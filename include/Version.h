@@ -1,0 +1,9 @@
+#ifndef CKRE_VERSION_H
+#define CKRE_VERSION_H
+
+#define CKRE_MAJOR_VER 0
+#define CKRE_MINOR_VER 1
+#define CKRE_PATCH_VER 0
+#define CKRE_VERSION "0.1.0"
+
+#endif // CKRE_VERSION_H
