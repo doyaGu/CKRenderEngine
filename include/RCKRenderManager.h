@@ -48,8 +48,18 @@ public:
 
     void DeleteAllVertexBuffers();
 
+    void AddTemporaryCallback(
+        CKCallbacksContainer *callbacks,
+        void *Function,
+        void *Argument,
+        CKBOOL preOrPost);
     void ClearTemporaryCallbacks();
     void RemoveAllTemporaryCallbacks();
+    void RegisterDefaultEffects();
+
+    // Scene graph node management
+    CKSceneGraphNode *CreateNode(RCK3dEntity *entity);
+    void DeleteNode(CKSceneGraphNode *node);
 
 public:
     XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;

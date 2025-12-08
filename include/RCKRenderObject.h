@@ -6,10 +6,32 @@
 #include "CKRenderObject.h"
 
 class RCKRenderObject : public CKRenderObject {
+    friend struct CKSceneGraphNode;
 public:
-    // TODO: Add public functions
+    void AddToRenderContext(CKRenderContext *context);
+    void RemoveFromRenderContext(CKRenderContext *context);
 
-    RCKRenderObject() {}
+    int CanBeHide() override;
+
+    CKBOOL IsInRenderContext(CKRenderContext *context) override;
+    CKBOOL IsRootObject() override;
+    CKBOOL IsToBeRendered() override;
+    void SetZOrder(int Z) override;
+    int GetZOrder() override;
+
+    CKBOOL IsToBeRenderedLast() override;
+
+    CKBOOL AddPreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) override;
+    CKBOOL RemovePreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
+
+    CKBOOL SetRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
+    CKBOOL RemoveRenderCallBack() override;
+
+    CKBOOL AddPostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) override;
+    CKBOOL RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
+
+    void RemoveAllCallbacks() override;
+
     explicit RCKRenderObject(CKContext *Context, CKSTRING name = nullptr);
     ~RCKRenderObject() override;
     CK_CLASSID GetClassID() override;
@@ -28,8 +50,10 @@ public:
     static CKRenderObject *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
 
+    CKDWORD GetInRenderContextMask() const { return m_InRenderContext; }
+
 protected:
-    CKBOOL m_InRenderContext;
+    CKDWORD m_InRenderContext;
     CKCallbacksContainer *m_Callbacks;
 };
 

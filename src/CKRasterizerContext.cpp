@@ -4,21 +4,15 @@ CKDWORD GetMsb(CKDWORD data, CKDWORD index)
 {
 #define OPERAND_SIZE (sizeof(CKDWORD) * 8)
     CKDWORD i = OPERAND_SIZE - 1;
-#ifdef WIN32
-    __asm
-    {
-        mov eax, data
-        bsr eax, eax
-        mov i, eax
-    }
-#else
-    if (data != 0)
+    if (data != 0) {
         while (!(data & (1 << (OPERAND_SIZE - 1))))
         {
             data <<= 1;
             --i;
         }
-#endif
+    } else {
+        i = 0; 
+    }
     return (i > index) ? index : i;
 #undef OPERAND_SIZE
 }
@@ -26,21 +20,13 @@ CKDWORD GetMsb(CKDWORD data, CKDWORD index)
 CKDWORD GetLsb(CKDWORD data, CKDWORD index)
 {
     CKDWORD i = 0;
-#ifdef WIN32
-    __asm
-    {
-        mov eax, data
-        bsf eax, eax
-        mov i, eax
-    }
-#else
-    if (data != 0)
+    if (data != 0) {
         while (!(data & 1))
         {
             data >>= 1;
             ++i;
         }
-#endif
+    }
     return (i > index) ? index : i;
 }
 

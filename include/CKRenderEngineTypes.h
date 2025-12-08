@@ -11,6 +11,8 @@
 #include "CKTypes.h"
 #include "CKRasterizerTypes.h"
 
+class CKRenderContext;
+
 class RCKRenderManager;
 class RCKRenderContext;
 class RCKKinematicChain;
@@ -44,16 +46,65 @@ struct VxCallBack {
     void *callback;
     void *argument;
     CKBOOL temp;
+    CKBOOL beforeTransparent;
 };
 
 class CKCallbacksContainer {
 public:
+    CKCallbacksContainer() : m_CallBack(nullptr) {}
 
-protected:
+    CKBOOL AddPreCallback(void *Function,
+                          void *Argument,
+                          CKBOOL Temporary,
+                          CKRenderManager *renderManager);
+    CKBOOL RemovePreCallback(void *Function, void *Argument);
+
+    CKBOOL SetCallBack(void *Function, void *Argument);
+    CKBOOL RemoveCallBack();
+
+    CKBOOL AddPostCallback(void *Function,
+                           void *Argument,
+                           CKBOOL Temporary,
+                           CKRenderManager *renderManager,
+                           CKBOOL BeforeTransparent = FALSE);
+    CKBOOL RemovePostCallback(void *Function, void *Argument);
+
+    void Clear();
+    void ClearPreCallbacks();
+    void ClearPostCallbacks();
+
+    void ExecutePreCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly = FALSE);
+    void ExecutePostCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly = FALSE, CKBOOL beforeTransparent = FALSE);
+    
+    void ExecuteCallbackList(XClassArray<VxCallBack> &callbacks,
+                             CKRenderContext *context,
+                             CKBOOL removeTemporary,
+                             int stageFilter);
+
+    VxCallBack *m_CallBack;
     XClassArray<VxCallBack> m_PreCallBacks;
-    void *m_Args;
     XClassArray<VxCallBack> m_PostCallBacks;
 };
+
+/**
+ * @brief Progressive mesh structure for LOD (Level of Detail) support.
+ * 
+ * Used by CKMesh to store progressive mesh data for dynamic level of detail.
+ * Size: 0x2C (44 bytes)
+ */
+struct CKProgressiveMesh {
+    int m_Field0;               // 0x00: Unknown field
+    int m_MorphEnabled;         // 0x04: Morph enabled flag
+    int m_MorphStep;            // 0x08: Morph step value
+    XArray<CKDWORD> m_Data;     // 0x0C: Progressive mesh data array
+    
+    CKProgressiveMesh() : m_Field0(0), m_MorphEnabled(0), m_MorphStep(0) {}
+};
+
+// Forward declaration for progressive mesh callback
+class CK3dEntity;
+class CKMesh;
+void ProgressiveMeshPreRenderCallback(CKRenderContext *ctx, CK3dEntity *entity, CKMesh *mesh, void *data);
 
 struct VxOption {
     CKDWORD Value;
@@ -97,30 +148,38 @@ struct VxVertex {
 };
 
 struct CKFace {
+    CKWORD m_VertexIndex[3];
     VxVector m_Normal;
     CKWORD m_MatIndex;
     CKWORD m_ChannelMask;
 };
 
 struct CKMaterialChannel {
-    CKDWORD field_0;
-    RCKMaterial *m_Material;
-    VXBLEND_MODE m_SourceBlend;
-    VXBLEND_MODE m_DestBlend;
-    CKDWORD m_Flags;
-    Vx2DVector m_UV;
+    Vx2DVector *m_uv;           // 0x00 - UV pointer for this channel
+    CKMaterial *m_Material;    // 0x04
+    VXBLEND_MODE m_SourceBlend; // 0x08
+    VXBLEND_MODE m_DestBlend;   // 0x0C
+    CKDWORD m_Flags;           // 0x10
+    XVoidArray *m_FaceIndices; // 0x14 - Pointer to face indices array for this channel (or nullptr if all faces use it)
+    CKDWORD field_18;          // 0x18 - Extra field for alignment to 28 bytes
+};
+
+struct CKPrimitiveEntry {
+    VXPRIMITIVETYPE m_Type;
+    XArray<CKWORD> m_Indices;
+    CKDWORD m_IndexBufferOffset;
 };
 
 struct CKMaterialGroup {
-    RCKMaterial *m_Material;
-    XVoidArray field_4;
-    XVoidArray field_10;
-    CKDWORD field_1C;
-    CKDWORD field_20;
-    CKDWORD field_24;
-    CKDWORD field_28;
-    CKDWORD field_2C;
-    CKDWORD field_30;
+    RCKMaterial *m_Material;     // 0x00
+    XClassArray<CKPrimitiveEntry> field_4;  // 0x04 - Primitive entries (size 12)
+    XVoidArray field_10;         // 0x10 - (size 12)
+    CKDWORD field_1C;            // 0x1C
+    CKDWORD field_20;            // 0x20
+    CKDWORD field_24;            // 0x24
+    CKDWORD field_28;            // 0x28 - Start vertex
+    CKDWORD field_2C;            // 0x2C - Vertex count
+    CKDWORD field_30;            // 0x30 - Vertex buffer data ptr
 };
 
 struct CKSprite3DBatch {

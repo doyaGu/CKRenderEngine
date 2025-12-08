@@ -4,6 +4,8 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/Version.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineTypes.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineEnums.h
+        ${CKRE_INCLUDE_DIR}/CKDebugLogger.h
+        ${CKRE_INCLUDE_DIR}/CKException.h
 
         ${CKRE_INCLUDE_DIR}/RCKRenderManager.h
         ${CKRE_INCLUDE_DIR}/RCKRenderContext.h
@@ -14,6 +16,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKAnimation.h
         ${CKRE_INCLUDE_DIR}/RCKKeyedAnimation.h
         ${CKRE_INCLUDE_DIR}/RCKObjectAnimation.h
+        ${CKRE_INCLUDE_DIR}/RCKKinematicChain.h
         ${CKRE_INCLUDE_DIR}/RCKLayer.h
         ${CKRE_INCLUDE_DIR}/RCKRenderObject.h
         ${CKRE_INCLUDE_DIR}/RCK2dEntity.h
@@ -32,6 +35,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKTargetLight.h
         ${CKRE_INCLUDE_DIR}/RCKSprite.h
         ${CKRE_INCLUDE_DIR}/RCKSpriteText.h
+        ${CKRE_INCLUDE_DIR}/RCKSkin.h
 
         ${CKRE_INCLUDE_DIR}/CKRenderedScene.h
         ${CKRE_INCLUDE_DIR}/CKSceneGraph.h
@@ -44,17 +48,21 @@ set(CKRE_PRIVATE_HEADERS
 set(CKRE_SOURCES
         CK2_3D.cpp
 
+        CKDebugLogger.cpp
+        CKException.cpp
+
         CKRenderManager.cpp
         CKRenderContext.cpp
+        CKCallbacksContainer.cpp
 
         CKMaterial.cpp
         CKTexture.cpp
         CKMesh.cpp
-        CKMesh_Utils.cpp
         CKPatchMesh.cpp
         CKAnimation.cpp
         CKKeyedAnimation.cpp
         CKObjectAnimation.cpp
+        CKKinematicChain.cpp
         CKLayer.cpp
         CKRenderObject.cpp
         CK2dEntity.cpp
@@ -73,6 +81,7 @@ set(CKRE_SOURCES
         CKTargetLight.cpp
         CKSprite.cpp
         CKSpriteText.cpp
+        CKSkin.cpp
 
         CKRenderedScene.cpp
         CKSceneGraph.cpp

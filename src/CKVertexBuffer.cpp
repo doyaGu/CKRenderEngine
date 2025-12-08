@@ -2,22 +2,24 @@
 
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
+#include "CKRasterizer.h"
+#include "RCKRasterizerContext.h"
 
-RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(),  m_Desc(), m_MemoryPool() {
+RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(), m_MemoryPool() {
     m_CKContext = context;
-    RCKRenderManager *rm = (RCKRenderManager *)m_CKContext->GetRenderManager();
+    RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
     m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_VERTEXBUFFER);
     m_DpData.Flags = 0;
     m_Valid = FALSE;
 }
 
 RCKVertexBuffer::~RCKVertexBuffer() {
-    RCKRenderManager *rm = (RCKRenderManager *)m_CKContext->GetRenderManager();
+    RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
     rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
 }
 
 void RCKVertexBuffer::Destroy() {
-    RCKRenderManager *rm = (RCKRenderManager *)m_CKContext->GetRenderManager();
+    RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
     rm->DestroyVertexBuffer(this);
 }
 
@@ -54,7 +56,7 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
         if (m_Valid)
             state = CK_VB_LOST;
         m_Valid = FALSE;
-        m_MemoryPool.Allocate((int)((m_Desc.m_VertexSize * m_Desc.m_MaxVertexCount) >> 2) + 1);
+        m_MemoryPool.Allocate((int) ((m_Desc.m_VertexSize * m_Desc.m_MaxVertexCount) >> 2) + 1);
     }
     return state;
 }
@@ -64,12 +66,12 @@ RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexC
     CKBYTE *mem;
     if (m_Valid) {
         CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
-        mem = (CKBYTE*)rstCtx->LockVertexBuffer(m_ObjectIndex, VertexCount, LockFlags);
+        mem = (CKBYTE *) rstCtx->LockVertexBuffer(m_ObjectIndex, VertexCount, LockFlags);
     } else {
-        mem = (CKBYTE *)m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
+        mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
     }
 
-    m_DpData.VertexCount = (int)VertexCount;
+    m_DpData.VertexCount = (int) VertexCount;
     CKRSTSetupDPFromVertexBuffer(mem, &m_Desc, m_DpData);
     return &m_DpData;
 }
@@ -95,34 +97,34 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     }
 
     if (!Indices)
-        IndexCount = (int)VertexCount;
+        IndexCount = (int) VertexCount;
 
-    VxStats &stats = ((RCKRenderContext *)Ctx)->GetStats();
+    VxStats &stats = ((RCKRenderContext *) Ctx)->GetStats();
     switch (pType) {
-        case VX_POINTLIST:
-            stats.NbPointsDrawn += (int)VertexCount;
-            break;
-        case VX_LINELIST:
-            stats.NbLinesDrawn += IndexCount >> 1;
-            break;
-        case VX_LINESTRIP:
-            stats.NbLinesDrawn = IndexCount + stats.NbLinesDrawn - 1;
-            break;
-        case VX_TRIANGLELIST:
-            stats.NbTrianglesDrawn += IndexCount / 3;
-            break;
-        case VX_TRIANGLESTRIP:
-        case VX_TRIANGLEFAN:
-            stats.NbTrianglesDrawn = IndexCount + stats.NbTrianglesDrawn - 2;
-            break;
+    case VX_POINTLIST:
+        stats.NbPointsDrawn += (int) VertexCount;
+        break;
+    case VX_LINELIST:
+        stats.NbLinesDrawn += IndexCount >> 1;
+        break;
+    case VX_LINESTRIP:
+        stats.NbLinesDrawn = IndexCount + stats.NbLinesDrawn - 1;
+        break;
+    case VX_TRIANGLELIST:
+        stats.NbTrianglesDrawn += IndexCount / 3;
+        break;
+    case VX_TRIANGLESTRIP:
+    case VX_TRIANGLEFAN:
+        stats.NbTrianglesDrawn = IndexCount + stats.NbTrianglesDrawn - 2;
+        break;
     }
-    stats.NbVerticesProcessed += (int)VertexCount;
+    stats.NbVerticesProcessed += (int) VertexCount;
 
     if (m_Valid) {
         return rstCtx->DrawPrimitiveVB(pType, m_ObjectIndex, StartVertex, VertexCount, Indices, IndexCount);
     } else {
-        CKBYTE *mem = (CKBYTE *)m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
-        m_DpData.VertexCount = (int)VertexCount;
+        CKBYTE *mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
+        m_DpData.VertexCount = (int) VertexCount;
         CKRSTSetupDPFromVertexBuffer(mem, &m_Desc, m_DpData);
         return rstCtx->DrawPrimitive(pType, Indices, IndexCount, &m_DpData);
     }

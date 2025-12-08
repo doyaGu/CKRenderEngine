@@ -4,10 +4,15 @@
 #include "CKRenderEngineTypes.h"
 
 #include "CKKeyedAnimation.h"
+#include "RCKAnimation.h"
 
-class RCKKeyedAnimation : public CKKeyedAnimation {
+class RCKKeyedAnimation : public RCKAnimation {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKKeyedAnimation.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKKeyedAnimation(CKContext *Context, CKSTRING name = nullptr);
     ~RCKKeyedAnimation() override;
@@ -28,7 +33,7 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    CKDWORD m_Animations;
+    XSObjectPointerArray m_Animations;
     CKDWORD field_38;
     CKBOOL m_Merged;
     float m_MergeFactor;

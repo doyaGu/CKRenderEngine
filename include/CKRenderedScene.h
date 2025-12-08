@@ -2,32 +2,46 @@
 #define CKRENDEREDSCENE_H
 
 #include "CKContext.h"
+#include "VxRect.h"
 
 class RCKRenderContext;
 class RCKMaterial;
 class RCK3dEntity;
 class RCKCamera;
+class CKMaterial;
 
 class CKRenderedScene {
+    friend class RCKRenderContext;
 public:
+    CKRenderedScene(CKRenderContext *rc);
+    ~CKRenderedScene();
+    CKERROR Draw(CK_RENDER_FLAGS Flags);
+    void SetDefaultRenderStates(CKRasterizerContext *rst);
+    void PrepareCameras(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS);
+    void SetupLights(CKRasterizerContext *rst);
+    void ResizeViewport(const VxRect &rect);
+    void AddObject(CKRenderObject *obj);
+    void RemoveObject(CKRenderObject *obj);
+    CKMaterial *GetBackgroundMaterial() const { return m_BackgroundMaterial; }
+    CK3dEntity *GetRootEntity() const { return m_RootEntity; }
 
 protected:
-    RCKRenderContext *m_RenderContext;
+    CKRenderContext *m_RenderContext;
     CKContext *m_Context;
-    RCKMaterial *m_BackgroundMaterial;
-    RCK3dEntity *m_3dEntity;
-    RCKCamera *m_AttachedCamera;
-    XArray<int> field_14;
-    XArray<int> m_Cameras;
-    XArray<int> m_Lights;
+    CKMaterial *m_BackgroundMaterial;
+    CK3dEntity *m_RootEntity;
+    CKCamera *m_AttachedCamera;
+    XArray<CK3dEntity *> m_3DEntities;
+    XArray<CKCamera *> m_Cameras;
+    XArray<CKLight *> m_Lights;
     CKDWORD m_FogMode;
     float m_FogStart;
     float m_FogEnd;
     float m_FogDensity;
     CKDWORD m_FogColor;
     CKDWORD m_AmbientLight;
-    CKDWORD field_50;
-    XArray<int> field_54;
+    CKDWORD m_LightCount;
+    XArray<CK2dEntity *> m_2DEntities;
 };
 
 #endif // CKRENDEREDSCENE_H

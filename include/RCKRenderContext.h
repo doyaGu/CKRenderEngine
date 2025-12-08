@@ -6,7 +6,9 @@
 #include "CKRenderedScene.h"
 
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
-    CKDWORD field_0[29];
+    CKWORD *Indices;
+    int IndexCount;
+    CKDWORD field_0[27]; // Adjusted padding
 };
 
 struct CKRenderContextSettings
@@ -34,6 +36,7 @@ public:
     CK2dEntity * Get2dRoot(CKBOOL background) override;
     void DetachAll() override;
     void ForceCameraSettingsUpdate() override;
+    void PrepareCameras(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS) override;
     CKERROR Clear(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS, CKDWORD Stencil = 0) override;
     CKERROR DrawScene(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS) override;
     CKERROR BackToFront(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS) override;
@@ -135,6 +138,13 @@ public:
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 
+    // Internal methods
+    void SetClipRect(VxRect *rect);
+    void SetFullViewport(CKViewportData *vp, int width, int height);
+    void UpdateProjection(CKBOOL forceUpdate);
+    void CallSprite3DBatches();
+    void AddExtents2D(const VxRect &rect, CKObject *obj);
+
     CKERROR Create(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp, int StencilBpp, int RefreshRate);
     VxStats &GetStats() {
         return m_Stats;
@@ -156,7 +166,7 @@ public:
     int GetMemoryOccupation() override;
     CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
 
-    CKERROR PrepareDependencies(CKDependenciesContext &context, CKBOOL iCaller = TRUE) override;
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
@@ -164,14 +174,20 @@ public:
     static int GetDependenciesCount(int mode);
     static CKSTRING GetDependencies(int i, int mode);
     static void Register();
-    static CKPlace *CreateInstance(CKContext *Context);
+    static CKObject *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
 
-protected:
+private:
+    CK_RENDER_FLAGS ResolveRenderFlags(CK_RENDER_FLAGS Flags) const;
+    void ExecutePreRenderCallbacks();
+    void ExecutePostRenderCallbacks(CKBOOL beforeTransparent);
+    void ExecutePostSpriteCallbacks();
+
+public:
     CKDWORD m_WinHandle;
     CKDWORD m_AppHandle;
     CKRECT m_WinRect;
-    CKDWORD m_RenderFlags;
+    CK_RENDER_FLAGS m_RenderFlags;
     CKRenderedScene *m_RenderedScene;
     CKBOOL m_Fullscreen;
     CKBOOL m_Active;
@@ -183,6 +199,7 @@ protected:
     CKCallbacksContainer m_PreRenderCallBacks;
     CKCallbacksContainer m_PreRenderTempCallBacks;
     CKCallbacksContainer m_PostRenderCallBacks;
+    CKCallbacksContainer m_PostSpriteRenderCallBacks;
     RCKRenderManager *m_RenderManager;
     CKRasterizerContext *m_RasterizerContext;
     CKRasterizerDriver *m_RasterizerDriver;
@@ -195,13 +212,10 @@ protected:
     float m_Zoom;
     float m_NearPlane;
     float m_FarPlane;
-    VxMatrix m_TransformMatrix;
+    VxMatrix m_ProjectionMatrix;
     CKViewportData m_ViewportData;
-    CKRECT m_WindowRect;
-    int m_Bpp;
-    int m_Zbpp;
-    int m_StencilBpp;
-    CKRenderContextSettings m_RenderContextSettings;
+    CKRenderContextSettings m_Settings;
+    CKRenderContextSettings m_FullscreenSettings;
     VxRect m_CurrentExtents;
     CKDWORD field_21C;
     CKDWORD m_TimeFpsCalc;
@@ -218,7 +232,8 @@ protected:
     VxTimeProfiler m_SpriteTimeProfiler;
     VxTimeProfiler m_TransparentObjectsSortTimeProfiler;
     RCK3dEntity *m_Current3dEntity;
-    RCKTexture *m_Texture;
+    RCKTexture *m_TargetTexture;
+    RCKTexture *m_Texture;  // Alias
     CKDWORD m_CubeMapFace;
     float m_FocalLength;
     float m_EyeSeparation;
@@ -226,9 +241,9 @@ protected:
     CKDWORD m_FpsInterval;
     XString m_CurrentObjectDesc;
     XString m_StateString;
-    CKDWORD field_33C;
+    CKDWORD m_SceneTraversalCalls;
     CKDWORD m_DrawSceneCalls;
-    CKDWORD field_344;
+    CKDWORD m_SortTransparentObjects;
     XVoidArray m_Sprite3DBatches;
     XVoidArray m_TransparentObjects;
     int m_StencilFreeMask;
@@ -239,12 +254,23 @@ protected:
     CKDWORD m_DpFlags;
     CKDWORD m_VertexBufferCount;
     XArray<CKObjectExtents> m_ObjectExtents;
-    XVoidArray field_388;
-    XVoidArray m_RootObjects;
+    XVoidArray m_Extents;
+    XObjectArray m_3dRootObjects;  // Custom: split from m_RootObjects for convenience
+    XObjectArray m_2dRootObjects;  // Custom: split from m_RootObjects for convenience
     RCKCamera *m_Camera;
     RCKTexture *m_NCUTex;
-    VxTimeProfiler m_TimeProfiler_3A8;
+    VxTimeProfiler m_PVTimeProfiler;
     CKDWORD m_PVInformation;
+
+    // Compatibility members (mapped to m_Settings)
+    // These are kept for backward compatibility with existing code
+    CKRECT m_WindowRect;  // Same as m_Settings.m_Rect for window mode
+    int m_Bpp;            // Same as m_Settings.m_Bpp
+    int m_Zbpp;           // Same as m_Settings.m_Zbpp
+    int m_StencilBpp;     // Same as m_Settings.m_StencilBpp
+    CKRenderContextSettings m_RenderContextSettings; // Alias for m_Settings
+
+    void OnClearAll();
 };
 
 #endif // RCKRENDERCONTEXT_H
