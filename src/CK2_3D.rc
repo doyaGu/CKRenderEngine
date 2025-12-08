@@ -25,7 +25,7 @@ BEGIN
             VALUE "FileVersion", CKRE_VERSION
             VALUE "InternalName", "CK2_3D.dll"
             VALUE "LegalCopyright", "Copyright (C) 2023"
-            VALUE "OriginalFilename", "ChunkParser.dll"
+            VALUE "OriginalFilename", "CK2_3D.dll"
             VALUE "ProductName", "RenderEngine"
             VALUE "ProductVersion", CKRE_VERSION
         END
