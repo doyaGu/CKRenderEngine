@@ -24,7 +24,7 @@ BEGIN
             VALUE "FileDescription", "Render Engine Component"
             VALUE "FileVersion", CKRE_VERSION
             VALUE "InternalName", "CK2_3D.dll"
-            VALUE "LegalCopyright", "Copyright (C) 2023"
+            VALUE "LegalCopyright", "Copyright (C) 2025"
             VALUE "OriginalFilename", "CK2_3D.dll"
             VALUE "ProductName", "RenderEngine"
             VALUE "ProductVersion", CKRE_VERSION
