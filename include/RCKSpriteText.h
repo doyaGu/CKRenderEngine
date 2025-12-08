@@ -1,11 +1,15 @@
 #ifndef RCKSPRITETEXT_H
 #define RCKSPRITETEXT_H
 
-#include "CKSpriteText.h"
+#include "RCKSprite.h"
 
-class RCKSpriteText : public CKSpriteText {
+class RCKSpriteText : public RCKSprite {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKSpriteText.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKSpriteText(CKContext *Context, CKSTRING name = nullptr);
     ~RCKSpriteText() override;
@@ -13,6 +17,8 @@ public:
 
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
+
+    CKERROR Render(CKRenderContext *Dev) override;
 
     int GetMemoryOccupation() override;
 
@@ -26,6 +32,10 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    void ClearFont();
+    void Redraw();
+    CKBOOL IsUpToDate();
+
     CKSTRING m_Text;
     CKDWORD m_FontColor;
     CKDWORD m_BkColor;

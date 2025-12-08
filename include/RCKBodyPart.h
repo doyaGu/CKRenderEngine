@@ -2,10 +2,15 @@
 #define RCKBODYPART_H
 
 #include "RCK3dObject.h"
+#include "CKBodyPart.h"
 
 class RCKBodyPart : public RCK3dObject {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKBodyPart.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKBodyPart(CKContext *Context, CKSTRING name = nullptr);
     ~RCKBodyPart() override;

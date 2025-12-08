@@ -3,28 +3,62 @@
 
 #include "CKRenderEngineTypes.h"
 
+class RCKRenderContext;
+class RCKPlace;
+
+// Forward declaration
+struct CKSceneGraphNode;
+
+// Transparent object entry for sorting
+struct CKTransparentObject {
+    CKSceneGraphNode *m_Node;  // The scene graph node
+    float m_ZhMax;             // Maximum Z in homogeneous coordinates (for depth sorting)
+    float m_ZhMin;             // Minimum Z in homogeneous coordinates
+};
+
 struct CKSceneGraphNode {
-public:
+    CKSceneGraphNode(RCK3dEntity *entity = nullptr);
+    ~CKSceneGraphNode();
+    
     void Clear();
     void Check();
 
-protected:
+    void AddNode(CKSceneGraphNode *node);
+    void RemoveNode(CKSceneGraphNode *node);
+    void PrioritiesChanged();
+    void SetRenderContextMask(CKDWORD mask, CKBOOL force);
+    void EntityFlagsChanged(CKBOOL updateParent);
+    void InvalidateBox(CKBOOL propagate);
+    CKBOOL IsToBeParsed();
+    
+    // Rendering traversal
+    void NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags);
+    void SetAsPotentiallyVisible();
+    void SetAsInsideFrustum();
+    void SortNodes();
+    void ClearTransparentFlags();
+    CKBOOL CheckHierarchyFrustum();
+
     RCK3dEntity *m_Entity;
-    CKDWORD m_field_4;
-    CKDWORD m_Flag;
-    CKDWORD m_ChildCount;
+    CKDWORD m_TimeFpsCalc;
+    CKDWORD m_Flags;
+    int m_Index;
     VxBbox m_Bbox;
-    CKWORD m_field_28;
     CKWORD m_Priority;
-    CKDWORD m_field_2C;
-    CKDWORD m_field_30;
+    CKWORD m_MaxPriority;
+    CKDWORD m_RenderContextMask;
+    CKDWORD m_EntityMask;
     CKSceneGraphNode *m_Parent;
-    XArray<CKSceneGraphNode> m_Children;
-    CKDWORD m_field_44;
+    XArray<CKSceneGraphNode *> m_Children;
+    int m_ChildToBeParsedCount;
 };
 
 struct CKSceneGraphRootNode : public CKSceneGraphNode {
-    CKDWORD field_48;
+    void RenderTransparents(RCKRenderContext *rc, CKDWORD flags);
+    void SortTransparentObjects(RCKRenderContext *rc, CKDWORD flags);
+    void AddTransparentObject(CKSceneGraphNode *node);
+    
+    XClassArray<CKTransparentObject> m_TransparentObjects;  // Transparent objects for sorting
 };
 
 #endif // CKSCENEGRAPH_H

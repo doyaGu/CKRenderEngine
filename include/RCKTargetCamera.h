@@ -1,22 +1,27 @@
 #ifndef RCKTARGETCAMERA_H
 #define RCKTARGETCAMERA_H
 
+#include "RCKCamera.h"
 #include "CKTargetCamera.h"
 
-class RCKTargetCamera : public CKTargetCamera {
+class RCKTargetCamera : public RCKCamera {
 public:
-    // TODO: Add public functions
 
     explicit RCKTargetCamera(CKContext *Context, CKSTRING name = nullptr);
     ~RCKTargetCamera() override;
     CK_CLASSID GetClassID() override;
 
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    
+    // Override GetTarget/SetTarget from CKCamera
+    CK3dEntity *GetTarget() override;
+    void SetTarget(CK3dEntity *target) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
@@ -26,7 +31,7 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    // TODO: Add fields
+    CK_ID m_Target; // Target entity ID
 };
 
 #endif // RCKTARGETCAMERA_H

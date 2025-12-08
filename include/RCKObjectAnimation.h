@@ -2,13 +2,10 @@
 #define RCKOBJECTANIMATION_H
 
 #include "CKRenderEngineTypes.h"
-
 #include "CKObjectAnimation.h"
 
 class RCKObjectAnimation : public CKObjectAnimation {
 public:
-    // TODO: Add public functions
-
     explicit RCKObjectAnimation(CKContext *Context, CKSTRING name = nullptr);
     ~RCKObjectAnimation() override;
     CK_CLASSID GetClassID() override;
@@ -17,9 +14,68 @@ public:
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
     int GetMemoryOccupation() override;
-
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
+    // CKObjectAnimation virtual methods
+    CKAnimController *CreateController(CKANIMATION_CONTROLLER ControlType) override;
+    CKBOOL DeleteController(CKANIMATION_CONTROLLER ControlType) override;
+    CKAnimController *GetPositionController() override;
+    CKAnimController *GetScaleController() override;
+    CKAnimController *GetRotationController() override;
+    CKAnimController *GetScaleAxisController() override;
+    CKMorphController *GetMorphController() override;
+    
+    CKBOOL EvaluatePosition(float Time, VxVector &Pos) override;
+    CKBOOL EvaluateScale(float Time, VxVector &Scl) override;
+    CKBOOL EvaluateRotation(float Time, VxQuaternion &Rot) override;
+    CKBOOL EvaluateScaleAxis(float Time, VxQuaternion &ScaleAxis) override;
+    CKBOOL EvaluateMorphTarget(float Time, int VertexCount, VxVector *Vertices, CKDWORD VStride, VxCompressedVector *Normals) override;
+    CKBOOL EvaluateKeys(float step, VxQuaternion *rot, VxVector *pos, VxVector *scale, VxQuaternion *ScaleRot = NULL) override;
+    
+    CKBOOL HasMorphNormalInfo() override;
+    CKBOOL HasMorphInfo() override;
+    CKBOOL HasScaleInfo() override;
+    CKBOOL HasPositionInfo() override;
+    CKBOOL HasRotationInfo() override;
+    CKBOOL HasScaleAxisInfo() override;
+    
+    void AddPositionKey(float TimeStep, VxVector *pos) override;
+    void AddRotationKey(float TimeStep, VxQuaternion *rot) override;
+    void AddScaleKey(float TimeStep, VxVector *scl) override;
+    void AddScaleAxisKey(float TimeStep, VxQuaternion *sclaxis) override;
+    
+    CKBOOL Compare(CKObjectAnimation *anim, float threshold = 0.0f) override;
+    CKBOOL ShareDataFrom(CKObjectAnimation *anim) override;
+    CKObjectAnimation *Shared() override;
+    
+    void SetFlags(CKDWORD flags) override;
+    CKDWORD GetFlags() override;
+    
+    void Clear() override;
+    void ClearAll() override;
+    
+    float GetMergeFactor() override;
+    void SetMergeFactor(float factor) override;
+    CKBOOL IsMerged() override;
+    CKObjectAnimation *CreateMergedAnimation(CKObjectAnimation *subanim2, CKBOOL Dynamic = FALSE) override;
+    
+    void SetLength(float nbframe) override;
+    float GetLength() override;
+    void GetVelocity(float step, VxVector *vel) override;
+    
+    CKERROR SetStep(float step, CKKeyedAnimation *anim = NULL) override;
+    CKERROR SetFrame(float frame, CKKeyedAnimation *anim = NULL) override;
+    float GetCurrentStep() override;
+    
+    void Set3dEntity(CK3dEntity *ent) override;
+    CK3dEntity *Get3dEntity() override;
+    
+    int GetMorphVertexCount() override;
+    
+    void CreateTransition(float length, CKObjectAnimation *AnimIn, float StepFrom, CKObjectAnimation *AnimOut, float StepTo, CKBOOL Veloc, CKBOOL DontTurn, CKAnimKey *startingset = NULL) override;
+    void Clone(CKObjectAnimation *anim) override;
+
+    // Static methods for class registration
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
     static CKSTRING GetDependencies(int i, int mode);
@@ -32,11 +88,11 @@ protected:
     CKDWORD m_Flags;
     RCK3dEntity *m_Entity;
     float m_CurrentStep;
+    float m_Length;
     float m_MergeFactor;
     RCKObjectAnimation *m_Anim1;
     RCKObjectAnimation *m_Anim2;
-    CKDWORD m_field_38;
-    RCKKeyedAnimation *m_field_3C;
+    CKBOOL m_IsMerged;
 };
 
 #endif // RCKOBJECTANIMATION_H

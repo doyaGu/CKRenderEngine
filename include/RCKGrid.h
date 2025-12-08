@@ -3,11 +3,15 @@
 
 #include "CKRenderEngineTypes.h"
 
-#include "CKGrid.h"
+#include "RCK3dEntity.h"
 
-class RCKGrid : public CKGrid {
+class RCKGrid : public RCK3dEntity {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKGrid.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKGrid(CKContext *Context, CKSTRING name = nullptr);
     ~RCKGrid() override;

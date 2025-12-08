@@ -2,6 +2,18 @@
 
 #include <stdio.h>
 
+int ObjTypeIndex(CKRST_OBJECTTYPE Type) {
+    switch (Type) {
+        case CKRST_OBJ_TEXTURE: return 0;
+        case CKRST_OBJ_SPRITE: return 1;
+        case CKRST_OBJ_VERTEXBUFFER: return 2;
+        case CKRST_OBJ_INDEXBUFFER: return 3;
+        case CKRST_OBJ_VERTEXSHADER: return 4;
+        case CKRST_OBJ_PIXELSHADER: return 5;
+        default: return 0;
+    }
+}
+
 CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd)
 {
     CKRasterizer *rst = new CKRasterizer;

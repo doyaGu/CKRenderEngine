@@ -3,16 +3,21 @@
 
 #include "CKRenderEngineTypes.h"
 
-#include "CKSprite3D.h"
+#include "RCK3dEntity.h"
 
-class RCKSprite3D : public CKSprite3D {
+class RCKSprite3D : public RCK3dEntity {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKSprite3D.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKSprite3D(CKContext *Context, CKSTRING name = nullptr);
     ~RCKSprite3D() override;
     CK_CLASSID GetClassID() override;
 
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 

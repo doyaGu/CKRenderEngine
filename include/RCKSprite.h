@@ -1,22 +1,36 @@
 #ifndef RCKSPRITE_H
 #define RCKSPRITE_H
 
+#include "CKBitmapData.h"
+#include "RCK2dEntity.h"
 #include "CKSprite.h"
 
-class RCKSprite : public CKSprite {
+class RCKSprite : public RCK2dEntity {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKSprite.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKSprite(CKContext *Context, CKSTRING name = nullptr);
     ~RCKSprite() override;
     CK_CLASSID GetClassID() override;
 
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
+    void PostLoad() override;
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+
+    CKERROR Draw(CKRenderContext *dev) override;
+
+    void CopySpriteData(RCKSprite *src);
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
@@ -26,6 +40,7 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    // CKSprite members
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_PixelFormat;
     CKRasterizerContext *m_RasterizerContext;

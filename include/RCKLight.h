@@ -3,11 +3,16 @@
 
 #include "CKRenderEngineTypes.h"
 
+#include "RCK3dEntity.h"
 #include "CKLight.h"
 
-class RCKLight : public CKLight {
+class RCKLight : public RCK3dEntity {
 public:
-    // TODO: Add public functions
+
+#undef CK_PURE
+#define CK_3DIMPLEMENTATION
+#include "CKLight.h"
+#undef CK_3DIMPLEMENTATION
 
     explicit RCKLight(CKContext *Context, CKSTRING name = nullptr);
     ~RCKLight() override;
@@ -26,6 +31,8 @@ public:
     static void Register();
     static CKLight *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
+
+    CKBOOL Setup(CKRasterizerContext *rst, CKDWORD lightIndex);
 
 protected:
     CKLightData m_LightData;

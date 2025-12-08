@@ -1,22 +1,27 @@
 #ifndef RCKTARGETLIGHT_H
 #define RCKTARGETLIGHT_H
 
+#include "RCKLight.h"
 #include "CKTargetLight.h"
 
-class RCKTargetLight : public CKTargetLight {
+class RCKTargetLight : public RCKLight {
 public:
-    // TODO: Add public functions
 
     explicit RCKTargetLight(CKContext *Context, CKSTRING name = nullptr);
     ~RCKTargetLight() override;
     CK_CLASSID GetClassID() override;
 
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    
+    // Override GetTarget/SetTarget from CKLight
+    CK3dEntity *GetTarget() override;
+    void SetTarget(CK3dEntity *target) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
@@ -26,7 +31,7 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    // TODO: Add fields
+    CK_ID m_Target; // Target entity ID
 };
 
 #endif // RCKTARGETLIGHT_H
