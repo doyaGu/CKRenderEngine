@@ -3,34 +3,43 @@
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKObject.h"
-#include "CKBeObject.h"
 #include "RCKGrid.h"
+#include "CKGridManager.h"
+#include "CKEnums.h"
 #include "VxColor.h"
+
+#include <cstring>
 
 /**
  * @brief RCKLayer constructor
  * @param Context The CKContext instance
- * @param name Optional name for the layer
+ * @param name Name for the layer
+ * @param owner Owner grid ID
  */
-RCKLayer::RCKLayer(CKContext *Context, CKSTRING name)
+RCKLayer::RCKLayer(CKContext *Context, CKSTRING name, CK_ID owner)
     : CKLayer(Context, name),
       m_Grid(nullptr),
-      m_Type(0),
+      m_Type(1),
       m_Format(0),
-      m_Flags(0),
+      m_Flags(1),
       m_SquareArray(nullptr) {
-    // Initialize layer properties
+    // Get owner grid from context
+    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+
+    // Allocate square array if grid exists
+    if (m_Grid) {
+        const int width = m_Grid->GetWidth();
+        const int length = m_Grid->GetLength();
+        m_SquareArray = new CKSquare[width * length];
+    }
 }
 
 /**
  * @brief RCKLayer destructor
  */
 RCKLayer::~RCKLayer() {
-    // Cleanup square array if it exists
-    if (m_SquareArray) {
-        delete[] (char *) m_SquareArray;
-        m_SquareArray = nullptr;
-    }
+    // Cleanup square array unconditionally (operator delete handles nullptr)
+    delete[] m_SquareArray;
 }
 
 /**
@@ -38,7 +47,108 @@ RCKLayer::~RCKLayer() {
  * @return The class ID (51)
  */
 CK_CLASSID RCKLayer::GetClassID() {
-    return 51;
+    return m_ClassID;
+}
+
+//=============================================================================
+// CKLayer Virtual Methods
+//=============================================================================
+
+void RCKLayer::SetType(int Type) {
+    m_Type = static_cast<CKDWORD>(Type);
+}
+
+int RCKLayer::GetType() {
+    return static_cast<int>(m_Type);
+}
+
+void RCKLayer::SetFormat(int Format) {
+    m_Format = static_cast<CKDWORD>(Format);
+}
+
+int RCKLayer::GetFormat() {
+    return static_cast<int>(m_Format);
+}
+
+void RCKLayer::SetValue(int x, int y, void *val) {
+    // Original directly accesses array without null checks
+    const int width = m_Grid->GetWidth();
+    const int idx = y * width + x;
+    m_SquareArray[idx].ival = *static_cast<CKDWORD *>(val);
+}
+
+void RCKLayer::GetValue(int x, int y, void *val) {
+    // Original directly accesses array without null checks
+    const int width = m_Grid->GetWidth();
+    const int idx = y * width + x;
+    *static_cast<CKDWORD *>(val) = m_SquareArray[idx].ival;
+}
+
+CKBOOL RCKLayer::SetValue2(int x, int y, void *val) {
+    const int width = m_Grid->GetWidth();
+    const int length = m_Grid->GetLength();
+    // Original checks bounds: x >= width || x < 0 || y >= length || y < 0
+    if (x >= width || x < 0 || y >= length || y < 0)
+        return FALSE;
+    m_SquareArray[y * width + x].ival = *static_cast<CKDWORD *>(val);
+    return TRUE;
+}
+
+CKBOOL RCKLayer::GetValue2(int x, int y, void *val) {
+    const int width = m_Grid->GetWidth();
+    const int length = m_Grid->GetLength();
+    // Original checks bounds: x >= width || x < 0 || y >= length || y < 0
+    if (x >= width || x < 0 || y >= length || y < 0) {
+        *static_cast<CKDWORD *>(val) = 0;
+        return FALSE;
+    }
+    *static_cast<CKDWORD *>(val) = m_SquareArray[y * width + x].ival;
+    return TRUE;
+}
+
+CKSquare *RCKLayer::GetSquareArray() {
+    return m_SquareArray;
+}
+
+void RCKLayer::SetSquareArray(CKSquare *sqarray) {
+    // Original simply assigns without deleting old
+    m_SquareArray = sqarray;
+}
+
+void RCKLayer::SetVisible(CKBOOL vis) {
+    if (vis)
+        m_Flags |= LAYER_STATE_VISIBLE;
+    else
+        m_Flags &= ~LAYER_STATE_VISIBLE;
+}
+
+CKBOOL RCKLayer::IsVisible() {
+    return (m_Flags & LAYER_STATE_VISIBLE) != 0;
+}
+
+void RCKLayer::InitOwner(CK_ID owner) {
+    // Get owner grid from context
+    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+
+    // Delete existing square array
+    delete[] m_SquareArray;
+    m_SquareArray = nullptr;
+
+    // Allocate new square array if grid exists
+    if (m_Grid) {
+        const int width = m_Grid->GetWidth();
+        const int length = m_Grid->GetLength();
+        m_SquareArray = new CKSquare[width * length];
+    }
+}
+
+void RCKLayer::SetOwner(CK_ID owner) {
+    // Original simply sets m_Grid from context lookup without class validation
+    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+}
+
+CK_ID RCKLayer::GetOwner() {
+    return m_Grid ? m_Grid->GetID() : 0;
 }
 
 /**
@@ -52,71 +162,60 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = CKObject::Save(file, flags);
 
     // Create a new state chunk for layer data
-    CKStateChunk *chunk = CreateCKStateChunk(51, file);
+    CKStateChunk *chunk = CreateCKStateChunk(m_ClassID, file);
     chunk->StartWrite();
 
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
-    // Get the appropriate manager by GUID
-    // CKGUID managerGuid(2130724753, 0);
-    // CKObject *manager = m_Context->GetManagerByGuid(managerGuid);
-    // Note: Manager functionality is commented out due to missing CKGUID implementation
-    // This would normally handle color and type management
+    // Get grid manager - required for save
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return nullptr;
 
-    // Save layer data if file context or specific flags are set
-    if (file || (flags & 0x10) != 0) {
-        chunk->WriteIdentifier(0x10u); // Layer identifier
+    // Only write layer payload if saving to file or flag 0x10 is set
+    if (file || (flags & 0x10u) != 0) {
+        chunk->WriteIdentifier(0x10u);
+        chunk->WriteObject(reinterpret_cast<CKObject *>(m_Grid));
 
-        // Write layer properties
-        chunk->WriteObject(m_Grid);
-
-        // Write type only if not saving to file
+        // When saving to memory, write the raw type index
         if (!file) {
-            chunk->WriteInt(m_Type);
+            chunk->WriteInt(static_cast<int>(m_Type));
         }
 
-        chunk->WriteInt(m_Format);
+        chunk->WriteInt(static_cast<int>(m_Format));
 
-        // Handle file-specific saving
+        // When saving to a file, write version and metadata
         if (file) {
-            // Write version indicator
-            chunk->WriteInt(3);
+            chunk->WriteInt(3); // version
 
-            // Get and write color data
-            VxColor layerColor;
-            // Implementation would get color from manager
-            // manager->GetColor(m_Type, &layerColor);
-            CKDWORD colorValue = 0; // Placeholder for color conversion
-            chunk->WriteDword(colorValue);
+            VxColor color;
+            color.Set(0.0f, 0.0f, 0.0f, 0.0f);
+            gridMgr->GetAssociatedColor(static_cast<int>(m_Type), &color);
+            chunk->WriteDword(color.GetRGBA());
 
-            // Get and write GUID data
-            // CKGUID layerGuid;
-            // Implementation would get GUID from manager
-            // manager->GetGuid(m_Type, &layerGuid);
-            // chunk->WriteGuid(layerGuid);
+            CKGUID paramGuid = gridMgr->GetAssociatedParam(static_cast<int>(m_Type));
+            chunk->WriteGuid(paramGuid);
         }
 
-        chunk->WriteInt(m_Flags);
+        chunk->WriteInt(static_cast<int>(m_Flags));
 
-        // Save square array data if format is 0 and grid exists
-        if (!m_Format && m_Grid) {
-            int gridWidth = m_Grid->GetWidth();
-            int gridLength = m_Grid->GetLength();
-            int bufferSize = 4 * gridLength * gridWidth;
+        // Write square array data if format is 0 and grid exists
+        if (m_Format == 0 && m_Grid) {
+            const int gridWidth = m_Grid->GetWidth();
+            const int gridLength = m_Grid->GetLength();
+            const int bufferSize = 4 * gridLength * gridWidth;
             chunk->WriteBuffer_LEndian(bufferSize, m_SquareArray);
         }
 
-        // Update manager counters if saving to file
+        // Mark type as used in file
         if (file) {
-            // Implementation would update manager counters
-            // This is handled by the manager internally
+            // ManagerByGuid[11] + 4 * m_Type check from original
+            // This updates tracking in the grid manager
         }
     }
 
-    // Close the chunk
     chunk->CloseChunk();
-
     return chunk;
 }
 
@@ -135,85 +234,86 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Load layer data if identifier is found
     if (chunk->SeekIdentifier(0x10u)) {
-        // Get the appropriate manager by GUID
-        // CKGUID managerGuid(2130724753, 0);
-        // CKObject *manager = m_Context->GetManagerByGuid(managerGuid);
-        // Note: Manager functionality is commented out due to missing CKGUID implementation
-        // This would normally handle color and type management
+        CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+        if (!gridMgr)
+            return CKERR_NOTINITIALIZED;
 
-        // Determine layer type (implementation specific)
-        int layerType = 0; // Placeholder for type determination
-        m_Type = layerType;
-
-        // If type is 0, get default type from manager
-        if (!m_Type) {
-            // Implementation would get default type from manager
-            // m_Type = manager->GetDefaultType(layerType);
-        }
+        // Determine layer type from this object's name (Virtools convention)
+        const CKSTRING layerName = GetName();
+        m_Type = gridMgr->GetTypeFromName(layerName);
+        if (m_Type == 0)
+            m_Type = gridMgr->RegisterType(layerName);
 
         // Load grid reference
         m_Grid = reinterpret_cast<RCKGrid *>(chunk->ReadObject(m_Context));
 
-        // Skip type if not in file context
         if (!file) {
+            // Skip type index in runtime chunks (type is re-derived from layer name)
             chunk->ReadInt();
         }
 
         // Load format
-        m_Format = chunk->ReadInt();
+        m_Format = static_cast<CKDWORD>(chunk->ReadInt());
 
         // Handle file-specific loading
         if (file) {
-            int version = chunk->ReadInt();
+            const int version = chunk->ReadInt();
             if (version >= 1) {
-                // Load color data
-                CKDWORD colorValue = chunk->ReadDword();
-                VxColor layerColor;
-                // Implementation would convert color value
-                // ConvertColorValue(colorValue, &layerColor);
+                const CKDWORD colorValue = chunk->ReadDword();
+                VxColor layerColor(colorValue);
+                gridMgr->SetAssociatedColor(static_cast<int>(m_Type), &layerColor);
 
-                // Set color in manager
-                // manager->SetColor(m_Type, &layerColor);
-
-                // Handle different versions
                 if (version < 2) {
-                    m_Flags = 1;
+                    m_Flags = 1; // LAYER_STATE_VISIBLE
                 } else {
                     if (version < 3) {
-                        // Set default GUID for older versions
-                        // CKGUID defaultGuid(1515656957, 1155692247);
-                        // manager->SetGuid(m_Type, defaultGuid);
+                        // Historical default associated param GUID for older files
+                        gridMgr->SetAssociatedParam(static_cast<int>(m_Type), CKGUID(0x5A6B0AFD, 0x44EB9DD7));
                     } else {
-                        // Load GUID from chunk
-                        // CKGUID layerGuid;
-                        // chunk->ReadGuid(&layerGuid);
-                        // manager->SetGuid(m_Type, layerGuid);
+                        const CKGUID paramGuid = chunk->ReadGuid();
+                        gridMgr->SetAssociatedParam(static_cast<int>(m_Type), paramGuid);
                     }
-
-                    // Load flags
-                    m_Flags = chunk->ReadInt();
+                    m_Flags = static_cast<CKDWORD>(chunk->ReadInt());
                 }
             }
         } else {
             // Load flags directly for non-file context
-            m_Flags = chunk->ReadInt();
+            m_Flags = static_cast<CKDWORD>(chunk->ReadInt());
         }
 
         // Cleanup existing square array
-        if (m_SquareArray) {
-            delete[] (char *) m_SquareArray;
-            m_SquareArray = nullptr;
-        }
+        delete[] m_SquareArray;
+        m_SquareArray = nullptr;
 
         // Load square array data if format is 0
         if (!m_Format) {
-            int bufferSize = chunk->ReadBuffer(reinterpret_cast<void **>(&m_SquareArray));
-            if (bufferSize > 0) {
-                CKConvertEndianArray32(m_SquareArray, bufferSize / sizeof(CKDWORD));
-            }
+            void *raw = nullptr;
+            const int bufferSize = chunk->ReadBuffer(&raw);
+            m_SquareArray = reinterpret_cast<CKSquare *>(raw);
+            CKConvertEndianArray32(reinterpret_cast<CKDWORD *>(m_SquareArray), bufferSize >> 2);
         }
     }
 
+    return CK_OK;
+}
+
+CKERROR RCKLayer::PrepareDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    if (m_Grid)
+        m_Grid->PrepareDependencies(context);
+
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+CKERROR RCKLayer::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    m_Grid = static_cast<RCKGrid *>(context.Remap(reinterpret_cast<CKObject *>(m_Grid)));
     return CK_OK;
 }
 
@@ -222,11 +322,8 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKLayer::GetMemoryOccupation() {
-    int squareArraySize = 0;
-    if (m_SquareArray && m_Grid) {
-        squareArraySize = 4 * m_Grid->GetLength() * m_Grid->GetWidth();
-    }
-    return sizeof(RCKLayer) + squareArraySize;
+    // Original returns CKObject::GetMemoryOccupation() + 20 (5 fields * 4 bytes)
+    return CKObject::GetMemoryOccupation() + 20;
 }
 
 /**
@@ -236,23 +333,33 @@ int RCKLayer::GetMemoryOccupation() {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKLayer::Copy(CKObject &o, CKDependenciesContext &context) {
-    // Base class copy
-    CKLayer::Copy(o, context);
+    // In Virtools, Copy is called on the destination object, with 'o' being the source.
+    CKERROR err = CKObject::Copy(o, context);
+    if (err != CK_OK)
+        return err;
 
-    // Copy layer specific data
-    RCKLayer &target = (RCKLayer &) o;
-    target.m_Grid = m_Grid;
-    target.m_Type = m_Type;
-    target.m_Format = m_Format;
-    target.m_Flags = m_Flags;
+    CKDWORD classDeps = context.GetClassDependencies(CKCID_LAYER);
 
-    // Copy square array if it exists
-    if (m_SquareArray && m_Grid) {
-        int arraySize = 4 * m_Grid->GetLength() * m_Grid->GetWidth();
-        target.m_SquareArray = new char[arraySize];
-        memcpy(target.m_SquareArray, m_SquareArray, arraySize);
-    } else {
-        target.m_SquareArray = nullptr;
+    RCKLayer *src = static_cast<RCKLayer *>(&o);
+
+    m_Grid = src->m_Grid;
+    m_Type = src->m_Type;
+    m_Format = src->m_Format;
+    m_Flags = src->m_Flags;
+    m_SquareArray = nullptr;
+
+    // Original always allocates based on this->m_Grid after assignment
+    if (m_Grid) {
+        const int width = m_Grid->GetWidth();
+        const int length = m_Grid->GetLength();
+        const int count = width * length;
+        m_SquareArray = new CKSquare[count];
+
+        // Copy data if classDeps & 1, otherwise zero
+        if (classDeps & 1)
+            memcpy(m_SquareArray, src->m_SquareArray, static_cast<size_t>(count) * sizeof(CKSquare));
+        else
+            memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
     }
 
     return CK_OK;
@@ -279,9 +386,7 @@ void RCKLayer::Register() {
 }
 
 CKLayer *RCKLayer::CreateInstance(CKContext *Context) {
-    // Abstract class - cannot instantiate directly
-    // return reinterpret_cast<CKLayer *>(new RCKLayer(Context));
-    return nullptr;
+    return reinterpret_cast<CKLayer *>(new RCKLayer(Context, nullptr, 0));
 }
 
 // Static class ID

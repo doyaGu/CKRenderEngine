@@ -23,10 +23,11 @@
 #include "CKTexture.h"
 #include "RCKRenderContext.h"
 #include "CKRenderedScene.h"
-#include "RCKRasterizerContext.h"
+#include "CKRasterizer.h"
 #include "CKParameterManager.h"
 #include "RCK3dEntity.h"
 #include "RCKLight.h"
+#include "RCKSprite3D.h"
 #include "VxMath.h"
 
 // Static class ID (initialized during registration)
@@ -161,10 +162,24 @@ RCKMaterial::RCKMaterial(CKContext *Context, CKSTRING name)
     m_TextureAddressMode = VXTEXTURE_ADDRESSWRAP;
     m_TextureBorderColor = 0;
 
-    // Flags: ZWrite enabled by default, ZFunc = LESSEQUAL
-    // Bit layout: TwoSided(0), ZWrite(1), AlphaBlend(3), AlphaTest(4), Effect(8-13), ZFunc(14-18), AlphaFunc(19-23)
-    // Default: ZWrite=1, ZFunc=LESSEQUAL(4) -> (4 << 14) | 2 = 0x10002
-    m_Flags = 0x10002;
+    // Flags initialization (from IDA at 0x100629E0-0x10062AAF):
+    // Bit layout: 
+    //   Bit 0:      TwoSided
+    //   Bit 1:      ZWrite  
+    //   Bit 2:      PerspectiveCorrection
+    //   Bit 3:      AlphaBlend
+    //   Bit 4:      AlphaTest
+    //   Bit 5:      Sprite3DBatch
+    //   Bits 8-13:  Effect (6 bits)
+    //   Bits 14-18: ZFunc (5 bits)
+    //   Bits 19-23: AlphaFunc (5 bits)
+    //
+    // Step 1: Low byte = 6 (ZWrite + PerspectiveCorrection)
+    // Step 2: Clear effect bits (bits 8-13)
+    // Step 3: Set ZFunc = 4 (VXCMP_LESSEQUAL) at bits 14-18 -> 0x10000
+    // Step 4: Set AlphaFunc = 8 (VXCMP_ALWAYS) at bits 19-23 -> 0x400000
+    // Final: 0x410006
+    m_Flags = 0x410006;
 
     // Alpha reference value
     m_AlphaRef = 0;
@@ -189,8 +204,7 @@ RCKMaterial::RCKMaterial(CKContext *Context, CKSTRING name)
 RCKMaterial::~RCKMaterial() {
     // Clean up sprite batch if it exists
     if (m_Sprite3DBatch) {
-        // Note: Sprite batch cleanup would be handled here
-        // Based on decompilation, this calls a delete function on the batch
+        delete m_Sprite3DBatch;
         m_Sprite3DBatch = nullptr;
     }
 }
@@ -374,8 +388,8 @@ CKStateChunk *RCKMaterial::Save(CKFile *file, CKDWORD flags) {
 
     // Pack flags into single DWORD:
     // Bits 0-7:   Material flags (low byte of m_Flags)
-    // Bits 8-11:  ZFunc (from m_Flags bits 14-18, shifted)
-    // Bits 16-19: AlphaFunc (from m_Flags bits 19-23, shifted)
+    // Bits 8-12:  ZFunc (from m_Flags bits 14-18, 5 bits)
+    // Bits 16-20: AlphaFunc (from m_Flags bits 19-23, 5 bits)
     // Bits 24-31: AlphaRef
     CKDWORD packedFlags =
         (m_Flags & 0xFF) |
@@ -549,8 +563,8 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
 
             // Unpack flags
             m_Flags = (m_Flags & 0xFFFFFF00) | (packedFlags & 0xFF);
-            m_Flags = (m_Flags & 0xFFF83FFF) | (((packedFlags >> 8) & 0xF) << 14);
-            m_Flags = (m_Flags & 0xFF07FFFF) | (((packedFlags >> 16) & 0xF) << 19);
+            m_Flags = (m_Flags & 0xFFF83FFF) | (((packedFlags >> 8) & 0x1F) << 14);
+            m_Flags = (m_Flags & 0xFF07FFFF) | (((packedFlags >> 16) & 0x1F) << 19);
             m_AlphaRef = (packedFlags >> 24) & 0xFF;
 
             // Ensure AlphaFunc is valid
@@ -696,21 +710,44 @@ CKERROR RCKMaterial::Copy(CKObject &o, CKDependenciesContext &context) {
  * @brief Returns the class name for this material type.
  */
 CKSTRING RCKMaterial::GetClassName() {
-    return "Material";
+    return (CKSTRING) "Material";
 }
 
 /**
  * @brief Returns the dependencies count for the specified mode.
  */
 int RCKMaterial::GetDependenciesCount(int mode) {
-    return 0;
+    int count;
+    switch (mode)
+    {
+    case 1:
+        count = 1;
+        break;
+    case 2:
+        count = 1;
+        break;
+    case 3:
+        count = 0;
+        break;
+    case 4:
+        count = 1;
+        break;
+    default:
+        count = 0;
+        break;
+    }
+    return count;
 }
 
 /**
  * @brief Returns a dependency name.
  */
 CKSTRING RCKMaterial::GetDependencies(int i, int mode) {
-    return nullptr;
+    if (i != 0) {
+        return nullptr;
+    } else {
+        return (CKSTRING) "Texture";
+    }
 }
 
 /**
@@ -723,8 +760,7 @@ void RCKMaterial::Register() {
     CKClassNeedNotificationFrom(m_ClassID, CKCID_TEXTURE);
 
     // Register associated parameter GUID
-    CKGUID paramGuid(0x55A9872D, 0x22AE868B);
-    CKClassRegisterAssociatedParameter(m_ClassID, paramGuid);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_MATERIAL);
 
     // Register default options
     CKClassRegisterDefaultOptions(m_ClassID, 2);
@@ -812,9 +848,10 @@ const VxColor &RCKMaterial::GetDiffuse() {
 void RCKMaterial::SetDiffuse(const VxColor &Color) {
     m_MaterialData.Diffuse = Color;
 
-    // Notify sprite batch of color change
+    // Invalidate sprite batch vertex data when diffuse color changes
+    // Based on sub_10066480 which sets m_VertexCount = 0
     if (m_Sprite3DBatch) {
-        // Update sprite batch (based on call to sub_10066480)
+        m_Sprite3DBatch->m_VertexCount = 0;
     }
 }
 
@@ -845,9 +882,10 @@ void RCKMaterial::SetSpecular(const VxColor &Color) {
         m_MaterialData.Specular.a = 0.0f;
     }
 
-    // Notify sprite batch
+    // Invalidate sprite batch vertex data when specular color changes
+    // Based on sub_10066480 which sets m_VertexCount = 0
     if (m_Sprite3DBatch) {
-        // Update sprite batch
+        m_Sprite3DBatch->m_VertexCount = 0;
     }
 }
 
@@ -1163,20 +1201,23 @@ void RCKMaterial::SetZFunc(VXCMPFUNC ZFunc) {
 /**
  * @brief Checks if perspective correction is enabled.
  *
- * Note: This functionality may not be fully implemented in the original DLL.
+ * Based on decompilation at 0x10062CA3.
  */
 CKBOOL RCKMaterial::PerspectiveCorrectionEnabled() {
-    // Perspective correction is typically always enabled in modern hardware
-    return TRUE;
+    return (m_Flags & 4) != 0;
 }
 
 /**
  * @brief Enables or disables perspective correction.
  *
- * Note: This functionality may not be fully implemented in the original DLL.
+ * Based on decompilation at 0x10063058.
  */
 void RCKMaterial::EnablePerspectiveCorrection(CKBOOL Perspective) {
-    // Perspective correction is typically always enabled in modern hardware
+    if (Perspective) {
+        m_Flags |= 4;
+    } else {
+        m_Flags &= ~4;
+    }
 }
 
 //=============================================================================
@@ -1341,7 +1382,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
         // Apply texture if effect didn't handle it (bit 1 clear means apply texture)
         if ((effectResult & 2) == 0) {
-            CKBOOL clampUV = (m_TextureAddressMode == VXTEXTUREFILTER_MIPNEAREST);
+            CKBOOL clampUV = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
             CKBOOL texResult = m_Textures[0]->SetAsCurrent(dev, clampUV, TextureStage);
 
             if (!TextureStage) {
@@ -2177,9 +2218,49 @@ CKParameter *RCKMaterial::GetEffectParameter() {
 }
 
 //=============================================================================
+// Sprite3D Batch Methods
+//=============================================================================
+
+/**
+ * @brief Adds a sprite to this material's sprite batch.
+ *
+ * Based on decompilation at 0x10062D99.
+ * Creates a new batch if none exists, fills the batch with sprite data,
+ * and sets the batch flag on first addition.
+ *
+ * @param sprite The sprite to add to the batch
+ * @return TRUE if this is the first sprite in the batch (batch was just created/started),
+ *         FALSE if batch already existed and sprite was just added
+ */
+CKBOOL RCKMaterial::AddSprite3DBatch(RCKSprite3D *sprite) {
+    // Create batch if it doesn't exist
+    if (!m_Sprite3DBatch) {
+        m_Sprite3DBatch = new CKSprite3DBatch();
+    }
+    
+    // Fill the batch with sprite data
+    sprite->FillBatch(m_Sprite3DBatch);
+    
+    // Check if batch flag (0x20) is already set
+    if ((m_Flags & 0x20) != 0) {
+        return FALSE; // Batch already existed
+    }
+    
+    // Set batch flag (0x20) and return TRUE for new batch
+    m_Flags = (m_Flags & ~0xFF) | ((m_Flags & 0xFF) | 0x20);
+    return TRUE;
+}
+
+//=============================================================================
 // Global Variables
 //=============================================================================
 
 // This flag is set when transparency-related properties change
 // It signals the render engine to update transparency sorting
 CKBOOL g_UpdateTransparency = FALSE;
+
+// Fog projection mode (from IDA: dword_10090CD0)
+// Mode 0: Direct fog values (default)
+// Mode 1: Projected fog values (z/w based)
+// Mode 2: Projected fog values (1/w based)
+int g_FogProjectionMode = 0;

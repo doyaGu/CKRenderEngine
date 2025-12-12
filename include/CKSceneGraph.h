@@ -11,17 +11,14 @@ struct CKSceneGraphNode;
 
 // Transparent object entry for sorting
 struct CKTransparentObject {
-    CKSceneGraphNode *m_Node;  // The scene graph node
-    float m_ZhMax;             // Maximum Z in homogeneous coordinates (for depth sorting)
-    float m_ZhMin;             // Minimum Z in homogeneous coordinates
+    CKSceneGraphNode *m_Node; // The scene graph node
+    float m_ZhMax;            // Maximum Z in homogeneous coordinates (for depth sorting)
+    float m_ZhMin;            // Minimum Z in homogeneous coordinates
 };
 
 struct CKSceneGraphNode {
-    CKSceneGraphNode(RCK3dEntity *entity = nullptr);
+    explicit CKSceneGraphNode(RCK3dEntity *entity = nullptr);
     ~CKSceneGraphNode();
-    
-    void Clear();
-    void Check();
 
     void AddNode(CKSceneGraphNode *node);
     void RemoveNode(CKSceneGraphNode *node);
@@ -29,8 +26,11 @@ struct CKSceneGraphNode {
     void SetRenderContextMask(CKDWORD mask, CKBOOL force);
     void EntityFlagsChanged(CKBOOL updateParent);
     void InvalidateBox(CKBOOL propagate);
+    void SetPriority(CKWORD priority, CKBOOL propagate);
     CKBOOL IsToBeParsed();
-    
+    CKDWORD Rebuild();
+    CKDWORD ComputeHierarchicalBox();
+
     // Rendering traversal
     void NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags);
     void SetAsPotentiallyVisible();
@@ -53,12 +53,15 @@ struct CKSceneGraphNode {
     int m_ChildToBeParsedCount;
 };
 
-struct CKSceneGraphRootNode : public CKSceneGraphNode {
-    void RenderTransparents(RCKRenderContext *rc, CKDWORD flags);
+struct CKSceneGraphRootNode : CKSceneGraphNode {
+    void RenderTransparentObjects(RCKRenderContext *rc, CKDWORD flags);
     void SortTransparentObjects(RCKRenderContext *rc, CKDWORD flags);
     void AddTransparentObject(CKSceneGraphNode *node);
-    
-    XClassArray<CKTransparentObject> m_TransparentObjects;  // Transparent objects for sorting
+
+    void Clear();
+    void Check();
+
+    XClassArray<CKTransparentObject> m_TransparentObjects; // Transparent objects for sorting
 };
 
 #endif // CKSCENEGRAPH_H

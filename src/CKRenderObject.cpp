@@ -1,5 +1,6 @@
 #include "RCKRenderObject.h"
 #include "RCKRenderContext.h"
+#include "RCKRenderManager.h"
 #include "RCK3dEntity.h"
 #include "CKSceneGraph.h"
 #include "CKDebugLogger.h"
@@ -9,26 +10,24 @@
 CK_CLASSID RCKRenderObject::m_ClassID = CKCID_RENDEROBJECT;
 
 void RCKRenderObject::AddToRenderContext(CKRenderContext *context) {
+    // IDA @ 0x10076984
     RCKRenderContext *dev = (RCKRenderContext *) context;
+    RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: entity=%p mask=0x%x devMask=0x%x", 
+                             this, m_InRenderContext, dev->m_MaskFree);
     m_InRenderContext |= dev->m_MaskFree;
-    RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: obj=%p mask=0x%X, is3D=%d", this, m_InRenderContext, CKIsChildClassOf(this, CKCID_3DENTITY));
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
         RCK3dEntity *entity = (RCK3dEntity *) this;
-        if (entity->m_SceneGraphNode) {
-            if (dev->m_Start) {
-                entity->m_SceneGraphNode->m_RenderContextMask = m_InRenderContext;
-                RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: Set node mask direct to 0x%X", m_InRenderContext);
-            } else {
-                entity->m_SceneGraphNode->SetRenderContextMask(m_InRenderContext, FALSE);
-                RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: SetRenderContextMask(0x%X)", m_InRenderContext);
-            }
+        RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: Setting mask on scene graph node, start=%d", dev->m_Start);
+        if (dev->m_Start) {
+            entity->m_SceneGraphNode->m_RenderContextMask = m_InRenderContext;
         } else {
-            RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: WARNING - no scene graph node!");
+            entity->m_SceneGraphNode->SetRenderContextMask(m_InRenderContext, FALSE);
         }
     }
 }
 
 void RCKRenderObject::RemoveFromRenderContext(CKRenderContext *context) {
+    // IDA @ 0x100769fb
     RCKRenderContext *dev = (RCKRenderContext *) context;
     m_InRenderContext &= ~dev->m_MaskFree;
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
@@ -111,6 +110,15 @@ CKBOOL RCKRenderObject::RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Functi
 }
 
 void RCKRenderObject::RemoveAllCallbacks() {
+    // IDA @ 0x10076bf7
+    if (m_Callbacks) {
+        RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
+        rm->RemoveTemporaryCallback(m_Callbacks);
+    }
+    if (m_Callbacks) {
+        delete m_Callbacks;
+    }
+    m_Callbacks = nullptr;
 }
 
 RCKRenderObject::RCKRenderObject(CKContext *Context, CKSTRING name) : CKRenderObject(Context, name) {
@@ -119,22 +127,16 @@ RCKRenderObject::RCKRenderObject(CKContext *Context, CKSTRING name) : CKRenderOb
 }
 
 RCKRenderObject::~RCKRenderObject() {
+    // IDA @ 0x1000d870 - destructor calls RemoveAllCallbacks
+    RCKRenderObject::RemoveAllCallbacks();
 }
 
 CK_CLASSID RCKRenderObject::GetClassID() {
     return m_ClassID;
 }
 
-CKStateChunk *RCKRenderObject::Save(CKFile *file, CKDWORD flags) {
-    return CKRenderObject::Save(file, flags);
-}
-
-CKERROR RCKRenderObject::Load(CKStateChunk *chunk, CKFile *file) {
-    return CKRenderObject::Load(chunk, file);
-}
-
 int RCKRenderObject::GetMemoryOccupation() {
-    return CKBeObject::GetMemoryOccupation() + sizeof(CKDWORD) * 2;
+    return CKBeObject::GetMemoryOccupation() + sizeof(CKDWORD) + sizeof(CKCallbacksContainer *);
 }
 
 CKERROR RCKRenderObject::Copy(CKObject &o, CKDependenciesContext &context) {

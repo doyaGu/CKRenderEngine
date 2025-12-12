@@ -6,6 +6,7 @@
 #include "CKBeObject.h"
 #include "RCK3dEntity.h"
 #include "RCKCurvePoint.h"
+#include "RCKMesh.h"
 
 /**
  * @brief RCKCurve constructor
@@ -19,7 +20,7 @@ RCKCurve::RCKCurve(CKContext *Context, CKSTRING name)
       m_StepCount(0),
       m_FittingCoeff(0.0f),
       m_Color(0),
-      field_1C8(0) {
+      m_LoadingFlag(0) {
     // Initialize control points array
 }
 
@@ -35,7 +36,7 @@ RCKCurve::~RCKCurve() {
  * @return The class ID (43)
  */
 CK_CLASSID RCKCurve::GetClassID() {
-    return 43;
+    return m_ClassID;
 }
 
 /**
@@ -65,18 +66,10 @@ void RCKCurve::PreSave(CKFile *file, CKDWORD flags) {
     // Call base class PreSave first
     RCK3dEntity::PreSave(file, flags);
 
-    // Save control point objects
-    int pointCount = m_ControlPoints.Size();
-    if (pointCount > 0) {
-        // Convert RCKCurvePoint array to CKObject array for saving
-        XArray<CKObject *> objects;
-        for (int i = 0; i < pointCount; ++i) {
-            objects.PushBack(static_cast<CKObject *>(&m_ControlPoints[i]));
-        }
-        // Save objects using the file context
-        for (int i = 0; i < pointCount; ++i) {
-            file->SaveObject(objects[i], flags);
-        }
+    CKDWORD pointCount = m_ControlPoints.Size();
+    CKObject **points = pointCount ? reinterpret_cast<CKObject **>(&m_ControlPoints[0]) : nullptr;
+    if (pointCount && points) {
+        file->SaveObjects(points, pointCount, 0xFFFFFFFF);
     }
 }
 
@@ -105,12 +98,7 @@ CKStateChunk *RCKCurve::Save(CKFile *file, CKDWORD flags) {
     chunk->WriteIdentifier(0xFFC00000); // Curve identifier
 
     // Save control points array
-    // Convert RCKCurvePoint array to XObjectPointerArray for saving
-    XObjectPointerArray objectArray;
-    for (int i = 0; i < m_ControlPoints.Size(); ++i) {
-        objectArray.PushBack(static_cast<CKObject *>(&m_ControlPoints[i]));
-    }
-    objectArray.Save(chunk);
+    m_ControlPoints.Save(chunk);
 
     // Write curve properties
     chunk->WriteFloat(m_FittingCoeff);
@@ -120,20 +108,14 @@ CKStateChunk *RCKCurve::Save(CKFile *file, CKDWORD flags) {
     // If not saving to file, save control point sub-chunks
     if (!file) {
         chunk->WriteIdentifier(0xFF000000);
-        int pointCount = m_ControlPoints.Size();
+        CKDWORD pointCount = m_ControlPoints.Size();
         chunk->WriteDword(pointCount);
 
-        // Save each control point with its sub-chunk
-        for (int i = 0; i < m_ControlPoints.Size(); ++i) {
-            CKStateChunk *pointChunk = nullptr;
-            CKObject *point = static_cast<CKObject *>(&m_ControlPoints[i]);
-            if (point) {
-                pointChunk = point->Save(nullptr, flags);
-            }
-
+        for (CKDWORD i = 0; i < pointCount; ++i) {
+            CKObject *point = reinterpret_cast<CKObject *>(m_ControlPoints[i]);
+            CKStateChunk *pointChunk = point ? point->Save(nullptr, flags) : nullptr;
             chunk->WriteObject(point);
             chunk->WriteSubChunk(pointChunk);
-
             if (pointChunk) {
                 DeleteCKStateChunk(pointChunk);
             }
@@ -141,7 +123,7 @@ CKStateChunk *RCKCurve::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Close or update the chunk based on class ID
-    if (GetClassID() == 43)
+    if (GetClassID() == CKCID_CURVE)
         chunk->CloseChunk();
     else
         chunk->UpdateDataSize();
@@ -162,24 +144,14 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
     // Call base class Load first
     RCK3dEntity::Load(chunk, file);
 
-    // Set loading flag
-    field_1C8 = 1;
+    m_LoadingFlag = 1;
 
     // Handle different data versions
     if (chunk->GetDataVersion() < 5) {
         // Legacy format handling for data version < 5
         if (chunk->SeekIdentifier(0x800000u)) {
-            // Clear existing control points
             m_ControlPoints.Clear();
-            XObjectPointerArray objectArray;
-            objectArray.Load(m_Context, chunk);
-            // Convert back to RCKCurvePoint array
-            for (int i = 0; i < objectArray.Size(); ++i) {
-                RCKCurvePoint *point = static_cast<RCKCurvePoint *>(objectArray[i]);
-                if (point) {
-                    m_ControlPoints.PushBack(*point);
-                }
-            }
+            m_ControlPoints.Load(m_Context, chunk);
         }
 
         // Load curve properties from legacy identifiers
@@ -212,17 +184,8 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
     } else {
         // Modern format for data version >= 5
         if (chunk->SeekIdentifier(0xFFC00000)) {
-            // Clear existing control points
             m_ControlPoints.Clear();
-            XObjectPointerArray objectArray;
-            objectArray.Load(m_Context, chunk);
-            // Convert back to RCKCurvePoint array
-            for (int i = 0; i < objectArray.Size(); ++i) {
-                RCKCurvePoint *point = static_cast<RCKCurvePoint *>(objectArray[i]);
-                if (point) {
-                    m_ControlPoints.PushBack(*point);
-                }
-            }
+            m_ControlPoints.Load(m_Context, chunk);
 
             // Load curve properties
             m_FittingCoeff = chunk->ReadFloat();
@@ -237,11 +200,9 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
                 CK_ID objectID = chunk->ReadObjectID();
                 CKObject *object = m_Context->GetObject(objectID);
                 CKStateChunk *subChunk = chunk->ReadSubChunk();
-
                 if (object) {
                     object->Load(subChunk, nullptr);
                 }
-
                 if (subChunk) {
                     DeleteCKStateChunk(subChunk);
                 }
@@ -250,7 +211,7 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
     }
 
     // Clear loading flag
-    field_1C8 = 0;
+    m_LoadingFlag = 0;
 
     // Modify object flags
     ModifyObjectFlags(0, 0x400u);
@@ -270,7 +231,7 @@ void RCKCurve::CheckPreDeletion() {
  * @return Memory size in bytes
  */
 int RCKCurve::GetMemoryOccupation() {
-    return sizeof(RCKCurve) + m_ControlPoints.Size() * sizeof(RCKCurvePoint *);
+    return sizeof(RCKCurve) + m_ControlPoints.Size() * sizeof(CKObject *);
 }
 
 /**
@@ -280,9 +241,10 @@ int RCKCurve::GetMemoryOccupation() {
  * @return TRUE if object is used, FALSE otherwise
  */
 int RCKCurve::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
-    // Check if object is used in control points
-    for (int i = 0; i < m_ControlPoints.Size(); ++i) {
-        if (static_cast<CKObject *>(&m_ControlPoints[i]) == o) {
+    CKObject **begin = reinterpret_cast<CKObject **>(m_ControlPoints.Begin());
+    CKObject **end = reinterpret_cast<CKObject **>(m_ControlPoints.End());
+    for (CKObject **it = begin; it && it != end; ++it) {
+        if (*it == o) {
             return TRUE;
         }
     }
@@ -295,8 +257,18 @@ int RCKCurve::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKCurve::PrepareDependencies(CKDependenciesContext &context) {
-    // Prepare dependencies for control points
-    return CK_OK;
+    CKERROR err = RCK3dEntity::PrepareDependencies(context);
+    if (err != CK_OK) {
+        return err;
+    }
+
+    m_ControlPoints.Prepare(context);
+
+    if (m_CurrentMesh) {
+        m_CurrentMesh->PrepareDependencies(context);
+    }
+
+    return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
 /**
@@ -305,7 +277,14 @@ CKERROR RCKCurve::PrepareDependencies(CKDependenciesContext &context) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKCurve::RemapDependencies(CKDependenciesContext &context) {
-    // Remap dependencies for control points
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK) {
+        return err;
+    }
+
+    m_ControlPoints.Remap(context);
+    ModifyObjectFlags(0, 0x400u);
+
     return CK_OK;
 }
 
@@ -316,20 +295,24 @@ CKERROR RCKCurve::RemapDependencies(CKDependenciesContext &context) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKCurve::Copy(CKObject &o, CKDependenciesContext &context) {
-    // Base class copy
-    RCK3dEntity::Copy(o, context);
+    CKERROR err = RCK3dEntity::Copy(o, context);
+    if (err != CK_OK) {
+        return err;
+    }
 
-    // Copy curve specific data
-    RCKCurve &target = (RCKCurve &) o;
-    target.m_Opened = m_Opened;
-    target.m_Length = m_Length;
-    target.m_StepCount = m_StepCount;
-    target.m_FittingCoeff = m_FittingCoeff;
-    target.m_Color = m_Color;
-    target.field_1C8 = field_1C8;
+    RCKCurve &src = static_cast<RCKCurve &>(o);
 
-    // Copy control points (shallow copy)
-    target.m_ControlPoints = m_ControlPoints;
+    CreateLineMesh();
+
+    for (int i = 0; i < src.m_ControlPoints.Size(); ++i) {
+        m_ControlPoints.PushBack(src.m_ControlPoints[i]);
+    }
+
+    m_Opened = src.m_Opened;
+    m_Length = src.m_Length;
+    m_StepCount = src.m_StepCount;
+    m_FittingCoeff = src.m_FittingCoeff;
+    m_Color = src.m_Color;
 
     return CK_OK;
 }
@@ -372,8 +355,8 @@ CKERROR RCKCurve::GetPos(float step, VxVector *Pos, VxVector *Dir) {
     // In a real implementation, this would use spline math
     int pointCount = m_ControlPoints.Size();
     if (pointCount < 2) {
-        if (pointCount == 1) {
-            m_ControlPoints[0].GetPosition(Pos);
+        if (pointCount == 1 && m_ControlPoints[0]) {
+            reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0])->GetPosition(Pos);
         }
         return CK_OK;
     }
@@ -394,8 +377,8 @@ CKERROR RCKCurve::GetPos(float step, VxVector *Pos, VxVector *Dir) {
 
     // Get positions of the two endpoints
     VxVector p0, p1;
-    m_ControlPoints[segment].GetPosition(&p0);
-    m_ControlPoints[segment + 1].GetPosition(&p1);
+    reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[segment])->GetPosition(&p0);
+    reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[segment + 1])->GetPosition(&p1);
 
     // Linear interpolation
     Pos->x = p0.x + localT * (p1.x - p0.x);
@@ -435,8 +418,10 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
 CKERROR RCKCurve::GetTangents(int index, VxVector *InTangent, VxVector *OutTangent) {
     if (index < 0 || index >= m_ControlPoints.Size())
         return CKERR_INVALIDPARAMETER;
-
-    m_ControlPoints[index].GetTangents(InTangent, OutTangent);
+    auto *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[index]);
+    if (pt) {
+        pt->GetTangents(InTangent, OutTangent);
+    }
     return CK_OK;
 }
 
@@ -450,8 +435,10 @@ CKERROR RCKCurve::GetTangents(CKCurvePoint *pt, VxVector *InTangent, VxVector *O
 CKERROR RCKCurve::SetTangents(int index, VxVector *InTangent, VxVector *OutTangent) {
     if (index < 0 || index >= m_ControlPoints.Size())
         return CKERR_INVALIDPARAMETER;
-
-    m_ControlPoints[index].SetTangents(InTangent, OutTangent);
+    auto *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[index]);
+    if (pt) {
+        pt->SetTangents(InTangent, OutTangent);
+    }
     return CK_OK;
 }
 
@@ -473,11 +460,12 @@ float RCKCurve::GetFittingCoeff() {
 CKERROR RCKCurve::RemoveControlPoint(CKCurvePoint *pt, CKBOOL DeletePoint) {
     if (!pt) return CKERR_INVALIDPARAMETER;
 
-    // Cast to RCKCurvePoint* for comparison
-    RCKCurvePoint *rpt = reinterpret_cast<RCKCurvePoint *>(pt);
     for (int i = 0; i < m_ControlPoints.Size(); i++) {
-        if (&m_ControlPoints[i] == rpt) {
+        if (m_ControlPoints[i] == reinterpret_cast<CKObject *>(pt)) {
             m_ControlPoints.RemoveAt(i);
+            if (DeletePoint) {
+                m_Context->DestroyObject(reinterpret_cast<CKObject *>(pt));
+            }
             return CK_OK;
         }
     }
@@ -487,30 +475,23 @@ CKERROR RCKCurve::RemoveControlPoint(CKCurvePoint *pt, CKBOOL DeletePoint) {
 CKERROR RCKCurve::InsertControlPoint(CKCurvePoint *pt, CKCurvePoint *after) {
     if (!pt) return CKERR_INVALIDPARAMETER;
 
-    // Cast to RCKCurvePoint* for comparison
-    RCKCurvePoint *rafter = reinterpret_cast<RCKCurvePoint *>(after);
-
-    // Find position to insert
     int insertPos = 0;
     if (after) {
         for (int i = 0; i < m_ControlPoints.Size(); i++) {
-            if (&m_ControlPoints[i] == rafter) {
+            if (m_ControlPoints[i] == reinterpret_cast<CKObject *>(after)) {
                 insertPos = i + 1;
                 break;
             }
         }
     }
 
-    // Insert the point - need to dereference the cast pointer
-    RCKCurvePoint *rpt = reinterpret_cast<RCKCurvePoint *>(pt);
-    m_ControlPoints.Insert(insertPos, *rpt);
+    m_ControlPoints.Insert(insertPos, reinterpret_cast<CKObject *>(pt));
     return CK_OK;
 }
 
 CKERROR RCKCurve::AddControlPoint(CKCurvePoint *pt) {
     if (!pt) return CKERR_INVALIDPARAMETER;
-    RCKCurvePoint *rpt = reinterpret_cast<RCKCurvePoint *>(pt);
-    m_ControlPoints.PushBack(*rpt);
+    m_ControlPoints.PushBack(reinterpret_cast<CKObject *>(pt));
     return CK_OK;
 }
 
@@ -522,7 +503,7 @@ int RCKCurve::GetControlPointCount() {
 CKCurvePoint *RCKCurve::GetControlPoint(int index) {
     if (index < 0 || index >= m_ControlPoints.Size())
         return nullptr;
-    return reinterpret_cast<CKCurvePoint *>(&m_ControlPoints[index]);
+    return reinterpret_cast<CKCurvePoint *>(m_ControlPoints[index]);
 }
 
 CKERROR RCKCurve::RemoveAllControlPoints() {

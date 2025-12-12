@@ -102,7 +102,6 @@ CKStateChunk *RCKKinematicChain::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Close chunk appropriately based on class type
-    // Based on decompilation: if GetClassID() == 13 (CKCID_KINEMATICCHAIN)
     if (GetClassID() == CKCID_KINEMATICCHAIN)
         chunk->CloseChunk();
     else
@@ -214,6 +213,15 @@ CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBo
 
 int RCKKinematicChain::GetMemoryOccupation() {
     return sizeof(RCKKinematicChain);
+}
+
+CKERROR RCKKinematicChain::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+    m_StartEffector = (CKBodyPart *)context.Remap(m_StartEffector);
+    m_EndEffector = (CKBodyPart *)context.Remap(m_EndEffector);
+    return CK_OK;
 }
 
 CKERROR RCKKinematicChain::Copy(CKObject &o, CKDependenciesContext &context) {

@@ -58,6 +58,7 @@ set(CKRE_SOURCES
         CKMaterial.cpp
         CKTexture.cpp
         CKMesh.cpp
+        CKMeshUtils.cpp
         CKPatchMesh.cpp
         CKAnimation.cpp
         CKKeyedAnimation.cpp

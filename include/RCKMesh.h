@@ -5,7 +5,17 @@
 
 #include "CKMesh.h"
 
+// Forward declarations for generic functions
+void BuildFaceNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount);
+void BuildNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount);
+int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direction, VxIntersectionDesc *desc, CK_RAYINTERSECTION mode, const VxMatrix &worldMatrix);
+void NormalizeGenericFunc(VxVertex *vertices, int count);
+
 class RCKMesh : public CKMesh {
+    // Friend function for ray intersection (needs access to protected members)
+    friend int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direction, 
+                                               VxIntersectionDesc *desc, CK_RAYINTERSECTION mode, 
+                                               const VxMatrix &worldMatrix);
 public:
 
     //--------------------------------------------------------
@@ -141,16 +151,27 @@ public:
 
     CKDWORD GetSaveFlags();
     void UpdateBoundingVolumes(CKBOOL force);
-    void CreateNewMaterialGroup(int materialIndex);
+    int CreateNewMaterialGroup(CKMaterial *mat);
+    int GetMaterialGroupIndex(CKMaterial *mat, CKBOOL create);
+    void DeleteRenderGroup();
+
+    // Picking methods
+    CKBOOL Pick2D(const Vx2DVector &pt, VxIntersectionDesc *desc, RCKRenderContext *rc, RCK3dEntity *ent);
 
     // Internal rendering methods
     int DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent);
-    int RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data, int vertexLimit);
-    int RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable, CKWORD *indices, int indexCount);
-    void CreateRenderGroups();
+    int RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data);
+    int RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable);
+    int CreateRenderGroups();
     void UpdateChannelIndices();
     CKBOOL CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveData *data);
     CKBOOL CheckHWIndexBuffer(CKRasterizerContext *rst);
+
+    // Render-group remap helpers (IDA: VBuffer stored in CKMaterialGroup::m_RemapData)
+    CKVBuffer *GetVBuffer(CKMaterialGroup *group) const;
+    void DeleteVBuffer(CKMaterialGroup *group);
+    void ResetMaterialGroup(CKMaterialGroup *group, int a2);
+    void UpdateHasValidPrimitives(CKMaterialGroup *group);
 
     explicit RCKMesh(CKContext *Context, CKSTRING name = nullptr);
     ~RCKMesh() override;
@@ -189,7 +210,7 @@ public:
 protected:
     CKDWORD m_Flags;
     VxVector m_BaryCenter;
-    CKDWORD m_Radius;
+    float m_Radius;
     VxBbox m_LocalBox;
     XArray<CKFace> m_Faces;
     XArray<CKWORD> m_FaceVertexIndices;
@@ -200,10 +221,10 @@ protected:
     CKDWORD m_DrawFlags;
     CKDWORD m_FaceChannelMask;
     XClassArray<CKMaterialChannel> m_MaterialChannels;
-    XVoidArray field_D0;
+    XArray<int> m_ActiveTextureChannels; // Extra texture coordinate channel indices used for multitexture
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;
-    CKDWORD field_EC;
+    CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKProgressiveMesh *m_ProgressiveMesh;

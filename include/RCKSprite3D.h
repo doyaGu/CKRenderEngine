@@ -13,6 +13,9 @@ public:
 #include "CKSprite3D.h"
 #undef CK_3DIMPLEMENTATION
 
+    // Non-virtual helper method for batch rendering
+    void FillBatch(CKSprite3DBatch *batch);
+
     explicit RCKSprite3D(CKContext *Context, CKSTRING name = nullptr);
     ~RCKSprite3D() override;
     CK_CLASSID GetClassID() override;

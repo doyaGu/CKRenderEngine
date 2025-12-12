@@ -1,12 +1,17 @@
 #include "RCKBodyPart.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKObject.h"
-#include "CKBeObject.h"
+#include "CKDependencies.h"
+#include "CKEnums.h"
+
 #include "RCK3dEntity.h"
-#include "RCK3dObject.h"
-#include "CKCharacter.h"
-#include "CKAnimation.h"
+#include "RCKCharacter.h"
+#include "RCKAnimation.h"
+
+#include <cmath>
+#include <cstring>
 
 /**
  * @brief RCKBodyPart constructor
@@ -14,27 +19,20 @@
  * @param name Optional name for the body part
  */
 RCKBodyPart::RCKBodyPart(CKContext *Context, CKSTRING name)
-    : RCK3dObject(Context, name) {
-    // Initialize body part specific fields
-    field_1A8 = 0;
-    field_1AC = 0;
-    field_1B0 = 0;
-    field_1B4 = 0;
-    field_1B8 = 0;
-    field_1BC = 0;
-    field_1C0 = 0;
-    field_1C4 = 0;
-    field_1C8 = 0;
-    field_1CC = 0;
-    field_1D0 = 0;
-    field_1D4 = 0;
+        : RCK3dObject(Context, name),
+            m_Character(nullptr),
+            m_ExclusiveAnimation(nullptr) {
+    // IDA: m_RotationJoint.m_Flags = 7, vectors initialized to 0
+    m_RotationJoint.m_Flags = 7;
+    m_RotationJoint.m_Min.Set(0.0f, 0.0f, 0.0f);
+    m_RotationJoint.m_Max.Set(0.0f, 0.0f, 0.0f);
+    m_RotationJoint.m_Damping.Set(0.0f, 0.0f, 0.0f);
 }
 
 /**
  * @brief RCKBodyPart destructor
  */
 RCKBodyPart::~RCKBodyPart() {
-    // Cleanup resources if needed
 }
 
 /**
@@ -42,7 +40,7 @@ RCKBodyPart::~RCKBodyPart() {
  * @return The class ID (42)
  */
 CK_CLASSID RCKBodyPart::GetClassID() {
-    return 42;
+    return m_ClassID;
 }
 
 /**
@@ -52,37 +50,29 @@ CK_CLASSID RCKBodyPart::GetClassID() {
  * @return A new CKStateChunk containing the saved data
  */
 CKStateChunk *RCKBodyPart::Save(CKFile *file, CKDWORD flags) {
-    // Call base class Save first
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
-    // If no file and no special flags, return base chunk only
+    // Keep the same early-return optimization used across the repo for "memory-only" saves.
     if (!file && (flags & 0x7F000000) == 0)
         return baseChunk;
 
-    // Create a new state chunk for body part data
-    CKStateChunk *chunk = CreateCKStateChunk(42, file);
-    chunk->StartWrite();
+    CKStateChunk *chunk = CreateCKStateChunk(m_ClassID, file);
+    if (!chunk)
+        return baseChunk;
 
-    // Add the base class chunk
+    chunk->StartWrite();
     chunk->AddChunkAndDelete(baseChunk);
 
-    // Write body part specific data
-    chunk->WriteIdentifier(0x4000000u); // Body part identifier
+    // Identifier 0x04000000: character reference + optional rotation joint block.
+    chunk->WriteIdentifier(0x04000000);
+    chunk->WriteObject(reinterpret_cast<CKObject *>(m_Character));
 
-    // Write the referenced object at offset 424
-    // Note: This offset needs to be verified with actual class layout
-    CKObject **refObject = reinterpret_cast<CKObject **>(reinterpret_cast<uint8_t *>(this) + 424);
-    chunk->WriteObject(*refObject);
-
-    // Write additional data if certain flags are set
-    if ((m_ObjectFlags & 0x40000) != 0) {
-        // Write 40 bytes of data starting from offset 432
-        void *dataPtr = reinterpret_cast<void *>(reinterpret_cast<uint8_t *>(this) + 432);
-        chunk->WriteBufferNoSize_LEndian(40, dataPtr);
+    // Rotation joint block is present only if CK_3DENTITY_IKJOINTVALID is set.
+    if ((GetFlags() & CK_3DENTITY_IKJOINTVALID) != 0) {
+        chunk->WriteBufferNoSize_LEndian(sizeof(CKIkJoint), &m_RotationJoint);
     }
 
-    // Close or update the chunk based on class ID
-    if (GetClassID() == 42)
+    if (GetClassID() == m_ClassID)
         chunk->CloseChunk();
     else
         chunk->UpdateDataSize();
@@ -97,72 +87,51 @@ CKStateChunk *RCKBodyPart::Save(CKFile *file, CKDWORD flags) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
+    // IDA: 0x1000ea7a
     if (!chunk)
         return CKERR_INVALIDPARAMETER;
 
-    // Call base class Load first
     RCK3dEntity::Load(chunk, file);
 
-    // Handle different data versions
-    if (chunk->GetDataVersion() < 5) {
-        // Legacy format handling for data version < 5
-        if (chunk->SeekIdentifier(0x1000000u)) {
-            // Read legacy vector data and populate fields
-            VxVector vectors[3];
-            // Read vector data directly using individual component reads
-            for (int i = 0; i < 3; ++i) {
-                vectors[i].x = chunk->ReadFloat();
-                vectors[i].y = chunk->ReadFloat();
-                vectors[i].z = chunk->ReadFloat();
+    const int version = chunk->GetDataVersion();
+
+    if (version >= 5) {
+        if (chunk->SeekIdentifier(0x04000000)) {
+            m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
+            if ((GetFlags() & CK_3DENTITY_IKJOINTVALID) != 0) {
+                chunk->ReadAndFillBuffer_LEndian(sizeof(CKIkJoint), &m_RotationJoint);
             }
-
-            // Map legacy data to current fields
-            // Note: This mapping may need adjustment based on actual field layout
-            field_1A8 = *(CKDWORD *) &vectors[0].x;
-            field_1AC = *(CKDWORD *) &vectors[0].y;
-            field_1B0 = *(CKDWORD *) &vectors[0].z;
-            field_1B4 = *(CKDWORD *) &vectors[1].x;
-            field_1B8 = *(CKDWORD *) &vectors[1].y;
-            field_1BC = *(CKDWORD *) &vectors[1].z;
-            field_1C0 = *(CKDWORD *) &vectors[2].x;
-            field_1C4 = *(CKDWORD *) &vectors[2].y;
-            field_1C8 = *(CKDWORD *) &vectors[2].z;
-
-            // Set flags based on vector components
-            CKDWORD flags = 0;
-            for (int i = 0; i < 3; ++i) {
-                if (*(float *) &vectors[0][i] != 0.0f)
-                    flags |= (1 << (i - 1));
-                if (*(float *) &vectors[1][i] != 0.0f)
-                    flags |= (16 << (i - 1));
-                if (*(float *) &vectors[2][i] != 0.0f)
-                    flags |= (256 << (i - 1));
-            }
-            field_1CC = flags;
-        }
-
-        // Load referenced object
-        if (chunk->SeekIdentifier(0x4000000u)) {
-            CKObject **refObject = reinterpret_cast<CKObject **>(reinterpret_cast<uint8_t *>(this) + 424);
-            *refObject = chunk->ReadObject(m_Context);
         }
     } else {
-        // Modern format for data version >= 5
-        if (chunk->SeekIdentifier(0x4000000u)) {
-            // Load referenced object
-            CKObject **refObject = reinterpret_cast<CKObject **>(reinterpret_cast<uint8_t *>(this) + 424);
-            *refObject = chunk->ReadObject(m_Context);
+        // Legacy format: 0x01000000 holds 6 VxVectors (v5[0..5])
+        // IDA shows: v5[3..5] map to Min/Max/Damping, v5[0..2] used for flag calculation
+        if (chunk->SeekIdentifier(0x01000000)) {
+            VxVector v5[6];
+            std::memset(v5, 0, sizeof(v5));
+            chunk->ReadAndFillBuffer_LEndian(v5);
 
-            // Load additional data if flags are set
-            // Note: This flag check needs to be verified with actual field layout
-            if ((m_ObjectFlags & 0x40000) != 0) {
-                // Read 40 bytes of data directly into the target location
-                // This reads 10 floats (40 bytes) from the chunk
-                float *dataPtr = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(this) + 432);
-                for (int i = 0; i < 10; ++i) {
-                    dataPtr[i] = chunk->ReadFloat();
-                }
+            // IDA: Min = v5[3], Max = v5[4], Damping = v5[5]
+            m_RotationJoint.m_Damping = v5[5];
+            m_RotationJoint.m_Max = v5[4];
+            m_RotationJoint.m_Min = v5[3];
+            m_RotationJoint.m_Flags = 0;
+
+            // Build flags from v5[0], v5[1], v5[2]
+            for (int i = 0; i < 3; ++i) {
+                // IDA: if (*((_DWORD *)&v5[0].x + i))  -> check v5[0].x/y/z
+                if (*(&v5[0].x + i) != 0.0f)
+                    m_RotationJoint.m_Flags |= (1 << (i - 1));
+                // IDA: if (*((_DWORD *)&v5[1].x + i))  -> check v5[1].x/y/z  
+                if (*(&v5[1].x + i) != 0.0f)
+                    m_RotationJoint.m_Flags |= (16 << (i - 1));
+                // IDA: if (*((_DWORD *)&v5[2].x + i))  -> check v5[2].x/y/z
+                if (*(&v5[2].x + i) != 0.0f)
+                    m_RotationJoint.m_Flags |= (256 << (i - 1));
             }
+        }
+
+        if (chunk->SeekIdentifier(0x04000000)) {
+            m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
         }
     }
 
@@ -174,7 +143,8 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKBodyPart::GetMemoryOccupation() {
-    return sizeof(RCKBodyPart);
+    // IDA: RCK3dEntity::GetMemoryOccupation() + 48
+    return RCK3dEntity::GetMemoryOccupation() + 48;
 }
 
 /**
@@ -183,25 +153,35 @@ int RCKBodyPart::GetMemoryOccupation() {
  * @param context Dependencies context
  * @return CKERROR indicating success or failure
  */
+CKERROR RCKBodyPart::PrepareDependencies(CKDependenciesContext &context) {
+    // IDA: 0x1000ed38 - just calls base and FinishPrepareDependencies
+    CKERROR err = RCK3dEntity::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+CKERROR RCKBodyPart::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    m_Character = static_cast<RCKCharacter *>(context.Remap(reinterpret_cast<CKObject *>(m_Character)));
+    m_ExclusiveAnimation = static_cast<RCKAnimation *>(context.Remap(reinterpret_cast<CKObject *>(m_ExclusiveAnimation)));
+    return CK_OK;
+}
+
 CKERROR RCKBodyPart::Copy(CKObject &o, CKDependenciesContext &context) {
-    // Base class copy
-    RCK3dObject::Copy(o, context);
+    // IDA: 0x1000edd5 - Copy FROM source (o) TO this
+    CKERROR err = RCK3dEntity::Copy(o, context);
+    if (err != CK_OK)
+        return err;
 
-    // Copy body part specific data
-    RCKBodyPart &target = (RCKBodyPart &) o;
-    target.field_1A8 = field_1A8;
-    target.field_1AC = field_1AC;
-    target.field_1B0 = field_1B0;
-    target.field_1B4 = field_1B4;
-    target.field_1B8 = field_1B8;
-    target.field_1BC = field_1BC;
-    target.field_1C0 = field_1C0;
-    target.field_1C4 = field_1C4;
-    target.field_1C8 = field_1C8;
-    target.field_1CC = field_1CC;
-    target.field_1D0 = field_1D0;
-    target.field_1D4 = field_1D4;
-
+    RCKBodyPart &src = (RCKBodyPart &)o;
+    m_Character = src.m_Character;
+    m_ExclusiveAnimation = src.m_ExclusiveAnimation;
+    std::memcpy(&m_RotationJoint, &src.m_RotationJoint, sizeof(m_RotationJoint));
     return CK_OK;
 }
 
@@ -219,44 +199,66 @@ CKSTRING RCKBodyPart::GetDependencies(int i, int mode) {
 }
 
 void RCKBodyPart::Register() {
-    // Based on IDA decompilation
+    // IDA: 0x1000ec81 - CKGUID(0x4BA2618E, 0x7AAD0D02)
     CKClassNeedNotificationFrom(m_ClassID, CKCID_CHARACTER);
     CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_BODYPART);
 }
 
 CKBodyPart *RCKBodyPart::CreateInstance(CKContext *Context) {
-    // Note: This should return CKBodyPart* but we're implementing RCKBodyPart
-    // The actual implementation may need to handle the type conversion differently
     return reinterpret_cast<CKBodyPart *>(new RCKBodyPart(Context));
 }
 
 // Additional body part methods
 CKCharacter *RCKBodyPart::GetCharacter() const {
-    // Return the character this body part belongs to
-    return nullptr; // Would need member variable to track this
+    return reinterpret_cast<CKCharacter *>(m_Character);
 }
 
 void RCKBodyPart::SetExclusiveAnimation(const CKAnimation *anim) {
-    // Set exclusive animation for this body part
+    m_ExclusiveAnimation = reinterpret_cast<RCKAnimation *>(const_cast<CKAnimation *>(anim));
 }
 
 CKAnimation *RCKBodyPart::GetExclusiveAnimation() const {
-    return nullptr;
+    return reinterpret_cast<CKAnimation *>(m_ExclusiveAnimation);
 }
 
 void RCKBodyPart::GetRotationJoint(CKIkJoint *joint) const {
-    if (joint) {
-        // Initialize joint with default values
-        memset(joint, 0, sizeof(CKIkJoint));
-    }
+    // IDA: 0x1000e857 - direct memcpy, no null check
+    std::memcpy(joint, &m_RotationJoint, sizeof(CKIkJoint));
 }
 
 void RCKBodyPart::SetRotationJoint(const CKIkJoint *joint) {
-    // Set rotation joint constraints
+    // IDA: 0x1000e87b - direct memcpy, no null check or flag modification
+    std::memcpy(&m_RotationJoint, joint, sizeof(CKIkJoint));
 }
 
 CKERROR RCKBodyPart::FitToJoint() {
-    // Fit body part orientation to match joint constraints
+    // IDA: 0x1000e89f - uses Vx3DMatrixToEulerAngles/FromEulerAngles directly
+    VxVector euler(0.0f, 0.0f, 0.0f);
+    
+    // Extract Euler angles from local matrix
+    Vx3DMatrixToEulerAngles(GetLocalMatrix(), &euler.x, &euler.y, &euler.z);
+    
+    // Apply joint limits for each axis
+    for (int i = 0; i < 3; ++i) {
+        // Check if limit flag is set for this axis (16 << (i-1) maps to bits for X/Y/Z)
+        // IDA shows: (16 << (i - 1)) & m_Flags
+        // i=0: 16 >> 1 = 8 (but this seems off), let's match exact behavior
+        if (((16 << (i - 1)) & m_RotationJoint.m_Flags) != 0) {
+            float *angle = &euler.x + i;
+            float *minVal = &m_RotationJoint.m_Min.x + i;
+            float *maxVal = &m_RotationJoint.m_Max.x + i;
+            
+            if (*angle < *minVal)
+                *angle = *minVal;
+            if (*angle > *maxVal)
+                *angle = *maxVal;
+        }
+    }
+    
+    // Apply modified euler angles back to local matrix
+    Vx3DMatrixFromEulerAngles(m_LocalMatrix, euler.x, euler.y, euler.z);
+    LocalMatrixChanged(FALSE, TRUE);
+    
     return CK_OK;
 }
 

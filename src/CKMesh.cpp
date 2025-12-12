@@ -1,10 +1,15 @@
 #include "RCKMesh.h"
+
+#include <cmath>
+#include <algorithm>
+
+#include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "VxMath.h"
 #include "CKContext.h"
 #include "CKMaterial.h"
 #include "RCKMaterial.h"
+#include "RCKTexture.h"
 #include "CKRenderEngineTypes.h"
 #include "CKScene.h"
 #include "CKRenderManager.h"
@@ -12,15 +17,150 @@
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "CKRasterizer.h"
+#include "CKMemoryPool.h"
 #include "CKDebugLogger.h"
-#include <algorithm>
-#include <cmath>
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+// External global for transparency update flag
+extern CKBOOL g_UpdateTransparency;
+
+// External VxMath normal building functions
+extern void (*g_BuildNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
+extern void (*g_BuildFaceNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
 
 #define MESH_DEBUG_LOG(msg) CK_LOG("Mesh", msg)
 #define MESH_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("Mesh", fmt, __VA_ARGS__)
+
+CKVBuffer *RCKMesh::GetVBuffer(CKMaterialGroup *group) const {
+    if (!group || !group->m_RemapData)
+        return nullptr;
+    return reinterpret_cast<CKVBuffer *>(static_cast<uintptr_t>(group->m_RemapData));
+}
+
+void RCKMesh::DeleteVBuffer(CKMaterialGroup *group) {
+    if (!group || !group->m_RemapData)
+        return;
+    delete reinterpret_cast<CKVBuffer *>(static_cast<uintptr_t>(group->m_RemapData));
+    group->m_RemapData = 0;
+}
+
+void RCKMesh::ResetMaterialGroup(CKMaterialGroup *group, int a2) {
+    if (!group)
+        return;
+
+    group->m_Primitives.Resize(1);
+    if (group->m_Primitives.Size() > 0) {
+        // IDA: Resize to 3*a2 then back to 0 (reserve semantics)
+        group->m_Primitives[0].m_Indices.Resize(3 * a2);
+        group->m_Primitives[0].m_Indices.Resize(0);
+        group->m_Primitives[0].m_Type = VX_TRIANGLELIST;
+        group->m_Primitives[0].m_IndexBufferOffset = -1;
+    }
+
+    group->m_FaceIndices.Resize(0);
+    group->m_HasValidPrimitives = 0;
+    group->m_MinVertexIndex = 0x10000;
+    group->m_MaxVertexIndex = 0;
+    group->m_BaseVertex = 0;
+
+    DeleteVBuffer(group);
+    group->m_VertexCount = 0;
+}
+
+void RCKMesh::UpdateHasValidPrimitives(CKMaterialGroup *group) {
+    if (!group)
+        return;
+    group->m_HasValidPrimitives = 0;
+    for (int i = 0; i < group->m_Primitives.Size(); ++i) {
+        if (group->m_Primitives[i].m_Indices.Size() > 0) {
+            group->m_HasValidPrimitives = 1;
+            return;
+        }
+    }
+}
+
+CKVBuffer::CKVBuffer(int vertexCount) : m_Vertices(0), m_Colors(0), m_UVs(0), m_VertexRemap(0) {
+    if (vertexCount)
+        Resize(vertexCount);
+}
+
+CKVBuffer::~CKVBuffer() = default;
+
+void CKVBuffer::Resize(int vertexCount) {
+    m_Vertices.Resize(vertexCount);
+    m_Colors.Resize(vertexCount);
+    m_VertexRemap.Resize(vertexCount);
+}
+
+void CKVBuffer::Update(RCKMesh *mesh, int force) {
+    if (!mesh)
+        return;
+
+    const int vertexCount = m_VertexRemap.Size();
+    if (vertexCount <= 0)
+        return;
+
+    // Ensure storage matches remap size
+    if (m_Vertices.Size() != vertexCount || m_Colors.Size() != vertexCount)
+        Resize(vertexCount);
+
+    const CKDWORD flags = mesh->GetFlags();
+
+    // IDA masks: 0x28000 (pos+normal), 0x10000 (color), 0x4000 (uv + channels)
+    if (force || (flags & 0x3C000) != 0) {
+        if (force || (flags & 0x28000) != 0) {
+            CKDWORD srcStride = 0;
+            void *srcPtr = mesh->GetPositionsPtr(&srcStride);
+            if (srcPtr && srcStride) {
+                VxStridedData dst(m_Vertices.Begin(), 32);
+                VxStridedData src(srcPtr, srcStride);
+                VxIndexedCopy(dst, src, 0x18u, m_VertexRemap.Begin(), vertexCount);
+            }
+        }
+
+        if (force || (flags & 0x10000) != 0) {
+            CKDWORD srcStride = 0;
+            void *srcPtr = mesh->GetColorsPtr(&srcStride);
+            if (srcPtr && srcStride) {
+                VxStridedData dst(m_Colors.Begin(), 8);
+                VxStridedData src(srcPtr, srcStride);
+                VxIndexedCopy(dst, src, 8u, m_VertexRemap.Begin(), vertexCount);
+            }
+        }
+
+        if (force || (flags & 0x4000) != 0) {
+            // Copy main UVs into m_Vertices UV field
+            CKDWORD srcStride = 0;
+            void *srcPtr = mesh->GetTextureCoordinatesPtr(&srcStride, -1);
+            if (srcPtr && srcStride) {
+                VxStridedData dst(&m_Vertices[0].m_UV, 32);
+                VxStridedData src(srcPtr, srcStride);
+                VxIndexedCopy(dst, src, 8u, m_VertexRemap.Begin(), vertexCount);
+            }
+
+            const int channelCount = mesh->GetChannelCount();
+            m_UVs.Resize(channelCount);
+
+            for (int c = 0; c < channelCount; ++c) {
+                if (!mesh->GetChannelMaterial(c)) {
+                    m_UVs[c].Resize(0);
+                    continue;
+                }
+
+                CKDWORD channelStride = 0;
+                void *channelPtr = mesh->GetTextureCoordinatesPtr(&channelStride, c);
+                if (!channelPtr || !channelStride) {
+                    m_UVs[c].Resize(0);
+                    continue;
+                }
+
+                m_UVs[c].Resize(vertexCount);
+                VxStridedData dstUv(m_UVs[c].Begin(), 8);
+                VxStridedData srcUv(channelPtr, channelStride);
+                VxIndexedCopy(dstUv, srcUv, 8u, m_VertexRemap.Begin(), vertexCount);
+            }
+        }
+    }
+}
 
 /**
  * @brief Progressive mesh pre-render callback for LOD processing.
@@ -143,59 +283,49 @@ void ProgressiveMeshPreRenderCallback(CKRenderContext *ctx, CK3dEntity *entity, 
 
 // Constructor
 RCKMesh::RCKMesh(CKContext *Context, CKSTRING name) : CKMesh(Context, name) {
-    // Initialize member variables
-    m_BaryCenter.Set(0.0f, 0.0f, 0.0f);
-    m_LocalBox.Min.Set(0.0f, 0.0f, 0.0f);
-    m_LocalBox.Max.Set(0.0f, 0.0f, 0.0f);
-    m_Faces.Clear();
-    m_FaceVertexIndices.Clear();
-    m_LineIndices.Clear();
-    m_Vertices.Clear();
-    m_VertexColors.Clear();
-    m_MaterialChannels.Clear();
-    field_D0.Clear();
-    m_MaterialGroups.Clear();
-
+    // Match IDA at 0x1001bab0
+    // Note: XArray/XClassArray constructors are called implicitly by C++ member initialization
+    // The vtable is set by the compiler after base class constructor
+    
+    // Set object flags to 64 (0x40) as per IDA
     m_ObjectFlags = 64;
+    
+    // Initialize members in IDA order
     m_VertexWeights = nullptr;
-    m_Flags = 10;
+    m_Flags = 10;          // 0x0A
     m_Radius = 0.0f;
     m_ProgressiveMesh = nullptr;
-
+    
+    // Reserve space for material groups and create initial group
     m_MaterialGroups.Reserve(2);
-    // CreateNewMaterialGroup(0); // Commented out - method doesn't exist yet
-
-    // Create vertex and index buffers
-    RCKRenderManager *renderManager = (RCKRenderManager *) Context->GetRenderManager();
-    // m_VertexBuffer = renderManager->CreateObjectIndex(CKRST_OBJ_VERTEXBUFFER);
-    // m_IndexBuffer = renderManager->CreateObjectIndex(CKRST_OBJ_INDEXBUFFER);
-    m_VertexBuffer = 0;
-    m_IndexBuffer = 0;
-
+    CreateNewMaterialGroup(nullptr);
+    
+    // Create vertex and index buffers via RenderManager
+    RCKRenderManager *renderManager = (RCKRenderManager *)Context->GetRenderManager();
+    if (renderManager) {
+        m_VertexBuffer = renderManager->CreateObjectIndex(CKRST_OBJ_VERTEXBUFFER);
+        m_IndexBuffer = renderManager->CreateObjectIndex(CKRST_OBJ_INDEXBUFFER);
+    } else {
+        m_VertexBuffer = 0;
+        m_IndexBuffer = 0;
+    }
+    
+    // Clear local box
     memset(&m_LocalBox, 0, sizeof(m_LocalBox));
-    // m_RenderCallbacks = nullptr; // Field doesn't exist in header
+    
+    // Initialize callback containers and other fields
+    m_RenderCallbacks = nullptr;
     m_SubMeshCallbacks = nullptr;
-    m_FaceChannelMask = 0;
-    m_Valid = 0;
-    field_EC = 0;
+        m_FaceChannelMask = 0;
+        m_Valid = 0;
+        m_VertexBufferReady = 0;
 }
 
 // Destructor
 RCKMesh::~RCKMesh() {
-    // Clean up progressive mesh
-    if (m_ProgressiveMesh) {
-        DestroyPM();
-    }
-
-    // Clean up callbacks
-    // if (m_RenderCallbacks) {
-    //     delete m_RenderCallbacks;
-    // }
-    // if (m_SubMeshCallbacks) {
-    //     delete m_SubMeshCallbacks;
-    // }
-
-    // Clean up material channels
+    // Match IDA at 0x1001bc99
+    
+    // Clean up material channels (sub_1001BE0B in IDA)
     for (int i = 0; i < m_MaterialChannels.Size(); i++) {
         CKMaterialChannel &channel = m_MaterialChannels[i];
         if (channel.m_uv != nullptr) {
@@ -203,47 +333,148 @@ RCKMesh::~RCKMesh() {
             channel.m_uv = nullptr;
         }
     }
+    
+    // Delete render groups
+    DeleteRenderGroup();
+    
+    // Remove all callbacks
+    RemoveAllCallbacks();
+    
+    // Clean up vertex weights array
+    if (m_VertexWeights) {
+        delete m_VertexWeights;
+        m_VertexWeights = nullptr;
+    }
+    
+    // Release vertex buffer
+    if (m_VertexBuffer) {
+        RCKRenderManager *renderManager = (RCKRenderManager *)m_Context->GetRenderManager();
+        if (renderManager) {
+            renderManager->ReleaseObjectIndex(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
+        }
+        m_VertexBuffer = 0;
+    }
+    
+    // Release index buffer
+    if (m_IndexBuffer) {
+        RCKRenderManager *renderManager = (RCKRenderManager *)m_Context->GetRenderManager();
+        if (renderManager) {
+            renderManager->ReleaseObjectIndex(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+        }
+        m_IndexBuffer = 0;
+    }
+    
+    // Note: XArray/XClassArray destructors handle clearing of:
+        // m_MaterialGroups, m_ActiveTextureChannels, m_MaterialChannels, m_Vertices,
+    // m_Vertices, m_LineIndices, m_FaceVertexIndices, m_Faces
 }
 
 // Get class ID
+// Match IDA at 0x10028ac8
 CK_CLASSID RCKMesh::GetClassID() {
-    return CKCID_MESH;
+    return m_ClassID;
 }
 
 // Show/Hide mesh
 void RCKMesh::Show(CK_OBJECT_SHOWOPTION show) {
-    CKMesh::Show(show);
+    // Match IDA at 0x1001cdc3
+    CKObject::Show(show);
+    
+    // Update mesh visibility flag
+    if ((show & 1) != 0) {  // CKSHOW_SHOW = 1
+        m_Flags |= 0x02;  // Set visible flag
+    } else {
+        m_Flags &= ~0x02; // Clear visible flag
+    }
 }
 
 // Transparency methods
 CKBOOL RCKMesh::IsTransparent() {
-    return (m_Flags & 0x02) != 0;
+    // Match IDA at 0x1001cf38
+    // Check FORCETRANSPARENCY flag
+    if ((m_Flags & 0x1000) != 0) {
+        return TRUE;
+    }
+    
+    // Check if transparency is up to date and not forcing update
+    if ((m_Flags & 0x2000) == 0 || g_UpdateTransparency) {
+        // Set TRANSPARENCYUPTODATE flag
+        m_Flags |= 0x2000;
+        
+        // Create render groups if not optimized
+        if ((m_Flags & 0x04) == 0) {
+            CreateRenderGroups();
+        }
+        
+        // Clear transparency flag
+        m_Flags &= ~0x10;
+        
+        // Check each material group for transparency (starting from index 1)
+        for (int i = 1; i < m_MaterialGroups.Size(); ++i) {
+            CKMaterialGroup *group = m_MaterialGroups[i];
+            if (group && group->m_Material && group->m_Material->IsAlphaTransparent()) {
+                m_Flags |= 0x10;
+                return TRUE;
+            }
+        }
+    }
+    
+    return (m_Flags & 0x10) != 0;
 }
 
 void RCKMesh::SetTransparent(CKBOOL Transparency) {
+    // Match IDA at 0x1001cf05
     if (Transparency) {
-        m_Flags |= 0x02;
+        m_Flags |= 0x1000;  // Set FORCETRANSPARENCY flag
     } else {
-        m_Flags &= ~0x02;
+        m_Flags &= ~0x1000;
     }
 }
 
 // Wrap mode methods
 void RCKMesh::SetWrapMode(VXTEXTURE_WRAPMODE Mode) {
-    m_Flags = (m_Flags & ~0x18) | (Mode & 0x18);
+    // Match IDA at 0x1001ce5b
+    // Bit 0 of Mode = WRAPU (0x100), Bit 1 = WRAPV (0x200)
+    if ((Mode & 1) != 0) {
+        m_Flags |= 0x100;   // Set WRAPU
+    } else {
+        m_Flags &= ~0x100;  // Clear WRAPU
+    }
+    
+    if ((Mode & 2) != 0) {
+        m_Flags |= 0x200;   // Set WRAPV
+    } else {
+        m_Flags &= ~0x200;  // Clear WRAPV
+    }
 }
 
 VXTEXTURE_WRAPMODE RCKMesh::GetWrapMode() {
-    return (VXTEXTURE_WRAPMODE) (m_Flags & 0x18);
+    // Match IDA at 0x1001cebc
+    int result = 0;
+    if ((m_Flags & 0x100) != 0) {  // WRAPU
+        result |= 1;
+    }
+    if ((m_Flags & 0x200) != 0) {  // WRAPV
+        result |= 2;
+    }
+    return (VXTEXTURE_WRAPMODE)result;
 }
 
 // Lighting mode methods
 void RCKMesh::SetLitMode(VXMESH_LITMODE Mode) {
-    m_Flags = (m_Flags & ~0x60) | (Mode << 5);
+    // Match IDA at 0x1001ce04
+    // Mode 0 = LIT (needs lighting), Mode 1 = PRELIT (vertex colors)
+    if (Mode) {
+        m_Flags &= ~0x80;  // Clear PRELITMODE bit for LIT mode
+    } else {
+        m_Flags |= 0x80;   // Set PRELITMODE bit for PRELIT mode
+    }
 }
 
 VXMESH_LITMODE RCKMesh::GetLitMode() {
-    return (VXMESH_LITMODE) ((m_Flags & 0x60) >> 5);
+    // Match IDA at 0x1001ce37
+    // Returns 1 (LIT) if PRELITMODE bit is clear, 0 (PRELIT) if set
+    return (VXMESH_LITMODE) ((m_Flags & 0x80) == 0);
 }
 
 // Flags methods
@@ -252,7 +483,14 @@ CKDWORD RCKMesh::GetFlags() {
 }
 
 void RCKMesh::SetFlags(CKDWORD Flags) {
-    m_Flags = Flags & 0x7FE39A;
+    // Match IDA at 0x1001cd80
+    m_Flags = Flags;
+    // Update object transparency flag based on mesh transparency flag
+    if ((m_Flags & 0x02) != 0) {
+        m_ObjectFlags |= 0x40;  // CK_OBJECT_HASITOWNTRANSPARENCY
+    } else {
+        m_ObjectFlags &= ~0x40;
+    }
 }
 
 // Vertex data access methods
@@ -262,94 +500,123 @@ void *RCKMesh::GetPositionsPtr(CKDWORD *Stride) {
 }
 
 void *RCKMesh::GetNormalsPtr(CKDWORD *Stride) {
-    *Stride = 32;
-    return m_Vertices.Begin();
+    // Match IDA at 0x1001c3b4
+    *Stride = 32;  // sizeof(VxVertex)
+    if (m_Vertices.Size() > 0) {
+        // Return pointer to m_Normal field (offset 12 in VxVertex)
+        return &m_Vertices[0].m_Normal;
+    }
+    return nullptr;
 }
 
 void *RCKMesh::GetColorsPtr(CKDWORD *Stride) {
-    *Stride = 4;
+    // Match IDA at 0x1001c130
+    if (m_VertexColors.Size() == 0) {
+        return nullptr;
+    }
+    *Stride = 8;  // sizeof(VxColors)
     return m_VertexColors.Begin();
 }
 
 void *RCKMesh::GetSpecularColorsPtr(CKDWORD *Stride) {
-    *Stride = 4;
-    return m_VertexColors.Begin();
+    // Match IDA at 0x1001c1f7
+    *Stride = 8;  // sizeof(VxColors)
+    if (m_VertexColors.Size() > 0) {
+        // Return pointer to specular color (offset +4 in VxColors)
+        return (CKBYTE *)m_VertexColors.Begin() + 4;
+    }
+    return nullptr;
 }
 
 void *RCKMesh::GetTextureCoordinatesPtr(CKDWORD *Stride, int channel) {
-    if (channel < 0 || channel >= m_MaterialChannels.Size()) {
-        *Stride = 0;
+    // Match IDA at 0x1001c59a
+    if (!Stride) {
         return nullptr;
     }
-
-    CKMaterialChannel &matChannel = m_MaterialChannels[channel];
-    if (matChannel.m_uv != nullptr) {
-        *Stride = 8;
-        return matChannel.m_uv;
+    
+    // channel == -1 means use vertex UVs
+    if (channel == -1) {
+        *Stride = 32;  // sizeof(VxVertex)
+        return &m_Vertices[0].m_UV;
     }
-
-    *Stride = 0;
-    return nullptr;
+    
+    if ((unsigned int)channel >= (unsigned int)m_MaterialChannels.Size()) {
+        return nullptr;
+    }
+    
+    CKMaterialChannel &matChannel = m_MaterialChannels[channel];
+    
+    // If flag 0x800000 is set, use vertex UVs
+    if ((matChannel.m_Flags & 0x800000) != 0) {
+        *Stride = 32;  // sizeof(VxVertex)
+        return &m_Vertices[0].m_UV;
+    }
+    
+    // Use channel-specific UV array
+    *Stride = 8;  // sizeof(VxUV)
+    return matChannel.m_uv;
 }
 
 // Vertex manipulation notifications
 void RCKMesh::VertexMove() {
-    m_Flags &= ~0x01;
-    // UpdateBoundingVolumes(1); // Commented out - method doesn't exist yet
+    // Match IDA at 0x1001e115
+    m_Flags &= ~0x01;        // Clear bounding valid flag
+    m_Flags |= 0x8000;       // Set POS_CHANGED flag
+    m_Valid = 0;             // Invalidate render data
 }
 
 void RCKMesh::UVChanged() {
-    // Mark UV data as changed
+    // Match IDA at 0x1001e14e
+    m_Flags |= 0x4000;       // Set UV_CHANGED flag
+    m_Valid = 0;             // Invalidate render data
 }
 
 void RCKMesh::NormalChanged() {
-    // Mark normal data as changed
+    // Match IDA at 0x1001e175
+    m_Flags |= 0x8000;       // Set NORMAL_CHANGED flag
+    m_Flags &= ~0x80000;     // Clear face normals computed flag
+    m_Valid = 0;             // Invalidate render data
 }
 
 void RCKMesh::ColorChanged() {
-    // Mark color data as changed
+    // Match IDA at 0x1001e1ae
+    m_Flags |= 0x10000;      // Set COLOR_CHANGED flag
+    m_Valid = 0;             // Invalidate render data
 }
 
 // Normal building methods
 void RCKMesh::BuildNormals() {
-    int vertexCount = m_Vertices.Size();
-    if (vertexCount == 0) return;
-
-    // Clear existing normals
-    for (int i = 0; i < vertexCount; i++) {
-        VxVertex &vertex = m_Vertices[i];
-        vertex.m_Normal.x = 0.0f;
-        vertex.m_Normal.y = 0.0f;
-        vertex.m_Normal.z = 0.0f;
-    }
-
-    // Calculate face normals and accumulate
-    int faceCount = m_Faces.Size();
-    for (int i = 0; i < faceCount; i++) {
-        CKFace &face = m_Faces[i];
-        // Face structure doesn't have vertex indices - need to use face vertex indices array
-        // This is a simplified implementation
-    }
-
-    // Normalize all vertex normals
-    for (int i = 0; i < vertexCount; i++) {
-        // m_Vertices[i].m_Normal.Normalize(); // VxVector doesn't have Normalize method
-    }
+    // Match IDA at 0x1001e39e
+    if (m_Faces.Size() == 0) return;
+    if (m_Vertices.Size() == 0) return;
+    
+    // Set flags: 0x80000 (FACENORMALSCOMPUTED) | 0x8000 (POS_CHANGED) 
+    m_Flags |= 0x88000;
+    
+    // Call the VxMath normal building function
+    g_BuildNormalsFunc(m_Faces.Begin(),
+                       m_FaceVertexIndices.Begin(),
+                       m_Faces.Size(),
+                       m_Vertices.Begin(),
+                       m_Vertices.Size());
 }
 
 void RCKMesh::BuildFaceNormals() {
-    int faceCount = m_Faces.Size();
-    for (int i = 0; i < faceCount; i++) {
-        CKFace &face = m_Faces[i];
-        int vertexCount = m_Vertices.Size();
-
-        // Face structure doesn't have vertex indices - simplified implementation
-        face.m_Normal.Set(0.0f, 0.0f, 1.0f);
-    }
+    // Match IDA at 0x1001e42e
+    if (m_Faces.Size() == 0) return;
+    if (m_Vertices.Size() == 0) return;
+    
+    // Call the VxMath face normal building function
+    g_BuildFaceNormalsFunc(m_Faces.Begin(),
+                           m_FaceVertexIndices.Begin(),
+                           m_Faces.Size(),
+                           m_Vertices.Begin(),
+                           m_Vertices.Size());
 }
 
 // Vertex count management
 CKBOOL RCKMesh::SetVertexCount(int Count) {
+    // Match IDA at 0x1001be5f
     if (Count < 0) {
         Count = 0;
     }
@@ -362,7 +629,7 @@ CKBOOL RCKMesh::SetVertexCount(int Count) {
         return TRUE;
     }
 
-    // Resize vertex arrays
+    // Resize vertex arrays - first to aligned, then to actual count
     m_Vertices.Resize(alignedCount);
     m_VertexColors.Resize(alignedCount);
     m_Vertices.Resize(Count);
@@ -374,32 +641,38 @@ CKBOOL RCKMesh::SetVertexCount(int Count) {
         VxVertex *newVertices = &m_Vertices[currentCount];
         memset(newVertices, 0, sizeof(VxVertex) * (Count - currentCount));
 
-        // Initialize new colors to white with alpha 255
-        VxColors *newColors = &m_VertexColors[currentCount];
-        for (int i = 0; i < (Count - currentCount); i++) {
-            m_VertexColors[i].Color = 0xFFFFFFFF;
-        }
+        // Initialize new colors with VxFillStructure pattern: {0xFFFFFFFF, 0}
+        CKDWORD defaultColor[2] = { 0xFFFFFFFF, 0 };
+        VxFillStructure(Count - currentCount, &m_VertexColors[currentCount], 8, 8, defaultColor);
     }
 
     // Update material channels UV data
-    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
-        CKMaterialChannel &channel = m_MaterialChannels[i];
-        // UV data is stored directly in struct, not as pointer
-        if (!(channel.m_Flags & 0x800000)) {
-            // UV data allocation would go here if needed
+    for (CKMaterialChannel *channel = m_MaterialChannels.Begin();
+         channel != m_MaterialChannels.End();
+         channel++) {
+        // Delete old UV array
+        if (channel->m_uv) {
+            delete[] channel->m_uv;
+        }
+        channel->m_uv = nullptr;
+        
+        // Allocate new UV array if not using vertex UV
+        if ((channel->m_Flags & 0x800000) == 0) {
+            channel->m_uv = new Vx2DVector[Count];
+            // Initialize UV array
+            for (int i = 0; i < Count; ++i) {
+                channel->m_uv[i].x = 0.0f;
+                channel->m_uv[i].y = 0.0f;
+            }
         }
     }
 
     // Update vertex weights if present
     if (m_VertexWeights) {
-        // Resize vertex weights array
-        int oldSize = (int) m_VertexWeights->Size();
-        if (oldSize < Count) {
-            m_VertexWeights->Resize(Count);
-            // Initialize new weights to 1.0f
-            for (int i = oldSize; i < Count; i++) {
-                (*m_VertexWeights)[i] = 1.0f;
-            }
+        m_VertexWeights->Resize(Count);
+        if (currentCount < Count) {
+            // Initialize new weights to zero
+            memset(&(*m_VertexWeights)[currentCount], 0, sizeof(float) * (Count - currentCount));
         }
     }
 
@@ -447,63 +720,78 @@ void RCKMesh::SetVertexColor(int Index, CKDWORD Color) {
     }
 }
 
+// Match IDA at 0x1001c0f2
 CKDWORD RCKMesh::GetVertexColor(int Index) {
     if (Index >= 0 && Index < m_VertexColors.Size()) {
         return m_VertexColors[Index].Color;
     }
-    return 0xFFFFFFFF;
+    return 0;
 }
 
 // Vertex texture coordinate methods
+// Match IDA at 0x1001c3f3
 void RCKMesh::SetVertexTextureCoordinates(int Index, float u, float v, int channel) {
-    if (Index >= 0 && Index < m_Vertices.Size() &&
-        channel >= 0 && channel < m_MaterialChannels.Size()) {
-        CKMaterialChannel &matChannel = m_MaterialChannels[channel];
-        if (matChannel.m_uv != nullptr) {
-            matChannel.m_uv[Index].x = u;
-            matChannel.m_uv[Index].y = v;
-            UVChanged();
+    if (Index >= 0 && Index < m_Vertices.Size()) {
+        if (channel >= 0) {
+            if ((unsigned int)channel < (unsigned int)m_MaterialChannels.Size()) {
+                if (m_MaterialChannels[channel].m_uv) {
+                    m_MaterialChannels[channel].m_uv[Index].x = u;
+                    m_MaterialChannels[channel].m_uv[Index].y = v;
+                }
+            }
+        } else {
+            // channel < 0 means set the vertex's own UV
+            m_Vertices[Index].m_UV.x = u;
+            m_Vertices[Index].m_UV.y = v;
         }
+        UVChanged();
     }
 }
 
 void RCKMesh::GetVertexTextureCoordinates(int Index, float *u, float *v, int channel) {
-    *u = 0.0f;
-    *v = 0.0f;
-
-    if (Index >= 0 && Index < m_Vertices.Size() &&
-        channel >= 0 && channel < m_MaterialChannels.Size()) {
-        CKMaterialChannel &matChannel = m_MaterialChannels[channel];
-        if (matChannel.m_uv != nullptr) {
-            *u = matChannel.m_uv[Index].x;
-            *v = matChannel.m_uv[Index].y;
+    // Match IDA at 0x1001c4c7
+    if (Index < 0 || Index >= m_Vertices.Size())
+        return;
+    
+    if (channel < 0) {
+        // channel < 0 means use default UV from m_Vertices
+        *u = m_Vertices[Index].m_UV.x;
+        *v = m_Vertices[Index].m_UV.y;
+    } else {
+        // IDA shows unsigned comparison for channel bounds check
+        if ((unsigned int)channel >= (unsigned int)m_MaterialChannels.Size())
+            return;
+        if (m_MaterialChannels[channel].m_uv != nullptr) {
+            *u = m_MaterialChannels[channel].m_uv[Index].x;
+            *v = m_MaterialChannels[channel].m_uv[Index].y;
         }
     }
 }
 
 // Face count management
 CKBOOL RCKMesh::SetFaceCount(int Count) {
-    if (Count < 0) {
-        Count = 0;
-    }
-
+    // Match IDA at 0x1001c646
+    int oldCount = m_Faces.Size();
+    
     m_Faces.Resize(Count);
     m_FaceVertexIndices.Resize(Count * 3);
 
     // Initialize new faces
-    int currentCount = m_Faces.Size();
-    if (currentCount < Count) {
-        for (int i = currentCount; i < Count; i++) {
-            CKFace &face = m_Faces[i];
-            // Face structure doesn't have vertex indices
-            // face.m_VertexIndex[0] = 0;
-            // face.m_VertexIndex[1] = 0;
-            // face.m_VertexIndex[2] = 0;
-            face.m_MatIndex = 0;
-            face.m_Normal.Set(0.0f, 0.0f, 1.0f);
-        }
+    if (oldCount < Count) {
+        // Clear new face vertex indices
+        memset(&m_FaceVertexIndices[oldCount * 3], 0, sizeof(CKWORD) * 3 * (Count - oldCount));
+        
+        // Set channel mask to all channels
+        m_FaceChannelMask = 0xFFFF;
     }
-
+    
+    // Initialize new faces with channel mask -1 (0xFFFF) 
+    // Note: IDA shows this loop runs even if oldCount >= Count (just won't execute)
+    for (int i = oldCount; i < Count; i++) {
+        m_Faces[i].m_ChannelMask = 0xFFFF;
+    }
+    
+    UnOptimize();
     return TRUE;
 }
 
@@ -513,54 +801,40 @@ int RCKMesh::GetFaceCount() {
 
 // Face vertex index methods
 void RCKMesh::SetFaceVertexIndex(int FaceIndex, int Vertex1, int Vertex2, int Vertex3) {
+    // Match IDA at 0x1001c70d
     if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        CKFace &face = m_Faces[FaceIndex];
-        // Face structure doesn't have vertex indices directly
-        // They are stored in m_FaceVertexIndices array
-
-        // Update face vertex indices array
-        if (FaceIndex * 3 + 2 < m_FaceVertexIndices.Size()) {
-            m_FaceVertexIndices[FaceIndex * 3] = Vertex1;
-            m_FaceVertexIndices[FaceIndex * 3 + 1] = Vertex2;
-            m_FaceVertexIndices[FaceIndex * 3 + 2] = Vertex3;
-        }
+        m_FaceVertexIndices[FaceIndex * 3] = Vertex1;
+        m_FaceVertexIndices[FaceIndex * 3 + 1] = Vertex2;
+        m_FaceVertexIndices[FaceIndex * 3 + 2] = Vertex3;
+        UnOptimize();
     }
 }
 
 void RCKMesh::GetFaceVertexIndex(int FaceIndex, int &Vertex1, int &Vertex2, int &Vertex3) {
-    Vertex1 = 0;
-    Vertex2 = 0;
-    Vertex3 = 0;
-
+    // Match IDA at 0x1001c7f0
     if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        CKFace &face = m_Faces[FaceIndex];
-        // Face structure doesn't have vertex indices directly
-        // They are stored in m_FaceVertexIndices array
-        int baseIndex = FaceIndex * 3;
-        Vertex1 = m_FaceVertexIndices[baseIndex];
-        Vertex2 = m_FaceVertexIndices[baseIndex + 1];
-        Vertex3 = m_FaceVertexIndices[baseIndex + 2];
+        Vertex1 = m_FaceVertexIndices[FaceIndex * 3];
+        Vertex2 = m_FaceVertexIndices[FaceIndex * 3 + 1];
+        Vertex3 = m_FaceVertexIndices[FaceIndex * 3 + 2];
     }
 }
 
 // Face material methods
+// Match IDA at 0x1001c892
 void RCKMesh::SetFaceMaterial(int FaceIndex, CKMaterial *Mat) {
     if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        int materialIndex = GetChannelByMaterial(Mat);
-        if (materialIndex >= 0) {
-            m_Faces[FaceIndex].m_MatIndex = materialIndex;
-        }
+        int v4 = GetMaterialGroupIndex(Mat, TRUE);
+        if (v4 != m_Faces[FaceIndex].m_MatIndex)
+            UnOptimize();
+        m_Faces[FaceIndex].m_MatIndex = v4;
     }
 }
 
+// Match IDA at 0x1001c909
 CKMaterial *RCKMesh::GetFaceMaterial(int Index) {
-    if (Index >= 0 && Index < m_Faces.Size()) {
-        int materialIndex = m_Faces[Index].m_MatIndex;
-        if (materialIndex >= 0 && materialIndex < m_MaterialChannels.Size()) {
-            return (CKMaterial *) m_MaterialChannels[materialIndex].m_Material;
-        }
-    }
-    return nullptr;
+    if (Index < 0 || Index >= m_Faces.Size())
+        return nullptr;
+    return m_MaterialGroups[m_Faces[Index].m_MatIndex]->m_Material;
 }
 
 // Face indices access
@@ -570,48 +844,51 @@ CKWORD *RCKMesh::GetFacesIndices() {
 
 // Geometry calculations
 float RCKMesh::GetRadius() {
+    // Match IDA at 0x1001f13d
+    if ((m_Flags & 0x01) == 0) {
+        UpdateBoundingVolumes(FALSE);
+    }
     return m_Radius;
 }
 
 const VxBbox &RCKMesh::GetLocalBox() {
+    // Match IDA at 0x1001f163
+    if ((m_Flags & 0x01) == 0) {
+        UpdateBoundingVolumes(FALSE);
+    }
     return m_LocalBox;
 }
 
 void RCKMesh::GetBaryCenter(VxVector *Vector) {
+    // Match IDA at 0x1001f189
+    if ((m_Flags & 0x01) == 0) {
+        UpdateBoundingVolumes(FALSE);
+    }
     *Vector = m_BaryCenter;
 }
 
 // Line operations
+// Match IDA at 0x1001e2cd
 CKBOOL RCKMesh::SetLineCount(int Count) {
-    if (Count < 0) {
-        Count = 0;
-    }
-
-    m_LineIndices.Resize(Count * 2);
+    m_LineIndices.Resize(2 * Count);
     return TRUE;
 }
 
+// Match IDA at 0x1001e2f3
 int RCKMesh::GetLineCount() {
-    return m_LineIndices.Size() / 2;
+    return m_LineIndices.Size() >> 1;
 }
 
+// Match IDA at 0x1001e30e
 void RCKMesh::SetLine(int LineIndex, int VIndex1, int VIndex2) {
-    int index = LineIndex * 2;
-    if (index + 1 < m_LineIndices.Size()) {
-        m_LineIndices[index] = VIndex1;
-        m_LineIndices[index + 1] = VIndex2;
-    }
+    m_LineIndices[2 * LineIndex] = VIndex1;
+    m_LineIndices[2 * LineIndex + 1] = VIndex2;
 }
 
+// Match IDA at 0x1001e353
 void RCKMesh::GetLine(int LineIndex, int *VIndex1, int *VIndex2) {
-    if (VIndex1) *VIndex1 = 0;
-    if (VIndex2) *VIndex2 = 0;
-
-    int index = LineIndex * 2;
-    if (index + 1 < m_LineIndices.Size()) {
-        if (VIndex1) *VIndex1 = m_LineIndices[index];
-        if (VIndex2) *VIndex2 = m_LineIndices[index + 1];
-    }
+    *VIndex1 = m_LineIndices[2 * LineIndex];
+    *VIndex2 = m_LineIndices[2 * LineIndex + 1];
 }
 
 CKWORD *RCKMesh::GetLineIndices() {
@@ -651,55 +928,173 @@ int RCKMesh::GetVertexWeightsCount() {
 }
 
 void RCKMesh::SetVertexWeight(int index, float w) {
-    if (index >= 0 && index < GetVertexWeightsCount() && m_VertexWeights) {
+    // Match IDA at 0x1001f5dd
+    if (m_VertexWeights) {
         (*m_VertexWeights)[index] = w;
     }
 }
 
 float RCKMesh::GetVertexWeight(int index) {
-    if (index >= 0 && index < GetVertexWeightsCount() && m_VertexWeights) {
+    // Match IDA at 0x1001f60d
+    if (m_VertexWeights) {
         return (*m_VertexWeights)[index];
     }
-    return 1.0f;
+    return 0.0f;
 }
 
 // Mesh operations
 void RCKMesh::Clean(CKBOOL KeepVertices) {
-    // Implementation would remove unused vertices/faces
-    // For now, just update bounding volumes
-    // UpdateBoundingVolumes(1); // Commented out - method doesn't exist yet
-}
-
-void RCKMesh::InverseWinding() {
-    int faceCount = m_Faces.Size();
-    for (int i = 0; i < faceCount; i++) {
-        CKFace &face = m_Faces[i];
-        // Swap second and third vertices
-        // Face structure doesn't have vertex indices directly
-        // They are stored in m_FaceVertexIndices array
-        int baseIndex = i * 3;
-        int temp = m_FaceVertexIndices[baseIndex + 1];
-        m_FaceVertexIndices[baseIndex + 1] = m_FaceVertexIndices[baseIndex + 2];
-        m_FaceVertexIndices[baseIndex + 2] = temp;
-
-        // Update face vertex indices array
-        if (baseIndex + 2 < m_FaceVertexIndices.Size()) {
-            // Face structure doesn't have vertex indices directly
-            // They are stored in m_FaceVertexIndices array
+    // Match IDA at 0x1001f09a
+    m_Faces.Clear();
+    m_FaceVertexIndices.Clear();
+    m_LineIndices.Clear();
+    
+    DeleteRenderGroup();
+    
+    // Clear material channels (sub_1001BE0B in IDA)
+    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
+        CKMaterialChannel &channel = m_MaterialChannels[i];
+        if (channel.m_uv != nullptr) {
+            delete[] channel.m_uv;
+            channel.m_uv = nullptr;
+        }
+    }
+    m_MaterialChannels.Clear();
+    
+    if (!KeepVertices) {
+        m_Vertices.Clear();
+        m_VertexColors.Clear();
+        
+        if (m_VertexWeights) {
+            delete m_VertexWeights;
+            m_VertexWeights = nullptr;
         }
     }
 }
 
+void RCKMesh::InverseWinding() {
+    // Match IDA at 0x1001eaf1
+    int faceCount = m_Faces.Size();
+    int v6 = 1;  // Start at index 1 (second vertex of first face)
+    for (int i = 0; i < faceCount; ++i) {
+        // Swap vertices at indices v6 and v6+1 (i.e., indices 1&2, 4&5, 7&8, ...)
+        CKWORD temp = m_FaceVertexIndices[v6];
+        m_FaceVertexIndices[v6] = m_FaceVertexIndices[v6 + 1];
+        m_FaceVertexIndices[v6 + 1] = temp;
+        v6 += 3;
+    }
+    UnOptimize();
+    ModifierVertexMove(TRUE, TRUE);
+}
+
 void RCKMesh::Consolidate() {
-    // Implementation would consolidate duplicate vertices
-    // For now, just update flags
-    m_Flags &= ~0x01;
+    // Match IDA at 0x1001eb80
+    // This method removes degenerate faces (with zero normal) and unused vertices
+    
+    int removedFaces = 0;
+    int removedVertices = 0;
+    int faceCount = m_Faces.Size();
+    int newFaceCount = faceCount;
+    int i = 0;
+    
+    // Remove degenerate faces (faces with zero normal)
+    while (i < newFaceCount) {
+        CKFace &face = m_Faces[i];
+        VxVector &normal = face.m_Normal;
+        
+        if (normal.x == 0.0f && normal.y == 0.0f && normal.z == 0.0f) {
+            --newFaceCount;
+            ++removedFaces;
+            
+            if (i != newFaceCount) {
+                // Swap with last valid face
+                m_Faces[i] = m_Faces[newFaceCount];
+                m_FaceVertexIndices[i * 3] = m_FaceVertexIndices[newFaceCount * 3];
+                m_FaceVertexIndices[i * 3 + 1] = m_FaceVertexIndices[newFaceCount * 3 + 1];
+                m_FaceVertexIndices[i * 3 + 2] = m_FaceVertexIndices[newFaceCount * 3 + 2];
+            }
+        } else {
+            ++i;
+        }
+    }
+    
+    if (newFaceCount != faceCount) {
+        SetFaceCount(newFaceCount);
+    }
+    
+    // Mark used vertices
+    int vertexCount = m_Vertices.Size();
+    XArray<int> vertexMap;
+    vertexMap.Resize(vertexCount);
+    for (i = 0; i < vertexCount; ++i) {
+        vertexMap[i] = -2;  // Mark as unused
+    }
+    
+    // Mark vertices used by faces
+    for (i = 0; i < m_FaceVertexIndices.Size(); ++i) {
+        vertexMap[m_FaceVertexIndices[i]] = 666666;  // Mark as used
+    }
+    
+    // Compact vertices
+    int newVertexCount = vertexCount;
+    for (i = 0; i < newVertexCount; ++i) {
+        if (vertexMap[i] == -2) {
+            --newVertexCount;
+            ++removedVertices;
+            
+            // Find last used vertex
+            int k = newVertexCount;
+            while (k > i && vertexMap[k] == -2) {
+                --k;
+            }
+            
+            if (i == k) {
+                vertexMap[i] = -1;
+            } else {
+                // Move vertex k to position i
+                m_Vertices[i] = m_Vertices[k];
+                m_VertexColors[i] = m_VertexColors[k];
+                vertexMap[k] = i;
+                vertexMap[i] = -2;
+            }
+        } else if (vertexMap[i] == 666666) {
+            vertexMap[i] = i;  // Keep at same position
+        }
+    }
+    
+    // Resize and remap face indices
+    if (newVertexCount != vertexCount) {
+        m_Vertices.Resize(newVertexCount);
+        m_VertexColors.Resize(newVertexCount);
+        
+        for (i = 0; i < m_FaceVertexIndices.Size(); ++i) {
+            m_FaceVertexIndices[i] = vertexMap[m_FaceVertexIndices[i]];
+        }
+    }
+    
+    // Update skins if vertices were removed (IDA lines 126-140)
+    if (removedVertices) {
+        const XObjectPointerArray &entities = m_Context->GetObjectListByType(CKCID_3DENTITY, TRUE);
+        for (CKObject **it = entities.Begin(); it != entities.End(); ++it) {
+            CK3dEntity *entity = (CK3dEntity *)*it;
+            if (entity && entity->GetCurrentMesh() == this) {
+                CKSkin *skin = entity->GetSkin();
+                if (skin) {
+                    skin->RemapVertices(vertexMap);
+                }
+            }
+        }
+    }
+    
+    if (removedFaces || removedVertices) {
+        UnOptimize();
+    }
 }
 
 void RCKMesh::UnOptimize() {
-    // Implementation would undo optimization
-    // For now, just update flags
-    m_Flags &= ~0x01;
+    // Match IDA at 0x1002a980
+    // Clear OPTIMIZED (0x04) and TRANSPARENCYUPTODATE (0x2000) flags
+    m_Flags &= ~0x2004;
 }
 
 // Callback system methods
@@ -732,28 +1127,52 @@ CKBOOL RCKMesh::RemovePostRenderCallBack(CK_MESHRENDERCALLBACK Function, void *A
 }
 
 void RCKMesh::SetRenderCallBack(CK_MESHRENDERCALLBACK Function, void *Argument) {
+    // Match IDA at 0x1001de07
     if (!m_RenderCallbacks) {
         m_RenderCallbacks = new CKCallbacksContainer();
     }
-    m_RenderCallbacks->Clear();
-    if (Function) {
-        m_RenderCallbacks->AddPreCallback((void *) Function, Argument, FALSE, m_Context->GetRenderManager());
+    
+    // Allocate m_Callback if not present
+    if (!m_RenderCallbacks->m_Callback) {
+        m_RenderCallbacks->m_Callback = new VxCallBack();
     }
+    
+    // Set the main callback
+    m_RenderCallbacks->m_Callback->callback = (void *)Function;
+    m_RenderCallbacks->m_Callback->argument = Argument;
+    m_RenderCallbacks->m_Callback->temp = FALSE;
 }
 
 void RCKMesh::SetDefaultRenderCallBack() {
+    // Match IDA at 0x1001df02
     if (m_RenderCallbacks) {
-        m_RenderCallbacks->Clear();
+        delete m_RenderCallbacks->m_Callback;
+        m_RenderCallbacks->m_Callback = nullptr;
     }
 }
 
 void RCKMesh::RemoveAllCallbacks() {
+    // Match IDA at 0x1001df48
+    RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+    
     if (m_RenderCallbacks) {
-        m_RenderCallbacks->Clear();
+        rm->RemoveTemporaryCallback(m_RenderCallbacks);
     }
+    
+    if (m_RenderCallbacks) {
+        delete m_RenderCallbacks;
+    }
+    
     if (m_SubMeshCallbacks) {
-        m_SubMeshCallbacks->Clear();
+        rm->RemoveTemporaryCallback(m_SubMeshCallbacks);
     }
+    
+    if (m_SubMeshCallbacks) {
+        delete m_SubMeshCallbacks;
+    }
+    
+    m_SubMeshCallbacks = nullptr;
+    m_RenderCallbacks = nullptr;
 }
 
 // Sub-mesh callback methods
@@ -786,40 +1205,57 @@ CKBOOL RCKMesh::RemoveSubMeshPostRenderCallBack(CK_SUBMESHRENDERCALLBACK Functio
 }
 
 // Material management
+// Match IDA at 0x1001e01b
 int RCKMesh::GetMaterialCount() {
-    return m_MaterialChannels.Size();
+    if ((m_Flags & 0x04) == 0)
+        CreateRenderGroups();
+    return m_MaterialGroups.Size() - 1;
 }
 
+// Match IDA at 0x1001e04c
 CKMaterial *RCKMesh::GetMaterial(int index) {
-    if (index >= 0 && index < m_MaterialChannels.Size()) {
-        return m_MaterialChannels[index].m_Material;
-    }
-    return nullptr;
+    if ((m_Flags & 0x04) == 0)
+        CreateRenderGroups();
+    if ((unsigned int)(index + 1) < (unsigned int)m_MaterialGroups.Size())
+        return m_MaterialGroups[index + 1]->m_Material;
+    else
+        return nullptr;
 }
 
 // Progressive mesh methods (skipped as requested)
 void RCKMesh::SetVerticesRendered(int count) {
-    if (!m_ProgressiveMesh) {
-        if (CreatePM() != CK_OK)
-            return;
+    // Match IDA at 0x100246d9
+    if (!m_ProgressiveMesh)
+        return;
+    
+    // Clamp count between 0 and vertex count
+    int maxCount = m_Vertices.Size();
+    int minCount = 0;
+    if (count < minCount) count = minCount;
+    if (count > maxCount) count = maxCount;
+    
+    if (m_ProgressiveMesh->m_VertexCount != count) {
+        m_ProgressiveMesh->m_VertexCount = count;
+        CKObject::ModifyObjectFlags(0, 0x400);
     }
-    m_ProgressiveMesh->m_Field0 = ClampPMVertexCount(this, count);
 }
 
 int RCKMesh::GetVerticesRendered() {
-    if (!m_ProgressiveMesh)
-        return GetVertexCount();
-    if (m_ProgressiveMesh->m_Field0 <= 0)
-        m_ProgressiveMesh->m_Field0 = GetVertexCount();
-    return ClampPMVertexCount(this, m_ProgressiveMesh->m_Field0);
+    // Match IDA at 0x10024751
+    if (m_ProgressiveMesh)
+        return m_ProgressiveMesh->m_VertexCount;
+    return 0;
 }
 
 void RCKMesh::EnablePMGeoMorph(CKBOOL enable) {
-    if (!m_ProgressiveMesh) {
-        if (CreatePM() != CK_OK)
-            return;
+    // Match IDA at 0x100256aa
+    if (!m_ProgressiveMesh)
+        return;
+    
+    if (m_ProgressiveMesh->m_MorphEnabled != enable) {
+        m_ProgressiveMesh->m_MorphEnabled = enable;
+        CKObject::ModifyObjectFlags(0, 0x400);
     }
-    m_ProgressiveMesh->m_MorphEnabled = enable ? 1 : 0;
 }
 
 CKBOOL RCKMesh::IsPMGeoMorphEnabled() {
@@ -827,11 +1263,14 @@ CKBOOL RCKMesh::IsPMGeoMorphEnabled() {
 }
 
 void RCKMesh::SetPMGeoMorphStep(int gs) {
-    if (!m_ProgressiveMesh) {
-        if (CreatePM() != CK_OK)
-            return;
+    // Match IDA at 0x10025731
+    if (!m_ProgressiveMesh)
+        return;
+    
+    if (m_ProgressiveMesh->m_MorphStep != gs) {
+        m_ProgressiveMesh->m_MorphStep = gs;
+        CKObject::ModifyObjectFlags(0, 0x400);
     }
-    m_ProgressiveMesh->m_MorphStep = gs;
 }
 
 int RCKMesh::GetPMGeoMorphStep() {
@@ -969,14 +1408,14 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteInt(faceCount);
             for (int j = 0; j < faceCount; j++) {
                 // Pack vertex indices: first two as DWORD
-                WORD idx0 = m_FaceVertexIndices[3 * j];
-                WORD idx1 = m_FaceVertexIndices[3 * j + 1];
+                CKWORD idx0 = m_FaceVertexIndices[3 * j];
+                CKWORD idx1 = m_FaceVertexIndices[3 * j + 1];
                 CKDWORD indices01 = idx0 | (idx1 << 16);
                 chunk->WriteDwordAsWords(indices01);
 
                 // Third index and material index
-                WORD idx2 = m_FaceVertexIndices[3 * j + 2];
-                WORD matIdx = (WORD) m_Faces[j].m_MatIndex;
+                CKWORD idx2 = m_FaceVertexIndices[3 * j + 2];
+                CKWORD matIdx = (CKWORD) m_Faces[j].m_MatIndex;
                 CKDWORD idx2AndMat = idx2 | (matIdx << 16);
                 chunk->WriteDwordAsWords(idx2AndMat);
             }
@@ -988,7 +1427,7 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteIdentifier(0x40000);
             chunk->WriteInt(lineCount);
             // Bulk write line indices - based on IDA at 0x100275b5
-            chunk->WriteBuffer_LEndian16(lineCount * 2 * sizeof(WORD), m_LineIndices.Begin());
+            chunk->WriteBuffer_LEndian16(lineCount * 2 * sizeof(CKWORD), m_LineIndices.Begin());
         }
 
         // Write vertex data (chunk 0x20000) using optimized buffer write
@@ -1104,7 +1543,7 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Write face channel masks if not all 0xFFFF (chunk 0x8000)
-    WORD maskAnd = 0xFFFF;
+    CKWORD maskAnd = 0xFFFF;
     for (int i = 0; i < GetFaceCount(); i++)
         maskAnd &= m_Faces[i].m_ChannelMask;
 
@@ -1127,7 +1566,7 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
     // Write progressive mesh data (chunk 0x800000)
     if (m_ProgressiveMesh && m_ProgressiveMesh->m_Data.Size() > 0) {
         chunk->WriteIdentifier(0x800000);
-        chunk->WriteInt(m_ProgressiveMesh->m_Field0);
+        chunk->WriteInt(m_ProgressiveMesh->m_VertexCount);
         chunk->WriteInt(m_ProgressiveMesh->m_MorphEnabled);
         chunk->WriteInt(m_ProgressiveMesh->m_MorphStep);
         int dataSize = (int) m_ProgressiveMesh->m_Data.Size();
@@ -1179,11 +1618,8 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
             if (chunk->SeekIdentifier(0x100000)) {
                 int groupCount = chunk->ReadInt();
 
-                // Clear existing material groups
-                for (int i = 0; i < (int) m_MaterialGroups.Size(); i++) {
-                    delete m_MaterialGroups[i];
-                }
-                m_MaterialGroups.Clear();
+                // Clear existing material groups - IDA calls DeleteRenderGroup here
+                DeleteRenderGroup();
 
                 groupIndices.Resize(groupCount);
 
@@ -1213,11 +1649,11 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
                     for (int j = 0; j < faceCount; j++) {
                         // Read packed indices
                         CKDWORD indices01 = chunk->ReadDwordAsWords();
-                        m_FaceVertexIndices[3 * j] = (WORD) (indices01 & 0xFFFF);
-                        m_FaceVertexIndices[3 * j + 1] = (WORD) (indices01 >> 16);
+                        m_FaceVertexIndices[3 * j] = (CKWORD) (indices01 & 0xFFFF);
+                        m_FaceVertexIndices[3 * j + 1] = (CKWORD) (indices01 >> 16);
 
                         CKDWORD idx2AndMat = chunk->ReadDwordAsWords();
-                        m_FaceVertexIndices[3 * j + 2] = (WORD) (idx2AndMat & 0xFFFF);
+                        m_FaceVertexIndices[3 * j + 2] = (CKWORD) (idx2AndMat & 0xFFFF);
 
                         // Map material index through group indices if available
                         int matIdx = (idx2AndMat >> 16);
@@ -1373,18 +1809,30 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
     // Load face channel masks (chunk 0x8000)
     if (chunk->SeekIdentifier(0x8000)) {
         int maskCount = chunk->ReadInt();
-        int facesToProcess = maskCount;
         int faceCount = GetFaceCount();
-        if (faceCount < maskCount)
-            facesToProcess = faceCount & ~1; // Round down to even
-
-        for (int i = 0; i < facesToProcess / 2; i++) {
-            CKDWORD packed = chunk->ReadDwordAsWords();
-            m_Faces[2 * i].m_ChannelMask = (WORD) (packed & 0xFFFF);
-            m_Faces[2 * i + 1].m_ChannelMask = (WORD) (packed >> 16);
+        
+        // IDA logic: calculate pairs and remainder
+        int pairCount = maskCount >> 1;
+        int hasRemainder = maskCount - 2 * pairCount;
+        
+        // Boundary check: if our face count is less than file's mask count
+        if (faceCount < maskCount) {
+            pairCount = faceCount >> 1;
+            hasRemainder = 0;
         }
-        if (maskCount & 1 && faceCount >= maskCount)
-            m_Faces[maskCount - 1].m_ChannelMask = chunk->ReadWord();
+
+        // Read pairs
+        for (int i = 0; i < pairCount; i++) {
+            CKDWORD packed = chunk->ReadDwordAsWords();
+            m_Faces[2 * i].m_ChannelMask = (CKWORD) (packed & 0xFFFF);
+            m_Faces[2 * i + 1].m_ChannelMask = (CKWORD) (packed >> 16);
+        }
+        
+        // Read remainder (odd face)
+        if (hasRemainder) {
+            CKWORD mask = chunk->ReadWord();
+            m_Faces[maskCount - 1].m_ChannelMask = mask;
+        }
     }
 
     // Load progressive mesh data (chunk 0x800000)
@@ -1395,7 +1843,7 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
         if (!m_ProgressiveMesh)
             m_ProgressiveMesh = new CKProgressiveMesh();
 
-        m_ProgressiveMesh->m_Field0 = chunk->ReadInt();
+        m_ProgressiveMesh->m_VertexCount = chunk->ReadInt();
         m_ProgressiveMesh->m_MorphEnabled = chunk->ReadInt();
         m_ProgressiveMesh->m_MorphStep = chunk->ReadInt();
         pmSize -= 12;
@@ -1410,156 +1858,364 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 void RCKMesh::CheckPreDeletion() {
-    // Clean up before deletion
-    RemoveAllCallbacks();
-
-    if (m_ProgressiveMesh) {
-        DestroyPM();
+    // Match IDA at 0x10026521
+    // Call base class first
+    CKObject::CheckPreDeletion();
+    
+    // Collect materials that need to be removed (checking IsToBeDeleted flag)
+    XArray<CKMaterial *> materialsToRemove;
+    int matCount = GetMaterialCount();
+    for (int i = 0; i < matCount; ++i) {
+        CKMaterial *mat = GetMaterial(i);
+        if (mat && mat->IsToBeDeleted()) {
+            materialsToRemove.PushBack(mat);
+        }
+    }
+    
+    // Replace marked materials with NULL
+    for (CKMaterial **it = materialsToRemove.Begin(); it != materialsToRemove.End(); ++it) {
+        ReplaceMaterial(*it, NULL);
+    }
+    
+    // Clear channel materials that are being deleted
+    int channelCount = GetChannelCount();
+    for (int i = 0; i < channelCount; ++i) {
+        CKMaterial *mat = GetChannelMaterial(i);
+        if (mat && mat->IsToBeDeleted()) {
+            SetChannelMaterial(i, NULL);
+        }
     }
 }
 
 int RCKMesh::GetMemoryOccupation() {
-    int size = sizeof(RCKMesh);
-    size += m_Vertices.Size() * sizeof(VxVertex);
-    size += m_VertexColors.Size() * sizeof(CKDWORD);
-    size += m_Faces.Size() * sizeof(CKFace);
-    size += m_FaceVertexIndices.Size() * sizeof(CKWORD);
-    size += m_LineIndices.Size() * sizeof(CKWORD);
-    size += m_MaterialChannels.Size() * sizeof(CKMaterialChannel);
-
-    // Add UV data size
-    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-        if (m_MaterialChannels[i].m_uv) {
-            size += GetVertexCount() * sizeof(Vx2DVector);
+    // Match IDA at 0x10026678
+    // Call base class and add this class size (180 bytes for RCKMesh specific data)
+    int size = CKBeObject::GetMemoryOccupation() + 180;
+    
+    // Vertex array: 32 bytes per VxVertex
+    size += m_Vertices.Size() * 32;
+    
+    // Vertex colors: 16 bytes per VxColors (IDA shows 16, not 8)
+    size += m_VertexColors.Size() * 16;
+    
+    // Faces: 16 bytes per CKFace (IDA shows 16)
+    size += m_Faces.Size() * 16;
+    
+    // Render callbacks
+    if (m_RenderCallbacks) {
+        // Add callback array sizes + 28 for callback structure
+        size += m_RenderCallbacks->m_PreCallBacks.Size() * 12;
+        size += m_RenderCallbacks->m_PostCallBacks.Size() * 12 + 28;
+    }
+    
+    // Material groups: 52 bytes each plus face indices
+    size += m_MaterialGroups.Size() * 52;
+    for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+        CKMaterialGroup *group = m_MaterialGroups[i];
+        if (group) {
+            // Add size from face indices array
+            size += group->m_FaceIndices.Size() * sizeof(CKWORD);
+            // Each primitive entry has indices
+            for (int j = 0; j < group->m_Primitives.Size(); ++j) {
+                size += group->m_Primitives[j].m_Indices.Size() * sizeof(CKWORD);
+            }
         }
     }
-
-    // Add vertex weights size
-    if (m_VertexWeights) {
-        size += GetVertexWeightsCount() * sizeof(float);
+    
+    // Material channels: 24 bytes each
+    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
+        size += 24;
+        // If channel has UV data
+        if (m_MaterialChannels[i].m_uv) {
+            size += m_Vertices.Size() * 8;  // 8 bytes per Vx2DVector
+        }
+        // If channel has custom face indices
+        if (m_MaterialChannels[i].m_FaceIndices) {
+            size += m_MaterialChannels[i].m_FaceIndices->Size() * sizeof(CKWORD);
+        }
     }
-
+    
+    // Progressive mesh
+    if (m_ProgressiveMesh) {
+        size += m_ProgressiveMesh->m_Data.Size() * sizeof(CKDWORD);
+    }
+    
     return size;
 }
 
 int RCKMesh::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
-    // Check if object is used by this mesh
+    // Match IDA at 0x10026869
+    // Check if object is a material
     if (cid == CKCID_MATERIAL) {
-        for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-            if (m_MaterialChannels[i].m_Material == (CKMaterial *) o) {
+        // Check material groups first (not channels!)
+        int matCount = GetMaterialCount();
+        for (int i = 0; i < matCount; ++i) {
+            if (o == GetMaterial(i)) {
                 return 1;
             }
         }
     }
-    return 0;
+    // Call base class for other checks
+    return CKBeObject::IsObjectUsed(o, cid);
 }
 
 // Dependencies Functions
 CKERROR RCKMesh::PrepareDependencies(CKDependenciesContext &context) {
-    // Add material dependencies
-    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-        if (m_MaterialChannels[i].m_Material) {
-            CK_ID id = m_MaterialChannels[i].m_Material->GetID();
-            context.AddObjects(&id, 1);
+    // Call base class first - matches IDA at 0x10028c2a
+    CKERROR result = CKBeObject::PrepareDependencies(context);
+    if (result != CK_OK)
+        return result;
+    
+    // Check if material dependencies should be processed (flag bit 0)
+    // Corresponds to IDA's GetClassDependencies(a2, 32) & 1
+    if ((context.GetClassDependencies(CKCID_MESH) & 1) != 0) {
+        // Iterate through all materials in material groups
+        int materialCount = GetMaterialCount();
+        for (int i = 0; i < materialCount; ++i) {
+            CKMaterial *mat = GetMaterial(i);
+            if (mat) {
+                mat->PrepareDependencies(context);
+            }
+        }
+        
+        // Iterate through material channels
+        for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
+            if (m_MaterialChannels[i].m_Material) {
+                m_MaterialChannels[i].m_Material->PrepareDependencies(context);
+            }
         }
     }
-    return CK_OK;
+    
+    return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
 CKERROR RCKMesh::RemapDependencies(CKDependenciesContext &context) {
-    // Remap material dependencies
-    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-        if (m_MaterialChannels[i].m_Material) {
-            m_MaterialChannels[i].m_Material = (CKMaterial *) context.Remap(m_MaterialChannels[i].m_Material);
+    // Call base class first - matches IDA at 0x10028d3c
+    CKERROR result = CKBeObject::RemapDependencies(context);
+    if (result != CK_OK)
+        return result;
+    
+    // Check if material dependencies should be remapped (flag bit 0)
+    // Corresponds to IDA's GetClassDependencies(a2, 32) & 1
+    if ((context.GetClassDependencies(CKCID_MESH) & 1) != 0) {
+        // Remap material groups
+        for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+            CKMaterialGroup *group = m_MaterialGroups[i];
+            if (group && group->m_Material) {
+                group->m_Material = (RCKMaterial *)context.Remap(group->m_Material);
+            }
+        }
+        
+        // Remap material channel materials
+        for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
+            if (m_MaterialChannels[i].m_Material) {
+                m_MaterialChannels[i].m_Material = (RCKMaterial *)context.Remap(m_MaterialChannels[i].m_Material);
+            }
         }
     }
+    
     return CK_OK;
 }
 
 CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
-    // Copy mesh data
-    RCKMesh &source = (RCKMesh &) o;
-
-    // Copy basic properties
-    m_Flags = source.m_Flags;
-    m_BaryCenter = source.m_BaryCenter;
-    m_Radius = source.m_Radius;
-    m_LocalBox = source.m_LocalBox;
-
-    // Copy vertex data
-    SetVertexCount(source.GetVertexCount());
-    for (int i = 0; i < source.GetVertexCount(); i++) {
-        VxVector pos, normal;
-        CKDWORD color;
-
-        source.GetVertexPosition(i, &pos);
-        source.GetVertexNormal(i, &normal);
-        color = source.GetVertexColor(i);
-
-        SetVertexPosition(i, &pos);
-        SetVertexNormal(i, &normal);
-        SetVertexColor(i, color);
-
-        // Copy UV coordinates
-        for (int channel = 0; channel < source.GetMaterialCount(); channel++) {
-            float u, v;
-            source.GetVertexTextureCoordinates(i, &u, &v, channel);
-            SetVertexTextureCoordinates(i, u, v, channel);
+    // Match IDA at 0x10028e2b
+    // Call base class first
+    CKERROR result = CKBeObject::Copy(o, context);
+    if (result != CK_OK)
+        return result;
+    
+    RCKMesh *source = (RCKMesh *)&o;
+    
+    // Get class dependencies flags
+    CKDWORD classDeps = context.GetClassDependencies(CKCID_MESH);
+    
+    // Copy transparency flag (bit 0x02) from source
+    m_Flags &= ~0x02;
+    m_Flags |= source->m_Flags & 0x02;
+    
+    // Copy vertex data using memcpy for efficiency
+    int vertexCount = source->GetVertexCount();
+    SetVertexCount(vertexCount);
+    if (vertexCount > 0) {
+        // Copy vertices (VxVertex = 32 bytes)
+        if (m_Vertices.Size() > 0 && source->m_Vertices.Size() > 0) {
+            memcpy(&m_Vertices[0], &source->m_Vertices[0], 32 * vertexCount);
+        }
+        // Copy vertex colors (VxColors = 8 bytes)
+        if (m_VertexColors.Size() > 0 && source->m_VertexColors.Size() > 0) {
+            memcpy(&m_VertexColors[0], &source->m_VertexColors[0], 8 * vertexCount);
         }
     }
-
+    
+    // Delete existing render groups and copy material groups from source
+    DeleteRenderGroup();
+    for (int i = 0; i < source->m_MaterialGroups.Size(); ++i) {
+        CKMaterialGroup *srcGroup = source->m_MaterialGroups[i];
+        // Create new group and copy from source (matches IDA VxMaterial copy pattern)
+        CKMaterialGroup *newGroup = new CKMaterialGroup();
+        if (newGroup) {
+            // Copy material pointer
+            newGroup->m_Material = srcGroup->m_Material;
+            // Copy all other fields from source group
+            newGroup->m_HasValidPrimitives = srcGroup->m_HasValidPrimitives;
+            newGroup->m_MinVertexIndex = srcGroup->m_MinVertexIndex;
+            newGroup->m_MaxVertexIndex = srcGroup->m_MaxVertexIndex;
+            newGroup->m_BaseVertex = srcGroup->m_BaseVertex;
+            newGroup->m_VertexCount = srcGroup->m_VertexCount;
+            newGroup->m_RemapData = 0;
+            if (srcGroup->m_RemapData) {
+                CKVBuffer *srcVb = GetVBuffer(srcGroup);
+                if (srcVb) {
+                    CKVBuffer *dstVb = new CKVBuffer();
+                    if (dstVb) {
+                        dstVb->m_Vertices = srcVb->m_Vertices;
+                        dstVb->m_Colors = srcVb->m_Colors;
+                        dstVb->m_UVs = srcVb->m_UVs;
+                        dstVb->m_VertexRemap = srcVb->m_VertexRemap;
+                        newGroup->m_RemapData = static_cast<CKDWORD>(reinterpret_cast<uintptr_t>(dstVb));
+                    }
+                }
+            }
+            m_MaterialGroups.PushBack(newGroup);
+        }
+    }
+    
     // Copy face data
-    SetFaceCount(source.GetFaceCount());
-    for (int i = 0; i < source.GetFaceCount(); i++) {
-        int v1, v2, v3;
-        source.GetFaceVertexIndex(i, v1, v2, v3);
-        SetFaceVertexIndex(i, v1, v2, v3);
-
-        CKMaterial *material = source.GetFaceMaterial(i);
-        if (material) {
-            SetFaceMaterial(i, material);
+    int faceCount = source->GetFaceCount();
+    m_Faces.Resize(faceCount);
+    m_FaceVertexIndices.Resize(3 * faceCount);
+    if (faceCount > 0) {
+        // Copy face structures (CKFace = sizeof(CKFace) bytes per face)
+        if (m_Faces.Size() > 0 && source->m_Faces.Size() > 0) {
+            memcpy(&m_Faces[0], &source->m_Faces[0], sizeof(CKFace) * faceCount);
+        }
+        // Copy face vertex indices (3 WORDs per face)
+        if (m_FaceVertexIndices.Size() > 0 && source->m_FaceVertexIndices.Size() > 0) {
+            memcpy(&m_FaceVertexIndices[0], &source->m_FaceVertexIndices[0], sizeof(CKWORD) * 3 * faceCount);
         }
     }
-
-    // Copy line data
-    SetLineCount(source.GetLineCount());
-    for (int i = 0; i < source.GetLineCount(); i++) {
-        int v1, v2;
-        source.GetLine(i, &v1, &v2);
-        SetLine(i, v1, v2);
+    SetFaceCount(faceCount);
+    
+    // Copy channels
+    int channelCount = source->GetChannelCount();
+    for (int i = 0; i < channelCount; ++i) {
+        CKMaterial *channelMat = source->GetChannelMaterial(i);
+        AddChannel(channelMat, FALSE);
+        SetChannelSourceBlend(i, source->GetChannelSourceBlend(i));
+        SetChannelDestBlend(i, source->GetChannelDestBlend(i));
+        SetChannelFlags(i, source->GetChannelFlags(i));
+        
+        // Copy channel UV coords if not using default UVs (flag 0x800000)
+        if ((source->GetChannelFlags(i) & 0x800000) == 0) {
+            CKDWORD destStride, srcStride;
+            void *destUV = GetTextureCoordinatesPtr(&destStride, i);
+            void *srcUV = source->GetTextureCoordinatesPtr(&srcStride, i);
+            if (destUV && srcUV) {
+                CKBYTE *dest = (CKBYTE *)destUV;
+                CKBYTE *src = (CKBYTE *)srcUV;
+                for (int v = 0; v < vertexCount; ++v) {
+                    // Copy UV (2 floats = 8 bytes)
+                    memcpy(dest, src, 8);
+                    dest += destStride;
+                    src += srcStride;
+                }
+            }
+        }
     }
-
+    
     // Copy vertex weights
-    SetVertexWeightsCount(source.GetVertexWeightsCount());
-    for (int i = 0; i < source.GetVertexWeightsCount(); i++) {
-        float weight = source.GetVertexWeight(i);
-        SetVertexWeight(i, weight);
+    int weightsCount = source->GetVertexWeightsCount();
+    SetVertexWeightsCount(weightsCount);
+    if (weightsCount > 0) {
+        float *destWeights = GetVertexWeightsPtr();
+        float *srcWeights = source->GetVertexWeightsPtr();
+        if (destWeights && srcWeights) {
+            memcpy(destWeights, srcWeights, sizeof(float) * weightsCount);
+        }
     }
-
+    
+    // Copy progressive mesh if present
+    if (source->m_ProgressiveMesh) {
+        m_ProgressiveMesh = new CKProgressiveMesh();
+        // Copy progressive mesh data
+        // Note: Detailed PM copy would require more reverse engineering
+        // For now, add the pre-render callback
+        AddPreRenderCallBack(ProgressiveMeshPreRenderCallback, this, FALSE);
+    }
+    
     return CK_OK;
 }
 
 // Scene management
 void RCKMesh::AddToScene(CKScene *scene, CKBOOL dependencies) {
+    // Match IDA at 0x10026411
+    if (!scene)
+        return;
+    
     CKBeObject::AddToScene(scene, dependencies);
+    
+    if (dependencies) {
+        // Add all materials to the scene
+        int materialCount = GetMaterialCount();
+        for (int i = 0; i < materialCount; ++i) {
+            CKMaterial *mat = GetMaterial(i);
+            if (mat) {
+                mat->AddToScene(scene, dependencies);
+            }
+        }
+    }
 }
 
 void RCKMesh::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
+    // Match IDA at 0x10026499
+    if (!scene)
+        return;
+    
     CKBeObject::RemoveFromScene(scene, dependencies);
+    
+    if (dependencies) {
+        // Remove all materials from the scene
+        int materialCount = GetMaterialCount();
+        for (int i = 0; i < materialCount; ++i) {
+            CKMaterial *mat = GetMaterial(i);
+            if (mat) {
+                mat->RemoveFromScene(scene, dependencies);
+            }
+        }
+    }
 }
 
 // Class Registering
 CKSTRING RCKMesh::GetClassName() {
-    return "3D Mesh";
+    return (CKSTRING) "Mesh";
 }
 
 int RCKMesh::GetDependenciesCount(int mode) {
-    return 1; // Materials
+    int count;
+    switch (mode)
+    {
+    case 1:
+        count = 1;
+        break;
+    case 2:
+        count = 1;
+        break;
+    case 3:
+        count = 0;
+        break;
+    case 4:
+        count = 1;
+        break;
+    default:
+        count = 0;
+        break;
+    }
+    return count;
 }
 
 CKSTRING RCKMesh::GetDependencies(int i, int mode) {
     if (i == 0) {
-        return "Materials";
+        return "Material";
     }
     return nullptr;
 }
@@ -1579,49 +2235,123 @@ CK_CLASSID RCKMesh::m_ClassID = CKCID_MESH;
 
 // Helper methods
 CKDWORD RCKMesh::GetSaveFlags() {
-    CKDWORD flags = 0x01; // Always save positions
-
-    // Check if we have normals
-    if (m_Vertices.Size() > 0) {
-        flags |= 0x02;
+    // Match IDA at 0x10026f1f
+    // Start with all save flags enabled (binary 1111)
+    // Bit 0 (0x01): All diffuse colors identical - only save first
+    // Bit 1 (0x02): All specular colors identical - only save first
+    // Bit 2 (0x04): Normals need to be saved (cleared if can be rebuilt from faces)
+    // Bit 3 (0x08): All UVs identical - only save first
+    // Bit 4 (0x10): Skip positions (flag 0x200000 set)
+    CKDWORD flags = 0x0F;
+    
+    int vertexCount = m_Vertices.Size();
+    int faceCount = m_Faces.Size();
+    
+    // Get first vertex color and specular for comparison
+    CKDWORD firstColor = m_VertexColors.Size() > 0 ? m_VertexColors[0].Color : 0;
+    CKDWORD firstSpecular = m_VertexColors.Size() > 0 ? m_VertexColors[0].Specular : 0;
+    
+    // Check flag 0x200000 - if set, add flag 0x10 (skip positions)
+    if ((m_Flags & 0x200000) != 0)
+        flags |= 0x10;
+    
+    // Check if all UVs are identical (if not 0x100000 flag set)
+    // IDA: if UV differs, clear bit 3 (0x08)
+    if ((m_Flags & 0x100000) == 0 && vertexCount > 0) {
+        float firstU = m_Vertices[0].m_UV.x;
+        float firstV = m_Vertices[0].m_UV.y;
+        for (int i = 0; i < vertexCount; ++i) {
+            if (m_Vertices[i].m_UV.x != firstU || m_Vertices[i].m_UV.y != firstV) {
+                flags &= ~0x08; // UVs differ, clear bit 3
+                break;
+            }
+        }
     }
-
-    // Check if we have colors
-    if (m_VertexColors.Size() > 0) {
-        flags |= 0x04;
-    }
-
-    // Check if we have UV coordinates
-    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-        if (m_MaterialChannels[i].m_uv) {
-            flags |= 0x08;
+    
+    // Check if all diffuse colors are identical
+    // IDA: if color differs, clear bit 0 (0x01)
+    for (int j = 0; j < vertexCount; ++j) {
+        if (m_VertexColors[j].Color != firstColor) {
+            flags &= ~0x01;
             break;
         }
     }
-
+    
+    // Check if all specular colors are identical
+    // IDA: if specular differs, clear bit 1 (0x02)
+    for (int j = 0; j < vertexCount; ++j) {
+        if (m_VertexColors[j].Specular != firstSpecular) {
+            flags &= ~0x02;
+            break;
+        }
+    }
+    
+    // Check if normals need to be saved (0x280000 flag check)
+    // If not set, we build face normals and check if vertex normals can be rebuilt
+    if ((m_Flags & 0x280000) == 0 && vertexCount > 0 && faceCount > 0) {
+        // Build face normals first
+        BuildFaceNormals();
+        
+        // Build vertex normals from face normals
+        XArray<VxVector> vertexNormals;
+        vertexNormals.Resize(vertexCount);
+        for (int i = 0; i < vertexCount; ++i) {
+            vertexNormals[i] = VxVector(0, 0, 0);
+        }
+        
+        CKWORD *faceIndices = m_FaceVertexIndices.Begin();
+        for (int f = 0; f < faceCount; ++f) {
+            VxVector &faceNormal = m_Faces[f].m_Normal;
+            vertexNormals[faceIndices[0]] += faceNormal;
+            vertexNormals[faceIndices[1]] += faceNormal;
+            vertexNormals[faceIndices[2]] += faceNormal;
+            faceIndices += 3;
+        }
+        
+        // Calculate average difference between computed and stored normals
+        VxVector totalDiff(0, 0, 0);
+        for (int i = 0; i < vertexCount; ++i) {
+            VxVector computed = vertexNormals[i];
+            computed.Normalize();
+            VxVector stored = m_Vertices[i].m_Normal;
+            stored.Normalize();
+            VxVector diff = computed - stored;
+            totalDiff += diff;
+        }
+        totalDiff *= (1.0f / vertexCount);
+        
+        // If normals can be rebuilt from faces, clear bit 2 (don't save them)
+        if (totalDiff.Magnitude() < 0.001f) {
+            flags &= ~0x04;
+        }
+    }
+    
     return flags;
 }
 
 void RCKMesh::UpdateBoundingVolumes(CKBOOL force) {
-    if (!force && (m_Flags & 0x01)) {
-        return; // Already valid
-    }
-
+    // Match IDA at 0x1001f1c4
+    // IDA version always computes (no early return based on flag check)
+    // The 'force' parameter is passed but not used in the original
+    
     int vertexCount = m_Vertices.Size();
-    if (vertexCount == 0) {
+    if (vertexCount <= 0) {
+        // IDA: Zero everything and set valid flag
+        m_BaryCenter = VxVector(0, 0, 0);
         m_LocalBox.Min = VxVector(0, 0, 0);
         m_LocalBox.Max = VxVector(0, 0, 0);
-        m_BaryCenter = VxVector(0.0f, 0.0f, 0.0f);
         m_Radius = 0.0f;
+        m_Flags |= 0x01; // Set valid flag
         return;
     }
 
-    // Calculate bounding box
+    // Initialize with first vertex
     VxVector minPos = m_Vertices[0].m_Position;
     VxVector maxPos = m_Vertices[0].m_Position;
-    VxVector center(0.0f, 0.0f, 0.0f);
+    VxVector center = m_Vertices[0].m_Position;
 
-    for (int i = 0; i < vertexCount; i++) {
+    // Calculate bounding box and accumulate center
+    for (int i = 1; i < vertexCount; i++) {
         VxVector &pos = m_Vertices[i].m_Position;
         center += pos;
 
@@ -1633,49 +2363,73 @@ void RCKMesh::UpdateBoundingVolumes(CKBOOL force) {
         if (pos.z > maxPos.z) maxPos.z = pos.z;
     }
 
+    // Calculate barycenter
+    center *= (1.0f / (float)vertexCount);
+    m_BaryCenter = center;
+
+    // Calculate radius squared (distance from barycenter to farthest vertex)
+    float radiusSq = 0.0f;
+    for (int i = 0; i < vertexCount; i++) {
+        VxVector diff = m_Vertices[i].m_Position - m_BaryCenter;
+        float distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+        if (distSq > radiusSq) {
+            radiusSq = distSq;
+        }
+    }
+    m_Radius = sqrtf(radiusSq);
+
     // Set bounding box
     m_LocalBox.Min = minPos;
     m_LocalBox.Max = maxPos;
-
-    // Calculate barycenter
-    center *= (1.0f / vertexCount);
-    m_BaryCenter = center;
-
-    // Calculate radius (distance from barycenter to farthest vertex)
-    m_Radius = 0.0f;
-    for (int i = 0; i < vertexCount; i++) {
-        VxVector diff = m_Vertices[i].m_Position - m_BaryCenter;
-        float distance = diff.Magnitude();
-        if (distance > m_Radius) {
-            m_Radius = distance;
-        }
-    }
 
     m_Flags |= 0x01; // Mark as valid
 }
 
 // Material channel management
-int RCKMesh::AddChannel(CKMaterial *material, int flags) {
+int RCKMesh::AddChannel(CKMaterial *material, CKBOOL CopySrcUv) {
+    // Match IDA at 0x1001d034
+    if (!material)
+        return -1;
+    
+    // Check if channel already exists
+    int existingIndex = GetChannelByMaterial(material);
+    if (existingIndex >= 0)
+        return existingIndex;
+    
+    // Create new channel
     CKMaterialChannel channel;
+    memset(&channel, 0, sizeof(channel));
     channel.m_Material = material;
-    channel.m_Flags = flags;
-    channel.m_SourceBlend = VXBLEND_SRCALPHA;
-    channel.m_DestBlend = VXBLEND_INVSRCALPHA;
-    channel.m_uv = nullptr;
-
-    int index = m_MaterialChannels.Size();
     m_MaterialChannels.PushBack(channel);
-
-    // Allocate UV coordinates for this channel
-    if (!(flags & 0x800000)) {
-        int vertexCount = GetVertexCount();
-        if (vertexCount > 0) {
-            m_MaterialChannels[index].m_uv = new Vx2DVector[vertexCount];
-            memset(m_MaterialChannels[index].m_uv, 0, sizeof(Vx2DVector) * vertexCount);
+    
+    // Get pointer to newly added channel
+    int channelIndex = m_MaterialChannels.Size() - 1;
+    CKMaterialChannel *newChannel = &m_MaterialChannels[channelIndex];
+    
+    // Allocate UV array
+    int vertexCount = m_Vertices.Size();
+    Vx2DVector *uv = new Vx2DVector[vertexCount];
+    newChannel->m_uv = uv;
+    
+    // Copy UV from vertices if requested
+    if (CopySrcUv) {
+        VxVertex *vertices = m_Vertices.Begin();
+        for (int i = 0; i < vertexCount; ++i) {
+            uv[i].x = vertices[i].m_UV.x;
+            uv[i].y = vertices[i].m_UV.y;
         }
     }
-
-    return index;
+    
+    UVChanged();
+    m_FaceChannelMask = 0xFFFF;
+    
+    // Update face channel masks
+    CKWORD channelBit = 1 << channelIndex;
+    for (CKFace *face = m_Faces.Begin(); face != m_Faces.End(); ++face) {
+        face->m_ChannelMask |= channelBit;
+    }
+    
+    return channelIndex;
 }
 
 void RCKMesh::RemoveChannel(CKMaterial *material) {
@@ -1686,16 +2440,24 @@ void RCKMesh::RemoveChannel(CKMaterial *material) {
 }
 
 void RCKMesh::RemoveChannel(int index) {
-    if (index >= 0 && index < m_MaterialChannels.Size()) {
+    // Match IDA at 0x1001d2a9
+    if ((unsigned int)index < (unsigned int)m_MaterialChannels.Size()) {
         CKMaterialChannel &channel = m_MaterialChannels[index];
+        // Clear channel (delete UV array)
         if (channel.m_uv) {
             delete[] channel.m_uv;
+            channel.m_uv = nullptr;
         }
         m_MaterialChannels.RemoveAt(index);
+        m_FaceChannelMask = 0xFFFF;
+        UVChanged();
     }
 }
 
+// Match IDA at 0x1001d696
 int RCKMesh::GetChannelByMaterial(CKMaterial *material) {
+    if (!material)
+        return -1;
     for (int i = 0; i < m_MaterialChannels.Size(); i++) {
         if (m_MaterialChannels[i].m_Material == material) {
             return i;
@@ -1704,23 +2466,52 @@ int RCKMesh::GetChannelByMaterial(CKMaterial *material) {
     return -1;
 }
 
-void RCKMesh::CreateNewMaterialGroup(int materialIndex) {
-    CKMaterialGroup *group = new CKMaterialGroup();
-    group->m_Material = nullptr; // Will be set later
-    group->field_28 = 0;         // Start vertex
-    group->field_2C = 0;         // Vertex count
-    group->field_30 = 0;         // VB data ptr
+void RCKMesh::DeleteRenderGroup() {
+    // Match IDA at 0x1001e1d8
+    for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+        CKMaterialGroup *group = m_MaterialGroups[i];
+        if (group) {
+            DeleteVBuffer(group);
+            delete group;
+        }
+    }
+    m_MaterialGroups.Clear();
+    m_Valid = 0;
+}
+
+// Match IDA at 0x1002AB90
+int RCKMesh::GetMaterialGroupIndex(CKMaterial *mat, CKBOOL create) {
+    for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+        if (m_MaterialGroups[i]->m_Material == mat)
+            return i;
+    }
+    if (create)
+        return CreateNewMaterialGroup(mat);
+    else
+        return -1;
+}
+
+// Match IDA at 0x1002ac70
+int RCKMesh::CreateNewMaterialGroup(CKMaterial *mat) {
+    CKMaterialGroup *group = new CKMaterialGroup(mat);
     m_MaterialGroups.PushBack(group);
+    return m_MaterialGroups.Size() - 1;
 }
 
 void RCKMesh::DestroyPM() {
+    // Match IDA at 0x10025637
     if (!m_ProgressiveMesh)
         return;
 
-    RemovePreRenderCallBack((CK_MESHRENDERCALLBACK) ProgressiveMeshPreRenderCallback, this);
-    m_ProgressiveMesh->m_Data.Clear();
+    // Delete the progressive mesh data
     delete m_ProgressiveMesh;
     m_ProgressiveMesh = nullptr;
+    
+    // Remove the pre-render callback
+    RemovePreRenderCallBack((CK_MESHRENDERCALLBACK) ProgressiveMeshPreRenderCallback, this);
+    
+    // Rebuild render groups
+    CreateRenderGroups();
 }
 
 // =============================================
@@ -1728,46 +2519,55 @@ void RCKMesh::DestroyPM() {
 // =============================================
 
 CKBYTE *RCKMesh::GetModifierVertices(CKDWORD *Stride) {
-    if (Stride) *Stride = sizeof(VxVertex);
-    return (CKBYTE *) m_Vertices.Begin();
+    // Match IDA at 0x1002a7a0
+    return (CKBYTE *)GetPositionsPtr(Stride);
 }
 
 int RCKMesh::GetModifierVertexCount() {
+    // Match IDA at 0x1002a7c0
+    if (m_ProgressiveMesh) {
+        return m_ProgressiveMesh->m_VertexCount;
+    }
     return m_Vertices.Size();
 }
 
 void RCKMesh::ModifierVertexMove(CKBOOL RebuildNormals, CKBOOL RebuildFaceNormals) {
-    if (RebuildNormals) BuildNormals();
-    if (RebuildFaceNormals) BuildFaceNormals();
+    // Match IDA at 0x1001e0a5
+    if (GetLitMode()) {
+        if (RebuildNormals) {
+            BuildNormals();
+        } else if (RebuildFaceNormals) {
+            BuildFaceNormals();
+        }
+    } else if (RebuildFaceNormals || RebuildNormals) {
+        BuildFaceNormals();
+    }
     VertexMove();
 }
 
 CKBYTE *RCKMesh::GetModifierUVs(CKDWORD *Stride, int channel) {
-    if (channel < 0) channel = 0;
-    if (channel >= m_MaterialChannels.Size()) {
-        if (Stride) *Stride = 0;
-        return nullptr;
-    }
-    if (Stride) *Stride = sizeof(Vx2DVector);
-    return (CKBYTE *) m_MaterialChannels[channel].m_uv;
+    // Match IDA at 0x1002a800
+    return (CKBYTE *)GetTextureCoordinatesPtr(Stride, channel);
 }
 
 int RCKMesh::GetModifierUVCount(int channel) {
-    if (channel < 0) channel = 0;
-    if (channel >= m_MaterialChannels.Size()) return 0;
-    return m_Vertices.Size();
+    // Match IDA at 0x1002a830
+    return GetModifierVertexCount();
 }
 
 void RCKMesh::ModifierUVMove() {
     UVChanged();
 }
 
+// Match IDA at 0x1001c16a
 void RCKMesh::SetVertexSpecularColor(int Index, CKDWORD Color) {
     if (Index >= 0 && Index < m_VertexColors.Size()) {
         m_VertexColors[Index].Specular = Color;
+        ColorChanged();
     }
 }
 
+// Match IDA at 0x1001c1b8
 CKDWORD RCKMesh::GetVertexSpecularColor(int Index) {
     if (Index >= 0 && Index < m_VertexColors.Size()) {
         return m_VertexColors[Index].Specular;
@@ -1775,71 +2575,127 @@ CKDWORD RCKMesh::GetVertexSpecularColor(int Index) {
     return 0;
 }
 
+// Match IDA at 0x1001e865
 void RCKMesh::TranslateVertices(VxVector *Vector) {
-    if (!Vector) return;
-    for (int i = 0; i < m_Vertices.Size(); i++) {
-        m_Vertices[i].m_Position.x += Vector->x;
-        m_Vertices[i].m_Position.y += Vector->y;
-        m_Vertices[i].m_Position.z += Vector->z;
+    CKDWORD stride;
+    int vertexCount = GetModifierVertexCount();
+    if (vertexCount <= 0)
+        return;
+    
+    VxVector *positions = (VxVector *)GetModifierVertices(&stride);
+    if (!positions)
+        return;
+    
+    for (int i = 0; i < vertexCount; ++i) {
+        *positions += *Vector;
+        positions = (VxVector *)((CKBYTE *)positions + stride);
     }
-    VertexMove();
+    ModifierVertexMove(TRUE, FALSE);
 }
 
+// Match IDA at 0x1001e4ac
 void RCKMesh::ScaleVertices(VxVector *Vector, VxVector *Pivot) {
-    if (!Vector) return;
-    VxVector pivot = Pivot ? *Pivot : m_BaryCenter;
-    for (int i = 0; i < m_Vertices.Size(); i++) {
-        VxVector &pos = m_Vertices[i].m_Position;
-        pos.x = pivot.x + (pos.x - pivot.x) * Vector->x;
-        pos.y = pivot.y + (pos.y - pivot.y) * Vector->y;
-        pos.z = pivot.z + (pos.z - pivot.z) * Vector->z;
+    CKDWORD stride;
+    int vertexCount = GetModifierVertexCount();
+    if (vertexCount <= 0)
+        return;
+    
+    float *positions = (float *)GetModifierVertices(&stride);
+    if (!positions)
+        return;
+    
+    CKDWORD normalStride;
+    VxVector *normals = (VxVector *)GetNormalsPtr(&normalStride);
+    
+    // CKPatchMesh (ClassID 53) doesn't scale normals
+    if (GetClassID() != CKCID_PATCHMESH && normals) {
+        if (Pivot) {
+            for (int i = 0; i < vertexCount; ++i) {
+                positions[0] = (positions[0] - Pivot->x) * Vector->x + Pivot->x;
+                positions[1] = (positions[1] - Pivot->y) * Vector->y + Pivot->y;
+                positions[2] = (positions[2] - Pivot->z) * Vector->z + Pivot->z;
+                normals->x *= Vector->x;
+                normals->y *= Vector->y;
+                normals->z *= Vector->z;
+                normals->Normalize();
+                positions = (float *)((CKBYTE *)positions + stride);
+                normals = (VxVector *)((CKBYTE *)normals + normalStride);
+            }
+        } else {
+            for (int i = 0; i < vertexCount; ++i) {
+                positions[0] *= Vector->x;
+                positions[1] *= Vector->y;
+                positions[2] *= Vector->z;
+                normals->x *= Vector->x;
+                normals->y *= Vector->y;
+                normals->z *= Vector->z;
+                normals->Normalize();
+                positions = (float *)((CKBYTE *)positions + stride);
+                normals = (VxVector *)((CKBYTE *)normals + normalStride);
+            }
+        }
+        ModifierVertexMove(FALSE, TRUE);
+    } else {
+        if (Pivot) {
+            for (int i = 0; i < vertexCount; ++i) {
+                positions[0] = (positions[0] - Pivot->x) * Vector->x + Pivot->x;
+                positions[1] = (positions[1] - Pivot->y) * Vector->y + Pivot->y;
+                positions[2] = (positions[2] - Pivot->z) * Vector->z + Pivot->z;
+                positions = (float *)((CKBYTE *)positions + stride);
+            }
+        } else {
+            for (int i = 0; i < vertexCount; ++i) {
+                positions[0] *= Vector->x;
+                positions[1] *= Vector->y;
+                positions[2] *= Vector->z;
+                positions = (float *)((CKBYTE *)positions + stride);
+            }
+        }
+        ModifierVertexMove(TRUE, TRUE);
     }
-    VertexMove();
 }
 
+// Match IDA at 0x1001e792
 void RCKMesh::ScaleVertices3f(float X, float Y, float Z, VxVector *Pivot) {
     VxVector scale(X, Y, Z);
     ScaleVertices(&scale, Pivot);
 }
 
+// Match IDA at 0x1001e7c8
 void RCKMesh::RotateVertices(VxVector *Vector, float Angle) {
-    if (!Vector) return;
+    CKDWORD stride;
+    int vertexCount = GetModifierVertexCount();
+    if (vertexCount <= 0)
+        return;
+    
+    VxVector *positions = (VxVector *)GetModifierVertices(&stride);
     VxMatrix rot;
     Vx3DMatrixFromRotation(rot, *Vector, Angle);
-    for (int i = 0; i < m_Vertices.Size(); i++) {
-        VxVector &pos = m_Vertices[i].m_Position;
-        Vx3DRotateVector(&pos, rot, &pos);
+    
+    for (int i = 0; i < vertexCount; ++i) {
+        Vx3DRotateVector(positions, rot, positions);
+        positions = (VxVector *)((CKBYTE *)positions + stride);
     }
-    VertexMove();
+    ModifierVertexMove(TRUE, FALSE);
 }
 
+// Match IDA at 0x1001cd16 - unsigned comparison, returns axis0() on error
 const VxVector &RCKMesh::GetFaceNormal(int Index) {
-    static VxVector defaultNormal(0, 0, 1);
-    if (Index >= 0 && Index < m_Faces.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_Faces.Size()) {
         return m_Faces[Index].m_Normal;
     }
-    return defaultNormal;
+    return VxVector::axis0();
 }
 
+// Match IDA at 0x1001ccf6 - no bounds check in original
 CKWORD RCKMesh::GetFaceChannelMask(int FaceIndex) {
-    if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        return m_Faces[FaceIndex].m_ChannelMask;
-    }
-    return 0;
+    return m_Faces[FaceIndex].m_ChannelMask;
 }
 
+// Match IDA at 0x1001c7b7 - no bounds checking in original
 VxVector &RCKMesh::GetFaceVertex(int FaceIndex, int VIndex) {
-    static VxVector defaultVertex(0, 0, 0);
-    if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        CKFace &face = m_Faces[FaceIndex];
-        if (VIndex >= 0 && VIndex < 3) {
-            int vertexIndex = face.m_VertexIndex[VIndex];
-            if (vertexIndex >= 0 && vertexIndex < m_Vertices.Size()) {
-                return m_Vertices[vertexIndex].m_Position;
-            }
-        }
-    }
-    return defaultVertex;
+    int vertexIndex = m_FaceVertexIndices[FaceIndex * 3 + VIndex];
+    return m_Vertices[vertexIndex].m_Position;
 }
 
 CKBYTE *RCKMesh::GetFaceNormalsPtr(CKDWORD *Stride) {
@@ -1850,71 +2706,110 @@ CKBYTE *RCKMesh::GetFaceNormalsPtr(CKDWORD *Stride) {
     return nullptr;
 }
 
+// Match IDA at 0x1001c958
 void RCKMesh::SetFaceMaterialEx(int *FaceIndices, int FaceCount, CKMaterial *Mat) {
-    if (!FaceIndices) return;
-    for (int i = 0; i < FaceCount; i++) {
-        SetFaceMaterial(FaceIndices[i], Mat);
+    CKWORD v6 = (CKWORD)GetMaterialGroupIndex(Mat, TRUE);
+    for (int i = 0; i < FaceCount; ++i) {
+        m_Faces[FaceIndices[i]].m_MatIndex = v6;
     }
+    UnOptimize();
 }
 
+// Match IDA at 0x1001cbee
 void RCKMesh::SetFaceChannelMask(int FaceIndex, CKWORD ChannelMask) {
-    if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        m_Faces[FaceIndex].m_ChannelMask = ChannelMask;
-    }
+    CKWORD v4 = m_Faces[FaceIndex].m_ChannelMask ^ ChannelMask;
+    m_Faces[FaceIndex].m_ChannelMask = ChannelMask;
+    m_FaceChannelMask |= v4;
 }
 
+// Match IDA at 0x1001c9bf
 void RCKMesh::ReplaceMaterial(CKMaterial *oldMat, CKMaterial *newMat) {
-    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
-        if (m_MaterialChannels[i].m_Material == oldMat) {
-            m_MaterialChannels[i].m_Material = newMat;
+    if (oldMat == newMat)
+        return;
+    
+    int v11 = GetMaterialGroupIndex(oldMat, FALSE);
+    if (v11 < 0)
+        return;
+    
+    if (v11 == 0) {
+        // oldMat is at index 0, just update faces with index 0 to newMat's index
+        CKWORD v9 = (CKWORD)GetMaterialGroupIndex(newMat, TRUE);
+        for (int j = 0; j < m_Faces.Size(); ++j) {
+            if (m_Faces[j].m_MatIndex == 0)
+                m_Faces[j].m_MatIndex = v9;
         }
-    }
-}
-
-void RCKMesh::ChangeFaceChannelMask(int FaceIndex, CKWORD AddChannelMask, CKWORD RemoveChannelMask) {
-    if (FaceIndex >= 0 && FaceIndex < m_Faces.Size()) {
-        m_Faces[FaceIndex].m_ChannelMask |= AddChannelMask;
-        m_Faces[FaceIndex].m_ChannelMask &= ~RemoveChannelMask;
-    }
-}
-
-void RCKMesh::ApplyGlobalMaterial(CKMaterial *Mat) {
-    for (int i = 0; i < m_Faces.Size(); i++) {
-        SetFaceMaterial(i, Mat);
-    }
-}
-
-void RCKMesh::DissociateAllFaces() {
-    // Create separate vertices for each face
-    int faceCount = m_Faces.Size();
-    if (faceCount == 0) return;
-
-    XArray<VxVertex> newVertices;
-    XArray<VxColors> newColors;
-
-    for (int i = 0; i < faceCount; i++) {
-        CKFace &face = m_Faces[i];
-        for (int j = 0; j < 3; j++) {
-            int oldIndex = face.m_VertexIndex[j];
-            if (oldIndex >= 0 && oldIndex < m_Vertices.Size()) {
-                newVertices.PushBack(m_Vertices[oldIndex]);
-                if (oldIndex < m_VertexColors.Size()) {
-                    newColors.PushBack(m_VertexColors[oldIndex]);
-                }
+        UnOptimize();
+    } else if (newMat) {
+        // Just update the material pointer in the group
+        m_MaterialGroups[v11]->m_Material = (RCKMaterial *)newMat;
+    } else {
+        // newMat is null, reassign faces and remove the group
+        for (int i = 0; i < m_Faces.Size(); ++i) {
+            if (m_Faces[i].m_MatIndex == v11) {
+                m_Faces[i].m_MatIndex = 0;
+            } else if (m_Faces[i].m_MatIndex > v11) {
+                --m_Faces[i].m_MatIndex;
             }
-            face.m_VertexIndex[j] = i * 3 + j;
         }
+        CKMaterialGroup *v7 = m_MaterialGroups[v11];
+        if (v7)
+            delete v7;
+        m_MaterialGroups.RemoveAt(v11);
+        UnOptimize();
     }
+}
 
-    // Swap contents
-    m_Vertices.Clear();
-    m_VertexColors.Clear();
-    for (int i = 0; i < newVertices.Size(); i++) {
-        m_Vertices.PushBack(newVertices[i]);
+// Match IDA at 0x1001cc4e
+void RCKMesh::ChangeFaceChannelMask(int FaceIndex, CKWORD AddChannelMask, CKWORD RemoveChannelMask) {
+    CKWORD v5 = ~RemoveChannelMask & (AddChannelMask | m_Faces[FaceIndex].m_ChannelMask);
+    CKWORD v6 = m_Faces[FaceIndex].m_ChannelMask ^ v5;
+    m_Faces[FaceIndex].m_ChannelMask = v5;
+    m_FaceChannelMask |= v6;
+}
+
+// Match IDA at 0x1001cb8a
+void RCKMesh::ApplyGlobalMaterial(CKMaterial *Mat) {
+    CKWORD v4 = (CKWORD)GetMaterialGroupIndex(Mat, TRUE);
+    for (CKFace *i = m_Faces.Begin(); i < m_Faces.End(); ++i)
+        i->m_MatIndex = v4;
+    UnOptimize();
+}
+
+// Match IDA at 0x1001e8e4
+void RCKMesh::DissociateAllFaces() {
+    // Create temporary copies of current vertex and color data
+    XArray<VxVertex> tempVertices;
+    XArray<VxColors> tempColors;
+    tempVertices = m_Vertices;
+    tempColors = m_VertexColors;
+    
+    // Get total number of face vertex indices (faces * 3)
+    int indexCount = m_FaceVertexIndices.Size();
+    
+    // Resize vertex array to hold one vertex per face index
+    SetVertexCount(indexCount);
+    
+    // If weights exist, duplicate them for each vertex
+    if (m_VertexWeights) {
+        XArray<float> tempWeights;
+        tempWeights.Resize(indexCount);
+        for (int i = 0; i < indexCount; ++i) {
+            CKWORD oldIndex = m_FaceVertexIndices[i];
+            tempWeights[i] = (*m_VertexWeights)[oldIndex];
+        }
+        *m_VertexWeights = tempWeights;
     }
-    for (int i = 0; i < newColors.Size(); i++) {
-        m_VertexColors.PushBack(newColors[i]);
+    
+    // Copy vertex and color data from original locations to new sequential locations
+    for (int j = 0; j < indexCount; ++j) {
+        CKWORD oldIndex = m_FaceVertexIndices[j];
+        m_Vertices[j] = tempVertices[oldIndex];
+        m_VertexColors[j] = tempColors[oldIndex];
+        // Set each index to its sequential value
+        m_FaceVertexIndices[j] = (CKWORD)j;
     }
+    
+    UnOptimize();
 }
 
 void RCKMesh::CreateLineStrip(int StartingLine, int Count, int StartingVertexIndex) {
@@ -1935,8 +2830,9 @@ void RCKMesh::RemoveChannelByMaterial(CKMaterial *Mat) {
     }
 }
 
+// Match IDA at 0x1001d31e
 void RCKMesh::ActivateChannel(int Index, CKBOOL Active) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
         if (Active) {
             m_MaterialChannels[Index].m_Flags |= 0x01;
         } else {
@@ -1945,91 +2841,184 @@ void RCKMesh::ActivateChannel(int Index, CKBOOL Active) {
     }
 }
 
+// Match IDA at 0x1001d418
 CKBOOL RCKMesh::IsChannelActive(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return (m_MaterialChannels[Index].m_Flags & 0x01) != 0;
-    }
-    return FALSE;
+    if ((unsigned int)Index >= (unsigned int)m_MaterialChannels.Size())
+        return FALSE;
+    return (m_MaterialChannels[Index].m_Flags & 0x01) != 0;
 }
 
+// Match IDA at 0x1001d391
 void RCKMesh::ActivateAllChannels(CKBOOL Active) {
-    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
-        ActivateChannel(i, Active);
-    }
-}
-
-void RCKMesh::LitChannel(int Index, CKBOOL Lit) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        if (Lit) {
-            m_MaterialChannels[Index].m_Flags |= 0x02;
+    for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
+        if (Active) {
+            m_MaterialChannels[i].m_Flags |= 0x01;
         } else {
-            m_MaterialChannels[Index].m_Flags &= ~0x02;
+            m_MaterialChannels[i].m_Flags &= ~0x01;
         }
     }
 }
 
+// Match IDA at 0x1001d454
+void RCKMesh::LitChannel(int Index, CKBOOL Lit) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
+        if (Lit) {
+            // Lit = TRUE means unlit mode off (clear bit)
+            m_MaterialChannels[Index].m_Flags &= ~0x01000000;
+        } else {
+            // Lit = FALSE means unlit mode on (set bit)
+            m_MaterialChannels[Index].m_Flags |= 0x01000000;
+        }
+    }
+}
+
+// Match IDA at 0x1001d4cd
 CKBOOL RCKMesh::IsChannelLit(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return (m_MaterialChannels[Index].m_Flags & 0x02) != 0;
-    }
-    return FALSE;
+    return (unsigned int)Index < (unsigned int)m_MaterialChannels.Size()
+        && (m_MaterialChannels[Index].m_Flags & 0x01000000) == 0;
 }
 
+// Match IDA at 0x1001d510
 CKDWORD RCKMesh::GetChannelFlags(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return m_MaterialChannels[Index].m_Flags;
-    }
-    return 0;
+    if ((unsigned int)Index >= (unsigned int)m_MaterialChannels.Size())
+        return 0;
+    return m_MaterialChannels[Index].m_Flags;
 }
 
+// Match IDA at 0x1001d549
 void RCKMesh::SetChannelFlags(int Index, CKDWORD Flags) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
+        if (Flags & VXCHANNEL_SAMEUV) {
+            // Delete UV array if using same UV
+            delete[] m_MaterialChannels[Index].m_uv;
+            m_MaterialChannels[Index].m_uv = nullptr;
+        } else if (!m_MaterialChannels[Index].m_uv && m_Vertices.Size()) {
+            // Allocate UV array if not already allocated and has vertices
+            int v7 = m_Vertices.Size();
+            Vx2DVector *v6 = new Vx2DVector[v7];
+            if (v6) {
+                for (int i = 0; i < v7; ++i) {
+                    v6[i].x = 0.0f;
+                    v6[i].y = 0.0f;
+                }
+            }
+            m_MaterialChannels[Index].m_uv = v6;
+        }
         m_MaterialChannels[Index].m_Flags = Flags;
     }
 }
 
 CKMaterial *RCKMesh::GetChannelMaterial(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return m_MaterialChannels[Index].m_Material;
-    }
-    return nullptr;
+    // Match IDA at 0x1001d731 - uses unsigned comparison
+    if ((unsigned int)Index >= (unsigned int)m_MaterialChannels.Size())
+        return nullptr;
+    return m_MaterialChannels[Index].m_Material;
 }
 
+// Match IDA at 0x1001d7a2
 VXBLEND_MODE RCKMesh::GetChannelSourceBlend(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return m_MaterialChannels[Index].m_SourceBlend;
-    }
-    return VXBLEND_ONE;
+    if ((unsigned int)Index >= (unsigned int)m_MaterialChannels.Size())
+        return VXBLEND_ZERO;
+    return m_MaterialChannels[Index].m_SourceBlend;
 }
 
+// Match IDA at 0x1001d816
 VXBLEND_MODE RCKMesh::GetChannelDestBlend(int Index) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
-        return m_MaterialChannels[Index].m_DestBlend;
-    }
-    return VXBLEND_ZERO;
+    if ((unsigned int)Index >= (unsigned int)m_MaterialChannels.Size())
+        return VXBLEND_ZERO;
+    return m_MaterialChannels[Index].m_DestBlend;
 }
 
+// Match IDA at 0x1001d6f9
 void RCKMesh::SetChannelMaterial(int Index, CKMaterial *Mat) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
         m_MaterialChannels[Index].m_Material = Mat;
     }
 }
 
+// Match IDA at 0x1001d76a
 void RCKMesh::SetChannelSourceBlend(int Index, VXBLEND_MODE BlendMode) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
         m_MaterialChannels[Index].m_SourceBlend = BlendMode;
     }
 }
 
+// Match IDA at 0x1001d7de
 void RCKMesh::SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) {
-    if (Index >= 0 && Index < m_MaterialChannels.Size()) {
+    if ((unsigned int)Index < (unsigned int)m_MaterialChannels.Size()) {
         m_MaterialChannels[Index].m_DestBlend = BlendMode;
     }
 }
 
 CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
-    // Basic render implementation - actual rendering done by rasterizer
-    return CK_OK;
+    // Match IDA at 0x1001d852
+    RCKRenderContext *rc = (RCKRenderContext *)Dev;
+    RCK3dEntity *ent = (RCK3dEntity *)Mov;
+    
+    // Check rasterizer context
+    if (!rc->m_RasterizerContext)
+        return -18;
+    
+    // Compute box visibility if entity is different from current
+    if (ent != rc->m_Current3dEntity) {
+        VxRect extents;
+        const VxBbox &box = GetLocalBox();
+        rc->m_RasterizerContext->ComputeBoxVisibility(box, FALSE, &extents);
+        rc->AddExtents2D(extents, nullptr);
+    }
+    
+    // Handle render callbacks
+    if (m_RenderCallbacks) {
+        // Pre-render callbacks - m_PreCallBacks is at offset 0 of CKCallbacksContainer
+        // sub_1002C220 returns (End - Begin) / 12, i.e. element count
+        int preCount = m_RenderCallbacks->m_PreCallBacks.Size();
+        if (preCount > 0) {
+            rc->m_RasterizerContext->SetVertexShader(0);
+            rc->m_ObjectsCallbacksTimeProfiler.Reset();
+            
+            // Iterate with 12-byte stride (sizeof VxCallBack)
+            for (CKBYTE *i = (CKBYTE *)m_RenderCallbacks->m_PreCallBacks.Begin();
+                 i < (CKBYTE *)m_RenderCallbacks->m_PreCallBacks.End();
+                 i += 12) {
+                CK_MESHRENDERCALLBACK callback = *(CK_MESHRENDERCALLBACK *)i;
+                void *argument = *(void **)(i + 4);
+                callback(Dev, Mov, this, argument);
+            }
+            
+            rc->m_Stats.ObjectsCallbacksTime = rc->m_ObjectsCallbacksTimeProfiler.Current() 
+                                             + rc->m_Stats.ObjectsCallbacksTime;
+        }
+        
+        // Main callback or default render
+        if (m_RenderCallbacks->m_Callback) {
+            ((CK_MESHRENDERCALLBACK)m_RenderCallbacks->m_Callback->callback)(
+                Dev, Mov, this, m_RenderCallbacks->m_Callback->argument);
+        } else {
+            DefaultRender(rc, ent);
+        }
+        
+        // Post-render callbacks
+        int postCount = m_RenderCallbacks->m_PostCallBacks.Size();
+        if (postCount > 0) {
+            rc->m_RasterizerContext->SetVertexShader(0);
+            rc->m_ObjectsCallbacksTimeProfiler.Reset();
+            
+            for (CKBYTE *j = (CKBYTE *)m_RenderCallbacks->m_PostCallBacks.Begin();
+                 j < (CKBYTE *)m_RenderCallbacks->m_PostCallBacks.End();
+                 j += 12) {
+                CK_MESHRENDERCALLBACK callback = *(CK_MESHRENDERCALLBACK *)j;
+                void *argument = *(void **)(j + 4);
+                callback(Dev, Mov, this, argument);
+            }
+            
+            rc->m_Stats.ObjectsCallbacksTime = rc->m_ObjectsCallbacksTimeProfiler.Current() 
+                                             + rc->m_Stats.ObjectsCallbacksTime;
+        }
+    } else {
+        DefaultRender(rc, ent);
+    }
+    
+    return 0;
 }
 
 float *RCKMesh::GetVertexWeightsPtr() {
@@ -2045,18 +3034,475 @@ void RCKMesh::LoadVertices(CKStateChunk *chunk) {
         BuildFaceNormals();
 }
 
+/**
+ * CreatePM - Create Progressive Mesh data
+ * 
+ * Based on IDA decompilation at 0x10024777 (3748 bytes)
+ * 
+ * This function implements a progressive mesh algorithm that reorders vertices
+ * by importance for LOD (Level of Detail) rendering. The algorithm:
+ * 1. Builds vertex/face connectivity using PMVertexEx and PMFace structures
+ * 2. Computes edge collapse costs based on geometric error (distance * normal preservation)
+ * 3. Uses a min-heap to extract vertices in order of increasing collapse cost
+ * 4. Records the collapse order for progressive reconstruction
+ * 5. Reorders mesh vertices so less important vertices come last
+ * 6. Updates face indices, material channel UVs, skins, and morph controllers
+ */
+
+// Helper: Calculate edge collapse cost between two vertices
+// Based on IDA at sub_100238F3
+static float CalculateEdgeCollapseCost(PMVertexEx* v1, PMVertexEx* v2) {
+    // Calculate distance between vertices
+    float dx = v1->position.x - v2->position.x;
+    float dy = v1->position.y - v2->position.y;
+    float dz = v1->position.z - v2->position.z;
+    float distance = sqrtf(dx * dx + dy * dy + dz * dz);
+    
+    // Calculate normal preservation factor
+    // For each face containing both vertices, check how much normals would change
+    float normalFactor = 0.0f;
+    
+    for (PMFace** fit = v1->faces.Begin(); fit != v1->faces.End(); ++fit) {
+        PMFace* f = *fit;
+        if (f && f->ContainsVertex(v2)) {
+            // This face would be collapsed (degenerate)
+            continue;
+        }
+        if (!f) continue;
+        
+        // Calculate how much the normal would change if v1 collapses to v2
+        // Find the other two vertices of this face
+        PMVertexEx* other1 = nullptr;
+        PMVertexEx* other2 = nullptr;
+        for (int i = 0; i < 3; i++) {
+            if (f->vertices[i] != v1) {
+                if (!other1) other1 = f->vertices[i];
+                else other2 = f->vertices[i];
+            }
+        }
+        
+        if (!other1 || !other2) continue;
+        
+        // Calculate new normal if v1 is replaced by v2
+        VxVector e1, e2, newNormal;
+        e1.x = other1->position.x - v2->position.x;
+        e1.y = other1->position.y - v2->position.y;
+        e1.z = other1->position.z - v2->position.z;
+        e2.x = other2->position.x - v2->position.x;
+        e2.y = other2->position.y - v2->position.y;
+        e2.z = other2->position.z - v2->position.z;
+        
+        // Cross product for new normal
+        newNormal.x = e1.y * e2.z - e1.z * e2.y;
+        newNormal.y = e1.z * e2.x - e1.x * e2.z;
+        newNormal.z = e1.x * e2.y - e1.y * e2.x;
+        
+        // Normalize
+        float len = sqrtf(newNormal.x * newNormal.x + newNormal.y * newNormal.y + newNormal.z * newNormal.z);
+        if (len > 0.0001f) {
+            newNormal.x /= len;
+            newNormal.y /= len;
+            newNormal.z /= len;
+        }
+        
+        // Dot product with original normal (1.002 - dot) * 0.5 matches IDA
+        float dot = newNormal.x * f->normal.x + newNormal.y * f->normal.y + newNormal.z * f->normal.z;
+        float factor = (1.002f - dot) * 0.5f;
+        if (factor > normalFactor) {
+            normalFactor = factor;
+        }
+    }
+    
+    // Check if vertex is on boundary (any neighbor only shares 1 face)
+    // Based on IDA at sub_100234D4
+    bool isBoundary = false;
+    for (PMVertexEx** nit = v1->neighbors.Begin(); nit != v1->neighbors.End(); ++nit) {
+        PMVertexEx* neighbor = *nit;
+        int sharedFaces = 0;
+        for (PMFace** fit = v1->faces.Begin(); fit != v1->faces.End(); ++fit) {
+            if (*fit && (*fit)->ContainsVertex(neighbor)) {
+                sharedFaces++;
+            }
+        }
+        if (sharedFaces == 1) {
+            isBoundary = true;
+            break;
+        }
+    }
+    
+    // Boundary vertices get higher cost to preserve edges
+    if (isBoundary) {
+        normalFactor = 1.0f;
+    }
+    
+    return distance * normalFactor;
+}
+
+// Helper: Calculate minimum collapse cost for a vertex
+// Based on IDA at sub_10023AB6
+static void CalculateMinCollapseCost(PMVertexEx* v) {
+    v->collapseCost = 9.9999998e12f;
+    v->collapseTarget = nullptr;
+    
+    for (PMVertexEx** nit = v->neighbors.Begin(); nit != v->neighbors.End(); ++nit) {
+        PMVertexEx* neighbor = *nit;
+        if (!neighbor) continue;
+        
+        float cost = CalculateEdgeCollapseCost(v, neighbor);
+        if (cost < v->collapseCost) {
+            v->collapseCost = cost;
+            v->collapseTarget = neighbor;
+        }
+    }
+}
+
 CKERROR RCKMesh::CreatePM() {
+    // Match IDA at 0x100247a6: Check for PATCHMESH
+    if (CKIsChildClassOf(this, CKCID_PATCHMESH))
+        return CKERR_INVALIDPARAMETER;
+
+    // Match IDA at 0x100247c0: Check if already has PM
     if (m_ProgressiveMesh)
         return CKERR_ALREADYPRESENT;
 
-    m_ProgressiveMesh = new CKProgressiveMesh();
-    m_ProgressiveMesh->m_Field0 = GetVertexCount();
-    m_ProgressiveMesh->m_MorphEnabled = 0;
-    m_ProgressiveMesh->m_MorphStep = 0;
-    m_ProgressiveMesh->m_Data.Clear();
-    m_ProgressiveMesh->m_Data.PushBack((CKDWORD) GetVertexCount());
+    // Match IDA at 0x100247df: Consolidate geometry first
+    Consolidate();
 
+    int vertexCount = GetVertexCount();
+    int faceCount = GetFaceCount();
+    
+    if (vertexCount < 3 || faceCount < 1)
+        return CKERR_INVALIDPARAMETER;
+
+    // Match IDA at 0x100247ef: Create CKProgressiveMesh (44 bytes)
+    // Constructor sets m_VertexCount = -1, m_MorphEnabled = 0, m_MorphStep = 0
+    m_ProgressiveMesh = new CKProgressiveMesh();
+
+    // Match IDA at 0x10024863: Add pre-render callback
     AddPreRenderCallBack((CK_MESHRENDERCALLBACK) ProgressiveMeshPreRenderCallback, this, FALSE);
+
+    // Match IDA at 0x10024873: Create PMEdgeCollapseData (36 bytes)
+    PMEdgeCollapseData* pmData = new PMEdgeCollapseData();
+    m_ProgressiveMesh->m_EdgeCollapseStruct = pmData;
+
+    // Match IDA at 0x100248fb-0x10024911: Reserve vertex array
+    pmData->vertices.Reserve(vertexCount);
+    
+    // Match IDA at 0x10024916-0x100249d1: Create PMVertexEx for each mesh vertex
+    for (int i = 0; i < vertexCount; i++) {
+        VxVector pos;
+        GetVertexPosition(i, &pos);
+        
+        PMVertexEx* v = new PMVertexEx(pos, i);
+        pmData->vertices.PushBack(v);
+    }
+    
+    // Match IDA at 0x100249e9-0x10024a02: Reserve face array
+    pmData->faces.Reserve(faceCount);
+    
+    // Match IDA at 0x10024a07-0x10024b90: Create PMFace for each mesh face
+    for (int i = 0; i < faceCount; i++) {
+        int v0, v1, v2;
+        GetFaceVertexIndex(i, v0, v1, v2);
+        
+        // Get face normal (returns const VxVector&)
+        const VxVector& normal = GetFaceNormal(i);
+        
+        // Get face material (optional)
+        CKMaterial* mat = GetFaceMaterial(i);
+        
+        // Create face with vertices from vertex array
+        PMFace* f = new PMFace(
+            pmData->vertices[v0],
+            pmData->vertices[v1],
+            pmData->vertices[v2],
+            normal,
+            mat
+        );
+        f->arrayIndex = pmData->faces.Size();
+        pmData->faces.PushBack(f);
+        
+        // Link vertices to face and establish neighbor relationships
+        // Based on IDA at sub_10023577
+        PMVertexEx* pv0 = pmData->vertices[v0];
+        PMVertexEx* pv1 = pmData->vertices[v1];
+        PMVertexEx* pv2 = pmData->vertices[v2];
+        
+        pv0->faces.PushBack(f);
+        pv1->faces.PushBack(f);
+        pv2->faces.PushBack(f);
+        
+        pv0->AddNeighbor(pv1);
+        pv0->AddNeighbor(pv2);
+        pv1->AddNeighbor(pv0);
+        pv1->AddNeighbor(pv2);
+        pv2->AddNeighbor(pv0);
+        pv2->AddNeighbor(pv1);
+    }
+    
+    // Match IDA at 0x10024ba6: Calculate initial collapse costs for all vertices
+    // and add them to the min-heap (sub_10023B7F)
+    for (int i = 0; i < vertexCount; i++) {
+        PMVertexEx* v = pmData->vertices[i];
+        CalculateMinCollapseCost(v);
+        pmData->AddToHeap(v);
+    }
+    
+    // Match IDA at 0x10024bb0-0x10024bd1: Create collapse order tracking array
+    XArray<int> collapseOrder;  // Maps original vertex index -> new reordered position
+    collapseOrder.Resize(vertexCount);
+    
+    // Match IDA at 0x10024bfa: Resize parent vertex array
+    m_ProgressiveMesh->m_Data.Resize(vertexCount);
+    
+    // Match IDA at 0x10024c15-0x10024cc8: Main edge collapse loop
+    // Pop vertices from heap in order of increasing collapse cost
+    while (pmData->heap.Size() > 0) {
+        // Match IDA at 0x10024c2c: Get vertex with minimum collapse cost (sub_10023DC1)
+        PMVertexEx* v = pmData->PopMinFromHeap();
+        if (!v) break;
+        
+        // Match IDA at 0x10024c45-0x10024c57: Record new position for this vertex
+        int newPosition = pmData->heap.Size(); // Vertices are ordered from last collapsed to first
+        collapseOrder[v->originalIndex] = newPosition;
+        
+        // Match IDA at 0x10024c5c-0x10024c73: Record parent vertex index
+        int parentOrigIndex = -1;
+        if (v->collapseTarget) {
+            parentOrigIndex = v->collapseTarget->originalIndex;
+        }
+        
+        // Match IDA at 0x10024c8c-0x10024caf: Store parent in m_Data array
+        // This stores the original index of the target vertex
+        m_ProgressiveMesh->m_Data[newPosition] = (CKDWORD)parentOrigIndex;
+        
+        // Match IDA at 0x10024cc8: Collapse this vertex to its target (sub_10023BE7)
+        if (v->collapseTarget) {
+            PMVertexEx* target = v->collapseTarget;
+            
+            // Save neighbors before modification
+            XArray<PMVertexEx*> affectedNeighbors;
+            for (PMVertexEx** nit = v->neighbors.Begin(); nit != v->neighbors.End(); ++nit) {
+                affectedNeighbors.PushBack(*nit);
+            }
+            
+            // Process faces in reverse order to handle removal properly
+            for (int fi = v->faces.Size() - 1; fi >= 0; fi--) {
+                PMFace* f = v->faces[fi];
+                if (!f) continue;
+                
+                // If face contains both v and target, it becomes degenerate - remove it
+                if (f->ContainsVertex(target)) {
+                    pmData->RemoveFace(f);
+                }
+            }
+            
+            // Update remaining faces to use target instead of v
+            // Based on IDA at sub_100237B5
+            for (int fi = v->faces.Size() - 1; fi >= 0; fi--) {
+                PMFace* f = v->faces[fi];
+                if (!f || f->arrayIndex < 0) continue;
+                
+                f->ReplaceVertex(v, target);
+                
+                // Remove face from v's face list, add to target's
+                target->faces.PushBack(f);
+                
+                // Update vertex neighbor relationships
+                for (int vi = 0; vi < 3; vi++) {
+                    PMVertexEx* fv = f->vertices[vi];
+                    if (fv && fv != target) {
+                        target->AddNeighbor(fv);
+                        fv->AddNeighbor(target);
+                        fv->RemoveNeighbor(v);
+                    }
+                }
+            }
+            v->faces.Clear();
+            
+            // Remove v from neighbor lists
+            for (PMVertexEx** nit = v->neighbors.Begin(); nit != v->neighbors.End(); ++nit) {
+                PMVertexEx* neighbor = *nit;
+                if (neighbor) {
+                    neighbor->RemoveNeighbor(v);
+                }
+            }
+            v->neighbors.Clear();
+            
+            // Recalculate collapse costs for affected vertices and update heap
+            for (PMVertexEx** nit = affectedNeighbors.Begin(); nit != affectedNeighbors.End(); ++nit) {
+                PMVertexEx* neighbor = *nit;
+                if (neighbor && neighbor->heapIndex >= 0) {
+                    CalculateMinCollapseCost(neighbor);
+                    pmData->UpdateHeapPosition(neighbor);
+                }
+            }
+        }
+    }
+    
+    // Match IDA at 0x10024cd2-0x10024d6f: Remap parent indices through collapse order
+    for (int i = 0; i < vertexCount; i++) {
+        int parentOrigIndex = (int)m_ProgressiveMesh->m_Data[i];
+        if (parentOrigIndex == -1) {
+            m_ProgressiveMesh->m_Data[i] = 0;
+        } else {
+            m_ProgressiveMesh->m_Data[i] = (CKDWORD)collapseOrder[parentOrigIndex];
+        }
+    }
+    
+    // Match IDA at 0x10024d8a-0x10024ebc: Save original vertex data
+    XArray<VxVertex> originalVertices;
+    originalVertices.Resize(vertexCount);
+    XArray<CKDWORD> originalColors;
+    originalColors.Resize(vertexCount * 2); // Color + Specular
+    
+    for (int i = 0; i < vertexCount; i++) {
+        GetVertexPosition(i, (VxVector*)&originalVertices[i]);
+        GetVertexNormal(i, &originalVertices[i].m_Normal);
+        GetVertexTextureCoordinates(i, &originalVertices[i].m_UV.x, &originalVertices[i].m_UV.y, -1);
+        originalColors[i * 2] = GetVertexColor(i);
+        originalColors[i * 2 + 1] = GetVertexSpecularColor(i);
+    }
+
+    // Match IDA at 0x10024ebc-0x10024fbb: Reorder vertices according to collapse order
+    for (int i = 0; i < vertexCount; i++) {
+        int newPos = collapseOrder[i];
+        SetVertexPosition(newPos, (VxVector*)&originalVertices[i]);
+        SetVertexNormal(newPos, &originalVertices[i].m_Normal);
+        SetVertexTextureCoordinates(newPos, originalVertices[i].m_UV.x, originalVertices[i].m_UV.y, -1);
+        SetVertexColor(newPos, originalColors[i * 2]);
+        SetVertexSpecularColor(newPos, originalColors[i * 2 + 1]);
+    }
+
+    // Match IDA at 0x10024fda-0x1002505a: Update face vertex indices
+    int finalFaceCount = GetFaceCount();
+    for (int f = 0; f < finalFaceCount; f++) {
+        int v0, v1, v2;
+        GetFaceVertexIndex(f, v0, v1, v2);
+        SetFaceVertexIndex(f, collapseOrder[v0], collapseOrder[v1], collapseOrder[v2]);
+    }
+
+    // Match IDA at 0x10025074: Set initial vertices rendered
+    SetVerticesRendered(vertexCount);
+    
+    // Match IDA at 0x1002508d: Store vertex count in PM structure
+    m_ProgressiveMesh->m_VertexCount = vertexCount;
+    
+    // Match IDA at 0x1002508d call to sub_1002404E: Sort faces by minimum vertex index
+    // This ensures faces with lower vertex indices come first, allowing proper LOD
+    // rendering when reducing vertex count. Faces are sorted by their minimum vertex
+    // index so that when we limit vertices, the visible faces only use valid vertices.
+    {
+        // Build array of face info for sorting: (minVertexIndex, faceIndex)
+        struct FaceSortInfo {
+            CKWORD minVertex;
+            CKWORD maxVertex;  // Store original index info
+            int originalFaceIndex;
+            int v0, v1, v2;
+            CKMaterial* material;
+        };
+        
+        XArray<FaceSortInfo> faceInfo;
+        faceInfo.Resize(finalFaceCount);
+        
+        for (int f = 0; f < finalFaceCount; f++) {
+            int v0, v1, v2;
+            GetFaceVertexIndex(f, v0, v1, v2);
+            
+            faceInfo[f].minVertex = (CKWORD)((v0 < v1) ? ((v0 < v2) ? v0 : v2) : ((v1 < v2) ? v1 : v2));
+            faceInfo[f].maxVertex = (CKWORD)((v0 > v1) ? ((v0 > v2) ? v0 : v2) : ((v1 > v2) ? v1 : v2));
+            faceInfo[f].originalFaceIndex = f;
+            faceInfo[f].v0 = v0;
+            faceInfo[f].v1 = v1;
+            faceInfo[f].v2 = v2;
+            faceInfo[f].material = GetFaceMaterial(f);
+        }
+        
+        // Sort by minimum vertex index (descending so faces with higher min indices come last)
+        // This matches IDA comparison at sub_1002404E which sorts for LOD culling
+        for (int i = 0; i < finalFaceCount - 1; i++) {
+            for (int j = i + 1; j < finalFaceCount; j++) {
+                // Sort descending by max vertex (faces that need more vertices come last)
+                if (faceInfo[j].maxVertex < faceInfo[i].maxVertex) {
+                    FaceSortInfo tmp = faceInfo[i];
+                    faceInfo[i] = faceInfo[j];
+                    faceInfo[j] = tmp;
+                }
+            }
+        }
+        
+        // Apply sorted face order
+        for (int f = 0; f < finalFaceCount; f++) {
+            SetFaceVertexIndex(f, faceInfo[f].v0, faceInfo[f].v1, faceInfo[f].v2);
+            SetFaceMaterial(f, faceInfo[f].material);
+        }
+        
+        // Rebuild face indices and render groups
+        CreateRenderGroups();
+    }
+
+    // Match IDA at 0x10025092-0x10025200: Remap material channel UVs
+    int channelCount = GetChannelCount();
+    for (int c = 0; c < channelCount; c++) {
+        CKDWORD stride;
+        float *uvPtr = (float*)GetTextureCoordinatesPtr(&stride, c);
+        if (uvPtr && stride > 0) {
+            // Save original UVs
+            XArray<float> originalUVs;
+            originalUVs.Resize(vertexCount * 2);
+            for (int v = 0; v < vertexCount; v++) {
+                float *uv = (float*)((char*)uvPtr + v * stride);
+                originalUVs[v * 2] = uv[0];
+                originalUVs[v * 2 + 1] = uv[1];
+            }
+            // Reorder UVs
+            for (int v = 0; v < vertexCount; v++) {
+                int newPos = collapseOrder[v];
+                float *uv = (float*)((char*)uvPtr + newPos * stride);
+                uv[0] = originalUVs[v * 2];
+                uv[1] = originalUVs[v * 2 + 1];
+            }
+        }
+    }
+
+    // Match IDA at 0x10025219-0x100252aa: Update skins using this mesh
+    // Original IDA code iterates through all CKSkin objects (CKCID_SKIN = 33)
+    // and remaps vertex indices for skins that reference this mesh.
+    // The algorithm:
+    //   1. Get all skin objects via GetObjectListByType(CKCID_SKIN, TRUE)
+    //   2. For each skin, check if skin->GetMesh() == this
+    //   3. If so, get the bone entity via skin->GetBoneEntity()
+    //   4. Call boneEntity->RemapVertices(collapseOrder) to remap bone weights
+    // 
+    // Note: This requires CKSkin class which is not fully implemented.
+    // For now, we use raw vtable calls matching the IDA decompilation.
+#if 0 // Disabled until CKSkin is properly defined
+    const int CKCID_SKIN_LOCAL = 33;
+    CK2dEntity* skinList = (CK2dEntity*)m_Context->GetObjectListByType(CKCID_SKIN_LOCAL, TRUE);
+    if (skinList) {
+        // Iterate skin objects...
+    }
+#endif
+
+    // Match IDA at 0x100252c2-0x100255bb: Update morph controllers
+    // Original IDA code iterates through all CKObjectAnimation objects
+    // and remaps morph controller keys for animations affecting this mesh.
+    // The algorithm:
+    //   1. Get all object animations via GetObjectsListByClassID(CKCID_OBJECTANIMATION)
+    //   2. For each animation, get the morph controller via GetMorphController()
+    //   3. Check if the animation's 3D entity's current mesh is this mesh
+    //   4. For each morph key, remap the position and flag arrays using collapseOrder
+    //
+    // Note: This requires CKMorphController and CKMorphKey which are not fully defined.
+    // The key structure has: offset 4 = VxVector* positions, offset 8 = CKDWORD* flags
+#if 0 // Disabled until CKMorphController is properly defined
+    CKDWORD* animList = m_Context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
+    int animCount = m_Context->GetObjectsCountByClassID(CKCID_OBJECTANIMATION);
+    for (int i = 0; i < animCount; i++) {
+        // Remap morph keys...
+    }
+#endif
+
     return CK_OK;
 }
 
@@ -2230,10 +3676,99 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     }
 
     // Clear channel tracking
-    field_D0.Clear();
+    m_ActiveTextureChannels.Clear();
 
-    // Skip multi-texture channel setup (complex logic - simplified here)
-    if (!hasAlphaMaterial && field_D0.Size() == 0) {
+    // Reset per-frame "already processed" flag so RenderChannels can run if needed.
+    // DefaultRender may choose to merge some channels into mono-pass multitexturing.
+    {
+        constexpr CKDWORD kChannelActive = 0x1;
+        constexpr CKDWORD kChannelProcessedInBasePass = 0x02000000;
+
+        for (int c = 0; c < m_MaterialChannels.Size(); ++c) {
+            m_MaterialChannels[c].m_Flags &= ~kChannelProcessedInBasePass;
+        }
+
+        // Attempt mono-pass multitexturing only when:
+        // - channel rendering is enabled
+        // - base pass has no alpha-transparent materials (conservative)
+        // - rasterizer reports multiple stages
+        if (renderChannels && !hasAlphaMaterial && rstContext && rstContext->m_Driver) {
+            int maxBlendStages = (int)rstContext->m_Driver->m_3DCaps.MaxNumberBlendStage;
+            int maxTextureStages = (int)rstContext->m_Driver->m_3DCaps.MaxNumberTextureStage;
+            int maxStages = std::min(maxBlendStages, maxTextureStages);
+
+            // Stage 0 is the base material; extra texcoord sets are limited by VxDrawPrimitiveData.
+            int maxAdditionalStages = std::max(0, std::min(maxStages, 8) - 1);
+
+            for (int c = 0; c < m_MaterialChannels.Size() && (int)m_ActiveTextureChannels.Size() < maxAdditionalStages;
+                 ++c) {
+                CKMaterialChannel &channel = m_MaterialChannels[c];
+
+                if (!channel.m_Material)
+                    continue;
+                if ((channel.m_Flags & kChannelActive) == 0)
+                    continue;
+                if ((channel.m_Flags & kChannelProcessedInBasePass) != 0)
+                    continue;
+
+                // Only merge channels that apply to all faces; otherwise we'd need additional splits.
+                if (channel.m_FaceIndices)
+                    continue;
+
+                CKTexture *tex = channel.m_Material->GetTexture(0);
+                if (!tex)
+                    continue;
+
+                const int stage = 1 + (int)m_ActiveTextureChannels.Size();
+
+                // Bind texture for this stage.
+                // We intentionally avoid calling CKMaterial::SetAsCurrent for stage>0 because it mutates
+                // global render states (zwrite/blend/alpha test/etc.).
+                const CKBOOL clampUV = (channel.m_Material->GetTextureAddressMode() == VXTEXTURE_ADDRESSCLAMP);
+                tex->SetAsCurrent((CKRenderContext *)rc, clampUV, stage);
+
+                // Provide UVs for this stage through VxDrawPrimitiveData (SW) / extra texcoord sets (HW).
+                m_ActiveTextureChannels.PushBack(c);
+                channel.m_Flags |= kChannelProcessedInBasePass;
+
+                // Stage state setup (blend test + basic sampling/addressing)
+                const CKDWORD stageBlend = (((CKDWORD)channel.m_SourceBlend) << 4) | (CKDWORD)channel.m_DestBlend;
+                rstContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
+                rstContext->SetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND,
+                                                 (CKDWORD)channel.m_Material->GetTextureBlendMode());
+                rstContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, (CKDWORD)stage);
+                rstContext->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, 0);
+                rstContext->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), VxMatrix::Identity());
+
+                const CKDWORD addr = (CKDWORD)channel.m_Material->GetTextureAddressMode();
+                rstContext->SetTextureStageState(stage, CKRST_TSS_ADDRESS, addr);
+                rstContext->SetTextureStageState(stage, CKRST_TSS_ADDRESSU, addr);
+                rstContext->SetTextureStageState(stage, CKRST_TSS_ADDRESSV, addr);
+                rstContext->SetTextureStageState(stage, CKRST_TSS_BORDERCOLOR,
+                                                 (CKDWORD)channel.m_Material->GetTextureBorderColor());
+                rstContext->SetTextureStageState(stage, CKRST_TSS_MAGFILTER,
+                                                 (CKDWORD)channel.m_Material->GetTextureMagMode());
+                rstContext->SetTextureStageState(stage, CKRST_TSS_MINFILTER,
+                                                 (CKDWORD)channel.m_Material->GetTextureMinMode());
+            }
+        }
+    }
+
+    // Populate extra texcoord pointers for non-remapped groups (remapped groups patch these per-group).
+    for (int j = 0; j < 7; ++j) {
+        dpData.TexCoordPtrs[j] = nullptr;
+        dpData.TexCoordStrides[j] = 0;
+    }
+    for (int j = 0; j < m_ActiveTextureChannels.Size() && j < 7; ++j) {
+        const int channelIdx = m_ActiveTextureChannels[j];
+        CKDWORD stride = 0;
+        void *ptr = GetTextureCoordinatesPtr(&stride, channelIdx);
+        dpData.TexCoordPtrs[j] = ptr;
+        dpData.TexCoordStrides[j] = stride;
+    }
+
+    // If we didn't enable any extra stages, ensure stage 1 is disabled/neutral.
+    if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
         rstContext->SetTexture(0, 1);
         rstContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
     }
@@ -2241,7 +3776,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     // Setup draw flags
     {
         CKDWORD flags = m_DrawFlags | 1;
-        flags |= (512 << field_D0.Size());
+        flags |= (512 << m_ActiveTextureChannels.Size());
         dpData.Flags = flags;
     }
 
@@ -2265,34 +3800,39 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             // Check rasterizer capabilities for VB support and attempt HW vertex buffer
             if (CheckHWVertexBuffer(rstContext, dp)) {
                 dp = nullptr; // Use HW vertex buffer instead
-                field_EC = 1;
+                m_VertexBufferReady = 1;
             }
         } else {
-            field_EC = 0;
+            m_VertexBufferReady = 0;
         }
 
         int renderedTriangles = 0;
 
         // Render non-transparent material groups first
+        // IDA logic: if (!m_Material || !m_Material->IsAlphaTransparent())
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
-            if (group && group->field_30 && dp) {
+            if (group && group->m_RemapData && dp) {
                 // Update vertex buffer data for remapped groups
-                // VBuffer::Update((CKMemoryPool *)group->field_30, (VxMemoryPool *)this, 0);
+                CKVBuffer *vb = GetVBuffer(group);
+                if (vb)
+                    vb->Update(this, 0);
             }
-            if (group && group->m_Material) {
-                if (!group->m_Material->IsAlphaTransparent()) {
-                    renderedTriangles += RenderGroup(rc, group, ent, dp, renderVertexCount);
+            if (group) {
+                if (!group->m_Material || !group->m_Material->IsAlphaTransparent()) {
+                    renderedTriangles += RenderGroup(rc, group, ent, dp);
                 }
             }
         }
 
-        // Render transparent material groups
-        for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+        // Render transparent material groups (starting from second element)
+        // IDA: for ( k = (XClassArray::Begin(&this->m_MaterialGroups) + 4); ...
+        // The +4 means skip first pointer (4 bytes), so start from index 1
+        for (int i = 1; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (group && group->m_Material) {
                 if (group->m_Material->IsAlphaTransparent()) {
-                    renderedTriangles += RenderGroup(rc, group, ent, dp, renderVertexCount);
+                    renderedTriangles += RenderGroup(rc, group, ent, dp);
                 }
             }
         }
@@ -2334,7 +3874,7 @@ UpdateStats:
     if (renderChannels) {
         CKDWORD fogEnable = 0;
         rstContext->GetRenderState(VXRENDERSTATE_FOGENABLE, &fogEnable);
-        RenderChannels(rc, ent, &dpData, fogEnable, faceIndices, faceIndexCount);
+        RenderChannels(rc, ent, &dpData, fogEnable);
         rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
     }
 
@@ -2379,8 +3919,8 @@ RenderLines:
     rstContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
 
     // Clear texture stages
-    if (hasAlphaMaterial || field_D0.Size() > 0) {
-        for (int i = 1; i <= (int) field_D0.Size(); i++) {
+    if (hasAlphaMaterial || m_ActiveTextureChannels.Size() > 0) {
+        for (int i = 1; i <= (int) m_ActiveTextureChannels.Size(); i++) {
             rstContext->SetTextureStageState(i, CKRST_TSS_STAGEBLEND, 0);
         }
     }
@@ -2390,163 +3930,192 @@ RenderLines:
 
 //--------------------------------------------
 // RenderGroup - Render a single material group
+// IDA: 0x10022829 (1864 bytes)
 //--------------------------------------------
-
-// Mesh render callback with material parameter (5 args, not 4 like SDK typedef)
-typedef void (*CK_MESHRENDERCALLBACK_EX)(CKRenderContext *Dev, CK3dEntity *Mov, CKMesh *Object, CKMaterial *Mat,
-                                         void *Argument);
-
-int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data,
-                         int vertexLimit) {
+int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
     RCKMaterial *mat = group->m_Material;
-    int trianglesDrawn = 0;
-    bool useLod = vertexLimit > 0 && vertexLimit < m_Vertices.Size();
 
-    // Execute pre-render submesh callbacks (if any exist)
+    // Check for pre-render submesh callbacks - sub_1002C220 checks if Size() > 0
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PreCallBacks.Size() > 0) {
-        dev->m_ObjectsCallbacksTimeProfiler.Reset();
-        rstContext->SetVertexShader(0);
-
-        for (XClassArray<VxCallBack>::Iterator it = m_SubMeshCallbacks->m_PreCallBacks.Begin();
-             it != m_SubMeshCallbacks->m_PreCallBacks.End(); ++it) {
-            CK_MESHRENDERCALLBACK_EX func = (CK_MESHRENDERCALLBACK_EX) it->callback;
-            if (func) {
-                func((CKRenderContext *) dev, (CK3dEntity *) ent, (CKMesh *) this, (CKMaterial *) mat, it->argument);
+        // Execute callbacks if there are any
+        if (m_SubMeshCallbacks->m_PreCallBacks.Size() > 0) {
+            dev->m_ObjectsCallbacksTimeProfiler.Reset();
+            dev->m_RasterizerContext->SetVertexShader(0);
+            
+            // Iterate through callbacks (VxCallBack is 12 bytes: callback ptr, argument ptr, flags)
+            for (VxCallBack *cb = m_SubMeshCallbacks->m_PreCallBacks.Begin();
+                 cb < m_SubMeshCallbacks->m_PreCallBacks.End(); ++cb) {
+                // Call: func(dev, ent, this, mat, argument)
+                typedef void (*MeshRenderCallback)(RCKRenderContext*, RCK3dEntity*, RCKMesh*, RCKMaterial*, void*);
+                MeshRenderCallback func = (MeshRenderCallback)cb->callback;
+                func(dev, ent, this, mat, cb->argument);
             }
+
+            dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
         }
 
-        dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
-
+        // If material is null after callbacks, use default
         if (!mat)
-            mat = (RCKMaterial *) dev->m_RenderManager->m_DefaultMat;
+            mat = (RCKMaterial *)dev->m_RenderManager->GetDefaultMaterial();
     } else if (mat) {
-        mat->SetAsCurrent((CKRenderContext *) dev, (m_Flags & 0x80) == 0, 0);
-
-        if (!mat->GetTexture(0) && field_D0.Size() > 0) {
-            rstContext->SetTextureStageState(0, CKRST_TSS_OP, 2);
-            rstContext->SetTextureStageState(0, CKRST_TSS_ARG1, 0);
-            rstContext->SetTextureStageState(0, CKRST_TSS_AOP, 2);
-            rstContext->SetTextureStageState(0, CKRST_TSS_AARG1, 0);
+        // Normal case - set material as current
+        mat->SetAsCurrent((CKRenderContext *)dev, (m_Flags & 0x80) == 0, 0);
+        
+        // If material has no texture but we have texture stages, set up modulate
+        if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
+            rstContext->SetTextureStageState(0, CKRST_TSS_OP, 2);      // MODULATE
+            rstContext->SetTextureStageState(0, CKRST_TSS_ARG1, 0);    // DIFFUSE
+            rstContext->SetTextureStageState(0, CKRST_TSS_AOP, 2);     // MODULATE
+            rstContext->SetTextureStageState(0, CKRST_TSS_AARG1, 0);   // DIFFUSE
         }
     } else {
-        mat = (RCKMaterial *) dev->m_RenderManager->m_DefaultMat;
-        if (mat)
-            mat->SetAsCurrent((CKRenderContext *) dev, (m_Flags & 0x80) == 0, 0);
+        // No material - use default
+        mat = (RCKMaterial *)dev->m_RenderManager->GetDefaultMaterial();
+        mat->SetAsCurrent((CKRenderContext *)dev, (m_Flags & 0x80) == 0, 0);
 
+        // Check for vertex color alpha blending (flags 0x80 and 0x1000)
         if ((m_Flags & 0x1080) == 0x1080) {
-            rstContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
-            rstContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
+            rstContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);      // 5
+            rstContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);  // 6
             rstContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, 1);
         }
     }
-
+    
+    // Handle entity-specific render states
     if (ent) {
-        CKDWORD moveFlags = ent->GetMoveableFlags();
-        if (moveFlags & 0x200000)
-            rstContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
-        if (moveFlags & 0x80000)
+        if ((ent->m_MoveableFlags & 0x200000) != 0)
+            rstContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);  // 8
+        if ((ent->m_MoveableFlags & 0x80000) != 0)
             rstContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, 0);
     }
-
-    auto drawEntry = [&](CKPrimitiveEntry *entry, bool countStats) {
-        CKWORD *indices = entry->m_Indices.Begin();
-        int indexCount = entry->m_Indices.Size();
-        XArray<CKWORD> filtered;
-
-        if (useLod) {
-            if (entry->m_Type == VX_TRIANGLELIST) {
-                FilterTriangleList(indices, indexCount, vertexLimit, filtered);
-            } else if (entry->m_Type == VX_LINELIST) {
-                FilterLineList(indices, indexCount, vertexLimit, filtered);
-            } else {
-                filtered.Clear();
-            }
-            indices = filtered.Begin();
-            indexCount = filtered.Size();
-        }
-
-        if (indexCount <= 0)
-            return;
-
-        if (countStats && entry->m_Type == VX_TRIANGLELIST)
-            trianglesDrawn += indexCount / 3;
-
-        if (data) {
-            rstContext->DrawPrimitive(entry->m_Type, indices, indexCount, data);
-            return;
-        }
-
-        if (useLod || (int) entry->m_IndexBufferOffset < 0) {
-            int vbCount = group->field_2C;
-            if (useLod) {
-                int available = vertexLimit - (int) group->field_28;
-                if (available <= 0)
-                    return;
-                if (available < vbCount)
-                    vbCount = available;
-            }
-            rstContext->DrawPrimitiveVB(entry->m_Type, m_VertexBuffer, group->field_28, vbCount, indices, indexCount);
-            return;
-        }
-
-        rstContext->DrawPrimitiveVBIB(entry->m_Type, m_VertexBuffer, m_IndexBuffer,
-                                      group->field_28, group->field_2C,
-                                      entry->m_IndexBufferOffset, indexCount);
-    };
-
+    
+    // Render primitives
     if (data) {
-        if (mat && mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);
-            for (int i = 0; i < group->field_4.Size(); i++) {
-                drawEntry(&group->field_4[i], false);
-            }
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
-        }
+        // Software vertex path (data != null)
+        
+        // Update data pointers if group has remapped vertices
+        if (group->m_RemapData) {
+            CKVBuffer *vb = GetVBuffer(group);
+            if (vb && group->m_VertexCount > 0 && vb->m_Vertices.Size() >= (int)group->m_VertexCount &&
+                vb->m_Colors.Size() >= (int)group->m_VertexCount) {
+                VxVertex *verts = vb->m_Vertices.Begin();
+                VxColors *colors = vb->m_Colors.Begin();
 
-        for (int i = 0; i < group->field_4.Size(); i++) {
-            drawEntry(&group->field_4[i], true);
+                data->VertexCount = group->m_VertexCount;
+                data->PositionPtr = &verts[0].m_Position;
+                data->NormalPtr = &verts[0].m_Normal;
+                data->TexCoordPtr = &verts[0].m_UV;
+                data->ColorPtr = &colors[0].Color;
+                data->SpecularColorPtr = &colors[0].Specular;
+
+                for (int j = 0; j < m_ActiveTextureChannels.Size(); ++j) {
+                    const int channelIdx = m_ActiveTextureChannels[j];
+                    Vx2DVector *channelUVs = nullptr;
+                    if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
+                        if (vb->m_UVs[channelIdx].Size() == (int)group->m_VertexCount)
+                            channelUVs = vb->m_UVs[channelIdx].Begin();
+                    }
+                    data->TexCoordPtrs[j] = channelUVs;
+                    data->TexCoordStrides[j] = 8;
+                }
+            }
+        }
+        
+        // Two-sided alpha transparent materials need back-face pass first
+        if (mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
+            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);  // 2
+            
+            for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
+                if (prim->m_Indices.Size() > 0) {
+                    int indexCount = prim->m_Indices.Size();
+                    CKWORD *indices = prim->m_Indices.Begin();
+                    rstContext->DrawPrimitive(prim->m_Type, indices, indexCount, data);
+                }
+            }
+            
+            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);  // 3
+        }
+        
+        // Main render pass
+        for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
+            if (prim->m_Indices.Size() > 0) {
+                int indexCount = prim->m_Indices.Size();
+                CKWORD *indices = prim->m_Indices.Begin();
+                rstContext->DrawPrimitive(prim->m_Type, indices, indexCount, data);
+            }
         }
     } else {
-        if (mat && mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);
-            for (int i = 0; i < group->field_4.Size(); i++) {
-                drawEntry(&group->field_4[i], false);
+        // Hardware vertex buffer path (data == null)
+        
+        // Two-sided alpha transparent materials need back-face pass first
+        if (mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
+            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);  // 2
+            
+            for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
+                if (prim->m_Indices.Size() > 0) {
+                    int indexCount = prim->m_Indices.Size();
+                    CKWORD *indices = prim->m_Indices.Begin();
+                    rstContext->DrawPrimitiveVB(prim->m_Type, m_VertexBuffer, 
+                                                group->m_BaseVertex, group->m_VertexCount, 
+                                                indices, indexCount);
+                }
             }
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
+            
+            // Flush vertex buffer (Lock/Unlock with size 0)
+            rstContext->LockVertexBuffer(m_VertexBuffer, 0, 0, CKRST_LOCK_DEFAULT);
+            rstContext->UnlockVertexBuffer(m_VertexBuffer);
+            
+            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);  // 3
         }
-
-        for (int i = 0; i < group->field_4.Size(); i++) {
-            drawEntry(&group->field_4[i], true);
+        
+        // Main render pass - check for index buffer usage
+        for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
+            if (prim->m_Indices.Size() > 0) {
+                int indexCount = prim->m_Indices.Size();
+                
+                if ((int)prim->m_IndexBufferOffset >= 0) {
+                    // Use hardware index buffer
+                    rstContext->DrawPrimitiveVBIB(prim->m_Type, m_VertexBuffer, m_IndexBuffer,
+                                                  group->m_BaseVertex, group->m_VertexCount,
+                                                  prim->m_IndexBufferOffset, indexCount);
+                } else {
+                    // Use software indices with hardware vertex buffer
+                    CKWORD *indices = prim->m_Indices.Begin();
+                    rstContext->DrawPrimitiveVB(prim->m_Type, m_VertexBuffer,
+                                                group->m_BaseVertex, group->m_VertexCount,
+                                                indices, indexCount);
+                }
+            }
         }
     }
-
+    
+    // Execute post-render submesh callbacks
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PostCallBacks.Size() > 0) {
         dev->m_ObjectsCallbacksTimeProfiler.Reset();
-        rstContext->SetVertexShader(0);
-
-        for (XClassArray<VxCallBack>::Iterator it = m_SubMeshCallbacks->m_PostCallBacks.Begin();
-             it != m_SubMeshCallbacks->m_PostCallBacks.End(); ++it) {
-            CK_MESHRENDERCALLBACK_EX func = (CK_MESHRENDERCALLBACK_EX) it->callback;
-            if (func) {
-                func((CKRenderContext *) dev, (CK3dEntity *) ent, (CKMesh *) this, (CKMaterial *) mat, it->argument);
-            }
+        dev->m_RasterizerContext->SetVertexShader(0);
+        
+        for (VxCallBack *cb = m_SubMeshCallbacks->m_PostCallBacks.Begin();
+             cb < m_SubMeshCallbacks->m_PostCallBacks.End(); ++cb) {
+            typedef void (*MeshRenderCallback)(RCKRenderContext*, RCK3dEntity*, RCKMesh*, RCKMaterial*, void*);
+            MeshRenderCallback func = (MeshRenderCallback)cb->callback;
+            func(dev, ent, this, mat, cb->argument);
         }
-
+        
         dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
     }
-
-    return trianglesDrawn;
+    
+    return 1;
 }
 
 //--------------------------------------------
 // RenderChannels - Render material channels (multi-texture passes)
+// IDA: 0x10022f71 (1115 bytes)
 //--------------------------------------------
-int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable,
-                            CKWORD *indices, int indexCount) {
+int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable) {
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
 
-    // Setup flags for channel rendering
+    // Setup flags for channel rendering (m_DrawFlags | 0x201)
     CKDWORD flags = m_DrawFlags | 0x201;
     data->Flags = flags;
 
@@ -2558,32 +4127,48 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
     VxMatrix projMat;
     memcpy(&projMat, dev->GetProjectionTransformationMatrix(), sizeof(VxMatrix));
     float origZ = projMat[3][2];
-    projMat[3][2] = origZ * 1.001f;
+    float newZ = origZ * 1.001f;
+    projMat[3][2] = newZ;
     dev->SetProjectionTransformationMatrix(projMat);
 
     // Iterate through material channels
-    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
-        CKMaterialChannel *channel = &m_MaterialChannels[i];
+    for (int c = 0; c < m_MaterialChannels.Size(); ++c) {
+        CKMaterialChannel &channel = m_MaterialChannels[c];
+        RCKMaterial *mat = (RCKMaterial *)channel.m_Material;
+        CKDWORD &channelFlags = channel.m_Flags;
+        XArray<CKWORD> *faceIndices = channel.m_FaceIndices;
 
         // Skip inactive or already processed channels
-        if (!channel->m_Material)
+        if (!mat)
             continue;
-        if ((channel->m_Flags & 1) == 0)
+        if ((channelFlags & 1) == 0)
             continue;
-        if ((channel->m_Flags & 0x2000000) != 0)
+        if ((channelFlags & 0x2000000) != 0)
+            continue;
+        // Check if channel has face indices and they have data (sub_100047B0)
+        if (faceIndices && faceIndices->Size() == 0)
             continue;
 
-        RCKMaterial *mat = (RCKMaterial *) channel->m_Material;
+        // Save material blend modes
+        CKDWORD origSrcBlend = *(CKDWORD *)((CKBYTE *)mat + 192);   // offset 48*4 = 192
+        CKDWORD origDestBlend = *(CKDWORD *)((CKBYTE *)mat + 196);  // offset 49*4 = 196
+        CKDWORD origMixFlags = *(CKDWORD *)((CKBYTE *)mat + 216);   // offset 54*4 = 216
 
-        // Save and modify material blend modes
-        VXBLEND_MODE origSrcBlend = mat->GetSourceBlend();
-        VXBLEND_MODE origDestBlend = mat->GetDestBlend();
+        // Get channel blend modes
+        VXBLEND_MODE srcBlend = channel.m_SourceBlend;
+        VXBLEND_MODE destBlend = channel.m_DestBlend;
 
-        mat->SetSourceBlend(channel->m_SourceBlend);
-        mat->SetDestBlend(channel->m_DestBlend);
+        // Set material blend modes
+        *(CKDWORD *)((CKBYTE *)mat + 192) = srcBlend;
+        *(CKDWORD *)((CKBYTE *)mat + 196) = destBlend;
 
-        // Set fog enable based on blend mode
-        if (channel->m_SourceBlend == VXBLEND_SRCALPHA && channel->m_DestBlend == VXBLEND_INVSRCALPHA) {
+        // Update material mix flags: set bit 3, then clear bit 1
+        CKDWORD mixFlags = *(CKDWORD *)((CKBYTE *)mat + 216);
+        mixFlags = (mixFlags | 8) & ~2;
+        *(CKDWORD *)((CKBYTE *)mat + 216) = mixFlags;
+
+        // Set fog enable based on blend mode (SRCALPHA/INVSRCALPHA)
+        if (srcBlend == VXBLEND_SRCALPHA && destBlend == VXBLEND_INVSRCALPHA) {
             rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         } else {
             rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, 0);
@@ -2592,59 +4177,72 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         rstContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
 
         // Check for additive blending (mark as unlit)
-        if ((channel->m_SourceBlend == VXBLEND_ZERO && channel->m_DestBlend == VXBLEND_SRCCOLOR) ||
-            (channel->m_SourceBlend == VXBLEND_DESTCOLOR && channel->m_DestBlend == VXBLEND_ZERO)) {
-            channel->m_Flags |= 0x1000000;
+        if ((srcBlend == VXBLEND_ZERO && destBlend == VXBLEND_SRCCOLOR) ||
+            (srcBlend == VXBLEND_DESTCOLOR && destBlend == VXBLEND_ZERO)) {
+            channelFlags |= 0x1000000;
         }
 
-        CKBOOL useLighting = (m_Flags & 0x80) == 0 && (channel->m_Flags & 0x1000000) == 0;
-        mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
+        // Determine if lighting should be used
+        CKBOOL useLighting = (m_Flags & 0x80) == 0 && (channelFlags & 0x1000000) == 0;
+
+        // Call CKMaterial::SetAsCurrent(dev, useLighting, 0)
+        mat->SetAsCurrent((CKRenderContext *)dev, useLighting, 0);
         rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
 
-        // Handle unlit channel
-        if ((channel->m_Flags & 0x1000000) != 0) {
+        // Handle unlit channel - clear color pointers
+        if ((channelFlags & 0x1000000) != 0) {
             data->ColorPtr = nullptr;
             data->SpecularColorPtr = nullptr;
-            data->Flags &= ~2;
+            CKDWORD dpFlags = data->Flags;
+            dpFlags = dpFlags & ~2;
+            data->Flags = dpFlags;
         } else if ((m_Flags & 0x80) != 0) {
+            // Vertex color mode
             data->Flags &= ~2;
             data->Flags |= 0x30;
             data->ColorPtr = origColorPtr;
             data->SpecularColorPtr = origSpecularPtr;
         } else {
-            data->Flags |= 2;
+            // Normal lighting mode
+            CKDWORD dpFlags = data->Flags;
+            dpFlags = dpFlags | 2;
+            data->Flags = dpFlags;
         }
 
         // Setup texture coordinates
-        if ((channel->m_Flags & 0x800000) != 0) {
+        if ((channelFlags & 0x800000) != 0) {
             // Use main vertex UVs
-            if (m_Vertices.Size() > 0) {
-                data->TexCoordPtr = &m_Vertices[0].m_UV;
-                data->TexCoordStride = 32;
-            }
+            data->TexCoordPtr = &m_Vertices[0].m_UV;
+            data->TexCoordStride = 32;
         } else {
             // Use channel-specific UVs
-            data->TexCoordPtr = channel->m_uv;
+            data->TexCoordPtr = channel.m_uv;
             data->TexCoordStride = 8;
         }
 
-        // Draw the channel
-        CKWORD *channelIndices = indices ? indices : m_FaceVertexIndices.Begin();
-        int channelIndexCount = indexCount > 0 ? indexCount : m_FaceVertexIndices.Size();
-        if (channelIndexCount > 0 && channelIndices) {
-            rstContext->DrawPrimitive(VX_TRIANGLELIST, channelIndices, channelIndexCount, data);
+        // Get indices to draw
+        CKWORD *indices;
+        int indexCount;
+        if (faceIndices) {
+            indices = faceIndices->Begin();
+            indexCount = faceIndices->Size();
+        } else {
+            indices = m_FaceVertexIndices.Begin();
+            indexCount = m_FaceVertexIndices.Size();
         }
 
-        // Restore material blend modes
-        mat->SetSourceBlend(origSrcBlend);
-        mat->SetDestBlend(origDestBlend);
+        // Draw the channel
+        rstContext->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
+
+        // Restore material state
+        *(CKDWORD *)((CKBYTE *)mat + 216) = origMixFlags;
+        *(CKDWORD *)((CKBYTE *)mat + 192) = origSrcBlend;
+        *(CKDWORD *)((CKBYTE *)mat + 196) = origDestBlend;
     }
 
     // Restore texture coordinate pointer
-    if (m_Vertices.Size() > 0) {
-        data->TexCoordPtr = &m_Vertices[0].m_UV;
-        data->TexCoordStride = 32;
-    }
+    data->TexCoordPtr = &m_Vertices[0].m_UV;
+    data->TexCoordStride = 32;
     data->ColorPtr = origColorPtr;
     data->SpecularColorPtr = origSpecularPtr;
 
@@ -2657,9 +4255,10 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
 
 //--------------------------------------------
 // CreateRenderGroups - Build material groups for rendering
+// IDA: 0x1001f898 (4171 bytes)
 //--------------------------------------------
-void RCKMesh::CreateRenderGroups() {
-    // Mark as mono-material initially and invalidate
+int RCKMesh::CreateRenderGroups() {
+    // Set mono-material flag initially and invalidate
     m_Flags |= VXMESH_MONOMATERIAL;
     m_Valid = 0;
 
@@ -2668,197 +4267,237 @@ void RCKMesh::CreateRenderGroups() {
     int faceCount = m_Faces.Size();
     if (vertexCount <= 0 || faceCount <= 0) {
         m_Flags |= 4;
-        return;
+        return 0;
     }
 
-    // Clear face indices from existing groups (don't delete the groups themselves)
+    // Reset all existing material groups (IDA: sub_1002A0F0(group, 0))
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
-        CKMaterialGroup *group = m_MaterialGroups[i];
-        if (group) {
-            // Clear primitive entries
-            for (int j = 0; j < group->field_4.Size(); j++) {
-                group->field_4[j].m_Indices.Clear();
-            }
-            group->field_10.Clear();
-            group->field_2C = 0; // Reset vertex count
-        }
+        ResetMaterialGroup(m_MaterialGroups[i], 0);
     }
 
-    // Track min/max material indices used
+    // Allocate temporary tracker array
+    CKMemoryPool pool(m_Context, vertexCount * (int)sizeof(CKDWORD));
+    CKDWORD *vertexTracker = (CKDWORD *)pool.Mem();
+    
+    // Track min/max material indices
     int maxMatIndex = 0;
     int minMatIndex = 2048;
-
-    // First pass: count faces per material and build face index lists
+    
+    // Pointer to face vertex indices
     CKWORD *faceIndices = m_FaceVertexIndices.Begin();
-
-    for (int faceIdx = 0; faceIdx < faceCount; faceIdx++) {
-        CKFace &face = m_Faces[faceIdx];
-        int matIdx = face.m_MatIndex;
-
-        // Track min/max material index
-        if (matIdx > maxMatIndex) maxMatIndex = matIdx;
-        if (matIdx < minMatIndex) minMatIndex = matIdx;
-
-        // Ensure material group exists
-        while (m_MaterialGroups.Size() <= matIdx) {
-            CKMaterialGroup *newGroup = new CKMaterialGroup();
-            memset(newGroup, 0, sizeof(CKMaterialGroup));
-            m_MaterialGroups.PushBack(newGroup);
-        }
-
-        CKMaterialGroup *group = m_MaterialGroups[matIdx];
-        if (group) {
-            // Add face index to the group's face list
-            CKWORD faceWord = (CKWORD) faceIdx;
-            group->field_10.PushBack((void *) (intptr_t) faceWord);
-        }
-
-        faceIndices += 3; // Move to next face
-    }
-
-    // Check if single material
-    if (minMatIndex == maxMatIndex && m_MaterialGroups.Size() > 0) {
-        // Single material case - copy all face indices directly
-        CKMaterialGroup *group = m_MaterialGroups[minMatIndex];
-        if (group) {
-            // Ensure we have at least one primitive entry
-            if (group->field_4.Size() == 0) {
-                CKPrimitiveEntry entry;
-                entry.m_Type = VX_TRIANGLELIST;
-                entry.m_IndexBufferOffset = -1;
-                group->field_4.PushBack(entry);
+    
+    int matGroupCount = m_MaterialGroups.Size();
+    
+    if (matGroupCount >= 31) {
+        // For >= 31 material groups, use XBitArray per vertex to track materials
+        // Each vertex has a bit array to track which materials it's used by
+        XClassArray<XBitArray> vertexMaterialSets;
+        vertexMaterialSets.Resize(vertexCount);
+        
+        CKFace *facePtr = (CKFace *)m_Faces.Begin();
+        for (int faceIdx = 0; faceIdx < faceCount; faceIdx++) {
+            int matIdx = facePtr->m_MatIndex;
+            
+            // Track min/max
+            if (matIdx > maxMatIndex) maxMatIndex = matIdx;
+            if (matIdx < minMatIndex) minMatIndex = matIdx;
+            
+            // Add face index to material group's face list
+            CKWORD faceWord = (CKWORD)faceIdx;
+            CKMaterialGroup *group = m_MaterialGroups[matIdx];
+            group->m_FaceIndices.PushBack(faceWord);
+            
+            // For each of the 3 vertices in this face
+            for (int v = 0; v < 3; v++) {
+                CKWORD vidx = faceIndices[v];
+                XBitArray &bits = vertexMaterialSets[vidx];
+                // Check if this material was already added for this vertex
+                if (!bits.IsSet(matIdx)) {
+                    bits.Set(matIdx);
+                    // Increment vertex count for this material group
+                    group->m_VertexCount++;
+                }
             }
-
-            // Copy all indices to the primitive entry
-            CKPrimitiveEntry &entry = group->field_4[0];
-            entry.m_Indices.Resize(faceCount * 3);
-            memcpy(entry.m_Indices.Begin(), m_FaceVertexIndices.Begin(), faceCount * 3 * sizeof(CKWORD));
-            entry.m_IndexBufferOffset = -1;
-
-            // Set vertex range
-            group->field_20 = 0;
-            group->field_24 = vertexCount;
-            group->field_2C = vertexCount;
-            group->field_28 = 0;
+            
+            facePtr++;
+            faceIndices += 3;
         }
     } else {
-        // Multiple materials - need to build per-material index lists
+        // For < 31 material groups, use 32-bit mask per vertex
+        memset(vertexTracker, 0, vertexCount * sizeof(CKDWORD));
+        
+        CKFace *facePtr = (CKFace *)m_Faces.Begin();
+        for (int faceIdx = 0; faceIdx < faceCount; faceIdx++) {
+            int matIdx = facePtr->m_MatIndex;
+            
+            // Track min/max
+            if (matIdx > maxMatIndex) maxMatIndex = matIdx;
+            if (matIdx < minMatIndex) minMatIndex = matIdx;
+            
+            // Add face index to material group's face list
+            CKWORD faceWord = (CKWORD)faceIdx;
+            CKMaterialGroup *group = m_MaterialGroups[matIdx];
+            group->m_FaceIndices.PushBack(faceWord);
+            
+            // Bit mask for this material
+            CKDWORD matBit = 1 << matIdx;
+            
+            // For each of the 3 vertices in this face
+            for (int v = 0; v < 3; v++) {
+                CKWORD vidx = faceIndices[v];
+                // Check if this material was already added for this vertex
+                if ((vertexTracker[vidx] & matBit) == 0) {
+                    vertexTracker[vidx] |= matBit;
+                    // Increment vertex count for this material group
+                    group->m_VertexCount++;
+                }
+            }
+            
+            facePtr++;
+            faceIndices += 3;
+        }
+    }
+    
+    // Accumulate vertex buffer offsets
+    CKDWORD totalVertexOffset = 0;
+    
+    // Check if single material (mono-material)
+    if (minMatIndex == maxMatIndex) {
+        // Single material case - copy all face indices directly
+        CKMaterialGroup *group = m_MaterialGroups[minMatIndex];
+        
+        // Resize index array to hold all indices
+        CKPrimitiveEntry &entry = group->m_Primitives[0];
+        entry.m_Indices.Resize(faceCount * 3);
+        
+        // Copy all indices directly
+        memcpy(entry.m_Indices.Begin(), m_FaceVertexIndices.Begin(), faceCount * 3 * sizeof(CKWORD));
+        entry.m_IndexBufferOffset = -1;
+        
+        // Set vertex range for full mesh
+        group->m_MinVertexIndex = 0;
+        group->m_MaxVertexIndex = vertexCount;
+        group->m_VertexCount = vertexCount;
+        group->m_BaseVertex = 0;
+    } else {
+        // Multiple materials - clear mono-material flag
         m_Flags &= ~VXMESH_MONOMATERIAL;
-
-        // Allocate tracking array for vertex -> material mapping
-        CKDWORD *vertexMaterialMask = new CKDWORD[vertexCount];
-
+        
+        // Process each material group (build local remap + indices + VBuffer)
         for (int matIdx = 0; matIdx < m_MaterialGroups.Size(); matIdx++) {
             CKMaterialGroup *group = m_MaterialGroups[matIdx];
-            if (!group || group->field_10.Size() == 0)
+            if (!group || group->m_VertexCount == 0 || group->m_FaceIndices.Size() == 0)
                 continue;
 
-            // Clear vertex tracking
-            memset(vertexMaterialMask, 0, vertexCount * sizeof(CKDWORD));
+            const int expectedLocalVertexCount = (int)group->m_VertexCount;
 
-            // Ensure primitive entry exists
-            if (group->field_4.Size() == 0) {
-                CKPrimitiveEntry entry;
-                entry.m_Type = VX_TRIANGLELIST;
-                entry.m_IndexBufferOffset = -1;
-                group->field_4.PushBack(entry);
-            }
+            // Per-group remap buffer
+            CKVBuffer *vb = new CKVBuffer(expectedLocalVertexCount);
+            group->m_RemapData = static_cast<CKDWORD>(reinterpret_cast<uintptr_t>(vb));
+            group->m_VertexCount = 0;
 
-            CKPrimitiveEntry &entry = group->field_4[0];
-            int faceListCount = group->field_10.Size();
-            entry.m_Indices.Resize(faceListCount * 3);
+            memset(vertexTracker, 0, vertexCount * sizeof(CKDWORD));
 
-            // Build local index list for this material group
-            CKWORD *dstIndices = entry.m_Indices.Begin();
-            int localVertexCount = 0;
+            // Allocate indices for this group
+            group->m_Primitives.Resize(1);
+            group->m_Primitives[0].m_Type = VX_TRIANGLELIST;
+            group->m_Primitives[0].m_IndexBufferOffset = -1;
 
-            // Track which vertices we've seen and their local indices
-            XArray<int> vertexRemap;
-            vertexRemap.Resize(vertexCount);
-            for (int v = 0; v < vertexCount; v++)
-                vertexRemap[v] = -1;
+            const int faceListCount = group->m_FaceIndices.Size();
+            group->m_Primitives[0].m_Indices.Resize(faceListCount * 3);
+            CKWORD *dstIndices = group->m_Primitives[0].m_Indices.Begin();
 
             for (int f = 0; f < faceListCount; f++) {
-                int faceIdx = (int) (intptr_t) group->field_10[f];
+                const int faceIdx = group->m_FaceIndices[f];
                 CKWORD *srcIndices = m_FaceVertexIndices.Begin() + faceIdx * 3;
 
                 for (int v = 0; v < 3; v++) {
-                    CKWORD vidx = srcIndices[v];
-                    if (vertexRemap[vidx] < 0) {
-                        vertexRemap[vidx] = localVertexCount++;
+                    const CKWORD globalIdx = srcIndices[v];
+                    if (vertexTracker[globalIdx] == 0) {
+                        vertexTracker[globalIdx] = group->m_VertexCount + 1;
+                        const int localIdx = (int)group->m_VertexCount;
+                        group->m_VertexCount = localIdx + 1;
+                        if (vb && localIdx < vb->m_VertexRemap.Size())
+                            vb->m_VertexRemap[localIdx] = (int)globalIdx;
                     }
-                    *dstIndices++ = (CKWORD) vertexRemap[vidx];
+
+                    *dstIndices++ = (CKWORD)(vertexTracker[globalIdx] - 1);
                 }
             }
 
-            // Allocate local vertex buffer for this group
-            if (localVertexCount > 0) {
-                // Store vertex remap table in field_30
-                int *remapTable = new int[localVertexCount];
-                int remapIdx = 0;
-                for (int v = 0; v < vertexCount && remapIdx < localVertexCount; v++) {
-                    if (vertexRemap[v] >= 0) {
-                        remapTable[vertexRemap[v]] = v;
-                    }
-                }
-                group->field_30 = (CKDWORD) remapTable;
+            // Tighten VBuffer arrays if the earlier unique-count was off
+            if (vb && (int)group->m_VertexCount != vb->m_VertexRemap.Size()) {
+                vb->Resize((int)group->m_VertexCount);
             }
 
-            entry.m_IndexBufferOffset = -1;
-            group->field_20 = 0;
-            group->field_24 = localVertexCount;
-            group->field_2C = localVertexCount;
-            group->field_28 = 0; // Will be set later for combined VB
-        }
+            group->m_MinVertexIndex = 0;
+            group->m_MaxVertexIndex = group->m_VertexCount;
+            group->m_BaseVertex = totalVertexOffset;
+            totalVertexOffset += group->m_VertexCount;
 
-        delete[] vertexMaterialMask;
-
-        // Update vertex buffer offsets for combined buffer
-        CKDWORD totalOffset = 0;
-        for (int i = 0; i < m_MaterialGroups.Size(); i++) {
-            CKMaterialGroup *group = m_MaterialGroups[i];
-            if (group && group->field_2C > 0) {
-                group->field_28 = totalOffset;
-                totalOffset += group->field_2C;
-            }
+            if (vb)
+                vb->Update(this, 1);
         }
     }
-
-    // Remove empty material groups
-    for (int i = m_MaterialGroups.Size() - 1; i > 0; i--) {
-        CKMaterialGroup *group = m_MaterialGroups[i];
-        if (group && group->field_10.Size() == 0) {
-            // Check if any face references this material
-            bool hasReference = false;
-            for (int j = 0; j < m_MaterialGroups.Size() && !hasReference; j++) {
-                if (i != j && m_MaterialGroups[j] && m_MaterialGroups[j]->m_Material == group->m_Material) {
-                    hasReference = true;
-                }
-            }
-
-            if (!hasReference) {
-                delete group;
-                m_MaterialGroups.RemoveAt(i);
-
-                // Update face material indices
-                for (int f = 0; f < m_Faces.Size(); f++) {
-                    if (m_Faces[f].m_MatIndex > i)
-                        m_Faces[f].m_MatIndex--;
-                }
-            }
-        }
+    
+    // Prune invalid groups (IDA keeps index 0)
+    if (m_MaterialGroups.Size() > 0) {
+        UpdateHasValidPrimitives(m_MaterialGroups[0]);
     }
 
-    // Clear face channel mask for material channels
+    int currentIndex = 1;
+    for (int idx = 1; idx < m_MaterialGroups.Size();) {
+        CKMaterialGroup *group = m_MaterialGroups[idx];
+        UpdateHasValidPrimitives(group);
+
+        if (group && group->m_HasValidPrimitives) {
+            ++idx;
+            ++currentIndex;
+            continue;
+        }
+
+        if (group) {
+            DeleteVBuffer(group);
+            delete group;
+        }
+        m_MaterialGroups.RemoveAt(idx);
+
+        for (int f = 0; f < m_Faces.Size(); f++) {
+            if (m_Faces[f].m_MatIndex > currentIndex)
+                --m_Faces[f].m_MatIndex;
+        }
+    }
+    
+    // Clear channel face indices
+    for (int c = 0; c < m_MaterialChannels.Size(); c++) {
+        if (m_MaterialChannels[c].m_FaceIndices) {
+            delete m_MaterialChannels[c].m_FaceIndices;
+            m_MaterialChannels[c].m_FaceIndices = nullptr;
+        }
+    }
+    
+    // Reset face channel mask (will trigger rebuild on next render)
     m_FaceChannelMask = 0xFFFF;
-
-    // Clear channel index data
-    for (int i = 0; i < m_MaterialChannels.Size(); i++) {
-        // Channel face indices would be rebuilt by UpdateChannelIndices if needed
+    
+    // Triangle strip optimization (if enabled)
+    // IDA shows this happens when flag 0x400000 is set
+    if ((m_Flags & 0x400000) != 0) {
+        // Triangle strip optimization path
+        // This is complex optimization that converts triangle lists to strips
+        // For now we skip this optimization
+    } else {
+        // Vertex cache optimization (if enabled)
+        RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+        if (rm && rm->m_VertexCache.Value > 0 && vertexCount > 0) {
+            // Vertex cache optimization for each material group
+            // This reorders indices to improve vertex cache hits
+            // For now we skip this optimization
+        }
     }
-
+    
     // Mark render groups as built
     m_Flags |= 4;
+    return 1;
 }
 
 //--------------------------------------------
@@ -2894,7 +4533,7 @@ void RCKMesh::UpdateChannelIndices() {
             if (channel.m_FaceIndices) {
                 channel.m_FaceIndices->Clear();
             } else {
-                channel.m_FaceIndices = new XVoidArray();
+                channel.m_FaceIndices = new XArray<CKWORD>();
             }
 
             // Iterate through faces and collect vertex indices for faces using this channel
@@ -2902,9 +4541,9 @@ void RCKMesh::UpdateChannelIndices() {
             for (int f = 0; f < m_Faces.Size(); f++) {
                 if ((channelBit & m_Faces[f].m_ChannelMask) != 0) {
                     // This face uses this channel - add its 3 vertex indices
-                    channel.m_FaceIndices->PushBack((void *) (intptr_t) faceIndices[0]);
-                    channel.m_FaceIndices->PushBack((void *) (intptr_t) faceIndices[1]);
-                    channel.m_FaceIndices->PushBack((void *) (intptr_t) faceIndices[2]);
+                    channel.m_FaceIndices->PushBack(faceIndices[0]);
+                    channel.m_FaceIndices->PushBack(faceIndices[1]);
+                    channel.m_FaceIndices->PushBack(faceIndices[2]);
                 }
                 faceIndices += 3;
             }
@@ -2940,9 +4579,9 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
         if (group && group->m_Material) {
-            if (group->field_30) {
+            if (group->m_RemapData) {
                 hasRemappedVertices = TRUE;
-                totalVertexCount += group->field_2C;
+                totalVertexCount += group->m_VertexCount;
             } else {
                 hasDirectVertices = TRUE;
             }
@@ -2978,11 +4617,11 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
         if (!rst->CreateObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER, &newDesc)) {
             return FALSE;
         }
-        field_EC = 0; // Mark as needing update
+        m_VertexBufferReady = 0; // Mark as needing update
     }
 
     // If buffer is up to date, just check index buffer and return
-    if (field_EC != 0) {
+    if (m_VertexBufferReady != 0) {
         RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
         if (rm->m_UseIndexBuffers.Value) {
             CheckHWIndexBuffer(rst);
@@ -3013,40 +4652,55 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (group && group->m_Material) {
-                if (group->field_30) {
+                if (group->m_RemapData) {
                     // This group has remapped vertices
-                    // field_30 points to remapped vertex array
-                    VxVertex *remappedVerts = (VxVertex *) group->field_30;
-                    VxColors *remappedColors = (VxColors *) ((CKBYTE *) group->field_30 + 12);
+                    CKVBuffer *vb = GetVBuffer(group);
+                    if (!vb || group->m_VertexCount <= 0) {
+                        group->m_BaseVertex = 0;
+                        continue;
+                    }
+
+                    // Ensure remapped data is up to date before uploading to HW VB.
+                    vb->Update(this, 0);
+
+                    if (vb->m_Vertices.Size() < (int) group->m_VertexCount ||
+                        vb->m_Colors.Size() < (int) group->m_VertexCount) {
+                        group->m_BaseVertex = 0;
+                        continue;
+                    }
+
+                    VxVertex *remappedVerts = vb->m_Vertices.Begin();
+                    VxColors *remappedColors = vb->m_Colors.Begin();
 
                     // Update local data for this group
-                    localData.VertexCount = group->field_2C;
+                    localData.VertexCount = group->m_VertexCount;
                     localData.PositionPtr = &remappedVerts[0].m_Position;
                     localData.NormalPtr = &remappedVerts[0].m_Normal;
                     localData.TexCoordPtr = &remappedVerts[0].m_UV;
                     localData.ColorPtr = &remappedColors[0].Color;
                     localData.SpecularColorPtr = &remappedColors[0].Specular;
 
-                    // Set up extra tex coords from field_D0
-                    for (int t = 0; t < (int) field_D0.Size(); t++) {
-                        int channelIdx = (int) (intptr_t) field_D0[t];
-                        if (channelIdx >= 0 && channelIdx < m_MaterialChannels.Size()) {
-                            // Get UV data for this channel from the remapped vertex array
-                            // This assumes the remapped data contains per-channel UVs at offset 24 + channelIdx * sizeof(UV array)
-                            localData.TexCoordPtrs[t] = m_MaterialChannels[channelIdx].m_uv;
-                            localData.TexCoordStrides[t] = 8;
+                    // Set up extra tex coords from active channel list
+                    for (int t = 0; t < (int) m_ActiveTextureChannels.Size(); t++) {
+                        const int channelIdx = m_ActiveTextureChannels[t];
+                        Vx2DVector *channelUVs = nullptr;
+                        if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
+                            if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
+                                channelUVs = vb->m_UVs[channelIdx].Begin();
                         }
+                        localData.TexCoordPtrs[t] = channelUVs;
+                        localData.TexCoordStrides[t] = 8;
                     }
 
                     // Set the start vertex offset for this group
-                    group->field_28 = currentOffset;
-                    currentOffset += group->field_2C;
+                    group->m_BaseVertex = currentOffset;
+                    currentOffset += group->m_VertexCount;
 
                     // Load this group's vertices into the buffer
                     vbData = CKRSTLoadVertexBuffer(vbData, vertexFormat, vertexSize, &localData);
                 } else {
                     // No remapped vertices for this group
-                    group->field_28 = 0;
+                    group->m_BaseVertex = 0;
                 }
             }
         }
@@ -3084,8 +4738,8 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         CKMaterialGroup *group = m_MaterialGroups[i];
         if (group && group->m_Material) {
             // Iterate through primitive entries
-            for (int p = 0; p < group->field_4.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->field_4[p];
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 totalIndexCount += prim->m_Indices.Size();
                 if (prim->m_IndexBufferOffset < 0) {
                     needUpdate = TRUE;
@@ -3110,8 +4764,8 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
             for (int i = 0; i < m_MaterialGroups.Size(); i++) {
                 CKMaterialGroup *group = m_MaterialGroups[i];
                 if (group && group->m_Material) {
-                    for (int p = 0; p < group->field_4.Size(); p++) {
-                        group->field_4[p].m_IndexBufferOffset = -1;
+                    for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                        group->m_Primitives[p].m_IndexBufferOffset = -1;
                     }
                 }
             }
@@ -3130,8 +4784,8 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (group && group->m_Material) {
-                for (int p = 0; p < group->field_4.Size(); p++) {
-                    group->field_4[p].m_IndexBufferOffset = -1;
+                for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                    group->m_Primitives[p].m_IndexBufferOffset = -1;
                 }
             }
         }
@@ -3144,8 +4798,8 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
         if (group && group->m_Material) {
-            for (int p = 0; p < group->field_4.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->field_4[p];
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                CKPrimitiveEntry *prim = &group->m_Primitives[p];
 
                 // Set the index buffer offset for this primitive
                 prim->m_IndexBufferOffset = currentOffset;
@@ -3164,4 +4818,116 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     rst->UnlockIndexBuffer(m_IndexBuffer);
 
     return TRUE;
+}
+
+// IDA: 0x100268d9
+// Pick2D tests if a 2D screen point intersects any lines in the mesh
+CKBOOL RCKMesh::Pick2D(const Vx2DVector &pt, VxIntersectionDesc *desc, RCKRenderContext *rc, RCK3dEntity *ent) {
+    int vertexCount = m_Vertices.Size();
+    if (vertexCount == 0)
+        return FALSE;
+
+    int lineCount = GetLineCount();
+    if (lineCount == 0)
+        return FALSE;
+
+    // Transform all vertices to screen space
+    XClassArray<VxVector4> screenVertices;
+    screenVertices.Resize(vertexCount);
+
+    VxTransformData transformData;
+    transformData.ClipFlags = 0;
+    transformData.InStride = sizeof(VxVertex);
+    transformData.InVertices = m_Vertices.Begin();
+    transformData.OutStride = 0;
+    transformData.OutVertices = nullptr;
+    transformData.ScreenStride = sizeof(VxVector4);
+    transformData.ScreenVertices = screenVertices.Begin();
+
+    rc->TransformVertices(vertexCount, &transformData, (CK3dEntity *)ent);
+
+    // Initialize search threshold
+    float threshold = 100.0f;
+    
+    // Initialize result if provided
+    // Match IDA at 0x100269dd
+    if (desc) {
+        desc->IntersectionPoint = VxVector(0, 0, 0);
+        desc->IntersectionNormal = VxVector(0, 0, 0);
+        desc->TexU = 0.0f;
+        desc->TexV = 0.0f;
+        desc->Distance = -1.0f;
+        desc->FaceIndex = 0;
+    }
+
+    // Get line indices pointer
+    CKWORD *lineIndices = m_LineIndices.Begin();
+
+    // Test each line
+    for (int i = 0; i < lineCount; ++i) {
+        CKWORD idx0 = lineIndices[0];
+        CKWORD idx1 = lineIndices[1];
+        
+        // Get screen positions of line endpoints
+        float x0 = screenVertices[idx0].x;
+        float y0 = screenVertices[idx0].y;
+        float x1 = screenVertices[idx1].x;
+        float y1 = screenVertices[idx1].y;
+        
+        // Line direction vector
+        float dx = x1 - x0;
+        float dy = y1 - y0;
+        
+        // Vector from first endpoint to pick point
+        float px = pt.x - x0;
+        float py = pt.y - y0;
+        
+        // Project pick point onto line
+        float dot1 = dx * px + dy * py;
+        float dot2 = (pt.x - x1) * dx + (pt.y - y1) * dy;
+        
+        // Check if projection falls between endpoints
+        if (dot1 >= 0.0f && dot2 < 0.0f) {
+            // Calculate squared perpendicular distance
+            float cross = dx * py - dy * px;
+            float lengthSq = dx * dx + dy * dy;
+            float distSq = (cross * cross) / lengthSq;
+            
+            // Check if within threshold
+            if (distSq <= threshold) {
+                // Calculate interpolation parameter with perspective correction
+                float t = dot1 / lengthSq;
+                
+                float w0 = screenVertices[idx0].w;
+                float w1 = screenVertices[idx1].w;
+                float invW0 = 1.0f / w0;
+                float invW1 = 1.0f / w1;
+                
+                // Perspective-correct interpolation
+                t = (t * invW0) / ((invW0 - invW1) * t + invW1);
+                
+                // Get world positions of line endpoints
+                VxVertex *v0 = &m_Vertices[idx0];
+                VxVertex *v1 = &m_Vertices[idx1];
+                
+                // Interpolate intersection point in object space
+                VxVector interpPt;
+                interpPt.x = v0->m_Position.x + t * (v1->m_Position.x - v0->m_Position.x);
+                interpPt.y = v0->m_Position.y + t * (v1->m_Position.y - v0->m_Position.y);
+                interpPt.z = v0->m_Position.z + t * (v1->m_Position.z - v0->m_Position.z);
+                
+                // Store result - IDA only writes IntersectionPoint (via Sprite field offset)
+                // Object is left unchanged (not initialized by this function)
+                if (desc) {
+                    desc->IntersectionPoint = interpPt;
+                }
+                
+                return TRUE;
+            }
+        }
+        
+        lineIndices += 2;
+    }
+
+    return FALSE;
 }

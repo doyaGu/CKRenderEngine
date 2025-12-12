@@ -2,6 +2,10 @@
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "VxMath.h"
+#include "CKDebugLogger.h"
+
+#define CAMERA_DEBUG_LOG(msg) CK_LOG("Camera", msg)
+#define CAMERA_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("Camera", fmt, __VA_ARGS__)
 
 // Static class ID definition
 CK_CLASSID RCKCamera::m_ClassID = CKCID_CAMERA;
@@ -414,8 +418,10 @@ CKStateChunk *RCKCamera::Save(CKFile *file, CKDWORD flags) {
     cameraChunk->WriteFloat(m_Fov);
     cameraChunk->WriteFloat(m_OrthographicZoom);
 
-    // Pack width and height into single DWORD for efficient storage
-    CKDWORD packedDimensions = (m_Height << 16) | m_Width;
+    // Pack width and height into single DWORD for efficient storage.
+    // IDA: (SLOWORD(m_Height) << 16) | SLOWORD(m_Width)
+    CKDWORD packedDimensions = (static_cast<CKDWORD>(static_cast<CKWORD>(m_Height)) << 16)
+        | static_cast<CKDWORD>(static_cast<CKWORD>(m_Width));
     cameraChunk->WriteDword(packedDimensions);
 
     // Write clipping planes

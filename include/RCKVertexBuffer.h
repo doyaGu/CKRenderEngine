@@ -15,13 +15,11 @@ public:
 
     CKVB_STATE Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) override;
 
-    VxDrawPrimitiveData *
-    Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) override;
+    VxDrawPrimitiveData *Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) override;
 
     void Unlock(CKRenderContext *Ctx) override;
 
-    CKBOOL Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex,
-                CKDWORD VertexCount) override;
+    CKBOOL Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) override;
 
 protected:
     CKDWORD m_ObjectIndex;

@@ -4,6 +4,8 @@
 #include "CKTexture.h"
 
 class RCKTexture : public CKTexture {
+    friend class RCKRenderManager;
+
 public:
     CKBOOL Create(int Width, int Height, int BPP, int Slot) override;
     CKBOOL LoadImage(CKSTRING Name, int Slot) override;

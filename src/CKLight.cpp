@@ -426,12 +426,14 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     CKDWORD typeAndFlags = m_LightData.Type | m_Flags;
     lightChunk->WriteDword(typeAndFlags);
 
-    // Convert diffuse color to packed DWORD format (RGBA)
-    CKDWORD packedColor =
-        ((CKDWORD) (m_LightData.Diffuse.r * 255.0f) << 24) |
-        ((CKDWORD) (m_LightData.Diffuse.g * 255.0f) << 16) |
-        ((CKDWORD) (m_LightData.Diffuse.b * 255.0f) << 8) |
-        ((CKDWORD) (m_LightData.Diffuse.a * 255.0f));
+    // Convert diffuse color to packed DWORD format (BGRA with alpha forced to 0xFF)
+    // IDA: sub_1001BA90 returns RGBAFTOCOLOR(this) | 0xFF000000
+    // Pack as: B in bits 16-23, G in bits 8-15, R in bits 0-7, A in bits 24-31
+    CKDWORD packedColor = 
+        ((CKDWORD)(m_LightData.Diffuse.b * 255.0f) << 16) |
+        ((CKDWORD)(m_LightData.Diffuse.g * 255.0f) << 8) |
+        ((CKDWORD)(m_LightData.Diffuse.r * 255.0f)) |
+        0xFF000000;
     lightChunk->WriteDword(packedColor);
 
     // Write attenuation and range
@@ -539,12 +541,13 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
             m_Flags = typeAndFlags & 0xFFFFFF00;
 
             // Convert packed color DWORD back to VxColor
+            // IDA: sub_10016990 unpacks BGRA format:
+            // r = BYTE2(color) / 255, g = BYTE1(color) / 255, b = BYTE0(color) / 255, a = HIBYTE(color) / 255
             CKDWORD packedColor = chunk->ReadDword();
-            // Unpack color from DWORD (RGBA format)
-            m_LightData.Diffuse.r = ((packedColor >> 24) & 0xFF) / 255.0f;
-            m_LightData.Diffuse.g = ((packedColor >> 16) & 0xFF) / 255.0f;
-            m_LightData.Diffuse.b = ((packedColor >> 8) & 0xFF) / 255.0f;
-            m_LightData.Diffuse.a = (packedColor & 0xFF) / 255.0f;
+            m_LightData.Diffuse.r = ((packedColor >> 16) & 0xFF) / 255.0f;  // BYTE2
+            m_LightData.Diffuse.g = ((packedColor >> 8) & 0xFF) / 255.0f;   // BYTE1
+            m_LightData.Diffuse.b = (packedColor & 0xFF) / 255.0f;          // BYTE0
+            m_LightData.Diffuse.a = ((packedColor >> 24) & 0xFF) / 255.0f;  // HIBYTE
 
             // Read attenuation and range
             m_LightData.Attenuation0 = chunk->ReadFloat();
@@ -584,22 +587,74 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
 Summary: Sets up the light in the rasterizer.
 Purpose: Configures the light at the specified index in the rasterizer.
 Remarks:
+- Checks visibility first
+- For non-directional lights, checks if attenuation sum is sufficient
 - Checks if light is active (bit 8 / 0x100 in m_Flags)
-- Sets light data and enables the light
+- Extracts position from world matrix row 3
+- Extracts direction from world matrix row 2
+- Handles specular flag (0x200) - scales diffuse by light power
+- Applies light power scaling to diffuse color if != 1.0
 
 Implementation based on decompilation at 0x1001b0c2.
 *************************************************/
 CKBOOL RCKLight::Setup(CKRasterizerContext *rst, CKDWORD lightIndex) {
-    if (!rst)
+    // Check visibility
+    if (!IsVisible())
         return FALSE;
+
+    // For non-directional lights, check attenuation sum
+    if (m_LightData.Type != VX_LIGHTDIREC) {
+        float attenuationSum = m_LightData.Attenuation0 + m_LightData.Attenuation1 + m_LightData.Attenuation2;
+        if (attenuationSum < 0.00001f)
+            return FALSE;
+    }
 
     // Check if light is active (0x100 flag)
     if (!(m_Flags & 0x100))
         return FALSE;
 
-    // Set light data
-    rst->SetLight(lightIndex, &m_LightData);
-    rst->EnableLight(lightIndex, TRUE);
+    // Extract position from world matrix row 3
+    const VxMatrix &worldMat = GetWorldMatrix();
+    m_LightData.Position.x = worldMat[3][0];
+    m_LightData.Position.y = worldMat[3][1];
+    m_LightData.Position.z = worldMat[3][2];
+
+    // Extract direction from world matrix row 2
+    m_LightData.Direction.x = worldMat[2][0];
+    m_LightData.Direction.y = worldMat[2][1];
+    m_LightData.Direction.z = worldMat[2][2];
+
+    // Handle specular flag (0x200) - set specular to scaled diffuse or black
+    if (m_Flags & 0x200) {
+        // Scale diffuse color by light power for specular
+        m_LightData.Specular.r = m_LightData.Diffuse.r * m_LightPower;
+        m_LightData.Specular.g = m_LightData.Diffuse.g * m_LightPower;
+        m_LightData.Specular.b = m_LightData.Diffuse.b * m_LightPower;
+        m_LightData.Specular.a = 1.0f;
+    } else {
+        // Set specular to black
+        m_LightData.Specular = VxColor(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    // Apply light power scaling
+    if (m_LightPower == 1.0f) {
+        // No scaling needed
+        rst->SetLight(lightIndex, &m_LightData);
+        rst->EnableLight(lightIndex, TRUE);
+    } else {
+        // Save original diffuse, scale it, set light, restore
+        VxColor originalDiffuse = m_LightData.Diffuse;
+        m_LightData.Diffuse.r *= m_LightPower;
+        m_LightData.Diffuse.g *= m_LightPower;
+        m_LightData.Diffuse.b *= m_LightPower;
+        m_LightData.Diffuse.a *= m_LightPower;
+
+        rst->SetLight(lightIndex, &m_LightData);
+        rst->EnableLight(lightIndex, TRUE);
+
+        // Restore original diffuse
+        m_LightData.Diffuse = originalDiffuse;
+    }
 
     return TRUE;
 }
@@ -636,7 +691,8 @@ Summary: Copies light data from another light object.
 Purpose: Deep copy of all light properties including CKLightData.
 Remarks:
 - Calls base class Copy first
-- Copies entire CKLightData structure (0x70 = 112 bytes)
+- Copies entire light data block using memcpy (0x70 = 112 bytes)
+- This includes CKLightData (104 bytes), m_Flags (4 bytes), m_LightPower (4 bytes)
 
 Implementation based on decompilation at 0x1001b873.
 *************************************************/
@@ -647,10 +703,9 @@ CKERROR RCKLight::Copy(CKObject &o, CKDependenciesContext &context) {
 
     RCKLight *srcLight = static_cast<RCKLight *>(&o);
 
-    // Copy light data (CKLightData + m_Flags + m_LightPower)
-    m_LightData = srcLight->m_LightData;
-    m_Flags = srcLight->m_Flags;
-    m_LightPower = srcLight->m_LightPower;
+    // Copy entire light data block (0x70 = 112 bytes)
+    // This copies m_LightData (104), m_Flags (4), and m_LightPower (4)
+    memcpy(&m_LightData, &srcLight->m_LightData, sizeof(CKLightData));
 
     return CK_OK;
 }

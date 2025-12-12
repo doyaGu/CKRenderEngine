@@ -14,6 +14,7 @@
 #include "CKFile.h"
 
 class RCK2dEntity : public RCKRenderObject {
+    friend class CKRenderedScene;
 public:
 
 #undef CK_PURE
@@ -36,11 +37,12 @@ public:
     CKBOOL RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
     void RemoveAllCallbacks() override;
 
-    // Helpers
-    void AddToRenderContext(CKRenderContext *context);
-    void RemoveFromRenderContext(CKRenderContext *context);
-    int CanBeHide();
     void GetHomogeneousRelativeRect(VxRect &rect);
+    void SetBackgroundRecursive(CKBOOL back);
+
+    // Internal methods used by RCKRenderContext
+    CK2dEntity *Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable);
+    CKBOOL UpdateExtents(CKRenderContext *dev);
 
     //--------------------------------------------------------
     ////               Private Part

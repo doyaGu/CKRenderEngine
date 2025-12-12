@@ -34,7 +34,7 @@ public:
 
 protected:
     XSObjectPointerArray m_Animations;
-    CKDWORD field_38;
+    CKDWORD m_RuntimeFlags; // Misc runtime flags for keyed animation
     CKBOOL m_Merged;
     float m_MergeFactor;
     RCKObjectAnimation *m_RootAnimation;

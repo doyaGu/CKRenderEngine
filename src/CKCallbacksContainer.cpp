@@ -14,7 +14,7 @@ CKBOOL CKCallbacksContainer::AddPreCallback(void *Function, void *Argument, CKBO
         }
     }
 
-    VxCallBack cb = {Function, Argument, Temporary, FALSE};
+    VxCallBack cb = {Function, Argument, Temporary};
     m_PreCallBacks.PushBack(cb);
     if (Temporary && renderManager) {
         ((RCKRenderManager *) renderManager)->AddTemporaryCallback(this, Function, Argument, TRUE);
@@ -43,33 +43,32 @@ CKBOOL CKCallbacksContainer::SetCallBack(void *Function, void *Argument) {
         return FALSE;
     }
 
-    if (m_CallBack) {
-        if (m_CallBack->callback == Function && m_CallBack->argument == Argument) {
+    if (m_Callback) {
+        if (m_Callback->callback == Function && m_Callback->argument == Argument) {
             return FALSE; // Callback already exists
         }
-        delete m_CallBack; // Remove old callback
-        m_CallBack = nullptr;
+        delete m_Callback; // Remove old callback
+        m_Callback = nullptr;
     }
 
-    m_CallBack = new VxCallBack{Function, Argument, FALSE, FALSE};
+    m_Callback = new VxCallBack{Function, Argument, FALSE};
     return TRUE;
 }
 
 CKBOOL CKCallbacksContainer::RemoveCallBack() {
-    if (!m_CallBack) {
+    if (!m_Callback) {
         return FALSE; // No callback to remove
     }
 
-    delete m_CallBack;
-    m_CallBack = nullptr;
+    delete m_Callback;
+    m_Callback = nullptr;
     return TRUE;
 }
 
 CKBOOL CKCallbacksContainer::AddPostCallback(void *Function,
                                              void *Argument,
                                              CKBOOL Temporary,
-                                             CKRenderManager *renderManager,
-                                             CKBOOL BeforeTransparent) {
+                                             CKRenderManager *renderManager) {
     if (!Function) {
         return FALSE;
     }
@@ -80,7 +79,7 @@ CKBOOL CKCallbacksContainer::AddPostCallback(void *Function,
         }
     }
 
-    VxCallBack cb = {Function, Argument, Temporary, BeforeTransparent};
+    VxCallBack cb = {Function, Argument, Temporary};
     m_PostCallBacks.PushBack(cb);
 
     if (Temporary && renderManager) {
@@ -103,30 +102,6 @@ CKBOOL CKCallbacksContainer::RemovePostCallback(void *Function, void *Argument) 
     }
 
     return FALSE;
-}
-
-void CKCallbacksContainer::ExecuteCallbackList(XClassArray<VxCallBack> &callbacks,
-                                               CKRenderContext *context,
-                                               CKBOOL removeTemporary,
-                                               int stageFilter) {
-    if (!context)
-        return;
-
-    for (XClassArray<VxCallBack>::Iterator it = callbacks.Begin(); it != callbacks.End();) {
-        VxCallBack &entry = *it;
-        const bool matchesStage = (stageFilter == -1) || (entry.beforeTransparent == (stageFilter != 0));
-
-        if (matchesStage && entry.callback) {
-            CK_RENDERCALLBACK func = reinterpret_cast<CK_RENDERCALLBACK>(entry.callback);
-            func(context, entry.argument);
-        }
-
-        if (matchesStage && removeTemporary && entry.temp) {
-            it = callbacks.Remove(it);
-        } else {
-            ++it;
-        }
-    }
 }
 
 // Generic render callback type (not the same as CK_MESHRENDERCALLBACK which takes 4 args)
@@ -152,13 +127,9 @@ void CKCallbacksContainer::ExecutePreCallbacks(CKRenderContext *dev, CKBOOL temp
     }
 }
 
-void CKCallbacksContainer::ExecutePostCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly, CKBOOL beforeTransparent) {
+void CKCallbacksContainer::ExecutePostCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly) {
     for (XClassArray<VxCallBack>::Iterator it = m_PostCallBacks.Begin(); it != m_PostCallBacks.End();) {
         if (temporaryOnly && !it->temp) {
-            ++it;
-            continue;
-        }
-        if (beforeTransparent != it->beforeTransparent) {
             ++it;
             continue;
         }
@@ -187,8 +158,8 @@ void CKCallbacksContainer::ClearPostCallbacks() {
 void CKCallbacksContainer::Clear() {
     m_PreCallBacks.Clear();
     m_PostCallBacks.Clear();
-    if (m_CallBack) {
-        delete m_CallBack;
-        m_CallBack = nullptr;
+    if (m_Callback) {
+        delete m_Callback;
+        m_Callback = nullptr;
     }
 }

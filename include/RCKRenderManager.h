@@ -7,9 +7,12 @@
 #include "CKRenderManager.h"
 #include "CKSceneGraph.h"
 
+class RCK3dEntity;
+
 class RCKRenderManager : public CKRenderManager {
 public:
     explicit RCKRenderManager(CKContext *context);
+    ~RCKRenderManager() override;
 
     CKERROR PreClearAll() override;
     CKERROR PreProcess() override;
@@ -41,10 +44,13 @@ public:
     int GetEffectCount() override;
     int AddEffect(const VxEffectDescription &NewEffect) override;
 
+    CKMaterial *GetDefaultMaterial();
+
     CKDWORD CreateObjectIndex(CKRST_OBJECTTYPE type);
     CKBOOL ReleaseObjectIndex(CKDWORD index, CKRST_OBJECTTYPE type);
 
     void DetachAllObjects();
+    void DestroyingDevice(CKRenderContext *ctx);
 
     void DeleteAllVertexBuffers();
 
@@ -53,55 +59,48 @@ public:
         void *Function,
         void *Argument,
         CKBOOL preOrPost);
+    void RemoveTemporaryCallback(CKCallbacksContainer *callbacks);
     void ClearTemporaryCallbacks();
     void RemoveAllTemporaryCallbacks();
     void RegisterDefaultEffects();
 
+    void SaveLastFrameMatrix();
+    void CleanMovedEntities();
+
+    // Last-frame tracking list management (mirrors CK2_3D.dll sub_1000D770/D7A0)
+    void RegisterLastFrameEntity(RCK3dEntity *entity);
+    void UnregisterLastFrameEntity(RCK3dEntity *entity);
+
     // Scene graph node management
     CKSceneGraphNode *CreateNode(RCK3dEntity *entity);
     void DeleteNode(CKSceneGraphNode *node);
+    CKSceneGraphRootNode *GetRootNode() { return &m_SceneGraphRootNode; }
+
+    // Entity movement tracking (called when entities move)
+    void AddMovedEntity(RCK3dEntity *entity) { m_MovedEntities.PushBack((CKObject*)entity); }
+
+    // Render context mask management
+    CKDWORD GetRenderContextMaskFree() { return m_RenderContextMaskFree; }
+    void ReleaseRenderContextMaskFree(CKDWORD mask) { m_RenderContextMaskFree |= mask; }
+
+    // Driver management
+    CKRasterizerDriver *GetDriver(int DriverIndex);
+    CKRasterizerContext *GetFullscreenContext();
+    int GetPreferredSoftwareDriver();
 
 public:
-    XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;
-    XClassArray<VxCallBack> m_TemporaryPostRenderCallbacks;
-    XSObjectArray m_RenderContexts;
-    XArray<CKRasterizer *> m_Rasterizers;
-    VxDriverDescEx *m_Drivers;
-    int m_DriverCount;
-    CKMaterial *m_DefaultMat;
-    CKDWORD m_RenderContextMaskFree;
-    CKSceneGraphRootNode m_CKSceneGraphRootNode;
-    CKDWORD field_B0;
-    CKDWORD field_B4;
-    XObjectPointerArray m_MovedEntities;
-    XObjectPointerArray m_Objects;
-    CKDWORD field_D0;
-    CKDWORD field_D4;
-    CKDWORD field_D8;
-    CKDWORD field_DC;
-    CKDWORD field_E0;
-    CKDWORD field_E4;
-    CKDWORD field_E8;
-    CKDWORD field_EC;
-    CKDWORD field_F0;
-    CKDWORD field_F4;
-    CKDWORD field_F8;
-    CKDWORD field_FC;
-    CKDWORD field_100;
-    CKDWORD field_104;
-    CKDWORD field_108;
-    CKDWORD field_10C;
-    CKDWORD field_110;
-    CKDWORD field_114;
-    CKDWORD field_118;
-    CKDWORD field_11C;
-    CKDWORD field_120;
-    CKDWORD field_124;
-    CKDWORD field_128;
-    CKDWORD field_12C;
-    CKDWORD field_130;
-    CKDWORD field_134;
-    CKDWORD field_138;
+    XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;  // 0x28
+    XClassArray<VxCallBack> m_TemporaryPostRenderCallbacks; // 0x34
+    XSObjectArray m_RenderContexts;                          // 0x40
+    XArray<CKRasterizer *> m_Rasterizers;                    // 0x48
+    VxDriverDescEx *m_Drivers;                               // 0x54
+    int m_DriverCount;                                       // 0x58
+    CKMaterial *m_DefaultMat;                                // 0x5C
+    CKDWORD m_RenderContextMaskFree;                         // 0x60
+    CKSceneGraphRootNode m_SceneGraphRootNode;               // 0x64 (84 bytes)
+    XObjectPointerArray m_MovedEntities;                     // 0xB8
+    XObjectPointerArray m_Entities;                          // 0xC4
+    CKDWORD m_ReservedState[27];                             // 0xD0-0x138 padding/state placeholders
     XArray<CKVertexBuffer *> m_VertexBuffers;
     VxOption m_ForceLinearFog;
     VxOption m_ForceSoftware;

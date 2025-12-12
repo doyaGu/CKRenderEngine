@@ -352,7 +352,7 @@ CKStateChunk *RCKPatchMesh::Save(CKFile *file, CKDWORD flags) {
         ckChunk->WriteBuffer_LEndian(v22 * 4, v25);
     }
 
-    if (GetClassID() == 53) // CKCID_PATCHMESH
+    if (GetClassID() == CKCID_PATCHMESH)
         ckChunk->CloseChunk();
     else
         ckChunk->UpdateDataSize();

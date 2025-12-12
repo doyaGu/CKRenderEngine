@@ -4,11 +4,27 @@
 #include "CKRenderEngineTypes.h"
 #include "CKRenderContext.h"
 #include "CKRenderedScene.h"
+#include "CKRasterizerEnums.h"
 
+// Forward declarations
+class RCKMaterial;
+class RCK3dEntity;
+class RCKSprite3D;
+
+// IDA: sizeof = 220 bytes (0xDC)
+// Layout: VxDrawPrimitiveData (104 bytes) + m_CachedData (116 bytes = 29*4)
+// m_CachedData layout:
+//   [0-25]: Cached copy of VxDrawPrimitiveData (104/4 = 26 DWORDs)
+//   [26]: Indices pointer (dynamically allocated CKWORD array)
+//   [27]: MaxIndexCount (for allocation tracking)
+//   [28]: MaxVertexCount (for allocation tracking)
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
-    CKWORD *Indices;
-    int IndexCount;
-    CKDWORD field_0[27]; // Adjusted padding
+    CKDWORD m_CachedData[29];  // 0x68 - Cached copy + index/vertex tracking
+
+    VxDrawPrimitiveData *GetStructure(CKRST_DPFLAGS DpFlags, int VertexCount);
+    CKWORD *GetIndices(int IndicesCount);
+    void ClearStructure();
+    void AllocateStructure();
 };
 
 struct CKRenderContextSettings
@@ -20,8 +36,9 @@ struct CKRenderContextSettings
 };
 
 struct CKObjectExtents {
-    VxRect m_Rect;
-    CKDWORD m_Extent;
+    VxRect m_Rect;      // 0x00 - Screen extent rectangle
+    CKDWORD m_Entity;   // 0x10 - Pointer to entity (stored as CKDWORD)
+    CKDWORD m_Camera;   // 0x14 - Associated camera
 };
 
 class RCKRenderContext : public CKRenderContext {
@@ -139,11 +156,19 @@ public:
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 
     // Internal methods
+    CKBOOL DestroyDevice();
+    void ClearCallbacks();
     void SetClipRect(VxRect *rect);
     void SetFullViewport(CKViewportData *vp, int width, int height);
     void UpdateProjection(CKBOOL forceUpdate);
+    void AddSprite3DBatch(RCKSprite3D *sprite);
     void CallSprite3DBatches();
+    void FlushSprite3DBatchesIfNeeded();  // IDA: sub_1000D2F0
     void AddExtents2D(const VxRect &rect, CKObject *obj);
+    
+    // Internal pick methods
+    CK3dEntity *Pick3D(const Vx2DVector &pt, VxIntersectionDesc *desc, CK3dEntity *filter, CKBOOL ignoreUnpickable);
+    CK2dEntity *_Pick2D(const Vx2DVector &pt, CKBOOL ignoreUnpickable);
 
     CKERROR Create(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp, int StencilBpp, int RefreshRate);
     VxStats &GetStats() {
@@ -182,93 +207,92 @@ private:
     void ExecutePreRenderCallbacks();
     void ExecutePostRenderCallbacks(CKBOOL beforeTransparent);
     void ExecutePostSpriteCallbacks();
+    void LoadPVInformationTexture();
+    void DrawPVInformationWatermark();
+    void FillStateString();
 
 public:
-    CKDWORD m_WinHandle;
-    CKDWORD m_AppHandle;
-    CKRECT m_WinRect;
-    CK_RENDER_FLAGS m_RenderFlags;
-    CKRenderedScene *m_RenderedScene;
-    CKBOOL m_Fullscreen;
-    CKBOOL m_Active;
-    CKBOOL m_PerspectiveOrOrthographic;
-    CKBOOL m_ProjectionUpdated;
-    CKBOOL m_Start;
-    CKBOOL m_TransparentMode;
-    CKBOOL m_DeviceValid;
-    CKCallbacksContainer m_PreRenderCallBacks;
-    CKCallbacksContainer m_PreRenderTempCallBacks;
-    CKCallbacksContainer m_PostRenderCallBacks;
-    CKCallbacksContainer m_PostSpriteRenderCallBacks;
-    RCKRenderManager *m_RenderManager;
-    CKRasterizerContext *m_RasterizerContext;
-    CKRasterizerDriver *m_RasterizerDriver;
-    CKDWORD m_Driver;
-    CKDWORD m_Shading;
-    CKDWORD m_TextureEnabled;
-    CKDWORD m_DisplayWireframe;
-    VxFrustum m_Frustum;
-    float m_Fov;
-    float m_Zoom;
-    float m_NearPlane;
-    float m_FarPlane;
-    VxMatrix m_ProjectionMatrix;
-    CKViewportData m_ViewportData;
-    CKRenderContextSettings m_Settings;
-    CKRenderContextSettings m_FullscreenSettings;
-    VxRect m_CurrentExtents;
-    CKDWORD field_21C;
-    CKDWORD m_TimeFpsCalc;
-    VxTimeProfiler m_RenderTimeProfiler;
-    float m_SmoothedFps;
-    VxStats m_Stats;
-    VxTimeProfiler m_DevicePreCallbacksTimeProfiler;
-    VxTimeProfiler m_DevicePostCallbacksTimeProfiler;
-    VxTimeProfiler m_ObjectsCallbacksTimeProfiler;
-    VxTimeProfiler m_SpriteCallbacksTimeProfiler;
-    VxTimeProfiler m_ObjectsRenderTimeProfiler;
-    VxTimeProfiler m_SceneTraversalTimeProfiler;
-    VxTimeProfiler m_SkinTimeProfiler;
-    VxTimeProfiler m_SpriteTimeProfiler;
-    VxTimeProfiler m_TransparentObjectsSortTimeProfiler;
-    RCK3dEntity *m_Current3dEntity;
-    RCKTexture *m_TargetTexture;
-    RCKTexture *m_Texture;  // Alias
-    CKDWORD m_CubeMapFace;
-    float m_FocalLength;
-    float m_EyeSeparation;
-    CKDWORD m_Flags;
-    CKDWORD m_FpsInterval;
-    XString m_CurrentObjectDesc;
-    XString m_StateString;
-    CKDWORD m_SceneTraversalCalls;
-    CKDWORD m_DrawSceneCalls;
-    CKDWORD m_SortTransparentObjects;
-    XVoidArray m_Sprite3DBatches;
-    XVoidArray m_TransparentObjects;
-    int m_StencilFreeMask;
-    UserDrawPrimitiveDataClass *m_UserDrawPrimitiveData;
-    CKDWORD m_MaskFree;
-    CKDWORD m_VertexBufferIndex;
-    CKDWORD m_StartIndex;
-    CKDWORD m_DpFlags;
-    CKDWORD m_VertexBufferCount;
-    XArray<CKObjectExtents> m_ObjectExtents;
-    XVoidArray m_Extents;
-    XObjectArray m_3dRootObjects;  // Custom: split from m_RootObjects for convenience
-    XObjectArray m_2dRootObjects;  // Custom: split from m_RootObjects for convenience
-    RCKCamera *m_Camera;
-    RCKTexture *m_NCUTex;
-    VxTimeProfiler m_PVTimeProfiler;
-    CKDWORD m_PVInformation;
-
-    // Compatibility members (mapped to m_Settings)
-    // These are kept for backward compatibility with existing code
-    CKRECT m_WindowRect;  // Same as m_Settings.m_Rect for window mode
-    int m_Bpp;            // Same as m_Settings.m_Bpp
-    int m_Zbpp;           // Same as m_Settings.m_Zbpp
-    int m_StencilBpp;     // Same as m_Settings.m_StencilBpp
-    CKRenderContextSettings m_RenderContextSettings; // Alias for m_Settings
+    // =====================================================================
+    // Binary-aligned member layout - matches IDA RCKRenderContext (956 bytes)
+    // Base class CKRenderContext at offset 0x00 (20 bytes)
+    // =====================================================================
+    
+    CKDWORD m_WinHandle;                    // 0x14 (4 bytes)
+    CKDWORD m_AppHandle;                    // 0x18 (4 bytes) - WIN_HANDLE
+    CKRECT m_WinRect;                       // 0x1C (16 bytes)
+    CKDWORD m_RenderFlags;                  // 0x2C (4 bytes) - CK_RENDER_FLAGS stored as DWORD
+    CKRenderedScene *m_RenderedScene;       // 0x30 (4 bytes)
+    CKBOOL m_Fullscreen;                    // 0x34 (4 bytes)
+    CKBOOL m_Active;                        // 0x38 (4 bytes)
+    CKBOOL m_Perspective;                   // 0x3C (4 bytes) - renamed from m_PerspectiveOrOrthographic
+    CKBOOL m_ProjectionUpdated;             // 0x40 (4 bytes)
+    CKBOOL m_Start;                         // 0x44 (4 bytes)
+    CKBOOL m_TransparentMode;               // 0x48 (4 bytes)
+    CKBOOL m_DeviceValid;                   // 0x4C (4 bytes)
+    CKCallbacksContainer m_PreRenderCallBacks;      // 0x50 (28 bytes)
+    CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
+    CKCallbacksContainer m_PostSpriteRenderCallBacks;     // 0x88 (28 bytes)
+    RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
+    CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
+    CKRasterizerDriver *m_RasterizerDriver; // 0xAC (4 bytes)
+    CKDWORD m_DriverIndex;                  // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
+    CKDWORD m_Shading;                      // 0xB4 (4 bytes)
+    CKDWORD m_TextureEnabled;               // 0xB8 (4 bytes)
+    CKDWORD m_DisplayWireframe;             // 0xBC (4 bytes)
+    VxFrustum m_Frustum;                    // 0xC0 (172 bytes)
+    float m_Fov;                            // 0x16C (4 bytes)
+    float m_Zoom;                           // 0x170 (4 bytes)
+    float m_NearPlane;                      // 0x174 (4 bytes)
+    float m_FarPlane;                       // 0x178 (4 bytes)
+    VxMatrix m_ProjectionMatrix;            // 0x17C (64 bytes)
+    CKViewportData m_ViewportData;          // 0x1BC (24 bytes)
+    CKRenderContextSettings m_Settings;     // 0x1D4 (28 bytes)
+    CKRenderContextSettings m_FullscreenSettings; // 0x1F0 (28 bytes)
+    VxRect m_CurrentExtents;                // 0x20C (16 bytes)
+    CKDWORD m_FpsFrameCount;                // 0x21C (4 bytes) - frame counter used for FPS smoothing
+    CKDWORD m_TimeFpsCalc;                  // 0x220 (4 bytes)
+    VxTimeProfiler m_RenderTimeProfiler;    // 0x224 (16 bytes)
+    float m_SmoothedFps;                    // 0x234 (4 bytes)
+    VxStats m_Stats;                        // 0x238 (72 bytes)
+    VxTimeProfiler m_DevicePreCallbacksTimeProfiler;    // 0x280 (16 bytes)
+    VxTimeProfiler m_DevicePostCallbacksTimeProfiler;   // 0x290 (16 bytes)
+    VxTimeProfiler m_ObjectsCallbacksTimeProfiler;      // 0x2A0 (16 bytes)
+    VxTimeProfiler m_SpriteCallbacksTimeProfiler;       // 0x2B0 (16 bytes)
+    VxTimeProfiler m_ObjectsRenderTimeProfiler;         // 0x2C0 (16 bytes)
+    VxTimeProfiler m_SceneTraversalTimeProfiler;        // 0x2D0 (16 bytes)
+    VxTimeProfiler m_SkinTimeProfiler;                  // 0x2E0 (16 bytes)
+    VxTimeProfiler m_SpriteTimeProfiler;                // 0x2F0 (16 bytes)
+    VxTimeProfiler m_TransparentObjectsSortTimeProfiler; // 0x300 (16 bytes)
+    RCK3dEntity *m_Current3dEntity;         // 0x310 (4 bytes)
+    RCKTexture *m_TargetTexture;            // 0x314 (4 bytes)
+    // NOTE: m_Texture removed - not in IDA structure
+    CKRST_CUBEFACE m_CubeMapFace;            // 0x318 (4 bytes) - changed type to match IDA
+    float m_FocalLength;                    // 0x31C (4 bytes)
+    float m_EyeSeparation;                  // 0x320 (4 bytes)
+    CKDWORD m_Flags;                        // 0x324 (4 bytes)
+    CKDWORD m_FpsInterval;                  // 0x328 (4 bytes)
+    XString m_CurrentObjectDesc;            // 0x32C (8 bytes)
+    XString m_StateString;                  // 0x334 (8 bytes)
+    CKDWORD m_SceneTraversalCalls;          // 0x33C (4 bytes)
+    CKDWORD m_DrawSceneCalls;               // 0x340 (4 bytes)
+    CKDWORD m_SortTransparentObjects;       // 0x344 (4 bytes)
+    XArray<RCKMaterial*> m_Sprite3DBatches; // 0x348 (12 bytes) - Materials for sprite batch rendering
+    XArray<RCK3dEntity*> m_TransparentObjects; // 0x354 (12 bytes) - Transparent entities for sorting/rendering
+    int m_StencilFreeMask;                  // 0x360 (4 bytes)
+    UserDrawPrimitiveDataClass *m_UserDrawPrimitiveData; // 0x364 (4 bytes)
+    CKDWORD m_MaskFree;                     // 0x368 (4 bytes)
+    CKDWORD m_VertexBufferIndex;            // 0x36C (4 bytes)
+    CKDWORD m_StartIndex;                   // 0x370 (4 bytes)
+    CKDWORD m_DpFlags;                      // 0x374 (4 bytes)
+    CKDWORD m_VertexBufferCount;            // 0x378 (4 bytes)
+    XArray<CKObjectExtents> m_ObjectExtents; // 0x37C (12 bytes) - Object screen extents for picking
+    XArray<CKObjectExtents> m_Extents;      // 0x388 (12 bytes) - Additional extents array
+    XObjectArray m_RootObjects;             // 0x394 (12 bytes) - single array for both 3D and 2D roots
+    RCKCamera *m_Camera;                    // 0x3A0 (4 bytes)
+    RCKTexture *m_NCUTex;                   // 0x3A4 (4 bytes)
+    VxTimeProfiler m_PVTimeProfiler;        // 0x3A8 (16 bytes)
+    CKDWORD m_PVInformation;                // 0x3B8 (4 bytes)
+    // Total: 956 bytes (0x3BC)
 
     void OnClearAll();
 };

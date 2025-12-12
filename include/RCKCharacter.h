@@ -3,6 +3,16 @@
 
 #include "RCK3dEntity.h"
 
+struct CKSecondaryAnimation {
+  CK_ID AnimID;
+  RCKKeyedAnimation *Animation;
+  CKDWORD Flags;
+  float WarpLength;
+  CKDWORD field_14;
+  CK_SECONDARYANIMATION_FLAGS Mode;
+  CKDWORD field_1C;
+};
+
 class RCKCharacter : public RCK3dEntity {
 public:
 
@@ -55,7 +65,22 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    // TODO: Add fields
+    XSArray<RCKBodyPart *> m_BodyParts;
+    XSArray<RCKAnimation *> m_Animations;
+    CKSecondaryAnimation *m_SecondaryAnimations;
+    CKWORD m_SecondaryAnimationsCount;
+    CKWORD m_SecondaryAnimationsAllocated;
+    RCKBodyPart *m_RootBodyPart;
+    RCKKeyedAnimation *m_ActiveAnimation;
+    RCKAnimation *m_AnimDest;
+    RCKKeyedAnimation *m_Warper;
+    float m_FrameDest;
+    CKDWORD field_1D4;
+    RCK3dEntity *m_FloorRef;
+    float m_AnimationLevelOfDetail;
+    float m_FrameSrc;
+    RCKAnimation *m_AnimSrc;
+    CKDWORD m_TransitionMode;
 };
 
 #endif // RCKCHARACTER_H

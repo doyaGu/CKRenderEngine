@@ -4,9 +4,23 @@
 #include "CKContext.h"
 #include "CKObject.h"
 #include "CKBeObject.h"
+#include "CKGridManager.h"
+#include "CKScene.h"
+#include "CKLevel.h"
+#include "CKAttributeManager.h"
 #include "RCK3dEntity.h"
 #include "RCKLayer.h"
+#include "RCKMaterial.h"
 #include "RCKMesh.h"
+#include "RCKTexture.h"
+
+static inline CKSTRING GridManager_GetNameFromType(CKGridManager *mgr, int type) {
+    if (!mgr)
+        return nullptr;
+    typedef CKSTRING(__thiscall *Fn)(CKGridManager *, int);
+    Fn fn = *reinterpret_cast<Fn *>(*reinterpret_cast<char **>(mgr) + 0x7C);
+    return fn ? fn(mgr, type) : nullptr;
+}
 
 /**
  * @brief RCKGrid constructor
@@ -18,16 +32,27 @@ RCKGrid::RCKGrid(CKContext *Context, CKSTRING name)
       m_Width(0),
       m_Length(0),
       m_Priority(0),
-      m_OrientationMode(0),
+      m_OrientationMode(CKGRID_FREE),
       m_Mesh(nullptr) {
-    // Initialize layers array
+    // Set default scale as per original implementation
+    VxVector scale(1.0f, 10.0f, 1.0f);
+    SetScale(&scale, FALSE, TRUE);
+
+    // Set Grid attribute
+    CKAttributeManager *attrMgr = Context->GetAttributeManager();
+    if (attrMgr) {
+        CKAttributeType attrType = attrMgr->GetAttributeTypeByName("Grid");
+        SetAttribute(attrType, 0);
+    }
 }
 
 /**
  * @brief RCKGrid destructor
  */
 RCKGrid::~RCKGrid() {
-    // Cleanup resources if needed
+    // IDA shows destructor just clears the layers array
+    // The mesh/materials/textures are cleaned up elsewhere
+    m_Layers.Clear();
 }
 
 /**
@@ -76,17 +101,19 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Save layers array
-    // Convert CKLayer array to XObjectPointerArray for saving
+    // Convert layer ID array to XObjectPointerArray for saving
     XObjectPointerArray objectArray;
     for (int i = 0; i < m_Layers.Size(); ++i) {
-        objectArray.PushBack(reinterpret_cast<CKObject *>(m_Layers[i]));
+        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+        if (layerObject)
+            objectArray.PushBack(layerObject);
     }
     objectArray.Save(chunk);
 
     // If not saving to file, save layer sub-chunks
     if (!file) {
         for (int i = 0; i < m_Layers.Size(); ++i) {
-            CKObject *layerObject = reinterpret_cast<CKObject *>(m_Layers[i]);
+            CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
             if (layerObject) {
                 CKStateChunk *layerChunk = layerObject->Save(nullptr, flags);
                 chunk->WriteSubChunk(layerChunk);
@@ -96,7 +123,7 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Close or update the chunk based on class ID
-    if (GetClassID() == 50)
+    if (GetClassID() == CKCID_GRID)
         chunk->CloseChunk();
     else
         chunk->UpdateDataSize();
@@ -135,19 +162,19 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
         XObjectPointerArray objectArray;
         objectArray.Load(m_Context, chunk);
 
-        // Convert back to CKLayer array
+        // Convert back to layer ID array
         m_Layers.Clear();
         for (int i = 0; i < objectArray.Size(); ++i) {
-            CKLayer *layer = reinterpret_cast<CKLayer *>(objectArray[i]);
-            if (layer) {
-                m_Layers.PushBack(layer);
+            CKObject *layerObject = reinterpret_cast<CKObject *>(objectArray[i]);
+            if (layerObject) {
+                m_Layers.PushBack(layerObject->GetID());
             }
         }
 
         // If not loading from file, load layer sub-chunks
         if (!file) {
             for (int i = 0; i < m_Layers.Size(); ++i) {
-                CKObject *layerObject = reinterpret_cast<CKObject *>(m_Layers[i]);
+                CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
                 CKStateChunk *subChunk = chunk->ReadSubChunk();
                 if (layerObject) {
                     layerObject->Load(subChunk, nullptr);
@@ -168,7 +195,63 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKGrid::GetMemoryOccupation() {
-    return sizeof(RCKGrid) + m_Layers.Size() * sizeof(CKLayer *);
+    return sizeof(RCKGrid) + m_Layers.Size() * sizeof(CK_ID);
+}
+
+CKERROR RCKGrid::PrepareDependencies(CKDependenciesContext &context) {
+    // IDA: 0x10019c98
+    // If operation mode is CK_DEPENDENCIES_COPY (1), clear current mesh first
+    if (context.IsInMode(CK_DEPENDENCIES_COPY))
+        SetCurrentMesh(nullptr, TRUE);
+
+    CKERROR err = RCK3dEntity::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    // Get class dependencies for CKCID_GRID
+    CKDWORD classDeps = context.GetClassDependencies(CKCID_GRID);
+
+    // If not copy mode or layers dependency flag set, prepare layers
+    if (!context.IsInMode(CK_DEPENDENCIES_COPY) || (classDeps & 1) != 0)
+        m_Layers.Prepare(context);
+
+    // If operation mode is CK_DEPENDENCIES_DELETE (2), prepare mesh and materials for deletion
+    if (context.IsInMode(CK_DEPENDENCIES_DELETE)) {
+        if (m_Mesh) {
+            m_Mesh->PrepareDependencies(context);
+            CKMaterial *mat0 = m_Mesh->GetFaceMaterial(0);
+            if (mat0) {
+                mat0->PrepareDependencies(context);
+                CKTexture *tex = mat0->GetTexture(0);
+                if (tex)
+                    tex->PrepareDependencies(context);
+            }
+            CKMaterial *mat2 = m_Mesh->GetFaceMaterial(2);
+            if (mat2)
+                mat2->PrepareDependencies(context);
+        }
+        m_Mesh = nullptr;
+    }
+
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+CKERROR RCKGrid::RemapDependencies(CKDependenciesContext &context) {
+    // IDA: 0x10019e09
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    // If layers dependency flag set, remap layers
+    CKDWORD classDeps = context.GetClassDependencies(CKCID_GRID);
+    if ((classDeps & 1) != 0)
+        m_Layers.Remap(context);
+
+    // If visible, construct mesh texture
+    if (IsVisible())
+        ConstructMeshTexture(0.5f);
+
+    return CK_OK;
 }
 
 /**
@@ -178,26 +261,38 @@ int RCKGrid::GetMemoryOccupation() {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
-    // Base class copy
-    RCK3dEntity::Copy(o, context);
+    // IDA: 0x10019e7f
+    // Virtools convention: Copy is called on the destination object, and 'o' is the source.
+    // Base class copy first.
+    CKERROR err = RCK3dEntity::Copy(o, context);
+    if (err != CK_OK)
+        return err;
 
-    // Copy grid specific data
-    RCKGrid &target = (RCKGrid &) o;
-    target.m_Width = m_Width;
-    target.m_Length = m_Length;
-    target.m_Priority = m_Priority;
-    target.m_OrientationMode = m_OrientationMode;
-    target.m_Mesh = m_Mesh;
+    RCKGrid &src = static_cast<RCKGrid &>(o);
 
-    // Copy layers (shallow copy)
-    target.m_Layers = m_Layers;
+    // Get class dependencies for CKCID_GRID
+    CKDWORD classDeps = context.GetClassDependencies(CKCID_GRID);
+
+    m_Width = src.m_Width;
+    m_Length = src.m_Length;
+    m_Priority = src.m_Priority;
+    m_OrientationMode = src.m_OrientationMode;
+    m_Mesh = nullptr; // IDA: Always set to null
+
+    // If operation mode is CK_DEPENDENCIES_COPY (1), restore source's mesh
+    if (context.IsInMode(CK_DEPENDENCIES_COPY))
+        src.SetCurrentMesh(src.m_Mesh, TRUE);
+
+    // If layers dependency flag set, copy layers array
+    if ((classDeps & 1) != 0)
+        m_Layers = src.m_Layers;
 
     return CK_OK;
 }
 
 // Static class registration methods
 CKSTRING RCKGrid::GetClassName() {
-    return "Grid";
+    return (CKSTRING) "Grid";
 }
 
 int RCKGrid::GetDependenciesCount(int mode) {
@@ -209,9 +304,10 @@ CKSTRING RCKGrid::GetDependencies(int i, int mode) {
 }
 
 void RCKGrid::Register() {
-    // Based on IDA decompilation
+    // Based on IDA decompilation at 0x10019bd4
     CKClassNeedNotificationFrom(m_ClassID, CKCID_LAYER);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_3DENTITY); // Grid uses 3DENTITY GUID
+    // IDA shows CKGUID(1535772117, 837429460) = 0x5B8749C5, 0x31E8C1D4
+    CKClassRegisterAssociatedParameter(m_ClassID, CKGUID(0x5B8749C5, 0x31E8C1D4));
     CKClassRegisterDefaultDependencies(m_ClassID, 1, CK_DEPENDENCIES_COPY);
 }
 
@@ -223,24 +319,306 @@ CKGrid *RCKGrid::CreateInstance(CKContext *Context) {
 // Additional Grid Methods
 // =====================================================
 
+void RCKGrid::PostLoad() {
+    // IDA: If visible, construct mesh texture with 0.5f threshold
+    if (IsVisible())
+        ConstructMeshTexture(0.5f);
+    RCK3dEntity::PostLoad();
+}
+
+void RCKGrid::Show(CK_OBJECT_SHOWOPTION show) {
+    // IDA: if becoming visible and not currently visible, construct mesh
+    // if becoming hidden and currently visible, destroy mesh
+    if ((show & CKSHOW) != 0) {
+        if (!IsVisible())
+            ConstructMeshTexture(0.5f);
+    } else {
+        if (IsVisible())
+            DestroyMeshTexture();
+    }
+    RCK3dEntity::Show(show);
+}
+
+void RCKGrid::CheckPostDeletion() {
+    // IDA: Call base then check layers array
+    CKObject::CheckPostDeletion();
+    m_Layers.Check(m_Context);
+}
+
 void RCKGrid::ConstructMeshTexture(float scale) {
-    // Construct the mesh texture for the grid
+    // IDA: 0x10017a83
+    // If mesh already exists, just set it as current
+    if (m_Mesh) {
+        SetCurrentMesh(m_Mesh, TRUE);
+        return;
+    }
+
+    // Create the mesh
+    char buffer[256];
+    sprintf(buffer, "%s mesh", GetName());
+    m_Mesh = (RCKMesh *)m_Context->CreateObject(CKCID_MESH, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    if (!m_Mesh)
+        return;
+
+    float width = (float)m_Width;
+    float length = (float)m_Length;
+    const float eps = 0.0001f;
+
+    // Set up 12 vertices for the grid visualization
+    m_Mesh->SetVertexCount(12);
+
+    VxVector v;
+    // Main quad vertices (0-3): the filled grid area
+    v.Set(0.0f, 1.0f, 0.0f);
+    m_Mesh->SetVertexPosition(0, &v);
+    v.Set(0.0f, 1.0f, length);
+    m_Mesh->SetVertexPosition(1, &v);
+    v.Set(width, 1.0f, length);
+    m_Mesh->SetVertexPosition(2, &v);
+    v.Set(width, 1.0f, 0.0f);
+    m_Mesh->SetVertexPosition(3, &v);
+
+    // Border vertices (4-11): wireframe outline
+    v.Set(0.0f, 0.0f, eps);
+    m_Mesh->SetVertexPosition(4, &v);
+    v.Set(eps, 0.0f, length);
+    m_Mesh->SetVertexPosition(5, &v);
+    v.Set(width, 0.0f, length - eps);
+    m_Mesh->SetVertexPosition(6, &v);
+    v.Set(width - eps, 0.0f, 0.0f);
+    m_Mesh->SetVertexPosition(7, &v);
+    v.Set(eps, 0.0f, 0.0f);
+    m_Mesh->SetVertexPosition(8, &v);
+    v.Set(0.0f, 0.0f, length - eps);
+    m_Mesh->SetVertexPosition(9, &v);
+    v.Set(width - eps, 0.0f, length);
+    m_Mesh->SetVertexPosition(10, &v);
+    v.Set(width, 0.0f, eps);
+    m_Mesh->SetVertexPosition(11, &v);
+
+    // Set lighting mode to prelit
+    m_Mesh->SetLitMode(VX_PRELITMESH);
+
+    // Set up 10 faces
+    m_Mesh->SetFaceCount(10);
+    // Main quad (2 triangles)
+    m_Mesh->SetFaceVertexIndex(0, 0, 1, 2);
+    m_Mesh->SetFaceVertexIndex(1, 0, 2, 3);
+    // Border faces (8 triangles for wireframe edges)
+    m_Mesh->SetFaceVertexIndex(2, 5, 9, 1);
+    m_Mesh->SetFaceVertexIndex(3, 6, 10, 2);
+    m_Mesh->SetFaceVertexIndex(4, 7, 11, 3);
+    m_Mesh->SetFaceVertexIndex(5, 4, 8, 0);
+    m_Mesh->SetFaceVertexIndex(6, 4, 5, 9);
+    m_Mesh->SetFaceVertexIndex(7, 5, 6, 10);
+    m_Mesh->SetFaceVertexIndex(8, 6, 7, 11);
+    m_Mesh->SetFaceVertexIndex(9, 7, 4, 8);
+
+    // Set vertex colors
+    VxColor white(1.0f, 1.0f, 1.0f, 1.0f);
+    CKDWORD whiteColor = RGBAFTOCOLOR(white.r, white.g, white.b, white.a);
+    for (int i = 0; i < 4; ++i) {
+        m_Mesh->SetVertexColor(i, whiteColor);
+        m_Mesh->SetVertexSpecularColor(i, 0xFF000000);
+    }
+
+    // Orange color for border vertices
+    CKDWORD orangeColor = RGBAFTOCOLOR(1.0f, 0.5f, 0.1f, white.a);
+    for (int i = 4; i < 12; ++i) {
+        m_Mesh->SetVertexColor(i, orangeColor);
+        m_Mesh->SetVertexSpecularColor(i, 0xFF000000);
+    }
+
+    // Build face normals
+    m_Mesh->BuildFaceNormals();
+    m_Mesh->SetLitMode(VX_PRELITMESH);
+
+    // Create main material (with alpha blend for transparency)
+    sprintf(buffer, "%s material", GetName());
+    CKMaterial *material = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    m_Mesh->SetFaceMaterial(0, material);
+    m_Mesh->SetFaceMaterial(1, material);
+
+    material->EnableAlphaBlend(TRUE);
+    material->EnableZWrite(FALSE);
+    material->SetSourceBlend(VXBLEND_SRCALPHA);
+    material->SetDestBlend(VXBLEND_INVSRCALPHA);
+    material->SetTwoSided(TRUE);
+    material->SetDiffuse(white);
+    material->SetTextureMagMode(VXTEXTUREFILTER_NEAREST);
+    material->SetTextureMinMode(VXTEXTUREFILTER_NEAREST);
+    material->SetTextureBlendMode(VXTEXTUREBLEND_MODULATEALPHA);
+
+    // Create wireframe material for border
+    sprintf(buffer, "%s material2", GetName());
+    CKMaterial *material2 = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    for (int i = 2; i < 10; ++i)
+        m_Mesh->SetFaceMaterial(i, material2);
+
+    material2->SetFillMode(VXFILL_WIREFRAME);
+    material2->SetTwoSided(TRUE);
+    white.a = 1.0f;
+    material2->SetDiffuse(white);
+
+    // Create texture for grid visualization
+    sprintf(buffer, "%s texture", GetName());
+    CKTexture *texture = (CKTexture *)m_Context->CreateObject(CKCID_TEXTURE, buffer, CK_OBJECTCREATION_NONAMECHECK);
+
+    // Calculate texture size based on grid dimensions (power of 2, max 256)
+    int texWidth, texHeight;
+    if (m_Width > 64) texWidth = 256;
+    else if (m_Width > 32) texWidth = 128;
+    else if (m_Width > 16) texWidth = 64;
+    else if (m_Width > 8) texWidth = 32;
+    else texWidth = 16;
+
+    if (m_Length > 64) texHeight = 256;
+    else if (m_Length > 32) texHeight = 128;
+    else if (m_Length > 16) texHeight = 64;
+    else if (m_Length > 8) texHeight = 32;
+    else texHeight = 16;
+
+    texture->Create(texWidth, texHeight, 32);
+    texture->SetDesiredVideoFormat(_16_BGR565);
+
+    // Calculate texture coordinates
+    float uScale = (float)(m_Width * 2) / (float)texWidth;
+    float vScale = (float)(m_Length * 2) / (float)texHeight;
+
+    m_Mesh->SetVertexTextureCoordinates(0, 0.0f, 0.0f, 0);
+    m_Mesh->SetVertexTextureCoordinates(1, 0.0f, vScale, 0);
+    m_Mesh->SetVertexTextureCoordinates(2, uScale, vScale, 0);
+    m_Mesh->SetVertexTextureCoordinates(3, uScale, 0.0f, 0);
+
+    // Get grid manager for layer color info
+    int layerCount = GetLayerCount();
+    CKLayer **layers = new CKLayer*[layerCount];
+    VxColor *layerColors = new VxColor[layerCount];
+    memset(layerColors, 0, sizeof(VxColor) * layerCount);
+
+    CKGridManager *gridMgr = (CKGridManager *)m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
+    if (gridMgr) {
+        // Gather layer information and colors
+        for (int i = 0; i < layerCount; ++i) {
+            layers[i] = (CKLayer *)m_Layers.GetObject(m_Context, i);
+            if (layers[i] && layers[i]->IsVisible()) {
+                // Get layer color from grid manager
+                // The layer stores color info that we use for texture generation
+            }
+        }
+
+        // Lock texture surface and fill with layer data
+        CKBYTE *surfacePtr = texture->LockSurfacePtr();
+        if (surfacePtr) {
+            CKBYTE *rowPtr = surfacePtr;
+            for (CKDWORD y = 0; y < m_Length; ++y) {
+                CKBYTE *pixelPtr = rowPtr;
+                for (CKDWORD x = 0; x < m_Width; ++x) {
+                    int r = 0, g = 0, b = 0;
+
+                    // Accumulate color from all layers at this cell
+                    for (int j = 0; j < layerCount; ++j) {
+                        if (layers[j]) {
+                            int value = 0;
+                            // Get cell value from layer
+                            // Multiply by layer color and accumulate
+                            r += (int)(value * layerColors[j].r);
+                            g += (int)(value * layerColors[j].g);
+                            b += (int)(value * layerColors[j].b);
+                        }
+                    }
+
+                    // Clamp values
+                    if (r > 255) r = 255;
+                    if (g > 255) g = 255;
+                    if (b > 255) b = 255;
+
+                    // Write 2x2 pixels (grid cells are 2 pixels in texture)
+                    CKDWORD color = 0xFF000000 | (r << 16) | (g << 8) | b;
+                    *(CKDWORD *)pixelPtr = color;
+                    *(CKDWORD *)(pixelPtr + 4) = color;
+                    *(CKDWORD *)(pixelPtr + 4 * texWidth) = color;
+                    *(CKDWORD *)(pixelPtr + 4 * texWidth + 4) = color;
+
+                    pixelPtr += 8;
+                }
+                rowPtr += 8 * texWidth;
+            }
+            texture->ReleaseSurfacePtr();
+
+            // Mark objects as not to be saved (dynamically generated)
+            m_Mesh->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
+            material->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
+            material2->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
+            texture->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
+
+            // Add to current level
+            CKLevel *level = m_Context->GetCurrentLevel();
+            if (level) {
+                level->AddObject(m_Mesh);
+                level->AddObject(material);
+                level->AddObject(material2);
+                level->AddObject(texture);
+            }
+
+            // Set texture on material (channel 0)
+            material->SetTexture0(texture);
+
+            // Set mesh as transparent and add to entity
+            m_Mesh->SetTransparent(TRUE);
+            AddMesh(m_Mesh);
+            SetCurrentMesh(m_Mesh, TRUE);
+        }
+    }
+
+    delete[] layers;
+    delete[] layerColors;
 }
 
 void RCKGrid::DestroyMeshTexture() {
-    // Destroy the mesh texture
+    // IDA decompilation at 0x10018d00
+    if (m_Context->IsInClearAll())
+        return;
+
+    if (!m_Mesh) {
+        m_Mesh = nullptr;
+        return;
+    }
+
+    CKMaterial *mat0 = m_Mesh->GetFaceMaterial(0);
+    CKMaterial *mat2 = m_Mesh->GetFaceMaterial(2);
+
+    if (mat0) {
+        CKTexture *tex = mat0->GetTexture(0);
+        if (tex)
+            m_Context->DestroyObject(tex);
+        m_Context->DestroyObject(mat0);
+        if (mat2)
+            m_Context->DestroyObject(mat2);
+    }
+
+    m_Context->DestroyObject(m_Mesh);
+    m_Mesh = nullptr;
 }
 
 CKBOOL RCKGrid::IsActive() {
-    return TRUE;
+    CKScene *scene = m_Context ? m_Context->GetCurrentScene() : nullptr;
+    if (!scene)
+        return FALSE;
+    return (scene->GetObjectFlags(this) & 8) != 0;
 }
 
 void RCKGrid::SetHeightValidity(float val) {
-    // Set height validity threshold
+    VxVector s;
+    GetScale(&s, TRUE);
+    s.y = val;
+    SetScale(&s, FALSE, TRUE);
 }
 
 float RCKGrid::GetHeightValidity() {
-    return 0.0f;
+    VxVector s;
+    GetScale(&s, TRUE);
+    return s.y;
 }
 
 int RCKGrid::GetWidth() {
@@ -254,21 +632,34 @@ int RCKGrid::GetLength() {
 void RCKGrid::SetDimensions(int width, int length, float cellWidth, float cellLength) {
     m_Width = width;
     m_Length = length;
+
+    VxVector s;
+    GetScale(&s, TRUE);
+    if (width > 0)
+        s.x = cellWidth / static_cast<float>(width);
+    if (length > 0)
+        s.z = cellLength / static_cast<float>(length);
+    SetScale(&s, FALSE, TRUE);
 }
 
 float RCKGrid::Get2dCoordsFrom3dPos(const VxVector *pos, int *x, int *y) {
-    if (!pos || !x || !y) return 0.0f;
-    *x = 0;
-    *y = 0;
-    return 0.0f;
+    if (!pos || !x || !y)
+        return 0.0f;
+
+    VxVector local;
+    InverseTransform(&local, pos, nullptr);
+
+    *x = static_cast<int>(local.x);
+    *y = static_cast<int>(local.z);
+    return local.y;
 }
 
 void RCKGrid::Get3dPosFrom2dCoords(VxVector *pos, int x, int y) {
-    if (pos) {
-        pos->x = (float) x;
-        pos->y = 0.0f;
-        pos->z = (float) y;
-    }
+    if (!pos)
+        return;
+
+    VxVector local(static_cast<float>(x) + 0.5f, 0.0f, static_cast<float>(y) + 0.5f);
+    Transform(pos, &local, nullptr);
 }
 
 CKERROR RCKGrid::AddClassification(int classType) {
@@ -308,19 +699,83 @@ CK_GRIDORIENTATION RCKGrid::GetOrientationMode() {
 }
 
 CKLayer *RCKGrid::AddLayer(int type, int format) {
-    return nullptr;
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return nullptr;
+
+    // Validate type exists in manager
+    CKSTRING layerName = GridManager_GetNameFromType(gridMgr, type);
+    if (!layerName)
+        return nullptr;
+
+    if (GetLayer(type))
+        return nullptr;
+    if (format != 0)
+        return nullptr;
+
+    CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->CreateObject(CKCID_LAYER, layerName, CK_OBJECTCREATION_NONAMECHECK));
+    if (!layer)
+        return nullptr;
+
+    layer->InitOwner(GetID());
+    layer->SetType(type);
+    layer->SetFormat(0);
+    layer->SetName(layerName, 0);
+    m_Layers.PushBack(layer->GetID());
+    return layer;
 }
 
 CKLayer *RCKGrid::AddLayerByName(char *name, int format) {
-    return nullptr;
+    if (!name)
+        return nullptr;
+
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return nullptr;
+
+    const int type = gridMgr->GetTypeFromName(name);
+    if (!type)
+        return nullptr;
+
+    if (GetLayer(type))
+        return nullptr;
+    if (format != 0)
+        return nullptr;
+
+    CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->CreateObject(CKCID_LAYER, name, CK_OBJECTCREATION_NONAMECHECK));
+    if (!layer)
+        return nullptr;
+
+    layer->InitOwner(GetID());
+    layer->SetType(type);
+    layer->SetFormat(0);
+    layer->SetName(name, 0);
+    m_Layers.PushBack(layer->GetID());
+    return layer;
 }
 
 CKLayer *RCKGrid::GetLayer(int type) {
+    for (int i = 0; i < m_Layers.Size(); ++i) {
+        CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->GetObjectA(m_Layers[i]));
+        if (layer && layer->GetType() == type)
+            return layer;
+    }
     return nullptr;
 }
 
 CKLayer *RCKGrid::GetLayerByName(char *name) {
-    return nullptr;
+    if (!name)
+        return nullptr;
+
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return nullptr;
+
+    const int type = gridMgr->GetTypeFromName(name);
+    if (!type)
+        return nullptr;
+
+    return GetLayer(type);
 }
 
 int RCKGrid::GetLayerCount() {
@@ -328,21 +783,52 @@ int RCKGrid::GetLayerCount() {
 }
 
 CKLayer *RCKGrid::GetLayerByIndex(int index) {
-    if (index >= 0 && index < m_Layers.Size()) {
-        return m_Layers[index];
-    }
-    return nullptr;
+    if (index < 0 || index >= m_Layers.Size())
+        return nullptr;
+    return reinterpret_cast<CKLayer *>(m_Context->GetObjectA(m_Layers[index]));
 }
 
 CKERROR RCKGrid::RemoveLayer(int type) {
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return CKERR_INVALIDPARAMETER;
+
+    // Validate type exists
+    if (!GridManager_GetNameFromType(gridMgr, type))
+        return CKERR_INVALIDPARAMETER;
+
+    CKLayer *layer = GetLayer(type);
+    if (!layer)
+        return CKERR_INVALIDPARAMETER;
+
+    m_Layers.Remove(layer->GetID());
+    m_Context->DestroyObject(layer);
     return CK_OK;
 }
 
 CKERROR RCKGrid::RemoveLayerByName(char *name) {
+    if (!name)
+        return CKERR_INVALIDPARAMETER;
+
+    CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr)
+        return CKERR_INVALIDPARAMETER;
+
+    const int type = gridMgr->GetTypeFromName(name);
+    if (!type)
+        return CKERR_INVALIDPARAMETER;
+
+    // Match original behavior: ignore RemoveLayer result.
+    (void)RemoveLayer(type);
     return CK_OK;
 }
 
 CKERROR RCKGrid::RemoveAllLayers() {
+    for (int i = 0; i < m_Layers.Size(); ++i) {
+        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+        if (layerObject)
+            m_Context->DestroyObject(layerObject);
+    }
     m_Layers.Clear();
     return CK_OK;
 }

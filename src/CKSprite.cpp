@@ -35,14 +35,14 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
     m_SourceRect = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
 
     RCKRenderManager *rm = (RCKRenderManager *) Context->GetRenderManager();
-    m_PixelFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
+    m_VideoFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
     m_RasterizerContext = nullptr;
     m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_SPRITE);
 }
 
 RCKSprite::~RCKSprite() {
     RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-    if (rm) {
+    if (rm && m_ObjectIndex) {
         rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_SPRITE);
     }
 }
@@ -52,7 +52,7 @@ CK_CLASSID RCKSprite::GetClassID() {
 }
 
 CKSTRING RCKSprite::GetClassName() {
-    return "Sprite";
+    return (CKSTRING) "Sprite";
 }
 
 int RCKSprite::GetDependenciesCount(int mode) {
@@ -108,7 +108,8 @@ CKBOOL RCKSprite::LoadImage(CKSTRING Name, int Slot) {
     int oldWidth = m_BitmapData.m_Width;
     int oldHeight = m_BitmapData.m_Height;
 
-    if (m_BitmapData.LoadSlotImage(filename.Str(), Slot)) {
+    CKBOOL result = m_BitmapData.LoadSlotImage(filename.Str(), Slot);
+    if (result) {
         SetSize(Vx2DVector((float) GetWidth(), (float) GetHeight()));
 
         if (Slot == 0) {
@@ -125,7 +126,7 @@ CKBOOL RCKSprite::LoadImage(CKSTRING Name, int Slot) {
         FreeVideoMemory();
     }
 
-    return TRUE;
+    return result;
 }
 
 CKBOOL RCKSprite::SaveImage(CKSTRING Name, int Slot, CKBOOL CKUseFormat) {
@@ -192,14 +193,14 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
         CKRST_TEXTURE_ALPHA;
     spriteDesc.MipMapCount = 0;
 
-    VxPixelFormat2ImageDesc(m_PixelFormat, spriteDesc.Format);
+    VxPixelFormat2ImageDesc(m_VideoFormat, spriteDesc.Format);
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
         FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
     }
 
     // Handle UNKNOWN_PF - use ARGB1555 format
-    if (m_PixelFormat == UNKNOWN_PF) {
+    if (m_VideoFormat == UNKNOWN_PF) {
         spriteDesc.Format.BitsPerPixel = 16;
         spriteDesc.Format.AlphaMask = 0x8000;
         spriteDesc.Format.RedMask = 0x7C00;
@@ -236,16 +237,11 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
 }
 
 CKBOOL RCKSprite::FreeVideoMemory() {
-    if (m_RasterizerContext) {
-        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_SPRITE);
-        m_RasterizerContext = nullptr;
-        return TRUE;
-    }
-    return FALSE;
+    return m_RasterizerContext && m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_SPRITE);
 }
 
 CKBOOL RCKSprite::IsInVideoMemory() {
-    return m_RasterizerContext != nullptr;
+    return m_RasterizerContext && m_RasterizerContext->GetSpriteData(m_ObjectIndex) != nullptr;
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
@@ -274,11 +270,14 @@ CKBOOL RCKSprite::GetSystemTextureDesc(VxImageDescEx &desc) {
 }
 
 void RCKSprite::SetDesiredVideoFormat(VX_PIXELFORMAT pf) {
-    m_PixelFormat = pf;
+    if (m_VideoFormat != pf) {
+        m_VideoFormat = pf;
+        FreeVideoMemory();
+    }
 }
 
 VX_PIXELFORMAT RCKSprite::GetDesiredVideoFormat() {
-    return m_PixelFormat;
+    return m_VideoFormat;
 }
 
 void RCKSprite::CopySpriteData(RCKSprite *src) {
@@ -299,21 +298,21 @@ void RCKSprite::CopySpriteData(RCKSprite *src) {
     m_BitmapData.m_TransColor = src->m_BitmapData.m_TransColor;
     m_BitmapData.m_SaveOptions = src->m_BitmapData.m_SaveOptions;
     m_BitmapData.m_PickThreshold = src->m_BitmapData.m_PickThreshold;
-    m_PixelFormat = src->m_PixelFormat;
+    m_VideoFormat = src->m_VideoFormat;
 
-    int slotCount = src->GetSlotCount();
+    const int slotCount = src->GetSlotCount();
     SetSlotCount(slotCount);
 
+    const size_t byteCount = (size_t) (4 * m_BitmapData.m_Height * m_BitmapData.m_Width);
     for (int i = 0; i < slotCount; ++i) {
         CKBYTE *srcPtr = src->LockSurfacePtr(i);
-        CKSTRING filename = src->GetSlotFileName(i);
-        SetSlotFileName(i, filename);
-
+        SetSlotFileName(i, src->GetSlotFileName(i));
         if (srcPtr) {
+            // Original allocates per-slot storage then memcpy 32bpp (4*W*H).
             m_BitmapData.CreateImage(m_BitmapData.m_Width, m_BitmapData.m_Height, 32, i);
             CKBYTE *dstPtr = m_BitmapData.LockSurfacePtr(i);
-            if (dstPtr && srcPtr) {
-                memcpy(dstPtr, srcPtr, m_BitmapData.m_Width * m_BitmapData.m_Height * 4);
+            if (dstPtr) {
+                memcpy(dstPtr, srcPtr, byteCount);
             }
         }
     }
@@ -323,10 +322,8 @@ CKERROR RCKSprite::Copy(CKObject &o, CKDependenciesContext &context) {
     CKERROR err = RCK2dEntity::Copy(o, context);
     if (err != CK_OK) return err;
 
-    if (CKIsChildClassOf(&o, CKCID_SPRITE)) {
-        RCKSprite *src = (RCKSprite *) &o;
-        CopySpriteData(src);
-    }
+    context.GetClassDependencies(CKCID_SPRITE);
+    CopySpriteData((RCKSprite *) &o);
     return CK_OK;
 }
 
@@ -434,15 +431,37 @@ void RCKSprite::PostLoad() {
 }
 
 int RCKSprite::GetMemoryOccupation() {
-    return RCK2dEntity::GetMemoryOccupation() + sizeof(CKBitmapData);
+    return RCK2dEntity::GetMemoryOccupation() + sizeof(CKBitmapData) + sizeof(VX_PIXELFORMAT) + sizeof(CKRasterizerContext *) + sizeof(CKDWORD);
 }
 
 CKERROR RCKSprite::PrepareDependencies(CKDependenciesContext &context) {
-    return RCK2dEntity::PrepareDependencies(context);
+    CKERROR err = RCK2dEntity::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+    return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
 CKERROR RCKSprite::RemapDependencies(CKDependenciesContext &context) {
     return RCK2dEntity::RemapDependencies(context);
+}
+
+CKBOOL RCKSprite::LoadMovie(CKSTRING Name, int width, int height, int Bpp) {
+    if (!Name) return FALSE;
+
+    XString filename(Name);
+    CKPathManager *pm = m_Context->GetPathManager();
+    pm->ResolveFileName(filename, BITMAP_PATH_IDX, -1);
+
+    if (m_BitmapData.LoadMovieFile(filename.Str())) {
+        SetSize(Vx2DVector((float) GetWidth(), (float) GetHeight()));
+        m_SourceRect.left = 0.0f;
+        m_SourceRect.top = 0.0f;
+        m_SourceRect.right = (float) GetWidth();
+        m_SourceRect.bottom = (float) GetHeight();
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 // Proxy methods for CKBitmapData
@@ -462,7 +481,6 @@ int RCKSprite::GetSlotCount() { return m_BitmapData.GetSlotCount(); }
 CKBOOL RCKSprite::SetSlotCount(int Count) { return m_BitmapData.SetSlotCount(Count); }
 int RCKSprite::GetCurrentSlot() { return m_BitmapData.GetCurrentSlot(); }
 CKBOOL RCKSprite::SetCurrentSlot(int Slot) { return m_BitmapData.SetCurrentSlot(Slot); }
-CKBOOL RCKSprite::LoadMovie(CKSTRING Name, int width, int height, int Bpp) { return m_BitmapData.LoadMovieFile(Name); }
 CKSTRING RCKSprite::GetMovieFileName() { return m_BitmapData.GetMovieFileName(); }
 CKMovieReader *RCKSprite::GetMovieReader() { return m_BitmapData.GetMovieReader(); }
 void RCKSprite::SetPickThreshold(int Threshold) { m_BitmapData.SetPickThreshold(Threshold); }

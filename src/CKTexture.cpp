@@ -1,5 +1,6 @@
 #include "RCKTexture.h"
 
+#include "CKBitmapReader.h"
 #include "CKPathManager.h"
 #include "CKRasterizer.h"
 #include "CKStateChunk.h"
@@ -44,7 +45,7 @@ CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
     int oldWidth = GetWidth();
     int oldHeight = GetHeight();
 
-    CKBOOL result = CKBitmapData::CreateImage(Width, Height, BPP, Slot);
+    CKBOOL result = CreateImage(Width, Height, BPP, Slot);
 
     if (oldWidth != GetWidth() || oldHeight != GetHeight())
         FreeVideoMemory();
@@ -53,25 +54,43 @@ CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
 }
 
 CKBOOL RCKTexture::LoadImage(CKSTRING Name, int Slot) {
+    if (!Name)
+        return FALSE;
+
+    SetUserMipMapMode(0);
+
+    int oldWidth = GetWidth();
+    int oldHeight = GetHeight();
+
     XString path(Name);
     m_Context->GetPathManager()->ResolveFileName(path, BITMAP_PATH_IDX, -1);
 
-    if (!CKBitmapData::LoadSlotImage(path, Slot))
-        return FALSE;
+    CKBOOL result = LoadSlotImage(path, Slot);
+    if (!result)
+        SetSlotFileName(Slot, Name);
 
-    FreeVideoMemory();
-    return TRUE;
+    if (oldWidth != GetWidth() || oldHeight != GetHeight())
+        FreeVideoMemory();
+
+    return result;
 }
 
 CKBOOL RCKTexture::LoadMovie(CKSTRING Name) {
-    XString path(Name);
-    m_Context->GetPathManager()->ResolveFileName(path, BITMAP_PATH_IDX, -1);
+    SetUserMipMapMode(0);
 
-    if (!CKBitmapData::LoadMovieFile(path))
+    if (!Name)
         return FALSE;
 
     FreeVideoMemory();
-    return TRUE;
+
+    XString path(Name);
+    m_Context->GetPathManager()->ResolveFileName(path, BITMAP_PATH_IDX, -1);
+
+    CKBOOL result = LoadMovieFile(path);
+    if (!result)
+        m_Context->OutputToConsole("Movie can not be loaded...", TRUE);
+
+    return result;
 }
 
 CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int TextureStage) {
@@ -345,7 +364,10 @@ CKBOOL RCKTexture::GetSystemTextureDesc(VxImageDescEx &desc) {
 }
 
 void RCKTexture::SetDesiredVideoFormat(VX_PIXELFORMAT Format) {
-    m_DesiredVideoFormat = Format;
+    if (m_DesiredVideoFormat != Format) {
+        m_DesiredVideoFormat = Format;
+        FreeVideoMemory();
+    }
 }
 
 VX_PIXELFORMAT RCKTexture::GetDesiredVideoFormat() {
@@ -451,7 +473,67 @@ CK_CLASSID RCKTexture::GetClassID() {
 }
 
 CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
-    return CKBeObject::Save(file, flags);
+    CKStateChunk *baseChunk = CKBeObject::Save(file, flags);
+    if (!file && (flags & 0x2FF000) == 0)
+        return baseChunk;
+
+    CKStateChunk *chunk = CreateCKStateChunk(CKCID_TEXTURE, file);
+    chunk->StartWrite();
+    chunk->AddChunkAndDelete(baseChunk);
+
+    CKDWORD identifiers[4] = {
+        CK_STATESAVE_TEXAVIFILENAME,   // 0x1000
+        CK_STATESAVE_TEXREADER,        // 0x100000
+        CK_STATESAVE_TEXCOMPRESSED,    // 0x20000
+        CK_STATESAVE_TEXFILENAMES      // 0x10000
+    };
+    DumpToChunk(chunk, m_Context, file, identifiers);
+
+    if (m_PickThreshold) {
+        chunk->WriteIdentifier(CK_STATESAVE_PICKTHRESHOLD);
+        chunk->WriteInt(m_PickThreshold);
+    }
+
+    chunk->WriteIdentifier(CK_STATESAVE_OLDTEXONLY);
+    CKDWORD dword = (CKBYTE) m_MipMapLevel;
+    dword |= (m_SaveOptions << 16);
+    if (IsTransparent())
+        dword |= 0x100;
+    if (m_BitmapFlags & 0x10)  // IsCubeMap
+        dword |= 0x400;
+    if (m_DesiredVideoFormat != UNKNOWN_PF)
+        dword |= 0x200;
+
+    chunk->WriteDword(dword);
+    chunk->WriteDword(GetTransparentColor());
+
+    if (GetSlotCount() > 1)
+        chunk->WriteInt(GetCurrentSlot());
+
+    if (m_DesiredVideoFormat != UNKNOWN_PF)
+        chunk->WriteDword(m_DesiredVideoFormat);
+
+    if (m_SaveProperties) {
+        chunk->WriteIdentifier(CK_STATESAVE_TEXSAVEFORMAT);
+        chunk->WriteBuffer(m_SaveProperties->m_Size, m_SaveProperties);
+    }
+
+    if (m_MipMaps) {
+        chunk->WriteIdentifier(CK_STATESAVE_USERMIPMAP);
+        chunk->WriteInt(m_MipMaps->Size());
+        int count = m_MipMaps->Size();
+        for (int i = 0; i < count; ++i) {
+            VxImageDescEx *mipmap = m_MipMaps->At(i);
+            chunk->WriteRawBitmap(*mipmap);
+        }
+    }
+
+    if (GetClassID() == CKCID_TEXTURE)
+        chunk->CloseChunk();
+    else
+        chunk->UpdateDataSize();
+
+    return chunk;
 }
 
 CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
@@ -589,7 +671,55 @@ int RCKTexture::GetMemoryOccupation() {
 }
 
 CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
-    return CKBeObject::Copy(o, context);
+    CKERROR err = CKBeObject::Copy(o, context);
+    if (err != CK_OK)
+        return err;
+
+    RCKTexture *src = static_cast<RCKTexture *>(&o);
+
+    context.GetClassDependencies(CKCID_TEXTURE);
+
+    // Copy movie if present
+    if (GetMovieFileName())
+        LoadMovie(src->GetMovieFileName());
+
+    // Copy save properties if present
+    if (src->m_SaveProperties)
+        m_SaveProperties = CKCopyBitmapProperties(src->m_SaveProperties);
+
+    // Copy bitmap data members
+    m_Width = src->m_Width;
+    m_Height = src->m_Height;
+    m_CurrentSlot = src->m_CurrentSlot;
+    m_BitmapFlags = src->m_BitmapFlags;
+    m_TransColor = src->m_TransColor;
+    m_SaveOptions = src->m_SaveOptions;
+    m_PickThreshold = src->m_PickThreshold;
+
+    // Copy texture-specific members
+    m_DesiredVideoFormat = src->m_DesiredVideoFormat;
+    m_MipMapLevel = src->m_MipMapLevel;
+
+    // Copy slot count and contents
+    SetSlotCount(src->GetSlotCount());
+
+    int imageSize = m_Width * m_Height * 4;
+    for (int i = 0; i < GetSlotCount(); ++i) {
+        CKBYTE *srcImage = src->LockSurfacePtr(i);
+        SetSlotFileName(i, src->GetSlotFileName(i));
+
+        if (srcImage) {
+            CreateImage(m_Width, m_Height, 32, i);
+            CKBYTE *dstImage = LockSurfacePtr(i);
+            if (dstImage) {
+                memcpy(dstImage, srcImage, imageSize);
+                ReleaseSurfacePtr(i);
+            }
+            src->ReleaseSurfacePtr(i);
+        }
+    }
+
+    return CK_OK;
 }
 
 CKSTRING RCKTexture::GetClassName() {

@@ -19,14 +19,12 @@ RCKObjectAnimation::RCKObjectAnimation(CKContext *Context, CKSTRING name)
       m_MergeFactor(0.0f),
       m_Anim1(nullptr),
       m_Anim2(nullptr),
-      m_IsMerged(FALSE) {
-}
+      m_IsMerged(FALSE) {}
 
-RCKObjectAnimation::~RCKObjectAnimation() {
-}
+RCKObjectAnimation::~RCKObjectAnimation() {}
 
 CK_CLASSID RCKObjectAnimation::GetClassID() {
-    return CKCID_OBJECTANIMATION;
+    return m_ClassID;
 }
 
 //=============================================================================
@@ -850,7 +848,7 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
     // Release current keyframe data if we own it
     if (m_KeyframeData) {
         // Decrement reference count
-        if (--m_KeyframeData->field_18 <= 0 && m_KeyframeData) {
+        if (--m_KeyframeData->m_RefCount <= 0 && m_KeyframeData) {
             // Free the keyframe data
             delete m_KeyframeData;
         }
@@ -862,7 +860,7 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
         // Share the keyframe data with source
         m_KeyframeData = srcAnim->m_KeyframeData;
         if (m_KeyframeData)
-            ++m_KeyframeData->field_18; // Increment reference count
+            ++m_KeyframeData->m_RefCount; // Increment reference count
     } else {
         // Create new keyframe data
         m_KeyframeData = new CKKeyframeData();

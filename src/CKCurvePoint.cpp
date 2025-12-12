@@ -96,7 +96,7 @@ CKStateChunk *RCKCurvePoint::Save(CKFile *file, CKDWORD flags) {
     chunk->WriteVector(&m_m_TangentOut);
 
     // Close or update the chunk based on class ID
-    if (GetClassID() == 36)
+    if (GetClassID() == CKCID_CURVEPOINT)
         chunk->CloseChunk();
     else
         chunk->UpdateDataSize();
