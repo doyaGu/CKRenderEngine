@@ -234,8 +234,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // Create default material
     CK_DEBUG_LOG("About to create default material");
-    m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat",
-                                                          CK_OBJECTCREATION_NONAMECHECK);
+    m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
     if (m_DefaultMat) {
         CK_DEBUG_LOG_FMT("Default material created at %p", m_DefaultMat);
         m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
@@ -246,8 +245,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // Create 2D root entities
     CK_DEBUG_LOG("About to create 2DRootFore");
-    m_2DRootFore = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootFore",
-                                                          CK_OBJECTCREATION_NONAMECHECK);
+    m_2DRootFore = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootFore", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootFore) {
         CK_DEBUG_LOG_FMT("2DRootFore created at %p", m_2DRootFore);
         m_2DRootFore->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
@@ -256,6 +254,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         CK_DEBUG_LOG("2DRootFore entity flags modified");
         m_2DRootFore->Show(CKHIDE);
         CK_DEBUG_LOG("2DRootFore hidden");
+        m_2DRootForeName = m_2DRootFore->GetID();
     } else {
         CK_DEBUG_LOG("Failed to create 2DRootFore");
     }
@@ -271,6 +270,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         CK_DEBUG_LOG("2DRootBack entity flags modified");
         m_2DRootBack->Show(CKHIDE);
         CK_DEBUG_LOG("2DRootBack hidden");
+        m_2DRootBackName = m_2DRootBack->GetID();
     } else {
         CK_DEBUG_LOG("Failed to create 2DRootBack");
     }
@@ -279,56 +279,52 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     RegisterDefaultEffects();
 
     // Initialize scene graph root node with full render context mask
-    m_CKSceneGraphRootNode.m_RenderContextMask = 0xFFFFFFFF;
-    m_CKSceneGraphRootNode.m_EntityMask = 0xFFFFFFFF;
+    m_SceneGraphRootNode.m_RenderContextMask = 0xFFFFFFFF;
+    m_SceneGraphRootNode.m_EntityMask = 0xFFFFFFFF;
 
     CK_DEBUG_LOG_FMT("RCKRenderManager initialization complete - %d drivers available", m_DriverCount);
 }
 
+RCKRenderManager::~RCKRenderManager() {
+    // Clean up drivers
+    for (int i = 0; i < m_DriverCount; ++i) {
+        delete[] m_Drivers[i].DisplayModes;
+        m_Drivers[i].TextureFormats.Clear();
+    }
+    delete[] m_Drivers;
+    m_Drivers = nullptr;
+
+    // Close rasterizers
+    int rstInfoCount = g_RasterizersInfo.Size();
+    for (int i = 0; i < rstInfoCount; ++i) {
+        CKRasterizerInfo &info = g_RasterizersInfo[i];
+        if (info.CloseFct && m_Rasterizers[i]) {
+            info.CloseFct(m_Rasterizers[i]);
+        }
+    }
+
+    // Clear effects
+    m_Effects.Clear();
+
+    // Clear options
+    m_Options.Clear();
+
+    // Clear vertex buffers
+    m_VertexBuffers.Clear();
+
+    // Clear rasterizers array
+    m_Rasterizers.Clear();
+
+    // Clear render contexts
+    m_RenderContexts.Clear();
+
+    // Clear callback arrays
+    m_TemporaryPreRenderCallbacks.Clear();
+    m_TemporaryPostRenderCallbacks.Clear();
+}
+
 CKERROR RCKRenderManager::PreClearAll() {
-    m_CKSceneGraphRootNode.Clear();
-    m_CKSceneGraphRootNode.m_TransparentObjects.Clear();
-    m_CKSceneGraphRootNode.m_RenderContextMask = 0xFFFFFFFF;
-    m_CKSceneGraphRootNode.m_EntityMask = 0xFFFFFFFF;
-    m_CKSceneGraphRootNode.m_ChildToBeParsedCount = 0;
-
-    // Rebuild scene graph nodes for all existing 3D entities so they keep valid links
-    XArray<RCK3dEntity *> entities;
-    for (int i = 0; i < CKGetClassCount(); ++i) {
-        if (!CKIsChildClassOf(i, CKCID_3DENTITY))
-            continue;
-
-        int count = m_Context->GetObjectsCountByClassID(i);
-        CK_ID *ids = m_Context->GetObjectsListByClassID(i);
-        for (int j = 0; j < count; ++j) {
-            RCK3dEntity *entity = (RCK3dEntity *) m_Context->GetObject(ids[j]);
-            if (entity)
-                entities.PushBack(entity);
-        }
-    }
-
-    // Pass 1: recreate nodes (attached to root by CreateNode)
-    for (int i = 0; i < entities.Size(); ++i) {
-        RCK3dEntity *entity = entities[i];
-        entity->m_SceneGraphNode = CreateNode(entity);
-    }
-
-    // Pass 2: reattach to real parents and restore render context masks
-    for (int i = 0; i < entities.Size(); ++i) {
-        RCK3dEntity *entity = entities[i];
-        CKSceneGraphNode *node = entity->m_SceneGraphNode;
-        if (!node)
-            continue;
-
-        // Move under its parent node if present
-        if (entity->m_Parent && entity->m_Parent->m_SceneGraphNode) {
-            m_CKSceneGraphRootNode.RemoveNode(node);
-            entity->m_Parent->m_SceneGraphNode->AddNode(node);
-        }
-
-        node->SetRenderContextMask(entity->GetInRenderContextMask(), TRUE);
-    }
-
+    m_SceneGraphRootNode.Clear();
     DetachAllObjects();
     ClearTemporaryCallbacks();
     DeleteAllVertexBuffers();
@@ -347,71 +343,68 @@ CKERROR RCKRenderManager::PreClearAll() {
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCK3dEntity *entity = (RCK3dEntity *) m_Context->GetObject(ids[j]);
-                if (entity)
-                    entity->RemoveAllCallbacks();
+                entity->RemoveAllCallbacks();
             }
         } else if (CKIsChildClassOf(i, CKCID_MESH)) {
             int count = m_Context->GetObjectsCountByClassID(i);
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCKMesh *mesh = (RCKMesh *) m_Context->GetObject(ids[j]);
-                if (mesh)
-                    mesh->RemoveAllCallbacks();
+                mesh->RemoveAllCallbacks();
             }
         }
     }
 
     m_DefaultMat = nullptr;
+    CK_DEBUG_LOG_FMT("RCKRenderManager PreClearAll complete");
     return CK_OK;
 }
 
 CKERROR RCKRenderManager::PreProcess() {
-    return CKBaseManager::PreProcess();
+    SaveLastFrameMatrix();
+    CleanMovedEntities();
+    RemoveAllTemporaryCallbacks();
+    return CK_OK;
 }
 
 CKERROR RCKRenderManager::PostProcess() {
-    return CKBaseManager::PostProcess();
+    // Set moved flag on all moved entities
+    for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin(); 
+         it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
+        (*it)->m_MoveableFlags |= 0x40000000;
+    }
+
+    // Clear extents for all render contexts
+    int ctxCount = GetRenderContextCount();
+    for (int j = 0; j < ctxCount; ++j) {
+        RCKRenderContext *ctx = (RCKRenderContext *) GetRenderContext(j);
+        if (ctx) {
+            ctx->m_Extents.Resize(0);
+        }
+    }
+
+    return CK_OK;
 }
 
 CKERROR RCKRenderManager::SequenceAddedToScene(CKScene *scn, CK_ID *objids, int count) {
     CK_DEBUG_LOG_FMT("SequenceAddedToScene: scn=%p, count=%d", scn, count);
     
-    // Try to add to Level's render contexts first
     CKLevel *level = m_Context->GetCurrentLevel();
-    int ctxCount = 0;
-    
-    if (level && level->GetCurrentScene() == scn) {
-        ctxCount = level->GetRenderContextCount();
-        CK_DEBUG_LOG_FMT("SequenceAddedToScene: Level has %d render contexts", ctxCount);
-        for (int i = 0; i < ctxCount; ++i) {
-            CKRenderContext *ctx = level->GetRenderContext(i);
-            if (ctx) {
-                for (int j = 0; j < count; ++j) {
-                    CKObject *obj = m_Context->GetObject(objids[j]);
-                    if (obj && CKIsChildClassOf(obj, CKCID_RENDEROBJECT)) {
-                        CK_DEBUG_LOG_FMT("SequenceAddedToScene: Adding object %s (class=%X) to level context", 
-                                         obj->GetName() ? obj->GetName() : "(null)", obj->GetClassID());
-                        ctx->AddObjectWithHierarchy((CKRenderObject *) obj);
-                    }
-                }
-            }
-        }
-    }
-    
-    // If no level contexts, add to all render contexts managed by RenderManager
-    if (ctxCount == 0) {
-        ctxCount = GetRenderContextCount();
-        CK_DEBUG_LOG_FMT("SequenceAddedToScene: No level contexts, using %d manager contexts", ctxCount);
-        for (int i = 0; i < ctxCount; ++i) {
-            CKRenderContext *ctx = GetRenderContext(i);
-            if (ctx) {
-                for (int j = 0; j < count; ++j) {
-                    CKObject *obj = m_Context->GetObject(objids[j]);
-                    if (obj && CKIsChildClassOf(obj, CKCID_RENDEROBJECT)) {
-                        CK_DEBUG_LOG_FMT("SequenceAddedToScene: Adding object %s (class=%X) to manager context", 
-                                         obj->GetName() ? obj->GetName() : "(null)", obj->GetClassID());
-                        ctx->AddObjectWithHierarchy((CKRenderObject *) obj);
-                    }
+    if (!level)
+        return CK_OK;
+
+    if (level->GetCurrentScene() != scn)
+        return CK_OK;
+
+    int ctxCount = level->GetRenderContextCount();
+    for (int i = 0; i < ctxCount; ++i) {
+        CKRenderContext *ctx = level->GetRenderContext(i);
+        if (ctx) {
+            for (int j = 0; j < count; ++j) {
+                CKObject *obj = m_Context->GetObject(objids[j]);
+                if (obj && CKIsChildClassOf(obj, CKCID_RENDEROBJECT)) {
+                    CK_DEBUG_LOG_FMT("SequenceAddedToScene: Adding object to render context");
+                    ctx->AddObject((CKRenderObject *) obj);
                 }
             }
         }
@@ -444,7 +437,22 @@ CKERROR RCKRenderManager::SequenceRemovedFromScene(CKScene *scn, CK_ID *objids, 
 }
 
 CKERROR RCKRenderManager::OnCKEnd() {
-    return CKBaseManager::OnCKEnd();
+    CKObject *obj = m_Context->GetObject(m_2DRootForeName);
+    if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
+        m_Context->DestroyObject(m_2DRootBack);
+    }
+    
+    obj = m_Context->GetObject(m_2DRootBackName);
+    if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
+        m_Context->DestroyObject(m_2DRootFore);
+    }
+    
+    m_2DRootBack = nullptr;
+    m_2DRootFore = nullptr;
+    m_2DRootForeName = 0;
+    m_2DRootBackName = 0;
+    
+    return CK_OK;
 }
 
 CKERROR RCKRenderManager::OnCKPause() {
@@ -461,9 +469,9 @@ CKERROR RCKRenderManager::OnCKPause() {
 }
 
 CKERROR RCKRenderManager::SequenceToBeDeleted(CK_ID *objids, int count) {
-    m_Objects.Check();
+    m_Entities.Check();
     m_MovedEntities.Check();
-    m_CKSceneGraphRootNode.Check();
+    m_SceneGraphRootNode.Check();
     return CK_OK;
 }
 
@@ -473,7 +481,15 @@ CKERROR RCKRenderManager::SequenceDeleted(CK_ID *objids, int count) {
 }
 
 CKDWORD RCKRenderManager::GetValidFunctionsMask() {
-    return 0xC029F;
+    return CKMANAGER_FUNC_OnSequenceToBeDeleted |
+           CKMANAGER_FUNC_OnSequenceDeleted |
+           CKMANAGER_FUNC_PreProcess |
+           CKMANAGER_FUNC_PostProcess |
+           CKMANAGER_FUNC_PreClearAll |
+           CKMANAGER_FUNC_OnCKEnd |
+           CKMANAGER_FUNC_OnCKPause |
+           CKMANAGER_FUNC_OnSequenceAddedToScene |
+           CKMANAGER_FUNC_OnSequenceRemovedFromScene;
 }
 
 int RCKRenderManager::GetRenderDriverCount() {
@@ -495,7 +511,7 @@ VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
     VxDriverDescEx *drv = &m_Drivers[Driver];
     CK_DEBUG_LOG_FMT("GetRenderDriverDescription: drv=%p, CapsUpToDate=%d", drv, drv->CapsUpToDate);
 
-    if (!drv->CapsUpToDate && drv->RasterizerDriver) {
+    if (!drv->CapsUpToDate) {
         CK_DEBUG_LOG("GetRenderDriverDescription: Updating caps");
         UpdateDriverDescCaps(drv);
     }
@@ -538,6 +554,18 @@ CKRenderContext *RCKRenderManager::GetRenderContext(int pos) {
 }
 
 CKRenderContext *RCKRenderManager::GetRenderContextFromPoint(CKPOINT &pt) {
+    for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
+        RCKRenderContext *ctx = (RCKRenderContext *) m_Context->GetObject(*it);
+        if (ctx) {
+            WIN_HANDLE win = ctx->GetWindowHandle();
+            if (win) {
+                CKRECT rect;
+                VxGetWindowRect(win, &rect);
+                if (VxPtInRect(&rect, &pt))
+                    return ctx;
+            }
+        }
+    }
     return nullptr;
 }
 
@@ -549,7 +577,7 @@ void RCKRenderManager::Process() {
     for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
         CKRenderContext *dev = (CKRenderContext *) m_Context->GetObject(*it);
         if (dev)
-            dev->Render();
+            dev->Render(CK_RENDER_USECURRENTSETTINGS);
     }
 }
 
@@ -579,59 +607,17 @@ void RCKRenderManager::FlushTextures() {
     }
 }
 
-CKRenderContext *RCKRenderManager::CreateRenderContext(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen,
-                                                       int Bpp, int Zbpp, int StencilBpp, int RefreshRate) {
-    CK_DEBUG_LOG_FMT("CreateRenderContext: Window=%p, Driver=%d, Fullscreen=%d, Bpp=%d", Window, Driver, Fullscreen,
-                     Bpp);
-
-    RCKRenderContext *dev = (RCKRenderContext *) m_Context->CreateObject(CKCID_RENDERCONTEXT);
-    if (!dev) {
-        CK_DEBUG_LOG("CreateRenderContext: Failed to create RenderContext object");
+CKRenderContext *RCKRenderManager::CreateRenderContext(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp, int StencilBpp, int RefreshRate) {
+    RCKRenderContext *dev = (RCKRenderContext *) m_Context->CreateObject(CKCID_RENDERCONTEXT, nullptr, CK_OBJECTCREATION_NONAMECHECK);
+    if (!dev)
         return nullptr;
-    }
-
-    // Allocate a free mask bit for this context
-    // Find first available bit in m_RenderContextMaskFree
-    CKDWORD mask = 0;
-    for (int i = 0; i < 32; i++) {
-        CKDWORD bit = (1 << i);
-        if (m_RenderContextMaskFree & bit) {
-            mask = bit;
-            m_RenderContextMaskFree &= ~bit;  // Mark as used
-            break;
-        }
-    }
-    
-    if (mask == 0) {
-        CK_DEBUG_LOG("CreateRenderContext: No free render context mask available");
-        m_Context->DestroyObject(dev);
-        return nullptr;
-    }
-    
-    dev->m_MaskFree = mask;
-    CK_DEBUG_LOG_FMT("CreateRenderContext: Allocated mask 0x%X", mask);
-
-    CK_DEBUG_LOG("CreateRenderContext: RenderContext object created, calling Create...");
 
     if (dev->Create(Window, Driver, rect, Fullscreen, Bpp, Zbpp, StencilBpp, RefreshRate) != CK_OK) {
-        CK_DEBUG_LOG("CreateRenderContext: Create failed, destroying object");
-        m_RenderContextMaskFree |= mask;  // Return mask to free pool
         m_Context->DestroyObject(dev);
         return nullptr;
     }
 
-    CK_DEBUG_LOG("CreateRenderContext: Success");
-    CK_DEBUG_LOG_FMT("CreateRenderContext: dev=%p, dev->GetID()=%d", dev, dev->GetID());
-    CK_DEBUG_LOG("CreateRenderContext: About to add to m_RenderContexts");
     m_RenderContexts.PushBack(dev->GetID());
-    CK_DEBUG_LOG("CreateRenderContext: Added to m_RenderContexts");
-    
-    // Verify 2D roots are accessible from the newly created context
-    CK2dEntity *fore = dev->Get2dRoot(FALSE);
-    CK2dEntity *back = dev->Get2dRoot(TRUE);
-    CK_DEBUG_LOG_FMT("CreateRenderContext: Verifying 2D roots - fore=%p back=%p", fore, back);
-    
-    CK_DEBUG_LOG_FMT("CreateRenderContext: Returning dev=%p", dev);
     return dev;
 }
 
@@ -652,7 +638,7 @@ CKERROR RCKRenderManager::DestroyRenderContext(CKRenderContext *context) {
 
 void RCKRenderManager::RemoveRenderContext(CKRenderContext *context) {
     if (context)
-        m_RenderContexts.RemoveObject(context);
+        m_RenderContexts.Remove(context->GetID());
 }
 
 CKVertexBuffer *RCKRenderManager::CreateVertexBuffer() {
@@ -663,12 +649,19 @@ CKVertexBuffer *RCKRenderManager::CreateVertexBuffer() {
 
 void RCKRenderManager::DestroyVertexBuffer(CKVertexBuffer *VB) {
     if (VB) {
-        m_VertexBuffers.Remove(VB);
-        delete VB;
+        if (m_VertexBuffers.Remove(VB))
+            delete VB;
     }
 }
 
 void RCKRenderManager::SetRenderOptions(CKSTRING RenderOptionString, CKDWORD Value) {
+    for (int i = 0; i < m_Options.Size(); ++i) {
+        VxOption *option = m_Options[i];
+        if (stricmp(option->Key.CStr(), RenderOptionString) == 0) {
+            option->Value = Value;
+            return;
+        }
+    }
 }
 
 const VxEffectDescription &RCKRenderManager::GetEffectDescription(int EffectIndex) {
@@ -682,7 +675,7 @@ int RCKRenderManager::GetEffectCount() {
 int RCKRenderManager::AddEffect(const VxEffectDescription &NewEffect) {
     int size = m_Effects.Size();
     m_Effects.PushBack(NewEffect);
-    // *((_DWORD *)XArray::End(&this->m_Effects) - 23) = size;
+    m_Effects[size].EffectIndex = (VX_EFFECT)size;
     return size;
 }
 
@@ -698,34 +691,161 @@ CKBOOL RCKRenderManager::ReleaseObjectIndex(CKDWORD index, CKRST_OBJECTTYPE type
     return m_Drivers->Rasterizer->ReleaseObjectIndex(index, type, TRUE);
 }
 
+CKMaterial *RCKRenderManager::GetDefaultMaterial() {
+    if (!m_DefaultMat) {
+        m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
+        if (m_DefaultMat) {
+            CK_DEBUG_LOG_FMT("Default material created at %p", m_DefaultMat);
+            m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+            CK_DEBUG_LOG("Default material flags modified");
+        } else {
+            CK_DEBUG_LOG("Failed to create default material");
+        }
+    }
+    return m_DefaultMat;
+}
+
 void RCKRenderManager::DetachAllObjects() {
+    m_MovedEntities.Clear();
+    m_Entities.Clear();
+    
+    for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
+        CKRenderContext *ctx = (CKRenderContext *) m_Context->GetObject(*it);
+        if (ctx) {
+            ctx->DetachAll();
+            ctx->SetCurrentRenderOptions(255);
+        }
+    }
+}
+
+void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
+    RCKRenderContext *rctx = (RCKRenderContext *) ctx;
+    CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+    
+    for (int i = 0; i < CKGetClassCount(); ++i) {
+        if (CKIsChildClassOf(i, CKCID_TEXTURE)) {
+            int count = m_Context->GetObjectsCountByClassID(i);
+            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
+            for (int j = 0; j < count; ++j) {
+                RCKTexture *tex = (RCKTexture *) m_Context->GetObject(ids[j]);
+                if (tex && tex->m_RasterizerContext == rstCtx) {
+                    tex->m_RasterizerContext = nullptr;
+                }
+            }
+        } else if (CKIsChildClassOf(i, CKCID_SPRITE)) {
+            int count = m_Context->GetObjectsCountByClassID(i);
+            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
+            for (int j = 0; j < count; ++j) {
+                RCKSprite *sprite = (RCKSprite *) m_Context->GetObject(ids[j]);
+                if (sprite && sprite->m_RasterizerContext == rstCtx) {
+                    sprite->m_RasterizerContext = nullptr;
+                }
+            }
+        }
+    }
 }
 
 void RCKRenderManager::DeleteAllVertexBuffers() {
+    for (CKVertexBuffer **it = (CKVertexBuffer **)m_VertexBuffers.Begin(); 
+         it < (CKVertexBuffer **)m_VertexBuffers.End(); ++it) {
+        if (*it) {
+            delete *it;
+        }
+    }
+    m_VertexBuffers.Resize(0);
+}
+
+void RCKRenderManager::SaveLastFrameMatrix() {
+    for (RCK3dEntity **it = (RCK3dEntity **)m_Entities.Begin();
+         it != (RCK3dEntity **)m_Entities.End(); ++it) {
+        (*it)->SaveLastFrameMatrix();
+    }
+}
+
+void RCKRenderManager::RegisterLastFrameEntity(RCK3dEntity *entity) {
+    if (!entity) return;
+    m_Entities.AddIfNotHere(entity);
+}
+
+void RCKRenderManager::UnregisterLastFrameEntity(RCK3dEntity *entity) {
+    if (!entity) return;
+    m_Entities.Remove(entity);
+}
+
+void RCKRenderManager::CleanMovedEntities() {
+    int count = 0;
+    for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin();
+         it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
+        RCK3dEntity *entity = *it;
+        if ((entity->GetMoveableFlags() & 0x40000000) != 0) {
+            // Entity was moved this frame, clear both flags
+            entity->ModifyMoveableFlags(0, 0x40020000);
+        } else {
+            // Entity was not moved, just clear the flag and keep in list
+            entity->ModifyMoveableFlags(0, 0x40000000);
+            m_MovedEntities[count++] = entity;
+        }
+    }
+    m_MovedEntities.Resize(count);
 }
 
 void RCKRenderManager::AddTemporaryCallback(CKCallbacksContainer *callbacks, void *Function, void *Argument,
                                             CKBOOL preOrPost) {
+    VxCallBack cb;
+    cb.callback = callbacks;
+    cb.argument = Function;
+    cb.temp = (CKBOOL)(CKDWORD)Argument;
+    
+    if (preOrPost)
+        m_TemporaryPreRenderCallbacks.PushBack(cb);
+    else
+        m_TemporaryPostRenderCallbacks.PushBack(cb);
+}
+
+void RCKRenderManager::RemoveTemporaryCallback(CKCallbacksContainer *callbacks) {
+    // Remove from pre-render callbacks array
+    for (int i = m_TemporaryPreRenderCallbacks.Size() - 1; i >= 0; --i) {
+        if (m_TemporaryPreRenderCallbacks[i].callback == callbacks) {
+            m_TemporaryPreRenderCallbacks.RemoveAt(i);
+        }
+    }
+    
+    // Remove from post-render callbacks array
+    for (int i = m_TemporaryPostRenderCallbacks.Size() - 1; i >= 0; --i) {
+        if (m_TemporaryPostRenderCallbacks[i].callback == callbacks) {
+            m_TemporaryPostRenderCallbacks.RemoveAt(i);
+        }
+    }
 }
 
 void RCKRenderManager::ClearTemporaryCallbacks() {
+    m_TemporaryPreRenderCallbacks.Resize(0);
+    m_TemporaryPostRenderCallbacks.Resize(0);
 }
 
 void RCKRenderManager::RemoveAllTemporaryCallbacks() {
+    // Remove all pre-render callbacks from their containers
+    for (VxCallBack *it = m_TemporaryPreRenderCallbacks.Begin();
+         it != m_TemporaryPreRenderCallbacks.End(); ++it) {
+        CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
+        if (container) {
+            container->RemovePreCallback(it->argument, (void *)(CKDWORD)it->temp);
+        }
+    }
+    
+    // Remove all post-render callbacks from their containers
+    for (VxCallBack *it = m_TemporaryPostRenderCallbacks.Begin();
+         it != m_TemporaryPostRenderCallbacks.End(); ++it) {
+        CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
+        if (container) {
+            container->RemovePostCallback(it->argument, (void *)(CKDWORD)it->temp);
+        }
+    }
+    
+    ClearTemporaryCallbacks();
 }
 
 void RCKRenderManager::RegisterDefaultEffects() {
-    // Define GUIDs for parameter types
-    const CKGUID GUID_MATERIAL_EFFECT(0x62C563E3, 0x7323470D);
-    const CKGUID GUID_TEX_COORDS_GENERATOR(0x7DBC28F5, 0x3F161E80);
-    const CKGUID GUID_TEXTURE_BLENDING(0x21E87A54, 0x65D37993);
-    const CKGUID GUID_TEXGEN_REFERENTIAL(0x724B7421, 0x07213ADD);
-    const CKGUID GUID_COMBINE2_TEXTURES(0x154264EA, 0x1EB15971);
-    const CKGUID GUID_COMBINE3_TEXTURES(0x235E15CC, 0x65903824);
-    const CKGUID GUID_BUMPMAP_PARAMS(0x36DA22D9, 0x4AC44B4C);
-    const CKGUID GUID_3DENTITY(0x5B8A05D5, 0x31EA28D4);
-    const CKGUID GUID_FLOAT(0x47884C3F, 0x432C2C20);
-
     // Effect 0: None
     VxEffectDescription effectNone;
     effectNone.Summary = "None";
@@ -746,7 +866,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectTexGen.DescImage = "Effect_CubeReflMap.jpg";
     effectTexGen.MaxTextureCount = 0;
     effectTexGen.NeededTextureCoordsCount = 0;
-    effectTexGen.ParameterType = GUID_TEX_COORDS_GENERATOR;
+    effectTexGen.ParameterType = CKPGUID_TEXGENEFFECT;
     effectTexGen.ParameterDescription = "TexGen Type";
     effectTexGen.ParameterDefaultValue = "Reflect";
     AddEffect(effectTexGen);
@@ -765,7 +885,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectTexGenRef.DescImage = "Effect_CubeReflMap.jpg";
     effectTexGenRef.MaxTextureCount = 0;
     effectTexGenRef.NeededTextureCoordsCount = 0;
-    effectTexGenRef.ParameterType = GUID_TEXGEN_REFERENTIAL;
+    effectTexGenRef.ParameterType = CKPGUID_TEXGENREFEFFECT;
     effectTexGenRef.ParameterDescription = "TexGen Params";
     effectTexGenRef.ParameterDefaultValue = "Reflect,NULL";
     AddEffect(effectTexGenRef);
@@ -783,7 +903,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectBumpEnv.NeededTextureCoordsCount = 2;
     effectBumpEnv.Tex1Description = "Bump Texture";
     effectBumpEnv.Tex2Description = "Env. Texture";
-    effectBumpEnv.ParameterType = GUID_BUMPMAP_PARAMS;
+    effectBumpEnv.ParameterType = CKPGUID_BUMPMAPPARAM;
     effectBumpEnv.ParameterDescription = "Params";
     effectBumpEnv.ParameterDefaultValue = "0,Add,Reflect,NULL";
     AddEffect(effectBumpEnv);
@@ -797,7 +917,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectDP3.MaxTextureCount = 1;
     effectDP3.NeededTextureCoordsCount = 1;
     effectDP3.Tex1Description = "Bump Texture (Normals)";
-    effectDP3.ParameterType = GUID_3DENTITY;
+    effectDP3.ParameterType = CKPGUID_3DENTITY;
     effectDP3.ParameterDescription = "Light";
     effectDP3.ParameterDefaultValue = "NULL";
     AddEffect(effectDP3);
@@ -812,7 +932,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectCombine2.DescImage = "Effect_Blend2Textures.jpg";
     effectCombine2.MaxTextureCount = 1;
     effectCombine2.NeededTextureCoordsCount = 0;
-    effectCombine2.ParameterType = GUID_COMBINE2_TEXTURES;
+    effectCombine2.ParameterType = CKPGUID_COMBINE2TEX;
     effectCombine2.ParameterDescription = "Params";
     effectCombine2.ParameterDefaultValue = "Modulate,None,NULL";
     AddEffect(effectCombine2);
@@ -824,7 +944,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectCombine3.DescImage = "Effect_Blend3Textures.jpg";
     effectCombine3.MaxTextureCount = 2;
     effectCombine3.NeededTextureCoordsCount = 0;
-    effectCombine3.ParameterType = GUID_COMBINE3_TEXTURES;
+    effectCombine3.ParameterType = CKPGUID_COMBINE3TEX;
     effectCombine3.ParameterDescription = "Params";
     effectCombine3.ParameterDefaultValue = "Modulate,None,NULL,Modulate,None,NULL";
     AddEffect(effectCombine3);
@@ -845,49 +965,49 @@ void RCKRenderManager::RegisterDefaultEffects() {
         return;
 
     // Register Material Effect enum
-    pm->RegisterNewEnum(GUID_MATERIAL_EFFECT, (CKSTRING) "Material Effect", (CKSTRING) effectEnum.CStr());
-    CKParameterTypeDesc *typeDesc = pm->GetParameterTypeDescription(GUID_MATERIAL_EFFECT);
+    pm->RegisterNewEnum(CKPGUID_MATERIALEFFECT, (CKSTRING) "Material Effect", (CKSTRING) effectEnum.CStr());
+    CKParameterTypeDesc *typeDesc = pm->GetParameterTypeDescription(CKPGUID_MATERIALEFFECT);
     if (typeDesc)
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register Tex Coords Generator enum
-    pm->RegisterNewEnum(GUID_TEX_COORDS_GENERATOR, (CKSTRING) "Tex Coords Generator",
+    pm->RegisterNewEnum(CKPGUID_TEXGENEFFECT, (CKSTRING) "Tex Coords Generator",
                         (CKSTRING)
                         "None=0,Transform=1,Reflect=2,Chrome=3,Planar=4,CubeMap Reflect=31,CubeMap SkyMap=32,CubeMap Normals=33,CubeMap Positions=34");
-    typeDesc = pm->GetParameterTypeDescription(GUID_TEX_COORDS_GENERATOR);
+    typeDesc = pm->GetParameterTypeDescription(CKPGUID_TEXGENEFFECT);
     if (typeDesc)
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register Texture Blending enum
-    pm->RegisterNewEnum(GUID_TEXTURE_BLENDING, (CKSTRING) "Texture Blending",
+    pm->RegisterNewEnum(CKPGUID_TEXCOMBINE, (CKSTRING) "Texture Blending",
                         (CKSTRING)
                         "None=0,Modulate=4,Modulate 2X=5,Modulate 4X=6,Add=7,Add Signed=8,Add Signed 2X=9,Subtract=10,Add Smooth=11,"
                         "Blend Using Diffuse Alpha=12,Blend Using Texture Alpha=13,Blend Using Current Alpha=16,"
                         "Modulate Alpha Add Color=18,Modulate Color Add Alpha=19,Modulate InvAlpha Add Color=20,Modulate InvColor Add Alpha=21");
-    typeDesc = pm->GetParameterTypeDescription(GUID_TEXTURE_BLENDING);
+    typeDesc = pm->GetParameterTypeDescription(CKPGUID_TEXCOMBINE);
     if (typeDesc)
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register TexgenReferential structure: (TexGen, Referential)
-    pm->RegisterNewStructure(GUID_TEXGEN_REFERENTIAL, (CKSTRING) "TexgenReferential",
+    pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, (CKSTRING) "TexgenReferential",
                              (CKSTRING) "TexGen,Referential",
-                             GUID_TEX_COORDS_GENERATOR, GUID_3DENTITY);
+                             CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register Combine2Textures structure: (Combine, TexGen, Referential)
-    pm->RegisterNewStructure(GUID_COMBINE2_TEXTURES, (CKSTRING) "Combine 2 Textures",
+    pm->RegisterNewStructure(CKPGUID_COMBINE2TEX, (CKSTRING) "Combine 2 Textures",
                              (CKSTRING) "Combine,TexGen,Referential",
-                             GUID_TEXTURE_BLENDING, GUID_TEX_COORDS_GENERATOR, GUID_3DENTITY);
+                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register Combine3Textures structure: (Combine1, TexGen1, Ref1, Combine2, TexGen2, Ref2)
-    pm->RegisterNewStructure(GUID_COMBINE3_TEXTURES, (CKSTRING) "Combine 3 Textures",
+    pm->RegisterNewStructure(CKPGUID_COMBINE3TEX, (CKSTRING) "Combine 3 Textures",
                              (CKSTRING) "Combine1,TexGen1,Ref1,Combine2,TexGen2,Ref2",
-                             GUID_TEXTURE_BLENDING, GUID_TEX_COORDS_GENERATOR, GUID_3DENTITY,
-                             GUID_TEXTURE_BLENDING, GUID_TEX_COORDS_GENERATOR, GUID_3DENTITY);
+                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY,
+                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register BumpmapParameters structure: (Amplitude, EnvMap Combine, EnvMap TexGen, EnvMap Referential)
-    pm->RegisterNewStructure(GUID_BUMPMAP_PARAMS, (CKSTRING) "Bumpmap Parameters",
+    pm->RegisterNewStructure(CKPGUID_BUMPMAPPARAM, (CKSTRING) "Bumpmap Parameters",
                              (CKSTRING) "Amplitude,EnvMap Combine,EnvMap TexGen,EnvMap Referential",
-                             GUID_FLOAT, GUID_TEXTURE_BLENDING, GUID_TEX_COORDS_GENERATOR, GUID_3DENTITY);
+                             CKPGUID_FLOAT, CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 }
 
 // =====================================================
@@ -898,9 +1018,9 @@ CKSceneGraphNode *RCKRenderManager::CreateNode(RCK3dEntity *entity) {
     CKSceneGraphNode *node = new CKSceneGraphNode(entity);
     if (node) {
         // Add to root node
-        m_CKSceneGraphRootNode.AddNode(node);
+        m_SceneGraphRootNode.AddNode(node);
         CK_DEBUG_LOG_FMT("CreateNode: Created node for entity=%p, total children=%d", 
-                         entity, m_CKSceneGraphRootNode.m_Children.Size());
+                         entity, m_SceneGraphRootNode.m_Children.Size());
     }
     return node;
 }
@@ -916,4 +1036,47 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
     
     // Delete the node
     delete node;
+}
+
+// =====================================================
+// Driver Management
+// =====================================================
+
+CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
+    // IDA: 0x1006f7f0
+    if (DriverIndex >= (int)m_DriverCount)
+        return nullptr;
+    return m_Drivers[DriverIndex].RasterizerDriver;
+}
+
+CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
+    // IDA: 0x10074f8a
+    for (int i = 0; i < m_Rasterizers.Size(); ++i) {
+        CKRasterizer *rasterizer = m_Rasterizers[i];
+        if (rasterizer && rasterizer->m_FullscreenContext) {
+            return rasterizer->m_FullscreenContext;
+        }
+    }
+    return nullptr;
+}
+
+int RCKRenderManager::GetPreferredSoftwareDriver() {
+    // IDA: 0x100733f0
+    // First pass: prefer OpenGL software driver
+    for (int i = 0; i < (int)m_DriverCount; ++i) {
+        CKRasterizerDriver *driver = GetDriver(i);
+        if (driver && !driver->m_Hardware && driver->m_2DCaps.Family == CKRST_OPENGL) {
+            return i;
+        }
+    }
+    
+    // Second pass: any software driver
+    for (int i = 0; i < (int)m_DriverCount; ++i) {
+        CKRasterizerDriver *driver = GetDriver(i);
+        if (driver && !driver->m_Hardware) {
+            return i;
+        }
+    }
+    
+    return 0;
 }

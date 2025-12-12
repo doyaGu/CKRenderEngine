@@ -24,6 +24,7 @@ public:
     CKERROR IKSetEffectorPos(VxVector *pos, CK3dEntity *ref = nullptr, CKBodyPart *body = nullptr) override;
 
     int GetMemoryOccupation() override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     // Class registration helpers

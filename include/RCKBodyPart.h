@@ -21,6 +21,8 @@ public:
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     static CKSTRING GetClassName();
@@ -31,18 +33,9 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    CKDWORD field_1A8;
-    CKDWORD field_1AC;
-    CKDWORD field_1B0;
-    CKDWORD field_1B4;
-    CKDWORD field_1B8;
-    CKDWORD field_1BC;
-    CKDWORD field_1C0;
-    CKDWORD field_1C4;
-    CKDWORD field_1C8;
-    CKDWORD field_1CC;
-    CKDWORD field_1D0;
-    CKDWORD field_1D4;
+     RCKCharacter *m_Character;
+     RCKAnimation *m_ExclusiveAnimation;
+     CKIkJoint m_RotationJoint;
 };
 
 #endif // RCKBODYPART_H

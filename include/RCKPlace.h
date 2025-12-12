@@ -37,7 +37,7 @@ public:
 
 protected:
     XSArray<CKPortalEntry> m_Portals;
-    CK_ID field_1B0;
+    CK_ID m_AuxObjectId;  // auxiliary serialized reference (legacy)
     CK_ID m_DefaultCamera;
     VxRect m_ClippingRect;
 };

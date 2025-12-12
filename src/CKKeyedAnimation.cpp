@@ -11,7 +11,7 @@
 
 RCKKeyedAnimation::RCKKeyedAnimation(CKContext *Context, CKSTRING name)
     : RCKAnimation(Context, name),
-      field_38(0),
+      m_RuntimeFlags(0),
       m_Merged(FALSE),
       m_MergeFactor(0.0f),
       m_RootAnimation(nullptr),

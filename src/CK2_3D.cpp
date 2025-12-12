@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cmath>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -7,8 +8,10 @@
 
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
-
+#include "CKRasterizer.h"
+#include "CKDebugLogger.h"
 #include "CKException.h"
+
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "RCKKinematicChain.h"
@@ -37,8 +40,6 @@
 #include "RCKTargetLight.h"
 #include "RCKSprite.h"
 #include "RCKSpriteText.h"
-#include "CKDebugLogger.h"
-#include "CKRasterizer.h"
 
 #define VIRTOOLS_RENDERENGIEN_GUID CKGUID(0xAABCF63, 0)
 
@@ -46,13 +47,9 @@
 #define CK_DEBUG_LOG(msg) CK_LOG("Core", msg)
 #define CK_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("Core", fmt, __VA_ARGS__)
 
+extern void SetProcessorSpecific_FunctionsPtr();
 extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
 extern void CKNULLRasterizerClose(CKRasterizer *rst);
-
-void (*g_BuildFaceNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
-void (*g_BuildNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
-int (*g_RayIntersection)(RCKMesh *, VxVector &, VxVector &, VxIntersectionDesc *, CK_RAYINTERSECTION, VxMatrix const &);
-void (*g_NormalizeFunc)(VxVertex *, int);
 
 HMODULE g_DllHandle = nullptr;
 CKBOOL g_EnumerationDone = FALSE;
@@ -164,10 +161,6 @@ void InitializeCK2_3D() {
     CKCLASSREGISTERCID(RCKSprite, CKCID_2DENTITY)
     CKCLASSREGISTERCID(RCKSpriteText, CKCID_SPRITE)
     CKBuildClassHierarchyTable();
-}
-
-
-void SetProcessorSpecific_FunctionsPtr() {
 }
 
 CKERROR InitInstanceFct(CKContext *context) {

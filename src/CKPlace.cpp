@@ -16,7 +16,7 @@
 RCKPlace::RCKPlace(CKContext *Context, CKSTRING name)
     : RCK3dEntity(Context, name),
       m_DefaultCamera(0),
-      field_1B0(0) {
+    m_AuxObjectId(0) {
     // Initialize place properties
 }
 
@@ -32,9 +32,8 @@ RCKPlace::~RCKPlace() {
  * @return The class ID (22)
  */
 CK_CLASSID RCKPlace::GetClassID() {
-    return 22;
+    return m_ClassID;
 }
-
 
 /**
  * @brief Save the place data to a state chunk
@@ -60,11 +59,11 @@ CKStateChunk *RCKPlace::Save(CKFile *file, CKDWORD flags) {
         chunk->WriteObject(defaultCamera);
     }
 
-    // Save field_1B0 if saving to file and flag is set
+    // Save auxiliary object if saving to file and flag is set
     if (file && (flags & 0x8000) != 0) {
         chunk->WriteIdentifier(0x8000u); // Field 1B0 identifier
-        CKObject *field1B0Obj = m_Context->GetObject(field_1B0);
-        chunk->WriteObject(field1B0Obj);
+        CKObject *auxObj = m_Context->GetObject(m_AuxObjectId);
+        chunk->WriteObject(auxObj);
     }
 
     // Save portals if they exist and flag is set
@@ -122,7 +121,7 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
         XObjectArray children;
         children.Load(chunk);
 
-        for (unsigned int i = 0; i < children.Size(); ++i) {
+        for (int i = 0; i < children.Size(); ++i) {
             CK3dEntity *child = reinterpret_cast<CK3dEntity *>(children.GetObject(m_Context, i));
             if (child) {
                 // Simplified child addition logic
@@ -137,9 +136,9 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
     if (chunk->SeekIdentifier(0x2000u))
         m_DefaultCamera = chunk->ReadObjectID();
 
-    // Load field_1B0
+    // Load auxiliary object reference
     if (chunk->SeekIdentifier(0x8000u))
-        field_1B0 = chunk->ReadObjectID();
+        m_AuxObjectId = chunk->ReadObjectID();
 
     // Load portals
     if (chunk->SeekIdentifier(0x1000u)) {
@@ -180,7 +179,7 @@ CKERROR RCKPlace::Copy(CKObject &o, CKDependenciesContext &context) {
     // Copy place specific data
     RCKPlace &target = (RCKPlace &) o;
     target.m_DefaultCamera = m_DefaultCamera;
-    target.field_1B0 = field_1B0;
+    target.m_AuxObjectId = m_AuxObjectId;
     target.m_Portals = m_Portals; // Assuming proper copy semantics for m_Portals
 
     return CK_OK;

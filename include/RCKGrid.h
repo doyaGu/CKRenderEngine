@@ -2,6 +2,7 @@
 #define RCKGRID_H
 
 #include "CKRenderEngineTypes.h"
+#include "XObjectArray.h"
 
 #include "RCK3dEntity.h"
 
@@ -19,9 +20,14 @@ public:
 
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
+    void PostLoad() override;
+    void Show(CK_OBJECT_SHOWOPTION show = CKSHOW) override;
+    void CheckPostDeletion() override;
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     static CKSTRING GetClassName();
@@ -32,7 +38,8 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    XArray<CKLayer *> m_Layers;
+    // IDA shows m_Layers as XObjectArray-like type (stores CK_IDs, has Check/Prepare/Remap)
+    XObjectArray m_Layers;
     CKDWORD m_Width;
     CKDWORD m_Length;
     CKDWORD m_Priority;

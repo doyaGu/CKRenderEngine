@@ -3,6 +3,8 @@
 
 #include "RCK3dEntity.h"
 
+class RCKCurvePoint;
+
 class RCKCurve : public RCK3dEntity {
 public:
 
@@ -50,13 +52,13 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    XArray<RCKCurvePoint> m_ControlPoints;
+    XObjectPointerArray m_ControlPoints;
     CKBOOL m_Opened;
-    CKDWORD m_Length;
+    float m_Length;
     int m_StepCount;
     float m_FittingCoeff;
     CKDWORD m_Color;
-    CKDWORD field_1C8;
+    CKDWORD m_LoadingFlag; // Non-zero while loading legacy data
 };
 
 #endif // RCKCURVE_H

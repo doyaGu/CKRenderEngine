@@ -26,11 +26,13 @@ static void SwapTransparentObjects(CKTransparentObject *a, CKTransparentObject *
 // =====================================================
 
 CKSceneGraphNode::CKSceneGraphNode(RCK3dEntity *entity) {
+    // IDA @ 0x1000d6d0
     m_Entity = entity;
     m_TimeFpsCalc = 0;
     m_Flags = 0;
     m_Index = 0;
-    m_Priority = 10000;  // 0x2710 - default priority from IDA
+    // IDA: *(_DWORD *)&this->m_Priority = 0x27102710 means both Priority and MaxPriority = 10000
+    m_Priority = 10000;
     m_MaxPriority = 10000;
     m_RenderContextMask = 0;
     m_EntityMask = 0;
@@ -52,153 +54,109 @@ CKSceneGraphNode::~CKSceneGraphNode() {
 void CKSceneGraphNode::AddNode(CKSceneGraphNode *node) {
     if (!node)
         return;
-    
-    SCENEGRAPH_DEBUG_LOG_FMT("AddNode START: node=%p entity=%p parent=%p parentEntity=%p parentMask=0x%X childrenBefore=%d",
-                             node, node->m_Entity, this, m_Entity, m_RenderContextMask, m_Children.Size());
-    
+
+    // IDA @ 0x100770b5
     // Set the index to current children count
     node->m_Index = m_Children.Size();
     node->m_Parent = this;
-    
+
     // Add to children array
     m_Children.PushBack(node);
-    
+
     // Invalidate bounding box
     node->InvalidateBox(TRUE);
-    
-    // Force recalculation of render context mask hierarchy (IDA @ 0x100770b5 line 10-14)
-    // For root node (no entity), keep its RenderContextMask (0xFFFFFFFF), don't reset to 0
-    CKDWORD maskForRecalc = m_RenderContextMask;  // Default: use current mask
-    if (m_Entity) {
-        maskForRecalc = m_Entity->m_InRenderContext;  // Override if entity exists
-    }
-    SetRenderContextMask(maskForRecalc, TRUE);  // Recalculate on PARENT
-    
+
+    // Force recalculation of render context mask hierarchy
+    // IDA: if entity exists use m_InRenderContext, else use 0
+    CKDWORD mask = 0;
+    if (m_Entity)
+        mask = m_Entity->m_InRenderContext;
+    SetRenderContextMask(mask, TRUE);
+
     // Update entity flags
     node->EntityFlagsChanged(TRUE);
-    
+
     // Check priorities
     if (node->m_MaxPriority > m_Priority || node->m_Priority > m_Priority) {
         PrioritiesChanged();
     }
-    
-    SCENEGRAPH_DEBUG_LOG_FMT("AddNode: Added node (entity=%p) to parent (entity=%p), index=%d, children=%d",
-                             node->m_Entity, m_Entity, node->m_Index, m_Children.Size());
 }
 
 void CKSceneGraphNode::RemoveNode(CKSceneGraphNode *node) {
-    if (!node || node->m_Parent != this)
-        return;
-    
-    // Find and remove from children array
-    int index = node->m_Index;
-    if (index >= 0 && index < m_Children.Size() && m_Children[index] == node) {
-        // Use RemoveAt to remove by index
-        for (int i = index; i < m_Children.Size() - 1; i++) {
-            m_Children[i] = m_Children[i + 1];
-        }
-        m_Children.Resize(m_Children.Size() - 1);
-        
-        // Update indices of subsequent children
-        for (int i = index; i < m_Children.Size(); i++) {
-            if (m_Children[i])
-                m_Children[i]->m_Index = i;
-        }
-    }
-    
+    // IDA @ 0x1007715f
     node->m_Parent = nullptr;
-    node->m_Index = -1;
+
+    // Decrement child to be parsed count if node was in parsed section
+    if (node->m_Index < m_ChildToBeParsedCount)
+        --m_ChildToBeParsedCount;
+
+    // Remove from children array using iterator-style removal
+    int removeIndex = node->m_Index;
+    m_Children.RemoveAt(removeIndex);  // XArray::Remove
+
+    // Update indices of subsequent children
+    int newIndex = removeIndex;
+    for (CKSceneGraphNode **it = m_Children.Begin() + newIndex; it < m_Children.End(); ++it) {
+        (*it)->m_Index = newIndex++;
+    }
+
+    // Update priorities
+    PrioritiesChanged();
+
+    // Invalidate bounding box
+    InvalidateBox(TRUE);
+
+    // Recalculate render context mask
+    CKDWORD mask = 0;
+    if (m_Entity)
+        mask = m_Entity->m_InRenderContext;
+    SetRenderContextMask(mask, TRUE);
 }
 
 void CKSceneGraphNode::PrioritiesChanged() {
-    // Update max priority based on children
-    CKWORD maxPriority = m_Priority;
-    for (int i = 0; i < m_Children.Size(); i++) {
-        if (m_Children[i]) {
-            if (m_Children[i]->m_Priority > maxPriority)
-                maxPriority = m_Children[i]->m_Priority;
-            if (m_Children[i]->m_MaxPriority > maxPriority)
-                maxPriority = m_Children[i]->m_MaxPriority;
+    // IDA @ 0x10076fdd: Iterate upward updating m_Priority based on children
+    for (CKSceneGraphNode *node = this; node != nullptr; node = node->m_Parent) {
+        CKWORD priority = 0;
+        
+        // Find maximum priority among children
+        CKSceneGraphNode **it = node->m_Children.Begin();
+        CKSceneGraphNode **end = node->m_Children.End();
+        while (it < end) {
+            CKSceneGraphNode *child = *it;
+            if (child->m_Priority > priority)
+                priority = child->m_Priority;
+            if (child->m_MaxPriority > priority)
+                priority = child->m_MaxPriority;
+            ++it;
         }
+        
+        // Stop if priority hasn't changed
+        if (node->m_Priority == priority)
+            break;
+        
+        // Update flags and priority
+        node->m_Flags |= 0x10;  // Need sort flag
+        node->m_Priority = priority;
     }
-    m_MaxPriority = maxPriority;
-    
-    // Propagate to parent
-    if (m_Parent) {
-        m_Parent->PrioritiesChanged();
-    }
-}
-
-void CKSceneGraphNode::Clear() {
-    SCENEGRAPH_DEBUG_LOG_FMT("Clear: Clearing node=%p entity=%p childrenCount=%d",
-                             this, m_Entity, m_Children.Size());
-
-    // Recursively delete children so no orphan nodes remain after a clear
-    for (int i = 0; i < m_Children.Size(); ++i) {
-        CKSceneGraphNode *child = m_Children[i];
-        if (!child)
-            continue;
-
-        child->Clear();
-
-        if (child->m_Entity && child->m_Entity->m_SceneGraphNode == child) {
-            child->m_Entity->m_SceneGraphNode = nullptr;
-        }
-
-        delete child;
-    }
-
-    m_Children.Clear();
-    m_ChildToBeParsedCount = 0;
-
-    if (m_Entity && m_Entity->m_SceneGraphNode == this) {
-        m_Entity->m_SceneGraphNode = nullptr;
-    }
-
-    m_Entity = nullptr;
-    m_TimeFpsCalc = 0;
-    m_Flags = 0;
-    m_Index = -1;
-    m_Priority = 0;
-    m_MaxPriority = 0;
-    m_RenderContextMask = 0;
-    m_EntityMask = 0;
-    m_Parent = nullptr;
-}
-
-void CKSceneGraphNode::Check() {
-    // Validation/debug check
 }
 
 // Check if this node should be parsed for rendering
+// IDA @ 0x1007766d
 CKBOOL CKSceneGraphNode::IsToBeParsed() {
-    if (m_EntityMask == 0) {
-        SCENEGRAPH_DEBUG_LOG_FMT("IsToBeParsed: FALSE - m_EntityMask=0, node=%p entity=%p", this, m_Entity);
+    if (m_EntityMask == 0)
         return FALSE;
-    }
-    
-    if (m_Entity) {
-        if ((m_Entity->m_MoveableFlags & VX_MOVEABLE_VISIBLE) != 0) {
-            SCENEGRAPH_DEBUG_LOG_FMT("IsToBeParsed: TRUE - VX_MOVEABLE_VISIBLE set, node=%p entity=%p flags=0x%X", 
-                                     this, m_Entity, m_Entity->m_MoveableFlags);
-            return TRUE;
-        }
-        if ((m_Entity->m_MoveableFlags & VX_MOVEABLE_HIERARCHICALHIDE) != 0) {
-            SCENEGRAPH_DEBUG_LOG_FMT("IsToBeParsed: FALSE - HIERARCHICALHIDE set, node=%p entity=%p", this, m_Entity);
-            return FALSE;
-        }
-    }
-    
-    CKBOOL result = m_ChildToBeParsedCount > 0;
-    SCENEGRAPH_DEBUG_LOG_FMT("IsToBeParsed: %d - based on childCount=%d, node=%p entity=%p", 
-                             result, m_ChildToBeParsedCount, this, m_Entity);
-    return result;
+
+    if ((m_Entity->m_MoveableFlags & VX_MOVEABLE_VISIBLE) != 0)
+        return TRUE;
+
+    if ((m_Entity->m_MoveableFlags & VX_MOVEABLE_HIERARCHICALHIDE) != 0)
+        return FALSE;
+
+    return m_ChildToBeParsedCount;
 }
 
+// IDA @ 0x1007784f
 void CKSceneGraphNode::SetRenderContextMask(CKDWORD mask, CKBOOL force) {
-    SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask START: node=%p entity=%p oldRenderMask=0x%X newMask=0x%X force=%d",
-                             this, m_Entity, m_RenderContextMask, mask, force);
-    
     if (mask != m_RenderContextMask || force) {
         m_RenderContextMask = mask;
         
@@ -207,49 +165,49 @@ void CKSceneGraphNode::SetRenderContextMask(CKDWORD mask, CKBOOL force) {
             CKDWORD oldEntityMask = node->m_EntityMask;
             node->m_EntityMask = node->m_RenderContextMask;
             
-            // Combine with children's masks
-            for (int i = 0; i < node->m_Children.Size(); i++) {
-                if (node->m_Children[i]) {
-                    SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask: Combining child[%d] EntityMask=0x%X", 
-                                             i, node->m_Children[i]->m_EntityMask);
-                    node->m_EntityMask |= node->m_Children[i]->m_EntityMask;
-                }
+            // Combine with children's masks using iterator style
+            CKSceneGraphNode **it = node->m_Children.Begin();
+            CKSceneGraphNode **end = node->m_Children.End();
+            while (it < end) {
+                node->m_EntityMask |= (*it)->m_EntityMask;
+                ++it;
             }
             
-            SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask: node=%p entity=%p oldEntityMask=0x%X → newEntityMask=0x%X parent=%p",
-                                     node, node->m_Entity, oldEntityMask, node->m_EntityMask, node->m_Parent);
-            
-            // Stop if mask didn't change or we're at root (IDA @ 0x1007784f line 15-16)
-            if (node->m_EntityMask == oldEntityMask || node->m_Parent == nullptr) {
-                SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask: BREAK - maskSame=%d isRoot=%d",
-                                         node->m_EntityMask == oldEntityMask, node->m_Parent == nullptr);
+            // Stop if mask didn't change or we're at root
+            if (node->m_EntityMask == oldEntityMask || node->m_Parent == nullptr)
                 break;
-            }
             
-            // Update flags if mask changed (called BEFORE break check per IDA line 17)
-            SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask: Calling EntityFlagsChanged on node=%p", node);
+            // Update flags if mask changed (before next iteration)
             node->EntityFlagsChanged(TRUE);
         }
-    } else {
-        SCENEGRAPH_DEBUG_LOG_FMT("SetRenderContextMask: SKIPPED - mask same and not forced");
     }
 }
 
+// IDA @ 0x10077426
 void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
-    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: node=%p entity=%p IsToBeParsed=%d index=%d parentChildCount=%d",
-                             this, m_Entity, IsToBeParsed(), m_Index, 
-                             m_Parent ? m_Parent->m_ChildToBeParsedCount : -1);
-    
-    if (!m_Parent || m_Parent->m_Children.Size() == 0)
+    // IDA @ 0x10077426 - Safety check: if no parent, nothing to do
+    if (!m_Parent)
         return;
     
-    if (IsToBeParsed()) {
+    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p index=%d parent=%p parentChildCount=%d parentToBeParsed=%d",
+                              m_Entity, m_Index, m_Parent, m_Parent->m_Children.Size(),
+                              m_Parent->m_ChildToBeParsedCount);
+    
+    // Check if parent has children
+    if (m_Parent->m_Children.Size() == 0)
+        return;
+    
+    CKBOOL shouldParse = IsToBeParsed();
+    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p shouldParse=%d", m_Entity, shouldParse);
+    
+    if (shouldParse) {
         // Node should be parsed
         if (m_Index >= m_Parent->m_ChildToBeParsedCount) {
             // Need to move to parsed section
             if (m_Parent->m_Children.Size() == 1) {
                 m_Parent->m_ChildToBeParsedCount = 1;
-                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: Updated parent childCount to 1");
+                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p ADDED to parse (single child), parent count now=%d",
+                                         m_Entity, m_Parent->m_ChildToBeParsedCount);
                 if (updateParent && m_Parent->m_Parent)
                     m_Parent->EntityFlagsChanged(TRUE);
             } else {
@@ -261,10 +219,10 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
                     m_Parent->m_Children[swapIndex] = this;
                     other->m_Index = m_Index;
                     m_Index = swapIndex;
-                    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: Swapped node at %d with %d", swapIndex, m_Index);
                 }
-                m_Parent->m_ChildToBeParsedCount++;
-                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: Incremented parent childCount to %d", m_Parent->m_ChildToBeParsedCount);
+                ++m_Parent->m_ChildToBeParsedCount;
+                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p ADDED to parse, parent count now=%d",
+                                         m_Entity, m_Parent->m_ChildToBeParsedCount);
                 if (updateParent && m_Parent->m_Parent)
                     m_Parent->EntityFlagsChanged(TRUE);
             }
@@ -282,14 +240,35 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
                 m_Parent->m_Children[swapIndex] = this;
                 other->m_Index = m_Index;
                 m_Index = swapIndex;
-                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: Swapped node out, old index %d new index %d", m_Index, swapIndex);
             }
-            m_Parent->m_ChildToBeParsedCount--;
-            SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: Decremented parent childCount to %d", m_Parent->m_ChildToBeParsedCount);
+            --m_Parent->m_ChildToBeParsedCount;
             if (updateParent && m_Parent->m_Parent)
                 m_Parent->EntityFlagsChanged(TRUE);
             m_Parent->m_Flags |= 0x10; // Need sort
         }
+    }
+}
+
+// IDA @ 0x10076f50
+void CKSceneGraphNode::SetPriority(CKWORD priority, CKBOOL propagate) {
+    // Clamp priority to [-10000, 10000] range
+    int p = (int)priority;
+    if (p < -10000)
+        p = -10000;
+    else if (p > 10000)
+        p = 10000;
+    
+    // Store as offset (priority + 10000) so range becomes [0, 20000]
+    CKWORD newMaxPriority = (CKWORD)(p + 10000);
+    
+    if (m_MaxPriority == newMaxPriority || !m_Parent) {
+        // No change or no parent - just update
+        m_MaxPriority = newMaxPriority;
+    } else {
+        // Priority changed and has parent - mark parent for resort
+        m_Parent->m_Flags |= 0x10;
+        m_MaxPriority = newMaxPriority;
+        m_Parent->PrioritiesChanged();
     }
 }
 
@@ -307,249 +286,237 @@ void CKSceneGraphNode::InvalidateBox(CKBOOL propagate) {
     }
 }
 
+// IDA @ 0x1000d250: Clear visibility test flags (bits 0,1)
 void CKSceneGraphNode::SetAsPotentiallyVisible() {
-    m_Flags |= 0x01; // Mark as potentially visible
+    m_Flags &= ~3u; // Clear bits 0 and 1
 }
 
+// IDA @ 0x1000d270: Set as inside frustum (bit 0)
 void CKSceneGraphNode::SetAsInsideFrustum() {
-    m_Flags |= 0x02; // Mark as inside frustum
+    m_Flags |= 1u; // Set bit 0
 }
 
 void CKSceneGraphNode::SortNodes() {
-    // Sort children by priority for rendering order
-    // Simple bubble sort for now
-    int n = m_ChildToBeParsedCount;
-    for (int i = 0; i < n - 1; i++) {
-        for (int j = 0; j < n - i - 1; j++) {
-            if (m_Children[j]->m_Priority > m_Children[j + 1]->m_Priority) {
-                CKSceneGraphNode *temp = m_Children[j];
-                m_Children[j] = m_Children[j + 1];
-                m_Children[j + 1] = temp;
+    m_Flags &= ~0x10;
+
+    if (m_ChildToBeParsedCount < 2)
+        return;
+
+    CKSceneGraphNode **begin = m_Children.Begin();
+    CKSceneGraphNode **end = begin + m_ChildToBeParsedCount;
+
+    CKBOOL noSwaps = TRUE;
+    for (CKSceneGraphNode **i = begin + 1; i < end; ++i) {
+        for (CKSceneGraphNode **curr = end - 1; curr >= i; --curr) {
+            CKSceneGraphNode **prev = curr - 1;
+
+            CKDWORD currPriority = *reinterpret_cast<CKDWORD *>(&(*curr)->m_Priority);
+            CKDWORD prevPriority = *reinterpret_cast<CKDWORD *>(&(*prev)->m_Priority);
+
+            if (currPriority > prevPriority) {
+                CKSceneGraphNode *tmp = *curr;
+                *curr = *prev;
+                *prev = tmp;
+
+                int prevIndex = (*curr)->m_Index;
+                (*curr)->m_Index = (*prev)->m_Index;
+                (*prev)->m_Index = prevIndex;
+
+                noSwaps = FALSE;
             }
         }
+
+        if (noSwaps)
+            break;
+        noSwaps = TRUE;
     }
-    m_Flags &= ~0x10; // Clear sort needed flag
 }
 
 void CKSceneGraphNode::ClearTransparentFlags() {
-    // Clear the "in transparent list" flag for this node and all children
-    m_Flags &= ~0x20;
-    for (int i = 0; i < m_Children.Size(); i++) {
-        if (m_Children[i])
-            m_Children[i]->ClearTransparentFlags();
+    // IDA @ 0x100789A0
+    // Clear flag 0x01 and set flag 0x02
+    m_Flags &= ~1u;
+    m_Flags |= 2u;
+    
+    // Only traverse children that are to be parsed (not all children)
+    int i = 0;
+    CKSceneGraphNode **it = m_Children.Begin();
+    while (i < m_ChildToBeParsedCount) {
+        (*it)->ClearTransparentFlags();
+        ++it;
+        ++i;
     }
 }
 
 CKBOOL CKSceneGraphNode::CheckHierarchyFrustum() {
-    // Check if entity passes hierarchy frustum test
-    // Returns TRUE if the entity is fully inside the frustum
-    if ((m_Flags & 0x02) != 0) // Already marked as inside frustum
-        return TRUE;
-    return FALSE;
+    // IDA @ 0x1000D290: return this->m_Flags & 1
+    // Check flag 0x01 to determine if hierarchy frustum test passed
+    return (m_Flags & 0x01) != 0;
 }
 
 void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     CKBOOL clipRectSet = FALSE;
 
-    // Update stats
     dev->m_SceneTraversalCalls++;
 
-    // Mark visibility
     SetAsPotentiallyVisible();
     SetAsInsideFrustum();
 
-    // Sort nodes if needed
     if ((m_Flags & 0x10) != 0)
         SortNodes();
 
-    // Handle Place viewport clipping
-    if (m_Entity && m_Entity->GetClassID() == CKCID_PLACE) {
-        RCKPlace *place = (RCKPlace *) m_Entity;
+    if (m_Entity->GetClassID() == CKCID_PLACE) {
+        RCKPlace *place = (RCKPlace *)m_Entity;
         VxRect &clip = place->ViewportClip();
         if (!clip.IsNull()) {
-            // Check if clip rect is valid (within 0-1 range)
-            VxRect unitRect(0.0f, 0.0f, 1.0f, 1.0f);
-            // TODO: Transform and set clip rect
-            clipRectSet = TRUE;
+            VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
+            if (clip.IsInside(unit)) {
+                clipRectSet = TRUE;
+
+                VxRect rect = clip;
+                float right = (float)dev->m_ViewportData.ViewX + (float)dev->m_ViewportData.ViewWidth;
+                float bottom = (float)dev->m_ViewportData.ViewY + (float)dev->m_ViewportData.ViewHeight;
+                VxRect viewport((float)dev->m_ViewportData.ViewX, (float)dev->m_ViewportData.ViewY, right, bottom);
+                rect.TransformFromHomogeneous(viewport);
+                dev->SetClipRect(&rect);
+            }
         }
     }
 
-    // Mark character as rendered
-    if (m_Entity && m_Entity->GetClassID() == CKCID_CHARACTER) {
-        m_Entity->ModifyMoveableFlags(VX_MOVEABLE_CHARACTERRENDERED, 0);
-    }
+    if (m_Entity->GetClassID() == CKCID_CHARACTER)
+        m_Entity->m_MoveableFlags |= 0x20000000;
 
-    // Render the entity
-    if ((dev->m_MaskFree & m_RenderContextMask) != 0 && m_Entity && m_Entity->IsToBeRendered()) {
-        m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
-
+    if ((m_EntityMask & dev->m_MaskFree) != 0 && m_Entity->IsToBeRendered()) {
         if (m_Entity->IsToBeRenderedLast()) {
-            // Queue for render last pass (transparent objects)
             m_TimeFpsCalc = dev->m_TimeFpsCalc;
-            CKSceneGraphRootNode *root = &dev->m_RenderManager->m_CKSceneGraphRootNode;
-            root->AddTransparentObject(this);
+            dev->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
         } else {
-            // Update timing stats
             dev->m_Stats.SceneTraversalTime += dev->m_SceneTraversalTimeProfiler.Current();
-
-            // Render the entity
-            m_Entity->Render((CKRenderContext *) dev, flags);
-
+            m_Entity->Render((CKRenderContext *)dev, flags);
             dev->m_SceneTraversalTimeProfiler.Reset();
         }
     }
 
-    // Traverse children
-    for (int i = 0; i < m_ChildToBeParsedCount; i++) {
-        CKSceneGraphNode *child = m_Children[i];
-        if (child && (dev->m_MaskFree & child->m_EntityMask) != 0) {
-            child->NoTestsTraversal(dev, flags);
-        }
+    CKSceneGraphNode **it = m_Children.Begin();
+    for (int parsed = 0; parsed < m_ChildToBeParsedCount; ++parsed, ++it) {
+        if ((dev->m_MaskFree & (*it)->m_EntityMask) != 0)
+            (*it)->NoTestsTraversal(dev, flags);
     }
 
-    // Restore viewport if we changed it
     if (clipRectSet) {
         dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
         dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, dev->m_ProjectionMatrix);
     }
 }
 
-void CKSceneGraphRootNode::RenderTransparents(RCKRenderContext *rc, CKDWORD flags) {
-    SCENEGRAPH_DEBUG_LOG_FMT("RenderTransparents: node=%p entity=%p childCount=%d", 
-                             this, m_Entity, m_ChildToBeParsedCount);
-    
-    // Update stats
+void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWORD flags) {
     rc->m_SceneTraversalCalls++;
 
-    // Mark as potentially visible
     SetAsPotentiallyVisible();
 
-    // If no children to parse, handle leaf node
-    if (m_ChildToBeParsedCount == 0) {
-        if (m_Entity && m_Entity->IsToBeRendered() &&
-            (rc->m_MaskFree & m_RenderContextMask) != 0 &&
-            m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags)) {
-            if (m_Entity->IsToBeRenderedLast()) {
-                m_TimeFpsCalc = rc->m_TimeFpsCalc;
-                rc->m_RenderManager->m_CKSceneGraphRootNode.AddTransparentObject(this);
-                SCENEGRAPH_DEBUG_LOG_FMT("Leaf: Added transparent, entity=%p", m_Entity);
-            } else {
-                rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+    CKBOOL clipRectSet = FALSE;
+    CKBOOL hierarchyVisible = FALSE;
 
-                // Set flag bit for transparent render
-                CKDWORD renderFlags = flags;
-                renderFlags |= 0x100; // BYTE1(flags) | 1
+    if (m_ChildToBeParsedCount != 0) {
+        if ((m_Flags & 0x10) != 0)
+            SortNodes();
 
-                SCENEGRAPH_DEBUG_LOG_FMT("Leaf: Calling Render(), entity=%p flags=0x%X", m_Entity, renderFlags);
-                m_Entity->Render((CKRenderContext *) rc, renderFlags);
+        if (m_Entity) {
+            m_Entity->ModifyMoveableFlags(0x20, 0);
 
-                rc->m_SceneTraversalTimeProfiler.Reset();
+            if (!m_Entity->IsInViewFrustrumHierarchic((CKRenderContext *)rc)) {
+                if (m_Entity->GetClassID() == CKCID_CHARACTER) {
+                    VxBbox expanded = m_Bbox;
+                    expanded.Max *= 2.0f;
+                    expanded.Min *= 2.0f;
+
+                    if (rc->m_RasterizerContext->ComputeBoxVisibility(expanded, TRUE, nullptr))
+                        m_Entity->m_MoveableFlags |= 0x20000000;
+                }
+
+                ClearTransparentFlags();
+                return;
+            }
+
+            if (m_Entity->GetClassID() == CKCID_PLACE) {
+                RCKPlace *place = (RCKPlace *)m_Entity;
+                VxRect &clip = place->ViewportClip();
+                if (!clip.IsNull()) {
+                    VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
+                    if (clip.IsInside(unit)) {
+                        clipRectSet = TRUE;
+
+                        VxRect rect = clip;
+                        float right = (float)rc->m_ViewportData.ViewX + (float)rc->m_ViewportData.ViewWidth;
+                        float bottom = (float)rc->m_ViewportData.ViewY + (float)rc->m_ViewportData.ViewHeight;
+                        VxRect viewport((float)rc->m_ViewportData.ViewX, (float)rc->m_ViewportData.ViewY, right, bottom);
+                        rect.TransformFromHomogeneous(viewport);
+                        rc->SetClipRect(&rect);
+                    }
+                }
+            }
+
+            if (m_Entity->GetClassID() == CKCID_CHARACTER)
+                m_Entity->m_MoveableFlags |= 0x20000000;
+
+            hierarchyVisible = CheckHierarchyFrustum();
+
+            if ((rc->m_MaskFree & m_RenderContextMask) != 0 && m_Entity->IsToBeRendered()) {
+                if (m_Entity->IsToBeRenderedLast()) {
+                    if (hierarchyVisible || m_Entity->IsInViewFrustrum((CKRenderContext *)rc, flags)) {
+                        m_TimeFpsCalc = rc->m_TimeFpsCalc;
+                        rc->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
+                    }
+                } else {
+                    rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+                    m_Entity->Render((CKRenderContext *)rc, flags);
+                    rc->m_SceneTraversalTimeProfiler.Reset();
+                }
+            }
+        }
+
+        if (hierarchyVisible) {
+            CKSceneGraphNode **it = m_Children.Begin();
+            for (int parsed = 0; parsed < m_ChildToBeParsedCount; ++parsed, ++it) {
+                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
+                    (*it)->NoTestsTraversal(rc, flags);
             }
         } else {
-            SCENEGRAPH_DEBUG_LOG_FMT("Leaf: SKIPPED render - entity=%p IsToBeRendered=%d MaskTest=%d InFrustrum=%d", 
-                                     m_Entity, m_Entity ? m_Entity->IsToBeRendered() : -1,
-                                     (rc->m_MaskFree & m_RenderContextMask) != 0,
-                                     m_Entity ? m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags) : -1);
+            CKSceneGraphRootNode **it = (CKSceneGraphRootNode **)m_Children.Begin();
+            for (int parsed = 0; parsed < m_ChildToBeParsedCount; ++parsed, ++it) {
+                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
+                    (*it)->RenderTransparentObjects(rc, flags);
+            }
         }
+
+        if (clipRectSet) {
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
+            rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+        }
+
         return;
     }
 
-    // Sort nodes if needed
-    if ((m_Flags & 0x10) != 0)
-        SortNodes();
+    if (!m_Entity)
+        return;
 
-    CKBOOL clipRectSet = FALSE;
-    CKBOOL entityInFrustum = FALSE;
+    if (!m_Entity->IsToBeRendered())
+        return;
 
-    if (m_Entity) {
-        // Clear extents flag
-        m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
+    if ((m_RenderContextMask & rc->m_MaskFree) == 0)
+        return;
 
-        // Check view frustum
-        if (!m_Entity->IsInViewFrustrumHierarchic((CKRenderContext *) rc)) {
-            // Special handling for characters - expand bbox
-            if (m_Entity->GetClassID() == CKCID_CHARACTER) {
-                VxBbox expandedBox = m_Bbox;
-                expandedBox.Max *= 2.0f;
-                expandedBox.Min *= 2.0f;
+    if (!m_Entity->IsInViewFrustrum((CKRenderContext *)rc, flags))
+        return;
 
-                if (rc->m_RasterizerContext->ComputeBoxVisibility(expandedBox, TRUE, nullptr)) {
-                    m_Entity->ModifyMoveableFlags(VX_MOVEABLE_CHARACTERRENDERED, 0);
-                }
-            }
-            // Clear transparent flags for this subtree
-            ClearTransparentFlags();
-            return;
-        }
-
-        // Handle Place viewport clipping
-        if (m_Entity->GetClassID() == CKCID_PLACE) {
-            RCKPlace *place = (RCKPlace *) m_Entity;
-            VxRect &clip = place->ViewportClip();
-            if (!clip.IsNull()) {
-                VxRect unitRect(0.0f, 0.0f, 1.0f, 1.0f);
-                if (clip.IsInside(unitRect)) {
-                    clipRectSet = TRUE;
-
-                    // Transform clip rect from homogeneous to screen coordinates
-                    VxRect screenClip = clip;
-                    float viewX = (float) rc->m_ViewportData.ViewX;
-                    float viewY = (float) rc->m_ViewportData.ViewY;
-                    float viewRight = viewX + (float) rc->m_ViewportData.ViewWidth;
-                    float viewBottom = viewY + (float) rc->m_ViewportData.ViewHeight;
-                    VxRect viewport(viewX, viewY, viewRight, viewBottom);
-                    screenClip.TransformFromHomogeneous(viewport);
-                    rc->SetClipRect(&screenClip);
-                }
-            }
-        }
-
-        // Mark character as rendered
-        if (m_Entity->GetClassID() == CKCID_CHARACTER) {
-            m_Entity->ModifyMoveableFlags(VX_MOVEABLE_CHARACTERRENDERED, 0);
-        }
-
-        // Check if entity passes hierarchy test
-        entityInFrustum = CheckHierarchyFrustum();
-
-        // Render if needed
-        if ((rc->m_MaskFree & m_RenderContextMask) != 0 && m_Entity->IsToBeRendered()) {
-            if (m_Entity->IsToBeRenderedLast()) {
-                if (entityInFrustum || m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags)) {
-                    m_TimeFpsCalc = rc->m_TimeFpsCalc;
-                    rc->m_RenderManager->m_CKSceneGraphRootNode.AddTransparentObject(this);
-                }
-            } else {
-                rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-                m_Entity->Render((CKRenderContext *) rc, flags);
-                rc->m_SceneTraversalTimeProfiler.Reset();
-            }
-        }
-    }
-
-    // Traverse children
-    if (entityInFrustum) {
-        // Entity passed frustum test, children likely visible - use no-tests traversal
-        for (int i = 0; i < m_ChildToBeParsedCount; i++) {
-            CKSceneGraphNode *child = m_Children[i];
-            if (child && (rc->m_MaskFree & child->m_EntityMask) != 0) {
-                child->NoTestsTraversal(rc, flags);
-            }
-        }
+    if (m_Entity->IsToBeRenderedLast()) {
+        m_TimeFpsCalc = rc->m_TimeFpsCalc;
+        rc->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
     } else {
-        // Need to test each child
-        for (int i = 0; i < m_ChildToBeParsedCount; i++) {
-            CKSceneGraphRootNode *child = (CKSceneGraphRootNode *) m_Children[i];
-            if (child && (rc->m_MaskFree & child->m_EntityMask) != 0) {
-                child->RenderTransparents(rc, flags);
-            }
-        }
-    }
-
-    // Restore viewport if we changed it
-    if (clipRectSet) {
-        rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
-        rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+        rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+        CKDWORD renderFlags = flags | 0x100;
+        m_Entity->Render((CKRenderContext *)rc, renderFlags);
+        rc->m_SceneTraversalTimeProfiler.Reset();
     }
 }
 
@@ -560,120 +527,89 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
     CKDWORD timeFpsCalc = dev->m_TimeFpsCalc;
 
-    // Check if sorting is enabled
     if (dev->m_RenderManager->m_SortTransparentObjects.Value && count > 1) {
-        // Reset profiler
         dev->m_TransparentObjectsSortTimeProfiler.Reset();
 
-        // Update matrices for projection
         dev->m_RasterizerContext->UpdateMatrices(2);
-        VxMatrix viewProjMatrix = dev->m_RasterizerContext->m_ViewProjMatrix;
+        VxMatrix viewProj = dev->m_RasterizerContext->m_ViewProjMatrix;
 
-        // Calculate Z extents for each transparent object
         CKTransparentObject *it = m_TransparentObjects.Begin();
         while (it != m_TransparentObjects.End()) {
             CKSceneGraphNode *node = it->m_Node;
 
-            // Check if object is valid for this render context
-            if ((dev->m_MaskFree & node->m_RenderContextMask) != 0 &&
-                node->m_TimeFpsCalc == timeFpsCalc) {
+            if ((dev->m_MaskFree & node->m_RenderContextMask) != 0 && node->m_TimeFpsCalc == timeFpsCalc) {
                 RCK3dEntity *entity = node->m_Entity;
 
-                // For Sprite3D, update bounding box
                 if (CKIsChildClassOf(entity, CKCID_SPRITE3D)) {
-                    entity->ModifyMoveableFlags(0, 4); // Clear flag
+                    entity->ModifyMoveableFlags(0, 4);
                     entity->UpdateBox(TRUE);
                 }
 
-                // Compute model-view-projection matrix
                 VxMatrix mvp;
-                Vx3DMultiplyMatrix4(mvp, viewProjMatrix, entity->GetWorldMatrix());
+                Vx3DMultiplyMatrix4(mvp, viewProj, entity->GetWorldMatrix());
 
-                // Project bounding box to get Z extents
                 const VxBbox &bbox = entity->GetBoundingBox(FALSE);
-                float zhMin, zhMax;
-                VxProjectBoxZExtents(mvp, bbox, zhMin, zhMax);
-                it->m_ZhMin = zhMin;
-                it->m_ZhMax = zhMax;
+                VxProjectBoxZExtents(mvp, bbox, it->m_ZhMin, it->m_ZhMax);
 
                 ++it;
             } else {
-                // Remove from list - object not valid
-                node->m_Flags &= ~0x20; // Clear "in transparent list" flag
+                node->m_Flags &= ~0x20;
                 it = m_TransparentObjects.Remove(it);
             }
         }
 
-        // Sort transparent objects if any remain
         if (m_TransparentObjects.Size() > 0) {
-            // Get camera position for tie-breaking
-            VxVector cameraPos = *(VxVector *) &dev->m_RenderedScene->GetRootEntity()->GetWorldMatrix()[3];
-
             CKTransparentObject *begin = m_TransparentObjects.Begin();
             CKTransparentObject *end = m_TransparentObjects.End();
 
-            // Bubble sort with multiple passes until stable
-            CKBOOL sorted = FALSE;
-            for (CKTransparentObject *i = begin + 1; !sorted && i != end; ++i) {
-                sorted = TRUE;
-
-                for (CKTransparentObject *k = end - 1; k != begin; --k) {
+            CKBOOL noSwaps = TRUE;
+            for (CKTransparentObject *i = begin + 1; i != end; ++i) {
+                for (CKTransparentObject *k = end - 1; k != (i - 1); --k) {
                     CKTransparentObject *prev = k - 1;
 
-                    // Compare by priority first
                     if (k->m_Node->m_MaxPriority > prev->m_Node->m_MaxPriority) {
                         SwapTransparentObjects(k, prev);
-                        sorted = FALSE;
+                        noSwaps = FALSE;
                         continue;
                     }
 
-                    // If same priority, compare by Z depth
-                    if (k->m_Node->m_MaxPriority == prev->m_Node->m_MaxPriority) {
-                        // Check if Z ranges overlap
-                        if (prev->m_ZhMax < k->m_ZhMin) {
-                            // prev is completely in front, no swap needed
-                            continue;
-                        }
-
+                    if (k->m_Node->m_MaxPriority == prev->m_Node->m_MaxPriority && prev->m_ZhMax < k->m_ZhMin) {
                         if (k->m_ZhMax < prev->m_ZhMin) {
-                            // k is completely in front, swap
-                            SwapTransparentObjects(k, prev);
-                            sorted = FALSE;
-                            continue;
+                            int cmp = (k->m_ZhMax > prev->m_ZhMax) ? 1 : ((k->m_ZhMax < prev->m_ZhMax) ? -1 : 0);
+                            if (cmp < 0) {
+                                SwapTransparentObjects(k, prev);
+                                noSwaps = FALSE;
+                                continue;
+                            }
                         }
 
-                        // Overlapping Z ranges - use bounding box comparison for tie-breaking
-                        // Sort by maximum Z (back to front)
                         if (prev->m_ZhMax + 0.00000011920929f < k->m_ZhMax) {
                             SwapTransparentObjects(k, prev);
-                            sorted = FALSE;
+                            noSwaps = FALSE;
                         }
                     }
                 }
+
+                if (noSwaps)
+                    break;
+                noSwaps = TRUE;
             }
 
-            // Record sort time
             dev->m_Stats.TransparentObjectsSortTime = dev->m_TransparentObjectsSortTimeProfiler.Current();
 
-            // Render all transparent objects in sorted order
-            for (CKTransparentObject *j = m_TransparentObjects.Begin();
-                 j != m_TransparentObjects.End(); ++j) {
-                j->m_Node->m_Entity->Render((CKRenderContext *) dev, flags);
-            }
+            for (CKTransparentObject *renderIt = m_TransparentObjects.Begin(); renderIt != m_TransparentObjects.End(); ++renderIt)
+                renderIt->m_Node->m_Entity->Render((CKRenderContext *)dev, flags);
         }
     } else {
-        // No sorting - render in order, checking validity
         CKTransparentObject *it = m_TransparentObjects.Begin();
         while (it != m_TransparentObjects.End()) {
             CKSceneGraphNode *node = it->m_Node;
 
             if ((dev->m_MaskFree & node->m_RenderContextMask) != 0) {
                 if (node->m_TimeFpsCalc == timeFpsCalc) {
-                    // Render the entity
-                    node->m_Entity->Render((CKRenderContext *) dev, flags);
+                    node->m_Entity->Render((CKRenderContext *)dev, flags);
                     ++it;
                 } else {
-                    // Remove from list
                     node->m_Flags &= ~0x20;
                     it = m_TransparentObjects.Remove(it);
                 }
@@ -694,4 +630,111 @@ void CKSceneGraphRootNode::AddTransparentObject(CKSceneGraphNode *node) {
         m_TransparentObjects.PushBack(obj);
         node->m_Flags |= 0x20; // Mark as added to transparent list
     }
+}
+
+void CKSceneGraphRootNode::Clear() {
+    m_Children.Clear();
+    m_ChildToBeParsedCount = 0;
+    m_Index = 0;
+    m_Flags = 0;
+    m_Priority = 10000;
+    m_MaxPriority = 10000;
+    m_TransparentObjects.Resize(0);
+}
+
+void CKSceneGraphRootNode::Check() {
+    CKTransparentObject *it = m_TransparentObjects.Begin();
+    while (it != m_TransparentObjects.End()) {
+        CKSceneGraphNode *node = it->m_Node;
+        RCK3dEntity *entity = node->m_Entity;
+        if (entity && entity->GetObjectFlags() & 0x10) {
+            it = m_TransparentObjects.Remove(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+CKDWORD CKSceneGraphNode::Rebuild() {
+    int childCount = m_Children.Size();
+    m_EntityMask = m_RenderContextMask;
+
+    if (childCount == 0)
+        return m_EntityMask;
+
+    if (childCount == 1) {
+        CKSceneGraphNode *child = m_Children[0];
+        m_EntityMask |= child->Rebuild();
+        m_ChildToBeParsedCount = child->IsToBeParsed() ? 1 : 0;
+        return m_EntityMask;
+    }
+
+    m_Flags |= 0x10;
+
+    XArray<CKSceneGraphNode *> reordered;
+    reordered.Resize(childCount);
+
+    int parsedIndex = 0;
+    int unparsedIndex = childCount - 1;
+
+    for (CKSceneGraphNode **it = m_Children.Begin(); it < m_Children.End(); ++it) {
+        CKSceneGraphNode *child = *it;
+        m_EntityMask |= child->Rebuild();
+
+        if (child->IsToBeParsed()) {
+            child->m_Index = parsedIndex;
+            reordered[parsedIndex++] = child;
+        } else {
+            child->m_Index = unparsedIndex;
+            reordered[unparsedIndex--] = child;
+        }
+    }
+
+    m_ChildToBeParsedCount = parsedIndex;
+
+    for (int i = 0; i < childCount; ++i)
+        m_Children[i] = reordered[i];
+
+    return m_EntityMask;
+}
+
+CKDWORD CKSceneGraphNode::ComputeHierarchicalBox() {
+    if ((m_Flags & 0x08) != 0)
+        return m_Flags & 0x04;
+
+    m_Flags |= 0x08;
+
+    m_Entity->UpdateBox(TRUE);
+
+    if ((m_Entity->m_MoveableFlags & VX_MOVEABLE_BOXVALID) != 0) {
+        m_Bbox = m_Entity->m_WorldBoundingBox;
+
+        CKSceneGraphNode **it = m_Children.Begin();
+        while (it < m_Children.End()) {
+            if ((*it)->ComputeHierarchicalBox())
+                m_Bbox.Merge((*it)->m_Bbox);
+            ++it;
+        }
+
+        m_Flags |= 0x04;
+    } else {
+        CKSceneGraphNode **it = m_Children.Begin();
+        while (it < m_Children.End()) {
+            if ((*it)->ComputeHierarchicalBox()) {
+                m_Bbox = (*it)->m_Bbox;
+                m_Flags |= 0x04;
+                ++it;
+                break;
+            }
+            ++it;
+        }
+
+        while (it < m_Children.End()) {
+            if ((*it)->ComputeHierarchicalBox())
+                m_Bbox.Merge((*it)->m_Bbox);
+            ++it;
+        }
+    }
+
+    return m_Flags & 0x04;
 }

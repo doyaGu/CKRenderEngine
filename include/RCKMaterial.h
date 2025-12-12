@@ -38,6 +38,9 @@ class RCK3dEntity;
  * - m_EffectParameter:   Parameter for special effects
  */
 class RCKMaterial : public CKMaterial {
+    // Allow RCKRenderContext to access protected members for batch rendering
+    friend class RCKRenderContext;
+
 public:
     //=========================================================================
     // Construction/Destruction
@@ -211,6 +214,12 @@ public:
     CKDWORD DP3Effect(RCKRenderContext *dev, int stage);
     CKDWORD BlendTexturesEffect(RCKRenderContext *dev, int stage);
 
+    //=========================================================================
+    // Sprite3D Batch Methods (non-virtual)
+    //=========================================================================
+    CKBOOL AddSprite3DBatch(RCKSprite3D *sprite);
+    CKSprite3DBatch *GetSprite3DBatch() { return m_Sprite3DBatch; }
+
 protected:
     // Texture slots (4 for multi-texturing support)
     CKTexture *m_Textures[4];
@@ -234,10 +243,12 @@ protected:
 
     /**
      * Packed flags field layout:
-     * Bits 0:     TwoSided (1 = two-sided)
-     * Bits 1:     ZWrite (1 = enabled)
-     * Bits 3:     AlphaBlend (8 = enabled)
-     * Bits 4:     AlphaTest (16 = enabled)
+     * Bit 0:      TwoSided (1 = two-sided)
+     * Bit 1:      ZWrite (1 = enabled)
+     * Bit 2:      PerspectiveCorrection (1 = enabled)
+     * Bit 3:      AlphaBlend (8 = enabled)
+     * Bit 4:      AlphaTest (16 = enabled)
+     * Bit 5:      Sprite3DBatch flag
      * Bits 8-13:  Effect (VX_EFFECT, 6 bits)
      * Bits 14-18: ZFunc (VXCMPFUNC, 5 bits)
      * Bits 19-23: AlphaFunc (VXCMPFUNC, 5 bits)

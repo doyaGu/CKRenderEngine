@@ -6,6 +6,8 @@
 #include "CKSprite.h"
 
 class RCKSprite : public RCK2dEntity {
+    friend class RCKRenderManager;
+
 public:
 
 #undef CK_PURE
@@ -42,7 +44,7 @@ public:
 protected:
     // CKSprite members
     CKBitmapData m_BitmapData;
-    VX_PIXELFORMAT m_PixelFormat;
+    VX_PIXELFORMAT m_VideoFormat;
     CKRasterizerContext *m_RasterizerContext;
     CKDWORD m_ObjectIndex;
 };

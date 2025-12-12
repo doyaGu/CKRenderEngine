@@ -101,9 +101,8 @@ void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
 }
 
 // GetAlign: 0x10062173
-// Note: The original implementation seems to return wrong bits, but we follow SDK convention
 CKSPRITETEXT_ALIGNMENT RCKSpriteText::GetAlign() {
-    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF);
+    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF0000);
 }
 
 // ClearFont: 0x1006218c

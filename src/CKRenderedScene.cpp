@@ -4,34 +4,28 @@
 #include "CKRasterizer.h"
 #include "CK3dEntity.h"
 #include "CKMaterial.h"
+#include "RCKMaterial.h"
 #include "CKLight.h"
 #include "CKCamera.h"
 #include "CKSceneGraph.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
-#include "RCKRasterizerContext.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
 #include "RCKCamera.h"
 #include "RCKLight.h"
 #include "VxMatrix.h"
-#include "CKDebugLogger.h"
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <cstdio>
-
-#define SCENE_DEBUG_LOG(msg) CK_LOG("RenderedScene", msg)
-#define SCENE_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("RenderedScene", fmt, __VA_ARGS__)
+#include <cmath>
+#include <cstring>
 
 extern int g_UpdateTransparency;
+extern int g_FogProjectionMode;
 
 CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
-    SCENE_DEBUG_LOG_FMT("Constructor: rc=%p", rc);
+    // IDA: 0x1006f830
     m_RenderContext = rc;
-    SCENE_DEBUG_LOG_FMT("Constructor: rc->m_Context=%p", rc ? rc->m_Context : nullptr);
     m_Context = rc->m_Context;
-    SCENE_DEBUG_LOG_FMT("Constructor: m_Context=%p", m_Context);
     m_AmbientLight = 0xFF0F0F0F;
     m_FogMode = 0;
     m_FogStart = 1.0f;
@@ -43,31 +37,16 @@ CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
     m_RootEntity = nullptr;
     m_AttachedCamera = nullptr;
 
-    if (!m_Context) {
-        SCENE_DEBUG_LOG("Constructor: ERROR - m_Context is NULL!");
-        return;
-    }
+    m_RootEntity = (CK3dEntity *)m_Context->CreateObject(CKCID_3DENTITY, nullptr, CK_OBJECTCREATION_NONAMECHECK);
+    m_RootEntity->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+    AddObject(m_RootEntity);
 
-    SCENE_DEBUG_LOG("Constructor: Creating root entity");
-    m_RootEntity = (CK3dEntity *)m_Context->CreateObject(CKCID_3DENTITY);
-    SCENE_DEBUG_LOG_FMT("Constructor: m_RootEntity=%p", m_RootEntity);
-    if (m_RootEntity) {
-        m_RootEntity->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-        m_RenderContext->AddObject(m_RootEntity);
-        SCENE_DEBUG_LOG("Constructor: Root entity added");
-    }
-
-    SCENE_DEBUG_LOG("Constructor: Creating background material");
-    m_BackgroundMaterial = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING)"Background Material");
-    SCENE_DEBUG_LOG_FMT("Constructor: m_BackgroundMaterial=%p", m_BackgroundMaterial);
-    if (m_BackgroundMaterial) {
-        m_BackgroundMaterial->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-        m_BackgroundMaterial->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f));
-        m_BackgroundMaterial->SetAmbient(VxColor(0.0f, 0.0f, 0.0f));
-        m_BackgroundMaterial->SetSpecular(VxColor(0.0f, 0.0f, 0.0f));
-        m_BackgroundMaterial->SetEmissive(VxColor(0.0f, 0.0f, 0.0f));
-    }
-    SCENE_DEBUG_LOG("Constructor: Complete");
+    m_BackgroundMaterial = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING)"Background Material", CK_OBJECTCREATION_NONAMECHECK);
+    m_BackgroundMaterial->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+    m_BackgroundMaterial->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f));
+    m_BackgroundMaterial->SetAmbient(VxColor(0.0f, 0.0f, 0.0f));
+    m_BackgroundMaterial->SetSpecular(VxColor(0.0f, 0.0f, 0.0f));
+    m_BackgroundMaterial->SetEmissive(VxColor(0.0f, 0.0f, 0.0f));
 }
 
 CKRenderedScene::~CKRenderedScene() {
@@ -78,100 +57,108 @@ CKRenderedScene::~CKRenderedScene() {
 }
 
 void CKRenderedScene::AddObject(CKRenderObject *obj) {
-    if (!obj) return;
-    
+    // IDA: 0x1006fae5
     int classId = obj->GetClassID();
-    SCENE_DEBUG_LOG_FMT("AddObject: obj=%p classId=%d", obj, classId);
     
     if (CKIsChildClassOf(classId, CKCID_3DENTITY)) {
-        // Add to 3D entities array
         m_3DEntities.PushBack((CK3dEntity *)obj);
-        SCENE_DEBUG_LOG_FMT("AddObject: Added 3D entity, count=%d", m_3DEntities.Size());
         
-        // Check if it's a camera
-        if (CKIsChildClassOf(classId, CKCID_CAMERA)) {
+        if (CKIsChildClassOf(obj->GetClassID(), CKCID_CAMERA)) {
             m_Cameras.PushBack((CKCamera *)obj);
-            SCENE_DEBUG_LOG_FMT("AddObject: Added camera, count=%d", m_Cameras.Size());
         }
-        // Check if it's a light
-        else if (CKIsChildClassOf(classId, CKCID_LIGHT)) {
+        else if (CKIsChildClassOf(obj->GetClassID(), CKCID_LIGHT)) {
             m_Lights.PushBack((CKLight *)obj);
-            SCENE_DEBUG_LOG_FMT("AddObject: Added light, count=%d", m_Lights.Size());
         }
     }
-    else if (CKIsChildClassOf(classId, CKCID_2DENTITY)) {
-        // Add to 2D entities array
+    else if (CKIsChildClassOf(obj->GetClassID(), CKCID_2DENTITY)) {
         m_2DEntities.PushBack((CK2dEntity *)obj);
-        SCENE_DEBUG_LOG_FMT("AddObject: Added 2D entity, count=%d", m_2DEntities.Size());
         
-        // If no parent, set parent to 2D root
         CK2dEntity *ent2d = (CK2dEntity *)obj;
         if (!ent2d->GetParent()) {
             RCKRenderManager *renderManager = ((RCKRenderContext *)m_RenderContext)->m_RenderManager;
-            if (renderManager) {
-                if (ent2d->IsBackground()) {
-                    ent2d->SetParent(renderManager->m_2DRootBack);
-                } else {
-                    ent2d->SetParent(renderManager->m_2DRootFore);
-                }
+            if (ent2d->IsBackground()) {
+                ent2d->SetParent(renderManager->m_2DRootBack);
+            } else {
+                ent2d->SetParent(renderManager->m_2DRootFore);
             }
         }
     }
 }
 
 void CKRenderedScene::RemoveObject(CKRenderObject *obj) {
-    if (!obj) return;
-    
+    // IDA: 0x1006fc21
     int classId = obj->GetClassID();
     
     if (CKIsChildClassOf(classId, CKCID_3DENTITY)) {
-        // Remove from arrays using RemoveAt
-        for (int i = 0; i < m_3DEntities.Size(); ++i) {
-            if (m_3DEntities[i] == obj) {
-                m_3DEntities.RemoveAt(i);
-                break;
-            }
-        }
+        m_3DEntities.Remove((CK3dEntity *)obj);
         
-        if (CKIsChildClassOf(classId, CKCID_CAMERA)) {
-            for (int i = 0; i < m_Cameras.Size(); ++i) {
-                if (m_Cameras[i] == obj) {
-                    m_Cameras.RemoveAt(i);
-                    break;
-                }
+        if (CKIsChildClassOf(obj->GetClassID(), CKCID_CAMERA)) {
+            m_Cameras.Remove((CKCamera *)obj);
+            if (m_AttachedCamera == (CKCamera *)obj) {
+                m_AttachedCamera = nullptr;
             }
         }
-        else if (CKIsChildClassOf(classId, CKCID_LIGHT)) {
-            for (int i = 0; i < m_Lights.Size(); ++i) {
-                if (m_Lights[i] == obj) {
-                    m_Lights.RemoveAt(i);
-                    break;
-                }
-            }
+        if (CKIsChildClassOf(obj->GetClassID(), CKCID_LIGHT)) {
+            m_Lights.Remove((CKLight *)obj);
         }
     }
-    else if (CKIsChildClassOf(classId, CKCID_2DENTITY)) {
-        for (int i = 0; i < m_2DEntities.Size(); ++i) {
-            if (m_2DEntities[i] == obj) {
-                m_2DEntities.RemoveAt(i);
-                break;
-            }
+    else if (CKIsChildClassOf(obj->GetClassID(), CKCID_2DENTITY)) {
+        m_2DEntities.Remove((CK2dEntity *)obj);
+        
+        CK2dEntity *ent2d = (CK2dEntity *)obj;
+        if (!ent2d->GetParent()) {
+            CK2dEntity *root2D = m_RenderContext->Get2dRoot(ent2d->IsBackground());
+            ((RCK2dEntity *)root2D)->m_Children.Remove(ent2d);
         }
     }
 }
 
+void CKRenderedScene::DetachAll() {
+    // IDA: 0x1006fd4f
+    RCKRenderContext *rc = (RCKRenderContext *)m_RenderContext;
+    RCKRenderManager *rm = rc->m_RenderManager;
+    
+    // Clear 2D root children if in ClearAll or if render context not found in list
+    if (m_Context->IsInClearAll() || !rm->m_RenderContexts.IsHere(rc->m_ID)) {
+        if (rm->m_2DRootBack) {
+            ((RCK2dEntity *)rm->m_2DRootBack)->m_Children.Clear();
+        }
+        if (rm->m_2DRootFore) {
+            ((RCK2dEntity *)rm->m_2DRootFore)->m_Children.Clear();
+        }
+    }
+    
+    // Remove from render context if not in ClearAll
+    if (!m_Context->IsInClearAll()) {
+        for (CK2dEntity **it = m_2DEntities.Begin(); it != m_2DEntities.End(); ++it) {
+            if (*it) {
+                ((RCKRenderObject *)*it)->RemoveFromRenderContext(rc);
+            }
+        }
+        
+        for (CK3dEntity **it = m_3DEntities.Begin(); it != m_3DEntities.End(); ++it) {
+            if (*it) {
+                ((RCKRenderObject *)*it)->RemoveFromRenderContext(rc);
+            }
+        }
+    }
+    
+    m_2DEntities.Clear();
+    m_3DEntities.Clear();
+    m_Cameras.Clear();
+    m_Lights.Clear();
+    m_AttachedCamera = nullptr;
+}
+
 CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
-    SCENE_DEBUG_LOG_FMT("Draw: Flags=0x%X, rootEntity=%p, camera=%p", 
-                        Flags, m_RootEntity, m_RenderContext ? ((RCKRenderContext*)m_RenderContext)->m_Camera : nullptr);
+    // IDA: 0x100704ae
     RCKRenderContext *rc = (RCKRenderContext *)m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
     CKRasterizerContext *rst = rc->m_RasterizerContext;
     RCK3dEntity *rootEntity = (RCK3dEntity *)m_RootEntity;
-    
-    // Set default render states
+
     SetDefaultRenderStates(rst);
     
-    // Reset sprite time profiler
     rc->m_SpriteTimeProfiler.Reset();
     
     // Render background 2D sprites
@@ -180,35 +167,27 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
         
-        // Set full viewport for 2D rendering
         rc->SetFullViewport(&rst->m_ViewportData, 
                            rc->m_Settings.m_Rect.right, 
                            rc->m_Settings.m_Rect.bottom);
         rst->SetViewport(&rst->m_ViewportData);
         
-        // Render background 2D entities
         ((RCK2dEntity *)rm->m_2DRootBack)->Render((CKRenderContext *)rc);
         
-        // Restore viewport
         ResizeViewport(viewRect);
     }
     
-    // Update sprite time
     rc->m_Stats.SpriteTime += rc->m_SpriteTimeProfiler.Current();
     
     // Render 3D scene
-    CKBOOL skip3D = (Flags & CK_RENDER_SKIP3D) != 0;
-    SCENE_DEBUG_LOG_FMT("Draw: 3D scene - skip=%d (CK_RENDER_SKIP3D=0x%X), camera=%p", 
-                        skip3D, CK_RENDER_SKIP3D, rc->m_Camera);
     if ((Flags & CK_RENDER_SKIP3D) == 0) {
         RCKCamera *camera = rc->m_Camera;
         
-        // If camera is attached, set up camera transform
         if (camera) {
-            // Copy camera world matrix to root entity
+            // Copy camera world matrix to root entity (3x4 part = 0x30 bytes)
             VxMatrix *camMatrix = (VxMatrix *)&camera->m_WorldMatrix;
             VxMatrix *rootMatrix = (VxMatrix *)&rootEntity->m_WorldMatrix;
-            memcpy(rootMatrix, camMatrix, sizeof(VxVector) * 4); // Copy 3x4 part
+            memcpy(rootMatrix, camMatrix, 0x30);
             rootEntity->WorldMatrixChanged(FALSE, TRUE);
             
             // Compute perspective projection based on camera bounding box
@@ -218,13 +197,12 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             camera->InverseTransform(&camPos, &rootPos, nullptr);
             
             float z = rc->m_NearPlane / fabsf(camPos.z);
-            float left = (camera->m_LocalBoundingBox.Min.x - camPos.x) * z;
             float right = (camera->m_LocalBoundingBox.Max.x - camPos.x) * z;
+            float left = (camera->m_LocalBoundingBox.Min.x - camPos.x) * z;
             float top = (camera->m_LocalBoundingBox.Max.y - camPos.y) * z;
             float bottom = (camera->m_LocalBoundingBox.Min.y - camPos.y) * z;
             
-            rc->m_ProjectionMatrix.PerspectiveRect(left, right, top, bottom, 
-                                                   rc->m_NearPlane, rc->m_FarPlane);
+            rc->m_ProjectionMatrix.PerspectiveRect(left, right, top, bottom, rc->m_NearPlane, rc->m_FarPlane);
             rst->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
             rst->SetViewport(&rc->m_ViewportData);
             
@@ -234,11 +212,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
                            (float)rc->m_Settings.m_Rect.bottom);
             CK2dEntity *root2DBack = rc->Get2dRoot(TRUE);
             CK2dEntity *root2DFore = rc->Get2dRoot(FALSE);
-            SCENE_DEBUG_LOG_FMT("2D roots: back=%p fore=%p (rc=%p)", root2DBack, root2DFore, rc);
-            if (!root2DBack || !root2DFore) {
-                SCENE_DEBUG_LOG_FMT("WARN: missing 2D root (manager=%p)",
-                                    rc ? rc->m_RenderManager : nullptr);
-            }
             if (root2DBack) root2DBack->SetRect(fullRect);
             if (root2DFore) root2DFore->SetRect(fullRect);
         }
@@ -246,35 +219,31 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         // Build view frustum
         float aspectRatio = (float)rc->m_ViewportData.ViewWidth / (float)rc->m_ViewportData.ViewHeight;
         VxVector *origin = (VxVector *)&rootEntity->m_WorldMatrix[3];
-        VxVector *right = (VxVector *)&rootEntity->m_WorldMatrix[0];
+        VxVector *vright = (VxVector *)&rootEntity->m_WorldMatrix[0];
         VxVector *up = (VxVector *)&rootEntity->m_WorldMatrix[1];
         VxVector *dir = (VxVector *)&rootEntity->m_WorldMatrix[2];
         
-        VxFrustum frustum(*origin, *right, *up, *dir, 
+        VxFrustum frustum(*origin, *vright, *up, *dir, 
                          rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
         rc->m_Frustum = frustum;
         
-        // Set world and view matrices
         rst->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());
         rst->SetTransformMatrix(VXMATRIX_VIEW, rootEntity->GetInverseWorldMatrix());
         
-        // Setup lights
         SetupLights(rst);
         
-        // Update projection if no camera
         if (!camera) {
             rc->UpdateProjection(FALSE);
         }
         
-        // Execute pre-render callbacks
+        // Execute pre-render callbacks (m_PreCallBacks)
         rc->m_DevicePreCallbacksTimeProfiler.Reset();
         if (rc->m_PreRenderCallBacks.m_PreCallBacks.Size() > 0) {
+            VxCallBack *it = rc->m_PreRenderCallBacks.m_PreCallBacks.Begin();
             rst->SetVertexShader(0);
-            for (int i = 0; i < rc->m_PreRenderCallBacks.m_PreCallBacks.Size(); i++) {
-                VxCallBack &cb = rc->m_PreRenderCallBacks.m_PreCallBacks[i];
-                if (cb.callback) {
-                    ((CK_RENDERCALLBACK)cb.callback)((CKRenderContext *)rc, cb.argument);
-                }
+            while (it < rc->m_PreRenderCallBacks.m_PreCallBacks.End()) {
+                ((CK_RENDERCALLBACK)it->callback)((CKRenderContext *)rc, it->argument);
+                ++it;
             }
         }
         rc->m_Stats.DevicePreCallbacks += rc->m_DevicePreCallbacksTimeProfiler.Current();
@@ -283,64 +252,54 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         m_Context->ExecuteManagersOnPreRender((CKRenderContext *)rc);
         
         // Compute render flags for scene traversal
-        int renderFlags = CK_RENDER_DEFAULTSETTINGS;
-        if ((Flags & CK_RENDER_DONOTUPDATEEXTENTS) != 0) {
-            renderFlags &= ~CK_RENDER_BACKGROUNDSPRITES;
-        }
+        int renderFlags = (Flags & CK_RENDER_DONOTUPDATEEXTENTS) ? 0 : CK_RENDER_DEFAULTSETTINGS;
         
-        // Reset transparent objects
         rc->m_ObjectsRenderTimeProfiler.Reset();
         rc->m_TransparentObjects.Resize(0);
         rc->m_Stats.SceneTraversalTime = 0.0f;
         rc->m_SceneTraversalTimeProfiler.Reset();
         
-    // Render opaque objects via scene graph
-    SCENE_DEBUG_LOG_FMT("Draw: Calling RenderTransparents with flags=0x%X", renderFlags);
-    rm->m_CKSceneGraphRootNode.RenderTransparents(rc, renderFlags);
-    SCENE_DEBUG_LOG_FMT("Draw: RenderTransparents complete, transparent count=%d", 
-                        rc->m_TransparentObjects.Size());
-    
-    rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();        // Call sprite 3D batches
+        rm->m_SceneGraphRootNode.RenderTransparentObjects(rc, renderFlags);
+        
+        rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+        
         rc->CallSprite3DBatches();
         
-        // Execute post-render temp callbacks
+        // Execute post-render temp callbacks (m_PostRenderCallBacks.m_PostCallBacks)
         rc->m_DevicePostCallbacksTimeProfiler.Reset();
-        if (rc->m_PreRenderTempCallBacks.m_PostCallBacks.Size() > 0) {
+        if (rc->m_PostRenderCallBacks.m_PostCallBacks.Size() > 0) {
+            VxCallBack *it = rc->m_PostRenderCallBacks.m_PostCallBacks.Begin();
             rst->SetVertexShader(0);
-            for (int i = 0; i < rc->m_PreRenderTempCallBacks.m_PostCallBacks.Size(); i++) {
-                VxCallBack &cb = rc->m_PreRenderTempCallBacks.m_PostCallBacks[i];
-                if (cb.callback) {
-                    ((CK_RENDERCALLBACK)cb.callback)((CKRenderContext *)rc, cb.argument);
-                }
+            while (it < rc->m_PostRenderCallBacks.m_PostCallBacks.End()) {
+                ((CK_RENDERCALLBACK)it->callback)((CKRenderContext *)rc, it->argument);
+                ++it;
             }
         }
         rc->m_Stats.DevicePostCallbacks += rc->m_DevicePostCallbacksTimeProfiler.Current();
         
         // Sort and render transparent objects
         rc->m_SortTransparentObjects = TRUE;
-        rm->m_CKSceneGraphRootNode.SortTransparentObjects(rc, renderFlags);
+        rm->m_SceneGraphRootNode.SortTransparentObjects(rc, renderFlags);
         rc->CallSprite3DBatches();
         rc->m_SortTransparentObjects = FALSE;
         
         rc->m_Stats.ObjectsRenderTime = rc->m_ObjectsRenderTimeProfiler.Current();
         
-        // Execute post-render callbacks (pre)
+        // Execute post-render callbacks (m_PreRenderCallBacks.m_PostCallBacks)
         rc->m_DevicePostCallbacksTimeProfiler.Reset();
         if (rc->m_PreRenderCallBacks.m_PostCallBacks.Size() > 0) {
+            VxCallBack *it = rc->m_PreRenderCallBacks.m_PostCallBacks.Begin();
             rst->SetVertexShader(0);
-            for (int i = 0; i < rc->m_PreRenderCallBacks.m_PostCallBacks.Size(); i++) {
-                VxCallBack &cb = rc->m_PreRenderCallBacks.m_PostCallBacks[i];
-                if (cb.callback) {
-                    ((CK_RENDERCALLBACK)cb.callback)((CKRenderContext *)rc, cb.argument);
-                }
+            while (it < rc->m_PreRenderCallBacks.m_PostCallBacks.End()) {
+                ((CK_RENDERCALLBACK)it->callback)((CKRenderContext *)rc, it->argument);
+                ++it;
             }
         }
         rc->m_Stats.DevicePostCallbacks += rc->m_DevicePostCallbacksTimeProfiler.Current();
         
-        m_Context->ExecuteManagersOnPostRender((CKRenderContext *)rc);
+        m_Context->ExecuteManagersOnPostRender(rc);
     }
     
-    // Reset sprite time profiler for foreground
     rc->m_SpriteTimeProfiler.Reset();
     
     // Render foreground 2D sprites
@@ -349,39 +308,33 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
         
-        // Set full viewport for 2D rendering
         rc->SetFullViewport(&rst->m_ViewportData,
                            rc->m_Settings.m_Rect.right,
                            rc->m_Settings.m_Rect.bottom);
         rst->SetViewport(&rst->m_ViewportData);
         
-        // Render foreground 2D entities
-        ((RCK2dEntity *)rm->m_2DRootFore)->Render((CKRenderContext *)rc);
+        ((RCK2dEntity *)rm->m_2DRootFore)->Render(rc);
         
-        // Restore viewport
         ResizeViewport(viewRect);
     }
     
-    // Update sprite time
     rc->m_Stats.SpriteTime += rc->m_SpriteTimeProfiler.Current();
     
     rst->SetVertexShader(0);
-    m_Context->ExecuteManagersOnPostSpriteRender((CKRenderContext *)rc);
+    m_Context->ExecuteManagersOnPostSpriteRender(rc);
     
-    // Execute final post-render callbacks
+    // Execute final post-render callbacks (m_PostSpriteRenderCallBacks.m_PostCallBacks)
     rc->m_DevicePostCallbacksTimeProfiler.Reset();
-    if (rc->m_PostRenderCallBacks.m_PostCallBacks.Size() > 0) {
+    if (rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Size() > 0) {
+        VxCallBack *it = rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Begin();
         rst->SetVertexShader(0);
-        for (int i = 0; i < rc->m_PostRenderCallBacks.m_PostCallBacks.Size(); i++) {
-            VxCallBack &cb = rc->m_PostRenderCallBacks.m_PostCallBacks[i];
-            if (cb.callback) {
-                ((CK_RENDERCALLBACK)cb.callback)((CKRenderContext *)rc, cb.argument);
-            }
+        while (it < rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.End()) {
+            ((CK_RENDERCALLBACK)it->callback)((CKRenderContext *)rc, it->argument);
+            ++it;
         }
     }
     rc->m_Stats.DevicePostCallbacks += rc->m_DevicePostCallbacksTimeProfiler.Current();
     
-    // Adjust render times
     rc->m_Stats.ObjectsRenderTime -= (rc->m_Stats.SceneTraversalTime +
                                       rc->m_Stats.TransparentObjectsSortTime +
                                       rc->m_Stats.ObjectsCallbacksTime +
@@ -394,21 +347,18 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 }
 
 void CKRenderedScene::SetupLights(CKRasterizerContext *rst) {
-    // Disable all previously enabled lights
+    // IDA: 0x1006fea0
     for (CKDWORD i = 0; i < m_LightCount; ++i) {
         rst->EnableLight(i, FALSE);
     }
     m_LightCount = 0;
     
-    // Setup each light in the scene
-    for (int i = 0; i < m_Lights.Size(); ++i) {
-        RCKLight *light = (RCKLight *)m_Lights[i];
-        if (light && light->Setup(rst, m_LightCount)) {
+    for (CKLight **it = m_Lights.Begin(); it < m_Lights.End(); ++it) {
+        if (((RCKLight *)*it)->Setup(rst, m_LightCount)) {
             ++m_LightCount;
         }
     }
     
-    // Set ambient light
     rst->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
 }
 
@@ -421,83 +371,81 @@ void CKRenderedScene::ResizeViewport(const VxRect &rect) {
     rst->SetViewport(&rst->m_ViewportData);
 }
 
-void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst_base) {
-    RCKRasterizerContext *rst = (RCKRasterizerContext*)rst_base;
+void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
     RCKRenderContext *rc = (RCKRenderContext*)m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
 
-    rst->ClearRenderStateDefaultValue(VXRENDERSTATE_FOGVERTEXMODE);
-    rst->ClearRenderStateDefaultValue(VXRENDERSTATE_FOGENABLE);
-    rst->ClearRenderStateDefaultValue(VXRENDERSTATE_FOGPIXELMODE);
+    rst->InvalidateStateCache(VXRENDERSTATE_FOGVERTEXMODE);
+    rst->InvalidateStateCache(VXRENDERSTATE_FOGENABLE);
+    rst->InvalidateStateCache(VXRENDERSTATE_FOGPIXELMODE);
     rst->SetRenderState(VXRENDERSTATE_FOGENABLE, m_FogMode != VXFOG_NONE);
 
     if (m_FogMode) {
-        if (rm->m_ForceLinearFog.Value != 0)
+        if (rm->m_ForceLinearFog.Value != 0) {
             m_FogMode = VXFOG_LINEAR;
+        }
 
         if ((rc->m_RasterizerDriver->m_3DCaps.RasterCaps &
-            (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) ==
-            (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL) ) {
+             (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) ==
+            (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
             rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, m_FogMode);
         } else {
             m_FogMode = VXFOG_LINEAR;
             rst->SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, m_FogMode);
         }
 
-        // Fog Projection - project fog values through the projection matrix
-        // This is needed for correct fog in projected space
         const VxMatrix &projMat = rst->m_ProjectionMatrix;
-        
-        // Calculate projected fog end values
+
         float endZ = projMat[2][2] * m_FogEnd + projMat[3][2];
         float endW = projMat[2][3] * m_FogEnd + projMat[3][3];
-        
-        // Calculate projected fog start values
+
         float startZ = projMat[2][2] * m_FogStart + projMat[3][2];
         float startW = projMat[2][3] * m_FogStart + projMat[3][3];
-        
-        // Normalize by w
+
         float projFogEnd = endZ / endW;
         float projFogStart = startZ / startW;
-        float recipEndW = 1.0f / endW;
         float recipStartW = 1.0f / startW;
-        
-        // Use projection mode based on global config
-        // Mode 0: Direct fog values
-        // Mode 1: Projected fog values (z/w based)
-        // Mode 2: Projected fog values (1/w based)
-        // Currently using mode 0 (direct) - most compatible
-        rst->SetRenderState(VXRENDERSTATE_FOGEND, *(CKDWORD*)&m_FogEnd);
-        rst->SetRenderState(VXRENDERSTATE_FOGSTART, *(CKDWORD*)&m_FogStart);
-        rst->SetRenderState(VXRENDERSTATE_FOGDENSITY, *(CKDWORD*)&m_FogDensity);
-        rst->SetRenderState(VXRENDERSTATE_FOGCOLOR, (CKDWORD)m_FogColor);
+
+        if (g_FogProjectionMode == 0) {
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&m_FogEnd));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&m_FogStart));
+        } else if (g_FogProjectionMode == 1) {
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&projFogEnd));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&projFogStart));
+        } else if (g_FogProjectionMode == 2) {
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&projFogStart));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&recipStartW));
+        }
+
+        rst->SetRenderState(VXRENDERSTATE_FOGDENSITY, *reinterpret_cast<CKDWORD *>(&m_FogDensity));
+        rst->SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
     }
 
     if (rm->m_DisableSpecular.Value != 0) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_SPECULARENABLE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, FALSE);
         rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_SPECULARENABLE, TRUE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, TRUE);
     } else {
-        rst->SetRenderStateFlag(VXRENDERSTATE_SPECULARENABLE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, FALSE);
         rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     }
 
     if (rm->m_DisableDithering.Value != 0) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_DITHERENABLE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, FALSE);
         rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_DITHERENABLE, TRUE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, TRUE);
     } else {
-        rst->SetRenderStateFlag(VXRENDERSTATE_DITHERENABLE, FALSE);
-        rst->ClearRenderStateDefaultValue(VXRENDERSTATE_DITHERENABLE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, FALSE);
+        rst->InvalidateStateCache(VXRENDERSTATE_DITHERENABLE);
         rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
     }
 
     if (rm->m_DisablePerspectiveCorrection.Value != 0) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
         rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
     } else {
-        rst->SetRenderStateFlag(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
         rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
     }
 
@@ -508,81 +456,172 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst_base) {
     rst->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
     rst->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
 
-    if (rc->m_Shading == 0) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_SHADEMODE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_FILLMODE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
-        rst->SetRenderStateFlag(VXRENDERSTATE_FILLMODE, TRUE);
-    } else if (rc->m_Shading == 1) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_FILLMODE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_SHADEMODE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
-        rst->SetRenderStateFlag(VXRENDERSTATE_SHADEMODE, TRUE);
-    } else if (rc->m_Shading == 2) {
-        rst->SetRenderStateFlag(VXRENDERSTATE_SHADEMODE, FALSE);
-        rst->SetRenderStateFlag(VXRENDERSTATE_FILLMODE, FALSE);
+    if (rc->m_Shading < 2) {
+        if (rc->m_Shading) {
+            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
+            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
+            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, TRUE);
+        } else {
+            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
+            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, TRUE);
+        }
+    } else {
+        rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
+        rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
     }
 }
 
-void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS Flags) {
+void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
     RCKRenderContext *rc = (RCKRenderContext *)m_RenderContext;
-    
-    if (!rc || !rc->m_RasterizerContext)
-        return;
-    
-    // Lazily create a fallback camera so we always have a viewpoint
-    CKCamera *camera = m_AttachedCamera;
-    if (!camera) {
-        SCENE_DEBUG_LOG("PrepareCameras: creating fallback camera");
-        camera = (CKCamera *)m_Context->CreateObject(CKCID_CAMERA, (CKSTRING)"Fallback Camera");
-        if (camera) {
-            camera->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-            camera->SetProjectionType(CK_PERSPECTIVEPROJECTION);
-            camera->SetFov(PI / 4.0f);          // 45 deg default
-            camera->SetFrontPlane(1.0f);
-            camera->SetBackPlane(10000.0f);
-            // Position the camera a bit back looking at origin
-            VxMatrix mat = VxMatrix::Identity();
-            mat[3].z = -500.0f;
-            camera->SetWorldMatrix(mat);
-            // Attach to render context so rc->m_Camera is non-null
-            rc->AttachViewpointToCamera(camera);
-            // Add camera to render context so it's part of the scene graph
-            rc->AddObject(camera);
-            m_AttachedCamera = camera;
-        } else {
-            SCENE_DEBUG_LOG("PrepareCameras: failed to create fallback camera");
-            return;
+
+    for (CKCamera **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it) {
+        CKCamera *camera = *it;
+        if (camera && camera->GetClassID() == CKCID_TARGETCAMERA) {
+            CK3dEntity *target = camera->GetTarget();
+            if (target) {
+                VxVector origin(0.0f, 0.0f, 0.0f);
+                camera->LookAt(&origin, target, FALSE);
+            }
         }
     }
-    
-    // Set up render context parameters from camera
-    RCKCamera *cam = (RCKCamera *)camera;
-    
-    // Get camera properties
-    float fov = cam->GetFov();
-    float nearPlane = cam->GetFrontPlane();
-    float farPlane = cam->GetBackPlane();
-    int projType = cam->GetProjectionType();
-    
-    // Update render context with camera settings
-    rc->m_Fov = fov;
-    rc->m_NearPlane = nearPlane;
-    rc->m_FarPlane = farPlane;
-    rc->m_PerspectiveOrOrthographic = (projType == CK_PERSPECTIVEPROJECTION);
-    
-    if (!rc->m_PerspectiveOrOrthographic) {
-        rc->m_Zoom = cam->GetOrthographicZoom();
+
+    for (CKLight **it = m_Lights.Begin(); it != m_Lights.End(); ++it) {
+        CKLight *light = *it;
+        if (light && light->GetClassID() == CKCID_TARGETLIGHT && light->GetType() != VX_LIGHTPOINT) {
+            CK3dEntity *target = light->GetTarget();
+            if (target) {
+                VxVector origin(0.0f, 0.0f, 0.0f);
+                light->LookAt(&origin, target, FALSE);
+            }
+        }
     }
+
+    if (m_AttachedCamera && m_RootEntity) {
+        RCKCamera *cam = (RCKCamera*)m_AttachedCamera;
+        RCK3dEntity *rootEntity = (RCK3dEntity*)m_RootEntity;
+
+        std::memcpy(&rootEntity->m_WorldMatrix, &cam->m_WorldMatrix, sizeof(rootEntity->m_WorldMatrix));
+        ((RCK3dEntity *)m_RootEntity)->WorldMatrixChanged(TRUE, FALSE);
+
+        if ((cam->GetFlags() & CK_OBJECT_UPTODATE) == 0) {
+            rc->m_Perspective = (cam->GetProjectionType() == CK_PERSPECTIVEPROJECTION);
+            rc->m_Zoom = cam->GetOrthographicZoom();
+            rc->m_Fov = cam->GetFov();
+            rc->m_NearPlane = cam->GetFrontPlane();
+            rc->m_FarPlane = cam->GetBackPlane();
+
+            if ((flags & CK_RENDER_USECAMERARATIO) != 0) {
+                UpdateViewportSize(TRUE, flags);
+            } else {
+                rc->UpdateProjection(TRUE);
+            }
+
+            cam->ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
+        } else {
+            rc->UpdateProjection(FALSE);
+        }
+    } else {
+        rc->UpdateProjection(FALSE);
+    }
+}
+
+void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags) {
+    // IDA: 0x10071381
+    RCKRenderContext *rc = (RCKRenderContext *)m_RenderContext;
+
+    VxRect windowRect;
+    rc->GetWindowRect(windowRect, FALSE);
+
+    if (Flags == 0) {
+        Flags = (CK_RENDER_FLAGS)rc->GetCurrentRenderOptions();
+    }
+
+    int width = 4;
+    int height = 3;
+    if (m_AttachedCamera) {
+        m_AttachedCamera->GetAspectRatio(width, height);
+    }
+
+    int right = rc->m_Settings.m_Rect.right;
+    int bottom = rc->m_Settings.m_Rect.bottom;
+
+    int viewX = 0;
+    int viewY = 0;
+    int viewWidth = right;
+    int viewHeight = bottom;
+
+    double rcAspect = static_cast<double>(right) / static_cast<double>(bottom);
+    double camAspect = static_cast<double>(width) / static_cast<double>(height);
+
+    if ((Flags & CK_RENDER_USECAMERARATIO) != 0) {
+        if (rcAspect >= camAspect) {
+            viewHeight = bottom;
+            viewWidth = width * bottom / height;
+        } else {
+            viewWidth = right;
+            viewHeight = height * right / width;
+        }
+
+        viewX = static_cast<int>(static_cast<double>(right - viewWidth) * 0.5);
+        viewY = static_cast<int>(static_cast<double>(bottom - viewHeight) * 0.5);
+    } else {
+        viewX = 0;
+        viewY = 0;
+        viewWidth = right;
+        viewHeight = bottom;
+    }
+
+    if ((rc->m_RenderFlags & CK_RENDER_USECAMERARATIO) != 0) {
+        if (m_AttachedCamera) {
+            if ((m_AttachedCamera->GetFlags() & CK_OBJECT_NOTTOBEDELETED) != 0) {
+                if (forceUpdate) {
+                    rc->UpdateProjection(TRUE);
+                }
+            } else if (rc->m_ViewportData.ViewHeight == viewHeight &&
+                       rc->m_ViewportData.ViewWidth == viewWidth &&
+                       rc->m_ViewportData.ViewX == viewX &&
+                       rc->m_ViewportData.ViewY == viewY) {
+                if (forceUpdate) {
+                    rc->UpdateProjection(TRUE);
+                }
+            } else {
+                rc->m_ViewportData.ViewHeight = viewHeight;
+                rc->m_ViewportData.ViewWidth = viewWidth;
+                rc->m_ViewportData.ViewX = viewX;
+                rc->m_ViewportData.ViewY = viewY;
+                rc->UpdateProjection(TRUE);
+            }
+        } else if (forceUpdate) {
+            rc->UpdateProjection(TRUE);
+        }
+    } else if (forceUpdate) {
+        rc->UpdateProjection(TRUE);
+    }
+}
+
+void CKRenderedScene::ForceCameraSettingsUpdate() {
+    // IDA: 0x10070ffd
+    if (!m_AttachedCamera)
+        return;
+    if (!m_RootEntity)
+        return;
     
-    // Get the inverse of the camera's world matrix for the view matrix
-    const VxMatrix &worldMat = cam->GetWorldMatrix();
-    VxMatrix viewMat;
-    Vx3DInverseMatrix(viewMat, worldMat);
+    RCKRenderContext *rc = (RCKRenderContext *)m_RenderContext;
+    RCKCamera *cam = (RCKCamera *)m_AttachedCamera;
     
-    // Set the view matrix on the rasterizer
-    rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_VIEW, viewMat);
+    // Set root entity's world matrix from camera
+    m_RootEntity->SetWorldMatrix(cam->GetWorldMatrix(), FALSE);
     
-    // Mark projection as needing update 
-    rc->m_ProjectionUpdated = FALSE;
+    // Update render context settings from camera
+    rc->m_Perspective = (cam->GetProjectionType() == 1);
+    rc->m_Zoom = cam->GetOrthographicZoom();
+    rc->m_Fov = cam->GetFov();
+    rc->m_NearPlane = cam->GetFrontPlane();
+    rc->m_FarPlane = cam->GetBackPlane();
+    
+    // Update viewport size
+    UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
 }

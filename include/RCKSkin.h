@@ -8,6 +8,7 @@
 
 class CK3dEntity;
 class CKContext;
+class RCK3dEntity;
 
 /**
  * @brief Internal structure for per-bone vertex data used in skinning calculations.
@@ -75,6 +76,9 @@ public:
     VxVector &GetInitialPos() override;
     void SetInitialPos(VxVector &pos) override;
 
+    int *GetBonesArray() { return m_Bones; }
+    float *GetWeightsArray() { return m_Weights; }
+
 protected:
     int m_BoneCount;        // Number of bones affecting this vertex
     int *m_Bones;           // Array of bone indices
@@ -92,6 +96,7 @@ protected:
  * - Matrices for coordinate transformation
  */
 class RCKSkin : public CKSkin {
+    friend class RCK3dEntity;
 public:
     RCKSkin();
     ~RCKSkin();
@@ -117,6 +122,8 @@ public:
     // Internal methods
     void BuildBonePointLists();
     void ClearBonePointLists();
+
+    const VxMatrix &GetObjectInitMatrix() const { return m_ObjectInitMatrix; }
 
 protected:
     VxMatrix m_ObjectInitMatrix;                       // Original world matrix of the owner entity
