@@ -23,6 +23,8 @@ RCK2dEntity::RCK2dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Co
     m_Flags = CK_2DENTITY_RESERVED3 | CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW |
         CK_2DENTITY_STICKLEFT | CK_2DENTITY_STICKTOP;
     m_Parent = nullptr;
+    // IDA: VxRect::VxRect(&this->m_SourceRect, 0.0, 0.0, 1.0, 1.0);
+    m_SourceRect = VxRect(0.0f, 0.0f, 1.0f, 1.0f);
     m_HomogeneousRect = nullptr;
     m_ZOrder = 0;
     m_Material = nullptr;
@@ -761,9 +763,9 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     CKBOOL visible = FALSE;
     if (IsVisible()) {
         CKScene *scene = m_Context->GetCurrentScene();
-        if (IsInScene(scene)) {
+        // IDA: CKSceneObject::IsInScene(this, CurrentScene) || sub_100604B0(this)
+        if (IsInScene(scene) || (m_ObjectFlags & CK_OBJECT_NOTTOBELISTEDANDSAVED))
             visible = TRUE;
-        }
     }
     
     // If not visible and no children, skip
@@ -772,6 +774,16 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     
     // Update extents (returns FALSE if completely clipped)
     CKBOOL clipped = !UpdateExtents(context);
+    
+    // Execute pre-render callbacks if visible and has callbacks
+    if (visible && m_Callbacks && m_Callbacks->m_PreCallBacks.Size() > 0) {
+        dev->m_SpriteCallbacksTimeProfiler.Reset();
+        dev->m_RasterizerContext->SetVertexShader(0);
+        for (auto it = m_Callbacks->m_PreCallBacks.Begin(); it != m_Callbacks->m_PreCallBacks.End(); ++it) {
+            ((CK_RENDEROBJECT_CALLBACK)it->callback)(dev, (CKRenderObject *)this, it->argument);
+        }
+        dev->m_Stats.SpriteCallbacksTime += dev->m_SpriteCallbacksTimeProfiler.Current();
+    }
     
     // Draw if visible and not completely clipped
     if (!clipped && visible)
@@ -783,6 +795,16 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
         // Skip children that clip to parent if we're completely clipped
         if (!clipped || !(child->m_Flags & CK_2DENTITY_CLIPTOPARENT))
             child->Render(context);
+    }
+    
+    // Execute post-render callbacks if visible and has callbacks
+    if (visible && m_Callbacks && m_Callbacks->m_PostCallBacks.Size() > 0) {
+        dev->m_SpriteCallbacksTimeProfiler.Reset();
+        dev->m_RasterizerContext->SetVertexShader(0);
+        for (auto it = m_Callbacks->m_PostCallBacks.Begin(); it != m_Callbacks->m_PostCallBacks.End(); ++it) {
+            ((CK_RENDEROBJECT_CALLBACK)it->callback)(dev, (CKRenderObject *)this, it->argument);
+        }
+        dev->m_Stats.SpriteCallbacksTime += dev->m_SpriteCallbacksTimeProfiler.Current();
     }
     
     return CK_OK;
@@ -1223,11 +1245,13 @@ void RCK2dEntity::PostLoad(void) {
         // sub_10041C90 sorts the array using comparison function sub_1005C750
         ((RCK2dEntity *) m_Parent)->m_Children.Sort(CompareByZOrder);
 
+        // IDA: Remove from all render contexts when parented
+        // This ensures the 2D entity is not in both root list and child list
         CKRenderManager *rm = m_Context->GetRenderManager();
         int count = rm->GetRenderContextCount();
         for (int i = 0; i < count; ++i) {
             CKRenderContext *rc = rm->GetRenderContext(i);
-            rc->RemoveObject(this);
+            rc->RemoveObject((CKRenderObject *)this);
         }
     }
     CKObject::PostLoad();

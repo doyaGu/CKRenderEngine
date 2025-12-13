@@ -24,9 +24,17 @@ public:
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
+    void CheckPreDeletion() override;
     int GetMemoryOccupation() override;
-
+    int IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+
+    // Rendering methods
+    CKBOOL Render(CKRenderContext *Dev, CKDWORD Flags = CKRENDER_UPDATEEXTENTS) override;
+    int RayIntersection(const VxVector *Pos1, const VxVector *Pos2, VxIntersectionDesc *Desc,
+                        CK3dEntity *Ref, CK_RAYINTERSECTION iOptions = CKRAYINTERSECTION_DEFAULT) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);

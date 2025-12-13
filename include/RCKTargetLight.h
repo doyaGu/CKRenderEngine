@@ -19,6 +19,11 @@ public:
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
     
+    CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
+    
     // Override GetTarget/SetTarget from CKLight
     CK3dEntity *GetTarget() override;
     void SetTarget(CK3dEntity *target) override;

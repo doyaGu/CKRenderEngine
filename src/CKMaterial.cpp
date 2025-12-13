@@ -662,6 +662,12 @@ CKERROR RCKMaterial::RemapDependencies(CKDependenciesContext &context) {
  * @brief Copies material data from another object.
  *
  * Based on decompilation at 0x10065F34.
+ * The DLL copies:
+ * 1. Textures array (16 bytes via memcpy)
+ * 2. 125 bytes (0x7D) from m_MaterialData through m_AlphaRef
+ * 3. m_EffectParameter separately
+ *
+ * Note: m_Sprite3DBatch, m_Callback, and m_CallbackArgument are NOT copied.
  */
 CKERROR RCKMaterial::Copy(CKObject &o, CKDependenciesContext &context) {
     CKERROR err = CKBeObject::Copy(o, context);
@@ -671,15 +677,14 @@ CKERROR RCKMaterial::Copy(CKObject &o, CKDependenciesContext &context) {
 
     RCKMaterial *src = static_cast<RCKMaterial *>(&o);
 
-    // Get dependency settings
+    // Get dependency settings (called but result not used in original)
     context.GetClassDependencies(CKCID_MATERIAL);
 
-    // Copy texture references
-    for (int i = 0; i < 4; ++i) {
-        m_Textures[i] = src->m_Textures[i];
-    }
+    // Copy texture references (16 bytes)
+    memcpy(m_Textures, src->m_Textures, sizeof(m_Textures));
 
-    // Copy material data (125 bytes based on decompilation)
+    // Copy 125 bytes (0x7D) from m_MaterialData through first byte of m_AlphaRef
+    // This is equivalent to copying all the material properties
     m_MaterialData = src->m_MaterialData;
     m_SpecularColor = src->m_SpecularColor;
     m_TextureBlendMode = src->m_TextureBlendMode;
@@ -693,8 +698,7 @@ CKERROR RCKMaterial::Copy(CKObject &o, CKDependenciesContext &context) {
     m_TextureBorderColor = src->m_TextureBorderColor;
     m_Flags = src->m_Flags;
     m_AlphaRef = src->m_AlphaRef;
-    m_Callback = src->m_Callback;
-    m_CallbackArgument = src->m_CallbackArgument;
+    // Note: m_Sprite3DBatch, m_Callback, m_CallbackArgument are NOT copied per DLL
 
     // Copy effect parameter
     m_EffectParameter = src->m_EffectParameter;

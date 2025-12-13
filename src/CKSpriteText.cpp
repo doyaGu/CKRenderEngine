@@ -96,13 +96,13 @@ void RCKSpriteText::SetFont(CKSTRING FontName, int FontSize, int Weight, CKBOOL 
 // SetAlign: 0x1006212a
 void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
     m_Flags &= 0xFFFF0000;
-    m_Flags |= (CKDWORD) align;
+    m_Flags |= (CKDWORD)align & 0xFFFF;
     Redraw();
 }
 
 // GetAlign: 0x10062173
 CKSPRITETEXT_ALIGNMENT RCKSpriteText::GetAlign() {
-    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF0000);
+    return (CKSPRITETEXT_ALIGNMENT)(m_Flags & 0xFFFF0000);
 }
 
 // ClearFont: 0x1006218c
@@ -210,11 +210,11 @@ CKERROR RCKSpriteText::Load(CKStateChunk *chunk, CKFile *file) {
     if (chunk->SeekIdentifier(0x2000000)) {
         CKSTRING fontName = nullptr;
         chunk->ReadString(&fontName);
-        int height = chunk->ReadInt();
+        int fontSize = chunk->ReadInt();
         int weight = chunk->ReadInt();
         int italic = chunk->ReadInt();
         int underline = chunk->ReadInt();
-        SetFont(fontName, underline, italic, weight, height);
+        SetFont(fontName, fontSize, weight, italic, underline);
         CKDeletePointer(fontName);
     }
 

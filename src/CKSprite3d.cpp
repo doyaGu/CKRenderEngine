@@ -1,5 +1,7 @@
 #include "RCKSprite3D.h"
 #include "RCK3dEntity.h"
+#include "RCKMaterial.h"
+#include "RCKRenderContext.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -207,6 +209,96 @@ int RCKSprite3D::GetMemoryOccupation() {
     return RCK3dEntity::GetMemoryOccupation() + 32;
 }
 
+/*************************************************
+Summary: CheckPreDeletion method for RCKSprite3D.
+Purpose: Clears material reference if the material is being deleted.
+Remarks:
+- Calls base class CheckPreDeletion first
+- Checks if material is flagged for deletion and clears reference
+
+Implementation based on decompilation at 0x100431DC:
+- Uses sub_1000CEB0 which checks if object is being deleted
+- Clears m_Material to nullptr if material is being deleted
+*************************************************/
+void RCKSprite3D::CheckPreDeletion() {
+    // Call base class first
+    RCK3dEntity::CheckPreDeletion();
+
+    // Check if material is being deleted
+    if (m_Material) {
+        if (m_Material->IsToBeDeleted()) {
+            m_Material = nullptr;
+        }
+    }
+}
+
+/*************************************************
+Summary: IsObjectUsed method for RCKSprite3D.
+Purpose: Checks if the given object is used by this sprite.
+Remarks:
+- Returns TRUE if the object is this sprite's material
+- Otherwise delegates to base class
+
+Implementation based on decompilation at 0x10043238:
+*************************************************/
+int RCKSprite3D::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
+    if (obj == (CKObject *)m_Material) {
+        return TRUE;
+    }
+    return RCK3dEntity::IsObjectUsed(obj, cid);
+}
+
+/*************************************************
+Summary: PrepareDependencies method for RCKSprite3D.
+Purpose: Prepares dependencies for copy/save operations.
+Remarks:
+- Calls base class PrepareDependencies first
+- If material dependency bit is set, prepares material
+
+Implementation based on decompilation at 0x100436BB:
+- Checks CKDependenciesContext::GetClassDependencies for CKCID_SPRITE3D
+- Bit 0 (& 1) controls material dependency
+*************************************************/
+CKERROR RCKSprite3D::PrepareDependencies(CKDependenciesContext &context) {
+    // Call base class first
+    CKERROR err = RCK3dEntity::PrepareDependencies(context);
+    if (err != CK_OK) {
+        return err;
+    }
+
+    // Check if material dependency is enabled
+    if ((context.GetClassDependencies(CKCID_SPRITE3D) & 1) != 0) {
+        if (m_Material) {
+            ((CKObject *)m_Material)->PrepareDependencies(context);
+        }
+    }
+
+    return context.FinishPrepareDependencies((CKObject *)this, m_ClassID);
+}
+
+/*************************************************
+Summary: RemapDependencies method for RCKSprite3D.
+Purpose: Remaps object references after copy/load operations.
+Remarks:
+- Calls base class RemapDependencies first
+- Remaps material reference to copied material
+
+Implementation based on decompilation at 0x10043734:
+*************************************************/
+CKERROR RCKSprite3D::RemapDependencies(CKDependenciesContext &context) {
+    // Call base class first
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK) {
+        return err;
+    }
+
+    // Remap material reference
+    CKMaterial *remappedMaterial = (CKMaterial *)context.Remap((CKObject *)m_Material);
+    SetMaterial(remappedMaterial);
+
+    return CK_OK;
+}
+
 CKERROR RCKSprite3D::Copy(CKObject &o, CKDependenciesContext &context) {
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK)
@@ -307,11 +399,45 @@ CKSTRING RCKSprite3D::GetClassName() {
     return (CKSTRING) "3D Sprite";
 }
 
+/*************************************************
+Summary: GetDependenciesCount static method for RCKSprite3D.
+Purpose: Returns the number of dependency types for the given mode.
+Remarks:
+- Mode 1 (CK_DEPENDENCIES_COPY): Returns 1 (Material)
+- Mode 2 (CK_DEPENDENCIES_SAVE): Returns 1 (Material)
+- Mode 3 (CK_DEPENDENCIES_DELETE): Returns 0
+- Mode 4 (CK_DEPENDENCIES_REPLACE): Returns 1 (Material)
+
+Implementation based on decompilation at 0x10043580
+*************************************************/
 int RCKSprite3D::GetDependenciesCount(int mode) {
-    return 0;
+    switch (mode) {
+        case 1: // CK_DEPENDENCIES_COPY
+            return 1;
+        case 2: // CK_DEPENDENCIES_SAVE
+            return 1;
+        case 3: // CK_DEPENDENCIES_DELETE
+            return 0;
+        case 4: // CK_DEPENDENCIES_REPLACE
+            return 1;
+        default:
+            return 0;
+    }
 }
 
+/*************************************************
+Summary: GetDependencies static method for RCKSprite3D.
+Purpose: Returns the name of the i-th dependency type.
+Remarks:
+- Index 0: Returns "Material"
+- Other indices: Returns nullptr
+
+Implementation based on decompilation at 0x100435D2
+*************************************************/
 CKSTRING RCKSprite3D::GetDependencies(int i, int mode) {
+    if (i == 0) {
+        return (CKSTRING) "Material";
+    }
     return nullptr;
 }
 
@@ -424,4 +550,122 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
     // Vertex 3: right, bottom
     vertices[3].tu = m_Rect.right;
     vertices[3].tv = m_Rect.bottom;
+}
+
+//=============================================================================
+// Render - Renders the sprite to the render context
+// Based on IDA decompilation at 0x100424CE
+//
+// The sprite rendering uses a batching system where sprites with the same
+// material are grouped together for efficient rendering.
+//=============================================================================
+
+CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
+    RCKRenderContext *rc = (RCKRenderContext *)Dev;
+    
+    // Check if transparent rendering is enabled (flag 0x20)
+    if ((m_MoveableFlags & 0x20) != 0) {
+        // Transparent object - handle callbacks and world matrix setup
+        if (m_Callbacks && (Flags & 0x100) == 0) {
+            rc->SetWorldTransformationMatrix(m_WorldMatrix);
+        }
+    } else {
+        // Normal rendering - check if in view frustum first
+        if (!IsInViewFrustrum(Dev, Flags)) {
+            return TRUE;  // Not visible, but not an error
+        }
+    }
+    
+    // Add sprite to batch for rendering if we have a material
+    if (m_Material) {
+        rc->AddSprite3DBatch(this);
+    }
+    
+    // Update 2D extents if requested
+    if (Flags & 0xFF) {
+        rc->AddExtents2D(m_RenderExtents, (CKObject *)this);
+    }
+    
+    return TRUE;
+}
+
+//=============================================================================
+// RayIntersection - Performs ray intersection test with the sprite quad
+// Based on IDA decompilation at 0x10042F2A
+//
+// The sprite is treated as a quad in 3D space. The ray is transformed
+// into local space, then intersected with the XY plane at Z=0.
+// If the intersection point is within the sprite bounds, it's a hit.
+//=============================================================================
+
+int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2, 
+                                  VxIntersectionDesc *Desc, CK3dEntity *Ref, 
+                                  CK_RAYINTERSECTION iOptions) {
+    // Transform ray into local space
+    VxVector localPos1 = *Pos1;
+    VxVector localPos2 = *Pos2;
+    
+    if (Ref != (CK3dEntity *)this) {
+        InverseTransform(&localPos1, Pos1, Ref);
+        InverseTransform(&localPos2, Pos2, Ref);
+    }
+    
+    // Calculate ray direction
+    VxVector rayDir;
+    rayDir.x = localPos2.x - localPos1.x;
+    rayDir.y = localPos2.y - localPos1.y;
+    rayDir.z = localPos2.z - localPos1.z;
+    
+    // The sprite is in the XY plane at Z=0
+    // Find intersection with Z=0 plane
+    if (rayDir.z == 0.0f) {
+        return 0;  // Ray parallel to sprite plane
+    }
+    
+    // t = -localPos1.z / rayDir.z gives us the parameter where ray hits Z=0
+    float t = -localPos1.z / rayDir.z;
+    
+    // Calculate intersection point
+    VxVector intersectPoint;
+    intersectPoint.x = localPos1.x + t * rayDir.x;
+    intersectPoint.y = localPos1.y + t * rayDir.y;
+    intersectPoint.z = 0.0f;  // On the sprite plane
+    
+    // Check if intersection point is within sprite bounds
+    if (intersectPoint.x < m_LocalBoundingBox.Min.x ||
+        intersectPoint.x > m_LocalBoundingBox.Max.x ||
+        intersectPoint.y < m_LocalBoundingBox.Min.y ||
+        intersectPoint.y > m_LocalBoundingBox.Max.y) {
+        return 0;  // Outside sprite bounds
+    }
+    
+    // Fill in intersection description if provided
+    if (Desc) {
+        // Calculate actual distance along original ray
+        VxVector worldDir;
+        worldDir.x = Pos2->x - Pos1->x;
+        worldDir.y = Pos2->y - Pos1->y;
+        worldDir.z = Pos2->z - Pos1->z;
+        float rayLength = sqrtf(worldDir.x * worldDir.x + worldDir.y * worldDir.y + worldDir.z * worldDir.z);
+        Desc->Distance = t * rayLength;
+        
+        Desc->FaceIndex = 0;
+        Desc->IntersectionPoint = intersectPoint;
+        
+        // Calculate texture coordinates
+        float uvWidth = m_Rect.GetWidth();
+        float uvHeight = m_Rect.GetHeight();
+        float spriteWidth = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
+        float spriteHeight = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
+        
+        Desc->TexU = m_Rect.left + (intersectPoint.x - m_LocalBoundingBox.Min.x) * uvWidth / spriteWidth;
+        Desc->TexV = m_Rect.bottom - (intersectPoint.y - m_LocalBoundingBox.Min.y) * uvHeight / spriteHeight;
+        
+        // Set normal pointing towards negative Z (towards viewer)
+        Desc->IntersectionNormal.x = 0.0f;
+        Desc->IntersectionNormal.y = 0.0f;
+        Desc->IntersectionNormal.z = -1.0f;
+    }
+    
+    return 1;  // Intersection found
 }

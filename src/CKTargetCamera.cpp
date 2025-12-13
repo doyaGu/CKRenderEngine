@@ -4,6 +4,7 @@
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
+#include "CKDependencies.h"
 #include "VxMath.h"
 
 // Static class ID definition
@@ -19,17 +20,20 @@ Remarks:
 Implementation based on decompilation at 0x10043ae0.
 *************************************************/
 RCKTargetCamera::RCKTargetCamera(CKContext *Context, CKSTRING name)
-    : RCKCamera(Context, name), m_Target(0) {
-}
+    : RCKCamera(Context, name), m_Target(0) {}
 
 /*************************************************
 Summary: Destructor for RCKTargetCamera.
 Purpose: Cleans up target camera resources.
 Remarks:
+- Clears target to properly update target's flags
 - Base class destructor handles camera cleanup
+
+Implementation based on decompilation at 0x10043b16.
 *************************************************/
 RCKTargetCamera::~RCKTargetCamera() {
-    // Base class destructor handles cleanup
+    // Clear target to update flags properly
+    SetTarget(nullptr);
 }
 
 //=============================================================================
@@ -107,6 +111,39 @@ CK_CLASSID RCKTargetCamera::GetClassID() {
 }
 
 /*************************************************
+Summary: Checks and clears references to deleted objects.
+Purpose: Called during object deletion to clean up references.
+Remarks:
+- Calls base class CheckPostDeletion first
+- Clears m_Target if the target object no longer exists
+
+Implementation based on decompilation at 0x10043d49.
+*************************************************/
+void RCKTargetCamera::CheckPostDeletion() {
+    CKObject::CheckPostDeletion();
+    
+    // Clear target if the object no longer exists
+    if (!m_Context->GetObject(m_Target)) {
+        m_Target = 0;
+    }
+}
+
+/*************************************************
+Summary: Checks if an object is used by this target camera.
+Return Value: TRUE if the object is the target, FALSE otherwise.
+Remarks:
+- Returns TRUE if the given object is the target
+- Otherwise delegates to base class
+
+Implementation based on decompilation at 0x10043db9.
+*************************************************/
+CKBOOL RCKTargetCamera::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
+    if (o && o->GetID() == m_Target)
+        return TRUE;
+    return RCK3dEntity::IsObjectUsed(o, cid);
+}
+
+/*************************************************
 Summary: Returns the memory footprint of this object.
 Return Value: Memory size in bytes.
 Remarks:
@@ -116,6 +153,56 @@ Implementation based on decompilation at 0x10043d7f.
 *************************************************/
 int RCKTargetCamera::GetMemoryOccupation() {
     return RCKCamera::GetMemoryOccupation() + 4;
+}
+
+/*************************************************
+Summary: Prepares dependencies for copy/save operations.
+Purpose: Ensures target entity is included in dependencies.
+Remarks:
+- Calls base class PrepareDependencies first
+- If class dependencies include target (bit 0), prepares target entity
+- Finishes with FinishPrepareDependencies
+
+Implementation based on decompilation at 0x1004404d.
+*************************************************/
+CKERROR RCKTargetCamera::PrepareDependencies(CKDependenciesContext &context) {
+    CKERROR err = RCK3dEntity::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    // Check if target is included in dependencies (bit 0)
+    if (context.GetClassDependencies(CKCID_TARGETCAMERA) & 1) {
+        CKObject *targetObj = m_Context->GetObject(m_Target);
+        if (targetObj) {
+            targetObj->PrepareDependencies(context);
+        }
+    }
+
+    return context.FinishPrepareDependencies(this, CKCID_TARGETCAMERA);
+}
+
+/*************************************************
+Summary: Remaps object IDs after copy/paste operations.
+Purpose: Updates target ID to point to copied object.
+Remarks:
+- Calls base class RemapDependencies first
+- Remaps m_Target using context's Remap function
+
+Implementation based on decompilation at 0x100440ca.
+*************************************************/
+CKERROR RCKTargetCamera::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    // Remap target ID
+    CKObject *targetObj = m_Context->GetObject(m_Target);
+    CKObject *remapped = context.Remap(targetObj);
+    if (remapped) {
+        m_Target = remapped->GetID();
+    }
+
+    return CK_OK;
 }
 
 /*************************************************
@@ -266,11 +353,45 @@ CKSTRING RCKTargetCamera::GetClassName() {
     return (CKSTRING) "Target Camera";
 }
 
+/*************************************************
+Summary: Returns the number of dependencies for this class.
+Purpose: Tells the system how many dependency strings exist.
+Remarks:
+- Mode 1 (CK_DEPENDENCIES_COPY): 1 dependency (Target)
+- Mode 2 (CK_DEPENDENCIES_SAVE): 1 dependency (Target)
+- Mode 3: 0 dependencies
+- Mode 4 (CK_DEPENDENCIES_DELETE): 1 dependency (Target)
+- Other modes: 0 dependencies
+
+Implementation based on decompilation at 0x10043f12.
+*************************************************/
 int RCKTargetCamera::GetDependenciesCount(int mode) {
-    return 0;
+    switch (mode) {
+        case 1: // CK_DEPENDENCIES_COPY
+            return 1;
+        case 2: // CK_DEPENDENCIES_SAVE
+            return 1;
+        case 3:
+            return 0;
+        case 4: // CK_DEPENDENCIES_DELETE
+            return 1;
+        default:
+            return 0;
+    }
 }
 
+/*************************************************
+Summary: Returns the name of a dependency at index i.
+Purpose: Provides human-readable dependency names for UI.
+Remarks:
+- Index 0 returns "Target" for valid modes
+- Other indices return NULL
+
+Implementation based on decompilation at 0x10043f70.
+*************************************************/
 CKSTRING RCKTargetCamera::GetDependencies(int i, int mode) {
+    if (i == 0)
+        return (CKSTRING) "Target";
     return nullptr;
 }
 

@@ -50,8 +50,8 @@ RCKGrid::RCKGrid(CKContext *Context, CKSTRING name)
  * @brief RCKGrid destructor
  */
 RCKGrid::~RCKGrid() {
-    // IDA shows destructor just clears the layers array
-    // The mesh/materials/textures are cleaned up elsewhere
+    // IDA: 0x100179a1 - destructor just clears the layers array
+    // The base class destructor handles mesh cleanup
     m_Layers.Clear();
 }
 
@@ -63,12 +63,55 @@ CK_CLASSID RCKGrid::GetClassID() {
     return 50;
 }
 
+/**
+ * @brief Update the bounding box for the grid
+ * @param World If TRUE, also update world bounding box
+ * IDA: 0x100179f8
+ */
+void RCKGrid::UpdateBox(CKBOOL World) {
+    // Set local bounding box from (0,0,0) to (width, 1, length)
+    m_LocalBoundingBox.Min.Set(0.0f, 0.0f, 0.0f);
+    m_LocalBoundingBox.Max.Set((float)m_Width, 1.0f, (float)m_Length);
+
+    if (World) {
+        m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
+    }
+
+    m_MoveableFlags |= 4;
+}
+
+/**
+ * @brief Pre-save callback to prepare layers for saving
+ * @param file The CKFile being saved to
+ * @param flags Save flags
+ * IDA: 0x100197e1
+ */
+void RCKGrid::PreSave(CKFile *file, CKDWORD flags) {
+    // Clear mesh array and restore current mesh if present
+    m_Meshes.Clear();
+    if (m_CurrentMesh) {
+        m_Meshes.PushBack(m_CurrentMesh);
+    }
+
+    // Call base class PreSave
+    RCK3dEntity::PreSave(file, flags);
+
+    // Save all layer objects to the file
+    for (int i = 0; i < m_Layers.Size(); ++i) {
+        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+        if (layerObject) {
+            file->SaveObject(layerObject, flags);
+        }
+    }
+}
+
 
 /**
  * @brief Save the grid data to a state chunk
  * @param file The CKFile to save to (can be nullptr for standalone saving)
  * @param flags Save flags
  * @return A new CKStateChunk containing the saved data
+ * IDA: 0x1001987d
  */
 CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     // Call base class Save first
@@ -100,15 +143,8 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
         chunk->WriteInt(1);
     }
 
-    // Save layers array
-    // Convert layer ID array to XObjectPointerArray for saving
-    XObjectPointerArray objectArray;
-    for (int i = 0; i < m_Layers.Size(); ++i) {
-        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
-        if (layerObject)
-            objectArray.PushBack(layerObject);
-    }
-    objectArray.Save(chunk);
+    // Save layers using XObjectArray::Save with context
+    m_Layers.Save(chunk, m_Context);
 
     // If not saving to file, save layer sub-chunks
     if (!file) {
@@ -136,6 +172,7 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
  * @param chunk The CKStateChunk containing the saved data
  * @param file The CKFile being loaded from
  * @return CKERROR indicating success or failure
+ * IDA: 0x10019a11
  */
 CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk)
@@ -158,18 +195,8 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
             chunk->ReadInt();
         }
 
-        // Load layers array
-        XObjectPointerArray objectArray;
-        objectArray.Load(m_Context, chunk);
-
-        // Convert back to layer ID array
-        m_Layers.Clear();
-        for (int i = 0; i < objectArray.Size(); ++i) {
-            CKObject *layerObject = reinterpret_cast<CKObject *>(objectArray[i]);
-            if (layerObject) {
-                m_Layers.PushBack(layerObject->GetID());
-            }
-        }
+        // Load layers using XObjectArray::Load
+        m_Layers.Load(chunk);
 
         // If not loading from file, load layer sub-chunks
         if (!file) {
@@ -184,7 +211,7 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Check and validate loaded layers
-        objectArray.Check();
+        m_Layers.Check(m_Context);
     }
 
     return CK_OK;
@@ -193,9 +220,35 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
 /**
  * @brief Get memory occupation for the grid
  * @return Memory size in bytes
+ * IDA: 0x1001970b
  */
 int RCKGrid::GetMemoryOccupation() {
-    return sizeof(RCKGrid) + m_Layers.Size() * sizeof(CK_ID);
+    // Base class memory + 32 (grid specific fields)
+    int size = RCK3dEntity::GetMemoryOccupation() + 32;
+
+    // Add memory for layers array internal storage
+    size += m_Layers.GetMemoryOccupation(0);
+
+    // Add memory for layer cell data: 4 * width * length * layerCount
+    size += 4 * m_Width * m_Length * m_Layers.Size();
+
+    return size;
+}
+
+/**
+ * @brief Check if a specific object is used by this grid
+ * @param obj The object to check
+ * @param cid The class ID to check for
+ * @return TRUE if the object is used
+ * IDA: 0x1001976c
+ */
+CKBOOL RCKGrid::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
+    // Check if it's a layer and exists in our layers array
+    if (cid == CKCID_LAYER && m_Layers.FindObject(obj)) {
+        return TRUE;
+    }
+    // Otherwise delegate to base class
+    return RCK3dEntity::IsObjectUsed(obj, cid);
 }
 
 CKERROR RCKGrid::PrepareDependencies(CKDependenciesContext &context) {
@@ -259,9 +312,9 @@ CKERROR RCKGrid::RemapDependencies(CKDependenciesContext &context) {
  * @param o The target object
  * @param context Dependencies context
  * @return CKERROR indicating success or failure
+ * IDA: 0x10019e7f
  */
 CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
-    // IDA: 0x10019e7f
     // Virtools convention: Copy is called on the destination object, and 'o' is the source.
     // Base class copy first.
     CKERROR err = RCK3dEntity::Copy(o, context);
@@ -273,6 +326,9 @@ CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
     // Get class dependencies for CKCID_GRID
     CKDWORD classDeps = context.GetClassDependencies(CKCID_GRID);
 
+    // Save source mesh before copy (may be cleared by base)
+    RCKMesh *srcMesh = src.m_Mesh;
+
     m_Width = src.m_Width;
     m_Length = src.m_Length;
     m_Priority = src.m_Priority;
@@ -281,7 +337,7 @@ CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
 
     // If operation mode is CK_DEPENDENCIES_COPY (1), restore source's mesh
     if (context.IsInMode(CK_DEPENDENCIES_COPY))
-        src.SetCurrentMesh(src.m_Mesh, TRUE);
+        src.SetCurrentMesh(srcMesh, TRUE);
 
     // If layers dependency flag set, copy layers array
     if ((classDeps & 1) != 0)
@@ -662,24 +718,100 @@ void RCKGrid::Get3dPosFrom2dCoords(VxVector *pos, int x, int y) {
     Transform(pos, &local, nullptr);
 }
 
+/**
+ * @brief Add a classification attribute by type
+ * @param classType The attribute type to add
+ * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
+ * IDA: 0x1001901e
+ */
 CKERROR RCKGrid::AddClassification(int classType) {
-    return CK_OK;
+    if (SetAttribute(classType, 0))
+        return CK_OK;
+    return CKERR_INVALIDPARAMETER;
 }
 
+/**
+ * @brief Add a classification attribute by name
+ * @param name The attribute name to add
+ * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
+ * IDA: 0x10019046
+ */
 CKERROR RCKGrid::AddClassificationByName(char *name) {
-    return CK_OK;
+    CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
+    int attrType = attrMgr->GetAttributeTypeByName(name);
+    if (SetAttribute(attrType, 0))
+        return CK_OK;
+    return CKERR_INVALIDPARAMETER;
 }
 
+/**
+ * @brief Remove a classification attribute by type
+ * @param classType The attribute type to remove
+ * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
+ * IDA: 0x10019081
+ */
 CKERROR RCKGrid::RemoveClassification(int classType) {
-    return CK_OK;
+    if (RemoveAttribute(classType))
+        return CK_OK;
+    return CKERR_INVALIDPARAMETER;
 }
 
+/**
+ * @brief Remove a classification attribute by name
+ * @param name The attribute name to remove
+ * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
+ * IDA: 0x100190a7
+ */
 CKERROR RCKGrid::RemoveClassificationByName(char *name) {
-    return CK_OK;
+    CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
+    int attrType = attrMgr->GetAttributeTypeByName(name);
+    if (RemoveAttribute(attrType))
+        return CK_OK;
+    return CKERR_INVALIDPARAMETER;
 }
 
+/**
+ * @brief Check if entity has compatible classification
+ * @param entity The entity to check against
+ * @return TRUE if classifications are compatible
+ * IDA: 0x100190e0
+ */
 CKBOOL RCKGrid::HasCompatibleClass(CK3dEntity *entity) {
-    return TRUE;
+    if (!entity)
+        return FALSE;
+
+    // Get Grid Manager
+    CKGridManager *gridMgr = (CKGridManager *)m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
+    if (!gridMgr)
+        return FALSE;
+
+    // Get the grid classification category from the manager (vtable+172)
+    typedef int(__thiscall *GetCategoryFn)(CKGridManager *);
+    GetCategoryFn getCategoryFn = *reinterpret_cast<GetCategoryFn *>(*reinterpret_cast<char **>(gridMgr) + 0xAC);
+    int gridCategory = getCategoryFn(gridMgr);
+
+    CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
+
+    // Get entity's attribute list
+    int attrCount = entity->GetAttributeCount();
+    CKAttributeVal *attrList = new CKAttributeVal[attrCount];
+    entity->GetAttributeList(attrList);
+
+    // Check each attribute of the entity
+    while (attrCount > 0) {
+        --attrCount;
+        int attrType = attrList[attrCount].AttribType;
+        int attrCategory = attrMgr->GetAttributeCategoryIndex(attrType);
+
+        // If attribute is in grid category and this grid has it too
+        if (attrCategory == gridCategory && HasAttribute(attrType)) {
+            delete[] attrList;
+            return TRUE;
+        }
+    }
+
+    delete[] attrList;
+    return FALSE;
 }
 
 void RCKGrid::SetGridPriority(int priority) {
@@ -698,21 +830,32 @@ CK_GRIDORIENTATION RCKGrid::GetOrientationMode() {
     return static_cast<CK_GRIDORIENTATION>(m_OrientationMode);
 }
 
+/**
+ * @brief Add a layer by type
+ * @param type The layer type
+ * @param format The layer format (0 = normal)
+ * @return The created layer, or nullptr on failure
+ * IDA: 0x10019256
+ */
 CKLayer *RCKGrid::AddLayer(int type, int format) {
     CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
     if (!gridMgr)
         return nullptr;
 
-    // Validate type exists in manager
+    // Validate type exists in manager (vtable+124 = GetNameFromType)
     CKSTRING layerName = GridManager_GetNameFromType(gridMgr, type);
     if (!layerName)
         return nullptr;
 
+    // Check if layer with this type already exists
     if (GetLayer(type))
         return nullptr;
+
+    // Only format 0 is supported
     if (format != 0)
         return nullptr;
 
+    // Create the layer
     CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->CreateObject(CKCID_LAYER, layerName, CK_OBJECTCREATION_NONAMECHECK));
     if (!layer)
         return nullptr;
@@ -725,6 +868,13 @@ CKLayer *RCKGrid::AddLayer(int type, int format) {
     return layer;
 }
 
+/**
+ * @brief Add a layer by type name
+ * @param name The layer type name
+ * @param format The layer format (0 = normal)
+ * @return The created layer, or nullptr on failure
+ * IDA: 0x1001935d
+ */
 CKLayer *RCKGrid::AddLayerByName(char *name, int format) {
     if (!name)
         return nullptr;
@@ -733,15 +883,20 @@ CKLayer *RCKGrid::AddLayerByName(char *name, int format) {
     if (!gridMgr)
         return nullptr;
 
+    // Get type from name (vtable+120 = GetTypeFromName)
     const int type = gridMgr->GetTypeFromName(name);
     if (!type)
         return nullptr;
 
+    // Check if layer with this type already exists
     if (GetLayer(type))
         return nullptr;
+
+    // Only format 0 is supported
     if (format != 0)
         return nullptr;
 
+    // Create layer with the provided name
     CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->CreateObject(CKCID_LAYER, name, CK_OBJECTCREATION_NONAMECHECK));
     if (!layer)
         return nullptr;
@@ -806,6 +961,12 @@ CKERROR RCKGrid::RemoveLayer(int type) {
     return CK_OK;
 }
 
+/**
+ * @brief Remove a layer by type name
+ * @param name The layer type name to remove
+ * @return CK_OK
+ * IDA: 0x100195e9
+ */
 CKERROR RCKGrid::RemoveLayerByName(char *name) {
     if (!name)
         return CKERR_INVALIDPARAMETER;
@@ -818,8 +979,8 @@ CKERROR RCKGrid::RemoveLayerByName(char *name) {
     if (!type)
         return CKERR_INVALIDPARAMETER;
 
-    // Match original behavior: ignore RemoveLayer result.
-    (void)RemoveLayer(type);
+    // Match original behavior: call RemoveLayer and always return CK_OK
+    RemoveLayer(type);
     return CK_OK;
 }
 
