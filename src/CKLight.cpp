@@ -426,14 +426,10 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     CKDWORD typeAndFlags = m_LightData.Type | m_Flags;
     lightChunk->WriteDword(typeAndFlags);
 
-    // Convert diffuse color to packed DWORD format (BGRA with alpha forced to 0xFF)
+    // Convert diffuse color to packed DWORD format (ARGB with alpha forced to 0xFF)
     // IDA: sub_1001BA90 returns RGBAFTOCOLOR(this) | 0xFF000000
-    // Pack as: B in bits 16-23, G in bits 8-15, R in bits 0-7, A in bits 24-31
-    CKDWORD packedColor = 
-        ((CKDWORD)(m_LightData.Diffuse.b * 255.0f) << 16) |
-        ((CKDWORD)(m_LightData.Diffuse.g * 255.0f) << 8) |
-        ((CKDWORD)(m_LightData.Diffuse.r * 255.0f)) |
-        0xFF000000;
+    // RGBAFTOCOLOR uses: (A << 24) | (R << 16) | (G << 8) | (B << 0)
+    CKDWORD packedColor = RGBAFTOCOLOR(&m_LightData.Diffuse) | 0xFF000000;
     lightChunk->WriteDword(packedColor);
 
     // Write attenuation and range
@@ -541,13 +537,14 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
             m_Flags = typeAndFlags & 0xFFFFFF00;
 
             // Convert packed color DWORD back to VxColor
-            // IDA: sub_10016990 unpacks BGRA format:
-            // r = BYTE2(color) / 255, g = BYTE1(color) / 255, b = BYTE0(color) / 255, a = HIBYTE(color) / 255
+            // IDA: sub_10016990 unpacks ARGB format:
+            // r = BYTE2(color) / 255 (bits 16-23), g = BYTE1(color) / 255 (bits 8-15)
+            // b = BYTE0(color) / 255 (bits 0-7), a = HIBYTE(color) / 255 (bits 24-31)
             CKDWORD packedColor = chunk->ReadDword();
-            m_LightData.Diffuse.r = ((packedColor >> 16) & 0xFF) / 255.0f;  // BYTE2
-            m_LightData.Diffuse.g = ((packedColor >> 8) & 0xFF) / 255.0f;   // BYTE1
-            m_LightData.Diffuse.b = (packedColor & 0xFF) / 255.0f;          // BYTE0
-            m_LightData.Diffuse.a = ((packedColor >> 24) & 0xFF) / 255.0f;  // HIBYTE
+            m_LightData.Diffuse.r = (float)((packedColor >> 16) & 0xFF) / 255.0f;  // R = BYTE2
+            m_LightData.Diffuse.g = (float)((packedColor >> 8) & 0xFF) / 255.0f;   // G = BYTE1
+            m_LightData.Diffuse.b = (float)(packedColor & 0xFF) / 255.0f;          // B = BYTE0
+            m_LightData.Diffuse.a = (float)((packedColor >> 24) & 0xFF) / 255.0f;  // A = HIBYTE
 
             // Read attenuation and range
             m_LightData.Attenuation0 = chunk->ReadFloat();
@@ -625,15 +622,19 @@ CKBOOL RCKLight::Setup(CKRasterizerContext *rst, CKDWORD lightIndex) {
     m_LightData.Direction.z = worldMat[2][2];
 
     // Handle specular flag (0x200) - set specular to scaled diffuse or black
+    // IDA: sub_1001BA40 scales r,g,b by power; sub_1001B9B0 creates (val,val,val,1.0)
     if (m_Flags & 0x200) {
-        // Scale diffuse color by light power for specular
+        // Scale diffuse color RGB by light power for specular, alpha = 1.0
         m_LightData.Specular.r = m_LightData.Diffuse.r * m_LightPower;
         m_LightData.Specular.g = m_LightData.Diffuse.g * m_LightPower;
         m_LightData.Specular.b = m_LightData.Diffuse.b * m_LightPower;
         m_LightData.Specular.a = 1.0f;
     } else {
-        // Set specular to black
-        m_LightData.Specular = VxColor(0.0f, 0.0f, 0.0f, 1.0f);
+        // Set specular to black with alpha = 1.0
+        m_LightData.Specular.r = 0.0f;
+        m_LightData.Specular.g = 0.0f;
+        m_LightData.Specular.b = 0.0f;
+        m_LightData.Specular.a = 1.0f;
     }
 
     // Apply light power scaling
@@ -705,6 +706,7 @@ CKERROR RCKLight::Copy(CKObject &o, CKDependenciesContext &context) {
 
     // Copy entire light data block (0x70 = 112 bytes)
     // This copies m_LightData (104), m_Flags (4), and m_LightPower (4)
+    // Must match original qmemcpy(&this->m_LightData, &a2->m_LightData, 0x70u)
     memcpy(&m_LightData, &srcLight->m_LightData, sizeof(CKLightData));
 
     return CK_OK;

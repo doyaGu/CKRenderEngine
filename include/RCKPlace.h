@@ -21,12 +21,23 @@ public:
     ~RCKPlace() override;
     CK_CLASSID GetClassID() override;
 
+    // CKObject overrides
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
-
+    void CheckPreDeletion() override;
+    void CheckPostDeletion() override;
     int GetMemoryOccupation() override;
+    CKBOOL IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+
+    // CKBeObject overrides
+    void AddToScene(CKScene *scene, CKBOOL dependencies) override;
+    void RemoveFromScene(CKScene *scene, CKBOOL dependencies) override;
+
+    // CK3dEntity overrides
+    const VxBbox &GetBoundingBox(CKBOOL local = FALSE) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);

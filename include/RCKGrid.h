@@ -18,6 +18,7 @@ public:
     ~RCKGrid() override;
     CK_CLASSID GetClassID() override;
 
+    void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
     void PostLoad() override;
@@ -25,6 +26,8 @@ public:
     void CheckPostDeletion() override;
 
     int GetMemoryOccupation() override;
+    CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    void UpdateBox(CKBOOL World = TRUE) override;
 
     CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;

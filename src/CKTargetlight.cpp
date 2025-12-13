@@ -19,17 +19,20 @@ Remarks:
 Implementation based on decompilation at 0x10044180.
 *************************************************/
 RCKTargetLight::RCKTargetLight(CKContext *Context, CKSTRING name)
-    : RCKLight(Context, name), m_Target(0) {
-}
+    : RCKLight(Context, name), m_Target(0) {}
 
 /*************************************************
 Summary: Destructor for RCKTargetLight.
 Purpose: Cleans up target light resources.
 Remarks:
+- Must call SetTarget(NULL) to clear flags on old target
 - Base class destructor handles light cleanup
+
+Implementation based on decompilation at 0x100441B6.
 *************************************************/
 RCKTargetLight::~RCKTargetLight() {
-    // Base class destructor handles cleanup
+    // Clear target and its flags before base destructor runs
+    SetTarget(nullptr);
 }
 
 //=============================================================================
@@ -61,24 +64,24 @@ Remarks:
 Implementation based on decompilation at 0x10044229.
 *************************************************/
 void RCKTargetLight::SetTarget(CK3dEntity *target) {
-    // Don't allow setting self as target
-    if (target && target->GetID() == GetID())
+    // Don't allow setting self as target (compares pointers)
+    if (target == reinterpret_cast<CK3dEntity*>(this))
         return;
 
     // Clear flags on old target
     CK3dEntity *oldTarget = static_cast<CK3dEntity *>(m_Context->GetObject(m_Target));
     if (oldTarget) {
         CKDWORD flags = oldTarget->GetFlags();
-        flags &= ~0x100; // Clear "is target" flag
-        flags |= 0x2;    // Set some other flag
+        flags &= ~0x100; // Clear "is target" flag (BYTE1 &= ~1)
+        flags |= 0x2;    // Set flag 0x2
         oldTarget->SetFlags(flags);
     }
 
     // Set flags on new target
     if (target) {
         CKDWORD flags = target->GetFlags();
-        flags |= 0x100; // Set "is target" flag
-        flags &= ~0x2;  // Clear some other flag
+        flags |= 0x100;  // Set "is target" flag (BYTE1 |= 1)
+        flags &= ~0x2;   // Clear flag 0x2 (& 0xFFFFFFFD)
         target->SetFlags(flags);
         m_Target = target->GetID();
     } else {
@@ -129,6 +132,76 @@ CKERROR RCKTargetLight::Copy(CKObject &o, CKDependenciesContext &context) {
     RCKTargetLight *srcLight = static_cast<RCKTargetLight *>(&o);
     m_Target = srcLight->m_Target;
 
+    return CK_OK;
+}
+
+/*************************************************
+Summary: Checks if the specified object is used by this target light.
+Purpose: Used by the engine to determine object dependencies.
+Remarks:
+- First checks if the object is the target entity
+- Then delegates to base class for other checks
+
+Implementation based on decompilation at 0x10044430.
+*************************************************/
+CKBOOL RCKTargetLight::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
+    // Check if the object is our target
+    if (obj && obj->GetID() == m_Target)
+        return TRUE;
+    
+    // Delegate to base class for other checks
+    return RCK3dEntity::IsObjectUsed(obj, cid);
+}
+
+/*************************************************
+Summary: Prepares dependencies for this target light.
+Purpose: Called during copy/save operations to gather dependent objects.
+Remarks:
+- Calls base class PrepareDependencies first
+- If class dependencies include CKCID_TARGETLIGHT, prepares target object
+- Finishes by calling FinishPrepareDependencies
+
+Implementation based on decompilation at 0x100446E0.
+*************************************************/
+CKERROR RCKTargetLight::PrepareDependencies(CKDependenciesContext &context) {
+    // Call base class first
+    CKERROR result = RCK3dEntity::PrepareDependencies(context);
+    if (result != CK_OK)
+        return result;
+    
+    // Check if we need to prepare target dependencies
+    if (context.GetClassDependencies(CKCID_TARGETLIGHT) & 1) {
+        CKObject *targetObject = m_Context->GetObject(m_Target);
+        if (targetObject) {
+            targetObject->PrepareDependencies(context);
+        }
+    }
+    
+    // Finish preparing dependencies for this class
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+/*************************************************
+Summary: Remaps dependencies after a copy operation.
+Purpose: Updates internal object references to point to copied objects.
+Remarks:
+- Calls base class RemapDependencies first
+- Remaps m_Target to the new copied target object
+
+Implementation based on decompilation at 0x1004475D.
+*************************************************/
+CKERROR RCKTargetLight::RemapDependencies(CKDependenciesContext &context) {
+    // Call base class first
+    CKERROR result = RCK3dEntity::RemapDependencies(context);
+    if (result != CK_OK)
+        return result;
+    
+    // Remap target ID
+    if (m_Target) {
+        CKObject *remapped = context.Remap(m_Context->GetObject(m_Target));
+        m_Target = remapped ? remapped->GetID() : 0;
+    }
+    
     return CK_OK;
 }
 
@@ -260,11 +333,45 @@ CKSTRING RCKTargetLight::GetClassName() {
     return (CKSTRING) "Target Light";
 }
 
+/*************************************************
+Summary: Returns the number of dependencies for this class.
+Purpose: Used by the engine to query class-level dependency information.
+Remarks:
+- mode 1 (CK_DEPENDENCIES_COPY): 1
+- mode 2 (CK_DEPENDENCIES_DELETE): 1
+- mode 3 (CK_DEPENDENCIES_REPLACE): 0
+- mode 4 (CK_DEPENDENCIES_SAVE): 1
+- default: 0
+
+Implementation based on decompilation at 0x100445B0.
+*************************************************/
 int RCKTargetLight::GetDependenciesCount(int mode) {
-    return 0;
+    switch (mode) {
+        case 1: // CK_DEPENDENCIES_COPY
+            return 1;
+        case 2: // CK_DEPENDENCIES_DELETE
+            return 1;
+        case 3: // CK_DEPENDENCIES_REPLACE
+            return 0;
+        case 4: // CK_DEPENDENCIES_SAVE
+            return 1;
+        default:
+            return 0;
+    }
 }
 
+/*************************************************
+Summary: Returns the name of a dependency.
+Purpose: Used by the engine to get dependency names for UI or debugging.
+Remarks:
+- Returns "Target" for index 0
+- Returns nullptr for other indices
+
+Implementation based on decompilation at 0x10044610.
+*************************************************/
 CKSTRING RCKTargetLight::GetDependencies(int i, int mode) {
+    if (i == 0)
+        return (CKSTRING) "Target";
     return nullptr;
 }
 

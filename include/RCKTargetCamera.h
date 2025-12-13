@@ -11,12 +11,17 @@ public:
     ~RCKTargetCamera() override;
     CK_CLASSID GetClassID() override;
 
+    void CheckPostDeletion() override;
+    CKBOOL IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
+
     void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
     
     // Override GetTarget/SetTarget from CKCamera
