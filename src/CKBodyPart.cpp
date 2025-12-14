@@ -103,8 +103,12 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
     } else {
-        // Legacy format: 0x01000000 holds 6 VxVectors (v5[0..5])
-        // IDA shows: v5[3..5] map to Min/Max/Damping, v5[0..2] used for flag calculation
+        // Legacy format (version < 5): 0x01000000 holds 6 VxVectors
+        // v5[0..2]: Used for building rotation flags (non-zero = flag set)
+        // v5[3..5]: Min, Max, Damping vectors
+        // NOTE: The flag calculation uses (base << (i - 1)) which is UB for i=0,
+        // but MSVC produces a right shift, resulting in unusual flag mappings.
+        // We match this behavior exactly for binary compatibility.
         if (chunk->SeekIdentifier(0x01000000)) {
             VxVector v5[6];
             std::memset(v5, 0, sizeof(v5));
@@ -118,13 +122,10 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
 
             // Build flags from v5[0], v5[1], v5[2]
             for (int i = 0; i < 3; ++i) {
-                // IDA: if (*((_DWORD *)&v5[0].x + i))  -> check v5[0].x/y/z
                 if (*(&v5[0].x + i) != 0.0f)
                     m_RotationJoint.m_Flags |= (1 << (i - 1));
-                // IDA: if (*((_DWORD *)&v5[1].x + i))  -> check v5[1].x/y/z  
                 if (*(&v5[1].x + i) != 0.0f)
                     m_RotationJoint.m_Flags |= (16 << (i - 1));
-                // IDA: if (*((_DWORD *)&v5[2].x + i))  -> check v5[2].x/y/z
                 if (*(&v5[2].x + i) != 0.0f)
                     m_RotationJoint.m_Flags |= (256 << (i - 1));
             }
@@ -239,10 +240,12 @@ CKERROR RCKBodyPart::FitToJoint() {
     Vx3DMatrixToEulerAngles(GetLocalMatrix(), &euler.x, &euler.y, &euler.z);
     
     // Apply joint limits for each axis
+    // NOTE: The original DLL uses (16 << (i - 1)) which creates an off-by-one mapping:
+    //   i=0: 16 >> 1 = 8 (undefined but MSVC gives 8) - checks non-standard bit
+    //   i=1: 16 << 0 = 16 = CK_IKJOINT_LIMIT_X - checks X limit for Y axis!
+    //   i=2: 16 << 1 = 32 = CK_IKJOINT_LIMIT_Y - checks Y limit for Z axis!
+    // We match this behavior exactly for binary compatibility.
     for (int i = 0; i < 3; ++i) {
-        // Check if limit flag is set for this axis (16 << (i-1) maps to bits for X/Y/Z)
-        // IDA shows: (16 << (i - 1)) & m_Flags
-        // i=0: 16 >> 1 = 8 (but this seems off), let's match exact behavior
         if (((16 << (i - 1)) & m_RotationJoint.m_Flags) != 0) {
             float *angle = &euler.x + i;
             float *minVal = &m_RotationJoint.m_Min.x + i;

@@ -16,6 +16,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKAnimation.h
         ${CKRE_INCLUDE_DIR}/RCKKeyedAnimation.h
         ${CKRE_INCLUDE_DIR}/RCKObjectAnimation.h
+        ${CKRE_INCLUDE_DIR}/RCKKeyframeData.h
         ${CKRE_INCLUDE_DIR}/RCKKinematicChain.h
         ${CKRE_INCLUDE_DIR}/RCKLayer.h
         ${CKRE_INCLUDE_DIR}/RCKRenderObject.h
@@ -63,6 +64,7 @@ set(CKRE_SOURCES
         CKAnimation.cpp
         CKKeyedAnimation.cpp
         CKObjectAnimation.cpp
+        CKKeyframeData.cpp
         CKKinematicChain.cpp
         CKLayer.cpp
         CKRenderObject.cpp

@@ -2,6 +2,7 @@
 #define RCKCHARACTER_H
 
 #include "RCK3dEntity.h"
+#include "XObjectArray.h"
 
 struct CKSecondaryAnimation {
   CK_ID AnimID;
@@ -40,6 +41,8 @@ public:
     int GetMemoryOccupation() override;
     int IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
 
+    void Show(CK_OBJECT_SHOWOPTION show) override;
+
     //--------------------------------------------
     // Dependencies Functions	{Secret}
     CKERROR PrepareDependencies(CKDependenciesContext &context) override;
@@ -65,8 +68,11 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    XSArray<RCKBodyPart *> m_BodyParts;
-    XSArray<RCKAnimation *> m_Animations;
+    void FindFloorReference();
+    void RemoveSecondaryAnimationAt(int index);
+
+    XSObjectPointerArray m_BodyParts;      // Stores CKObject* (body parts)
+    XSObjectPointerArray m_Animations;     // Stores CKObject* (animations)
     CKSecondaryAnimation *m_SecondaryAnimations;
     CKWORD m_SecondaryAnimationsCount;
     CKWORD m_SecondaryAnimationsAllocated;
