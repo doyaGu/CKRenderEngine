@@ -1,9 +1,13 @@
 #include "RCKObjectAnimation.h"
 #include "RCKKeyedAnimation.h"
 #include "RCK3dEntity.h"
+#include "RCKMesh.h"
+#include "CKBodyPart.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
+#include "CKSceneGraph.h"
+#include "VxMath.h"
 
 //=============================================================================
 // Constructor/Destructor
@@ -15,11 +19,18 @@ RCKObjectAnimation::RCKObjectAnimation(CKContext *Context, CKSTRING name)
       m_Flags(0),
       m_Entity(nullptr),
       m_CurrentStep(0.0f),
-      m_Length(0.0f),
-      m_MergeFactor(0.0f),
+      m_MergeFactor(0.5f),
       m_Anim1(nullptr),
       m_Anim2(nullptr),
-      m_IsMerged(FALSE) {}
+      m_field_38(0),
+      m_ParentKeyedAnimation(nullptr) {
+    // Allocate and initialize keyframe data
+    m_KeyframeData = new CKKeyframeData();
+    if (m_KeyframeData) {
+        memset(m_KeyframeData, 0, sizeof(CKKeyframeData));
+        m_KeyframeData->m_ObjectAnimation = this;
+    }
+}
 
 RCKObjectAnimation::~RCKObjectAnimation() {}
 
@@ -110,7 +121,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
         if (m_KeyframeData)
             chunk->WriteFloat(m_KeyframeData->m_Length);
         else
-            chunk->WriteFloat(m_Length);
+            chunk->WriteFloat(0.0f);
 
         // Write merged animation data if flag 0x80 is set
         if (m_Flags & 0x80) {
@@ -398,8 +409,8 @@ CKERROR RCKObjectAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
     m_Flags = src->m_Flags;
     m_MergeFactor = src->m_MergeFactor;
     m_CurrentStep = src->m_CurrentStep;
-    m_Length = src->m_Length;
-    m_IsMerged = src->m_IsMerged;
+    m_field_38 = src->m_field_38;
+    m_ParentKeyedAnimation = src->m_ParentKeyedAnimation;
 
     return CK_OK;
 }
@@ -929,11 +940,41 @@ void RCKObjectAnimation::SetMergeFactor(float factor) {
 }
 
 CKBOOL RCKObjectAnimation::IsMerged() {
-    return m_IsMerged;
+    // Check flag bit 7 (0x80) to determine if this is a merged animation
+    return (m_Flags & 0x80) != 0;
 }
 
 CKObjectAnimation *RCKObjectAnimation::CreateMergedAnimation(CKObjectAnimation *subanim2, CKBOOL Dynamic) {
-    return nullptr;
+    if (!subanim2)
+        return nullptr;
+
+    // Determine creation options
+    CK_OBJECTCREATION_OPTIONS Options = CK_OBJECTCREATION_NONAMECHECK;
+    if (GetFlags() & 0x20000000)
+        Options = CK_OBJECTCREATION_DYNAMIC;
+
+    // Create a new ObjectAnimation object
+    RCKObjectAnimation *merged = (RCKObjectAnimation *)m_Context->CreateObject(
+        CKCID_OBJECTANIMATION, GetName(), Options, nullptr);
+    if (!merged)
+        return nullptr;
+
+    // Set the length to the max of the two animations
+    float len1 = GetLength();
+    float len2 = subanim2->GetLength();
+    merged->SetLength(len1 >= len2 ? len1 : len2);
+
+    // Set the merged flag (0x80)
+    merged->m_Flags |= 0x80;
+
+    // Set the source animations
+    merged->m_Anim1 = this;
+    merged->m_Anim2 = (RCKObjectAnimation *)subanim2;
+
+    // Set the entity
+    merged->Set3dEntity((CK3dEntity *)m_Entity);
+
+    return merged;
 }
 
 //=============================================================================
@@ -943,13 +984,12 @@ CKObjectAnimation *RCKObjectAnimation::CreateMergedAnimation(CKObjectAnimation *
 void RCKObjectAnimation::SetLength(float nbframe) {
     if (m_KeyframeData)
         m_KeyframeData->m_Length = nbframe;
-    m_Length = nbframe;
 }
 
 float RCKObjectAnimation::GetLength() {
     if (m_KeyframeData)
         return m_KeyframeData->m_Length;
-    return m_Length;
+    return 0.0f;
 }
 
 void RCKObjectAnimation::GetVelocity(float step, VxVector *vel) {
@@ -966,12 +1006,101 @@ void RCKObjectAnimation::GetVelocity(float step, VxVector *vel) {
 
 CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
     m_CurrentStep = step;
+
+    // Calculate the frame from step
+    float frame = step * (m_KeyframeData ? m_KeyframeData->m_Length : 0.0f);
+
+    // Check if entity is valid
+    if (!m_Entity)
+        return CKERR_NOTINITIALIZED;
+
+    // Handle special case for CKANIMATION_FORCESETSTEP (-1)
+    if (anim == (CKKeyedAnimation *)-1) {
+        anim = nullptr;
+    } else {
+        // Check if entity ignores animations (flag 0x400)
+        if (m_Entity->GetMoveableFlags() & 0x400)
+            return CK_OK;
+    }
+
+    // Check if entity is a body part with exclusive animation
+    if (CKIsChildClassOf(m_Entity, CKCID_BODYPART)) {
+        CKAnimation *exclusive = ((CKBodyPart *)m_Entity)->GetExclusiveAnimation();
+        if (exclusive && (CKKeyedAnimation *)exclusive != anim)
+            return CK_OK;
+    }
+
+    // Evaluate transform components
+    CKDWORD transformFlags = 0;
+    VxVector pos(0, 0, 0), scale(1, 1, 1);
+    VxQuaternion rot, scaleAxis;
+
+    if (EvaluatePosition(frame, pos))
+        transformFlags |= 4;  // Has position
+    if (EvaluateRotation(frame, rot))
+        transformFlags |= 8;  // Has rotation
+    if (EvaluateScale(frame, scale))
+        transformFlags |= 1;  // Has scale
+    if (EvaluateScaleAxis(frame, scaleAxis))
+        transformFlags |= 2;  // Has scale axis
+
+    // Apply transforms to entity
+    if (transformFlags) {
+        VxMatrix localMatrix = m_Entity->GetLocalMatrix();
+
+        if (transformFlags == 4) {
+            // Only position - just set position component of local matrix
+            localMatrix[3][0] = pos.x;
+            localMatrix[3][1] = pos.y;
+            localMatrix[3][2] = pos.z;
+        } else {
+            // Need to decompose current matrix to fill missing components
+            if ((transformFlags & 0xF) != 0xF) {
+                VxQuaternion tempRot;
+                VxVector tempPos, tempScale;
+                Vx3DDecomposeMatrix(localMatrix, tempRot, tempPos, tempScale);
+                if (!(transformFlags & 8)) rot = tempRot;
+                if (!(transformFlags & 4)) pos = tempPos;
+                if (!(transformFlags & 1)) scale = tempScale;
+            }
+
+            // Build matrix from quaternion rotation and components
+            VxMatrix rotMatrix;
+            rot.ToMatrix(rotMatrix);
+
+            // Apply scale
+            VxMatrix scaleMatrix;
+            Vx3DMatrixIdentity(scaleMatrix);
+            scaleMatrix[0][0] = scale.x;
+            scaleMatrix[1][1] = scale.y;
+            scaleMatrix[2][2] = scale.z;
+
+            // Combine: result = scale * rotation
+            Vx3DMultiplyMatrix(localMatrix, scaleMatrix, rotMatrix);
+
+            // Set position
+            localMatrix[3][0] = pos.x;
+            localMatrix[3][1] = pos.y;
+            localMatrix[3][2] = pos.z;
+        }
+
+        m_Entity->SetLocalMatrix(localMatrix);
+
+        // Notify matrix change if not driven by character animation
+        if (!anim || !anim->GetCharacter())
+            m_Entity->LocalMatrixChanged(FALSE, FALSE);
+    }
+
+    // TODO: Morph animation processing would go here
+    // This requires CKMesh::GetModifierVertices, CKContext::GetMemoryPool, etc.
+
     return CK_OK;
 }
 
 CKERROR RCKObjectAnimation::SetFrame(float frame, CKKeyedAnimation *anim) {
-    if (m_Length > 0.0f)
-        m_CurrentStep = frame / m_Length;
+    float length = GetLength();
+    if (length > 0.0f)
+        m_CurrentStep = frame / length;
     return CK_OK;
 }
 

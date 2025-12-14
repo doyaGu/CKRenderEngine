@@ -25,6 +25,11 @@ public:
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
+    // Override CKAnimation methods with RCKKeyedAnimation-specific implementations
+    void CenterAnimation(float frame) override;
+    CKAnimation *CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic = FALSE) override;
+    float CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) override;
+
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
     static CKSTRING GetDependencies(int i, int mode);
@@ -33,12 +38,11 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    XSObjectPointerArray m_Animations;
-    CKDWORD m_RuntimeFlags; // Misc runtime flags for keyed animation
-    CKBOOL m_Merged;
-    float m_MergeFactor;
-    RCKObjectAnimation *m_RootAnimation;
-    VxVector m_Vector;
+    XSObjectPointerArray m_Animations; // 0x34-0x3B (XSArray has m_Begin at 0x34, m_End at 0x38)
+    CKBOOL m_Merged;                   // 0x3C
+    float m_MergeFactor;               // 0x40
+    RCKObjectAnimation *m_RootAnimation; // 0x44
+    VxVector m_Vector;                 // 0x48-0x53 (12 bytes)
 };
 
 #endif // RCKKEYEDANIMATION_H

@@ -4,7 +4,10 @@
 #include "CKRenderEngineTypes.h"
 #include "CKObjectAnimation.h"
 
+class RCKKeyedAnimation;
+
 class RCKObjectAnimation : public CKObjectAnimation {
+    friend class RCKKeyedAnimation;  // Allow access to m_ParentKeyedAnimation
 public:
     explicit RCKObjectAnimation(CKContext *Context, CKSTRING name = nullptr);
     ~RCKObjectAnimation() override;
@@ -84,15 +87,15 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    CKKeyframeData *m_KeyframeData;
-    CKDWORD m_Flags;
-    RCK3dEntity *m_Entity;
-    float m_CurrentStep;
-    float m_Length;
-    float m_MergeFactor;
-    RCKObjectAnimation *m_Anim1;
-    RCKObjectAnimation *m_Anim2;
-    CKBOOL m_IsMerged;
+    CKKeyframeData *m_KeyframeData;  // 0x1C
+    CKDWORD m_Flags;                 // 0x20
+    RCK3dEntity *m_Entity;           // 0x24
+    float m_CurrentStep;             // 0x28
+    float m_MergeFactor;             // 0x2C - Note: animation length is stored in m_KeyframeData->m_Length
+    RCKObjectAnimation *m_Anim1;     // 0x30 - First source animation for merged animations
+    RCKObjectAnimation *m_Anim2;     // 0x34 - Second source animation for merged animations
+    CKDWORD m_field_38;              // 0x38 - Unknown/reserved field
+    RCKKeyedAnimation *m_ParentKeyedAnimation; // 0x3C - Parent keyed animation (used in SetStep)
 };
 
 #endif // RCKOBJECTANIMATION_H

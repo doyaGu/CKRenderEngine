@@ -4,7 +4,15 @@
 #include "CKRenderEngineTypes.h"
 #include "CKAnimation.h"
 
+// Flag bit definitions for CKAnimation::m_Flags
+// Bit 0  (0x00000001): CKANIMATION_LINKTOFRAMERATE
+// Bit 2  (0x00000004): CKANIMATION_CANBEBREAK
+// Bit 4  (0x00000010): CKANIMATION_ALIGNORIENTATION
+// Bits 8-16  (0x0001FF00): TransitionMode
+// Bits 18-23 (0x00EC0000): SecondaryAnimationMode
+
 class RCKAnimation : public CKAnimation {
+    friend class RCKCharacter;  // Allow RCKCharacter to access protected members
 public:
     explicit RCKAnimation(CKContext *Context, CKSTRING name = nullptr);
     ~RCKAnimation() override;
@@ -16,6 +24,7 @@ public:
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // CKAnimation virtual methods
     float GetLength() override;
@@ -40,7 +49,13 @@ public:
     void SetFlags(CKDWORD flags) override;
     CKDWORD GetFlags() override;
     CK3dEntity *GetRootEntity() override;
+    void CenterAnimation(float frame) override;
+    float GetMergeFactor() override;
+    void SetMergeFactor(float factor) override;
+    CKBOOL IsMerged() override;
+    CKAnimation *CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic = FALSE) override;
     void SetCurrentStep(float Step) override;
+    float CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
@@ -50,15 +65,15 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    RCKCharacter *m_Character;
-    float m_Length;
-    float m_CurrentFrame;
-    float m_Step;
-    RCK3dEntity *m_RootEntity;
-    CKDWORD m_Flags;
-    float m_FrameRate;
-    CK_ANIMATION_TRANSITION_MODE m_TransitionMode;
-    CK_SECONDARYANIMATION_FLAGS m_SecondaryAnimationMode;
+    // Object layout: sizeof(RCKAnimation) = 0x34 (52 bytes)
+    // Offset 0x00: CKAnimation base (28 bytes)
+    RCKCharacter *m_Character;    // Offset 0x1C
+    float m_Length;               // Offset 0x20 - Default: 100.0f
+    float m_Step;                 // Offset 0x24 - Default: 0.0f (represents normalized frame position)
+    RCK3dEntity *m_RootEntity;    // Offset 0x28
+    CKDWORD m_Flags;              // Offset 0x2C - Default: CKANIMATION_LINKTOFRAMERATE | CKANIMATION_CANBEBREAK
+    float m_FrameRate;            // Offset 0x30 - Default: 30.0f
+    // Note: TransitionMode and SecondaryAnimationMode are packed into m_Flags
 };
 
 #endif // RCKANIMATION_H

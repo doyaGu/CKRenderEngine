@@ -5,6 +5,7 @@
 #include "CKBodyPart.h"
 
 class RCKBodyPart : public RCK3dObject {
+    friend class RCKCharacter;  // Allow RCKCharacter to access protected members
 public:
 
 #undef CK_PURE

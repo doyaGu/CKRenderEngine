@@ -11,25 +11,23 @@
 RCKAnimation::RCKAnimation(CKContext *Context, CKSTRING name)
     : CKAnimation(Context, name),
       m_Character(nullptr),
-      m_Length(0.0f),
-      m_CurrentFrame(0.0f),
-      m_Step(1.0f),
+      m_Length(100.0f),         // Default from IDA: 100.0f
+      m_Step(0.0f),             // Default from IDA: 0.0f
       m_RootEntity(nullptr),
-      m_Flags(0),
-      m_FrameRate(30.0f),
-      m_TransitionMode((CK_ANIMATION_TRANSITION_MODE) 0),
-      m_SecondaryAnimationMode((CK_SECONDARYANIMATION_FLAGS) 0) {
+      m_Flags(CKANIMATION_LINKTOFRAMERATE | CKANIMATION_CANBEBREAK),  // Default from IDA: 5
+      m_FrameRate(30.0f) {      // Default from IDA: 30.0f
 }
 
 RCKAnimation::~RCKAnimation() {
 }
 
 CK_CLASSID RCKAnimation::GetClassID() {
-    return CKCID_ANIMATION;
+    return m_ClassID;
 }
 
 //=============================================================================
 // Serialization
+// Based on IDA decompilation at 0x10047979 (Save) and 0x10047ADC (Load)
 //=============================================================================
 
 CKStateChunk *RCKAnimation::Save(CKFile *file, CKDWORD flags) {
@@ -151,113 +149,199 @@ CKERROR RCKAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
     return CK_OK;
 }
 
+// Based on IDA decompilation at 0x10047D3A
+CKERROR RCKAnimation::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    m_RootEntity = (RCK3dEntity *) context.Remap((CKObject *) m_RootEntity);
+    m_Character = (RCKCharacter *) context.Remap((CKObject *) m_Character);
+
+    return CK_OK;
+}
+
 //=============================================================================
 // CKAnimation Virtual Methods
+// Based on IDA decompilation
 //=============================================================================
 
+// 0x10047E90
 float RCKAnimation::GetLength() {
     return m_Length;
 }
 
+// 0x10047EB0 - Frame is calculated as m_Step * m_Length
 float RCKAnimation::GetFrame() {
-    return m_CurrentFrame;
+    return m_Step * m_Length;
 }
 
+// 0x10047745 - Complex calculation with frame rate
 float RCKAnimation::GetNextFrame(float delta_t) {
-    return m_CurrentFrame + delta_t * m_Step;
+    float currentFrame = m_Step * m_Length;
+    
+    if ((m_Flags & CKANIMATION_LINKTOFRAMERATE) != 0) {
+        // Frame rate linked: advance by delta_t * frameRate * 0.001
+        return currentFrame + delta_t * m_FrameRate * 0.001f;
+    } else {
+        // Not frame rate linked: advance by 1 frame
+        return currentFrame + 1.0f;
+    }
 }
 
+// 0x10047ED0
 float RCKAnimation::GetStep() {
     return m_Step;
 }
 
+// 0x10047EF0 - Set m_Step as normalized position
 void RCKAnimation::SetFrame(float frame) {
-    m_CurrentFrame = frame;
+    if (m_Length != 0.0f) {
+        m_Step = frame / m_Length;
+    } else {
+        m_Step = 0.0f;
+    }
 }
 
+// SetStep and SetCurrentStep both set m_Step directly
 void RCKAnimation::SetStep(float step) {
     m_Step = step;
 }
 
+// 0x10047F30
 void RCKAnimation::SetLength(float nbframe) {
     m_Length = nbframe;
 }
 
+// 0x10047F50
 CKCharacter *RCKAnimation::GetCharacter() {
     return (CKCharacter *) m_Character;
 }
 
+// 0x10047796 - Always sets m_FrameRate regardless of link status
 void RCKAnimation::LinkToFrameRate(CKBOOL link, float fps) {
     if (link) {
-        m_Flags |= 1; // Flag for linked to frame rate
-        m_FrameRate = fps;
+        m_Flags |= CKANIMATION_LINKTOFRAMERATE;
     } else {
-        m_Flags &= ~1;
+        m_Flags &= ~CKANIMATION_LINKTOFRAMERATE;
     }
+    m_FrameRate = fps;
 }
 
+// 0x10047F70
 float RCKAnimation::GetLinkedFrameRate() {
     return m_FrameRate;
 }
 
+// 0x10047F90
 CKBOOL RCKAnimation::IsLinkedToFrameRate() {
-    return (m_Flags & 1) != 0;
+    return (m_Flags & CKANIMATION_LINKTOFRAMERATE) != 0;
 }
 
+// 0x100477D2 - TransitionMode stored in bits 8-16
 void RCKAnimation::SetTransitionMode(CK_ANIMATION_TRANSITION_MODE mode) {
-    m_TransitionMode = mode;
+    m_Flags &= ~CKANIMATION_TRANSITION_ALL;
+    m_Flags |= ((CKDWORD)mode << CK_TRANSITION_MODE_SHIFT);
 }
 
+// 0x10047805
 CK_ANIMATION_TRANSITION_MODE RCKAnimation::GetTransitionMode() {
-    return m_TransitionMode;
+    return (CK_ANIMATION_TRANSITION_MODE)((m_Flags & CKANIMATION_TRANSITION_ALL) >> CK_TRANSITION_MODE_SHIFT);
 }
 
+// 0x1004781E - SecondaryAnimationMode stored in bits 18-23
 void RCKAnimation::SetSecondaryAnimationMode(CK_SECONDARYANIMATION_FLAGS mode) {
-    m_SecondaryAnimationMode = mode;
+    m_Flags &= ~CKANIMATION_SECONDARY_ALL;
+    m_Flags |= ((CKDWORD)mode << CK_SECONDARY_FLAGS_SHIFT);
 }
 
+// 0x10047851
 CK_SECONDARYANIMATION_FLAGS RCKAnimation::GetSecondaryAnimationMode() {
-    return m_SecondaryAnimationMode;
+    return (CK_SECONDARYANIMATION_FLAGS)((m_Flags & CKANIMATION_SECONDARY_ALL) >> CK_SECONDARY_FLAGS_SHIFT);
 }
 
+// 0x1004786A - CanBeInterrupt uses bit 2 (value 4)
 void RCKAnimation::SetCanBeInterrupt(CKBOOL can) {
     if (can) {
-        m_Flags |= 2;
+        m_Flags |= CKANIMATION_CANBEBREAK;
     } else {
-        m_Flags &= ~2;
+        m_Flags &= ~CKANIMATION_CANBEBREAK;
     }
 }
 
+// 0x10047FB0
 CKBOOL RCKAnimation::CanBeInterrupt() {
-    return (m_Flags & 2) != 0;
+    return (m_Flags & CKANIMATION_CANBEBREAK) != 0;
 }
 
+// 0x1004789D - CharacterOrientation uses bit 4 (value 0x10)
 void RCKAnimation::SetCharacterOrientation(CKBOOL orient) {
     if (orient) {
-        m_Flags |= 4;
+        m_Flags |= CKANIMATION_ALIGNORIENTATION;
     } else {
-        m_Flags &= ~4;
+        m_Flags &= ~CKANIMATION_ALIGNORIENTATION;
     }
 }
 
+// 0x10047FD0
 CKBOOL RCKAnimation::DoesCharacterTakeOrientation() {
-    return (m_Flags & 4) != 0;
+    return (m_Flags & CKANIMATION_ALIGNORIENTATION) != 0;
 }
 
+// 0x10061E40
 void RCKAnimation::SetFlags(CKDWORD flags) {
     m_Flags = flags;
 }
 
+// 0x10061E20
 CKDWORD RCKAnimation::GetFlags() {
     return m_Flags;
 }
 
+// 0x100478D0 - Has special handling for CKKeyedAnimation (class 18)
 CK3dEntity *RCKAnimation::GetRootEntity() {
+    // If no root entity and this is a CKKeyedAnimation, rebuild it
+    if (!m_RootEntity && CKIsChildClassOf((CKObject*)this, CKCID_KEYEDANIMATION)) {
+        // RCKKeyedAnimation::RebuildHierarchy(this);
+        // This is handled by derived class
+    }
     return (CK3dEntity *) m_RootEntity;
 }
 
+// 0x10047F10
 void RCKAnimation::SetCurrentStep(float Step) {
     m_Step = Step;
+}
+
+// The following are virtual methods meant to be overridden by derived classes.
+// CKAnimation provides stub implementations that do nothing or return default values.
+
+void RCKAnimation::CenterAnimation(float frame) {
+    // Stub - implemented in derived classes (e.g., CKKeyedAnimation)
+}
+
+float RCKAnimation::GetMergeFactor() {
+    // Stub - implemented in derived classes
+    return 0.0f;
+}
+
+void RCKAnimation::SetMergeFactor(float factor) {
+    // Stub - implemented in derived classes
+}
+
+CKBOOL RCKAnimation::IsMerged() {
+    // Stub - implemented in derived classes
+    return FALSE;
+}
+
+// 0x10075C30 - Returns nullptr in base class
+CKAnimation *RCKAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic) {
+    return nullptr;
+}
+
+float RCKAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) {
+    // Stub - implemented in derived classes
+    return 0.0f;
 }
 
 //=============================================================================
@@ -267,26 +351,31 @@ void RCKAnimation::SetCurrentStep(float Step) {
 
 CK_CLASSID RCKAnimation::m_ClassID = CKCID_ANIMATION;
 
+// 0x10047C74
 CKSTRING RCKAnimation::GetClassName() {
     return (CKSTRING) "Animation";
 }
 
+// 0x10047C7E
 int RCKAnimation::GetDependenciesCount(int mode) {
     return 0;
 }
 
+// 0x10047C85
 CKSTRING RCKAnimation::GetDependencies(int i, int mode) {
     return nullptr;
 }
 
+// 0x10047C8C
 void RCKAnimation::Register() {
-    // Based on IDA analysis
-    CKClassNeedNotificationFrom(RCKAnimation::m_ClassID, CKCID_3DENTITY);
+    // Registers for notification from 3D entities (class 33 = CKCID_3DENTITY)
+    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
 
     // Register associated parameter GUID: {0x5BF0D34D, 0x19E69236}
-    CKClassRegisterAssociatedParameter(RCKAnimation::m_ClassID, CKPGUID_ANIMATION);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_ANIMATION);
 }
 
+// 0x10047CCD
 CKAnimation *RCKAnimation::CreateInstance(CKContext *Context) {
     // Object size is 0x34 (52 bytes)
     return new RCKAnimation(Context, nullptr);

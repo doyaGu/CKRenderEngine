@@ -30,11 +30,10 @@ void RCKSkinBoneData::SetBoneInitialInverseMatrix(const VxMatrix &M) {
 //-----------------------------------------------------------------------------
 
 RCKSkinVertexData::RCKSkinVertexData()
-    : m_BoneCount(0), m_Bones(nullptr), m_Weights(nullptr), m_InitialPos(0.0f, 0.0f, 0.0f) {
-}
+    : m_BoneCount(0), m_Bones(nullptr), m_Weights(nullptr), m_InitialPos(0.0f, 0.0f, 0.0f) {}
 
 RCKSkinVertexData::~RCKSkinVertexData() {
-    SetBoneCount(0);
+    RCKSkinVertexData::SetBoneCount(0);
 }
 
 void RCKSkinVertexData::SetBoneCount(int BoneCount) {
@@ -335,8 +334,7 @@ void RCKSkin::BuildBonePointLists() {
     }
 }
 
-CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride,
-                           CKBYTE *NormalPtr, CKDWORD NStride) {
+CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, CKBYTE *NormalPtr, CKDWORD NStride) {
     if (!VertexPtr)
         return FALSE;
 
@@ -421,10 +419,8 @@ CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride,
         VxMatrix temp;
         Vx3DMultiplyMatrix(temp, m_InverseWorldMatrix, boneWorldMatrix);
         boneData.GetTransformMatrix() = temp;
-        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(),
-                           boneData.GetInitialInverseMatrix());
-        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(),
-                           m_ObjectInitMatrix);
+        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), boneData.GetInitialInverseMatrix());
+        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), m_ObjectInitMatrix);
 
         anyBoneProcessed = true;
         const VxMatrix &transformMatrix = boneData.GetTransformMatrix();
