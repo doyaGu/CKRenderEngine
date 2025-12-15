@@ -28,17 +28,9 @@ public:
     CKBOOL IsToBeRendered() override;
     void SetZOrder(int Z) override;
     int GetZOrder() override;
-    CKBOOL IsToBeRenderedLast() override;
-    CKBOOL AddPreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) override;
-    CKBOOL RemovePreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
-    CKBOOL SetRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
-    CKBOOL RemoveRenderCallBack() override;
-    CKBOOL AddPostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) override;
-    CKBOOL RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) override;
-    void RemoveAllCallbacks() override;
 
     void GetHomogeneousRelativeRect(VxRect &rect);
-    void SetBackgroundRecursive(CKBOOL back);
+    void HierarchySetBackground(CKBOOL back);
 
     // Internal methods used by RCKRenderContext
     CK2dEntity *Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable);
@@ -88,7 +80,7 @@ protected:
     CKMaterial *m_Material;
     XArray<CK2dEntity *> m_Children;
     VxRect m_SourceRect;
-    CKDWORD m_ZOrder;
+    int m_ZOrder;
 };
 
 #endif // RCK2DENTITY_H

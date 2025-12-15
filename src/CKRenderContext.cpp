@@ -1294,8 +1294,8 @@ void RCKRenderContext::GetViewRect(VxRect &rect) {
     RC_DEBUG_LOG("GetViewRect called");
     rect.left = (float)m_ViewportData.ViewX;
     rect.top = (float)m_ViewportData.ViewY;
-    rect.right = (float)m_ViewportData.ViewWidth;
-    rect.bottom = (float)m_ViewportData.ViewHeight;
+    rect.right += (float)m_ViewportData.ViewWidth;
+    rect.bottom += (float)m_ViewportData.ViewHeight;
 }
 
 VX_PIXELFORMAT RCKRenderContext::GetPixelFormat(int *Bpp, int *Zbpp, int *StencilBpp) {
@@ -1309,11 +1309,7 @@ VX_PIXELFORMAT RCKRenderContext::GetPixelFormat(int *Bpp, int *Zbpp, int *Stenci
     if (m_RasterizerContext)
         return m_RasterizerContext->m_PixelFormat;
 
-    // Fallback based on bpp
-    if (m_Settings.m_Bpp == 32) return _32_ARGB8888;
-    if (m_Settings.m_Bpp == 24) return _24_RGB888;
-    if (m_Settings.m_Bpp == 16) return _16_RGB565;
-    return _16_RGB555;
+    return UNKNOWN_PF;
 }
 
 void RCKRenderContext::SetState(VXRENDERSTATETYPE State, CKDWORD Value) {
@@ -1476,8 +1472,7 @@ CKDWORD RCKRenderContext::GetFogColor() {
     return m_RenderedScene->m_FogColor;
 }
 
-CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount,
-                                       VxDrawPrimitiveData *data) {
+CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data) {
     // IDA: 0x1006b314
     if (!data)
         return FALSE;
@@ -1535,8 +1530,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         m_RasterizerContext->UnlockVertexBuffer(m_VertexBufferIndex);
     }
 
-    return m_RasterizerContext->DrawPrimitiveVB(pType, m_VertexBufferIndex, m_StartIndex,
-                                                 data->VertexCount, indices, indexcount);
+    return m_RasterizerContext->DrawPrimitiveVB(pType, m_VertexBufferIndex, m_StartIndex, data->VertexCount, indices, indexcount);
 }
 
 void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data, CK3dEntity *Ref) {

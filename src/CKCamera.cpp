@@ -19,7 +19,7 @@ Remarks:
 - Sets orthographic zoom to 1.0
 - Sets aspect ratio to 4:3
 - Sets front plane to 1.0, back plane to 4000.0
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000eee0.
 *************************************************/
@@ -33,7 +33,7 @@ RCKCamera::RCKCamera(CKContext *Context, CKSTRING name)
     m_FrontPlane = 1.0f;
     m_BackPlane = 4000.0f;
 
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 /*************************************************
@@ -64,13 +64,13 @@ float RCKCamera::GetFrontPlane() {
 Summary: Sets the front clipping plane distance.
 Purpose: Sets the distance below which nothing is seen.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f067.
 *************************************************/
 void RCKCamera::SetFrontPlane(float front) {
     m_FrontPlane = front;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 /*************************************************
@@ -87,13 +87,13 @@ float RCKCamera::GetBackPlane() {
 Summary: Sets the back clipping plane distance.
 Purpose: Sets the distance beyond which nothing is seen.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f0a3.
 *************************************************/
 void RCKCamera::SetBackPlane(float back) {
     m_BackPlane = back;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 //=============================================================================
@@ -114,13 +114,13 @@ float RCKCamera::GetFov() {
 Summary: Sets the field of view.
 Purpose: Sets the angle of view in radians.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f0df.
 *************************************************/
 void RCKCamera::SetFov(float fov) {
     m_Fov = fov;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 //=============================================================================
@@ -141,13 +141,13 @@ int RCKCamera::GetProjectionType() {
 Summary: Sets the projection type.
 Purpose: Sets perspective or orthographic projection.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f11b.
 *************************************************/
 void RCKCamera::SetProjectionType(int proj) {
     m_ProjectionType = proj;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 //=============================================================================
@@ -168,13 +168,13 @@ float RCKCamera::GetOrthographicZoom() {
 Summary: Sets the orthographic zoom value.
 Purpose: Sets zoom factor for orthographic projection.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f143.
 *************************************************/
 void RCKCamera::SetOrthographicZoom(float zoom) {
     m_OrthographicZoom = zoom;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 //=============================================================================
@@ -185,14 +185,14 @@ void RCKCamera::SetOrthographicZoom(float zoom) {
 Summary: Sets the aspect ratio.
 Purpose: Sets width and height for viewport sizing.
 Remarks:
-- Marks camera as modified (flag 0x400)
+- Marks camera as modified (flag CK_OBJECT_UPTODATE)
 
 Implementation based on decompilation at 0x1000f17f.
 *************************************************/
 void RCKCamera::SetAspectRatio(int width, int height) {
     m_Width = width;
     m_Height = height;
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 /*************************************************
@@ -222,7 +222,7 @@ Implementation based on decompilation at 0x1000efbc.
 void RCKCamera::ComputeProjectionMatrix(VxMatrix &mat) {
     float aspect = (float) m_Width / (float) m_Height;
 
-    if (m_ProjectionType & 1) {
+    if (m_ProjectionType & CK_PERSPECTIVEPROJECTION) {
         // Perspective projection
         mat.Perspective(m_Fov, aspect, m_FrontPlane, m_BackPlane);
     } else {
@@ -250,7 +250,7 @@ void RCKCamera::ResetRoll() {
     VxVector dir, up, right;
     GetOrientation(&dir, &up, &right, nullptr);
 
-    VxVector worldUp(0.0f, 1.0f, 0.0f);
+    VxVector worldUp(0.0f);
 
     // New right vector = worldUp cross dir
     right = CrossProduct(worldUp, dir);
@@ -366,7 +366,7 @@ CKERROR RCKCamera::Copy(CKObject &o, CKDependenciesContext &context) {
     m_Width = srcCamera->m_Width;
     m_Height = srcCamera->m_Height;
 
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 
     return CK_OK;
 }
@@ -399,7 +399,7 @@ CKStateChunk *RCKCamera::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // Return early if no file context and not in specific save modes
-    if (!file && (flags & 0xFC00000) == 0) {
+    if (!file && (flags & CK_STATESAVE_CAMERAONLY) == 0) {
         return baseChunk;
     }
 
@@ -412,16 +412,15 @@ CKStateChunk *RCKCamera::Save(CKFile *file, CKDWORD flags) {
     cameraChunk->StartWrite();
     cameraChunk->AddChunkAndDelete(baseChunk);
 
-    // Write camera-specific data with identifier 0xFC00000
-    cameraChunk->WriteIdentifier(0xFC00000);
-    cameraChunk->WriteInt(m_ProjectionType);
+    // Write camera-specific data with identifier CK_STATESAVE_CAMERAONLY
+    cameraChunk->WriteIdentifier(CK_STATESAVE_CAMERAONLY);
+    cameraChunk->WriteDword(m_ProjectionType);
     cameraChunk->WriteFloat(m_Fov);
     cameraChunk->WriteFloat(m_OrthographicZoom);
 
     // Pack width and height into single DWORD for efficient storage.
     // IDA: (SLOWORD(m_Height) << 16) | SLOWORD(m_Width)
-    CKDWORD packedDimensions = (static_cast<CKDWORD>(static_cast<CKWORD>(m_Height)) << 16)
-        | static_cast<CKDWORD>(static_cast<CKWORD>(m_Width));
+    CKDWORD packedDimensions = (static_cast<CKDWORD>(static_cast<CKWORD>(m_Height)) << 16) | static_cast<CKDWORD>(static_cast<CKWORD>(m_Width));
     cameraChunk->WriteDword(packedDimensions);
 
     // Write clipping planes
@@ -445,16 +444,16 @@ Remarks:
 - Calls base class RCK3dEntity::Load() first to handle entity data
 - Supports both legacy format (data version < 5) and current format
 - Legacy format uses separate identifiers for each camera property
-- Current format uses single identifier 0xFC00000 with packed data
+- Current format uses single identifier CK_STATESAVE_CAMERAONLY with packed data
 - Unpacks width/height from single DWORD storage
 - Sets object flags to mark camera as modified after loading
 
 Implementation based on decompilation at 0x1000F4A6:
 - Legacy format: separate chunks for FOV (0x400000), projection type (0x800000),
   orthographic zoom (0x1000000), dimensions (0x2000000), planes (0x4000000)
-- Current format: single chunk 0xFC00000 with all camera data
+- Current format: single chunk CK_STATESAVE_CAMERAONLY with all camera data
 - Handles width/height unpacking from packed DWORD
-- Sets object flag 0x400 to indicate camera modification
+- Sets object flag CK_OBJECT_UPTODATE to indicate camera modification
 
 Arguments:
 - chunk: The state chunk containing camera data
@@ -474,47 +473,48 @@ CKERROR RCKCamera::Load(CKStateChunk *chunk, CKFile *file) {
     if (chunk->GetDataVersion() < 5) {
         // Legacy format uses separate identifiers for each property
 
-        if (chunk->SeekIdentifier(0x400000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAFOV)) {
             m_Fov = chunk->ReadFloat();
         }
 
-        if (chunk->SeekIdentifier(0x800000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAPROJTYPE)) {
             m_ProjectionType = chunk->ReadDword();
         }
 
-        if (chunk->SeekIdentifier(0x1000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAOTHOZOOM)) {
             m_OrthographicZoom = chunk->ReadFloat();
         }
 
-        if (chunk->SeekIdentifier(0x2000000)) {
-            m_Width = chunk->ReadDword();
-            m_Height = chunk->ReadDword();
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAASPECT)) {
+            m_Width = chunk->ReadInt();
+            m_Height = chunk->ReadInt();
         }
 
-        if (chunk->SeekIdentifier(0x4000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAPLANES)) {
+            m_FrontPlane = chunk->ReadFloat();
+            m_BackPlane = chunk->ReadFloat();
+        }
+    } else {
+        // Current format (data version >= 5)
+        if (chunk->SeekIdentifier(CK_STATESAVE_CAMERAONLY)) {
+            // Current format uses single identifier with all camera data
+
+            m_ProjectionType = chunk->ReadInt();
+            m_Fov = chunk->ReadFloat();
+            m_OrthographicZoom = chunk->ReadFloat();
+
+            // Unpack width and height from single DWORD
+            CKDWORD packedDimensions = chunk->ReadDword();
+            m_Width = static_cast<int>(packedDimensions & 0xFFFF);
+            m_Height = static_cast<int>((packedDimensions >> 16) & 0xFFFF);
+
             m_FrontPlane = chunk->ReadFloat();
             m_BackPlane = chunk->ReadFloat();
         }
     }
-    // Current format (data version >= 5)
-    else if (chunk->SeekIdentifier(0xFC00000)) {
-        // Current format uses single identifier with all camera data
-
-        m_ProjectionType = chunk->ReadInt();
-        m_Fov = chunk->ReadFloat();
-        m_OrthographicZoom = chunk->ReadFloat();
-
-        // Unpack width and height from single DWORD
-        CKDWORD packedDimensions = chunk->ReadDword();
-        m_Width = (CKDWORD) (packedDimensions & 0xFFFF);
-        m_Height = (CKDWORD) ((packedDimensions >> 16) & 0xFFFF);
-
-        m_FrontPlane = chunk->ReadFloat();
-        m_BackPlane = chunk->ReadFloat();
-    }
 
     // Mark camera as modified after loading
-    ModifyObjectFlags(0, 0x400);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 
     return CK_OK;
 }
@@ -537,8 +537,7 @@ CKSTRING RCKCamera::GetDependencies(int i, int mode) {
 }
 
 void RCKCamera::Register() {
-    // Based on IDA decompilation
-    CKClassRegisterAssociatedParameter(RCKCamera::m_ClassID, CKPGUID_CAMERA);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_CAMERA);
 }
 
 CKCamera *RCKCamera::CreateInstance(CKContext *Context) {

@@ -7,6 +7,7 @@
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKSceneGraph.h"
+#include "CKMemoryPool.h"
 #include "VxMath.h"
 
 //=============================================================================
@@ -32,7 +33,39 @@ RCKObjectAnimation::RCKObjectAnimation(CKContext *Context, CKSTRING name)
     }
 }
 
-RCKObjectAnimation::~RCKObjectAnimation() {}
+RCKObjectAnimation::~RCKObjectAnimation() {
+    // Handle keyframe data reference counting and ownership transfer
+    // Based on IDA decompilation at 0x10056A50
+    if (m_KeyframeData) {
+        // Decrement reference count
+        --m_KeyframeData->m_RefCount;
+        
+        if (m_KeyframeData->m_RefCount > 0) {
+            // Other animations are sharing this data
+            // If we are the current owner, transfer ownership to another animation
+            if (m_KeyframeData->m_ObjectAnimation == this) {
+                // Find another animation that shares this keyframe data
+                int count = m_Context->GetObjectsCountByClassID(CKCID_OBJECTANIMATION);
+                CK_ID *ids = m_Context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
+                
+                for (int i = 0; i < count; ++i) {
+                    RCKObjectAnimation *other = static_cast<RCKObjectAnimation *>(m_Context->GetObjectA(ids[i]));
+                    if (other && other->m_KeyframeData == m_KeyframeData && other != this) {
+                        // Transfer ownership
+                        m_KeyframeData->m_ObjectAnimation = other;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // We're the last user - delete the keyframe data
+            if (m_KeyframeData) {
+                delete m_KeyframeData;
+            }
+        }
+        m_KeyframeData = nullptr;
+    }
+}
 
 CK_CLASSID RCKObjectAnimation::GetClassID() {
     return m_ClassID;
@@ -47,7 +80,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = CKObject::Save(file, flags);
 
     // If no file and no flags set, just return base chunk
-    if (!file && (flags & 0x7FFFFFF) == 0)
+    if (!file && (flags & CK_STATESAVE_OBJANIMALL) == 0)
         return baseChunk;
 
     // Create new chunk for ObjectAnimation data
@@ -56,7 +89,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
     chunk->AddChunkAndDelete(baseChunk);
 
     // Initialize root position vector
-    VxVector rootPos(0.0f, 0.0f, 0.0f);
+    VxVector rootPos(0.0f);
 
     // Get root position from parent animation if this is root
     void *appData = GetAppData();
@@ -69,17 +102,16 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
 
     if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation != this) {
         if (file) {
-            // Check if the shared animation is being saved
-            // This is a simplified version - original checks file objects
-            sharedAnim = m_KeyframeData->m_ObjectAnimation;
+            // Check if the shared animation is being saved (original checks file objects)
+            sharedAnim = static_cast<RCKObjectAnimation *>(m_KeyframeData->m_ObjectAnimation);
         } else {
-            sharedAnim = m_KeyframeData->m_ObjectAnimation;
+            sharedAnim = static_cast<RCKObjectAnimation *>(m_KeyframeData->m_ObjectAnimation);
         }
     }
 
     if (sharedAnim) {
         // Write reference to shared animation data (identifier 0x2000000)
-        chunk->WriteIdentifier(0x2000000);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMSHARED);
         chunk->WriteObject(sharedAnim);
         chunk->WriteFloat(rootPos.x);
         chunk->WriteFloat(rootPos.y);
@@ -92,8 +124,8 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
         chunk->WriteDword(m_Flags);
         chunk->WriteObject(m_Entity);
 
-        // Write merged animation data if flag 0x80 is set
-        if (m_Flags & 0x80) {
+        // Write merged animation data if flag CK_OBJECTANIMATION_MERGED is set
+        if (m_Flags & CK_OBJECTANIMATION_MERGED) {
             chunk->WriteFloat(m_MergeFactor);
             chunk->WriteObject(m_Anim1);
             chunk->WriteObject(m_Anim2);
@@ -105,7 +137,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
         }
 
         // Write full keyframe data (identifier 0x4000000)
-        chunk->WriteIdentifier(0x4000000);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
         chunk->WriteFloat(rootPos.x);
         chunk->WriteFloat(rootPos.y);
         chunk->WriteFloat(rootPos.z);
@@ -123,8 +155,8 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
         else
             chunk->WriteFloat(0.0f);
 
-        // Write merged animation data if flag 0x80 is set
-        if (m_Flags & 0x80) {
+        // Write merged animation data if flag CK_OBJECTANIMATION_MERGED is set
+        if (m_Flags & CK_OBJECTANIMATION_MERGED) {
             chunk->WriteFloat(m_MergeFactor);
             chunk->WriteObject(m_Anim1);
             chunk->WriteObject(m_Anim2);
@@ -216,11 +248,11 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
     // Clear existing data
     Clear();
 
-    VxVector rootPos(0.0f, 0.0f, 0.0f);
+    VxVector rootPos(0.0f);
 
     if (chunk->GetDataVersion() >= 1) {
         // New format (data version >= 1)
-        if (chunk->SeekIdentifier(0x2000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMSHARED)) {
             // Shared animation reference format
             CKObjectAnimation *sharedAnim = (CKObjectAnimation *) chunk->ReadObject(m_Context);
             rootPos.x = chunk->ReadFloat();
@@ -244,7 +276,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
             // Share data from the referenced animation
             if (sharedAnim)
                 ShareDataFrom(sharedAnim);
-        } else if (chunk->SeekIdentifier(0x4000000)) {
+        } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS)) {
             // Full keyframe data format
             // Initialize keyframe data
             if (!m_KeyframeData) {
@@ -284,7 +316,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
                 }
                 chunk->Skip(dataSize);
             }
-        } else if (chunk->SeekIdentifier(0x1000)) {
+        } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMNEWDATA)) {
             // Legacy format (identifier 0x1000)
             if (!m_KeyframeData) {
                 m_KeyframeData = new CKKeyframeData();
@@ -315,8 +347,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
             }
 
             // The legacy format has complex controller loading
-            // For now, we'll handle basic linear controllers
-            // This is a simplified implementation
+            // Legacy controller loading is handled through basic linear controllers
         }
     } else {
         // Very old format (data version < 1)
@@ -366,11 +397,16 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 int RCKObjectAnimation::GetMemoryOccupation() {
-    int size = sizeof(RCKObjectAnimation);
+    // Call base class first to get base size
+    int size = CKObject::GetMemoryOccupation();
+    
+    // Add RCKObjectAnimation-specific fields (36 bytes for members from 0x1C to 0x3F)
+    size += 36;
 
-    if (m_KeyframeData) {
-        size += sizeof(CKKeyframeData);
-        // Add controller sizes if they exist
+    // If we own the keyframe data, add its size
+    if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation == this) {
+        // Add sizes of all controllers using a helper function
+        // This matches the DLL's call to sub_1004B397(&this->m_KeyframeData->m_PositionController)
         if (m_KeyframeData->m_PositionController) {
             CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
             size += ctrl->DumpKeysTo(nullptr);
@@ -381,6 +417,14 @@ int RCKObjectAnimation::GetMemoryOccupation() {
         }
         if (m_KeyframeData->m_ScaleController) {
             CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
+            size += ctrl->DumpKeysTo(nullptr);
+        }
+        if (m_KeyframeData->m_ScaleAxisController) {
+            CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
+            size += ctrl->DumpKeysTo(nullptr);
+        }
+        if (m_KeyframeData->m_MorphController) {
+            CKMorphController *ctrl = reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
             size += ctrl->DumpKeysTo(nullptr);
         }
     }
@@ -421,19 +465,74 @@ CKERROR RCKObjectAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
 
 CKAnimController *RCKObjectAnimation::CreateController(CKANIMATION_CONTROLLER ControlType) {
     // CreateController delegates to CKKeyframeData::CreateController
-    // The controller allocation and initialization happens there
-    // TODO: Implement CKKeyframeData::CreateController when controller classes are available
-    // For now, ensure m_KeyframeData exists and return nullptr
+    // Based on IDA analysis of CKKeyframeData::CreateController at 0x1004A922
     if (!m_KeyframeData)
         return nullptr;
 
-    // The original implementation:
-    // 1. Deletes existing controller of the same base type
-    // 2. Allocates a new controller based on ControlType
-    // 3. Sets the controller's length from m_KeyframeData->m_Length
-    // 4. Returns the new controller
+    // Get the base controller type (mask out specific type to get category)
+    CKDWORD baseType = ControlType & CKANIMATION_CONTROLLER_MASK;
+    
+    // Delete existing controller of the same category
+    switch (baseType) {
+    case CKANIMATION_CONTROLLER_POS:
+        if (m_KeyframeData->m_PositionController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
+            m_KeyframeData->m_PositionController = nullptr;
+        }
+        break;
+    case CKANIMATION_CONTROLLER_ROT:
+        if (m_KeyframeData->m_RotationController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
+            m_KeyframeData->m_RotationController = nullptr;
+        }
+        break;
+    case CKANIMATION_CONTROLLER_SCL:
+        if (m_KeyframeData->m_ScaleController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
+            m_KeyframeData->m_ScaleController = nullptr;
+        }
+        break;
+    case CKANIMATION_CONTROLLER_SCLAXIS:
+        if (m_KeyframeData->m_ScaleAxisController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
+            m_KeyframeData->m_ScaleAxisController = nullptr;
+        }
+        break;
+    case CKANIMATION_CONTROLLER_MORPH:
+        if (m_KeyframeData->m_MorphController) {
+            delete reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
+            m_KeyframeData->m_MorphController = nullptr;
+        }
+        break;
+    default:
+        return nullptr;
+    }
 
-    return nullptr;
+    // Create new controller and assign to appropriate slot
+    CKAnimController *ctrl = m_KeyframeData->CreateController(ControlType);
+    if (!ctrl)
+        return nullptr;
+
+    // Assign to the appropriate controller slot
+    switch (baseType) {
+    case CKANIMATION_CONTROLLER_POS:
+        m_KeyframeData->m_PositionController = ctrl;
+        break;
+    case CKANIMATION_CONTROLLER_ROT:
+        m_KeyframeData->m_RotationController = ctrl;
+        break;
+    case CKANIMATION_CONTROLLER_SCL:
+        m_KeyframeData->m_ScaleController = ctrl;
+        break;
+    case CKANIMATION_CONTROLLER_SCLAXIS:
+        m_KeyframeData->m_ScaleAxisController = ctrl;
+        break;
+    case CKANIMATION_CONTROLLER_MORPH:
+        m_KeyframeData->m_MorphController = reinterpret_cast<CKMorphController *>(ctrl);
+        break;
+    }
+
+    return ctrl;
 }
 
 CKBOOL RCKObjectAnimation::DeleteController(CKANIMATION_CONTROLLER ControlType) {
@@ -712,21 +811,94 @@ CKBOOL RCKObjectAnimation::EvaluateScaleAxis(float Time, VxQuaternion &ScaleAxis
 
 CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVector *Vertices, CKDWORD VStride,
                                                VxCompressedVector *Normals) {
+    // Based on IDA decompilation at 0x100574B4
+    
+    // Check flag 0x20 - morph disabled
+    if (m_Flags & 0x20)
+        return FALSE;
+    
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
-        // For morphing, we need to evaluate both and blend the vertex data
-        // This is complex - for now return FALSE
-        // TODO: Implement morph blending
+    if (!(m_Flags & 0x80)) {
+        // Direct morph controller evaluation
+        if (m_KeyframeData && m_KeyframeData->m_MorphController) {
+            RCKMorphController *ctrl = reinterpret_cast<RCKMorphController *>(m_KeyframeData->m_MorphController);
+            return ctrl->Evaluate(Time, VertexCount, Vertices, VStride, Normals);
+        }
         return FALSE;
     }
-
-    // Direct morph controller evaluation
-    if (m_KeyframeData && m_KeyframeData->m_MorphController) {
-        CKMorphController *ctrl = reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
-        return ctrl->Evaluate(Time, VertexCount, Vertices, VStride, Normals);
+    
+    // Merged animation - blend morph data from both sub-animations
+    int vertCount1 = m_Anim1->GetMorphVertexCount();
+    int vertCount2 = m_Anim2->GetMorphVertexCount();
+    
+    // If vertex counts don't match, use whichever animation has morph data
+    if (!vertCount1 || vertCount1 != vertCount2) {
+        if (vertCount1)
+            return m_Anim1->EvaluateMorphTarget(Time, VertexCount, Vertices, VStride, Normals);
+        if (vertCount2)
+            return m_Anim2->EvaluateMorphTarget(Time, VertexCount, Vertices, VStride, Normals);
+        return FALSE;
     }
-
-    return FALSE;
+    
+    // Allocate temporary buffers for blending
+    // Need space for 2 vertex arrays + 2 normal arrays (if needed)
+    int bufferSize = vertCount1 * sizeof(VxVector) * 2;
+    if (Normals)
+        bufferSize += vertCount1 * sizeof(VxCompressedVector) * 2;
+    CKMemoryPool pool(m_Context, bufferSize);
+    VxVector *tempVerts1 = (VxVector *)pool.Mem();
+    VxVector *tempVerts2 = tempVerts1 + vertCount1;
+    VxCompressedVector *tempNorms = (VxCompressedVector *)(tempVerts2 + vertCount1);
+    
+    // Check if both animations have normal data
+    CKBOOL hasNorm1 = FALSE, hasNorm2 = FALSE;
+    if (Normals) {
+        hasNorm1 = m_Anim1->HasMorphNormalInfo();
+        hasNorm2 = m_Anim2->HasMorphNormalInfo();
+    }
+    
+    VxCompressedVector *normPtr1 = hasNorm1 ? tempNorms : nullptr;
+    VxCompressedVector *normPtr2 = hasNorm2 ? tempNorms + vertCount1 : nullptr;
+    
+    // Scale time to each animation's length
+    float normalizedTime = Time / m_KeyframeData->m_Length;
+    float time1 = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
+    float time2 = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+    
+    // Evaluate both animations
+    if (hasNorm1) {
+        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, normPtr1);
+        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, normPtr2);
+    } else if (hasNorm2) {
+        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, normPtr1);
+        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, Normals);
+    } else {
+        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, nullptr);
+        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, nullptr);
+    }
+    
+    // Blend vertices: result = v1 * (1 - factor) + v2 * factor
+    float factor = m_MergeFactor;
+    float invFactor = 1.0f - factor;
+    
+    VxVector *outVert = Vertices;
+    for (int i = 0; i < VertexCount; ++i) {
+        outVert->x = tempVerts1[i].x * invFactor + tempVerts2[i].x * factor;
+        outVert->y = tempVerts1[i].y * invFactor + tempVerts2[i].y * factor;
+        outVert->z = tempVerts1[i].z * invFactor + tempVerts2[i].z * factor;
+        outVert = (VxVector *)((char *)outVert + VStride);
+    }
+    
+    // Blend normals if both have normal info
+    if (hasNorm1 && hasNorm2 && Normals) {
+        for (int i = 0; i < VertexCount; ++i) {
+            // Interpolate compressed normals using their xa/ya fields
+            Normals[i].xa = (short)((float)normPtr1[i].xa * invFactor + (float)normPtr2[i].xa * factor);
+            Normals[i].ya = (short)((float)normPtr1[i].ya * invFactor + (float)normPtr2[i].ya * factor);
+        }
+    }
+    
+    return TRUE;
 }
 
 CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector *pos, VxVector *scale,
@@ -758,9 +930,24 @@ CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector 
 //=============================================================================
 
 CKBOOL RCKObjectAnimation::HasMorphNormalInfo() {
-    // Check if morph controller exists with normal data
+    // Check for merged animation
+    if (m_Flags & 0x80) {
+        // Merged animation - check both sub-animations
+        if (m_Anim1 && m_Anim1->HasMorphNormalInfo())
+            return TRUE;
+        if (m_Anim2 && m_Anim2->HasMorphNormalInfo())
+            return TRUE;
+        return FALSE;
+    }
+
+    // Direct check: controller exists, has keys, and first key has normal data
     if (m_KeyframeData && m_KeyframeData->m_MorphController) {
-        // TODO: Check if morph has normal info
+        CKMorphController *ctrl = m_KeyframeData->m_MorphController;
+        if (ctrl->GetKeyCount() > 0) {
+            CKMorphKey *key = static_cast<CKMorphKey*>(ctrl->GetKey(0));
+            if (key && key->NormArray)
+                return TRUE;
+        }
     }
     return FALSE;
 }
@@ -830,15 +1017,67 @@ CKBOOL RCKObjectAnimation::HasScaleAxisInfo() {
 //=============================================================================
 
 void RCKObjectAnimation::AddPositionKey(float TimeStep, VxVector *pos) {
+    // Based on IDA decompilation at 0x100567EC
+    if (!pos)
+        return;
+
+    // Create controller if it doesn't exist
+    if (!m_KeyframeData->m_PositionController)
+        CreateController(CKANIMATION_LINPOS_CONTROL);
+
+    // Create position key and add it
+    CKPositionKey key(TimeStep, *pos);
+    CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
+    if (ctrl)
+        ctrl->AddKey(&key);
 }
 
 void RCKObjectAnimation::AddRotationKey(float TimeStep, VxQuaternion *rot) {
+    // Based on IDA decompilation at 0x10056842
+    if (!rot)
+        return;
+
+    // Create controller if it doesn't exist
+    if (!m_KeyframeData->m_RotationController)
+        CreateController(CKANIMATION_LINROT_CONTROL);
+
+    // Create rotation key and add it
+    CKRotationKey key(TimeStep, *rot);
+    CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
+    if (ctrl)
+        ctrl->AddKey(&key);
 }
 
 void RCKObjectAnimation::AddScaleKey(float TimeStep, VxVector *scl) {
+    // Based on IDA decompilation at 0x100568A0
+    if (!scl)
+        return;
+
+    // Create controller if it doesn't exist
+    if (!m_KeyframeData->m_ScaleController)
+        CreateController(CKANIMATION_LINSCL_CONTROL);
+
+    // Create scale key and add it (CKScaleKey is typedef of CKPositionKey)
+    CKScaleKey key(TimeStep, *scl);
+    CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
+    if (ctrl)
+        ctrl->AddKey(&key);
 }
 
 void RCKObjectAnimation::AddScaleAxisKey(float TimeStep, VxQuaternion *sclaxis) {
+    // Based on IDA decompilation at 0x10056918
+    if (!sclaxis)
+        return;
+
+    // Create controller if it doesn't exist
+    if (!m_KeyframeData->m_ScaleAxisController)
+        CreateController(CKANIMATION_LINSCLAXIS_CONTROL);
+
+    // Create scale axis key and add it (CKScaleAxisKey is typedef of CKRotationKey)
+    CKScaleAxisKey key(TimeStep, *sclaxis);
+    CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
+    if (ctrl)
+        ctrl->AddKey(&key);
 }
 
 //=============================================================================
@@ -846,22 +1085,75 @@ void RCKObjectAnimation::AddScaleAxisKey(float TimeStep, VxQuaternion *sclaxis) 
 //=============================================================================
 
 CKBOOL RCKObjectAnimation::Compare(CKObjectAnimation *anim, float threshold) {
-    return FALSE;
+    // Based on IDA decompilation at 0x1005667D
+    if (!anim)
+        return FALSE;
+    
+    // Same animation = equal
+    if (anim == (CKObjectAnimation *)this)
+        return TRUE;
+    
+    // Compare keyframe data using CKKeyframeData::Compare (sub_1004A804)
+    RCKObjectAnimation *other = (RCKObjectAnimation *)anim;
+    CKKeyframeData *kf1 = m_KeyframeData;
+    CKKeyframeData *kf2 = other->m_KeyframeData;
+    
+    if (!kf2)
+        return FALSE;
+    
+    // Check lengths match
+    if (kf1->m_Length != kf2->m_Length)
+        return FALSE;
+    
+    // Compare position controllers
+    if (kf1->m_PositionController) {
+        if (!kf1->m_PositionController->Compare(kf2->m_PositionController, threshold))
+            return FALSE;
+    }
+    
+    // Compare scale controllers
+    if (kf1->m_ScaleController) {
+        if (!kf1->m_ScaleController->Compare(kf2->m_ScaleController, threshold))
+            return FALSE;
+    }
+    
+    // Compare rotation controllers
+    if (kf1->m_RotationController) {
+        if (!kf1->m_RotationController->Compare(kf2->m_RotationController, threshold))
+            return FALSE;
+    }
+    
+    // Compare scale axis controllers
+    if (kf1->m_ScaleAxisController) {
+        if (!kf1->m_ScaleAxisController->Compare(kf2->m_ScaleAxisController, threshold))
+            return FALSE;
+    }
+    
+    // Compare morph controllers
+    if (kf1->m_MorphController) {
+        if (!kf1->m_MorphController->Compare(kf2->m_MorphController, threshold))
+            return FALSE;
+    }
+    
+    return TRUE;
 }
 
 CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
+    // Based on IDA decompilation at 0x100566B9
     RCKObjectAnimation *srcAnim = (RCKObjectAnimation *) anim;
 
     // Can't share from self
     if (srcAnim == this)
         return FALSE;
 
-    // Release current keyframe data if we own it
+    // Release current keyframe data
     if (m_KeyframeData) {
         // Decrement reference count
-        if (--m_KeyframeData->m_RefCount <= 0 && m_KeyframeData) {
-            // Free the keyframe data
-            delete m_KeyframeData;
+        if (--m_KeyframeData->m_RefCount <= 0) {
+            // We're the last user - delete the keyframe data
+            if (m_KeyframeData) {
+                delete m_KeyframeData;
+            }
         }
         m_KeyframeData = nullptr;
     }
@@ -873,9 +1165,8 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
         if (m_KeyframeData)
             ++m_KeyframeData->m_RefCount; // Increment reference count
     } else {
-        // Create new keyframe data
+        // Create new keyframe data using constructor (not memset)
         m_KeyframeData = new CKKeyframeData();
-        memset(m_KeyframeData, 0, sizeof(CKKeyframeData));
         m_KeyframeData->m_ObjectAnimation = this;
     }
 
@@ -1091,8 +1382,62 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
             m_Entity->LocalMatrixChanged(FALSE, FALSE);
     }
 
-    // TODO: Morph animation processing would go here
-    // This requires CKMesh::GetModifierVertices, CKContext::GetMemoryPool, etc.
+    // Morph animation processing
+    // Based on IDA decompilation at 0x100578CA (lines 130-182)
+    if (HasMorphInfo()) {
+        // Only process if entity doesn't have a skin (skinned entities have different morph handling)
+        if (!m_Entity->m_Skin) {
+            RCKMesh *currentMesh = m_Entity->m_CurrentMesh;
+            if (currentMesh) {
+                // Set mesh flag indicating morph data has changed (0x40000)
+                CKDWORD meshFlags = currentMesh->GetFlags();
+                currentMesh->SetFlags(meshFlags | 0x40000);
+                
+                // Invalidate bounding box since vertices will move
+                if (m_Entity->m_SceneGraphNode)
+                    m_Entity->m_SceneGraphNode->InvalidateBox(TRUE);
+                
+                // Get vertex counts
+                int morphVertexCount = GetMorphVertexCount();
+                int meshVertexCount = currentMesh->GetModifierVertexCount();
+                CKBOOL hasNormalInfo = HasMorphNormalInfo();
+                
+                // Only proceed if mesh has vertices and they fit within morph data
+                if (meshVertexCount > 0 && meshVertexCount <= morphVertexCount) {
+                    // Allocate temporary buffer for normals if needed
+                    // VxCompressedVector = 4 bytes per normal
+                    CKMemoryPool memPool(m_Context, morphVertexCount * sizeof(VxCompressedVector));
+                    VxCompressedVector *normalBuffer = hasNormalInfo ? (VxCompressedVector *)memPool.Mem() : nullptr;
+                    
+                    // Get modifier vertices from mesh
+                    CKDWORD vertexStride = 0;
+                    CKBYTE *vertices = currentMesh->GetModifierVertices(&vertexStride);
+                    
+                    // Evaluate morph target into mesh vertices
+                    EvaluateMorphTarget(frame, meshVertexCount, (VxVector *)vertices, vertexStride, normalBuffer);
+                    
+                    // Copy normals if we have normal info
+                    if (hasNormalInfo) {
+                        CKDWORD normalStride = 0;
+                        VxVector *normals = (VxVector *)currentMesh->GetNormalsPtr(&normalStride);
+                        if (normals && normalBuffer) {
+                            for (int i = 0; i < meshVertexCount; i++) {
+                                // Decompress the compressed normal into full normal
+                                // Use operator= for conversion from compressed to full vector
+                                *normals = normalBuffer[i];
+                                normals = (VxVector *)((CKBYTE *)normals + normalStride);
+                            }
+                        }
+                        // Notify mesh of vertex movement, don't rebuild normals since we provided them
+                        currentMesh->ModifierVertexMove(FALSE, TRUE);
+                    } else {
+                        // Notify mesh of vertex movement, rebuild normals automatically
+                        currentMesh->ModifierVertexMove(TRUE, TRUE);
+                    }
+                }
+            }
+        }
+    }
 
     return CK_OK;
 }
@@ -1125,6 +1470,23 @@ CK3dEntity *RCKObjectAnimation::Get3dEntity() {
 //=============================================================================
 
 int RCKObjectAnimation::GetMorphVertexCount() {
+    // Based on IDA decompilation at 0x100580F9
+    
+    // Check for merged animation (flag 0x80)
+    if (m_Flags & 0x80) {
+        // Return max vertex count from both sub-animations
+        int count1 = m_Anim1->GetMorphVertexCount();
+        int count2 = m_Anim2->GetMorphVertexCount();
+        return (count1 > count2) ? count1 : count2;
+    }
+    
+    // Direct morph controller vertex count
+    if (m_KeyframeData && m_KeyframeData->m_MorphController) {
+        // Cast to our implementation class to access m_VertexCount
+        RCKMorphController *ctrl = reinterpret_cast<RCKMorphController *>(m_KeyframeData->m_MorphController);
+        return ctrl->GetMorphVertexCount();
+    }
+    
     return 0;
 }
 
@@ -1135,9 +1497,286 @@ int RCKObjectAnimation::GetMorphVertexCount() {
 void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimIn, float StepFrom,
                                           CKObjectAnimation *AnimOut, float StepTo, CKBOOL Veloc, CKBOOL DontTurn,
                                           CKAnimKey *startingset) {
+    // Based on IDA decompilation at 0x1005A5EE
+    // This creates a smooth transition between two animations by creating interpolated keyframes
+    
+    RCKObjectAnimation *animIn = (RCKObjectAnimation *)AnimIn;
+    RCKObjectAnimation *animOut = (RCKObjectAnimation *)AnimOut;
+    
+    if (!animIn || !animOut)
+        return;
+    
+    // Calculate actual frame times from normalized steps
+    float frameFrom = StepFrom * animIn->m_KeyframeData->m_Length;
+    float frameTo = StepTo * animOut->m_KeyframeData->m_Length;
+    
+    // Check what info both animations have
+    CKBOOL hasScale = animIn->HasScaleInfo() && animOut->HasScaleInfo();
+    CKBOOL hasPosition = animIn->HasPositionInfo() && animOut->HasPositionInfo();
+    CKBOOL hasRotation = animIn->HasRotationInfo() && animOut->HasRotationInfo();
+    CKBOOL hasScaleAxis = animIn->HasScaleAxisInfo() && animOut->HasScaleAxisInfo();
+    
+    // Temporary storage for evaluated keys
+    VxVector startPos(0, 0, 0), endPos(0, 0, 0);
+    VxVector startScale(1, 1, 1), endScale(1, 1, 1);
+    VxQuaternion startRot, endRot;
+    VxQuaternion startScaleAxis, endScaleAxis;
+    
+    // If no starting set provided, evaluate from AnimIn
+    if (!startingset) {
+        if (hasPosition) animIn->EvaluatePosition(frameFrom, startPos);
+        if (hasRotation) animIn->EvaluateRotation(frameFrom, startRot);
+        if (hasScale) animIn->EvaluateScale(frameFrom, startScale);
+        if (hasScaleAxis) animIn->EvaluateScaleAxis(frameFrom, startScaleAxis);
+    } else {
+        // Use provided starting set
+        // startingset is CKAnimKey* which should point to a structure containing pos, rot, scale, scaleAxis
+        // For now just evaluate from AnimIn if we don't know the exact structure
+        if (hasPosition) animIn->EvaluatePosition(frameFrom, startPos);
+        if (hasRotation) animIn->EvaluateRotation(frameFrom, startRot);
+        if (hasScale) animIn->EvaluateScale(frameFrom, startScale);
+        if (hasScaleAxis) animIn->EvaluateScaleAxis(frameFrom, startScaleAxis);
+    }
+    
+    // Evaluate end values from AnimOut
+    if (hasPosition) animOut->EvaluatePosition(frameTo, endPos);
+    if (hasRotation) animOut->EvaluateRotation(frameTo, endRot);
+    if (hasScale) animOut->EvaluateScale(frameTo, endScale);
+    if (hasScaleAxis) animOut->EvaluateScaleAxis(frameTo, endScaleAxis);
+    
+    // Reset transition animation state
+    m_Anim1 = nullptr;
+    m_Anim2 = nullptr;
+    m_MergeFactor = 0.5f;
+    m_CurrentStep = 0.0f;
+    m_Entity = animOut->m_Entity;
+    
+    // Create position controller with 2 keys (start and end)
+    if (hasPosition) {
+        // Delete existing controller
+        if (m_KeyframeData->m_PositionController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
+            m_KeyframeData->m_PositionController = nullptr;
+        }
+        
+        CKAnimController *posCtrl = CreateController(CKANIMATION_LINPOS_CONTROL);
+        if (posCtrl) {
+            CKPositionKey startKey(0.0f, startPos);
+            CKPositionKey endKey(length, endPos);
+            posCtrl->AddKey(&startKey);
+            posCtrl->AddKey(&endKey);
+        }
+    } else {
+        // Delete position controller if exists
+        if (m_KeyframeData->m_PositionController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
+            m_KeyframeData->m_PositionController = nullptr;
+        }
+    }
+    
+    // Create scale controller with 2 keys
+    if (hasScale) {
+        if (m_KeyframeData->m_ScaleController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
+            m_KeyframeData->m_ScaleController = nullptr;
+        }
+        
+        CKAnimController *sclCtrl = CreateController(CKANIMATION_LINSCL_CONTROL);
+        if (sclCtrl) {
+            CKScaleKey startKey(0.0f, startScale);
+            CKScaleKey endKey(length, endScale);
+            sclCtrl->AddKey(&startKey);
+            sclCtrl->AddKey(&endKey);
+        }
+    } else {
+        if (m_KeyframeData->m_ScaleController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
+            m_KeyframeData->m_ScaleController = nullptr;
+        }
+    }
+    
+    // Create rotation controller with 2 keys
+    if (hasRotation) {
+        if (m_KeyframeData->m_RotationController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
+            m_KeyframeData->m_RotationController = nullptr;
+        }
+        
+        CKAnimController *rotCtrl = CreateController(CKANIMATION_LINROT_CONTROL);
+        if (rotCtrl) {
+            CKRotationKey startKey(0.0f, startRot);
+            CKRotationKey endKey(length, endRot);
+            rotCtrl->AddKey(&startKey);
+            rotCtrl->AddKey(&endKey);
+        }
+    } else {
+        if (m_KeyframeData->m_RotationController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
+            m_KeyframeData->m_RotationController = nullptr;
+        }
+    }
+    
+    // Create scale axis controller with 2 keys
+    if (hasScaleAxis) {
+        if (m_KeyframeData->m_ScaleAxisController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
+            m_KeyframeData->m_ScaleAxisController = nullptr;
+        }
+        
+        CKAnimController *sclAxisCtrl = CreateController(CKANIMATION_LINSCLAXIS_CONTROL);
+        if (sclAxisCtrl) {
+            CKScaleAxisKey startKey(0.0f, startScaleAxis);
+            CKScaleAxisKey endKey(length, endScaleAxis);
+            sclAxisCtrl->AddKey(&startKey);
+            sclAxisCtrl->AddKey(&endKey);
+        }
+    } else {
+        if (m_KeyframeData->m_ScaleAxisController) {
+            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
+            m_KeyframeData->m_ScaleAxisController = nullptr;
+        }
+    }
+    
+    // Morph controller transition handling
+    // Based on IDA decompilation at 0x1005A5EE (lines 391-665)
+    // This creates morph transition between two animations
+    
+    // Check if both animations have morph normal info
+    CKBOOL hasMorphNormals = animIn->HasMorphNormalInfo() && animOut->HasMorphNormalInfo();
+    
+    if (animOut->HasMorphInfo()) {
+        int outMorphVertexCount = animOut->GetMorphVertexCount();
+        
+        // Allocate temporary buffer for morph data if needed
+        int bufferSize = outMorphVertexCount * sizeof(VxVector);
+        if (hasMorphNormals)
+            bufferSize += outMorphVertexCount * sizeof(VxCompressedVector);
+        CKMemoryPool memPool(m_Context, bufferSize);
+        VxVector *tempMorphBuffer = (VxVector *)memPool.Mem();
+        VxCompressedVector *tempNormalBuffer = hasMorphNormals ? 
+            (VxCompressedVector *)((CKBYTE*)tempMorphBuffer + outMorphVertexCount * sizeof(VxVector)) : nullptr;
+        
+        // Check if AnimIn is this animation (special case for in-place transition)
+        CKBOOL inPlaceTransition = (animIn == this);
+        CKBOOL hasStartData = FALSE;
+        
+        // Case 1: AnimIn == this and both have morph with matching vertex counts
+        if (inPlaceTransition && animIn->HasMorphInfo()) {
+            int inMorphVertexCount = animIn->GetMorphVertexCount();
+            if (outMorphVertexCount == inMorphVertexCount) {
+                // Evaluate morph from AnimIn into temp buffer
+                animIn->EvaluateMorphTarget(frameFrom, outMorphVertexCount, 
+                    tempMorphBuffer, sizeof(VxVector), tempNormalBuffer);
+                hasStartData = TRUE;
+            }
+        }
+        
+        // Create or reuse morph controller
+        RCKMorphController *morphCtrl = reinterpret_cast<RCKMorphController*>(m_KeyframeData->m_MorphController);
+        
+        // Check if we can reuse existing controller
+        if (!(morphCtrl && morphCtrl->m_NbKeys == 2 && 
+              morphCtrl->GetMorphVertexCount() == outMorphVertexCount)) {
+            // Create new morph controller
+            morphCtrl = reinterpret_cast<RCKMorphController*>(CreateController(CKANIMATION_MORPH_CONTROL));
+            if (morphCtrl) {
+                morphCtrl->SetMorphVertexCount(outMorphVertexCount);
+                morphCtrl->AddKey(0.0f, hasMorphNormals);
+                morphCtrl->AddKey(length, hasMorphNormals);
+            }
+        }
+        
+        if (morphCtrl) {
+            CKMorphKey *startKey = (CKMorphKey *)morphCtrl->GetKey(0);
+            CKMorphKey *endKey = (CKMorphKey *)morphCtrl->GetKey(1);
+            
+            if (startKey && endKey) {
+                // Ensure normal buffers match expectations
+                if (hasMorphNormals) {
+                    if (!startKey->NormArray)
+                        startKey->NormArray = new VxCompressedVector[outMorphVertexCount];
+                    if (!endKey->NormArray)
+                        endKey->NormArray = new VxCompressedVector[outMorphVertexCount];
+                } else {
+                    delete[] startKey->NormArray;
+                    startKey->NormArray = nullptr;
+                    delete[] endKey->NormArray;
+                    endKey->NormArray = nullptr;
+                }
+                
+                if (hasStartData) {
+                    // Copy start morph data from temp buffer
+                    if (startKey->PosArray)
+                        memcpy(startKey->PosArray, tempMorphBuffer, outMorphVertexCount * sizeof(VxVector));
+                    if (hasMorphNormals && startKey->NormArray && tempNormalBuffer)
+                        memcpy(startKey->NormArray, tempNormalBuffer, outMorphVertexCount * sizeof(VxCompressedVector));
+                } else if (animIn && animIn->HasMorphInfo()) {
+                    // Evaluate start from AnimIn
+                    int inMorphVertexCount = animIn->GetMorphVertexCount();
+                    if (outMorphVertexCount == inMorphVertexCount) {
+                        animIn->EvaluateMorphTarget(frameFrom, outMorphVertexCount,
+                            startKey->PosArray, sizeof(VxVector), startKey->NormArray);
+                    }
+                } else if (m_Entity && m_Entity->m_CurrentMesh) {
+                    // Fallback: copy from current mesh vertices
+                    RCKMesh *currentMesh = m_Entity->m_CurrentMesh;
+                    int meshVertexCount = currentMesh->GetModifierVertexCount();
+                    if (meshVertexCount <= outMorphVertexCount && startKey->PosArray) {
+                        CKDWORD vertexStride = 0;
+                        CKBYTE *meshVertices = currentMesh->GetModifierVertices(&vertexStride);
+                        if (meshVertices) {
+                            for (int i = 0; i < meshVertexCount; i++) {
+                                memcpy(&startKey->PosArray[i], meshVertices, sizeof(VxVector));
+                                meshVertices += vertexStride;
+                            }
+                        }
+                        
+                        // Copy normals from mesh if needed
+                        if (startKey->NormArray && animOut->HasMorphNormalInfo()) {
+                            CKDWORD normalStride = 0;
+                            VxVector *meshNormals = (VxVector *)currentMesh->GetNormalsPtr(&normalStride);
+                            if (meshNormals) {
+                                for (int i = 0; i < meshVertexCount; i++) {
+                                    // Use operator= for conversion
+                                    startKey->NormArray[i] = *meshNormals;
+                                    meshNormals = (VxVector *)((CKBYTE *)meshNormals + normalStride);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Evaluate end morph from AnimOut
+                animOut->EvaluateMorphTarget(frameTo, outMorphVertexCount,
+                    endKey->PosArray, sizeof(VxVector), endKey->NormArray);
+            }
+        }
+    } else {
+        // AnimOut has no morph info, clear morph controller
+        if (m_KeyframeData->m_MorphController) {
+            delete reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
+            m_KeyframeData->m_MorphController = nullptr;
+        }
+    }
 }
 
 void RCKObjectAnimation::Clone(CKObjectAnimation *anim) {
+    // Based on IDA decompilation at 0x10056C1F
+    // Clear current data first
+    ClearAll();
+    
+    RCKObjectAnimation *srcAnim = (RCKObjectAnimation *)anim;
+    if (srcAnim) {
+        // Share data from source - this copies the keyframe data reference
+        ShareDataFrom(srcAnim);
+        
+        // Copy other members
+        m_Entity = srcAnim->m_Entity;
+        m_Anim1 = srcAnim->m_Anim1;
+        m_Anim2 = srcAnim->m_Anim2;
+        m_MergeFactor = srcAnim->m_MergeFactor;
+        m_CurrentStep = srcAnim->m_CurrentStep;
+    }
 }
 
 //=============================================================================
@@ -1161,10 +1800,10 @@ CKSTRING RCKObjectAnimation::GetDependencies(int i, int mode) {
 
 void RCKObjectAnimation::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(RCKObjectAnimation::m_ClassID, CKCID_3DENTITY);
-    CKClassNeedNotificationFrom(RCKObjectAnimation::m_ClassID, CKCID_OBJECTANIMATION);
-    CKClassRegisterAssociatedParameter(RCKObjectAnimation::m_ClassID, CKPGUID_OBJECTANIMATION);
-    CKClassRegisterDefaultOptions(RCKObjectAnimation::m_ClassID, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
+    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
+    CKClassNeedNotificationFrom(m_ClassID, CKCID_OBJECTANIMATION);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_OBJECTANIMATION);
+    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
 }
 
 CKObjectAnimation *RCKObjectAnimation::CreateInstance(CKContext *Context) {

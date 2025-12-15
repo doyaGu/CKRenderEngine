@@ -118,7 +118,7 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // If no file and no special flags, return base chunk only
-    if (!file && (flags & 0xFC00000) == 0)
+    if (!file && (flags & CK_STATESAVE_GRIDONLY) == 0)
         return baseChunk;
 
     // Create a new state chunk for grid data

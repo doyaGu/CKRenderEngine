@@ -257,15 +257,15 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
     // Update moveable flags based on visibility
     CKDWORD moveableFlags = GetMoveableFlags();
     if (IsVisible())
-        moveableFlags |= 2u;
+        moveableFlags |= VX_MOVEABLE_VISIBLE;
     else
-        moveableFlags &= ~2u;
+        moveableFlags &= ~VX_MOVEABLE_VISIBLE;
 
     // Update 2D entity flag based on hierarchical hide state
     if (IsHierarchicallyHide())
-        moveableFlags |= 0x10000000u;
+        moveableFlags |= VX_MOVEABLE_HIERARCHICALHIDE;
     else
-        moveableFlags &= ~0x10000000u;
+        moveableFlags &= ~VX_MOVEABLE_HIERARCHICALHIDE;
 
     SetMoveableFlags(moveableFlags);
 

@@ -3,6 +3,7 @@
 
 #include "CKRenderEngineTypes.h"
 #include "CKObjectAnimation.h"
+#include "RCKKeyframeData.h"
 
 class RCKKeyedAnimation;
 
