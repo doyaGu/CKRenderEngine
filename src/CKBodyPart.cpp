@@ -53,7 +53,7 @@ CKStateChunk *RCKBodyPart::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // Keep the same early-return optimization used across the repo for "memory-only" saves.
-    if (!file && (flags & 0x7F000000) == 0)
+    if (!file && (flags & CK_STATESAVE_BODYPARTONLY) == 0)
         return baseChunk;
 
     CKStateChunk *chunk = CreateCKStateChunk(m_ClassID, file);

@@ -303,8 +303,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     rc->m_SpriteTimeProfiler.Reset();
     
     // Render foreground 2D sprites
-    if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 &&
-        rm->m_2DRootFore->GetChildrenCount() > 0) {
+    if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 && rm->m_2DRootFore->GetChildrenCount() > 0) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
         

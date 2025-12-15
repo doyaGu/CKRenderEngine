@@ -1,3 +1,5 @@
+#include <CKTexture.h>
+
 #include "RCK2dEntity.h"
 #include "RCKRenderContext.h"
 #include "CKRasterizer.h"
@@ -5,9 +7,9 @@
 
 // IDA: sub_1005C750 - Comparison function for sorting children by ZOrder
 // Compares two CK2dEntity* pointers by their m_ZOrder (at offset 0xB4 = 180)
-static int __cdecl CompareByZOrder(const void *a, const void *b) {
-    CK2dEntity *ent1 = *(CK2dEntity **)a;
-    CK2dEntity *ent2 = *(CK2dEntity **)b;
+static int CompareByZOrder(const void *a, const void *b) {
+    CK2dEntity *ent1 = *(CK2dEntity **) a;
+    CK2dEntity *ent2 = *(CK2dEntity **) b;
     return ent1->GetZOrder() - ent2->GetZOrder();
 }
 
@@ -18,12 +20,8 @@ CK_CLASSID RCK2dEntity::GetClassID() {
 }
 
 RCK2dEntity::RCK2dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Context, name) {
-    // Initialize flags with default values matching IDA decompilation:
-    // CK_2DENTITY_RESERVED3 | CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW | CK_2DENTITY_STICKLEFT | CK_2DENTITY_STICKTOP
-    m_Flags = CK_2DENTITY_RESERVED3 | CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW |
-        CK_2DENTITY_STICKLEFT | CK_2DENTITY_STICKTOP;
+    m_Flags = CK_2DENTITY_RESERVED3 | CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW | CK_2DENTITY_STICKLEFT | CK_2DENTITY_STICKTOP;
     m_Parent = nullptr;
-    // IDA: VxRect::VxRect(&this->m_SourceRect, 0.0, 0.0, 1.0, 1.0);
     m_SourceRect = VxRect(0.0f, 0.0f, 1.0f, 1.0f);
     m_HomogeneousRect = nullptr;
     m_ZOrder = 0;
@@ -31,12 +29,9 @@ RCK2dEntity::RCK2dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Co
 }
 
 RCK2dEntity::~RCK2dEntity() {
-    // IDA: operator delete(this->m_HomogeneousRect);
     if (m_HomogeneousRect)
         delete m_HomogeneousRect;
-    // IDA: sub_100602B0 clears the XArray
     m_Children.Clear();
-    // Note: m_Callbacks deletion is handled by base class RCKRenderObject destructor
 }
 
 CKERROR RCK2dEntity::GetPosition(Vx2DVector &vect, CKBOOL hom, CK2dEntity *ref) {
@@ -49,9 +44,9 @@ CKERROR RCK2dEntity::GetPosition(Vx2DVector &vect, CKBOOL hom, CK2dEntity *ref) 
         vect.x = m_Rect.left;
         vect.y = m_Rect.top;
         if (ref) {
-            Vx2DVector refPos;
-            ref->GetPosition(refPos);
-            vect -= refPos;
+            VxRect rect;
+            ref->GetRect(rect);
+            vect -= rect.GetTopLeft();
         }
     }
     return CK_OK;
@@ -60,10 +55,8 @@ CKERROR RCK2dEntity::GetPosition(Vx2DVector &vect, CKBOOL hom, CK2dEntity *ref) 
 void RCK2dEntity::SetPosition(const Vx2DVector &vect, CKBOOL hom, CKBOOL KeepChildren, CK2dEntity *ref) {
     if (hom) {
         if ((m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) && m_HomogeneousRect) {
-            float width = m_HomogeneousRect->GetWidth();
-            float height = m_HomogeneousRect->GetHeight();
-            VxRect newRect(vect.x, vect.y, vect.x + width, vect.y + height);
-            SetHomogeneousRect(newRect, KeepChildren);
+            m_HomogeneousRect->Move(vect);
+            SetHomogeneousRect(*m_HomogeneousRect, KeepChildren);
         }
     } else {
         if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
@@ -72,14 +65,13 @@ void RCK2dEntity::SetPosition(const Vx2DVector &vect, CKBOOL hom, CKBOOL KeepChi
 
         Vx2DVector pos = vect;
         if (ref) {
-            Vx2DVector refPos;
-            ref->GetPosition(refPos);
-            pos += refPos;
+            VxRect rect;
+            ref->GetRect(rect);
+            pos += rect.GetTopLeft();
         }
 
-        float width = m_Rect.GetWidth();
-        float height = m_Rect.GetHeight();
-        VxRect newRect(pos.x, pos.y, pos.x + width, pos.y + height);
+        VxRect newRect = m_Rect;
+        newRect.Move(pos);
         SetRect(newRect, KeepChildren);
     }
 }
@@ -100,18 +92,15 @@ CKERROR RCK2dEntity::GetSize(Vx2DVector &vect, CKBOOL hom) {
 void RCK2dEntity::SetSize(const Vx2DVector &vect, CKBOOL hom, CKBOOL KeepChildren) {
     if (hom) {
         if ((m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) && m_HomogeneousRect) {
-            VxRect newRect = *m_HomogeneousRect;
-            newRect.right = newRect.left + vect.x;
-            newRect.bottom = newRect.top + vect.y;
-            SetHomogeneousRect(newRect, KeepChildren);
+            m_HomogeneousRect->SetSize(vect);
+            SetHomogeneousRect(*m_HomogeneousRect, KeepChildren);
         }
     } else {
         if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
             m_Flags |= CK_2DENTITY_UPDATEHOMOGENEOUSCOORD;
         }
         VxRect newRect = m_Rect;
-        newRect.right = newRect.left + vect.x;
-        newRect.bottom = newRect.top + vect.y;
+        newRect.SetSize(vect);
         SetRect(newRect, KeepChildren);
     }
 }
@@ -193,19 +182,16 @@ CKERROR RCK2dEntity::SetHomogeneousRect(const VxRect &rect, CKBOOL KeepChildren)
 
     // Homogeneous rect becomes authoritative; keep screen rect in sync.
     *m_HomogeneousRect = rect;
-    m_Flags &= ~CK_2DENTITY_UPDATEHOMOGENEOUSCOORD;
 
     VxRect relRect;
     GetHomogeneousRelativeRect(relRect);
 
-    VxRect screenRect = rect;
+    VxRect screenRect = *m_HomogeneousRect;
     screenRect.TransformFromHomogeneous(relRect);
 
     // Use SetRect to preserve child-sticking behavior.
     SetRect(screenRect, KeepChildren);
 
-    // Restore exact homogeneous rect (SetRect recomputes it from screenRect).
-    *m_HomogeneousRect = rect;
     return CK_OK;
 }
 
@@ -271,16 +257,16 @@ CKBOOL RCK2dEntity::IsPickable() {
     return (m_Flags & CK_2DENTITY_NOTPICKABLE) == 0;
 }
 
-// IDA: sub_1005E1EE - recursively set/clear background flag 
-void RCK2dEntity::SetBackgroundRecursive(CKBOOL back) {
+// IDA: sub_1005E1EE - recursively set/clear background flag
+void RCK2dEntity::HierarchySetBackground(CKBOOL back) {
     if (back)
         m_Flags |= CK_2DENTITY_BACKGROUND;
     else
         m_Flags &= ~CK_2DENTITY_BACKGROUND;
-    
+
     // Recursively apply to all children
     for (CK2dEntity **it = m_Children.Begin(); it != m_Children.End(); ++it) {
-        ((RCK2dEntity *)*it)->SetBackgroundRecursive(back);
+        ((RCK2dEntity *) *it)->HierarchySetBackground(back);
     }
 }
 
@@ -291,20 +277,18 @@ void RCK2dEntity::SetBackground(CKBOOL back) {
 
     if (rc) {
         foregroundRoot = rc->Get2dRoot(FALSE);
-    }
-    if (rc) {
         backgroundRoot = rc->Get2dRoot(TRUE);
     }
 
-    if (back) {
-        if (!GetParent() && !(m_Flags & CK_2DENTITY_BACKGROUND)) {
-            SetParent(backgroundRoot);
-            SetBackgroundRecursive(TRUE);
-        }
-    } else {
+    if (!back) {
         if (!GetParent() && (m_Flags & CK_2DENTITY_BACKGROUND)) {
             SetParent(foregroundRoot);
-            SetBackgroundRecursive(FALSE);
+            HierarchySetBackground(FALSE);
+        }
+    } else {
+        if (!GetParent() && !(m_Flags & CK_2DENTITY_BACKGROUND)) {
+            SetParent(backgroundRoot);
+            HierarchySetBackground(TRUE);
         }
     }
 }
@@ -329,39 +313,39 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
     // Check if hidden by parent hierarchy
     if (IsHiddenByParent())
         return nullptr;
-    
+
     // Recursively check children in reverse order (back to front)
     for (int i = m_Children.Size() - 1; i >= 0; --i) {
-        RCK2dEntity *child = (RCK2dEntity *)m_Children[i];
+        RCK2dEntity *child = (RCK2dEntity *) m_Children[i];
         CK2dEntity *picked = child->Pick(pt, ignoreUnpickable);
         if (picked)
             return picked;
     }
-    
+
     // Check pickability
     if (!ignoreUnpickable && (m_Flags & CK_2DENTITY_NOTPICKABLE))
         return nullptr;
-    
+
     // Check visibility
     if (!IsVisible())
         return nullptr;
-    
+
     // Check if point is inside m_VtxPos (the actual rendered rectangle)
     if (pt.x < m_VtxPos.left || pt.x > m_VtxPos.right ||
         pt.y < m_VtxPos.top || pt.y > m_VtxPos.bottom)
         return nullptr;
-    
+
     // If no material, consider hit
     if (!m_Material)
-        return (CK2dEntity *)this;
-    
+        return (CK2dEntity *) this;
+
     // Calculate normalized UV coordinates within the entity
     Vx2DVector uv;
     if (m_Flags & CK_2DENTITY_RATIOOFFSET) {
-        RCKRenderContext *rc = (RCKRenderContext *)m_Context->GetPlayerRenderContext();
+        RCKRenderContext *rc = (RCKRenderContext *) m_Context->GetPlayerRenderContext();
         if (rc) {
-            uv.x = (pt.x - m_Rect.left - (float)rc->m_ViewportData.ViewX) / m_Rect.GetWidth();
-            uv.y = (pt.y - m_Rect.top - (float)rc->m_ViewportData.ViewY) / m_Rect.GetHeight();
+            uv.x = (pt.x - m_Rect.left - (float) rc->m_ViewportData.ViewX) / m_Rect.GetWidth();
+            uv.y = (pt.y - m_Rect.top - (float) rc->m_ViewportData.ViewY) / m_Rect.GetHeight();
         } else {
             uv.x = (pt.x - m_Rect.left) / m_Rect.GetWidth();
             uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
@@ -370,18 +354,80 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
         uv.x = (pt.x - m_Rect.left) / m_Rect.GetWidth();
         uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
     }
-    
+
     // Map UV to source rect coordinates
     float srcU = m_SourceRect.GetWidth() * uv.x + m_SourceRect.left;
     float srcV = m_SourceRect.GetHeight() * uv.y + m_SourceRect.top;
-    
-    // TODO: Implement PreciseTexturePick for alpha-based picking
-    // For now, just return this (consider it a hit if point is in rect)
-    // if (PreciseTexturePick(m_Material, srcU, srcV))
-    //     return this;
-    // return nullptr;
-    
-    return (CK2dEntity *)this;  // Simplified: just return this if inside rect
+
+    // Perform texture-based alpha picking if texture is available
+    CKTexture *texture = m_Material->GetTexture(0);
+    if (texture) {
+        // Get texture dimensions
+        VxImageDescEx desc;
+        texture->GetSystemTextureDesc(desc);
+        
+        if (desc.Image) {
+            // Clamp UV coordinates to [0, 1] range
+            if (srcU < 0.0f) srcU = 0.0f;
+            if (srcU > 1.0f) srcU = 1.0f;
+            if (srcV < 0.0f) srcV = 0.0f;
+            if (srcV > 1.0f) srcV = 1.0f;
+            
+            // Calculate pixel coordinates
+            int pixelX = (int)(srcU * (float)desc.Width);
+            int pixelY = (int)(srcV * (float)desc.Height);
+            
+            // Clamp to valid pixel range
+            if (pixelX >= desc.Width) pixelX = desc.Width - 1;
+            if (pixelY >= desc.Height) pixelY = desc.Height - 1;
+            if (pixelX < 0) pixelX = 0;
+            if (pixelY < 0) pixelY = 0;
+            
+            // Sample the pixel at the calculated position
+            CKBYTE *imageData = (CKBYTE *)desc.Image;
+            int bytesPerPixel = desc.BitsPerPixel / 8;
+            int pitch = desc.Width * bytesPerPixel;
+            int pixelOffset = pixelY * pitch + pixelX * bytesPerPixel;
+            
+            // Check alpha channel (assume ARGB or RGBA format)
+            // For most Virtools textures, alpha is typically the 4th byte or first byte
+            CKBYTE alpha = 255; // Default to opaque
+            
+            if (bytesPerPixel == 4) {
+                // 32-bit texture with alpha
+                if (desc.AlphaMask == 0xFF000000) {
+                    // ARGB format - alpha is first byte
+                    alpha = imageData[pixelOffset];
+                } else if (desc.AlphaMask == 0x000000FF) {
+                    // RGBA format - alpha is last byte
+                    alpha = imageData[pixelOffset + 3];
+                } else {
+                    // Try to detect from mask position
+                    alpha = imageData[pixelOffset + 3]; // Default to RGBA
+                }
+            } else if (bytesPerPixel == 2) {
+                // 16-bit texture, check if it has alpha (e.g., ARGB4444, ARGB1555)
+                if (desc.AlphaMask != 0) {
+                    // Extract alpha bits
+                    CKWORD pixel = *(CKWORD*)(imageData + pixelOffset);
+                    if (desc.AlphaMask == 0xF000) {
+                        // 4-bit alpha (ARGB4444)
+                        alpha = (CKBYTE)((pixel >> 12) * 17); // Scale 0-15 to 0-255
+                    } else if (desc.AlphaMask == 0x8000) {
+                        // 1-bit alpha (ARGB1555)
+                        alpha = (pixel & 0x8000) ? 255 : 0;
+                    }
+                }
+            }
+            
+            // Alpha threshold for picking (alpha > 128 = opaque enough to pick)
+            if (alpha <= 128) {
+                return nullptr; // Transparent, not pickable
+            }
+        }
+    }
+
+    return (CK2dEntity *) this;
 }
 
 void RCK2dEntity::SetFlags(CKDWORD Flags) {
@@ -434,59 +480,59 @@ CKBOOL RCK2dEntity::IsRatioOffset() {
 
 CKBOOL RCK2dEntity::SetParent(CK2dEntity *parent) {
     // IDA: 0x1005dd22
-    RCK2dEntity *newParent = (RCK2dEntity *)parent;
-    
+    RCK2dEntity *newParent = (RCK2dEntity *) parent;
+
     // Prevent circular hierarchy
-    for (RCK2dEntity *p = newParent; p; p = (RCK2dEntity *)p->m_Parent) {
+    for (RCK2dEntity *p = newParent; p; p = (RCK2dEntity *) p->m_Parent) {
         if (p == this)
             return FALSE;
     }
-    
+
     CKRenderContext *rc = m_Context->GetPlayerRenderContext();
-    
-    CK2dEntity *root0 = rc ? rc->Get2dRoot(0) : nullptr;  // Foreground root
-    CK2dEntity *root1 = rc ? rc->Get2dRoot(1) : nullptr;  // Background root
-    
+
+    CK2dEntity *root0 = rc ? rc->Get2dRoot(0) : nullptr; // Foreground root
+    CK2dEntity *root1 = rc ? rc->Get2dRoot(1) : nullptr; // Background root
+
     // Remove from current parent
     if (m_Parent) {
-        ((RCK2dEntity *)m_Parent)->m_Children.Remove((CK2dEntity *)this);
+        ((RCK2dEntity *) m_Parent)->m_Children.Remove((CK2dEntity *) this);
     } else {
         // Remove from roots if no parent
         if (root0) {
-            ((RCK2dEntity *)root0)->m_Children.Remove((CK2dEntity *)this);
+            ((RCK2dEntity *) root0)->m_Children.Remove((CK2dEntity *) this);
         }
         if (root1) {
-            ((RCK2dEntity *)root1)->m_Children.Remove((CK2dEntity *)this);
+            ((RCK2dEntity *) root1)->m_Children.Remove((CK2dEntity *) this);
         }
     }
-    
+
     // Check if new parent is null or a root
-    if (!newParent || newParent == (RCK2dEntity *)root0 || newParent == (RCK2dEntity *)root1) {
+    if (!newParent || newParent == (RCK2dEntity *) root0 || newParent == (RCK2dEntity *) root1) {
         // No real parent, add to appropriate root
         if (!newParent) {
             if (IsBackground()) {
-                newParent = (RCK2dEntity *)root1;
+                newParent = (RCK2dEntity *) root1;
             } else {
-                newParent = (RCK2dEntity *)root0;
+                newParent = (RCK2dEntity *) root0;
             }
         }
         if (newParent) {
-            newParent->m_Children.PushBack((CK2dEntity *)this);
+            newParent->m_Children.PushBack((CK2dEntity *) this);
             newParent->m_Children.Sort(CompareByZOrder);
         }
         m_Parent = nullptr;
     } else {
         // Real parent
-        newParent->m_Children.PushBack((CK2dEntity *)this);
+        newParent->m_Children.PushBack((CK2dEntity *) this);
         newParent->m_Children.Sort(CompareByZOrder);
         if (newParent->IsBackground()) {
             m_Flags |= CK_2DENTITY_BACKGROUND;
         } else {
             m_Flags &= ~CK_2DENTITY_BACKGROUND;
         }
-        m_Parent = (CK2dEntity *)newParent;
+        m_Parent = (CK2dEntity *) newParent;
     }
-    
+
     return TRUE;
 }
 
@@ -509,7 +555,7 @@ CK2dEntity *RCK2dEntity::HierarchyParser(CK2dEntity *current) const {
     CKRenderContext *rc = m_Context->GetPlayerRenderContext();
     CK2dEntity *foregroundRoot = rc ? rc->Get2dRoot(FALSE) : nullptr;
     CK2dEntity *backgroundRoot = rc ? rc->Get2dRoot(TRUE) : nullptr;
-    
+
     if (current) {
         // If current has children, return first child
         if (current->GetChildrenCount() > 0)
@@ -523,12 +569,12 @@ CK2dEntity *RCK2dEntity::HierarchyParser(CK2dEntity *current) const {
                 parent = node->GetParent();
             } else {
                 // If no parent, use root based on background flag
-                parent = ((RCK2dEntity *)node)->IsBackground() ? backgroundRoot : foregroundRoot;
+                parent = ((RCK2dEntity *) node)->IsBackground() ? backgroundRoot : foregroundRoot;
             }
-            
+
             if (!parent)
                 return nullptr;
-                
+
             // Find index of node in parent's children
             int childCount = parent->GetChildrenCount();
             int index = 0;
@@ -536,15 +582,15 @@ CK2dEntity *RCK2dEntity::HierarchyParser(CK2dEntity *current) const {
                 ++index;
             }
             ++index; // Move to next sibling
-            
+
             // If there's a next sibling, return it
             if (index < childCount)
                 return parent->GetChild(index);
-                
+
             // If we've reached the root of hierarchy, stop
-            if (parent == (CK2dEntity *)this)
+            if (parent == (CK2dEntity *) this)
                 return nullptr;
-                
+
             // Otherwise, continue up
             node = parent;
         }
@@ -599,8 +645,8 @@ CKBOOL RCK2dEntity::IsClippedToCamera() {
 
 // IDA: 0x1005cce5 - Updates clipped extents (m_VtxPos and m_SrcRect) for rendering
 CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
-    RCKRenderContext *rc = (RCKRenderContext *)dev;
-    
+    RCKRenderContext *rc = (RCKRenderContext *) dev;
+
     // Determine source rect to use
     VxRect srcRect;
     if (m_Flags & CK_2DENTITY_USESRCRECT) {
@@ -610,50 +656,50 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
         // - Sprites default to pixel-space source rect (0..width/height)
         // - Other 2D entities default to normalized (0..1)
         if (CKIsChildClassOf(this, CKCID_SPRITE)) {
-            CKSprite *sprite = (CKSprite *)this;
-            srcRect = VxRect(0.0f, 0.0f, (float)sprite->GetWidth(), (float)sprite->GetHeight());
+            CKSprite *sprite = (CKSprite *) this;
+            srcRect = VxRect(0.0f, 0.0f, (float) sprite->GetWidth(), (float) sprite->GetHeight());
         } else {
             srcRect = VxRect(0.0f, 0.0f, 1.0f, 1.0f);
         }
     }
-    
+
     // Initialize extents rectangles
     m_VtxPos = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
     m_SrcRect = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
-    
+
     // Calculate clip bounds
     VxRect clipRect;
     if (m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW) {
         // Clip to camera viewport
-        clipRect = VxRect((float)rc->m_ViewportData.ViewX, 
-                          (float)rc->m_ViewportData.ViewY,
-                          (float)(rc->m_ViewportData.ViewX + rc->m_ViewportData.ViewWidth),
-                          (float)(rc->m_ViewportData.ViewY + rc->m_ViewportData.ViewHeight));
+        clipRect = VxRect((float) rc->m_ViewportData.ViewX,
+                          (float) rc->m_ViewportData.ViewY,
+                          (float) (rc->m_ViewportData.ViewX + rc->m_ViewportData.ViewWidth),
+                          (float) (rc->m_ViewportData.ViewY + rc->m_ViewportData.ViewHeight));
     } else {
         // Clip to render context rect
-        clipRect = VxRect(0.0f, 0.0f, 
-                          (float)rc->m_Settings.m_Rect.right, 
-                          (float)rc->m_Settings.m_Rect.bottom);
+        clipRect = VxRect(0.0f, 0.0f,
+                          (float) rc->m_Settings.m_Rect.right,
+                          (float) rc->m_Settings.m_Rect.bottom);
     }
-    
+
     // Clip to parent if needed
     if ((m_Flags & CK_2DENTITY_CLIPTOPARENT) && m_Parent) {
-        RCK2dEntity *parent = (RCK2dEntity *)m_Parent;
+        RCK2dEntity *parent = (RCK2dEntity *) m_Parent;
         // Intersect with parent's VtxPos
         if (parent->m_VtxPos.left > clipRect.left) clipRect.left = parent->m_VtxPos.left;
         if (parent->m_VtxPos.top > clipRect.top) clipRect.top = parent->m_VtxPos.top;
         if (parent->m_VtxPos.right < clipRect.right) clipRect.right = parent->m_VtxPos.right;
         if (parent->m_VtxPos.bottom < clipRect.bottom) clipRect.bottom = parent->m_VtxPos.bottom;
     }
-    
+
     // Calculate source dimensions
     float srcWidth = srcRect.right - srcRect.left;
     float srcHeight = srcRect.bottom - srcRect.top;
-    
+
     // Calculate actual rect (apply homogeneous coords if needed)
     VxRect rect;
     float rectWidth, rectHeight;
-    
+
     if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
         if (m_Flags & CK_2DENTITY_UPDATEHOMOGENEOUSCOORD) {
             // Update homogeneous rect from screen rect
@@ -682,138 +728,138 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
         rectWidth = m_Rect.GetWidth();
         rectHeight = m_Rect.GetHeight();
     }
-    
+
     // Ensure rect is valid
     if (rect.right < rect.left) rect.right = rect.left;
     if (rect.bottom < rect.top) rect.bottom = rect.top;
-    
+
     // Calculate inverse dimensions for UV mapping
     float invWidth = (rectWidth > 0.0f) ? (1.0f / rectWidth) : 0.0f;
     float invHeight = (rectHeight > 0.0f) ? (1.0f / rectHeight) : 0.0f;
-    
+
     // Apply ratio offset if needed
     if (m_Flags & CK_2DENTITY_RATIOOFFSET) {
-        rect.left += (float)rc->m_ViewportData.ViewX;
-        rect.right += (float)rc->m_ViewportData.ViewX;
-        rect.top += (float)rc->m_ViewportData.ViewY;
-        rect.bottom += (float)rc->m_ViewportData.ViewY;
+        rect.left += (float) rc->m_ViewportData.ViewX;
+        rect.right += (float) rc->m_ViewportData.ViewX;
+        rect.top += (float) rc->m_ViewportData.ViewY;
+        rect.bottom += (float) rc->m_ViewportData.ViewY;
     }
-    
+
     // Visibility test
     if (rect.right < clipRect.left || rect.left > clipRect.right ||
         rect.bottom < clipRect.top || rect.top > clipRect.bottom) {
-        return FALSE;  // Completely outside clip region
+        return FALSE; // Completely outside clip region
     }
-    
+
     // Clip to bounds and adjust source rect
     float srcLeft = srcRect.left;
     float srcTop = srcRect.top;
-    
+
     // Left edge clip
     if (rect.left < clipRect.left) {
         float delta = clipRect.left - rect.left;
         srcLeft += delta * srcWidth * invWidth;
         rect.left = clipRect.left;
     }
-    
+
     // Top edge clip
     if (rect.top < clipRect.top) {
         float delta = clipRect.top - rect.top;
         srcTop += delta * srcHeight * invHeight;
         rect.top = clipRect.top;
     }
-    
+
     // Right edge clip
     if (rect.right > clipRect.right) {
         float delta = rect.right - clipRect.right;
         srcRect.right = srcLeft + (rectWidth - delta) * srcWidth * invWidth;
         rect.right = clipRect.right;
     } else {
-        srcRect.right = srcRect.right;  // Keep original
+        srcRect.right = srcRect.right; // Keep original
     }
-    
+
     // Bottom edge clip
     if (rect.bottom > clipRect.bottom) {
         float delta = rect.bottom - clipRect.bottom;
         srcRect.bottom = srcTop + (rectHeight - delta) * srcHeight * invHeight;
         rect.bottom = clipRect.bottom;
     } else {
-        srcRect.bottom = srcRect.bottom;  // Keep original
+        srcRect.bottom = srcRect.bottom; // Keep original
     }
-    
+
     // Store clipped extents
     m_VtxPos = rect;
     m_SrcRect.left = srcLeft;
     m_SrcRect.top = srcTop;
     m_SrcRect.right = srcRect.right;
     m_SrcRect.bottom = srcRect.bottom;
-    
+
     return TRUE;
 }
 
 CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // IDA: 0x1005ed00
-    RCKRenderContext *dev = (RCKRenderContext *)context;
-    
+    RCKRenderContext *dev = (RCKRenderContext *) context;
+
     // Check if hidden by parent hierarchy
-    if (IsHiddenByParent())
+    if (m_ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
         return CK_OK;
-    
+
     // Determine visibility
     CKBOOL visible = FALSE;
     if (IsVisible()) {
         CKScene *scene = m_Context->GetCurrentScene();
         // IDA: CKSceneObject::IsInScene(this, CurrentScene) || sub_100604B0(this)
-        if (IsInScene(scene) || (m_ObjectFlags & CK_OBJECT_NOTTOBELISTEDANDSAVED))
+        if (IsInScene(scene) || (m_ObjectFlags & CK_OBJECT_INTERFACEOBJ))
             visible = TRUE;
     }
-    
+
     // If not visible and no children, skip
     if (!visible && m_Children.Size() == 0)
         return CK_OK;
-    
+
     // Update extents (returns FALSE if completely clipped)
     CKBOOL clipped = !UpdateExtents(context);
-    
+
     // Execute pre-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PreCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
         dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PreCallBacks.Begin(); it != m_Callbacks->m_PreCallBacks.End(); ++it) {
-            ((CK_RENDEROBJECT_CALLBACK)it->callback)(dev, (CKRenderObject *)this, it->argument);
+            ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
         dev->m_Stats.SpriteCallbacksTime += dev->m_SpriteCallbacksTimeProfiler.Current();
     }
-    
+
     // Draw if visible and not completely clipped
     if (!clipped && visible)
         Draw(context);
-    
+
     // Render children
     for (auto it = m_Children.Begin(); it != m_Children.End(); ++it) {
-        RCK2dEntity *child = (RCK2dEntity *)*it;
+        RCK2dEntity *child = (RCK2dEntity *) *it;
         // Skip children that clip to parent if we're completely clipped
         if (!clipped || !(child->m_Flags & CK_2DENTITY_CLIPTOPARENT))
             child->Render(context);
     }
-    
+
     // Execute post-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PostCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
         dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PostCallBacks.Begin(); it != m_Callbacks->m_PostCallBacks.End(); ++it) {
-            ((CK_RENDEROBJECT_CALLBACK)it->callback)(dev, (CKRenderObject *)this, it->argument);
+            ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
         dev->m_Stats.SpriteCallbacksTime += dev->m_SpriteCallbacksTimeProfiler.Current();
     }
-    
+
     return CK_OK;
 }
 
 CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
     // IDA: 0x1005e430
-    RCKRenderContext *dev = (RCKRenderContext *)context;
-    
+    RCKRenderContext *dev = (RCKRenderContext *) context;
+
     if (m_Material) {
         // Save viewport if not clip-to-camera
         VxRect savedViewRect;
@@ -821,104 +867,104 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             VxRect windowRect;
             dev->GetViewRect(savedViewRect);
             dev->GetWindowRect(windowRect, FALSE);
-            
+
             float width = windowRect.GetWidth();
             float height = windowRect.GetHeight();
-            
+
             // Set full viewport
-            dev->SetFullViewport(&dev->m_RasterizerContext->m_ViewportData, (int)width, (int)height);
+            dev->SetFullViewport(&dev->m_RasterizerContext->m_ViewportData, (int) width, (int) height);
             dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
         }
-        
+
         // Set material
         m_Material->SetAsCurrent(dev, TRUE, FALSE);
-        
+
         // Set render states
         dev->SetState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
         dev->SetState(VXRENDERSTATE_FOGENABLE, FALSE);
-        
+
         // Background entities: disable Z test and write
         if (IsBackground()) {
             dev->SetState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
             dev->SetState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
         }
-        
+
         // Get draw primitive structure for 4 vertices (quad)
         VxDrawPrimitiveData *data = dev->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
-        CKDWORD *texCoordPtr = (CKDWORD *)data->TexCoordPtr;
-        float *positionPtr = (float *)data->PositionPtr;
+        CKDWORD *texCoordPtr = (CKDWORD *) data->TexCoordPtr;
+        float *positionPtr = (float *) data->PositionPtr;
         void *colorPtr = data->ColorPtr;
-        
+
         // Get diffuse color from material and fill all vertices
         const VxColor &diffuse = m_Material->GetDiffuse();
         CKDWORD colorValue = RGBAFTOCOLOR(&diffuse);
         VxFillStructure(4, colorPtr, data->ColorStride, 4, &colorValue);
-        
+
         // Set texture coordinates if texture present
         if (m_Material->GetTexture(0)) {
             // Vertex 0: top-left (srcRect left, top)
-            texCoordPtr[0] = *(CKDWORD *)&m_SrcRect.left;
-            texCoordPtr[1] = *(CKDWORD *)&m_SrcRect.top;
+            texCoordPtr[0] = *(CKDWORD *) &m_SrcRect.left;
+            texCoordPtr[1] = *(CKDWORD *) &m_SrcRect.top;
             // Vertex 1: top-right (srcRect right, top)
-            texCoordPtr[2] = *(CKDWORD *)&m_SrcRect.right;
-            texCoordPtr[3] = *(CKDWORD *)&m_SrcRect.top;
+            texCoordPtr[2] = *(CKDWORD *) &m_SrcRect.right;
+            texCoordPtr[3] = *(CKDWORD *) &m_SrcRect.top;
             // Vertex 2: bottom-right (srcRect right, bottom)
-            texCoordPtr[4] = *(CKDWORD *)&m_SrcRect.right;
-            texCoordPtr[5] = *(CKDWORD *)&m_SrcRect.bottom;
+            texCoordPtr[4] = *(CKDWORD *) &m_SrcRect.right;
+            texCoordPtr[5] = *(CKDWORD *) &m_SrcRect.bottom;
             // Vertex 3: bottom-left (srcRect left, bottom)
-            texCoordPtr[6] = *(CKDWORD *)&m_SrcRect.left;
-            texCoordPtr[7] = *(CKDWORD *)&m_SrcRect.bottom;
+            texCoordPtr[6] = *(CKDWORD *) &m_SrcRect.left;
+            texCoordPtr[7] = *(CKDWORD *) &m_SrcRect.bottom;
         }
-        
+
         // Set vertex positions (round to nearest pixel)
         int posStride = data->PositionStride;
-        
+
         // Vertex 0: top-left
-        positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
-        positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+        positionPtr[0] = (float) (int) (m_VtxPos.left + 0.5f);
+        positionPtr[1] = (float) (int) (m_VtxPos.top + 0.5f);
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 1: top-right
-        positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
-        positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+        positionPtr[0] = (float) (int) (m_VtxPos.right + 0.5f);
+        positionPtr[1] = (float) (int) (m_VtxPos.top + 0.5f);
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 2: bottom-right
-        positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
-        positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+        positionPtr[0] = (float) (int) (m_VtxPos.right + 0.5f);
+        positionPtr[1] = (float) (int) (m_VtxPos.bottom + 0.5f);
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 3: bottom-left
-        positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
-        positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+        positionPtr[0] = (float) (int) (m_VtxPos.left + 0.5f);
+        positionPtr[1] = (float) (int) (m_VtxPos.bottom + 0.5f);
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        
+
         // Draw quad as triangle fan
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
-        
+
         // Restore fog state
         dev->SetState(VXRENDERSTATE_FOGENABLE, dev->m_RenderedScene->m_FogMode != 0);
-        
+
         // Restore viewport if changed
         if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
-            dev->m_RasterizerContext->m_ViewportData.ViewX = (int)savedViewRect.left;
-            dev->m_RasterizerContext->m_ViewportData.ViewY = (int)savedViewRect.top;
-            dev->m_RasterizerContext->m_ViewportData.ViewWidth = (int)(savedViewRect.right - savedViewRect.left);
-            dev->m_RasterizerContext->m_ViewportData.ViewHeight = (int)(savedViewRect.bottom - savedViewRect.top);
+            dev->m_RasterizerContext->m_ViewportData.ViewX = (int) savedViewRect.left;
+            dev->m_RasterizerContext->m_ViewportData.ViewY = (int) savedViewRect.top;
+            dev->m_RasterizerContext->m_ViewportData.ViewWidth = (int) (savedViewRect.right - savedViewRect.left);
+            dev->m_RasterizerContext->m_ViewportData.ViewHeight = (int) (savedViewRect.bottom - savedViewRect.top);
             dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
         }
     } else {
         // No material - draw placeholder (editor mode only)
         if (m_Context->IsPlaying())
             return CK_OK;
-        
+
         // Set blend states for transparent black fill
         dev->SetState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
         dev->SetState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
@@ -929,48 +975,48 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         dev->SetState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
         dev->SetState(VXRENDERSTATE_FOGENABLE, FALSE);
         dev->SetTexture(NULL, FALSE, 0);
-        
+
         // Get draw primitive structure
         VxDrawPrimitiveData *data = dev->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
-        float *positionPtr = (float *)data->PositionPtr;
+        float *positionPtr = (float *) data->PositionPtr;
         void *colorPtr = data->ColorPtr;
         int posStride = data->PositionStride;
-        
+
         // Black color with 40% alpha
         VxColor black(0.0f, 0.0f, 0.0f, 0.4f);
         CKDWORD blackColor = RGBAFTOCOLOR(&black);
         VxFillStructure(4, colorPtr, data->ColorStride, 4, &blackColor);
-        
+
         // Vertex 0: top-left
         positionPtr[0] = m_VtxPos.left;
         positionPtr[1] = m_VtxPos.top;
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 1: top-right
         positionPtr[0] = m_VtxPos.right;
         positionPtr[1] = m_VtxPos.top;
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 2: bottom-right
         positionPtr[0] = m_VtxPos.right;
         positionPtr[1] = m_VtxPos.bottom;
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        positionPtr = (float *)((char *)positionPtr + posStride);
-        
+        positionPtr = (float *) ((char *) positionPtr + posStride);
+
         // Vertex 3: bottom-left
         positionPtr[0] = m_VtxPos.left;
         positionPtr[1] = m_VtxPos.bottom;
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
-        
+
         // Draw filled quad
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
-        
+
         // Draw white outline
         CKWORD *indices = dev->GetDrawPrimitiveIndices(5);
         indices[0] = 0;
@@ -978,29 +1024,29 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         indices[2] = 2;
         indices[3] = 3;
         indices[4] = 0;
-        
+
         // White color
         CKDWORD whiteColor = 0xFFFFFFFF;
-        
+
         // Adjust positions for outline (shrink by 1 pixel)
-        positionPtr = (float *)data->PositionPtr;
-        positionPtr = (float *)((char *)positionPtr + posStride);  // Skip to vertex 1
-        positionPtr[0] -= 1.0f;  // Move left
-        positionPtr = (float *)((char *)positionPtr + posStride);  // To vertex 2
-        positionPtr[0] -= 1.0f;  // Move left
-        positionPtr[1] -= 1.0f;  // Move up
-        positionPtr = (float *)((char *)positionPtr + posStride);  // To vertex 3
-        positionPtr[1] -= 1.0f;  // Move up
-        
+        positionPtr = (float *) data->PositionPtr;
+        positionPtr = (float *) ((char *) positionPtr + posStride); // Skip to vertex 1
+        positionPtr[0] -= 1.0f;                                     // Move left
+        positionPtr = (float *) ((char *) positionPtr + posStride); // To vertex 2
+        positionPtr[0] -= 1.0f;                                     // Move left
+        positionPtr[1] -= 1.0f;                                     // Move up
+        positionPtr = (float *) ((char *) positionPtr + posStride); // To vertex 3
+        positionPtr[1] -= 1.0f;                                     // Move up
+
         VxFillStructure(4, colorPtr, data->ColorStride, 4, &whiteColor);
-        
+
         // Draw outline as line strip
         dev->DrawPrimitive(VX_LINESTRIP, indices, 5, data);
-        
+
         // Restore fog state
         dev->SetState(VXRENDERSTATE_FOGENABLE, dev->m_RenderedScene->m_FogMode != 0);
     }
-    
+
     return CK_OK;
 }
 
@@ -1014,8 +1060,7 @@ void RCK2dEntity::SetExtents(const VxRect &srcrect, const VxRect &rect) {
     m_Rect = rect;
 }
 
-void RCK2dEntity::RestoreInitialSize() {
-}
+void RCK2dEntity::RestoreInitialSize() {}
 
 CKBOOL RCK2dEntity::IsHiddenByParent() {
     CK2dEntity *p = m_Parent;
@@ -1041,14 +1086,14 @@ CKBOOL RCK2dEntity::IsToBeRendered() {
 
 void RCK2dEntity::SetZOrder(int Z) {
     m_ZOrder = Z;
-    
+
     // IDA: sub_1005d3ed - sort parent's children or root's children after Z change
     if (m_Parent) {
-        ((RCK2dEntity *)m_Parent)->m_Children.Sort(CompareByZOrder);
+        ((RCK2dEntity *) m_Parent)->m_Children.Sort(CompareByZOrder);
     } else {
         CKRenderContext *rc = m_Context->GetPlayerRenderContext();
         if (rc) {
-            RCK2dEntity *root = (RCK2dEntity *)rc->Get2dRoot(IsBackground());
+            RCK2dEntity *root = (RCK2dEntity *) rc->Get2dRoot(IsBackground());
             if (root) {
                 root->m_Children.Sort(CompareByZOrder);
             }
@@ -1058,58 +1103,6 @@ void RCK2dEntity::SetZOrder(int Z) {
 
 int RCK2dEntity::GetZOrder() {
     return m_ZOrder;
-}
-
-CKBOOL RCK2dEntity::IsToBeRenderedLast() {
-    return FALSE;
-}
-
-CKBOOL RCK2dEntity::AddPreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) {
-    if (!m_Callbacks) {
-        m_Callbacks = new CKCallbacksContainer();
-    }
-    return m_Callbacks->AddPreCallback((void *) Function, Argument, Temp, m_Context->GetRenderManager());
-}
-
-CKBOOL RCK2dEntity::RemovePreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
-    if (!m_Callbacks) {
-        return FALSE;
-    }
-    return m_Callbacks->RemovePreCallback((void *) Function, Argument);
-}
-
-CKBOOL RCK2dEntity::SetRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
-    if (!m_Callbacks) {
-        m_Callbacks = new CKCallbacksContainer();
-    }
-    return m_Callbacks->SetCallBack((void *) Function, Argument);
-}
-
-CKBOOL RCK2dEntity::RemoveRenderCallBack() {
-    if (!m_Callbacks) {
-        return FALSE;
-    }
-    return m_Callbacks->RemoveCallBack();
-}
-
-CKBOOL RCK2dEntity::AddPostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument, CKBOOL Temp) {
-    if (!m_Callbacks) {
-        m_Callbacks = new CKCallbacksContainer();
-    }
-    return m_Callbacks->AddPostCallback((void *) Function, Argument, Temp, m_Context->GetRenderManager());
-}
-
-CKBOOL RCK2dEntity::RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
-    if (!m_Callbacks) {
-        return FALSE;
-    }
-    return m_Callbacks->RemovePostCallback((void *) Function, Argument);
-}
-
-void RCK2dEntity::RemoveAllCallbacks() {
-    if (m_Callbacks) {
-        m_Callbacks->Clear();
-    }
 }
 
 CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
@@ -1137,7 +1130,7 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             }
 
             // Read source rect conditionally
-            if (saveFlags & 0x10000) {
+            if (saveFlags & CK_2DENTITY_RESERVED0) {
                 chunk->ReadAndFillBuffer_LEndian(sizeof(VxRect), &m_SourceRect);
             } else if (GetClassID() == CKCID_2DENTITY) {
                 m_SourceRect = VxRect(0.0f, 0.0f, 1.0f, 1.0f);
@@ -1146,14 +1139,14 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             }
 
             // Read ZOrder conditionally
-            if (saveFlags & 0x20000) {
+            if (saveFlags & CK_2DENTITY_RESERVED1) {
                 m_ZOrder = chunk->ReadInt();
             } else {
                 m_ZOrder = 0;
             }
 
             // Read parent conditionally
-            if (saveFlags & 0x40000) {
+            if (saveFlags & CK_2DENTITY_RESERVED2) {
                 CK2dEntity *parent = (CK2dEntity *) chunk->ReadObject(m_Context);
                 if (file) {
                     m_Parent = parent;
@@ -1180,7 +1173,7 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
                 Show(CKHIDE);
             }
             m_Flags &= ~CK_2DENTITY_UPDATEHOMOGENEOUSCOORD;
-            m_Flags |= 0x280000;
+            m_Flags |= CK_2DENTITY_STICKTOP | CK_2DENTITY_STICKLEFT;
         }
 
         if ((m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) && !m_HomogeneousRect) {
@@ -1251,7 +1244,7 @@ void RCK2dEntity::PostLoad(void) {
         int count = rm->GetRenderContextCount();
         for (int i = 0; i < count; ++i) {
             CKRenderContext *rc = rm->GetRenderContext(i);
-            rc->RemoveObject((CKRenderObject *)this);
+            rc->RemoveObject((CKRenderObject *) this);
         }
     }
     CKObject::PostLoad();
@@ -1260,14 +1253,14 @@ void RCK2dEntity::PostLoad(void) {
 void RCK2dEntity::PreSave(CKFile *file, CKDWORD flags) {
     // IDA: 0x1005efa8
     CKBeObject::PreSave(file, flags);
-    if ((flags & 0x200000) && m_Material) {
+    if ((flags & CK_STATESAVE_2DENTITYMATERIAL) && m_Material) {
         file->SaveObject(m_Material, flags);
     }
-    if (flags & 0x400000) {
+    if (flags & CK_STATESAVE_2DENTITYHIERARCHY) {
         // IDA uses SaveObjects with array pointer and count
         int count = m_Children.Size();
         if (count > 0) {
-            file->SaveObjects((CKObject **)m_Children.Begin(), count, 0xFFFFFFFF);
+            file->SaveObjects((CKObject **) m_Children.Begin(), count, 0xFFFFFFFF);
         }
     }
 }
@@ -1286,13 +1279,13 @@ CKStateChunk *RCK2dEntity::Save(CKFile *file, CKDWORD flags) {
     CKDWORD saveFlags = m_Flags;
     if (m_SourceRect.top != 0.0f || m_SourceRect.left != 0.0f ||
         m_SourceRect.bottom != 0.0f || m_SourceRect.right != 0.0f) {
-        saveFlags |= 0x10000;
+        saveFlags |= CK_2DENTITY_RESERVED0;
     }
     if (m_ZOrder) {
-        saveFlags |= 0x20000;
+        saveFlags |= CK_2DENTITY_RESERVED1;
     }
     if (m_Parent) {
-        saveFlags |= 0x40000;
+        saveFlags |= CK_2DENTITY_RESERVED2;
     }
 
     chunk->WriteDword(saveFlags);
@@ -1305,17 +1298,17 @@ CKStateChunk *RCK2dEntity::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Conditionally write source rect
-    if (saveFlags & 0x10000) {
+    if (saveFlags & CK_2DENTITY_RESERVED0) {
         chunk->WriteBufferNoSize_LEndian(sizeof(VxRect), &m_SourceRect);
     }
 
     // Conditionally write ZOrder
-    if (saveFlags & 0x20000) {
+    if (saveFlags & CK_2DENTITY_RESERVED1) {
         chunk->WriteInt(m_ZOrder);
     }
 
     // Conditionally write parent
-    if (saveFlags & 0x40000) {
+    if (saveFlags & CK_2DENTITY_RESERVED2) {
         chunk->WriteObject(m_Parent);
     }
 
@@ -1336,48 +1329,48 @@ CKStateChunk *RCK2dEntity::Save(CKFile *file, CKDWORD flags) {
 void RCK2dEntity::PreDelete() {
     // IDA: 0x1005c8e1
     CKBeObject::PreDelete();
-    
+
     CKRenderContext *rc = m_Context->GetPlayerRenderContext();
-    
+
     // Don't process if this is a 2D root entity
     if (rc) {
         CK2dEntity *root0 = rc->Get2dRoot(0);
         CK2dEntity *root1 = rc->Get2dRoot(1);
-        if (this == (RCK2dEntity *)root1 || this == (RCK2dEntity *)root0) {
+        if (this == (RCK2dEntity *) root1 || this == (RCK2dEntity *) root0) {
             return;
         }
     }
-    
+
     // Find first valid parent (that is not being deleted)
-    RCK2dEntity *validParent = (RCK2dEntity *)m_Parent;
+    RCK2dEntity *validParent = (RCK2dEntity *) m_Parent;
     while (validParent && validParent->IsToBeDeleted()) {
-        validParent = (RCK2dEntity *)validParent->m_Parent;
+        validParent = (RCK2dEntity *) validParent->m_Parent;
     }
-    
+
     // Copy children array to avoid modification during iteration
     XArray<CK2dEntity *> childrenCopy;
     int count = m_Children.Size();
     for (int i = 0; i < count; ++i) {
         childrenCopy.PushBack(m_Children[i]);
     }
-    
+
     // Reparent children that are not being deleted
     for (auto it = childrenCopy.Begin(); it != childrenCopy.End(); ++it) {
-        RCK2dEntity *child = (RCK2dEntity *)*it;
+        RCK2dEntity *child = (RCK2dEntity *) *it;
         if (!child->IsToBeDeleted()) {
-            child->SetParent((CK2dEntity *)validParent);
+            child->SetParent((CK2dEntity *) validParent);
         }
     }
-    
+
     // Remove this from parent's children list
     if (m_Parent && !m_Parent->IsToBeDeleted()) {
-        ((RCK2dEntity *)m_Parent)->m_Children.Remove((CK2dEntity *)this);
+        ((RCK2dEntity *) m_Parent)->m_Children.Remove((CK2dEntity *) this);
     } else {
         // Remove from root if no valid parent
         if (rc) {
             CK2dEntity *root = rc->Get2dRoot(IsBackground() ? 1 : 0);
             if (root) {
-                ((RCK2dEntity *)root)->m_Children.Remove((CK2dEntity *)this);
+                ((RCK2dEntity *) root)->m_Children.Remove((CK2dEntity *) this);
             }
         }
     }
@@ -1395,7 +1388,8 @@ void RCK2dEntity::CheckPreDeletion() {
 
 int RCK2dEntity::GetMemoryOccupation() {
     // IDA: 0x1005f793 - RCKRenderObject::GetMemoryOccupation(this) + 96
-    return RCKRenderObject::GetMemoryOccupation() + sizeof(VxRect) * 4 + sizeof(VxRect *) + sizeof(CKDWORD) * 2 + sizeof(CK2dEntity *) + sizeof(CKMaterial *) + sizeof(XArray<CK2dEntity *>);
+    return RCKRenderObject::GetMemoryOccupation() + sizeof(VxRect) * 4 + sizeof(VxRect *) + sizeof(CKDWORD) * 2 + sizeof
+        (CK2dEntity *) + sizeof(CKMaterial *) + sizeof(XArray<CK2dEntity *>);
 }
 
 CKERROR RCK2dEntity::PrepareDependencies(CKDependenciesContext &context) {
@@ -1403,14 +1397,14 @@ CKERROR RCK2dEntity::PrepareDependencies(CKDependenciesContext &context) {
     CKERROR err = CKBeObject::PrepareDependencies(context);
     if (err != CK_OK)
         return err;
-    
+
     CKDWORD classDeps = context.GetClassDependencies(CKCID_2DENTITY);
-    
+
     // Bit 0: Material dependency
     if ((classDeps & 1) && m_Material) {
         m_Material->PrepareDependencies(context);
     }
-    
+
     // Bit 1: Children dependency
     if (classDeps & 2) {
         int count = GetChildrenCount();
@@ -1421,7 +1415,7 @@ CKERROR RCK2dEntity::PrepareDependencies(CKDependenciesContext &context) {
             }
         }
     }
-    
+
     return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
@@ -1430,23 +1424,23 @@ CKERROR RCK2dEntity::RemapDependencies(CKDependenciesContext &context) {
     CKERROR err = CKBeObject::RemapDependencies(context);
     if (err != CK_OK)
         return err;
-    
+
     CKDWORD classDeps = context.GetClassDependencies(CKCID_2DENTITY);
-    
+
     // Bit 0: Remap material
     if (classDeps & 1) {
-        m_Material = (CKMaterial *)context.Remap(m_Material);
+        m_Material = (CKMaterial *) context.Remap(m_Material);
     }
-    
+
     // Bit 1: Remap parent
     if (classDeps & 2) {
         CK2dEntity *parent = GetParent();
-        CK2dEntity *newParent = (CK2dEntity *)context.Remap(parent);
+        CK2dEntity *newParent = (CK2dEntity *) context.Remap(parent);
         if (newParent) {
             SetParent(newParent);
         }
     }
-    
+
     return CK_OK;
 }
 
@@ -1455,16 +1449,16 @@ CKERROR RCK2dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
     CKERROR err = CKBeObject::Copy(o, context);
     if (err != CK_OK)
         return err;
-    
-    RCK2dEntity *src = (RCK2dEntity *)&o;
-    
+
+    RCK2dEntity *src = (RCK2dEntity *) &o;
+
     m_Flags = src->m_Flags;
     m_SourceRect = src->m_SourceRect;
     m_ZOrder = src->m_ZOrder;
     m_Rect = src->m_Rect;
     m_Material = src->m_Material;
     SetParent(src->m_Parent);
-    
+
     // Copy homogeneous rect if source has one
     if (src->m_HomogeneousRect) {
         if (m_HomogeneousRect) {
@@ -1472,7 +1466,7 @@ CKERROR RCK2dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
         }
         m_HomogeneousRect = new VxRect(*src->m_HomogeneousRect);
     }
-    
+
     return CK_OK;
 }
 
@@ -1483,31 +1477,26 @@ CKSTRING RCK2dEntity::GetClassName() {
 int RCK2dEntity::GetDependenciesCount(int mode) {
     // IDA: 0x1005f906
     switch (mode) {
-        case 1: return 2;  // CK_DEPENDENCIES_COPY
-        case 2: return 2;  // CK_DEPENDENCIES_DELETE
-        case 3: return 0;  // CK_DEPENDENCIES_REPLACE
-        case 4: return 2;  // CK_DEPENDENCIES_SAVE
-        default: return 0;
+    case CK_DEPENDENCIES_COPY: return 2;
+    case CK_DEPENDENCIES_DELETE: return 2;
+    case CK_DEPENDENCIES_REPLACE: return 0;
+    case CK_DEPENDENCIES_SAVE: return 2;
+    default: return 0;
     }
 }
 
 CKSTRING RCK2dEntity::GetDependencies(int i, int mode) {
     // IDA: 0x1005f958
     if (i == 0)
-        return (CKSTRING)"Material";
+        return (CKSTRING) "Material";
     if (i == 1)
-        return (CKSTRING)"Children";
+        return (CKSTRING) "Children";
     return nullptr;
 }
 
 void RCK2dEntity::Register() {
-    // IDA: 0x1005f984
-    // CKClassNeedNotificationFrom(RCK2dEntity::m_ClassID, 30);  // 30 = CKCID_MATERIAL
     CKClassNeedNotificationFrom(m_ClassID, CKCID_MATERIAL);
-    // CKGUID(404124131, 467408131) = CKPGUID_2DENTITY
     CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_2DENTITY);
-    // CKClassRegisterDefaultDependencies(m_ClassID, 3, 1);  // 1 = CK_DEPENDENCIES_COPY
-    // CKClassRegisterDefaultDependencies(m_ClassID, 3, 4);  // 4 = CK_DEPENDENCIES_SAVE
     CKClassRegisterDefaultDependencies(m_ClassID, 3, CK_DEPENDENCIES_COPY);
     CKClassRegisterDefaultDependencies(m_ClassID, 3, CK_DEPENDENCIES_SAVE);
 }

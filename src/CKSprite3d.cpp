@@ -63,7 +63,7 @@ CKStateChunk *RCKSprite3D::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // Return early if no file context and not in specific save modes
-    if (!file && (flags & 0xFC00000) == 0) {
+    if (!file && (flags & CK_STATESAVE_SPRITE3DONLY) == 0) {
         return baseChunk;
     }
 

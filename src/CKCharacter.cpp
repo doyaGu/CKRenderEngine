@@ -105,7 +105,7 @@ void RCKCharacter::PreSave(CKFile *file, CKDWORD flags) {
 CKStateChunk *RCKCharacter::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
-    if (!file && (flags & 0xFFC00000) == 0) {
+    if (!file && (flags & CK_STATESAVE_CHARACTERONLY) == 0) {
         return baseChunk;
     }
 
@@ -122,7 +122,7 @@ CKStateChunk *RCKCharacter::Save(CKFile *file, CKDWORD flags) {
     m_BodyParts.Save(chunk);
 
     // Optionally save body parts as sub-chunks
-    if (!file && (flags & 0x10000000) != 0) {
+    if (!file && (flags & CK_STATESAVE_CHARACTERSAVEPARTS) != 0) {
         chunk->WriteIdentifier(0x10000000);
         int count = m_BodyParts.Size();
         chunk->StartSubChunkSequence(count);

@@ -131,7 +131,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Preserve moveable flags that should not be modified during load
     // Based on IDA: v16 = GetMoveableFlags() & 0x40000
-    CKDWORD preservedFlags = GetMoveableFlags() & 0x40000;
+    CKDWORD preservedFlags = GetMoveableFlags() & VX_MOVEABLE_WORLDALIGNED;
 
     // Initialize identity matrix for transformation
     VxMatrix worldMatrix;
@@ -209,11 +209,11 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
         // IDA line 120-123: if ( v16 ) v53 |= 0x40000u;
         if (preservedFlags) {
-            moveableFlags |= 0x40000;
+            moveableFlags |= VX_MOVEABLE_WORLDALIGNED;
         }
 
         // IDA line 124-127: if ( (v53 & 0x100000) != 0 ) SetPriority(10000)
-        if ((moveableFlags & 0x100000) != 0) {
+        if ((moveableFlags & VX_MOVEABLE_RENDERFIRST) != 0) {
             if (m_SceneGraphNode) {
                 m_SceneGraphNode->SetPriority(10000, FALSE);
             }
@@ -248,9 +248,9 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         VxVector cross = CrossProduct(row0, row1);
         float dot = DotProduct(cross, row2);
         if (dot < 0.0f) {
-            moveableFlags |= 0x1000000;  // VX_MOVEABLE_INDIRECTMATRIX
+            moveableFlags |= VX_MOVEABLE_INDIRECTMATRIX;
         } else {
-            moveableFlags &= ~0x1000000;
+            moveableFlags &= ~VX_MOVEABLE_INDIRECTMATRIX;
         }
 
         // IDA line 147-150: Sync VX_MOVEABLE_VISIBLE from CKObject::IsVisible()
@@ -276,12 +276,12 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
                              m_MoveableFlags, (m_MoveableFlags & VX_MOVEABLE_VISIBLE) ? 1 : 0, IsVisible() ? 1 : 0);
 
         // IDA line 156-157: Read optional Place (if entityFlags & 0x10000)
-        if (m_3dEntityFlags & 0x10000) {
+        if (m_3dEntityFlags & CK_3DENTITY_PLACEVALID) {
             chunk->ReadObjectID();  // Place reference (deprecated)
         }
 
         // IDA line 158-166: Read optional parent (if entityFlags & 0x20000)
-        if (m_3dEntityFlags & 0x20000) {
+        if (m_3dEntityFlags & CK_3DENTITY_PARENTVALID) {
             CK3dEntity *parent = (CK3dEntity *)chunk->ReadObject(m_Context);
             SetParent(parent, TRUE);
         } else {
@@ -289,7 +289,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // IDA line 167-171: Read optional priority (if entityFlags & 0x100000)
-        if (m_3dEntityFlags & 0x100000) {
+        if (m_3dEntityFlags & CK_3DENTITY_ZORDERVALID) {
             int priority = chunk->ReadInt();
             if (m_SceneGraphNode) {
                 m_SceneGraphNode->SetPriority((CKWORD)priority, FALSE);
@@ -312,7 +312,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
         CKDWORD moveable = chunk->ReadDword() & 0xFF3F00EB;
         if (preservedFlags) {
-            moveable |= 0x40000;
+            moveable |= VX_MOVEABLE_WORLDALIGNED;
         }
         SetMoveableFlags(moveable);
     }
@@ -330,9 +330,9 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
         CKDWORD moveable = GetMoveableFlags();
         if (dot < 0.0f) {
-            moveable |= 0x1000000;
+            moveable |= VX_MOVEABLE_INDIRECTMATRIX;
         } else {
-            moveable &= ~0x1000000;
+            moveable &= ~VX_MOVEABLE_INDIRECTMATRIX;
         }
         SetMoveableFlags(moveable);
     }
@@ -515,7 +515,7 @@ void RCK3dEntity::PreSave(CKFile *file, CKDWORD flags) {
 
     // Save children entities if requested by save flags
     // Based on decompilation: checks flags & 0x40000
-    if (file && (flags & 0x40000) && m_Children.Size() > 0) {
+    if (file && (flags & CK_STATESAVE_3DENTITYHIERARCHY) && m_Children.Size() > 0) {
         file->SaveObjects((CKObject **)m_Children.Begin(), m_Children.Size(), 0xFFFFFFFF);
     }
 }
@@ -560,7 +560,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 
     // Return early if no file and not in specific save modes
     // Based on IDA: if (!file && (flags & 0x3FF000) == 0)
-    if (!file && (flags & 0x3FF000) == 0) {
+    if (!file && (flags & CK_STATESAVE_3DENTITYONLY) == 0) {
         return baseChunk;
     }
 
@@ -600,24 +600,24 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
         // Based on IDA: conditionally sets/clears presence indicator bits
         // CK_3DENTITY_PARENTVALID (0x20000) - has parent
         if (m_Parent) {
-            m_3dEntityFlags |= 0x20000;  // CK_3DENTITY_PARENTVALID
+            m_3dEntityFlags |= CK_3DENTITY_PARENTVALID;
         } else {
-            m_3dEntityFlags &= ~0x20000;
+            m_3dEntityFlags &= ~CK_3DENTITY_PARENTVALID;
         }
         
         // CK_3DENTITY_PLACEVALID (0x10000) - has place
         if (placeObject) {
-            m_3dEntityFlags |= 0x10000;  // CK_3DENTITY_PLACEVALID
+            m_3dEntityFlags |= CK_3DENTITY_PLACEVALID;
         } else {
-            m_3dEntityFlags &= ~0x10000;
+            m_3dEntityFlags &= ~CK_3DENTITY_PLACEVALID;
         }
         
         // CK_3DENTITY_ZORDERVALID (0x100000) - has priority
         int priority = m_SceneGraphNode ? m_SceneGraphNode->m_Priority : 0;
         if (priority != 0) {
-            m_3dEntityFlags |= 0x100000;  // CK_3DENTITY_ZORDERVALID
+            m_3dEntityFlags |= CK_3DENTITY_ZORDERVALID;
         } else {
-            m_3dEntityFlags &= ~0x100000;
+            m_3dEntityFlags &= ~CK_3DENTITY_ZORDERVALID;
         }
 
         // Write entity flags and moveable flags

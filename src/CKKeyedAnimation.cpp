@@ -46,14 +46,14 @@ CKStateChunk *RCKKeyedAnimation::Save(CKFile *file, CKDWORD flags) {
     }
 
     // Save merged state and factor (identifier 0x100000)
-    if (file || (flags & 0x100000) != 0) {
+    if (file || (flags & CK_STATESAVE_KEYEDANIMMERGE) != 0) {
         chunk->WriteIdentifier(0x100000);
         chunk->WriteInt(m_Merged);
         chunk->WriteFloat(m_MergeFactor);
     }
 
     // Save animation sub-chunks (identifier 0x200000) - only when not saving to file
-    if (!file && (flags & 0x200000) != 0) {
+    if (!file && (flags & CK_STATESAVE_KEYEDANIMSUBANIMS) != 0) {
         chunk->WriteIdentifier(0x200000);
         chunk->WriteDword(m_Animations.Size());
         for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {

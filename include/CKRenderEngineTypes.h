@@ -524,15 +524,4 @@ struct CKSprite3DBatch {
     CKSprite3DBatch() : m_VertexCount(0), m_IndexCount(0), m_Flags(0) {}
 };
 
-struct CKKeyframeData {
-    CKDWORD m_PositionController;
-    CKDWORD m_ScaleController;
-    CKDWORD m_RotationController;
-    CKDWORD m_ScaleAxisController;
-    void *m_MorphController;
-    float m_Length;
-    CKDWORD m_RefCount; // Reference counter shared across animations
-    RCKObjectAnimation *m_ObjectAnimation;
-};
-
 #endif // CKRENDERENGINETYPES_H

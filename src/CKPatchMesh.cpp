@@ -350,7 +350,7 @@ CKERROR RCKPatchMesh::Load(CKStateChunk *chunk, CKFile *file) {
  */
 CKStateChunk *RCKPatchMesh::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCKMesh::Save(file, flags);
-    if (!file && (flags & 0xFF00000) == 0)
+    if (!file && (flags & CK_STATESAVE_PATCHMESHONLY) == 0)
         return baseChunk;
 
     CKStateChunk *chunk = CreateCKStateChunk(CKCID_PATCHMESH, file);

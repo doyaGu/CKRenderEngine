@@ -2,21 +2,21 @@
 #define RCKKEYFRAMEDATA_H
 
 #include "CKKeyframeData.h"
-#include <cstring>
 
 //===================================================================
 // CKKeyframeData - Container for animation controllers
+// Total size: 32 bytes (0x20) per IDA struct analysis
 //===================================================================
 struct CKKeyframeData
 {
-    CKAnimController *m_PositionController;
-    CKAnimController *m_ScaleController;
-    CKAnimController *m_RotationController;
-    CKAnimController *m_ScaleAxisController;
-    CKMorphController *m_MorphController;
-    float m_Length;
-    int m_Flags;
-    class CKObjectAnimation *m_ObjectAnimation;
+    CKAnimController *m_PositionController;   // 0x00
+    CKAnimController *m_ScaleController;      // 0x04
+    CKAnimController *m_RotationController;   // 0x08
+    CKAnimController *m_ScaleAxisController;  // 0x0C
+    CKMorphController *m_MorphController;     // 0x10
+    float m_Length;                           // 0x14
+    int m_RefCount;                           // 0x18 - Reference count for shared keyframe data (was mislabeled as m_Flags in IDA)
+    class CKObjectAnimation *m_ObjectAnimation; // 0x1C - Owner animation
 
     CKKeyframeData();
     ~CKKeyframeData();
@@ -296,6 +296,9 @@ public:
     virtual CKBOOL Compare(CKAnimController *control, float Threshold = 0.0f);
     virtual CKBOOL Clone(CKAnimController *control);
     virtual void SetMorphVertexCount(int count);
+    
+    // Get the vertex count for morph data
+    int GetMorphVertexCount() const { return m_VertexCount; }
 
 protected:
     CKMorphKey *m_Keys;

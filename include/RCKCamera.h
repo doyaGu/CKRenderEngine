@@ -44,7 +44,7 @@ protected:
     float m_Fov;
     float m_FrontPlane;
     float m_BackPlane;
-    int m_ProjectionType;
+    CKDWORD m_ProjectionType;
     float m_OrthographicZoom;
     int m_Width;
     int m_Height;

@@ -1375,7 +1375,7 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = CKBeObject::Save(file, flags);
 
     // Early return check - based on IDA at 0x100273bb
-    if (!file && (flags & 0xFFF000) == 0)
+    if (!file && (flags & CK_STATESAVE_MESHONLY) == 0)
         return baseChunk;
 
     // Create mesh-specific chunk

@@ -84,7 +84,7 @@ CKStateChunk *RCKCurve::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // If no file and no special flags, return base chunk only
-    if (!file && (flags & 0xFFC00000) == 0)
+    if (!file && (flags & CK_STATESAVE_CURVEONLY) == 0)
         return baseChunk;
 
     // Create a new state chunk for curve data
