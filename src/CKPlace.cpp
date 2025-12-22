@@ -7,6 +7,7 @@
 #include "RCK3dEntity.h"
 #include "CK3dEntity.h"
 #include "CKCamera.h"
+#include "PlaceFitter.h"
 
 /**
  * @brief RCKPlace constructor
@@ -15,13 +16,11 @@
  *
  * IDA: 0x1003e240
  */
-RCKPlace::RCKPlace(CKContext *Context, CKSTRING name)
-    : RCK3dEntity(Context, name),
-      m_AuxObjectId(0),
-      m_DefaultCamera(0),
-      m_ClippingRect(0.0f, 0.0f, 0.0f, 0.0f) {
-    // Set default priority for places - affects render sorting
+RCKPlace::RCKPlace(CKContext *Context, CKSTRING name) : RCK3dEntity(Context, name) {
+    m_Level = 0;
+    m_Camera = 0;
     m_Priority = 20000;
+    m_ClippingRect.Clear();
 }
 
 /**
@@ -98,22 +97,18 @@ void RCKPlace::CheckPreDeletion() {
     RCK3dEntity::CheckPreDeletion();
 
     // Iterate through portals and remove entries with objects marked for deletion
-    int i = 0;
-    while (i < m_Portals.Size()) {
-        CKPortalEntry &entry = m_Portals[i];
+    for (CKPortalEntry *it = m_Portals.Begin(); it < m_Portals.End();) {
+        CKPortalEntry &entry = *it;
 
-        // Check if place or portal is marked for deletion (m_ObjectFlags & 0x10)
-        // Cast to CKObject* to access IsToBeDeleted() since CKPlace is forward-declared
-        CKBOOL placeToBeDeleted = entry.place && 
-            reinterpret_cast<CKObject *>(entry.place)->IsToBeDeleted();
-        CKBOOL portalToBeDeleted = entry.portal && 
-            reinterpret_cast<CKObject *>(entry.portal)->IsToBeDeleted();
+        // Check if place or portal is marked for deletion
+        CKBOOL placeToBeDeleted = entry.place && reinterpret_cast<CKObject*>(entry.place)->IsToBeDeleted();
+        CKBOOL portalToBeDeleted = entry.portal && reinterpret_cast<CKObject*>(entry.portal)->IsToBeDeleted();
 
         if (placeToBeDeleted || portalToBeDeleted) {
-            m_Portals.RemoveAt(i);
+            it = m_Portals.Remove(it);
             // Don't increment i, check the new element at this index
         } else {
-            ++i;
+            ++it;
         }
     }
 }
@@ -121,19 +116,19 @@ void RCKPlace::CheckPreDeletion() {
 /**
  * @brief Check and clear invalid object references after deletion
  *
- * IDA: 0x1003e4a9 - Clears invalid m_AuxObjectId and m_DefaultCamera
+ * IDA: 0x1003e4a9 - Clears invalid m_Level and m_Camera
  */
 void RCKPlace::CheckPostDeletion() {
     CKObject::CheckPostDeletion();
 
     // Clear auxiliary object reference if it no longer exists
-    if (!m_Context->GetObject(m_AuxObjectId)) {
-        m_AuxObjectId = 0;
+    if (!m_Context->GetObject(m_Level)) {
+        m_Level = 0;
     }
 
-    // Clear default camera reference if it no longer exists
-    if (!m_Context->GetObject(m_DefaultCamera)) {
-        m_DefaultCamera = 0;
+    // Clear camera reference if it no longer exists
+    if (!m_Context->GetObject(m_Camera)) {
+        m_Camera = 0;
     }
 }
 
@@ -165,7 +160,7 @@ CKBOOL RCKPlace::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
         for (int i = 0; i < m_Portals.Size(); ++i) {
             // Check if object is the place or the portal geometry
             if (reinterpret_cast<CKObject *>(m_Portals[i].place) == o ||
-                reinterpret_cast<CKObject *>(m_Portals[i].portal) == o) {
+                static_cast<CKObject *>(m_Portals[i].portal) == o) {
                 return TRUE;
             }
         }
@@ -178,14 +173,14 @@ CKBOOL RCKPlace::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
  * @param file The file being saved to
  * @param flags Save flags
  *
- * IDA: 0x1003e662 - Calls base and saves default camera object
+ * IDA: 0x1003e662 - Calls base and saves camera object
  */
 void RCKPlace::PreSave(CKFile *file, CKDWORD flags) {
     RCK3dEntity::PreSave(file, flags);
 
-    // Save the default camera object reference
-    CKObject *defaultCam = m_Context->GetObject(m_DefaultCamera);
-    file->SaveObject(defaultCam, flags);
+    // Save the camera object reference
+    CKObject *camera = m_Context->GetObject(m_Camera);
+    file->SaveObject(camera, flags);
 }
 
 /**
@@ -207,29 +202,29 @@ CKStateChunk *RCKPlace::Save(CKFile *file, CKDWORD flags) {
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
-    // Save default camera if flag is set
-    if ((flags & 0x2000) != 0) {
-        chunk->WriteIdentifier(0x2000u);
-        CKObject *defaultCamera = m_Context->GetObject(m_DefaultCamera);
-        chunk->WriteObject(defaultCamera);
+    // Save camera if flag is set
+    if ((flags & CK_STATESAVE_PLACECAMERA) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_PLACECAMERA);
+        CKObject *camera = m_Context->GetObject(m_Camera);
+        chunk->WriteObject(camera);
     }
 
-    // Save auxiliary object if saving to file and flag is set
-    if (file && (flags & 0x8000) != 0) {
-        chunk->WriteIdentifier(0x8000u);
-        CKObject *auxObj = m_Context->GetObject(m_AuxObjectId);
-        chunk->WriteObject(auxObj);
+    // Save level if saving to file and flag is set
+    if (file && (flags & CK_STATESAVE_PLACELEVEL) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_PLACELEVEL);
+        CKObject *level = m_Context->GetObject(m_Level);
+        chunk->WriteObject(level);
     }
 
     // Save portals if they exist and flag is set
-    if (m_Portals.Size() > 0 && (flags & 0x1000) != 0) {
-        chunk->WriteIdentifier(0x1000u);
+    if (m_Portals.Size() > 0 && (flags & CK_STATESAVE_PLACEPORTALS) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_PLACEPORTALS);
         chunk->WriteInt(m_Portals.Size());
 
         // Save each portal entry (place, portal geometry)
-        for (int i = 0; i < m_Portals.Size(); i++) {
-            chunk->WriteObject(reinterpret_cast<CKObject *>(m_Portals[i].place));
-            chunk->WriteObject(reinterpret_cast<CKObject *>(m_Portals[i].portal));
+        for (CKPortalEntry *it = m_Portals.Begin(); it < m_Portals.End(); ++it) {
+            chunk->WriteObject(reinterpret_cast<CKObject *>(it->place));
+            chunk->WriteObject(reinterpret_cast<CKObject *>(it->portal));
         }
     }
 
@@ -274,7 +269,7 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
         return CK_OK;
 
     // Load children objects (0x4000)
-    if (chunk->SeekIdentifier(0x4000u)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_PLACEREFERENCES)) {
         XObjectArray children;
         children.Load(chunk);
 
@@ -293,30 +288,27 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
         }
     }
 
-    // Load default camera (0x2000)
-    if (chunk->SeekIdentifier(0x2000u)) {
-        m_DefaultCamera = chunk->ReadObjectID();
+    // Load camera (0x2000)
+    if (chunk->SeekIdentifier(CK_STATESAVE_PLACECAMERA)) {
+        m_Camera = chunk->ReadObjectID();
     }
 
-    // Load auxiliary object reference (0x8000)
-    if (chunk->SeekIdentifier(0x8000u)) {
-        m_AuxObjectId = chunk->ReadObjectID();
+    // Load level reference (0x8000)
+    if (chunk->SeekIdentifier(CK_STATESAVE_PLACELEVEL)) {
+        m_Level = chunk->ReadObjectID();
     }
 
     // Load portals (0x1000)
     // NOTE: Does NOT add bidirectionally - the file stores both directions
-    if (chunk->SeekIdentifier(0x1000u)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_PLACEPORTALS)) {
         int portalCount = chunk->ReadInt();
 
         for (int j = 0; j < portalCount; ++j) {
-            CKPlace *placeObj = reinterpret_cast<CKPlace *>(chunk->ReadObject(m_Context));
-            CK3dEntity *portalObj = reinterpret_cast<CK3dEntity *>(chunk->ReadObject(m_Context));
+            CKPortalEntry entry;
+            entry.place = reinterpret_cast<CKPlace *>(chunk->ReadObject(m_Context));
+            entry.portal = reinterpret_cast<CK3dEntity *>(chunk->ReadObject(m_Context));
 
-            // Only add if place is valid
-            if (placeObj) {
-                CKPortalEntry entry;
-                entry.place = placeObj;
-                entry.portal = portalObj;
+            if (entry.place) {
                 m_Portals.PushBack(entry);
             }
         }
@@ -335,27 +327,42 @@ CKERROR RCKPlace::Copy(CKObject &o, CKDependenciesContext &context) {
     // Base class copy
     RCK3dEntity::Copy(o, context);
 
-    // Copy place specific data
-    RCKPlace &target = static_cast<RCKPlace &>(o);
-    target.m_DefaultCamera = m_DefaultCamera;
-    target.m_AuxObjectId = m_AuxObjectId;
-    target.m_Portals = m_Portals;
-    target.m_ClippingRect = m_ClippingRect;
+    CKDWORD deps = context.GetClassDependencies(CKCID_PLACE);
+
+    RCKPlace *src = reinterpret_cast<RCKPlace *>(&o);
+    m_Level = src->m_Level;
+    m_Camera = src->m_Camera;
+    if (deps & CK_DEPENDENCIES_COPY) {
+        m_Portals = src->m_Portals;
+    }
 
     return CK_OK;
 }
 
 // Static class registration methods
 CKSTRING RCKPlace::GetClassName() {
-    return const_cast<CKSTRING>("Place");
+    return (CKSTRING) "Place";
 }
 
 int RCKPlace::GetDependenciesCount(int mode) {
-    return 0;
+    switch (mode) {
+    case CK_DEPENDENCIES_COPY:
+        return 1;
+    case CK_DEPENDENCIES_DELETE:
+        return 1;
+    case CK_DEPENDENCIES_REPLACE:
+        return 0;
+    case CK_DEPENDENCIES_SAVE:
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 CKSTRING RCKPlace::GetDependencies(int i, int mode) {
-    return nullptr;
+    if (i != 0)
+        return nullptr;
+    return (CKSTRING) "Portals";
 }
 
 void RCKPlace::Register() {
@@ -384,17 +391,17 @@ CK_CLASSID RCKPlace::m_ClassID = CKCID_PLACE;
  * IDA: 0x1003e610
  */
 CKCamera *RCKPlace::GetDefaultCamera() {
-    return reinterpret_cast<CKCamera *>(m_Context->GetObject(m_DefaultCamera));
+    return reinterpret_cast<CKCamera *>(m_Context->GetObject(m_Camera));
 }
 
 /**
  * @brief Set the default camera for this place
- * @param cam Pointer to the camera to set as default, or nullptr to clear
+ * @param cam Pointer to the default camera to set, or nullptr to clear
  *
  * IDA: 0x1003e62d
  */
 void RCKPlace::SetDefaultCamera(CKCamera *cam) {
-    m_DefaultCamera = cam ? cam->GetID() : 0;
+    m_Camera = cam ? cam->GetID() : 0;
 }
 
 /**
@@ -411,53 +418,28 @@ void RCKPlace::SetDefaultCamera(CKCamera *cam) {
  * 4. Add to both this place and the target place (bidirectional)
  */
 void RCKPlace::AddPortal(CKPlace *place, CK3dEntity *portal) {
-    // Portal must have VX_PORTAL flag if specified
-    if (portal && (portal->GetFlags() & 0x80000) == 0) {
+    if (!place) {
         return;
     }
 
-    // First search: check if (place, nullptr) already exists
-    // This means the place is already visible from anywhere
-    CKPortalEntry searchEntry;
-    searchEntry.place = place;
-    searchEntry.portal = nullptr;
-
-    // Search for existing entry with nullptr portal
-    CKBOOL foundNull = FALSE;
-    for (int i = 0; i < m_Portals.Size(); ++i) {
-        if (m_Portals[i].place == place && m_Portals[i].portal == nullptr) {
-            foundNull = TRUE;
-            break;
-        }
+    // Portal must have VX_PORTAL flag if specified
+    if (portal && (portal->GetFlags() & CK_3DENTITY_PORTAL) == 0) {
+        return;
     }
 
-    if (!foundNull) {
-        // Second search: check if this exact (place, portal) exists
-        searchEntry.portal = portal;
+    CKPortalEntry entry;
+    entry.place = place;
+    entry.portal = nullptr;
 
-        CKBOOL foundExact = FALSE;
-        for (int i = 0; i < m_Portals.Size(); ++i) {
-            if (m_Portals[i].place == place && m_Portals[i].portal == portal) {
-                foundExact = TRUE;
-                break;
-            }
-        }
-
-        if (!foundExact) {
-            // Add the portal pair to this place
-            CKPortalEntry entry;
-            entry.place = place;
-            entry.portal = portal;
+    CKPortalEntry *it = m_Portals.Find(entry);
+    if (it == m_Portals.End()) {
+        entry.portal = portal;
+        it = m_Portals.Find(entry);
+        if (it == m_Portals.End()) {
+            // Not found, add the portal entry
             m_Portals.PushBack(entry);
-
-            // Add the reverse portal to the destination place (bidirectional)
-            if (place) {
-                RCKPlace *destPlace = reinterpret_cast<RCKPlace *>(place);
-                CKPortalEntry reverseEntry;
-                reverseEntry.place = reinterpret_cast<CKPlace *>(this);
-                reverseEntry.portal = portal;
-                destPlace->m_Portals.PushBack(reverseEntry);
-            }
+            entry.place = reinterpret_cast<CKPlace *>(this);
+            m_Portals.PushBack(entry);
         }
     }
 }
@@ -471,25 +453,12 @@ void RCKPlace::AddPortal(CKPlace *place, CK3dEntity *portal) {
  * Removes from both this place and the target place
  */
 void RCKPlace::RemovePortal(CKPlace *place, CK3dEntity *portal) {
-    // Remove the portal pair from this place
-    for (int i = 0; i < m_Portals.Size(); ++i) {
-        if (m_Portals[i].place == place && m_Portals[i].portal == portal) {
-            m_Portals.RemoveAt(i);
-            break;
-        }
-    }
-
-    // Remove the reverse portal from the destination place
-    if (place) {
-        RCKPlace *destPlace = reinterpret_cast<RCKPlace *>(place);
-        for (int i = 0; i < destPlace->m_Portals.Size(); ++i) {
-            if (destPlace->m_Portals[i].place == reinterpret_cast<CKPlace *>(this) &&
-                destPlace->m_Portals[i].portal == portal) {
-                destPlace->m_Portals.RemoveAt(i);
-                break;
-            }
-        }
-    }
+    CKPortalEntry entry;
+    entry.place = place;
+    entry.portal = portal;
+    m_Portals.Remove(entry);
+    entry.place = reinterpret_cast<CKPlace *>(this);
+    m_Portals.Remove(entry);
 }
 
 /**
@@ -511,16 +480,16 @@ int RCKPlace::GetPortalCount() {
  * IDA: 0x1003eb4a
  */
 CKPlace *RCKPlace::GetPortal(int i, CK3dEntity **portal) {
-    if (i < 0 || i >= m_Portals.Size()) {
-        if (portal) *portal = nullptr;
+    CKPortalEntry *entry = m_Portals.At(i);
+    if (!entry) {
         return nullptr;
     }
 
-    const CKPortalEntry &entry = m_Portals[i];
     if (portal) {
-        *portal = entry.portal;
+        *portal = entry->portal;
     }
-    return entry.place;
+
+    return entry->place;
 }
 
 /**
@@ -540,10 +509,12 @@ VxRect &RCKPlace::ViewportClip() {
  * @return TRUE if successful
  *
  * IDA: 0x1003eb8e - Uses NearestPointGrid/PlaceFitter classes
- * TODO: Full implementation requires NearestPointGrid and PlaceFitter classes
  */
 CKBOOL RCKPlace::ComputeBestFitBBox(CKPlace *p2, VxMatrix &BBoxMatrix) {
-    // TODO: Implement ComputeBestFitBBox using NearestPointGrid/PlaceFitter
-    // This is a complex algorithm that finds common vertices between places
-    return FALSE;
+    if (!p2) return FALSE;
+
+    PlaceFitter fitter;
+    return fitter.ComputeBestFitBBox(reinterpret_cast<CK3dEntity*>(this),
+                                    reinterpret_cast<CK3dEntity*>(p2),
+                                    BBoxMatrix);
 }
