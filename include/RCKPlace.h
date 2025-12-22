@@ -7,6 +7,10 @@
 struct CKPortalEntry {
     CKPlace *place;
     CK3dEntity *portal;
+
+    bool operator==(const CKPortalEntry &other) const {
+        return (place == other.place) && (portal == other.portal);
+    }
 };
 
 class RCKPlace : public RCK3dEntity {
@@ -48,8 +52,8 @@ public:
 
 protected:
     XSArray<CKPortalEntry> m_Portals;
-    CK_ID m_AuxObjectId;  // auxiliary serialized reference (legacy)
-    CK_ID m_DefaultCamera;
+    CK_ID m_Level;
+    CK_ID m_Camera;
     VxRect m_ClippingRect;
 };
 
