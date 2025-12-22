@@ -490,30 +490,30 @@ CKBOOL RCK2dEntity::SetParent(CK2dEntity *parent) {
 
     CKRenderContext *rc = m_Context->GetPlayerRenderContext();
 
-    CK2dEntity *root0 = rc ? rc->Get2dRoot(0) : nullptr; // Foreground root
-    CK2dEntity *root1 = rc ? rc->Get2dRoot(1) : nullptr; // Background root
+    CK2dEntity *foreground = rc ? rc->Get2dRoot(FALSE) : nullptr; // Foreground root
+    CK2dEntity *background = rc ? rc->Get2dRoot(TRUE) : nullptr; // Background root
 
     // Remove from current parent
     if (m_Parent) {
         ((RCK2dEntity *) m_Parent)->m_Children.Remove((CK2dEntity *) this);
     } else {
         // Remove from roots if no parent
-        if (root0) {
-            ((RCK2dEntity *) root0)->m_Children.Remove((CK2dEntity *) this);
+        if (foreground) {
+            ((RCK2dEntity *) foreground)->m_Children.Remove((CK2dEntity *) this);
         }
-        if (root1) {
-            ((RCK2dEntity *) root1)->m_Children.Remove((CK2dEntity *) this);
+        if (background) {
+            ((RCK2dEntity *) background)->m_Children.Remove((CK2dEntity *) this);
         }
     }
 
     // Check if new parent is null or a root
-    if (!newParent || newParent == (RCK2dEntity *) root0 || newParent == (RCK2dEntity *) root1) {
+    if (!newParent || newParent == (RCK2dEntity *) foreground || newParent == (RCK2dEntity *) background) {
         // No real parent, add to appropriate root
         if (!newParent) {
             if (IsBackground()) {
-                newParent = (RCK2dEntity *) root1;
+                newParent = (RCK2dEntity *) background;
             } else {
-                newParent = (RCK2dEntity *) root0;
+                newParent = (RCK2dEntity *) foreground;
             }
         }
         if (newParent) {
@@ -1108,14 +1108,14 @@ int RCK2dEntity::GetZOrder() {
 CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk) return CKERR_INVALIDPARAMETER;
 
-    CKERROR result = CKBeObject::Load(chunk, file);
-    if (result != CK_OK) return result;
+    CKERROR err = CKBeObject::Load(chunk, file);
+    if (err != CK_OK) return err;
 
     if (chunk->GetDataVersion() >= 5) {
         // New format (version 5+)
         if (chunk->SeekIdentifier(0x10F000)) {
             CKDWORD saveFlags = chunk->ReadDword();
-            m_Flags = saveFlags & 0xFFF8F7FF; // Mask out save-only flags
+            m_Flags = saveFlags & ~(CK_2DENTITY_UPDATEHOMOGENEOUSCOORD | CK_2DENTITY_RESERVED0 | CK_2DENTITY_RESERVED1 | CK_2DENTITY_RESERVED2);
 
             // Allocate homogeneous rect if needed
             if ((m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) && !m_HomogeneousRect) {
