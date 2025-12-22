@@ -250,15 +250,13 @@ void RCKCamera::ResetRoll() {
     VxVector dir, up, right;
     GetOrientation(&dir, &up, &right, nullptr);
 
-    VxVector worldUp(0.0f);
-
-    // New right vector = worldUp cross dir
-    right = CrossProduct(worldUp, dir);
+    const VxVector zero(0.0f, 0.0f, 0.0f);
+    right = CrossProduct(zero, dir);
 
     // Check if looking nearly straight up/down
     if (right.Magnitude() < 0.1f) {
-        worldUp = VxVector(0.0f, 0.0f, 1.0f);
-        right = CrossProduct(worldUp, dir);
+        const VxVector fallbackAxis(0.0f, 0.0f, 1.0f);
+        right = CrossProduct(fallbackAxis, dir);
     }
 
     // New up vector = dir cross right
