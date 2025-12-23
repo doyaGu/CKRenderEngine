@@ -23,6 +23,9 @@ public:
     CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+
+    void AddToScene(CKScene *scene, CKBOOL dependencies = TRUE) override;
+    void RemoveFromScene(CKScene *scene, CKBOOL dependencies = TRUE) override;
     
     // Override GetTarget/SetTarget from CKCamera
     CK3dEntity *GetTarget() override;
