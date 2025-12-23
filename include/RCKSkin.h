@@ -42,12 +42,16 @@ public:
     CK3dEntity *GetBone() override;
     void SetBoneInitialInverseMatrix(const VxMatrix &M) override;
 
+    void SetFlags(CKDWORD flags) { m_BoneFlags = flags; }
+    CKDWORD GetFlags() const { return m_BoneFlags; }
+
     // Internal access for RCKSkin
     VxMatrix &GetInitialInverseMatrix() { return m_InitialInverseMatrix; }
     VxMatrix &GetTransformMatrix() { return m_TransformMatrix; }
 
 protected:
     CK3dEntity *m_Bone;                 // The 3D entity representing this bone
+    CKDWORD m_BoneFlags;                // Bone flags loaded from file (internal)
     VxMatrix m_InitialInverseMatrix;    // Original inverse world matrix of the bone
     VxMatrix m_TransformMatrix;         // Computed transformation matrix for skinning
 };
@@ -108,6 +112,7 @@ public:
     int GetBoneCount() override;
     int GetVertexCount() override;
     void ConstructBoneTransfoMatrices(CKContext *context) override;
+    CKBOOL CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, CKBYTE *NormalPtr, CKDWORD NStride) override;
     CKBOOL CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride) override;
     CKSkinBoneData *GetBoneData(int BoneIdx) override;
     CKSkinVertexData *GetVertexData(int VertexIdx) override;
@@ -116,8 +121,16 @@ public:
     int GetNormalCount() override;
     void SetNormal(int Index, const VxVector &Norm) override;
     VxVector &GetNormal(int Index) override;
-    CKBOOL CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, 
-                      CKBYTE *NormalPtr, CKDWORD NStride) override;
+
+
+    // Computes a bounding box of the skinned vertices in the owner's local space.
+    // Returns FALSE if the skin has no usable vertex data.
+    CKBOOL CalcLocalBBox(CKContext *context, VxBbox *bbox);
+
+    // Computes a bounding box from bone positions (DLL helper used by RCK3dEntity::UpdateBox).
+    // If owner != NULL, positions are transformed by owner->GetInverseWorldMatrix() (local space).
+    // If owner == NULL, raw bone world positions are used.
+    CKBOOL CalcBonesBBox(CKContext *context, CK3dEntity *owner, VxBbox *bbox);
 
     // Internal methods
     void BuildBonePointLists();

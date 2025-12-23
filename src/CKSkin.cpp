@@ -8,7 +8,7 @@
 // RCKSkinBoneData Implementation
 //-----------------------------------------------------------------------------
 
-RCKSkinBoneData::RCKSkinBoneData() : m_Bone(nullptr) {
+RCKSkinBoneData::RCKSkinBoneData() : m_Bone(nullptr), m_BoneFlags(0) {
     Vx3DMatrixIdentity(m_InitialInverseMatrix);
     Vx3DMatrixIdentity(m_TransformMatrix);
 }
@@ -180,8 +180,156 @@ void RCKSkin::ConstructBoneTransfoMatrices(CKContext *context) {
     }
 }
 
+CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, CKBYTE *NormalPtr, CKDWORD NStride) {
+    if (!VertexPtr)
+        return FALSE;
+
+    int skinVertexCount = m_VertexData.Size();
+    if (skinVertexCount == 0)
+        return FALSE;
+
+    if (VertexCount == 0)
+        return FALSE;
+
+    // Build bone point lists if not already done
+    if (m_Points.Size() == 0)
+        BuildBonePointLists();
+
+    // Initialize output arrays
+    if (m_Flags & 1) {
+        // Weighted mode: handle vertices individually based on bone count
+        for (int i = 0; i < skinVertexCount; ++i) {
+            VxVector *outPos = (VxVector *) (VertexPtr + i * VStride);
+            RCKSkinVertexData &vd = m_VertexData[i];
+            int boneCount = vd.GetBoneCount();
+
+            if (boneCount == 0) {
+                *outPos = vd.GetInitialPos();
+            } else if (boneCount == 1 && vd.GetWeight(0) == 1.0f) {
+                // Single bone with full weight - clear for accumulation
+                outPos->x = 0.0f;
+                outPos->y = 0.0f;
+                outPos->z = 0.0f;
+            } else {
+                // Multiple bones or partial weight - start with remainder
+                float totalWeight = 0.0f;
+                for (int b = 0; b < boneCount; ++b)
+                    totalWeight += vd.GetWeight(b);
+
+                float remainder = 1.0f - totalWeight;
+                if (remainder > 0.0f) {
+                    VxVector &initPos = vd.GetInitialPos();
+                    outPos->x = initPos.x * remainder;
+                    outPos->y = initPos.y * remainder;
+                    outPos->z = initPos.z * remainder;
+                } else {
+                    outPos->x = 0.0f;
+                    outPos->y = 0.0f;
+                    outPos->z = 0.0f;
+                }
+            }
+        }
+    } else {
+        // Standard mode: zero all vertices
+        VxVector zero(0.0f, 0.0f, 0.0f);
+        VxFillStructure(VertexCount, VertexPtr, VStride, sizeof(VxVector), &zero);
+    }
+
+    // Zero normals if provided
+    if (m_Normals.Size() > 0 && NormalPtr) {
+        VxVector zero(0.0f, 0.0f, 0.0f);
+        VxFillStructure(VertexCount, NormalPtr, NStride, sizeof(VxVector), &zero);
+    }
+
+    bool anyBoneProcessed = false;
+    int boneCount = m_BoneData.Size();
+
+    // Process each bone
+    for (int boneIdx = 0; boneIdx < boneCount; ++boneIdx) {
+        RCKSkinBonePoints &bonePoints = m_Points[boneIdx];
+        int pointCount = bonePoints.m_WeightedVertices.Size();
+
+        if (pointCount == 0)
+            continue;
+
+        RCKSkinBoneData &boneData = m_BoneData[boneIdx];
+        CK3dEntity *bone = boneData.GetBone();
+
+        if (!bone) {
+            boneData.SetBone(nullptr);
+            continue;
+        }
+
+        // Update bone transform matrix in CalcPoints (like original does)
+        const VxMatrix &boneWorldMatrix = bone->GetWorldMatrix();
+        VxMatrix temp;
+        Vx3DMultiplyMatrix(temp, m_InverseWorldMatrix, boneWorldMatrix);
+        boneData.GetTransformMatrix() = temp;
+        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), boneData.GetInitialInverseMatrix());
+        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), m_ObjectInitMatrix);
+
+        anyBoneProcessed = true;
+        const VxMatrix &transformMatrix = boneData.GetTransformMatrix();
+
+        // Transform vertices affected by this bone
+        for (int p = 0; p < pointCount; ++p) {
+            CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
+            if (vertexIdx >= VertexCount)
+                continue;
+
+            VxVector4 &weightedVertex = bonePoints.m_WeightedVertices[p];
+            VxVector *outPos = (VxVector *) (VertexPtr + vertexIdx * VStride);
+
+            // Transform position
+            VxVector transformed;
+            VxVector srcPos(weightedVertex.x, weightedVertex.y, weightedVertex.z);
+            Vx3DMultiplyMatrixVector(&transformed, transformMatrix, &srcPos);
+
+            // Accumulate weighted result
+            float weight = weightedVertex.w;
+            outPos->x += transformed.x * weight;
+            outPos->y += transformed.y * weight;
+            outPos->z += transformed.z * weight;
+        }
+
+        // Transform normals if provided
+        if (NormalPtr && bonePoints.m_WeightedNormals.Size() > 0) {
+            int normalCount = bonePoints.m_WeightedNormals.Size();
+            for (int n = 0; n < normalCount; ++n) {
+                CKWORD vertexIdx = bonePoints.m_VertexIndices[n];
+                if (vertexIdx >= VertexCount)
+                    continue;
+
+                VxVector4 &weightedNormal = bonePoints.m_WeightedNormals[n];
+                VxVector *outNorm = (VxVector *) (NormalPtr + vertexIdx * NStride);
+
+                // Rotate normal (no translation)
+                VxVector transformed;
+                VxVector srcNorm(weightedNormal.x, weightedNormal.y, weightedNormal.z);
+                Vx3DRotateVector(&transformed, transformMatrix, &srcNorm);
+
+                // Accumulate weighted result
+                float weight = weightedNormal.w;
+                outNorm->x += transformed.x * weight;
+                outNorm->y += transformed.y * weight;
+                outNorm->z += transformed.z * weight;
+            }
+        }
+    }
+
+    // If no bones were processed, copy initial positions directly
+    if (!anyBoneProcessed) {
+        for (int i = 0; i < skinVertexCount && i < VertexCount; ++i) {
+            VxVector *outPos = (VxVector *) (VertexPtr + i * VStride);
+            *outPos = m_VertexData[i].GetInitialPos();
+        }
+    }
+
+    return TRUE;
+}
+
 CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride) {
-    return CalcPoints(VertexCount, VertexPtr, VStride, nullptr, 0);
+    return CalcPointsEx(VertexCount, VertexPtr, VStride, nullptr, 0);
 }
 
 CKSkinBoneData *RCKSkin::GetBoneData(int BoneIdx) {
@@ -334,87 +482,72 @@ void RCKSkin::BuildBonePointLists() {
     }
 }
 
-CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, CKBYTE *NormalPtr, CKDWORD NStride) {
-    if (!VertexPtr)
+CKBOOL RCKSkin::CalcLocalBBox(CKContext *context, VxBbox *bbox) {
+    if (!bbox)
         return FALSE;
 
-    int skinVertexCount = m_VertexData.Size();
-    if (skinVertexCount == 0)
-        return FALSE;
-
-    if (VertexCount == 0)
+    const int skinVertexCount = m_VertexData.Size();
+    if (skinVertexCount <= 0)
         return FALSE;
 
     // Build bone point lists if not already done
     if (m_Points.Size() == 0)
         BuildBonePointLists();
 
-    // Initialize output arrays
-    if (m_Flags & 1) {
-        // Weighted mode: handle vertices individually based on bone count
-        for (int i = 0; i < skinVertexCount; ++i) {
-            VxVector *outPos = (VxVector *) (VertexPtr + i * VStride);
-            RCKSkinVertexData &vd = m_VertexData[i];
-            int boneCount = vd.GetBoneCount();
+    XClassArray<VxVector> outPositions;
+    outPositions.Resize(skinVertexCount);
 
+    // Initialize output array similarly to CalcPoints
+    if (m_Flags & 1) {
+        for (int i = 0; i < skinVertexCount; ++i) {
+            RCKSkinVertexData &vd = m_VertexData[i];
+            const int boneCount = vd.GetBoneCount();
             if (boneCount == 0) {
-                *outPos = vd.GetInitialPos();
+                outPositions[i] = vd.GetInitialPos();
             } else if (boneCount == 1 && vd.GetWeight(0) == 1.0f) {
-                // Single bone with full weight - clear for accumulation
-                outPos->x = 0.0f;
-                outPos->y = 0.0f;
-                outPos->z = 0.0f;
+                outPositions[i].x = 0.0f;
+                outPositions[i].y = 0.0f;
+                outPositions[i].z = 0.0f;
             } else {
-                // Multiple bones or partial weight - start with remainder
                 float totalWeight = 0.0f;
                 for (int b = 0; b < boneCount; ++b)
                     totalWeight += vd.GetWeight(b);
 
-                float remainder = 1.0f - totalWeight;
+                const float remainder = 1.0f - totalWeight;
                 if (remainder > 0.0f) {
-                    VxVector &initPos = vd.GetInitialPos();
-                    outPos->x = initPos.x * remainder;
-                    outPos->y = initPos.y * remainder;
-                    outPos->z = initPos.z * remainder;
+                    const VxVector &initPos = vd.GetInitialPos();
+                    outPositions[i].x = initPos.x * remainder;
+                    outPositions[i].y = initPos.y * remainder;
+                    outPositions[i].z = initPos.z * remainder;
                 } else {
-                    outPos->x = 0.0f;
-                    outPos->y = 0.0f;
-                    outPos->z = 0.0f;
+                    outPositions[i].x = 0.0f;
+                    outPositions[i].y = 0.0f;
+                    outPositions[i].z = 0.0f;
                 }
             }
         }
     } else {
-        // Standard mode: zero all vertices
         VxVector zero(0.0f, 0.0f, 0.0f);
-        VxFillStructure(VertexCount, VertexPtr, VStride, sizeof(VxVector), &zero);
-    }
-
-    // Zero normals if provided
-    if (m_Normals.Size() > 0 && NormalPtr) {
-        VxVector zero(0.0f, 0.0f, 0.0f);
-        VxFillStructure(VertexCount, NormalPtr, NStride, sizeof(VxVector), &zero);
+        VxFillStructure(skinVertexCount, (CKBYTE *) outPositions.Begin(), sizeof(VxVector), sizeof(VxVector), &zero);
     }
 
     bool anyBoneProcessed = false;
-    int boneCount = m_BoneData.Size();
+    const int boneCount = m_BoneData.Size();
 
-    // Process each bone
     for (int boneIdx = 0; boneIdx < boneCount; ++boneIdx) {
         RCKSkinBonePoints &bonePoints = m_Points[boneIdx];
-        int pointCount = bonePoints.m_WeightedVertices.Size();
-
+        const int pointCount = bonePoints.m_WeightedVertices.Size();
         if (pointCount == 0)
             continue;
 
         RCKSkinBoneData &boneData = m_BoneData[boneIdx];
         CK3dEntity *bone = boneData.GetBone();
-
         if (!bone) {
             boneData.SetBone(nullptr);
             continue;
         }
 
-        // Update bone transform matrix in CalcPoints (like original does)
+        // Keep transform-matrix construction aligned with CalcPoints
         const VxMatrix &boneWorldMatrix = bone->GetWorldMatrix();
         VxMatrix temp;
         Vx3DMultiplyMatrix(temp, m_InverseWorldMatrix, boneWorldMatrix);
@@ -425,57 +558,63 @@ CKBOOL RCKSkin::CalcPoints(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride, 
         anyBoneProcessed = true;
         const VxMatrix &transformMatrix = boneData.GetTransformMatrix();
 
-        // Transform vertices affected by this bone
         for (int p = 0; p < pointCount; ++p) {
-            CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
-            if (vertexIdx >= VertexCount)
+            const CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
+            if ((int) vertexIdx >= skinVertexCount)
                 continue;
 
             VxVector4 &weightedVertex = bonePoints.m_WeightedVertices[p];
-            VxVector *outPos = (VxVector *) (VertexPtr + vertexIdx * VStride);
-
-            // Transform position
-            VxVector transformed;
             VxVector srcPos(weightedVertex.x, weightedVertex.y, weightedVertex.z);
+
+            VxVector transformed;
             Vx3DMultiplyMatrixVector(&transformed, transformMatrix, &srcPos);
 
-            // Accumulate weighted result
-            float weight = weightedVertex.w;
-            outPos->x += transformed.x * weight;
-            outPos->y += transformed.y * weight;
-            outPos->z += transformed.z * weight;
-        }
-
-        // Transform normals if provided
-        if (NormalPtr && bonePoints.m_WeightedNormals.Size() > 0) {
-            int normalCount = bonePoints.m_WeightedNormals.Size();
-            for (int n = 0; n < normalCount; ++n) {
-                CKWORD vertexIdx = bonePoints.m_VertexIndices[n];
-                if (vertexIdx >= VertexCount)
-                    continue;
-
-                VxVector4 &weightedNormal = bonePoints.m_WeightedNormals[n];
-                VxVector *outNorm = (VxVector *) (NormalPtr + vertexIdx * NStride);
-
-                // Rotate normal (no translation)
-                VxVector transformed;
-                VxVector srcNorm(weightedNormal.x, weightedNormal.y, weightedNormal.z);
-                Vx3DRotateVector(&transformed, transformMatrix, &srcNorm);
-
-                // Accumulate weighted result
-                float weight = weightedNormal.w;
-                outNorm->x += transformed.x * weight;
-                outNorm->y += transformed.y * weight;
-                outNorm->z += transformed.z * weight;
-            }
+            const float weight = weightedVertex.w;
+            outPositions[vertexIdx].x += transformed.x * weight;
+            outPositions[vertexIdx].y += transformed.y * weight;
+            outPositions[vertexIdx].z += transformed.z * weight;
         }
     }
 
-    // If no bones were processed, copy initial positions directly
     if (!anyBoneProcessed) {
-        for (int i = 0; i < skinVertexCount && i < VertexCount; ++i) {
-            VxVector *outPos = (VxVector *) (VertexPtr + i * VStride);
-            *outPos = m_VertexData[i].GetInitialPos();
+        for (int i = 0; i < skinVertexCount; ++i)
+            outPositions[i] = m_VertexData[i].GetInitialPos();
+    }
+
+    bbox->Reset();
+    for (int i = 0; i < skinVertexCount; ++i)
+        bbox->Merge(outPositions[i]);
+
+    return TRUE;
+}
+
+CKBOOL RCKSkin::CalcBonesBBox(CKContext *context, CK3dEntity *owner, VxBbox *bbox) {
+    (void)context;
+    if (!bbox)
+        return FALSE;
+
+    bbox->Reset();
+
+    const VxMatrix *invOwner = nullptr;
+    if (owner) {
+        invOwner = &owner->GetInverseWorldMatrix();
+    }
+
+    const int boneCount = m_BoneData.Size();
+    VxVector tmp;
+    for (int i = 0; i < boneCount; ++i) {
+        CK3dEntity *bone = m_BoneData[i].GetBone();
+        if (!bone)
+            continue;
+
+        const VxMatrix &boneWorld = bone->GetWorldMatrix();
+        const VxVector bonePos(boneWorld[3][0], boneWorld[3][1], boneWorld[3][2]);
+
+        if (invOwner) {
+            Vx3DMultiplyMatrixVector(&tmp, *invOwner, &bonePos);
+            bbox->Merge(tmp);
+        } else {
+            bbox->Merge(bonePos);
         }
     }
 
