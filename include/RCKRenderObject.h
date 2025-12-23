@@ -38,8 +38,6 @@ public:
 
     int GetMemoryOccupation() override;
 
-    CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
-
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
     static CKSTRING GetDependencies(int i, int mode);
