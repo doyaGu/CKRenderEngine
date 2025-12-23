@@ -35,9 +35,9 @@ protected:
     CKMaterial *m_BackgroundMaterial;
     CK3dEntity *m_RootEntity;
     CKCamera *m_AttachedCamera;
-    XArray<CK3dEntity *> m_3DEntities;
-    XArray<CKCamera *> m_Cameras;
-    XArray<CKLight *> m_Lights;
+    XObjectPointerArray m_3DEntities;
+    XObjectPointerArray m_Cameras;
+    XObjectPointerArray m_Lights;
     CKDWORD m_FogMode;
     float m_FogStart;
     float m_FogEnd;
