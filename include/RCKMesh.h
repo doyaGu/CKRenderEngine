@@ -6,8 +6,8 @@
 #include "CKMesh.h"
 
 // Forward declarations for generic functions
-void BuildFaceNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount);
-void BuildNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount);
+void BuildFaceNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVertex *vertices, int vertexCount);
+void BuildNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVertex *vertices, int vertexCount);
 int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direction, VxIntersectionDesc *desc, CK_RAYINTERSECTION mode, const VxMatrix &worldMatrix);
 void NormalizeGenericFunc(VxVertex *vertices, int count);
 
@@ -220,7 +220,7 @@ protected:
     XArray<VxColors> m_VertexColors;
     CKDWORD m_DrawFlags;
     CKDWORD m_FaceChannelMask;
-    XClassArray<CKMaterialChannel> m_MaterialChannels;
+    XClassArray<VxMaterialChannel> m_MaterialChannels;
     XArray<int> m_ActiveTextureChannels; // Extra texture coordinate channel indices used for multitexture
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;

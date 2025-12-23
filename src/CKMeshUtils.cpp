@@ -7,8 +7,8 @@
 #include "RCKMaterial.h"
 #include "RCKTexture.h"
 
-void (*g_BuildFaceNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
-void (*g_BuildNormalsFunc)(CKFace *, unsigned short *, int, VxVertex *, int);
+void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
+void (*g_BuildNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 int (*g_RayIntersection)(RCKMesh *, VxVector &, VxVector &, VxIntersectionDesc *, CK_RAYINTERSECTION, VxMatrix const &);
 void (*g_NormalizeFunc)(VxVertex *, int);
 
@@ -33,7 +33,7 @@ void SetProcessorSpecific_FunctionsPtr() {
 // =====================================================
 
 // IDA @ 0x1002e82f: Precise texture pick for alpha testing
-static CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v) {
+CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v) {
     if (!mat)
         return TRUE;
 
@@ -101,7 +101,7 @@ static CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v) {
 }
 
 // IDA @ 0x1002e1ba: Build face normals from vertex positions
-void BuildFaceNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount) {
+void BuildFaceNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVertex *vertices, int vertexCount) {
     int indexOffset = 0;     // v16
     CKFace *facePtr = faces; // a1
     for (int i = 0; i < faceCount; ++i) {
@@ -128,7 +128,7 @@ void BuildFaceNormalsGenericFunc(CKFace *faces, unsigned short *indices, int fac
 }
 
 // IDA @ 0x1002e2cb: Build vertex normals by averaging face normals
-void BuildNormalsGenericFunc(CKFace *faces, unsigned short *indices, int faceCount, VxVertex *vertices, int vertexCount) {
+void BuildNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVertex *vertices, int vertexCount) {
     // First build face normals (IDA line 15)
     BuildFaceNormalsGenericFunc(faces, indices, faceCount, vertices, vertexCount);
 
