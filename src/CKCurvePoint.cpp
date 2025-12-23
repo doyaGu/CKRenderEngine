@@ -1,11 +1,22 @@
 #include "RCKCurvePoint.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "CKContext.h"
 #include "CKObject.h"
 #include "CKBeObject.h"
+#include "CKCurve.h"
 #include "RCK3dEntity.h"
-#include "RCKCurve.h"
+
+// Static class ID
+CK_CLASSID RCKCurvePoint::m_ClassID = CKCID_CURVEPOINT;
+
+CKBOOL RCKCurvePoint::IsHiddenByParent() {
+    return RCK3dEntity::IsHiddenByParent();
+}
+
+CKBOOL RCKCurvePoint::IsVisible() {
+    return RCK3dEntity::IsVisible();
+}
 
 /**
  * @brief RCKCurvePoint constructor
@@ -13,52 +24,27 @@
  * @param name Optional name for the curve point
  */
 RCKCurvePoint::RCKCurvePoint(CKContext *Context, CKSTRING name)
-    : RCK3dEntity(Context, name),
-      m_Curve(nullptr),
-      m_Tension(0.0f),
-      m_Continuity(0.0f),
-      m_Bias(0.0f),
-      m_Length(0.0f),
-      m_UseTCB(FALSE),
-      m_Linear(FALSE) {
-    // Initialize vectors
-    m_ReservedVector = VxVector(0.0f, 0.0f, 0.0f);
-    m_TangentIn = VxVector(0.0f, 0.0f, 0.0f);
-    m_m_TangentOut = VxVector(0.0f, 0.0f, 0.0f);
-    m_NotUsedVector = VxVector(0.0f, 0.0f, 0.0f);
+    : RCK3dEntity(Context, name) {
+    m_Tension = 0.0f;
+    m_Continuity = 0.0f;
+    m_Bias = 0.0f;
+    m_Curve = nullptr;
+    m_UseTCB = FALSE;
+    m_Linear = FALSE;
+    m_Length = 0.0f;
 }
 
 /**
  * @brief RCKCurvePoint destructor
  */
-RCKCurvePoint::~RCKCurvePoint() {
-    // Cleanup resources if needed
-}
+RCKCurvePoint::~RCKCurvePoint() {}
 
 /**
  * @brief Get the class ID for RCKCurvePoint
  * @return The class ID (36)
  */
 CK_CLASSID RCKCurvePoint::GetClassID() {
-    return 36;
-}
-
-/**
- * @brief Check if curve point is hidden by parent
- * @return TRUE if hidden by parent, FALSE otherwise
- */
-CKBOOL RCKCurvePoint::IsHiddenByParent() {
-    // Implementation based on parent visibility
-    return FALSE;
-}
-
-/**
- * @brief Check if curve point is visible
- * @return TRUE if visible, FALSE otherwise
- */
-CKBOOL RCKCurvePoint::IsVisible() {
-    // Implementation based on curve point visibility flags
-    return TRUE;
+    return m_ClassID;
 }
 
 /**
@@ -72,18 +58,18 @@ CKStateChunk *RCKCurvePoint::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // If no file and no special flags, return base chunk only
-    if (!file && (flags & 0xFFC00000) == 0)
+    if (!file && !(flags & CK_STATESAVE_CURVEONLY))
         return baseChunk;
 
     // Create a new state chunk for curve point data
-    CKStateChunk *chunk = CreateCKStateChunk(36, file);
+    CKStateChunk *chunk = CreateCKStateChunk(CKCID_CURVEPOINT, file);
     chunk->StartWrite();
 
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
     // Write curve point specific data
-    chunk->WriteIdentifier(0x10000000u); // Curve point identifier
+    chunk->WriteIdentifier(CK_STATESAVE_CURVEPOINTDEFAULTDATA);
 
     // Write curve point properties
     chunk->WriteObject(reinterpret_cast<CKObject *>(m_Curve));
@@ -120,7 +106,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
     // Handle different data versions
     if (chunk->GetDataVersion() < 5) {
         // Legacy format handling for data version < 5
-        if (chunk->SeekIdentifier(0x10000000u)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTDEFAULTDATA)) {
             // Load basic curve point properties
             m_Curve = reinterpret_cast<CKCurve *>(chunk->ReadObject(m_Context));
             m_UseTCB = chunk->ReadInt();
@@ -135,21 +121,21 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Load TCB parameters (legacy format)
-        if (chunk->SeekIdentifier(0x20000000u)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTTCB)) {
             m_Tension = chunk->ReadFloat();
             m_Continuity = chunk->ReadFloat();
             m_Bias = chunk->ReadFloat();
         }
 
         // Load reserved vector (legacy format)
-        if (chunk->SeekIdentifier(0x80000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTCURVEPOS)) {
             m_ReservedVector.x = chunk->ReadFloat();
             m_ReservedVector.y = chunk->ReadFloat();
             m_ReservedVector.z = chunk->ReadFloat();
         }
 
         // Load tangent vectors (legacy format)
-        if (chunk->SeekIdentifier(0x40000000u)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTTANGENTS)) {
             m_TangentIn.x = chunk->ReadFloat();
             m_TangentIn.y = chunk->ReadFloat();
             m_TangentIn.z = chunk->ReadFloat();
@@ -159,7 +145,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
         }
     } else {
         // Modern format for data version >= 5
-        if (chunk->SeekIdentifier(0x10000000u)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTDEFAULTDATA)) {
             // Load all curve point properties in modern format
             m_Curve = reinterpret_cast<CKCurve *>(chunk->ReadObject(m_Context));
             m_UseTCB = chunk->ReadInt();
@@ -180,7 +166,18 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKCurvePoint::GetMemoryOccupation() {
-    return sizeof(RCKCurvePoint);
+    return RCK3dEntity::GetMemoryOccupation() + 76;
+}
+
+CKERROR RCKCurvePoint::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = RCK3dEntity::RemapDependencies(context);
+    if (err != CK_OK) {
+        return err;
+    }
+
+    m_Curve = (CKCurve *)context.Remap(m_Curve);
+    SetParent(m_Curve, TRUE);
+    return CK_OK;
 }
 
 /**
@@ -191,21 +188,24 @@ int RCKCurvePoint::GetMemoryOccupation() {
  */
 CKERROR RCKCurvePoint::Copy(CKObject &o, CKDependenciesContext &context) {
     // Base class copy
-    RCK3dEntity::Copy(o, context);
+    CKERROR err = RCK3dEntity::Copy(o, context);
+    if (err != CK_OK) {
+        return err;
+    }
 
     // Copy curve point specific data
-    RCKCurvePoint &target = (RCKCurvePoint &) o;
-    target.m_Curve = m_Curve;
-    target.m_Tension = m_Tension;
-    target.m_Continuity = m_Continuity;
-    target.m_Bias = m_Bias;
-    target.m_Length = m_Length;
-    target.m_ReservedVector = m_ReservedVector;
-    target.m_TangentIn = m_TangentIn;
-    target.m_m_TangentOut = m_m_TangentOut;
-    target.m_NotUsedVector = m_NotUsedVector;
-    target.m_UseTCB = m_UseTCB;
-    target.m_Linear = m_Linear;
+    RCKCurvePoint &src = (RCKCurvePoint &) o;
+    m_Curve = src.m_Curve;
+    m_Tension = src.m_Tension;
+    m_Continuity = src.m_Continuity;
+    m_Bias = src.m_Bias;
+    m_Length = src.m_Length;
+    m_ReservedVector = src.m_ReservedVector;
+    m_TangentIn = src.m_TangentIn;
+    m_m_TangentOut = src.m_m_TangentOut;
+    m_NotUsedVector = src.m_NotUsedVector;
+    m_UseTCB = src.m_UseTCB;
+    m_Linear = src.m_Linear;
 
     return CK_OK;
 }
@@ -213,57 +213,74 @@ CKERROR RCKCurvePoint::Copy(CKObject &o, CKDependenciesContext &context) {
 // Transformation methods implementation
 void RCKCurvePoint::Rotate(const VxVector *Axis, float Angle, CK3dEntity *Ref, CKBOOL KeepChildren) {
     RCK3dEntity::Rotate(Axis, Angle, Ref, KeepChildren);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::Translate(const VxVector *Vect, CK3dEntity *Ref, CKBOOL KeepChildren) {
     RCK3dEntity::Translate(Vect, Ref, KeepChildren);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::AddScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Local) {
     RCK3dEntity::AddScale(Scale, KeepChildren, Local);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::SetPosition(const VxVector *Pos, CK3dEntity *Ref, CKBOOL KeepChildren) {
     RCK3dEntity::SetPosition(Pos, Ref, KeepChildren);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::SetOrientation(const VxVector *Dir, const VxVector *Up, const VxVector *Right, CK3dEntity *Ref,
                                    CKBOOL KeepChildren) {
     RCK3dEntity::SetOrientation(Dir, Up, Right, Ref, KeepChildren);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::SetQuaternion(const VxQuaternion *Quat, CK3dEntity *Ref, CKBOOL KeepChildren, CKBOOL KeepScale) {
     RCK3dEntity::SetQuaternion(Quat, Ref, KeepChildren, KeepScale);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::SetScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Local) {
     RCK3dEntity::SetScale(Scale, KeepChildren, Local);
+    NotifyUpdate();
 }
 
 CKBOOL RCKCurvePoint::ConstructWorldMatrix(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat) {
-    return RCK3dEntity::ConstructWorldMatrix(Pos, Scale, Quat);
+    CKBOOL result = RCK3dEntity::ConstructWorldMatrix(Pos, Scale, Quat);
+    NotifyUpdate();
+    return result;
 }
 
 CKBOOL RCKCurvePoint::ConstructWorldMatrixEx(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat,
                                              const VxQuaternion *Shear, float Sign) {
-    return RCK3dEntity::ConstructWorldMatrixEx(Pos, Scale, Quat, Shear, Sign);
+    CKBOOL result = RCK3dEntity::ConstructWorldMatrixEx(Pos, Scale, Quat, Shear, Sign);
+    NotifyUpdate();
+    return result;
 }
 
 CKBOOL RCKCurvePoint::ConstructLocalMatrix(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat) {
-    return RCK3dEntity::ConstructLocalMatrix(Pos, Scale, Quat);
+    CKBOOL result = RCK3dEntity::ConstructLocalMatrix(Pos, Scale, Quat);
+    NotifyUpdate();
+    return result;
 }
 
 CKBOOL RCKCurvePoint::ConstructLocalMatrixEx(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat,
                                              const VxQuaternion *Shear, float Sign) {
-    return RCK3dEntity::ConstructLocalMatrixEx(Pos, Scale, Quat, Shear, Sign);
+    CKBOOL result = RCK3dEntity::ConstructLocalMatrixEx(Pos, Scale, Quat, Shear, Sign);
+    NotifyUpdate();
+    return result;
 }
 
 void RCKCurvePoint::SetLocalMatrix(const VxMatrix &Mat, CKBOOL KeepChildren) {
     RCK3dEntity::SetLocalMatrix(Mat, KeepChildren);
+    NotifyUpdate();
 }
 
 void RCKCurvePoint::SetWorldMatrix(const VxMatrix &Mat, CKBOOL KeepChildren) {
     RCK3dEntity::SetWorldMatrix(Mat, KeepChildren);
+    NotifyUpdate();
 }
 
 // =====================================================
@@ -272,6 +289,12 @@ void RCKCurvePoint::SetWorldMatrix(const VxMatrix &Mat, CKBOOL KeepChildren) {
 
 CKCurve *RCKCurvePoint::GetCurve() {
     return m_Curve;
+}
+
+void RCKCurvePoint::SetCurve(CKCurve *curve) {
+    if (curve)
+        SetParent(curve, TRUE);
+    m_Curve = curve;
 }
 
 float RCKCurvePoint::GetBias() {
@@ -312,7 +335,6 @@ void RCKCurvePoint::SetLinear(CKBOOL linear) {
 
 void RCKCurvePoint::UseTCB(CKBOOL use) {
     m_UseTCB = use;
-    NotifyUpdate();
 }
 
 CKBOOL RCKCurvePoint::IsTCB() {
@@ -334,17 +356,43 @@ void RCKCurvePoint::SetTangents(VxVector *InTangent, VxVector *OutTangent) {
     NotifyUpdate();
 }
 
+void RCKCurvePoint::SetCurveLength(float length) {
+    m_Length = length;
+}
+
+void RCKCurvePoint::GetReservedVector(VxVector *vector) const {
+    if (vector) {
+        *vector = m_ReservedVector;
+    }
+}
+
+void RCKCurvePoint::SetReservedVector(const VxVector *vector) {
+    if (vector) {
+        m_ReservedVector = *vector;
+    }
+}
+
+void RCKCurvePoint::GetFittedVector(VxVector *vector) const {
+    if (vector) {
+        *vector = m_NotUsedVector;
+    }
+}
+
+void RCKCurvePoint::SetFittedVector(const VxVector *vector) {
+    if (vector) {
+        m_NotUsedVector = *vector;
+    }
+}
+
 void RCKCurvePoint::NotifyUpdate() {
-    // Notify parent curve that this point has changed
     if (m_Curve) {
-        // The curve needs to recalculate based on updated control point
-        // Specific implementation depends on curve's update mechanism
+        m_Curve->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     }
 }
 
 // Static class registration methods
 CKSTRING RCKCurvePoint::GetClassName() {
-    return "CurvePoint";
+    return (CKSTRING) "Curve Point";
 }
 
 int RCKCurvePoint::GetDependenciesCount(int mode) {
@@ -363,6 +411,3 @@ void RCKCurvePoint::Register() {
 CKCurvePoint *RCKCurvePoint::CreateInstance(CKContext *Context) {
     return reinterpret_cast<CKCurvePoint *>(new RCKCurvePoint(Context));
 }
-
-// Static class ID
-CK_CLASSID RCKCurvePoint::m_ClassID = CKCID_CURVEPOINT;

@@ -32,6 +32,8 @@ public:
     // Dependencies Functions	{Secret}
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
+
     void Rotate(const VxVector *Axis, float Angle, CK3dEntity *Ref = NULL, CKBOOL KeepChildren = FALSE) override;
     void Translate(const VxVector *Vect, CK3dEntity *Ref = NULL, CKBOOL KeepChildren = FALSE) override;
     void AddScale(const VxVector *Scale, CKBOOL KeepChildren = FALSE, CKBOOL Local = TRUE) override;
@@ -45,6 +47,15 @@ public:
     CKBOOL ConstructLocalMatrixEx(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat, const VxQuaternion *Shear, float Sign) override;
     void SetLocalMatrix(const VxMatrix &Mat, CKBOOL KeepChildren = FALSE) override;
     void SetWorldMatrix(const VxMatrix &Mat, CKBOOL KeepChildren = FALSE) override;
+
+    void SetCurve(CKCurve *curve);
+
+    // Internal cached data used by CKCurve (matches original engine layout/usage)
+    void SetCurveLength(float length);
+    void GetReservedVector(VxVector *vector) const;
+    void SetReservedVector(const VxVector *vector);
+    void GetFittedVector(VxVector *vector) const;
+    void SetFittedVector(const VxVector *vector);
 
     //--------------------------------------------
     // Class Registering	{Secret}
