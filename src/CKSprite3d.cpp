@@ -6,8 +6,11 @@
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKSceneGraph.h"
+#include "CKRasterizer.h"
 #include "CKRasterizerTypes.h"
 #include "VxMath.h"
+
+extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
 
 /*************************************************
 Summary: PreSave method for RCKSprite3D.
@@ -62,8 +65,8 @@ CKStateChunk *RCKSprite3D::Save(CKFile *file, CKDWORD flags) {
     // Call base class save first to handle entity data
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
-    // Return early if no file context and not in specific save modes
-    if (!file && (flags & CK_STATESAVE_SPRITE3DONLY) == 0) {
+    // IDA: early return when saving without file and no class-specific save flags are set
+    if (!file && !(flags & CK_STATESAVE_SPRITE3DONLY)) {
         return baseChunk;
     }
 
@@ -77,7 +80,7 @@ CKStateChunk *RCKSprite3D::Save(CKFile *file, CKDWORD flags) {
     spriteChunk->AddChunkAndDelete(baseChunk);
 
     // Write sprite-specific data with identifier 0x400000
-    spriteChunk->WriteIdentifier(0x400000);
+    spriteChunk->WriteIdentifier(CK_STATESAVE_SPRITE3DDATA);
     spriteChunk->WriteDword(m_Mode);
 
     // Calculate size from bounding box (half width and height)
@@ -140,7 +143,7 @@ CKERROR RCKSprite3D::Load(CKStateChunk *chunk, CKFile *file) {
     // Call base class load first to handle entity data
     RCK3dEntity::Load(chunk, file);
 
-    if (chunk->SeekIdentifier(0x400000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_SPRITE3DDATA)) {
         // Load sprite mode
         m_Mode = chunk->ReadDword();
 
@@ -167,14 +170,17 @@ CKERROR RCKSprite3D::Load(CKStateChunk *chunk, CKFile *file) {
         m_Material = (RCKMaterial *) chunk->ReadObject(m_Context);
 
         // Mark sprite as modified after loading
-        ModifyObjectFlags(0, 0x400);
+        ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     }
 
     return CK_OK;
 }
 
 RCKSprite3D::RCKSprite3D(CKContext *Context, CKSTRING name)
-    : RCK3dEntity(Context, name), m_Material(nullptr), m_Mode(0) {
+    : RCK3dEntity(Context, name) {
+    m_Mode = VXSPRITE3D_BILLBOARD;
+    m_Material = nullptr;
+
     // Initialize offset to center
     m_Offset.x = 0.0f;
     m_Offset.y = 0.0f;
@@ -187,6 +193,9 @@ RCKSprite3D::RCKSprite3D(CKContext *Context, CKSTRING name)
     m_LocalBoundingBox.Max.y = 1.0f;
     m_LocalBoundingBox.Max.z = 0.0f;
 
+    // Ensure meshless Sprite3D isn't collapsed to a point by UpdateBox().
+    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
+
     // Initialize UV mapping to full texture
     m_Rect.left = 0.0f;
     m_Rect.top = 0.0f;
@@ -194,8 +203,7 @@ RCKSprite3D::RCKSprite3D(CKContext *Context, CKSTRING name)
     m_Rect.bottom = 1.0f;
 }
 
-RCKSprite3D::~RCKSprite3D() {
-}
+RCKSprite3D::~RCKSprite3D() {}
 
 CK_CLASSID RCKSprite3D::m_ClassID = CKCID_SPRITE3D;
 
@@ -293,8 +301,8 @@ CKERROR RCKSprite3D::RemapDependencies(CKDependenciesContext &context) {
     }
 
     // Remap material reference
-    CKMaterial *remappedMaterial = (CKMaterial *)context.Remap((CKObject *)m_Material);
-    SetMaterial(remappedMaterial);
+    CKMaterial *material = (CKMaterial *)context.Remap((CKObject *)m_Material);
+    SetMaterial(material);
 
     return CK_OK;
 }
@@ -338,6 +346,10 @@ void RCKSprite3D::SetSize(Vx2DVector &size) {
     m_LocalBoundingBox.Max.x = (m_Offset.x + 1.0f) * halfWidth;
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
 
+    // Meshless entities are treated as a point in UpdateBox() unless VX_MOVEABLE_USERBOX is set.
+    // Sprite3D bounding box is always defined by size/offset.
+    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
+
     // Invalidate scene graph bounding box
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);
@@ -365,6 +377,9 @@ void RCKSprite3D::SetOffset(Vx2DVector &offset) {
     m_LocalBoundingBox.Max.x = (m_Offset.x + 1.0f) * halfWidth;
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
 
+    // Keep sprite bbox authoritative for UpdateBox().
+    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
+
     // Invalidate scene graph bounding box
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);
@@ -390,6 +405,127 @@ VXSPRITE3D_TYPE RCKSprite3D::GetMode() {
     return (VXSPRITE3D_TYPE) m_Mode;
 }
 
+CKBOOL RCKSprite3D::IsToBeRendered() {
+    const CKBOOL visible = (m_MoveableFlags & VX_MOVEABLE_VISIBLE) != 0;
+    return visible && m_Material;
+}
+
+CKBOOL RCKSprite3D::IsToBeRenderedLast() {
+    if ((m_MoveableFlags & VX_MOVEABLE_RENDERFIRST) != 0)
+        return FALSE;
+    if (m_Material)
+        return m_Material->IsAlphaTransparent();
+    return FALSE;
+}
+
+CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
+    RCKRenderContext *dev = (RCKRenderContext *)rc;
+
+    UpdateOrientation(rc);
+    ModifyMoveableFlags(VX_MOVEABLE_EXTENTSUPTODATE, 0);
+
+    if (!(flags & 0x100)) {
+        dev->SetWorldTransformationMatrix(m_WorldMatrix);
+    }
+
+    CKDWORD vis;
+    if (flags & 0xFF) {
+        m_RenderExtents = VxRect(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
+        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, &m_RenderExtents);
+    } else {
+        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, nullptr);
+    }
+
+    if (!vis) {
+        if (m_SceneGraphNode)
+            m_SceneGraphNode->SetAsOutsideFrustum();
+        return FALSE;
+    }
+
+    if (vis == 2) {
+        if (m_SceneGraphNode)
+            m_SceneGraphNode->SetAsInsideFrustum();
+    }
+
+    return TRUE;
+}
+
+CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
+    if (BBox && !(m_MoveableFlags & VX_MOVEABLE_UPTODATE)) {
+        m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
+        m_MoveableFlags |= VX_MOVEABLE_BOXVALID | VX_MOVEABLE_UPTODATE;
+    }
+
+    return TRUE;
+}
+
+void RCKSprite3D::UpdateOrientation(CKRenderContext *rc) {
+    if (!rc)
+        return;
+
+    RCKRenderContext *dev = (RCKRenderContext *)rc;
+    if (!dev->m_RenderedScene)
+        return;
+
+    RCK3dEntity *rootEntity = (RCK3dEntity *)dev->m_RenderedScene->GetRootEntity();
+    if (!rootEntity)
+        return;
+
+    const VxMatrix &rootWorld = rootEntity->m_WorldMatrix;
+
+    const CKDWORD mode = m_Mode;
+    if (mode == VXSPRITE3D_BILLBOARD) {
+        // IDA: memcpy 0x30 bytes from root entity world matrix to this world matrix
+        // (copies only the 3 orientation rows; keeps translation intact)
+        memcpy(&m_WorldMatrix, &rootWorld, sizeof(VxMatrix) - sizeof(VxVector4));
+        WorldMatrixChanged(TRUE, TRUE);
+    } else if (mode == VXSPRITE3D_XROTATE) {
+        // IDA: row0 = axisX
+        const VxVector &axisX = VxVector::axisX();
+        m_WorldMatrix[0][0] = axisX.x;
+        m_WorldMatrix[0][1] = axisX.y;
+        m_WorldMatrix[0][2] = axisX.z;
+
+        // IDA: v0 = normalize( (0, -rootWorld[1][2], rootWorld[1][1]) ) => row2
+        VxVector v0(0.0f, -rootWorld[1][2], rootWorld[1][1]);
+        v0.Normalize();
+        m_WorldMatrix[2][0] = v0.x;
+        m_WorldMatrix[2][1] = v0.y;
+        m_WorldMatrix[2][2] = v0.z;
+
+        // IDA: v1 = normalize( (0, row2.z, -row2.y) ) => row1
+        VxVector v1(0.0f, m_WorldMatrix[2][2], -m_WorldMatrix[2][1]);
+        v1.Normalize();
+        m_WorldMatrix[1][0] = v1.x;
+        m_WorldMatrix[1][1] = v1.y;
+        m_WorldMatrix[1][2] = v1.z;
+
+        WorldMatrixChanged(TRUE, TRUE);
+    } else if (mode == VXSPRITE3D_YROTATE) {
+        // IDA: row1 = axisY
+        const VxVector &axisY = VxVector::axisY();
+        m_WorldMatrix[1][0] = axisY.x;
+        m_WorldMatrix[1][1] = axisY.y;
+        m_WorldMatrix[1][2] = axisY.z;
+
+        // IDA: v0 = normalize( (rootWorld[2][2], 0, -rootWorld[2][0]) ) => row0
+        VxVector v0(rootWorld[2][2], 0.0f, -rootWorld[2][0]);
+        v0.Normalize();
+        m_WorldMatrix[0][0] = v0.x;
+        m_WorldMatrix[0][1] = v0.y;
+        m_WorldMatrix[0][2] = v0.z;
+
+        // IDA: v1 = normalize( (-row0.z, 0, row0.x) ) => row2
+        VxVector v1(-m_WorldMatrix[0][2], 0.0f, m_WorldMatrix[0][0]);
+        v1.Normalize();
+        m_WorldMatrix[2][0] = v1.x;
+        m_WorldMatrix[2][1] = v1.y;
+        m_WorldMatrix[2][2] = v1.z;
+
+        WorldMatrixChanged(TRUE, TRUE);
+    }
+}
+
 //=============================================================================
 // Static Class Methods (for class registration)
 // Based on IDA Pro analysis of original CK2_3D.dll
@@ -412,13 +548,13 @@ Implementation based on decompilation at 0x10043580
 *************************************************/
 int RCKSprite3D::GetDependenciesCount(int mode) {
     switch (mode) {
-        case 1: // CK_DEPENDENCIES_COPY
+        case CK_DEPENDENCIES_COPY:
             return 1;
-        case 2: // CK_DEPENDENCIES_SAVE
+        case CK_DEPENDENCIES_DELETE:
             return 1;
-        case 3: // CK_DEPENDENCIES_DELETE
+        case CK_DEPENDENCIES_REPLACE:
             return 0;
-        case 4: // CK_DEPENDENCIES_REPLACE
+        case CK_DEPENDENCIES_SAVE:
             return 1;
         default:
             return 0;
@@ -471,7 +607,7 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
     CKSceneGraphNode *node = (CKSceneGraphNode *)m_SceneGraphNode;
     if (node) {
         // Set batch flag if clipping needed (flag bit 0 == 0 means not inside frustum)
-        batch->m_Flags |= ((node->m_Flags & 1) == 0) ? 1 : 0;
+        batch->m_Flags |= node->CheckHierarchyFrustum() ? 0 : 1;
     }
     
     // Expand vertex array by 4 vertices (one quad for the sprite)
@@ -481,54 +617,51 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
     
     // Get pointer to the 4 new vertices at the end
     CKVertex *vertices = batch->m_Vertices.Begin() + currentSize;
-    
-    // Get sprite dimensions from local bounding box
-    float width = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
-    float height = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
-    
-    // Get world matrix vectors (columns 0, 1, 3)
-    VxVector xAxis(m_WorldMatrix[0][0], m_WorldMatrix[0][1], m_WorldMatrix[0][2]);
-    VxVector yAxis(m_WorldMatrix[1][0], m_WorldMatrix[1][1], m_WorldMatrix[1][2]);
-    VxVector position(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
-    
-    // Scale axes by dimensions
-    VxVector scaledX = xAxis * width;
-    VxVector scaledY = yAxis * height;
-    
-    // Calculate offset multipliers (offset goes from -1 to 1, convert to 0 to 1 range)
-    float offsetX = (m_Offset.x - 1.0f) * 0.5f;
-    float offsetY = (m_Offset.y - 1.0f) * 0.5f;
-    
-    // Calculate corner offset vectors
-    VxVector xOffset = scaledX * offsetX;
-    VxVector yOffset = scaledY * offsetY;
-    
-    // Calculate base corner position (bottom-left based on offset)
-    VxVector basePos = position + xOffset + yOffset;
-    
-    // Calculate 4 corner positions
-    // Vertex 0: base position (bottom-left)
+
+    // Dimensions from local bbox
+    const float width = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
+    const float height = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
+
+    // World matrix columns 0 and 1 scaled by size, plus translation (row 3)
+    const VxVector scaledX(
+        m_WorldMatrix[0][0] * width,
+        m_WorldMatrix[0][1] * width,
+        m_WorldMatrix[0][2] * width);
+    const VxVector scaledY(
+        m_WorldMatrix[1][0] * height,
+        m_WorldMatrix[1][1] * height,
+        m_WorldMatrix[1][2] * height);
+
+    const VxVector position(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
+
+    // Offsets are (offset - 1) * 0.5 per IDA
+    const float offsetX = (m_Offset.x - 1.0f) * 0.5f;
+    const float offsetY = (m_Offset.y - 1.0f) * 0.5f;
+
+    const VxVector basePos = position + (scaledX * offsetX) + (scaledY * offsetY);
+
+    // Vertex 0: base
     vertices[0].V.x = basePos.x;
     vertices[0].V.y = basePos.y;
     vertices[0].V.z = basePos.z;
     vertices[0].V.w = 1.0f;
-    
-    // Vertex 1: base + Y (top-left)
-    VxVector pos1 = basePos + scaledY;
+
+    // Vertex 1: base + Y
+    const VxVector pos1 = basePos + scaledY;
     vertices[1].V.x = pos1.x;
     vertices[1].V.y = pos1.y;
     vertices[1].V.z = pos1.z;
     vertices[1].V.w = 1.0f;
-    
-    // Vertex 2: base + X + Y (top-right)
-    VxVector pos2 = pos1 + scaledX;
+
+    // Vertex 2: base + Y + X
+    const VxVector pos2 = pos1 + scaledX;
     vertices[2].V.x = pos2.x;
     vertices[2].V.y = pos2.y;
     vertices[2].V.z = pos2.z;
     vertices[2].V.w = 1.0f;
-    
-    // Vertex 3: base + X (bottom-right)
-    VxVector pos3 = basePos + scaledX;
+
+    // Vertex 3: base + X
+    const VxVector pos3 = basePos + scaledX;
     vertices[3].V.x = pos3.x;
     vertices[3].V.y = pos3.y;
     vertices[3].V.z = pos3.z;
@@ -561,31 +694,83 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
 //=============================================================================
 
 CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
-    RCKRenderContext *rc = (RCKRenderContext *)Dev;
-    
-    // Check if transparent rendering is enabled (flag 0x20)
-    if ((m_MoveableFlags & 0x20) != 0) {
-        // Transparent object - handle callbacks and world matrix setup
-        if (m_Callbacks && (Flags & 0x100) == 0) {
-            rc->SetWorldTransformationMatrix(m_WorldMatrix);
+    RCKRenderContext *dev = (RCKRenderContext *)Dev;
+
+    // Local VxTimeProfiler constructed at entry (used by Dev debug mode).
+    VxTimeProfiler profiler;
+
+    // If VX_MOVEABLE_EXTENTSUPTODATE is set (0x20), the object is treated as transparent / already-validated.
+    if ((m_MoveableFlags & VX_MOVEABLE_EXTENTSUPTODATE) != 0) {
+        if (m_Callbacks && (Flags & CK_RENDER_CLEARVIEWPORT) == 0) {
+            dev->SetWorldTransformationMatrix(m_WorldMatrix);
         }
     } else {
-        // Normal rendering - check if in view frustum first
         if (!IsInViewFrustrum(Dev, Flags)) {
-            return TRUE;  // Not visible, but not an error
+            if ((dev->m_Flags & 1) != 0) {
+                dev->m_CurrentObjectDesc << m_Name;
+                if (IsToBeRenderedLast())
+                    dev->m_CurrentObjectDesc << " (as transparent Object)";
+                dev->m_CurrentObjectDesc << " : " << "Not drawn";
+                dev->m_CurrentObjectDesc << profiler.Current() << " ms \n";
+                if (--dev->m_FpsInterval <= 0)
+                    dev->BackToFront(CK_RENDER_USECURRENTSETTINGS);
+            }
+            return TRUE;
         }
     }
-    
-    // Add sprite to batch for rendering if we have a material
-    if (m_Material) {
-        rc->AddSprite3DBatch(this);
+
+    if (m_Callbacks) {
+        if (m_Callbacks->m_PreCallBacks.Size() > 0) {
+            dev->m_ObjectsCallbacksTimeProfiler.Reset();
+            dev->m_RasterizerContext->SetVertexShader(0);
+
+            for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); ++i) {
+                VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
+                if (cb.callback) {
+                    ((CK_RENDEROBJECT_CALLBACK)cb.callback)(Dev, (CKRenderObject *)this, cb.argument);
+                }
+            }
+
+            dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
+        }
+
+        if (m_Material) {
+            dev->AddSprite3DBatch(this);
+        }
+
+        if (m_Callbacks->m_PostCallBacks.Size() > 0) {
+            dev->m_ObjectsCallbacksTimeProfiler.Reset();
+            dev->m_RasterizerContext->SetVertexShader(0);
+
+            for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); ++i) {
+                VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
+                if (cb.callback) {
+                    ((CK_RENDEROBJECT_CALLBACK)cb.callback)(Dev, (CKRenderObject *)this, cb.argument);
+                }
+            }
+
+            dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
+        }
+    } else {
+        if (m_Material) {
+            dev->AddSprite3DBatch(this);
+        }
     }
-    
-    // Update 2D extents if requested
-    if (Flags & 0xFF) {
-        rc->AddExtents2D(m_RenderExtents, (CKObject *)this);
+
+    if ((Flags & 0xFF) != 0) {
+        dev->AddExtents2D(m_RenderExtents, (CKObject *)this);
     }
-    
+
+    if ((dev->m_Flags & 1) != 0) {
+        dev->m_CurrentObjectDesc << m_Name;
+        if (IsToBeRenderedLast())
+            dev->m_CurrentObjectDesc << " (as transparent Object)";
+        dev->m_CurrentObjectDesc << " : " << "Drawn";
+        dev->m_CurrentObjectDesc << profiler.Current() << " ms \n";
+        if (--dev->m_FpsInterval <= 0)
+            dev->BackToFront(CK_RENDER_USECURRENTSETTINGS);
+    }
+
     return TRUE;
 }
 
@@ -641,31 +826,35 @@ int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
     
     // Fill in intersection description if provided
     if (Desc) {
-        // Calculate actual distance along original ray
-        VxVector worldDir;
-        worldDir.x = Pos2->x - Pos1->x;
-        worldDir.y = Pos2->y - Pos1->y;
-        worldDir.z = Pos2->z - Pos1->z;
-        float rayLength = sqrtf(worldDir.x * worldDir.x + worldDir.y * worldDir.y + worldDir.z * worldDir.z);
-        Desc->Distance = t * rayLength;
-        
+        Desc->Distance = t;
+
+        // Scale distance by the input segment length (in the referential given by Ref)
+        VxVector dir;
+        dir.x = Pos2->x - Pos1->x;
+        dir.y = Pos2->y - Pos1->y;
+        dir.z = Pos2->z - Pos1->z;
+        Desc->Distance = Magnitude(dir) * Desc->Distance;
+
         Desc->FaceIndex = 0;
         Desc->IntersectionPoint = intersectPoint;
-        
-        // Calculate texture coordinates
-        float uvWidth = m_Rect.GetWidth();
-        float uvHeight = m_Rect.GetHeight();
-        float spriteWidth = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
-        float spriteHeight = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
-        
-        Desc->TexU = m_Rect.left + (intersectPoint.x - m_LocalBoundingBox.Min.x) * uvWidth / spriteWidth;
+
+        const float uvWidth = m_Rect.GetWidth();
+        const float uvHeight = m_Rect.GetHeight();
+        const float spriteWidth = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
+        const float spriteHeight = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
+
+        Desc->TexU = (intersectPoint.x - m_LocalBoundingBox.Min.x) * uvWidth / spriteWidth + m_Rect.left;
         Desc->TexV = m_Rect.bottom - (intersectPoint.y - m_LocalBoundingBox.Min.y) * uvHeight / spriteHeight;
-        
-        // Set normal pointing towards negative Z (towards viewer)
+
+        // Precise alpha-tested pick (material alpha ref + texture)
+        if (m_Material && !PreciseTexturePick(m_Material, Desc->TexU, Desc->TexV)) {
+            return 0;
+        }
+
         Desc->IntersectionNormal.x = 0.0f;
         Desc->IntersectionNormal.y = 0.0f;
         Desc->IntersectionNormal.z = -1.0f;
     }
-    
+
     return 1;  // Intersection found
 }
