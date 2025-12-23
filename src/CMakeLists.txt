@@ -86,6 +86,9 @@ set(CKRE_SOURCES
         CKSpriteText.cpp
         CKSkin.cpp
 
+        NearestPointGrid.cpp
+        PlaceFitter.cpp
+
         CKRenderedScene.cpp
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
