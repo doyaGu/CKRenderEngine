@@ -406,7 +406,7 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // Return early if no file context and not in specific save modes
-    if (!file && (flags & CK_STATESAVE_LIGHTONLY) == 0) {
+    if (!file && !(flags & CK_STATESAVE_LIGHTONLY)) {
         return baseChunk;
     }
 
@@ -420,7 +420,7 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     lightChunk->AddChunkAndDelete(baseChunk);
 
     // Write main light data with identifier 0x400000
-    lightChunk->WriteIdentifier(0x400000);
+    lightChunk->WriteIdentifier(CK_STATESAVE_LIGHTDATA);
 
     // Combine light type and flags for efficient storage
     CKDWORD typeAndFlags = m_LightData.Type | m_Flags;
@@ -429,7 +429,7 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     // Convert diffuse color to packed DWORD format (ARGB with alpha forced to 0xFF)
     // IDA: sub_1001BA90 returns RGBAFTOCOLOR(this) | 0xFF000000
     // RGBAFTOCOLOR uses: (A << 24) | (R << 16) | (G << 8) | (B << 0)
-    CKDWORD packedColor = RGBAFTOCOLOR(&m_LightData.Diffuse) | 0xFF000000;
+    CKDWORD packedColor = RGBAFTOCOLOR(&m_LightData.Diffuse) | A_MASK;
     lightChunk->WriteDword(packedColor);
 
     // Write attenuation and range
@@ -447,7 +447,7 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
 
     // Save light power if different from default
     if (m_LightPower != 1.0f) {
-        lightChunk->WriteIdentifier(0x800000);
+        lightChunk->WriteIdentifier(CK_STATESAVE_LIGHTDATA2);
         lightChunk->WriteFloat(m_LightPower);
     }
 
@@ -497,7 +497,7 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Handle legacy format (data version < 5)
     if (chunk->GetDataVersion() < 5) {
-        if (chunk->SeekIdentifier(0x400000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_LIGHTDATA)) {
             m_LightData.Type = (VXLIGHT_TYPE) chunk->ReadDword();
 
             // Read diffuse color components
@@ -530,11 +530,11 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
     }
     // Current format (data version >= 5)
     else {
-        if (chunk->SeekIdentifier(0x400000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_LIGHTDATA)) {
             // Unpack light type and flags from combined DWORD
             CKDWORD typeAndFlags = chunk->ReadDword();
             m_LightData.Type = (VXLIGHT_TYPE) (typeAndFlags & 0xFF);
-            m_Flags = typeAndFlags & 0xFFFFFF00;
+            m_Flags = typeAndFlags & ~0xFF;
 
             // Convert packed color DWORD back to VxColor
             // IDA: sub_10016990 unpacks ARGB format:
@@ -561,7 +561,7 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Read light power if present
-        if (chunk->SeekIdentifier(0x800000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_LIGHTDATA2)) {
             m_LightPower = chunk->ReadFloat();
         } else {
             m_LightPower = 1.0f;
@@ -731,7 +731,7 @@ CKSTRING RCKLight::GetDependencies(int i, int mode) {
 
 void RCKLight::Register() {
     // Register associated parameter GUID
-    CKClassRegisterAssociatedParameter(RCKLight::m_ClassID, CKPGUID_LIGHT);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_LIGHT);
 }
 
 CKLight *RCKLight::CreateInstance(CKContext *Context) {
