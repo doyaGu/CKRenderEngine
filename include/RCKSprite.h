@@ -32,6 +32,8 @@ public:
 
     CKERROR Draw(CKRenderContext *dev) override;
 
+    void RestoreInitialSize() override;
+
     void CopySpriteData(RCKSprite *src);
 
     static CKSTRING GetClassName();
