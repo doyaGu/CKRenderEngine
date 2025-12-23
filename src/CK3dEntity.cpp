@@ -2,16 +2,15 @@
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKMesh.h"
+#include "RCKObjectAnimation.h"
 #include "RCKSkin.h"
 #include "CKSkin.h"
 #include "CKMesh.h"
-#include "CKObjectAnimation.h"
 #include "CKSceneGraph.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKPlace.h"
 #include "CKScene.h"
-#include "CKLevel.h"
 #include "CKDependencies.h"
 #include "CKRasterizer.h"
 #include "VxMath.h"
@@ -21,25 +20,6 @@ extern int (*g_RayIntersection)(RCKMesh *, VxVector &, VxVector &, VxIntersectio
 
 #define ENTITY_DEBUG_LOG(msg) CK_LOG("3dEntity", msg)
 #define ENTITY_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("3dEntity", fmt, __VA_ARGS__)
-
-
-// Moveable flags that may not be defined in SDK
-#ifndef VX_MOVEABLE_NOANIMALIASING
-#define VX_MOVEABLE_NOANIMALIASING 0x00000800
-#endif
-#ifndef VX_MOVEABLE_ALLINSIDE
-#define VX_MOVEABLE_ALLINSIDE 0x00001000
-#endif
-#ifndef VX_MOVEABLE_ALLOUTSIDE
-#define VX_MOVEABLE_ALLOUTSIDE 0x00002000
-#endif
-
-// Helper function for matrix inverse multiply (A^-1 * B)
-inline void Vx3DMultiplyMatrixInverse(VxMatrix &result, const VxMatrix &A, const VxMatrix &B) {
-    VxMatrix invA;
-    Vx3DInverseMatrix(invA, A);
-    Vx3DMultiplyMatrix(result, invA, B);
-}
 
 /*************************************************
 Summary: PostLoad method for RCK3dEntity.
@@ -59,29 +39,24 @@ Implementation based on decompilation at 0x1000A138:
 void RCK3dEntity::PostLoad() {
     ENTITY_DEBUG_LOG_FMT("PostLoad: Starting for entity=%p meshes=%d currentMesh=%p", 
                          this, m_Meshes.Size(), m_CurrentMesh);
-    
-    // Based on original implementation at 0x1000a138:
-    // 1. Update skin if it exists
+
     if (m_Skin) {
         UpdateSkin();
     }
 
-    // 2. Process object animations if any exist
-    // Apply current scale to all animations to maintain proper proportions
     if (m_ObjectAnimations && m_ObjectAnimations->Size() > 0) {
         VxVector scale;
-        GetScale(&scale, 1);
+        GetScale(&scale, TRUE);
 
-        // Iterate through all object animations and apply scale
-        // Based on decompilation: uses XClassArray::Begin/End and sub_1005A56A
-        // Note: sub_1005A56A applies scale to animation - implementation TBD
+        for (CKObject **it = m_ObjectAnimations->Begin(); it != m_ObjectAnimations->End(); ++it) {
+            RCKObjectAnimation *anim = (RCKObjectAnimation *)*it;
+            if (anim)
+                anim->CheckScaleKeys(scale);
+        }
     }
 
-    // 3. Call base class PostLoad
-    // NOTE: Original does NOT add entities to RenderContext in PostLoad!
-    // Entity registration happens through AddToScene() or explicit AddObject() calls
     CKObject::PostLoad();
-    
+
     ENTITY_DEBUG_LOG_FMT("PostLoad: Complete for entity=%p", this);
 }
 
@@ -119,10 +94,10 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     ENTITY_DEBUG_LOG_FMT("Load: Starting for entity %s", GetName() ? GetName() : "(null)");
 
     // Call base class load first to handle basic object data
-    CKERROR result = CKBeObject::Load(chunk, file);
-    if (result != CK_OK) {
-        ENTITY_DEBUG_LOG_FMT("Load: Base class load failed with error %d", result);
-        return result;
+    CKERROR err = CKBeObject::Load(chunk, file);
+    if (err != CK_OK) {
+        ENTITY_DEBUG_LOG_FMT("Load: Base class load failed with error %d", err);
+        return err;
     }
     
     // Log the object flags IMMEDIATELY after CKBeObject::Load to see what SDK restored
@@ -134,12 +109,11 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     CKDWORD preservedFlags = GetMoveableFlags() & VX_MOVEABLE_WORLDALIGNED;
 
     // Initialize identity matrix for transformation
-    VxMatrix worldMatrix;
-    worldMatrix.SetIdentity();
+    VxMatrix worldMatrix = VxMatrix::Identity();
 
     // Load object animations (chunk 0x2000)
     // Deduplicate using last-pointer tracking as in IDA
-    if (chunk->SeekIdentifier(0x2000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_ANIMATION)) {
         if (!m_ObjectAnimations) {
             m_ObjectAnimations = new XObjectPointerArray();
         }
@@ -159,7 +133,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Load meshes (chunk 0x4000)
     // Based on IDA and docs: First reads current mesh, then mesh array
-    if (chunk->SeekIdentifier(0x4000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_MESHS)) {
         // Read current mesh object first
         CKMesh *currentMesh = (CKMesh *)chunk->ReadObject(m_Context);
         ENTITY_DEBUG_LOG_FMT("Load: Read current mesh = %p", currentMesh);
@@ -179,30 +153,24 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Set current mesh
-        if (currentMesh) {
-            // Original uses add_if_not_here = TRUE to keep array in sync
-            SetCurrentMesh(currentMesh, TRUE);
-            ENTITY_DEBUG_LOG_FMT("Load: Set current mesh to %p", m_CurrentMesh);
-        } else if (m_Meshes.Size() > 0) {
-            // Fallback: use first mesh if current mesh is NULL
-            SetCurrentMesh((CKMesh *)m_Meshes[0], TRUE);
-            ENTITY_DEBUG_LOG_FMT("Load: Set current mesh to first mesh %p", m_CurrentMesh);
-        }
+        SetCurrentMesh(currentMesh, TRUE);
+        ENTITY_DEBUG_LOG_FMT("Load: Set current mesh to %p", m_CurrentMesh);
     }
 
     // Load main entity data (chunk 0x100000) - new format
     // Matches IDA implementation @0x1000a7b9 EXACTLY
-    if (chunk->SeekIdentifier(0x100000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYNDATA)) {
         // IDA line 117: Dword = CKStateChunk::ReadDword(a2);
         CKDWORD entityFlags = chunk->ReadDword();
         
         // IDA line 118: this->SetFlags(this, Dword & 0xFFFFEFDF);
         // SetFlags stores (entityFlags & mask) to m_3dEntityFlags
         // The mask 0xFFFFEFDF clears bits 5 and 12, but preserves presence indicators
-        SetFlags(entityFlags & 0xFFFFEFDF);
-        
-        // IDA line 119: v53 = CKStateChunk::ReadDword(a2) & 0xBB3DBFEB;
-        CKDWORD moveableFlags = chunk->ReadDword() & 0xBB3DBFEB;
+        SetFlags(entityFlags & ~(CK_3DENTITY_RESERVED0 | CK_3DENTITY_UPDATELASTFRAME));
+
+        const CKDWORD moveableFlagsRaw = chunk->ReadDword();
+        const CKDWORD clearMask = VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID | VX_MOVEABLE_HASMOVED | VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT | VX_MOVEABLE_STENCILONLY | VX_MOVEABLE_RESERVED2;
+        CKDWORD moveableFlags = moveableFlagsRaw & ~clearMask;
 
         ENTITY_DEBUG_LOG_FMT("Load: entityFlags=0x%X moveableFlags=0x%X m_ObjectFlags=0x%X", 
                              entityFlags, moveableFlags, m_ObjectFlags);
@@ -292,32 +260,35 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         if (m_3dEntityFlags & CK_3DENTITY_ZORDERVALID) {
             int priority = chunk->ReadInt();
             if (m_SceneGraphNode) {
-                m_SceneGraphNode->SetPriority((CKWORD)priority, FALSE);
+                m_SceneGraphNode->SetPriority(priority, FALSE);
             }
         }
     }
 
-    // Legacy format loading for backward compatibility
     // Based on IDA: separate chunks for parent (0x8000), flags (0x10000), matrix (0x20000)
-    if (chunk->SeekIdentifier(0x8000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_PARENT)) {
         CK3dEntity *parent = (CK3dEntity *) chunk->ReadObject(m_Context);
         if (parent) {
-            SetParent(parent, FALSE);
+            SetParent(parent, TRUE);
         }
     }
 
-    if (chunk->SeekIdentifier(0x10000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYFLAGS)) {
         CKDWORD flags = chunk->ReadDword();
         SetFlags(flags);
 
-        CKDWORD moveable = chunk->ReadDword() & 0xFF3F00EB;
+        const CKDWORD moveableFlagsRaw = chunk->ReadDword();
+        CKDWORD moveableFlags = moveableFlagsRaw & ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX);
+        moveableFlags &= ~ (VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT);
+        moveableFlags &= ~0xFF00;
+
         if (preservedFlags) {
-            moveable |= VX_MOVEABLE_WORLDALIGNED;
+            moveableFlags |= VX_MOVEABLE_WORLDALIGNED;
         }
-        SetMoveableFlags(moveable);
+        SetMoveableFlags(moveableFlags);
     }
 
-    if (chunk->SeekIdentifier(0x20000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYMATRIX)) {
         chunk->Skip(1);  // IDA shows a padding byte consumed before the matrix
         chunk->ReadMatrix(worldMatrix);
 
@@ -328,16 +299,18 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         VxVector cross = CrossProduct(row0, row1);
         float dot = DotProduct(cross, row2);
 
-        CKDWORD moveable = GetMoveableFlags();
+        CKDWORD moveableFlags = GetMoveableFlags();
         if (dot < 0.0f) {
-            moveable |= VX_MOVEABLE_INDIRECTMATRIX;
+            moveableFlags |= VX_MOVEABLE_INDIRECTMATRIX;
         } else {
-            moveable &= ~VX_MOVEABLE_INDIRECTMATRIX;
+            moveableFlags &= ~VX_MOVEABLE_INDIRECTMATRIX;
         }
-        SetMoveableFlags(moveable);
+        SetMoveableFlags(moveableFlags);
     }
 
-    // Set world matrix respecting file/context rules from original implementation
+    // Set world matrix respecting file/context rules from original implementation (IDA: 0x1000AE7C..0x1000AF11)
+    // - If file != NULL: always SetWorldMatrix
+    // - Else: SetWorldMatrix only when the preserved WORLDALIGNED flag is not set, OR when the current mesh has an initial value in the current scene.
     if (file) {
         SetWorldMatrix(worldMatrix, TRUE);
     } else {
@@ -347,15 +320,15 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         if (meshForInit && currentScene && currentScene->GetObjectInitialValue(meshForInit)) {
             shouldSetMatrix = FALSE;
         }
-        if (shouldSetMatrix) {
+        if (!shouldSetMatrix) {
             SetWorldMatrix(worldMatrix, TRUE);
         }
     }
 
     // Load skin data (chunk 0x200000) - complex vertex weighting system
     // Based on IDA: checks for chunk, calls CreateSkin(), reads bone/vertex data
-    if (chunk->SeekIdentifier(0x200000)) {
-        // Create skin if needed
+    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYSKINDATA)) {
+        // IDA: `if (SeekIdentifier && CreateSkin())`
         if (!m_Skin) {
             CreateSkin();
         }
@@ -363,56 +336,58 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         if (m_Skin) {
             const int dataVersion = chunk->GetDataVersion();
 
-            // Older files (<6) have an extra byte to skip
+            // IDA: if (DataVersion < 6) Skip(1)
             if (dataVersion < 6) {
                 chunk->Skip(1);
             }
 
-            // Read object initialization matrix
-            VxMatrix objectInitMatrix;
-            chunk->ReadMatrix(objectInitMatrix);
-            m_Skin->SetObjectInitMatrix(objectInitMatrix);
-            Vx3DInverseMatrix(m_Skin->m_InverseWorldMatrix, objectInitMatrix);
+            // IDA: ReadMatrix into m_ObjectInitMatrix then compute inverse
+            chunk->ReadMatrix(m_Skin->m_ObjectInitMatrix);
+            Vx3DInverseMatrix(m_Skin->m_InverseWorldMatrix, m_Skin->m_ObjectInitMatrix);
 
-            // Bones are stored as an object-ID sequence followed by flags/matrices
-            int boneCount = chunk->StartReadSequence();
+            // IDA: Sequence = StartReadSequence(); SetBoneCount(Sequence)
+            const int boneCount = chunk->StartReadSequence();
             m_Skin->SetBoneCount(boneCount);
 
-            for (int i = 0; i < boneCount; i++) {
+            // IDA: first loop reads bone objects
+            for (int i = 0; i < boneCount; ++i) {
+                CK3dEntity *boneEntity = (CK3dEntity *)chunk->ReadObject(m_Context);
                 CKSkinBoneData *boneData = m_Skin->GetBoneData(i);
                 if (boneData) {
-                    CK3dEntity *boneEntity = (CK3dEntity *)chunk->ReadObject(m_Context);
                     boneData->SetBone(boneEntity);
-                } else {
-                    // Consume the object even if we cannot store it
-                    chunk->ReadObject(m_Context);
                 }
             }
 
-            for (int i = 0; i < boneCount; i++) {
-                // Flags are currently unused; consume them to match layout
-                chunk->ReadDword();
-                VxMatrix boneMatrix;
-                chunk->ReadMatrix(boneMatrix);
-
+            // IDA: second loop reads bone flags + (optional skip) + matrix
+            for (int i = 0; i < boneCount; ++i) {
+                const CKDWORD boneFlags = chunk->ReadDword();
+                if (dataVersion < 6) {
+                    chunk->Skip(1);
+                }
                 CKSkinBoneData *boneData = m_Skin->GetBoneData(i);
                 if (boneData) {
-                    boneData->SetBoneInitialInverseMatrix(boneMatrix);
+                    if (RCKSkinBoneData *rckBoneData = dynamic_cast<RCKSkinBoneData *>(boneData)) {
+                        rckBoneData->SetFlags(boneFlags);
+                    }
+                    VxMatrix boneInitInv;
+                    chunk->ReadMatrix(boneInitInv);
+                    boneData->SetBoneInitialInverseMatrix(boneInitInv);
+                } else {
+                    VxMatrix dummy;
+                    chunk->ReadMatrix(dummy);
                 }
             }
 
-            // Read vertex data
-            int vertexCount = chunk->ReadInt();
+            // IDA: v44 = ReadInt(); SetVertexCount(v44)
+            const int vertexCount = chunk->ReadInt();
             m_Skin->SetVertexCount(vertexCount);
 
-            for (int i = 0; i < vertexCount; i++) {
+            for (int i = 0; i < vertexCount; ++i) {
+                const int vertexBoneCount = chunk->ReadInt();
                 RCKSkinVertexData *vertexData = static_cast<RCKSkinVertexData *>(m_Skin->GetVertexData(i));
-                if (!vertexData) {
-                    continue;
+                if (vertexData) {
+                    vertexData->SetBoneCount(vertexBoneCount);
                 }
-
-                int vertexBoneCount = chunk->ReadInt();
-                vertexData->SetBoneCount(vertexBoneCount);
 
                 if (dataVersion < 6) {
                     chunk->Skip(1);
@@ -420,41 +395,50 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
                 VxVector initPos;
                 chunk->ReadVector(&initPos);
-                vertexData->SetInitialPos(initPos);
+                if (vertexData) {
+                    vertexData->SetInitialPos(initPos);
+                }
 
                 if (dataVersion < 6) {
                     chunk->Skip(1);
                 }
 
-                // Read bone indices then weights (buffered in original implementation)
-                if (vertexBoneCount > 0) {
+                if (vertexBoneCount > 0 && vertexData) {
                     chunk->ReadAndFillBuffer_LEndian(4 * vertexBoneCount, (void *)vertexData->GetBonesArray());
+                } else if (vertexBoneCount > 0) {
+                    // Consume data even if vertex storage is missing.
+                    // We can't easily skip because format is little-endian arrays; read into a temp buffer.
+                    XArray<CKDWORD> tmp;
+                    tmp.Resize(vertexBoneCount);
+                    chunk->ReadAndFillBuffer_LEndian(4 * vertexBoneCount, tmp.Begin());
+                }
 
-                    if (dataVersion < 6) {
-                        chunk->Skip(1);
-                    }
+                if (dataVersion < 6) {
+                    chunk->Skip(1);
+                }
 
+                if (vertexBoneCount > 0 && vertexData) {
                     chunk->ReadAndFillBuffer_LEndian(4 * vertexBoneCount, (void *)vertexData->GetWeightsArray());
+                } else if (vertexBoneCount > 0) {
+                    XArray<float> tmp;
+                    tmp.Resize(vertexBoneCount);
+                    chunk->ReadAndFillBuffer_LEndian(4 * vertexBoneCount, tmp.Begin());
                 }
             }
 
-            // Read normal data if present (chunk 0x1000)
-            if (chunk->SeekIdentifier(0x1000)) {
-                int normalCount = chunk->ReadInt();
-                m_Skin->SetNormalCount(normalCount);
-
-                for (int i = 0; i < normalCount; i++) {
-                    VxVector normal;
-                    chunk->ReadVector(&normal);
-                    m_Skin->SetNormal(i, normal);
+            // IDA: normals chunk does NOT store a count; it stores exactly 12*vertexCount bytes.
+            if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYSKINDATANORMALS)) {
+                m_Skin->SetNormalCount(vertexCount);
+                if (vertexCount > 0) {
+                    chunk->ReadAndFillBuffer_LEndian(12 * vertexCount, m_Skin->m_Normals.Begin());
                 }
             }
         }
     }
 
     // Set default bounding box if needed
-    // Based on IDA: triggered when CK_3DENTITY_BBOXVALID (0x80000) and CK_OBJECT_VISIBLE are set
-    if ((m_3dEntityFlags & 0x80000) && (m_ObjectFlags & CK_OBJECT_VISIBLE)) {
+    // Based on IDA: triggered when CK_3DENTITY_BBOXVALID (0x80000) and CK_OBJECT_INTERFACEOBJ are set
+    if ((m_3dEntityFlags & CK_3DENTITY_PORTAL) && (m_ObjectFlags & CK_OBJECT_INTERFACEOBJ)) {
         VxBbox defaultBbox;
         defaultBbox.Min = VxVector(-1.0f, -1.0f, -1.0f);
         defaultBbox.Max = VxVector(1.0f, 1.0f, 1.0f);
@@ -497,26 +481,29 @@ void RCK3dEntity::PreSave(CKFile *file, CKDWORD flags) {
 
     // Save mesh objects (except for curves which don't have meshes)
     // Based on decompilation: checks GetClassID() != CKCID_CURVE
-    if (file && GetClassID() != CKCID_CURVE && m_Meshes.Size() > 0) {
-        file->SaveObjects((CKObject **)m_Meshes.Begin(), m_Meshes.Size(), flags);
+    if (file && GetClassID() != CKCID_CURVE) {
+        file->SaveObjects(m_Meshes.Begin(), m_Meshes.Size(), flags);
     }
 
     // Save object animations
     // Based on decompilation: checks m_ObjectAnimations pointer
-    if (file && m_ObjectAnimations && m_ObjectAnimations->Size() > 0) {
-        file->SaveObjects((CKObject **)m_ObjectAnimations->Begin(), m_ObjectAnimations->Size(), flags);
+    if (file && m_ObjectAnimations) {
+        file->SaveObjects(m_ObjectAnimations->Begin(), m_ObjectAnimations->Size(), flags);
     }
 
     // Handle skin-related mesh flags for proper rendering
     // Based on decompilation: checks m_Skin, calls GetCurrentMesh()
-    if (m_Skin && m_CurrentMesh) {
-        m_CurrentMesh->SetFlags(m_CurrentMesh->GetFlags() | 0x200000);
+    if (m_Skin) {
+        CKMesh *mesh = GetCurrentMesh();
+        if (mesh) {
+            mesh->SetFlags(mesh->GetFlags() | VXMESH_PROCEDURALPOS);
+        }
     }
 
     // Save children entities if requested by save flags
     // Based on decompilation: checks flags & 0x40000
-    if (file && (flags & CK_STATESAVE_3DENTITYHIERARCHY) && m_Children.Size() > 0) {
-        file->SaveObjects((CKObject **)m_Children.Begin(), m_Children.Size(), 0xFFFFFFFF);
+    if (file && (flags & CK_STATESAVE_3DENTITYHIERARCHY)) {
+        file->SaveObjects(m_Children.Begin(), m_Children.Size());
     }
 }
 
@@ -557,10 +544,7 @@ Return Value:
 CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
     // Get base class chunk first
     CKStateChunk *baseChunk = CKBeObject::Save(file, flags);
-
-    // Return early if no file and not in specific save modes
-    // Based on IDA: if (!file && (flags & 0x3FF000) == 0)
-    if (!file && (flags & CK_STATESAVE_3DENTITYONLY) == 0) {
+    if (!file && !(flags & CK_STATESAVE_3DENTITYONLY)) {
         return baseChunk;
     }
 
@@ -576,7 +560,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
     // Save mesh data (chunk 0x4000)
     // Based on IDA: checks GetClassID() != CKCID_CURVE and writes current mesh first
     if (GetClassID() != CKCID_CURVE && (m_CurrentMesh || m_Meshes.Size() > 0)) {
-        chunk->WriteIdentifier(0x4000);
+        chunk->WriteIdentifier(CK_STATESAVE_MESHS);
         chunk->WriteObject(m_CurrentMesh);
         m_Meshes.Save(chunk);
     }
@@ -584,17 +568,17 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
     // Save object animations (chunk 0x2000)
     // Based on IDA: checks m_ObjectAnimations pointer and size
     if (m_ObjectAnimations && m_ObjectAnimations->Size() > 0) {
-        chunk->WriteIdentifier(0x2000);
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATION);
         m_ObjectAnimations->Save(chunk);
     }
 
     // Save main entity data (chunk 0x100000)
     // Based on IDA Save function @0x1000a2b2
     {
-        chunk->WriteIdentifier(0x100000);
+        chunk->WriteIdentifier(CK_STATESAVE_3DENTITYNDATA);
 
         // Get Place object for presence check
-        CKObject *placeObject = m_Context->GetObjectA(m_Place);
+        CKObject *placeObject = m_Context->GetObject(m_Place);
         
         // Build entity flags (stored in m_3dEntityFlags)
         // Based on IDA: conditionally sets/clears presence indicator bits
@@ -613,7 +597,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
         }
         
         // CK_3DENTITY_ZORDERVALID (0x100000) - has priority
-        int priority = m_SceneGraphNode ? m_SceneGraphNode->m_Priority : 0;
+        int priority = GetZOrder();
         if (priority != 0) {
             m_3dEntityFlags |= CK_3DENTITY_ZORDERVALID;
         } else {
@@ -622,7 +606,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 
         // Write entity flags and moveable flags
         chunk->WriteDword(m_3dEntityFlags);
-        chunk->WriteInt(GetMoveableFlags());
+        chunk->WriteDword(GetMoveableFlags());
 
         // Write world matrix as 4 row vectors
         // Based on IDA: uses sub_1000C160 to extract row vectors
@@ -656,7 +640,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
     // Save skin data (chunk 0x200000)
     // Based on IDA: checks m_Skin, writes bone/vertex data
     if (m_Skin) {
-        chunk->WriteIdentifier(0x200000);
+        chunk->WriteIdentifier(CK_STATESAVE_3DENTITYSKINDATA);
 
         // Write object initialization matrix
         chunk->WriteMatrix(m_Skin->GetObjectInitMatrix());
@@ -713,7 +697,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
         // Write normal data if present (chunk 0x1000)
         int normalCount = m_Skin->GetNormalCount();
         if (normalCount > 0 && normalCount == m_Skin->GetVertexCount()) {
-            chunk->WriteIdentifier(0x1000);
+            chunk->WriteIdentifier(CK_STATESAVE_3DENTITYSKINDATANORMALS);
             chunk->WriteInt(normalCount);
 
             for (int i = 0; i < normalCount; i++) {
@@ -737,28 +721,21 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 // RCK3dEntity Constructor/Destructor
 // =====================================================
 
-RCK3dEntity::RCK3dEntity(CKContext *Context, CKSTRING name)
-    : RCKRenderObject(Context, name),
-      m_Parent(nullptr),
-      m_Meshes(),
-      m_CurrentMesh(nullptr),
-      m_Place(0),
-      m_ObjectAnimations(nullptr),  // Pointer to dynamically allocated array
-      m_3dEntityFlags(0),           // CK_3DENTITY_FLAGS
-      m_LastFrameMatrix(nullptr),  // Pointer, not DWORD - based on IDA destructor using operator delete
-      m_Skin(nullptr),
-      m_MoveableFlags(0x4000B),  // Default from IDA: VX_MOVEABLE_VISIBLE | VX_MOVEABLE_PICKABLE | 0x40008
-      m_SceneGraphNode(nullptr) {
-    // Initialize matrices to identity - based on IDA constructor calling sub_1000C180 (SetIdentity)
-    m_LocalMatrix.SetIdentity();
-    m_WorldMatrix.SetIdentity();
-    m_InverseWorldMatrix.SetIdentity();
-    
+RCK3dEntity::RCK3dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Context, name) {
+    m_Place = 0;
+    m_Parent = nullptr;
+    m_3dEntityFlags = 0,
+    m_CurrentMesh = nullptr;
+    m_ObjectAnimations = nullptr,
+    m_Skin = nullptr,
+    m_LastFrameMatrix = nullptr,
 
-    // Default render extents (VxRect ctor sets zeros in IDA)
-    m_RenderExtents.left = m_RenderExtents.top = 0.0f;
-    m_RenderExtents.right = m_RenderExtents.bottom = 0.0f;
-    
+    m_LocalMatrix = VxMatrix::Identity();
+    m_WorldMatrix = VxMatrix::Identity();
+    m_InverseWorldMatrix = VxMatrix::Identity();
+
+    m_MoveableFlags = VX_MOVEABLE_PICKABLE | VX_MOVEABLE_VISIBLE | VX_MOVEABLE_WORLDALIGNED | VX_MOVEABLE_RENDERCHANNELS;
+
     // Create scene graph node - critical for rendering!
     // Based on IDA analysis at 0x10005086: RCK3dEntity constructor calls RCKRenderManager::CreateNode
     RCKRenderManager *renderManager = (RCKRenderManager *)m_Context->GetRenderManager();
@@ -786,70 +763,26 @@ Implementation based on decompilation at 0x100050b5:
 *************************************************/
 RCK3dEntity::~RCK3dEntity() {
     // Destroy skin if present
-    // IDA: if ( this->m_Skin ) RCK3dEntity::DestroySkin(this);
     if (m_Skin) {
-        DestroySkin();
+        RCK3dEntity::DestroySkin();
     }
-    
-    // Delete object animations array if allocated
-    // IDA: if ( this->m_ObjectAnimations.m_Begin ) sub_1000BCB0(...)
-    if (m_ObjectAnimations) {
-        delete m_ObjectAnimations;
-        m_ObjectAnimations = nullptr;
-    }
-    
-    // Delete last frame matrix if allocated
-    // IDA: operator delete(this->m_LastFrameMatrix);
-    if (m_LastFrameMatrix) {
-        delete m_LastFrameMatrix;
-        m_LastFrameMatrix = nullptr;
-    }
-    
-    // Clean up scene graph node
-    // IDA: if ( this->m_SceneGraphNode ) sub_1000BCE0(...)
-    if (m_SceneGraphNode) {
-        delete m_SceneGraphNode;
-        m_SceneGraphNode = nullptr;
-    }
-    
-    // Children array is cleared by XSObjectPointerArray destructor
-    // IDA: sub_1004A200(&this->m_Children);
-    // Also detach children from this parent
-    for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
-        RCK3dEntity *child = (RCK3dEntity *)*it;
-        if (child) {
-            child->m_Parent = nullptr;
-        }
-    }
-    
-    // Meshes array is cleared by XObjectPointerArray destructor
-    // IDA: sub_1001A080(&this->m_Meshs.m_Begin);
-    
-    // Base class destructor called automatically
 }
 
 CK_CLASSID RCK3dEntity::GetClassID() {
-    return CKCID_3DENTITY;
+    return m_ClassID;
 }
 
 int RCK3dEntity::GetMemoryOccupation() {
-    // Calculate memory used by this entity
-    int size = CKRenderObject::GetMemoryOccupation();
+    // IDA: 0x1000A0AC
+    int size = RCKRenderObject::GetMemoryOccupation() + 336;
+    size += m_Meshes.GetMemoryOccupation(FALSE);
+    size += m_Children.GetMemoryOccupation(FALSE);
 
-    // Add matrix storage
-    size += sizeof(VxMatrix) * 3; // Local, World, InverseWorld
-
-    // Add bounding boxes
-    size += sizeof(VxBbox) * 2;
-
-    // Add children array
-    size += sizeof(void *) * m_Children.Size();
-
-    // Add meshes array
-    size += sizeof(void *) * m_Meshes.Size();
-
-    // Add animations array
-    size += m_ObjectAnimations ? sizeof(void *) * m_ObjectAnimations->Size() : 0;
+    if (m_Callbacks) {
+        size += m_Callbacks->m_PreCallBacks.GetMemoryOccupation(FALSE);
+        size += m_Callbacks->m_PostCallBacks.GetMemoryOccupation(FALSE);
+        size += 28;
+    }
 
     return size;
 }
@@ -863,13 +796,10 @@ int RCK3dEntity::GetChildrenCount() const {
 }
 
 CK3dEntity *RCK3dEntity::GetChild(int pos) const {
-    // IDA: return *std::vector<void*>::operator[](&this->m_Children.m_Begin, pos);
-    // Original has NO bounds checking - matches binary behavior
     return (CK3dEntity *) m_Children[pos];
 }
 
 CKBOOL RCK3dEntity::SetParent(CK3dEntity *Parent, CKBOOL KeepWorldPos) {
-    // IDA: RCK3dEntity::SetParent at 0x1000932b
     RCK3dEntity *parent = (RCK3dEntity *) Parent;
     
     // Cannot parent to self
@@ -881,7 +811,7 @@ CKBOOL RCK3dEntity::SetParent(CK3dEntity *Parent, CKBOOL KeepWorldPos) {
         return TRUE;
     
     // Cannot parent a Place to another Place
-    if (CKIsChildClassOf(this, CKCID_PLACE) && CKIsChildClassOf(parent, CKCID_PLACE))
+    if (CKIsChildClassOf(this, CKCID_PLACE) && parent && CKIsChildClassOf(parent, CKCID_PLACE))
         return FALSE;
     
     // Check for cycles - cannot parent to a descendant
@@ -916,7 +846,7 @@ CKBOOL RCK3dEntity::SetParent(CK3dEntity *Parent, CKBOOL KeepWorldPos) {
     } else {
         // No parent - check if object should be added to root scene graph
         // Only add to root if not marked for deletion (CK_OBJECT_TOBEDELETED = 0x10)
-        if (!(m_ObjectFlags & CK_OBJECT_TOBEDELETED) && m_SceneGraphNode) {
+        if (!IsToBeDeleted() && m_SceneGraphNode) {
             RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
             if (rm && rm->GetRootNode()) {
                 rm->GetRootNode()->AddNode(m_SceneGraphNode);
@@ -936,9 +866,9 @@ CKBOOL RCK3dEntity::SetParent(CK3dEntity *Parent, CKBOOL KeepWorldPos) {
         }
     } else {
         // Local matrix stays, world matrix needs recalculation
-        LocalMatrixChanged(0, 1);
+        LocalMatrixChanged(FALSE, TRUE);
     }
-    
+
     // Update Place reference
     CK_ID newPlace = 0;
     if (CKIsChildClassOf(parent, CKCID_PLACE)) {
@@ -961,15 +891,12 @@ CK3dEntity *RCK3dEntity::GetParent() const {
 }
 
 CKBOOL RCK3dEntity::AddChild(CK3dEntity *Child, CKBOOL KeepWorldPos) {
-    // IDA: if (Child) return Child->SetParent(this, KeepWorldPos); else return 0;
-    if (Child)
-        return ((RCK3dEntity *)Child)->SetParent((CK3dEntity *)this, KeepWorldPos);
-    return FALSE;
+    if (!Child)
+        return FALSE;
+    return ((RCK3dEntity *)Child)->SetParent((CK3dEntity *)this, KeepWorldPos);
 }
 
 CKBOOL RCK3dEntity::AddChildren(const XObjectPointerArray &Children, CKBOOL KeepWorldPos) {
-    // IDA: AddChildren at 0x10009582
-    // First pass: Mark all objects with CK_OBJECT_TEMPMARKER (0x800)
     for (CKObject **it = Children.Begin(); it != Children.End(); ++it) {
         if (*it) {
             (*it)->ModifyObjectFlags(CK_OBJECT_TEMPMARKER, 0);
@@ -999,10 +926,9 @@ CKBOOL RCK3dEntity::AddChildren(const XObjectPointerArray &Children, CKBOOL Keep
 }
 
 CKBOOL RCK3dEntity::RemoveChild(CK3dEntity *Mov) {
-    // IDA: if (Mov) return Mov->SetParent(NULL, TRUE); else return 0;
-    if (Mov)
-        return Mov->SetParent(nullptr, TRUE);
-    return FALSE;
+    if (!Mov)
+        return FALSE;
+    return Mov->SetParent(nullptr, TRUE);
 }
 
 CKBOOL RCK3dEntity::CheckIfSameKindOfHierarchy(CK3dEntity *Mov, CKBOOL SameRecur) const {
@@ -1020,7 +946,7 @@ CKBOOL RCK3dEntity::CheckIfSameKindOfHierarchy(CK3dEntity *Mov, CKBOOL SameRecur
     if (SameRecur) {
         // Same order recursion - check children in order
         for (int i = 0; i < myChildCount; i++) {
-            RCK3dEntity *myChild = (RCK3dEntity *)const_cast<RCK3dEntity*>(this)->GetChild(i);
+            RCK3dEntity *myChild = (RCK3dEntity *)this->GetChild(i);
             CK3dEntity *otherChild = Mov->GetChild(i);
             if (!myChild->CheckIfSameKindOfHierarchy(otherChild, TRUE))
                 return FALSE;
@@ -1029,7 +955,7 @@ CKBOOL RCK3dEntity::CheckIfSameKindOfHierarchy(CK3dEntity *Mov, CKBOOL SameRecur
     } else {
         // Non-ordered matching - find any matching child
         for (int i = 0; i < myChildCount; i++) {
-            RCK3dEntity *myChild = (RCK3dEntity *)const_cast<RCK3dEntity*>(this)->GetChild(i);
+            RCK3dEntity *myChild = (RCK3dEntity *)this->GetChild(i);
             int k;
             for (k = 0; k < otherChildCount; k++) {
                 CK3dEntity *otherChild = Mov->GetChild(k);
@@ -1084,7 +1010,7 @@ CK3dEntity *RCK3dEntity::HierarchyParser(CK3dEntity *current) const {
     } else {
         // current is NULL - start from this object's first child
         if (m_Children.Size() > 0) {
-            return const_cast<RCK3dEntity *>(this)->GetChild(0);
+            return this->GetChild(0);
         }
         return nullptr;
     }
@@ -1110,10 +1036,10 @@ Implementation based on IDA decompilation at 0x100055dd:
   - If set: Register with render manager
 *************************************************/
 void RCK3dEntity::SetFlags(CKDWORD Flags) {
-    const CKDWORD oldUpdateLastFrame = m_3dEntityFlags & 0x1000;  // CK_3DENTITY_UPDATELASTFRAME
+    const CKDWORD oldUpdateLastFrame = m_3dEntityFlags & CK_3DENTITY_UPDATELASTFRAME;
     m_3dEntityFlags = Flags;
 
-    const CKBOOL updateLastFrame = (m_3dEntityFlags & 0x1000) != 0;
+    const CKBOOL updateLastFrame = (m_3dEntityFlags & CK_3DENTITY_UPDATELASTFRAME) != 0;
     RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
 
     // Register/unregister entity for last-frame tracking based on flag transition
@@ -1157,23 +1083,27 @@ CKBOOL RCK3dEntity::AreRenderChannelsVisible() const {
 }
 
 void RCK3dEntity::IgnoreAnimations(CKBOOL ignore) {
+    // IDA: 0x10005AC6
+    // Toggles CK_3DENTITY_IGNOREANIMATION (0x400) in 3D entity flags.
+    const CKDWORD flags = GetFlags();
     if (ignore) {
-        m_MoveableFlags |= VX_MOVEABLE_NOANIMALIASING;
+        SetFlags(flags | CK_3DENTITY_IGNOREANIMATION);
     } else {
-        m_MoveableFlags &= ~VX_MOVEABLE_NOANIMALIASING;
+        SetFlags(flags & ~CK_3DENTITY_IGNOREANIMATION);
     }
 }
 
 CKBOOL RCK3dEntity::AreAnimationIgnored() const {
-    return (m_MoveableFlags & VX_MOVEABLE_NOANIMALIASING) != 0;
+    // IDA: 0x10005AF9
+    return (GetFlags() & CK_3DENTITY_IGNOREANIMATION) != 0;
 }
 
 CKBOOL RCK3dEntity::IsAllInsideFrustrum() const {
-    return (m_MoveableFlags & VX_MOVEABLE_ALLINSIDE) != 0;
+    return m_SceneGraphNode && m_SceneGraphNode->CheckHierarchyFrustum();
 }
 
 CKBOOL RCK3dEntity::IsAllOutsideFrustrum() const {
-    return (m_MoveableFlags & VX_MOVEABLE_ALLOUTSIDE) != 0;
+    return m_SceneGraphNode && m_SceneGraphNode->IsAllOutsideFrustum();
 }
 
 void RCK3dEntity::SetRenderAsTransparent(CKBOOL Trans) {
@@ -1250,7 +1180,7 @@ CKDWORD RCK3dEntity::ModifyMoveableFlags(CKDWORD Add, CKDWORD Remove) {
         
         // Notify scene graph node
         if (m_SceneGraphNode) {
-            m_SceneGraphNode->EntityFlagsChanged(1);
+            m_SceneGraphNode->EntityFlagsChanged(TRUE);
         }
     }
     
@@ -1274,33 +1204,36 @@ CKDWORD RCK3dEntity::ModifyMoveableFlags(CKDWORD Add, CKDWORD Remove) {
 // =====================================================
 
 CKMesh *RCK3dEntity::GetCurrentMesh() const {
-    return (CKMesh *) m_CurrentMesh;
+    return m_CurrentMesh;
 }
 
 CKMesh *RCK3dEntity::SetCurrentMesh(CKMesh *m, CKBOOL add_if_not_here) {
-    CKMesh *old = (CKMesh *) m_CurrentMesh;
+    CKMesh *old = m_CurrentMesh;
 
-    if (add_if_not_here && m) {
-        // Check if mesh is in list
-        CKBOOL found = FALSE;
-        for (CKObject **it = m_Meshes.Begin(); it != m_Meshes.End(); ++it) {
-            if (*it == m) {
-                found = TRUE;
-                break;
-            }
-        }
-        if (!found) {
-            m_Meshes.PushBack(m);
-        }
+    if (old == m) {
+        return old;
+    }
+
+    if (m) {
+        SetBoundingBox(nullptr);
     }
 
     m_CurrentMesh = (RCKMesh *) m;
 
-    if (old != m) {
-        ENTITY_DEBUG_LOG_FMT(
-            "SetCurrentMesh: entity=%p name=%s old=%p new=%p add=%d size=%d",
-            this, GetName() ? GetName() : "(null)", old, m, add_if_not_here, m_Meshes.Size());
+    // Changing mesh invalidates cached boxes/skin update state.
+    m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
+    if (m_SceneGraphNode)
+        m_SceneGraphNode->InvalidateBox(TRUE);
+
+    if (m_CurrentMesh) {
+        if (add_if_not_here)
+            AddMesh(m);
     }
+
+    ENTITY_DEBUG_LOG_FMT(
+        "SetCurrentMesh: entity=%p name=%s old=%p new=%p add=%d size=%d",
+        this, GetName() ? GetName() : "(null)", old, m, add_if_not_here, m_Meshes.Size());
+
     return old;
 }
 
@@ -1318,10 +1251,7 @@ CKERROR RCK3dEntity::AddMesh(CKMesh *mesh) {
     if (!mesh)
         return CKERR_INVALIDPARAMETER;
 
-    m_Meshes.PushBack(mesh);
-    if (!m_CurrentMesh) {
-        m_CurrentMesh = (RCKMesh *) mesh;
-    }
+    m_Meshes.AddIfNotHere(mesh);
     ENTITY_DEBUG_LOG_FMT("AddMesh: entity=%p name=%s mesh=%p current=%p size=%d", this,
                          GetName() ? GetName() : "(null)", mesh, m_CurrentMesh, m_Meshes.Size());
     return CK_OK;
@@ -1331,18 +1261,17 @@ CKERROR RCK3dEntity::RemoveMesh(CKMesh *mesh) {
     if (!mesh)
         return CKERR_INVALIDPARAMETER;
 
-    for (CKObject **it = m_Meshes.Begin(); it != m_Meshes.End(); ++it) {
-        if (*it == mesh) {
-            m_Meshes.Remove(it);
-            if (m_CurrentMesh == (RCKMesh *) mesh) {
-                m_CurrentMesh = m_Meshes.Size() > 0 ? (RCKMesh *) m_Meshes[0] : nullptr;
-            }
-                ENTITY_DEBUG_LOG_FMT("RemoveMesh: entity=%p name=%s removed=%p newCurrent=%p size=%d", this,
-                                     GetName() ? GetName() : "(null)", mesh, m_CurrentMesh, m_Meshes.Size());
-            return CK_OK;
-        }
+    if (!m_Meshes.Erase(mesh))
+        return CKERR_NOTFOUND;
+
+    if (m_CurrentMesh == mesh) {
+        CKMesh *newCurrent = m_Meshes.Size() > 0 ? (CKMesh *) m_Meshes[0] : nullptr;
+        SetCurrentMesh(newCurrent, FALSE);
     }
-    return CKERR_NOTFOUND;
+
+    ENTITY_DEBUG_LOG_FMT("RemoveMesh: entity=%p name=%s removed=%p newCurrent=%p size=%d", this,
+                         GetName() ? GetName() : "(null)", mesh, m_CurrentMesh, m_Meshes.Size());
+    return CK_OK;
 }
 
 // =====================================================
@@ -1350,25 +1279,65 @@ CKERROR RCK3dEntity::RemoveMesh(CKMesh *mesh) {
 // =====================================================
 
 void RCK3dEntity::LookAt(const VxVector *Pos, CK3dEntity *Ref, CKBOOL KeepChildren) {
-    if (!Pos)
+    // IDA @ 0x10007D68
+    // - Reads current WORLD position from world matrix row 3
+    // - If Ref: transforms Pos by Ref->Transform(..., Ref=NULL)
+    // - dir = targetWorld - currentWorldPos
+    // - If |dir| < 1.1920929e-7, do nothing
+    // - If Cross(dir, currentDirAxis) is zero, do nothing
+    // - dir = Normalize(dir)
+    // - right = Cross(axisY, dir)
+    // - up    = Cross(dir, right)
+    // - If up.y == 0, do nothing
+    // - If Dot(up, oldUpAxis) < 0, negate up and right (avoid flip)
+    // - Calls SetOrientation(dir, up, right, Ref=NULL)
+
+    const VxVector currentWorldPos(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
+
+    VxVector targetWorld;
+    if (Ref) {
+        Ref->Transform(&targetWorld, Pos, nullptr);
+    } else {
+        targetWorld = *Pos;
+    }
+
+    VxVector dir = targetWorld - currentWorldPos;
+    const float dirLen = Magnitude(dir);
+    if (dirLen < EPSILON) {
         return;
+    }
 
-    VxVector target = *Pos;
-    VxVector position;
-    GetPosition(&position, Ref);
+    const VxVector currentDirAxis(m_WorldMatrix[2][0], m_WorldMatrix[2][1], m_WorldMatrix[2][2]);
+    const VxVector dirCrossCurrent = CrossProduct(dir, currentDirAxis);
+    if (SquareMagnitude(dirCrossCurrent) == 0.0f) {
+        return;
+    }
 
-    VxVector dir = target - position;
-    dir.Normalize();
+    dir = dir * (1.0f / dirLen);
 
-    VxVector up(0, 1, 0);
-    VxVector right = CrossProduct(up, dir);
-    right.Normalize();
-    up = CrossProduct(dir, right);
+    const VxVector *axisY = &VxVector::axisY();
+    VxVector right = CrossProduct(*axisY, dir);
+    VxVector up = CrossProduct(dir, right);
 
-    SetOrientation(&dir, &up, nullptr, Ref, KeepChildren);
+    if (fabsf(up.y) == 0.0f) {
+        return;
+    }
+
+    const VxVector oldUpAxis(m_WorldMatrix[1][0], m_WorldMatrix[1][1], m_WorldMatrix[1][2]);
+    if (DotProduct(up, oldUpAxis) < 0.0f) {
+        right = right * -1.0f;
+        up = up * -1.0f;
+    }
+
+    SetOrientation(&dir, &up, &right, nullptr, KeepChildren);
 }
 
 void RCK3dEntity::Rotate3f(float X, float Y, float Z, float Angle, CK3dEntity *Ref, CKBOOL KeepChildren) {
+    // IDA: 0x10008100
+    // If Angle == 0, do nothing (otherwise calls Rotate(vector,...)).
+    if (Angle == 0.0f)
+        return;
+
     VxVector axis(X, Y, Z);
     Rotate(&axis, Angle, Ref, KeepChildren);
 }
@@ -1386,21 +1355,19 @@ Implementation based on decompilation at 0x100077f5:
 - Call SetWorldMatrix to apply
 *************************************************/
 void RCK3dEntity::Rotate(const VxVector *Axis, float Angle, CK3dEntity *Ref, CKBOOL KeepChildren) {
-    if (!Axis)
-        return;
-    
     // IDA: if ( sub_100518A0(Angle) >= 0.00000011920929 ) - check angle threshold
-    if (fabsf(Angle) < 0.00000011920929f)
+    if (fabsf(Angle) < EPSILON)
         return;
-    
-    // Save original position
-    VxVector originalPos(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
+
+    // IDA takes the position from GetWorldMatrix()
+    const VxMatrix &world = GetWorldMatrix();
+    VxVector originalPos(world[3][0], world[3][1], world[3][2]);
     
     // Transform axis if Ref is provided
     VxVector worldAxis;
     if (Ref) {
         // IDA: Vx3DRotateVector(&v10, &Ref->m_WorldMatrix, Axis);
-        Vx3DRotateVector(&worldAxis, ((RCK3dEntity*)Ref)->m_WorldMatrix, Axis);
+        Vx3DRotateVector(&worldAxis, Ref->GetWorldMatrix(), Axis);
     } else {
         worldAxis = *Axis;
     }
@@ -1437,14 +1404,11 @@ Implementation based on decompilation at 0x10006bf9:
 - Call WorldPositionChanged to propagate
 *************************************************/
 void RCK3dEntity::Translate(const VxVector *Vect, CK3dEntity *Ref, CKBOOL KeepChildren) {
-    if (!Vect)
-        return;
-
     // IDA: v12 = *Vect; if (Ref) Ref->TransformVector(Ref, &v12, Vect, 0);
     VxVector trans = *Vect;
     if (Ref) {
         // Transform direction vector from Ref's local space to world space
-        ((RCK3dEntity *)Ref)->TransformVector(&trans, Vect, nullptr);
+        Ref->TransformVector(&trans, Vect, nullptr);
     }
     
     // IDA: Add to world matrix row 3 (translation)
@@ -1462,15 +1426,30 @@ void RCK3dEntity::AddScale3f(float X, float Y, float Z, CKBOOL KeepChildren, CKB
 }
 
 void RCK3dEntity::AddScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Local) {
-    if (!Scale)
-        return;
+    // IDA @ 0x10007C09
+    // - Builds a diagonal scale matrix (0 components are clamped to 1e-6)
+    // - Multiplies current matrix by that scale matrix
+    // - Calls SetLocalMatrix/SetWorldMatrix (not SetScale)
+    VxMatrix scaleMat;
+    scaleMat.SetIdentity();
 
-    VxVector current;
-    GetScale(&current, Local);
-    current.x *= Scale->x;
-    current.y *= Scale->y;
-    current.z *= Scale->z;
-    SetScale(&current, KeepChildren, Local);
+    constexpr float kEps = 0.000001f;
+    const float sx = (Scale->x == 0.0f) ? kEps : Scale->x;
+    const float sy = (Scale->y == 0.0f) ? kEps : Scale->y;
+    const float sz = (Scale->z == 0.0f) ? kEps : Scale->z;
+
+    scaleMat[0][0] = sx;
+    scaleMat[1][1] = sy;
+    scaleMat[2][2] = sz;
+
+    VxMatrix newMat;
+    if (Local) {
+        Vx3DMultiplyMatrix(newMat, m_LocalMatrix, scaleMat);
+        SetLocalMatrix(newMat, KeepChildren);
+    } else {
+        Vx3DMultiplyMatrix(newMat, m_WorldMatrix, scaleMat);
+        SetWorldMatrix(newMat, KeepChildren);
+    }
 }
 
 void RCK3dEntity::SetPosition3f(float X, float Y, float Z, CK3dEntity *Ref, CKBOOL KeepChildren) {
@@ -1495,28 +1474,19 @@ void RCK3dEntity::SetPosition(const VxVector *Pos, CK3dEntity *Ref, CKBOOL KeepC
     //      else memcpy(v5, Pos, 0xCu);
     //      RCK3dEntity::WorldPositionChanged(this, KeepChildren, 1);
     
-    if (!Pos)
-        return;
-    
     // Get pointer to translation component (row 3) of world matrix
-    float *worldPos = &m_WorldMatrix[3][0];
-    
+    VxVector *worldPos = &m_WorldMatrix[3];
+
     if (Ref) {
-        // Transform position from Ref space to world space
-        VxVector result;
-        ((RCK3dEntity *)Ref)->Transform(&result, Pos, nullptr);
-        worldPos[0] = result.x;
-        worldPos[1] = result.y;
-        worldPos[2] = result.z;
+        // IDA writes directly into the translation vector via Ref->Transform(..., 0)
+        Ref->Transform(worldPos, Pos, nullptr);
     } else {
-        // Direct copy
-        worldPos[0] = Pos->x;
-        worldPos[1] = Pos->y;
-        worldPos[2] = Pos->z;
+        // Direct copy (12 bytes)
+        memcpy(worldPos, Pos, sizeof(VxVector));
     }
     
     // Propagate changes - keepScale=1 preserves scale in bounding box calculations
-    WorldPositionChanged(KeepChildren, 1);
+    WorldPositionChanged(KeepChildren, TRUE);
 }
 
 /*************************************************
@@ -1529,9 +1499,6 @@ Implementation based on decompilation at 0x10006b51:
 - If Ref is null: return world position directly
 *************************************************/
 void RCK3dEntity::GetPosition(VxVector *Pos, CK3dEntity *Ref) const {
-    if (!Pos)
-        return;
-
     if (Ref) {
         if (Ref == (CK3dEntity *)m_Parent) {
             // IDA: Return local matrix row 3 (position relative to parent)
@@ -1539,9 +1506,9 @@ void RCK3dEntity::GetPosition(VxVector *Pos, CK3dEntity *Ref) const {
             Pos->y = m_LocalMatrix[3][1];
             Pos->z = m_LocalMatrix[3][2];
         } else {
-            // Transform world position to Ref's local space
-            VxVector worldPos(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
-            ((RCK3dEntity *)Ref)->InverseTransform(Pos, &worldPos, nullptr);
+            // IDA passes a pointer to the world translation vector into Ref->InverseTransform(..., 0)
+            const VxVector *worldPos = &m_WorldMatrix[3];
+            Ref->InverseTransform(Pos, worldPos, nullptr);
         }
     } else {
         // Return world matrix row 3 (absolute world position)
@@ -1551,57 +1518,135 @@ void RCK3dEntity::GetPosition(VxVector *Pos, CK3dEntity *Ref) const {
     }
 }
 
-void RCK3dEntity::SetOrientation(const VxVector *Dir, const VxVector *Up, const VxVector *Right, CK3dEntity *Ref,
-                                 CKBOOL KeepChildren) {
-    VxVector d, u, r;
+void RCK3dEntity::SetOrientation(const VxVector *Dir, const VxVector *Up, const VxVector *Right, CK3dEntity *Ref, CKBOOL KeepChildren) {
+    // IDA @ 0x10006CC3
+    constexpr float kEps = 0.000001f;
 
-    if (Dir) d = *Dir;
-    else d = VxVector(0, 0, 1);
-    if (Up) u = *Up;
-    else u = VxVector(0, 1, 0);
+    VxVector prevScale;
+    GetScale(&prevScale, FALSE);
+    if (prevScale.x == 0.0f) prevScale.x = kEps;
+    if (prevScale.y == 0.0f) prevScale.y = kEps;
+    if (prevScale.z == 0.0f) prevScale.z = kEps;
 
-    d.Normalize();
-    r = CrossProduct(u, d);
-    r.Normalize();
-    u = CrossProduct(d, r);
+    // Write orientation axes (0.0f components are forced to 1e-6 before normalize+scale).
+    if (Ref) {
+        VxVector rotDir;
+        VxVector rotUp;
+        VxVector rotRight;
+        Vx3DRotateVector(&rotDir, Ref->GetWorldMatrix(), Dir);
+        Vx3DRotateVector(&rotUp, Ref->GetWorldMatrix(), Up);
+        if (Right) {
+            Vx3DRotateVector(&rotRight, Ref->GetWorldMatrix(), Right);
+        } else {
+            rotRight = CrossProduct(rotUp, rotDir);
+        }
 
-    // Set rotation part of world matrix
-    m_WorldMatrix[0][0] = r.x;
-    m_WorldMatrix[0][1] = r.y;
-    m_WorldMatrix[0][2] = r.z;
-    m_WorldMatrix[1][0] = u.x;
-    m_WorldMatrix[1][1] = u.y;
-    m_WorldMatrix[1][2] = u.z;
-    m_WorldMatrix[2][0] = d.x;
-    m_WorldMatrix[2][1] = d.y;
-    m_WorldMatrix[2][2] = d.z;
+        m_WorldMatrix[0][0] = (rotRight.x == 0.0f) ? kEps : rotRight.x;
+        m_WorldMatrix[0][1] = (rotRight.y == 0.0f) ? kEps : rotRight.y;
+        m_WorldMatrix[0][2] = (rotRight.z == 0.0f) ? kEps : rotRight.z;
 
-    // Update local matrix
-    if (m_Parent) {
-        Vx3DMultiplyMatrixInverse(m_LocalMatrix, m_Parent->m_WorldMatrix, m_WorldMatrix);
+        m_WorldMatrix[1][0] = (rotUp.x == 0.0f) ? kEps : rotUp.x;
+        m_WorldMatrix[1][1] = (rotUp.y == 0.0f) ? kEps : rotUp.y;
+        m_WorldMatrix[1][2] = (rotUp.z == 0.0f) ? kEps : rotUp.z;
+
+        m_WorldMatrix[2][0] = (rotDir.x == 0.0f) ? kEps : rotDir.x;
+        m_WorldMatrix[2][1] = (rotDir.y == 0.0f) ? kEps : rotDir.y;
+        m_WorldMatrix[2][2] = (rotDir.z == 0.0f) ? kEps : rotDir.z;
     } else {
-        m_LocalMatrix = m_WorldMatrix;
+        if (Right) {
+            m_WorldMatrix[0][0] = (Right->x == 0.0f) ? kEps : Right->x;
+            m_WorldMatrix[0][1] = (Right->y == 0.0f) ? kEps : Right->y;
+            m_WorldMatrix[0][2] = (Right->z == 0.0f) ? kEps : Right->z;
+        } else {
+            const VxVector cross = CrossProduct(*Up, *Dir);
+            m_WorldMatrix[0][0] = (cross.x == 0.0f) ? kEps : cross.x;
+            m_WorldMatrix[0][1] = (cross.y == 0.0f) ? kEps : cross.y;
+            m_WorldMatrix[0][2] = (cross.z == 0.0f) ? kEps : cross.z;
+        }
+
+        m_WorldMatrix[1][0] = (Up->x == 0.0f) ? kEps : Up->x;
+        m_WorldMatrix[1][1] = (Up->y == 0.0f) ? kEps : Up->y;
+        m_WorldMatrix[1][2] = (Up->z == 0.0f) ? kEps : Up->z;
+
+        m_WorldMatrix[2][0] = (Dir->x == 0.0f) ? kEps : Dir->x;
+        m_WorldMatrix[2][1] = (Dir->y == 0.0f) ? kEps : Dir->y;
+        m_WorldMatrix[2][2] = (Dir->z == 0.0f) ? kEps : Dir->z;
     }
 
-    // Update inverse
-    Vx3DInverseMatrix(m_InverseWorldMatrix, m_WorldMatrix);
+    // Re-apply existing per-axis scale.
+    // IDA does this in two steps: normalizedAxis = axis * (1.0 / Magnitude(axis)) ; scaledAxis = normalizedAxis * savedScale.
+    {
+        const VxVector axis(m_WorldMatrix[0][0], m_WorldMatrix[0][1], m_WorldMatrix[0][2]);
+        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
+        const VxVector normalized = axis * invMag;
+        const VxVector scaled = normalized * prevScale.x;
+        m_WorldMatrix[0][0] = scaled.x;
+        m_WorldMatrix[0][1] = scaled.y;
+        m_WorldMatrix[0][2] = scaled.z;
+    }
+    {
+        const VxVector axis(m_WorldMatrix[1][0], m_WorldMatrix[1][1], m_WorldMatrix[1][2]);
+        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
+        const VxVector normalized = axis * invMag;
+        const VxVector scaled = normalized * prevScale.y;
+        m_WorldMatrix[1][0] = scaled.x;
+        m_WorldMatrix[1][1] = scaled.y;
+        m_WorldMatrix[1][2] = scaled.z;
+    }
+    {
+        const VxVector axis(m_WorldMatrix[2][0], m_WorldMatrix[2][1], m_WorldMatrix[2][2]);
+        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
+        const VxVector normalized = axis * invMag;
+        const VxVector scaled = normalized * prevScale.z;
+        m_WorldMatrix[2][0] = scaled.x;
+        m_WorldMatrix[2][1] = scaled.y;
+        m_WorldMatrix[2][2] = scaled.z;
+    }
+
+    WorldMatrixChanged(KeepChildren, TRUE);
 }
 
 void RCK3dEntity::GetOrientation(VxVector *Dir, VxVector *Up, VxVector *Right, CK3dEntity *Ref) {
+    // IDA @ 0x1000758C
+    // - If Ref: computes (Ref^-1 * thisWorld), then returns normalized axes
+    // - Else: returns normalized axes from GetWorldMatrix()
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, Ref->GetInverseWorldMatrix(), m_WorldMatrix);
+
+        if (Right) {
+            Right->x = tmp[0][0];
+            Right->y = tmp[0][1];
+            Right->z = tmp[0][2];
+            Right->Normalize();
+        }
+        if (Up) {
+            Up->x = tmp[1][0];
+            Up->y = tmp[1][1];
+            Up->z = tmp[1][2];
+            Up->Normalize();
+        }
+        if (Dir) {
+            Dir->x = tmp[2][0];
+            Dir->y = tmp[2][1];
+            Dir->z = tmp[2][2];
+            Dir->Normalize();
+        }
+        return;
+    }
+
+    const VxMatrix &world = GetWorldMatrix();
     if (Right) {
-        Right->x = m_WorldMatrix[0][0];
-        Right->y = m_WorldMatrix[0][1];
-        Right->z = m_WorldMatrix[0][2];
+        *Right = VxVector(world[0][0], world[0][1], world[0][2]);
+        Right->Normalize();
     }
     if (Up) {
-        Up->x = m_WorldMatrix[1][0];
-        Up->y = m_WorldMatrix[1][1];
-        Up->z = m_WorldMatrix[1][2];
+        *Up = VxVector(world[1][0], world[1][1], world[1][2]);
+        Up->Normalize();
     }
     if (Dir) {
-        Dir->x = m_WorldMatrix[2][0];
-        Dir->y = m_WorldMatrix[2][1];
-        Dir->z = m_WorldMatrix[2][2];
+        *Dir = VxVector(world[2][0], world[2][1], world[2][2]);
+        Dir->Normalize();
     }
 }
 
@@ -1647,23 +1692,45 @@ void RCK3dEntity::PreDelete() {
 }
 
 void RCK3dEntity::CheckPreDeletion() {
-    CKRenderObject::CheckPreDeletion();
+    // IDA @ 0x1000B994
+    CKObject::CheckPreDeletion();
+
+    m_Meshes.Check();
+    if (m_CurrentMesh && m_CurrentMesh->IsToBeDeleted()) {
+        m_CurrentMesh = nullptr;
+    }
+
+    if (m_ObjectAnimations) {
+        m_ObjectAnimations->Check();
+    }
+
+    if (m_Skin) {
+        const int boneCount = m_Skin->GetBoneCount();
+        for (int i = 0; i < boneCount; ++i) {
+            CKSkinBoneData *boneData = m_Skin->GetBoneData(i);
+            if (!boneData)
+                continue;
+            CK3dEntity *bone = boneData->GetBone();
+            if (bone && bone->IsToBeDeleted()) {
+                boneData->SetBone(nullptr);
+            }
+        }
+    }
 }
 
 int RCK3dEntity::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
-    // Check meshes
-    for (CKObject **it = m_Meshes.Begin(); it != m_Meshes.End(); ++it) {
-        if (*it == o) return TRUE;
+    // IDA @ 0x1000A016
+    if (cid == CKCID_ANIMATION) {
+        if (m_ObjectAnimations && m_ObjectAnimations->FindObject(o))
+            return TRUE;
+        return FALSE;
     }
 
-    // Check animations
-    if (m_ObjectAnimations) {
-        for (CKObject **it = m_ObjectAnimations->Begin(); it != m_ObjectAnimations->End(); ++it) {
-            if (*it == o) return TRUE;
-        }
+    if (cid == CKCID_MESH || cid == CKCID_PATCHMESH) {
+        return m_Meshes.FindObject(o);
     }
 
-    return CKRenderObject::IsObjectUsed(o, cid);
+    return CKBeObject::IsObjectUsed(o, cid);
 }
 
 CKERROR RCK3dEntity::PrepareDependencies(CKDependenciesContext &context) {
@@ -1747,20 +1814,22 @@ CKERROR RCK3dEntity::RemapDependencies(CKDependenciesContext &context) {
     if (GetClassID() == CKCID_CHARACTER)
         classDeps |= 2;
     
-    // Remap m_Place (sub_1000CDA0 remaps an ID/pointer)
-    m_Place = (CK_ID)context.Remap((CKObject *)(CKDWORD)m_Place);
+    // Remap m_Place (IDA: sub_1000CDA0 => CKDependenciesContext::RemapID)
+    CK_ID placeId = m_Place;
+    placeId = context.RemapID(placeId);
+    m_Place = placeId;
     
     // Remap meshes if flag 1 set
     if (classDeps & 1) {
         m_Meshes.Remap(context);
-        RCKMesh *remappedMesh = (RCKMesh *)context.Remap((CKObject *)m_CurrentMesh);
+        RCKMesh *remappedMesh = (RCKMesh *)context.Remap(m_CurrentMesh);
         SetCurrentMesh(remappedMesh, FALSE);
     }
     
     // Remap parent if flag 2 set
     if (classDeps & 2) {
         CK3dEntity *parent = GetParent();
-        CK3dEntity *remappedParent = (CK3dEntity *)context.Remap((CKObject *)parent);
+        CK3dEntity *remappedParent = (CK3dEntity *)context.Remap(parent);
         if (remappedParent)
             SetParent(remappedParent, TRUE);
     }
@@ -1778,13 +1847,13 @@ CKERROR RCK3dEntity::RemapDependencies(CKDependenciesContext &context) {
             if (boneData) {
                 // Remap bone entity
                 CK3dEntity *bone = boneData->GetBone();
-                CK3dEntity *remappedBone = (CK3dEntity *)context.Remap((CKObject *)bone);
+                CK3dEntity *remappedBone = (CK3dEntity *)context.Remap(bone);
                 boneData->SetBone(remappedBone);
                 
                 // Remap bone's parent if exists
                 if (remappedBone) {
                     CK3dEntity *boneParent = remappedBone->GetParent();
-                    CK3dEntity *remappedBoneParent = (CK3dEntity *)context.Remap((CKObject *)boneParent);
+                    CK3dEntity *remappedBoneParent = (CK3dEntity *)context.Remap(boneParent);
                     if (remappedBoneParent)
                         remappedBone->SetParent(remappedBoneParent, TRUE);
                 }
@@ -1814,42 +1883,42 @@ Implementation based on decompilation at 0x1000ba8b:
 *************************************************/
 CKERROR RCK3dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
     RCK3dEntity &src = (RCK3dEntity &)o;
-    
+
     // Set flags from source before CKBeObject::Copy
     SetFlags(src.GetFlags());
-    
+
     CKERROR err = CKBeObject::Copy(o, context);
     if (err != CK_OK)
         return err;
-    
+
     // Get class dependencies
     CKDWORD classDeps = context.GetClassDependencies(CKCID_3DENTITY);
-    
+
     // Set flags from source again
     SetFlags(src.GetFlags());
-    
+
     // Copy moveable flags with mask 0xFF3FBFEB
-    CKDWORD moveableFlags = src.GetMoveableFlags() & 0xFF3FBFEB;
+    CKDWORD moveableFlags = src.GetMoveableFlags() & ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID | VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT);
     SetMoveableFlags(moveableFlags);
-    
+
     // Copy parent
     CK3dEntity *srcParent = src.GetParent();
     SetParent(srcParent, TRUE);
-    
+
     // Copy ZOrder
-    int zorder = src.GetZOrder();
-    SetZOrder(zorder);
-    
+    int zOrder = src.GetZOrder();
+    SetZOrder(zOrder);
+
     // Copy world matrix
     SetWorldMatrix(src.m_WorldMatrix, TRUE);
-    
+
     // Copy meshes array
     m_Meshes = src.m_Meshes;
-    
+
     // Copy current mesh
     CKMesh *srcMesh = src.GetCurrentMesh();
-    SetCurrentMesh((RCKMesh *)srcMesh, FALSE);
-    
+    SetCurrentMesh(srcMesh);
+
     // Copy object animations if flag 4 set
     if (classDeps & 4) {
         int animCount = src.GetObjectAnimationCount();
@@ -1858,7 +1927,7 @@ CKERROR RCK3dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
             AddObjectAnimation(anim);
         }
     }
-    
+
     // Copy skin if source has one
     if (src.m_Skin) {
         m_Skin = new RCKSkin(*src.m_Skin);
@@ -1955,7 +2024,7 @@ Purpose: Uses scene graph node priority for render ordering.
 *************************************************/
 void RCK3dEntity::SetZOrder(int Z) {
     if (m_SceneGraphNode) {
-        m_SceneGraphNode->SetPriority((CKWORD)Z, 0);
+        m_SceneGraphNode->SetPriority(Z, FALSE);
     }
 }
 
@@ -1965,7 +2034,7 @@ Purpose: Returns scene graph node priority.
 *************************************************/
 int RCK3dEntity::GetZOrder() {
     if (m_SceneGraphNode) {
-        return m_SceneGraphNode->m_Priority;
+        return (int)m_SceneGraphNode->m_MaxPriority - 10000;
     }
     return 0;
 }
@@ -1981,8 +2050,9 @@ Implementation based on decompilation at 0x10005910:
 - Else return FALSE
 *************************************************/
 CKBOOL RCK3dEntity::IsToBeRenderedLast() {
-    // IDA: if ( (this->m_MoveableFlags & 0x100000) != 0 ) return 0;
-    if ((m_MoveableFlags & VX_MOVEABLE_ZBUFONLY) != 0)
+    // IDA 0x10005910: if ( (this->m_MoveableFlags & 0x00100000) != 0 ) return 0;
+    // => VX_MOVEABLE_RENDERFIRST
+    if ((m_MoveableFlags & VX_MOVEABLE_RENDERFIRST) != 0)
         return FALSE;
     
     // IDA: if ( (this->m_MoveableFlags & 0x10000) != 0 ) return 1;
@@ -2028,7 +2098,7 @@ Purpose: Updates internal state, local matrix, and propagates changes to childre
 
 Implementation based on decompilation at 0x100062d6:
 - Invalidates scene graph node's bounding box
-- Clears ALLINSIDE (0x1000) and ALLOUTSIDE (0x2000) flags, invalidates inverse matrix (0x400000)
+- Clears VX_MOVEABLE_UPTODATE (0x4), VX_MOVEABLE_WORLDALIGNED (0x40000), and VX_MOVEABLE_INVERSEWORLDMATVALID (0x400000)
 - If HASMOVED (0x20000) is set, clears 0x40000000; else sets HASMOVED and notifies RenderManager
 - Updates local matrix: if parent exists, LocalMatrix = ParentInverse * WorldMatrix; else LocalMatrix = WorldMatrix
 - If updateChildren: recalculate inverse and update children's local matrices to keep world position
@@ -2040,14 +2110,14 @@ void RCK3dEntity::WorldMatrixChanged(int updateChildren, int keepScale) {
         m_SceneGraphNode->InvalidateBox(keepScale);
     }
     
-    // Clear ALLINSIDE, ALLOUTSIDE, and INVERSEWORLDMATVALID flags
-    // IDA: this->m_MoveableFlags &= 0xFFBBFFFB (clears bits 0x440004 - but 0xFFBBFFFB means clear ~0x440004)
-    m_MoveableFlags &= 0xFFBBFFFB;
+    // IDA: this->m_MoveableFlags &= 0xFFBBFFFB (clears bits 0x00440004)
+    // => clears VX_MOVEABLE_UPTODATE (0x4), VX_MOVEABLE_WORLDALIGNED (0x40000), VX_MOVEABLE_INVERSEWORLDMATVALID (0x400000)
+    m_MoveableFlags &= ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_WORLDALIGNED | VX_MOVEABLE_INVERSEWORLDMATVALID);
     
     // Check VX_MOVEABLE_HASMOVED (0x20000) flag
     if ((m_MoveableFlags & VX_MOVEABLE_HASMOVED) != 0) {
         // Already moved this frame - clear the "needs update" bit
-        m_MoveableFlags &= ~0x40000000u;
+        m_MoveableFlags &= ~VX_MOVEABLE_RESERVED2;
     } else {
         // First move this frame - set HASMOVED and notify render manager
         m_MoveableFlags |= VX_MOVEABLE_HASMOVED;
@@ -2064,7 +2134,7 @@ void RCK3dEntity::WorldMatrixChanged(int updateChildren, int keepScale) {
         Vx3DMultiplyMatrix(m_LocalMatrix, parentInverse, m_WorldMatrix);
     } else {
         // No parent - local matrix equals world matrix
-        memcpy(&m_LocalMatrix, &m_WorldMatrix, sizeof(VxMatrix));
+        m_LocalMatrix = m_WorldMatrix;
     }
     
     // Handle children
@@ -2074,7 +2144,7 @@ void RCK3dEntity::WorldMatrixChanged(int updateChildren, int keepScale) {
         
         for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK3dEntity *child = (RCK3dEntity *)*it;
-            if (child && (child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT) == 0) {
+            if (child && !(child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT)) {
                 // Child's local = OurInverse * Child's World
                 Vx3DMultiplyMatrix(child->m_LocalMatrix, m_InverseWorldMatrix, child->m_WorldMatrix);
             }
@@ -2083,8 +2153,8 @@ void RCK3dEntity::WorldMatrixChanged(int updateChildren, int keepScale) {
         // Children move with parent - propagate local matrix changes
         for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK3dEntity *child = (RCK3dEntity *)*it;
-            if (child && (child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT) == 0) {
-                child->LocalMatrixChanged(0, 0);
+            if (child && !(child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT)) {
+                child->LocalMatrixChanged(FALSE, FALSE);
             }
         }
     }
@@ -2096,7 +2166,7 @@ Purpose: Recomputes world matrix from local * parent's world, propagates to chil
 
 Implementation based on decompilation at 0x100064a4:
 - Invalidates scene graph node's bounding box
-- Clears ALLINSIDE, ALLOUTSIDE, INVERSEWORLDMATVALID flags
+- Clears VX_MOVEABLE_UPTODATE (0x4), VX_MOVEABLE_WORLDALIGNED (0x40000), VX_MOVEABLE_INVERSEWORLDMATVALID (0x400000)
 - Handles HASMOVED flag and notifies render manager
 - Updates world matrix: if parent exists, WorldMatrix = ParentWorld * LocalMatrix; else WorldMatrix = LocalMatrix
 - Propagates changes to children similar to WorldMatrixChanged
@@ -2107,12 +2177,12 @@ void RCK3dEntity::LocalMatrixChanged(int updateChildren, int keepScale) {
         m_SceneGraphNode->InvalidateBox(keepScale);
     }
     
-    // Clear ALLINSIDE, ALLOUTSIDE, and INVERSEWORLDMATVALID flags
-    m_MoveableFlags &= 0xFFBBFFFB;
+    // IDA uses the same mask as WorldMatrixChanged: clears 0x00440004
+    m_MoveableFlags &= ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_WORLDALIGNED | VX_MOVEABLE_INVERSEWORLDMATVALID);
     
     // Check VX_MOVEABLE_HASMOVED (0x20000) flag
     if ((m_MoveableFlags & VX_MOVEABLE_HASMOVED) != 0) {
-        m_MoveableFlags &= ~0x40000000u;
+        m_MoveableFlags &= ~VX_MOVEABLE_RESERVED2;
     } else {
         m_MoveableFlags |= VX_MOVEABLE_HASMOVED;
         RCKRenderManager *renderManager = (RCKRenderManager *)m_Context->GetRenderManager();
@@ -2127,7 +2197,7 @@ void RCK3dEntity::LocalMatrixChanged(int updateChildren, int keepScale) {
         Vx3DMultiplyMatrix(m_WorldMatrix, m_Parent->m_WorldMatrix, m_LocalMatrix);
     } else {
         // No parent - world matrix equals local matrix
-        memcpy(&m_WorldMatrix, &m_LocalMatrix, sizeof(VxMatrix));
+        m_WorldMatrix = m_LocalMatrix;
     }
     
     // Handle children
@@ -2137,7 +2207,7 @@ void RCK3dEntity::LocalMatrixChanged(int updateChildren, int keepScale) {
         
         for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK3dEntity *child = (RCK3dEntity *)*it;
-            if (child && (child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT) == 0) {
+            if (child && !(child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT)) {
                 Vx3DMultiplyMatrix(child->m_LocalMatrix, m_InverseWorldMatrix, child->m_WorldMatrix);
             }
         }
@@ -2145,8 +2215,8 @@ void RCK3dEntity::LocalMatrixChanged(int updateChildren, int keepScale) {
         // Children move with parent
         for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK3dEntity *child = (RCK3dEntity *)*it;
-            if (child && (child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT) == 0) {
-                child->LocalMatrixChanged(0, 0);
+            if (child && !(child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT)) {
+                child->LocalMatrixChanged(FALSE, FALSE);
             }
         }
     }
@@ -2158,7 +2228,7 @@ Purpose: Optimized update when only position changes - updates inverse matrix in
 
 Implementation based on decompilation at 0x1000666b:
 - Invalidates scene graph bounding box
-- Clears BOXVALID (0x4) and INVERSEWORLDMATVALID (0x400000) flags (mask 0xFFFBFFFB)
+- Clears VX_MOVEABLE_UPTODATE (0x4) and VX_MOVEABLE_WORLDALIGNED (0x40000) (mask 0xFFFBFFFB)
 - Handles HASMOVED flag and notifies render manager
 - Updates local matrix from parent's inverse * world matrix
 - If inverse matrix was valid (0x400000), updates only the translation part incrementally
@@ -2170,14 +2240,15 @@ void RCK3dEntity::WorldPositionChanged(int updateChildren, int keepScale) {
         m_SceneGraphNode->InvalidateBox(keepScale);
     }
     
-    // IDA: this->m_MoveableFlags &= 0xFFFBFFFB; (clears 0x4 BOXVALID and 0x400004)
+    // IDA: this->m_MoveableFlags &= 0xFFFBFFFB; (clears bits 0x00040004)
+    // => clears VX_MOVEABLE_UPTODATE (0x4) and VX_MOVEABLE_WORLDALIGNED (0x40000)
     // This is different from WorldMatrixChanged which clears 0xFFBBFFFB
-    m_MoveableFlags &= 0xFFFBFFFB;
+    m_MoveableFlags &= ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_WORLDALIGNED);
     
     // Check VX_MOVEABLE_HASMOVED (0x20000) flag
     if ((m_MoveableFlags & VX_MOVEABLE_HASMOVED) != 0) {
         // Already moved this frame - clear the "needs update" bit (0x40000000)
-        m_MoveableFlags &= ~0x40000000u;
+        m_MoveableFlags &= ~VX_MOVEABLE_RESERVED2;
     } else {
         // First move this frame - set HASMOVED and notify render manager
         m_MoveableFlags |= VX_MOVEABLE_HASMOVED;
@@ -2194,7 +2265,7 @@ void RCK3dEntity::WorldPositionChanged(int updateChildren, int keepScale) {
         Vx3DMultiplyMatrix(m_LocalMatrix, parentInverse, m_WorldMatrix);
     } else {
         // No parent - local matrix equals world matrix
-        memcpy(&m_LocalMatrix, &m_WorldMatrix, sizeof(VxMatrix));
+        m_LocalMatrix = m_WorldMatrix;
     }
     
     // IDA: If inverse matrix was valid, update only the translation part incrementally
@@ -2238,7 +2309,7 @@ void RCK3dEntity::WorldPositionChanged(int updateChildren, int keepScale) {
         for (CKObject **it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK3dEntity *child = (RCK3dEntity *)*it;
             if (child && (child->m_MoveableFlags & VX_MOVEABLE_DONTUPDATEFROMPARENT) == 0) {
-                child->LocalMatrixChanged(0, 0);
+                child->LocalMatrixChanged(FALSE, FALSE);
             }
         }
     }
@@ -2281,34 +2352,53 @@ void RCK3dEntity::UpdatePlace(CK_ID placeId) {
 // =====================================================
 
 void RCK3dEntity::SetQuaternion(const VxQuaternion *Quat, CK3dEntity *Ref, CKBOOL KeepChildren, CKBOOL KeepScale) {
-    if (!Quat)
-        return;
+    // IDA @ 0x10008962
+    // - Optionally preserves LOCAL scale (KeepScale): GetScale(Local=TRUE) then SetScale(KeepChildren=0, Local=TRUE)
+    // - Preserves current WORLD translation (row 3)
+    // - If Ref: world = RefWorld * QuatMatrix, then restore translation
+    // - Else: world = QuatMatrix, then restore translation
+    // - Calls WorldMatrixChanged(KeepChildren, 1)
 
-    VxMatrix rot;
-    Quat->ToMatrix(rot);
+    VxVector savedLocalScale;
+    if (KeepScale) {
+        GetScale(&savedLocalScale, TRUE);
+    }
 
-    // Preserve position and scale
-    VxVector pos;
-    GetPosition(&pos, Ref);
+    const VxVector savedWorldPos(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
 
-    // Apply rotation
-    m_WorldMatrix[0][0] = rot[0][0];
-    m_WorldMatrix[0][1] = rot[0][1];
-    m_WorldMatrix[0][2] = rot[0][2];
-    m_WorldMatrix[1][0] = rot[1][0];
-    m_WorldMatrix[1][1] = rot[1][1];
-    m_WorldMatrix[1][2] = rot[1][2];
-    m_WorldMatrix[2][0] = rot[2][0];
-    m_WorldMatrix[2][1] = rot[2][1];
-    m_WorldMatrix[2][2] = rot[2][2];
+    if (Ref) {
+        VxMatrix rot;
+        Quat->ToMatrix(rot);
+        Vx3DMultiplyMatrix(m_WorldMatrix, Ref->GetWorldMatrix(), rot);
+    } else {
+        Quat->ToMatrix(m_WorldMatrix);
+    }
 
-    SetPosition(&pos, Ref, KeepChildren);
+    // Restore translation
+    m_WorldMatrix[3][0] = savedWorldPos.x;
+    m_WorldMatrix[3][1] = savedWorldPos.y;
+    m_WorldMatrix[3][2] = savedWorldPos.z;
+
+    WorldMatrixChanged(KeepChildren, 1);
+
+    if (KeepScale) {
+        SetScale(&savedLocalScale, 0, TRUE);
+    }
 }
 
 void RCK3dEntity::GetQuaternion(VxQuaternion *Quat, CK3dEntity *Ref) {
-    if (!Quat)
+    // IDA @ 0x10008A7A
+    // - If Ref: quat from (Ref^-1 * thisWorld)
+    // - Else: quat from thisWorld
+    // - Uses FromMatrix(MatIsUnit=FALSE, RestoreMat=TRUE)
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, Ref->GetInverseWorldMatrix(), m_WorldMatrix);
+        Quat->FromMatrix(tmp, FALSE, TRUE);
         return;
-    Quat->FromMatrix(m_WorldMatrix);
+    }
+
+    Quat->FromMatrix(m_WorldMatrix, FALSE, TRUE);
 }
 
 void RCK3dEntity::SetScale3f(float X, float Y, float Z, CKBOOL KeepChildren, CKBOOL Local) {
@@ -2317,42 +2407,48 @@ void RCK3dEntity::SetScale3f(float X, float Y, float Z, CKBOOL KeepChildren, CKB
 }
 
 void RCK3dEntity::SetScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Local) {
-    if (!Scale)
-        return;
+    // IDA @ 0x1000791A
+    // - Selects axis vectors from local/world matrix based on Local
+    // - For each axis: axis = Normalize(axis) * scaleComponent
+    // - If any Scale component is 0.0, clamps it to 1e-6
+    // - Calls LocalMatrixChanged/WorldMatrixChanged
+    constexpr float kEps = 0.000001f;
+    const float sx = (Scale->x == 0.0f) ? kEps : Scale->x;
+    const float sy = (Scale->y == 0.0f) ? kEps : Scale->y;
+    const float sz = (Scale->z == 0.0f) ? kEps : Scale->z;
 
-    // Get current scale
-    VxVector currentScale;
-    GetScale(&currentScale, Local);
-
-    // Calculate scale factors
-    VxVector factor;
-    factor.x = (currentScale.x != 0) ? Scale->x / currentScale.x : Scale->x;
-    factor.y = (currentScale.y != 0) ? Scale->y / currentScale.y : Scale->y;
-    factor.z = (currentScale.z != 0) ? Scale->z / currentScale.z : Scale->z;
-
-    // Apply scale
     VxMatrix &mat = Local ? m_LocalMatrix : m_WorldMatrix;
-    mat[0][0] *= factor.x;
-    mat[0][1] *= factor.x;
-    mat[0][2] *= factor.x;
-    mat[1][0] *= factor.y;
-    mat[1][1] *= factor.y;
-    mat[1][2] *= factor.y;
-    mat[2][0] *= factor.z;
-    mat[2][1] *= factor.z;
-    mat[2][2] *= factor.z;
 
-    // Update matrices
-    if (Local && m_Parent) {
-        Vx3DMultiplyMatrix(m_WorldMatrix, m_LocalMatrix, m_Parent->m_WorldMatrix);
-    } else if (!Local) {
-        if (m_Parent) {
-            Vx3DMultiplyMatrixInverse(m_LocalMatrix, m_Parent->m_WorldMatrix, m_WorldMatrix);
-        } else {
-            m_LocalMatrix = m_WorldMatrix;
-        }
+    {
+        VxVector axis0 = mat[0];
+        axis0.Normalize();
+        axis0 = axis0 * sx;
+        mat[0][0] = axis0.x;
+        mat[0][1] = axis0.y;
+        mat[0][2] = axis0.z;
     }
-    Vx3DInverseMatrix(m_InverseWorldMatrix, m_WorldMatrix);
+    {
+        VxVector axis1 = mat[1];
+        axis1.Normalize();
+        axis1 = axis1 * sy;
+        mat[1][0] = axis1.x;
+        mat[1][1] = axis1.y;
+        mat[1][2] = axis1.z;
+    }
+    {
+        VxVector axis2 = mat[2];
+        axis2.Normalize();
+        axis2 = axis2 * sz;
+        mat[2][0] = axis2.x;
+        mat[2][1] = axis2.y;
+        mat[2][2] = axis2.z;
+    }
+
+    if (Local) {
+        LocalMatrixChanged(KeepChildren, TRUE);
+    } else {
+        WorldMatrixChanged(KeepChildren, TRUE);
+    }
 }
 
 void RCK3dEntity::GetScale(VxVector *Scale, CKBOOL Local) {
@@ -2360,106 +2456,120 @@ void RCK3dEntity::GetScale(VxVector *Scale, CKBOOL Local) {
         return;
 
     const VxMatrix &mat = Local ? m_LocalMatrix : m_WorldMatrix;
-    Scale->x = sqrtf(mat[0][0] * mat[0][0] + mat[0][1] * mat[0][1] + mat[0][2] * mat[0][2]);
-    Scale->y = sqrtf(mat[1][0] * mat[1][0] + mat[1][1] * mat[1][1] + mat[1][2] * mat[1][2]);
-    Scale->z = sqrtf(mat[2][0] * mat[2][0] + mat[2][1] * mat[2][1] + mat[2][2] * mat[2][2]);
+    VxVector axis0 = mat[0];
+    VxVector axis1 = mat[1];
+    VxVector axis2 = mat[2];
+    Scale->x = axis0.Magnitude();
+    Scale->y = axis1.Magnitude();
+    Scale->z = axis2.Magnitude();
+}
+
+static void RCK3dEntity_ConstructMatrix(VxMatrix &dst, const VxVector *pos, const VxVector *scale, const VxQuaternion *quat) {
+    quat->ToMatrix(dst);
+
+    for (int i = 0; i < 3; ++i) {
+        dst[0][i] *= scale->x;
+        dst[1][i] *= scale->y;
+        dst[2][i] *= scale->z;
+    }
+
+    dst[3][0] = pos->x;
+    dst[3][1] = pos->y;
+    dst[3][2] = pos->z;
+}
+
+static void RCK3dEntity_ConstructMatrixEx(VxMatrix &dst, const VxVector *pos, const VxVector *scale, const VxQuaternion *quat,
+                                         const VxQuaternion *shear, float sign) {
+    (void)sign;
+
+    VxMatrix shearMat;
+    shear->ToMatrix(shearMat);
+
+    const float u00 = shearMat[0][0];
+    const float u01 = shearMat[0][1];
+    const float u02 = shearMat[0][2];
+    const float u10 = shearMat[1][0];
+    const float u11 = shearMat[1][1];
+    const float u12 = shearMat[1][2];
+    const float u20 = shearMat[2][0];
+    const float u21 = shearMat[2][1];
+    const float u22 = shearMat[2][2];
+
+    const float sx = scale->x;
+    const float sy = scale->y;
+    const float sz = scale->z;
+
+    VxMatrix s;
+    s.SetIdentity();
+
+    s[0][0] = u00 * u00 * sx + u10 * u10 * sy + u20 * u20 * sz;
+    s[1][0] = u01 * u00 * sx + u11 * u10 * sy + u21 * u20 * sz;
+    s[2][0] = u02 * u00 * sx + u12 * u10 * sy + u22 * u20 * sz;
+
+    s[1][1] = u01 * u01 * sx + u11 * u11 * sy + u21 * u21 * sz;
+    s[2][1] = u02 * u01 * sx + u12 * u11 * sy + u22 * u21 * sz;
+
+    s[2][2] = u02 * u02 * sx + u12 * u12 * sy + u22 * u22 * sz;
+
+    s[0][1] = s[1][0];
+    s[0][2] = s[2][0];
+    s[1][2] = s[2][1];
+
+    s[0][3] = s[1][3] = s[2][3] = 0.0f;
+    s[3][0] = s[3][1] = s[3][2] = 0.0f;
+    s[3][3] = 1.0f;
+
+    VxMatrix quatMat;
+    quat->ToMatrix(quatMat);
+
+    Vx3DMultiplyMatrix(dst, quatMat, s);
+
+    dst[3][0] = pos->x;
+    dst[3][1] = pos->y;
+    dst[3][2] = pos->z;
 }
 
 CKBOOL RCK3dEntity::ConstructWorldMatrix(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat) {
-    m_WorldMatrix.SetIdentity();
-
-    if (Quat) {
-        Quat->ToMatrix(m_WorldMatrix);
-    }
-
-    if (Scale) {
-        m_WorldMatrix[0][0] *= Scale->x;
-        m_WorldMatrix[0][1] *= Scale->x;
-        m_WorldMatrix[0][2] *= Scale->x;
-        m_WorldMatrix[1][0] *= Scale->y;
-        m_WorldMatrix[1][1] *= Scale->y;
-        m_WorldMatrix[1][2] *= Scale->y;
-        m_WorldMatrix[2][0] *= Scale->z;
-        m_WorldMatrix[2][1] *= Scale->z;
-        m_WorldMatrix[2][2] *= Scale->z;
-    }
-
-    if (Pos) {
-        m_WorldMatrix[3][0] = Pos->x;
-        m_WorldMatrix[3][1] = Pos->y;
-        m_WorldMatrix[3][2] = Pos->z;
-    }
-
-    Vx3DInverseMatrix(m_InverseWorldMatrix, m_WorldMatrix);
-
-    if (m_Parent) {
-        Vx3DMultiplyMatrixInverse(m_LocalMatrix, m_Parent->m_WorldMatrix, m_WorldMatrix);
-    } else {
-        m_LocalMatrix = m_WorldMatrix;
-    }
-
+    RCK3dEntity_ConstructMatrix(m_WorldMatrix, Pos, Scale, Quat);
+    WorldMatrixChanged(FALSE, TRUE);
     return TRUE;
 }
 
 CKBOOL RCK3dEntity::ConstructWorldMatrixEx(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat,
                                            const VxQuaternion *Shear, float Sign) {
-    return ConstructWorldMatrix(Pos, Scale, Quat);
+    RCK3dEntity_ConstructMatrixEx(m_WorldMatrix, Pos, Scale, Quat, Shear, Sign);
+    WorldMatrixChanged(FALSE, TRUE);
+    return TRUE;
 }
 
 CKBOOL RCK3dEntity::ConstructLocalMatrix(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat) {
-    m_LocalMatrix.SetIdentity();
-
-    if (Quat) {
-        Quat->ToMatrix(m_LocalMatrix);
-    }
-
-    if (Scale) {
-        m_LocalMatrix[0][0] *= Scale->x;
-        m_LocalMatrix[0][1] *= Scale->x;
-        m_LocalMatrix[0][2] *= Scale->x;
-        m_LocalMatrix[1][0] *= Scale->y;
-        m_LocalMatrix[1][1] *= Scale->y;
-        m_LocalMatrix[1][2] *= Scale->y;
-        m_LocalMatrix[2][0] *= Scale->z;
-        m_LocalMatrix[2][1] *= Scale->z;
-        m_LocalMatrix[2][2] *= Scale->z;
-    }
-
-    if (Pos) {
-        m_LocalMatrix[3][0] = Pos->x;
-        m_LocalMatrix[3][1] = Pos->y;
-        m_LocalMatrix[3][2] = Pos->z;
-    }
-
-    if (m_Parent) {
-        Vx3DMultiplyMatrix(m_WorldMatrix, m_LocalMatrix, m_Parent->m_WorldMatrix);
-    } else {
-        m_WorldMatrix = m_LocalMatrix;
-    }
-
-    Vx3DInverseMatrix(m_InverseWorldMatrix, m_WorldMatrix);
-
+    RCK3dEntity_ConstructMatrix(m_LocalMatrix, Pos, Scale, Quat);
+    LocalMatrixChanged(FALSE, TRUE);
     return TRUE;
 }
 
 CKBOOL RCK3dEntity::ConstructLocalMatrixEx(const VxVector *Pos, const VxVector *Scale, const VxQuaternion *Quat,
                                            const VxQuaternion *Shear, float Sign) {
-    return ConstructLocalMatrix(Pos, Scale, Quat);
+    RCK3dEntity_ConstructMatrixEx(m_LocalMatrix, Pos, Scale, Quat, Shear, Sign);
+    LocalMatrixChanged(FALSE, TRUE);
+    return TRUE;
 }
 
 CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     RCKRenderContext *dev = (RCKRenderContext *) Dev;
 
-    ENTITY_DEBUG_LOG_FMT("Render: entity=%p name=%s mesh=%p callbacks=%p flags=0x%X", 
-                         this, GetName() ? GetName() : "(null)", m_CurrentMesh, m_Callbacks, Flags);
+    // IDA: local VxTimeProfiler constructed at entry (used by Dev debug mode).
+    VxTimeProfiler profiler;
 
     // Must have mesh or callbacks
-    if (!m_CurrentMesh && !m_Callbacks) {
-        ENTITY_DEBUG_LOG("Render: SKIP - no mesh and no callbacks");
+    if (!m_CurrentMesh && !m_Callbacks)
         return FALSE;
-    }
 
     CKBOOL isPM = FALSE;
+
+    // IDA: sub_1000D2F0 (0x1000D2F0)
+    // Flush pending Sprite3D batches (only when needed).
+    dev->FlushSprite3DBatchesIfNeeded();
 
     // Check if extents are up to date (meaning we've already been verified visible)
     if ((m_MoveableFlags & VX_MOVEABLE_EXTENTSUPTODATE) != 0) {
@@ -2470,7 +2580,18 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     } else {
         // Need to check frustum visibility
         if (!IsInViewFrustrum(Dev, Flags)) {
-            // Object is outside frustum - skip rendering
+            // IDA: In debug render mode, append a "Not drawn" line and periodically flip.
+            if ((dev->m_Flags & 1) != 0) {
+                dev->m_CurrentObjectDesc << m_Name;
+                if (IsToBeRenderedLast())
+                    dev->m_CurrentObjectDesc << " (as transparent Object)";
+                dev->m_CurrentObjectDesc << " : " << "Not drawn";
+                dev->m_CurrentObjectDesc << profiler.Current() << " ms \n";
+                if (--dev->m_FpsInterval <= 0)
+                    dev->BackToFront(CK_RENDER_USECURRENTSETTINGS);
+            }
+
+            // Object is outside frustum - skip rendering but still return success
             return TRUE;
         }
     }
@@ -2488,9 +2609,9 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
             isPM = TRUE;
         } else {
             // Update skin before callbacks
-            VxTimeProfiler skinTimer;
+            dev->m_SkinTimeProfiler.Reset();
             UpdateSkin();
-            dev->m_Stats.SkinTime += skinTimer.Current();
+            dev->m_Stats.SkinTime += dev->m_SkinTimeProfiler.Current();
         }
     }
 
@@ -2498,24 +2619,22 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     if (m_Callbacks) {
         // Execute pre-render callbacks
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
-            VxTimeProfiler callbackTimer;
+            dev->m_ObjectsCallbacksTimeProfiler.Reset();
             dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
-                if (cb.callback) {
-                    ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
-                }
+                ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
             }
 
-            dev->m_Stats.ObjectsCallbacksTime += callbackTimer.Current();
+            dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
         }
 
         // Update skin for PM meshes after pre-callbacks
         if (isPM) {
-            VxTimeProfiler skinTimer;
+            dev->m_SkinTimeProfiler.Reset();
             UpdateSkin();
-            dev->m_Stats.SkinTime += skinTimer.Current();
+            dev->m_Stats.SkinTime += dev->m_SkinTimeProfiler.Current();
         }
 
         // Execute render callback (replaces default rendering) or default render
@@ -2529,71 +2648,85 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
         // Execute post-render callbacks
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
-            VxTimeProfiler callbackTimer;
+            dev->m_ObjectsCallbacksTimeProfiler.Reset();
             dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
-                if (cb.callback) {
-                    ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
-                }
+                ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
             }
 
-            dev->m_Stats.ObjectsCallbacksTime += callbackTimer.Current();
+            dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
         }
     } else {
         // No callbacks - just render the mesh
         if (m_CurrentMesh && (m_CurrentMesh->GetFlags() & VXMESH_VISIBLE) != 0) {
-            ENTITY_DEBUG_LOG_FMT("Render: Calling mesh->Render(), mesh=%p flags=0x%X", 
-                                 m_CurrentMesh, m_CurrentMesh->GetFlags());
             dev->m_Current3dEntity = this;
             m_CurrentMesh->Render(Dev, (CK3dEntity *) this);
             dev->m_Current3dEntity = nullptr;
-        } else {
-            ENTITY_DEBUG_LOG_FMT("Render: SKIP mesh - mesh=%p visible=%d", 
-                                 m_CurrentMesh, 
-                                 m_CurrentMesh ? (m_CurrentMesh->GetFlags() & VXMESH_VISIBLE) != 0 : -1);
         }
     }
 
     // Restore inverse winding if changed
     if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
+        // IDA toggles again based on the current state (not restoring the saved value).
         CKDWORD currentWinding = 0;
         dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &currentWinding);
         dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, currentWinding == 0 ? 1 : 0);
     }
 
     // Update render extents if requested
-    if (Flags & CKRENDER_UPDATEEXTENTS) {
+    if ((Flags & CKRENDER_UPDATEEXTENTS) != 0) {
         dev->AddExtents2D(m_RenderExtents, this);
+    }
+
+    // IDA: In debug render mode, append a per-object line and periodically flip.
+    if ((dev->m_Flags & 1) != 0) {
+        dev->m_CurrentObjectDesc << m_Name;
+        if (IsToBeRenderedLast())
+            dev->m_CurrentObjectDesc << " (as transparent Object)";
+        dev->m_CurrentObjectDesc << " : " << "Drawn";
+        dev->m_CurrentObjectDesc << profiler.Current() << " ms \n";
+        if (--dev->m_FpsInterval <= 0)
+            dev->BackToFront(CK_RENDER_USECURRENTSETTINGS);
     }
 
     return TRUE;
 }
 
 int RCK3dEntity::RayIntersection(const VxVector *Pos1, const VxVector *Pos2, VxIntersectionDesc *Desc, CK3dEntity *Ref, CK_RAYINTERSECTION iOptions) {
-    if (!m_CurrentMesh || !Pos1 || !Pos2 || !Desc)
+    // IDA: 0x10008DC5
+    // Notes:
+    // - Desc is allowed to be nullptr
+    // - If Ref != this, the segment endpoints are transformed to this local using InverseTransform(..., Ref)
+    // - If Desc != nullptr, Desc->Object is set to Ref before the ray test, then restored to this on success
+    // - If hit, Desc->Distance is scaled by the input segment length (in the referential given by Ref)
+    if (!m_CurrentMesh || !Pos1 || !Pos2)
         return 0;
 
     RCKMesh *mesh = m_CurrentMesh;
     if (!mesh)
         return 0;
 
-    // Transform the ray into this entity's local space
-    VxVector originLocal, endLocal;
-    if (Ref) {
-        VxMatrix invRef;
-        Vx3DInverseMatrix(invRef, Ref->GetWorldMatrix());
-        Vx3DMultiplyMatrixVector(&originLocal, invRef, Pos1);
-        Vx3DMultiplyMatrixVector(&endLocal, invRef, Pos2);
-    } else {
-        const VxMatrix &invWorld = GetInverseWorldMatrix();
-        Vx3DMultiplyMatrixVector(&originLocal, invWorld, Pos1);
-        Vx3DMultiplyMatrixVector(&endLocal, invWorld, Pos2);
+    VxVector localP1 = *Pos1;
+    VxVector localP2 = *Pos2;
+    if (Ref != (CK3dEntity *) this) {
+        InverseTransform(&localP1, Pos1, Ref);
+        InverseTransform(&localP2, Pos2, Ref);
     }
 
-    VxVector direction = endLocal - originLocal;
-    return g_RayIntersection ? g_RayIntersection(mesh, originLocal, direction, Desc, iOptions, m_WorldMatrix) : 0;
+    VxVector dir = localP2 - localP1;
+
+    if (Desc)
+        Desc->Object = (CKRenderObject *) Ref;
+
+    const int hit = g_RayIntersection ? g_RayIntersection(mesh, localP1, dir, Desc, iOptions, m_WorldMatrix) : 0;
+    if (hit && Desc) {
+        Desc->Object = (CKRenderObject *) this;
+        Desc->Distance *= (*Pos2 - *Pos1).Magnitude();
+    }
+
+    return hit;
 }
 
 void RCK3dEntity::GetRenderExtents(VxRect &rect) const {
@@ -2601,9 +2734,11 @@ void RCK3dEntity::GetRenderExtents(VxRect &rect) const {
 }
 
 const VxMatrix &RCK3dEntity::GetLastFrameMatrix() const {
-    // IDA at 0x10008850: returns address of m_WorldMatrix (same as GetWorldMatrix)
-    // The m_LastFrameMatrix is only allocated/used when CK_OBJECT_FREEMOTION flag is set
-    // For now, return world matrix as the "last frame" matrix
+    // IDA at 0x10008850:
+    // - if m_LastFrameMatrix != nullptr, return it
+    // - else return &m_WorldMatrix
+    if (m_LastFrameMatrix)
+        return *m_LastFrameMatrix;
     return m_WorldMatrix;
 }
 
@@ -2616,10 +2751,8 @@ Implementation based on decompilation at 0x10008874:
 - Calls LocalMatrixChanged(KeepChildren, 1)
 *************************************************/
 void RCK3dEntity::SetLocalMatrix(const VxMatrix &Mat, CKBOOL KeepChildren) {
-    // IDA: memcpy(v3, v4, 0x40u); // Copy 64-byte matrix
-    memcpy(&m_LocalMatrix, &Mat, sizeof(VxMatrix));
-    // IDA: RCK3dEntity::LocalMatrixChanged(this, a2, 1);
-    LocalMatrixChanged(KeepChildren, 1);
+    m_LocalMatrix = Mat;
+    LocalMatrixChanged(KeepChildren, TRUE);
 }
 
 const VxMatrix &RCK3dEntity::GetLocalMatrix() const {
@@ -2635,10 +2768,8 @@ Implementation based on decompilation at 0x100088c4:
 - Calls WorldMatrixChanged(KeepChildren, 1)
 *************************************************/
 void RCK3dEntity::SetWorldMatrix(const VxMatrix &Mat, CKBOOL KeepChildren) {
-    // IDA: qmemcpy(&this->m_WorldMatrix, arg0, sizeof(this->m_WorldMatrix));
-    memcpy(&m_WorldMatrix, &Mat, sizeof(VxMatrix));
-    // IDA: RCK3dEntity::WorldMatrixChanged(this, a2, 1);
-    WorldMatrixChanged(KeepChildren, 1);
+    m_WorldMatrix = Mat;
+    WorldMatrixChanged(KeepChildren, TRUE);
 }
 
 const VxMatrix &RCK3dEntity::GetWorldMatrix() const {
@@ -2658,7 +2789,7 @@ Implementation based on decompilation at 0x10008909:
 const VxMatrix &RCK3dEntity::GetInverseWorldMatrix() const {
     // Lazy evaluation - compute inverse only when needed
     // IDA: if ( (this->m_MoveableFlags & 0x400000) == 0 )
-    if ((m_MoveableFlags & VX_MOVEABLE_INVERSEWORLDMATVALID) == 0) {
+    if (!(m_MoveableFlags & VX_MOVEABLE_INVERSEWORLDMATVALID)) {
         // Mark as valid and compute
         // Note: const_cast required as this is logically const (caching)
         RCK3dEntity *mutableThis = const_cast<RCK3dEntity *>(this);
@@ -2669,42 +2800,65 @@ const VxMatrix &RCK3dEntity::GetInverseWorldMatrix() const {
 }
 
 void RCK3dEntity::Transform(VxVector *Dest, const VxVector *Src, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    Vx3DMultiplyMatrixVector(Dest, m_WorldMatrix, Src);
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, Ref->GetInverseWorldMatrix(), m_WorldMatrix);
+        Vx3DMultiplyMatrixVector(Dest, tmp, Src);
+    } else {
+        Vx3DMultiplyMatrixVector(Dest, m_WorldMatrix, Src);
+    }
 }
 
 void RCK3dEntity::InverseTransform(VxVector *Dest, const VxVector *Src, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    Vx3DMultiplyMatrixVector(Dest, m_InverseWorldMatrix, Src);
+    const VxMatrix &invWorld = GetInverseWorldMatrix();
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, invWorld, Ref->GetWorldMatrix());
+        Vx3DMultiplyMatrixVector(Dest, tmp, Src);
+    } else {
+        Vx3DMultiplyMatrixVector(Dest, invWorld, Src);
+    }
 }
 
 void RCK3dEntity::TransformVector(VxVector *Dest, const VxVector *Src, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    Vx3DRotateVector(Dest, m_WorldMatrix, Src);
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, Ref->GetInverseWorldMatrix(), m_WorldMatrix);
+        Vx3DRotateVector(Dest, tmp, Src);
+    } else {
+        Vx3DRotateVector(Dest, m_WorldMatrix, Src);
+    }
 }
 
 void RCK3dEntity::InverseTransformVector(VxVector *Dest, const VxVector *Src, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    Vx3DRotateVector(Dest, m_InverseWorldMatrix, Src);
+    const VxMatrix &invWorld = GetInverseWorldMatrix();
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, invWorld, Ref->GetWorldMatrix());
+        Vx3DRotateVector(Dest, tmp, Src);
+    } else {
+        Vx3DRotateVector(Dest, invWorld, Src);
+    }
 }
 
 void RCK3dEntity::TransformMany(VxVector *Dest, const VxVector *Src, int count, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    for (int i = 0; i < count; ++i) {
-        Vx3DMultiplyMatrixVector(&Dest[i], m_WorldMatrix, &Src[i]);
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, Ref->GetInverseWorldMatrix(), m_WorldMatrix);
+        Vx3DMultiplyMatrixVectorMany(Dest, tmp, Src, count, sizeof(VxVector));
+    } else {
+        Vx3DMultiplyMatrixVectorMany(Dest, m_WorldMatrix, Src, count, sizeof(VxVector));
     }
 }
 
 void RCK3dEntity::InverseTransformMany(VxVector *Dest, const VxVector *Src, int count, CK3dEntity *Ref) const {
-    if (!Dest || !Src)
-        return;
-    for (int i = 0; i < count; ++i) {
-        Vx3DMultiplyMatrixVector(&Dest[i], m_InverseWorldMatrix, &Src[i]);
+    const VxMatrix &invWorld = GetInverseWorldMatrix();
+    if (Ref) {
+        VxMatrix tmp;
+        Vx3DMultiplyMatrix(tmp, invWorld, Ref->GetWorldMatrix());
+        Vx3DMultiplyMatrixVectorMany(Dest, tmp, Src, count, sizeof(VxVector));
+    } else {
+        Vx3DMultiplyMatrixVectorMany(Dest, invWorld, Src, count, sizeof(VxVector));
     }
 }
 
@@ -2762,56 +2916,83 @@ int RCK3dEntity::GetObjectAnimationCount() const {
 }
 
 CKSkin *RCK3dEntity::CreateSkin() {
-    if (m_Skin)
-        return m_Skin;
+    DestroySkin();
 
     m_Skin = new RCKSkin();
-    m_Skin->SetObjectInitMatrix(GetWorldMatrix());
+
+    if (m_SceneGraphNode)
+        m_SceneGraphNode->InvalidateBox(TRUE);
     return m_Skin;
 }
 
 CKBOOL RCK3dEntity::DestroySkin() {
     if (m_Skin) {
-        if (m_CurrentMesh) {
-            m_CurrentMesh->SetFlags(m_CurrentMesh->GetFlags() & ~0x200000);
-        }
-
         delete m_Skin;
         m_Skin = nullptr;
-        return TRUE;
     }
-    return FALSE;
+
+    return TRUE;
 }
 
 CKBOOL RCK3dEntity::UpdateSkin() {
-    if (!m_Skin || !m_CurrentMesh)
+    if (!m_Skin)
         return FALSE;
+
+    // IDA: ?UpdateSkin@RCK3dEntity@@UAEHXZ @ 0x1000529E
+    // - Updates m_Skin->m_InverseWorldMatrix depending on CK_3DENTITY_ENABLESKINOFFSET
+    // - Forces mesh dynamic hint
+    // - Uses modifier vertices and optionally normals
+    // - Calls ModifierVertexMove with (RebuildNormals, RebuildFaceNormals) swapped depending on CalcPoints/CalcPointsEx
+
+    if ((m_3dEntityFlags & CK_3DENTITY_ENABLESKINOFFSET) != 0) {
+        Vx3DInverseMatrix(m_Skin->m_InverseWorldMatrix, m_Skin->m_ObjectInitMatrix);
+    } else {
+        m_Skin->m_InverseWorldMatrix = GetInverseWorldMatrix();
+    }
+
+    RCKMesh *mesh = static_cast<RCKMesh *>(GetCurrentMesh());
+    if (!mesh)
+        return FALSE;
+
+    // Ensure dynamic hint is set
+    mesh->SetFlags(mesh->GetFlags() | VXMESH_HINTDYNAMIC);
+
+    int modifierVertexCount = mesh->GetModifierVertexCount();
+
+    if (mesh->IsPM() && mesh->IsPMGeoMorphEnabled()) {
+        modifierVertexCount = m_Skin->GetVertexCount();
+        // Clear CK_OBJECT_UPTODATE on the mesh (PM geomorph path)
+        mesh->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
+    }
+
+    if (m_Skin->GetVertexCount() < modifierVertexCount)
+        return FALSE;
+
+    if (m_SceneGraphNode)
+        m_SceneGraphNode->InvalidateBox(TRUE);
 
     CKDWORD vStride = 0;
-    CKBYTE *vertexPtr = m_CurrentMesh->GetModifierVertices(&vStride);
-    int vertexCount = m_CurrentMesh->GetModifierVertexCount();
+    CKBYTE *vertexPtr = mesh->GetModifierVertices(&vStride);
 
-    CKDWORD nStride = 0;
-    CKBYTE *normalPtr = nullptr;
-    if (m_Skin->GetNormalCount() > 0) {
-        normalPtr = (CKBYTE *)m_CurrentMesh->GetNormalsPtr(&nStride);
+    if (m_Skin->GetNormalCount() != 0) {
+        CKDWORD nStride = 0;
+        CKBYTE *normalPtr = static_cast<CKBYTE *>(mesh->GetNormalsPtr(&nStride));
+        if (m_Skin->CalcPointsEx(modifierVertexCount, vertexPtr, vStride, normalPtr, nStride)) {
+            mesh->ModifierVertexMove(FALSE, TRUE);
+            return TRUE;
+        }
+    } else {
+        if (m_Skin->CalcPoints(modifierVertexCount, vertexPtr, vStride)) {
+            mesh->ModifierVertexMove(TRUE, FALSE);
+            return TRUE;
+        }
     }
 
-    if (!vertexPtr || vertexCount == 0)
-        return FALSE;
-
-    CKBOOL result = m_Skin->CalcPoints(vertexCount, vertexPtr, vStride, normalPtr, nStride);
-
-    if (result) {
-        m_CurrentMesh->UpdateBoundingVolumes(TRUE);
-        m_MoveableFlags |= VX_MOVEABLE_UPTODATE | VX_MOVEABLE_BOXVALID;
-    }
-
-    return result;
+    return FALSE;
 }
 
 CKSkin *RCK3dEntity::GetSkin() const {
-    return (CKSkin *) m_Skin;
+    return m_Skin;
 }
 
 /*************************************************
@@ -2825,91 +3006,141 @@ Implementation based on decompilation at 0x10006113:
 - Sets VX_MOVEABLE_BOXVALID (0x4000) when box is up-to-date
 *************************************************/
 void RCK3dEntity::UpdateBox(CKBOOL World) {
-    // IDA: if ( (this->m_MoveableFlags & 0x10) != 0 )  - VX_MOVEABLE_USERBOX
+    (void)World; // Original implementation ignores this parameter (IDA: 0x10006113)
+
     if ((m_MoveableFlags & VX_MOVEABLE_USERBOX) != 0) {
-        // User-defined bounding box - just transform local to world
-        // IDA: BYTE1(m_MoveableFlags) |= 0x40u; -> sets 0x4000 (BOXVALID)
         m_MoveableFlags |= VX_MOVEABLE_BOXVALID;
-        // Transform local box to world using VxBbox::TransformFrom
         m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
-    }
-    else if (m_CurrentMesh) {
-        // IDA: if ( (this->m_MoveableFlags & 4) == 0 || (this->m_CurrentMesh->m_Flags & 1) == 0 )
-        // Only update if box is not valid OR mesh changed (flag 1 = mesh dirty)
-        if ((m_MoveableFlags & VX_MOVEABLE_UPTODATE) == 0 || 
-            (m_CurrentMesh->GetFlags() & 0x1) == 0) {
-            
-            // Set BOXVALID flag
+    } else if (m_CurrentMesh) {
+        if (!(m_MoveableFlags & VX_MOVEABLE_UPTODATE) || !(m_CurrentMesh->GetFlags() & VXMESH_BOUNDINGUPTODATE)) {
             m_MoveableFlags |= VX_MOVEABLE_BOXVALID;
-            
-            // Get local box from mesh
+
+            // Base local bbox from mesh
             m_LocalBoundingBox = m_CurrentMesh->GetLocalBox();
-            
-            // IDA: if ( this->m_Skin ) - merge skin bounding box
+
+            // DLL merges a skin bbox computed from bone positions (sub_100407B0)
             if (m_Skin) {
-                // Skinning updates vertex positions directly; refresh deformation first
-                UpdateSkin();
-                m_CurrentMesh->UpdateBoundingVolumes(TRUE);
-                m_LocalBoundingBox = m_CurrentMesh->GetLocalBox();
+                VxBbox skinBox;
+                m_Skin->CalcBonesBBox(m_Context, (CK3dEntity *)this, &skinBox);
+                m_LocalBoundingBox.Merge(skinBox);
             }
-            
-            // Transform local to world
+
             m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
-            
-            // Set UPTODATE flag to indicate box is valid
             m_MoveableFlags |= VX_MOVEABLE_UPTODATE;
         }
-    }
-    else {
-        // No mesh - use world position as point box (min=max=position)
-        // IDA: Get row 3 (translation) and set both min and max to it
-        VxVector pos(m_WorldMatrix[3][0], m_WorldMatrix[3][1], m_WorldMatrix[3][2]);
+    } else {
+        // No mesh: world bbox is a point at world translation; local bbox is zeroed; BOXVALID is cleared.
+        const VxVector pos = m_WorldMatrix[3];
         m_WorldBoundingBox.Max = pos;
         m_WorldBoundingBox.Min = pos;
-        
-        // Clear local box
         memset(&m_LocalBoundingBox, 0, sizeof(VxBbox));
-        
-        // Clear BOXVALID flag - IDA: BYTE1(v7) &= ~0x40u;
         m_MoveableFlags &= ~VX_MOVEABLE_BOXVALID;
     }
 }
 
 const VxBbox &RCK3dEntity::GetBoundingBox(CKBOOL Local) {
+    // Ensure bounding boxes are up-to-date
+    UpdateBox(!Local);
     return Local ? m_LocalBoundingBox : m_WorldBoundingBox;
 }
 
 CKBOOL RCK3dEntity::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
-    if (!BBox)
-        return FALSE;
+    // IDA: ?SetBoundingBox@RCK3dEntity@@UAEHPBUVxBbox@@H@Z @ 0x10009181
+    if (BBox) {
+        if (Local) {
+            m_LocalBoundingBox = *BBox;
+            m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
+        } else {
+            m_WorldBoundingBox = *BBox;
+            const VxMatrix &invWorld = GetInverseWorldMatrix();
+            m_LocalBoundingBox.TransformFrom(m_WorldBoundingBox, invWorld);
+        }
 
-    if (Local) {
-        m_LocalBoundingBox = *BBox;
+        if (m_SceneGraphNode)
+            m_SceneGraphNode->InvalidateBox(TRUE);
+
+        // Mark as user-defined and valid.
+        m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
     } else {
-        m_WorldBoundingBox = *BBox;
+        // Clear USERBOX and UPTODATE (matches 0xFFFFFFEB mask in IDA)
+        m_MoveableFlags &= ~(VX_MOVEABLE_USERBOX | VX_MOVEABLE_UPTODATE);
+        if (m_SceneGraphNode)
+            m_SceneGraphNode->InvalidateBox(TRUE);
     }
+
     return TRUE;
 }
 
 const VxBbox &RCK3dEntity::GetHierarchicalBox(CKBOOL Local) {
-    // TODO: Include children bounding boxes
-    return GetBoundingBox(Local);
+    // IDA: ?GetHierarchicalBox@RCK3dEntity@@UAEABUVxBbox@@H@Z @ 0x1000926B
+    // World hierarchical box is stored on the scene-graph node.
+    if (!m_SceneGraphNode) {
+        return GetBoundingBox(Local);
+    }
+
+    m_SceneGraphNode->ComputeHierarchicalBox();
+    const VxBbox &worldBox = m_SceneGraphNode->m_Bbox;
+
+    if (!Local)
+        return worldBox;
+
+    const VxMatrix &invWorld = GetInverseWorldMatrix();
+    m_HierarchicalBox.TransformFrom(worldBox, invWorld);
+    return m_HierarchicalBox;
 }
 
 CKBOOL RCK3dEntity::GetBaryCenter(VxVector *Pos) {
+    // IDA: ?GetBaryCenter@RCK3dEntity@@UAEHPAUVxVector@@@Z @ 0x100090C1
     if (!Pos)
         return FALSE;
 
-    Pos->x = (m_WorldBoundingBox.Min.x + m_WorldBoundingBox.Max.x) * 0.5f;
-    Pos->y = (m_WorldBoundingBox.Min.y + m_WorldBoundingBox.Max.y) * 0.5f;
-    Pos->z = (m_WorldBoundingBox.Min.z + m_WorldBoundingBox.Max.z) * 0.5f;
+    if (m_CurrentMesh) {
+        VxVector localBary;
+        m_CurrentMesh->GetBaryCenter(&localBary);
+        Transform(Pos, &localBary, nullptr);
+        return TRUE;
+    }
 
-    return TRUE;
+    // No mesh: return world translation and return FALSE.
+    Pos->x = m_WorldMatrix[3][0];
+    Pos->y = m_WorldMatrix[3][1];
+    Pos->z = m_WorldMatrix[3][2];
+    return FALSE;
 }
 
 float RCK3dEntity::GetRadius() {
-    VxVector size = m_WorldBoundingBox.Max - m_WorldBoundingBox.Min;
-    return size.Magnitude() * 0.5f;
+    // IDA: ?GetRadius@RCK3dEntity@@UAEMXZ @ 0x10008EE2
+    if (m_CurrentMesh) {
+        VxVector row0 = m_WorldMatrix[0];
+        VxVector row1 = m_WorldMatrix[1];
+        VxVector row2 = m_WorldMatrix[2];
+        const float sx = row0.Magnitude();
+        const float sy = row1.Magnitude();
+        const float sz = row2.Magnitude();
+        float maxScale = sx;
+        if (sy > maxScale)
+            maxScale = sy;
+        if (sz > maxScale)
+            maxScale = sz;
+
+        return m_CurrentMesh->GetRadius() * maxScale;
+    }
+
+    UpdateBox(TRUE);
+    if (!(m_MoveableFlags & VX_MOVEABLE_BOXVALID))
+        return 0.0f;
+
+    const float dx = m_WorldBoundingBox.Max.x - m_WorldBoundingBox.Min.x;
+    const float dy = m_WorldBoundingBox.Max.y - m_WorldBoundingBox.Min.y;
+    const float dz = m_WorldBoundingBox.Max.z - m_WorldBoundingBox.Min.z;
+
+    float maxExtent = dx;
+    if (dy > maxExtent)
+        maxExtent = dy;
+    if (dz > maxExtent)
+        maxExtent = dz;
+
+    return maxExtent * 0.5f;
 }
 
 /*************************************************
@@ -2929,27 +3160,13 @@ void RCK3dEntity::Show(CK_OBJECT_SHOWOPTION show) {
     
     // Call base class Show
     CKObject::Show(show);
-    
-    // Clear hierarchy-affecting flags: preserve critical flags but clear transient ones
-    // IDA: this->m_MoveableFlags &= 0x8800BFC8 | preserved_flags
-    // The mask ~0x77FF4037 preserves flags that shouldn't change on Show/Hide
-    // This clears: ALLINSIDE(0x1000), ALLOUTSIDE(0x2000), HIERARCHICALHIDE(0x10000000), etc.
-    const CKDWORD preserve_mask = 0x8800BFC8 | (VX_MOVEABLE_PICKABLE | VX_MOVEABLE_VISIBLE |
-                                                 VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX |
-                                                 VX_MOVEABLE_EXTENTSUPTODATE | VX_MOVEABLE_BOXVALID |
-                                                 VX_MOVEABLE_RENDERLAST | VX_MOVEABLE_HASMOVED |
-                                                 VX_MOVEABLE_WORLDALIGNED | VX_MOVEABLE_NOZBUFFERWRITE |
-                                                 VX_MOVEABLE_RENDERFIRST | VX_MOVEABLE_NOZBUFFERTEST |
-                                                 VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT |
-                                                 VX_MOVEABLE_INDIRECTMATRIX | VX_MOVEABLE_ZBUFONLY |
-                                                 VX_MOVEABLE_STENCILONLY | VX_MOVEABLE_CHARACTERRENDERED |
-                                                 VX_MOVEABLE_RESERVED2);
-    m_MoveableFlags &= preserve_mask;
-    
+
+    m_MoveableFlags &= ~VX_MOVEABLE_HIERARCHICALHIDE;
+
     // Set or clear VX_MOVEABLE_VISIBLE (0x2) based on show parameter
     // show & 1 means "show" (CKSHOW = 1)
     // show & 2 means "hide children too" (CKHIDE_HIERARCHY = 2)
-    if ((show & 1) != 0) {
+    if ((show & CKSHOW) != 0) {
         m_MoveableFlags |= VX_MOVEABLE_VISIBLE;
         ENTITY_DEBUG_LOG_FMT("Show: entity=%p made VISIBLE", this);
     } else {
@@ -2957,7 +3174,7 @@ void RCK3dEntity::Show(CK_OBJECT_SHOWOPTION show) {
         ENTITY_DEBUG_LOG_FMT("Show: entity=%p made INVISIBLE", this);
         
         // If hiding children too, set hierarchical hide flag
-        if ((show & 2) != 0) {
+        if ((show & CKHIERARCHICALHIDE) != 0) {
             m_MoveableFlags |= VX_MOVEABLE_HIERARCHICALHIDE;
             ENTITY_DEBUG_LOG_FMT("Show: entity=%p set HIERARCHICALHIDE", this);
         }
@@ -3000,30 +3217,127 @@ CKBOOL RCK3dEntity::IsVisible() {
 }
 
 CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
+    // IDA: 0x10005D69
     if (!rc)
         return FALSE;
 
-    RCKRenderContext *dev = (RCKRenderContext *) rc;
+    RCKRenderContext *dev = (RCKRenderContext *)rc;
+    if (!dev->m_RasterizerContext)
+        return TRUE;
 
-    // Check if bounding box is in view frustum
-    if (dev->m_RasterizerContext) {
-        return dev->m_RasterizerContext->ComputeBoxVisibility(m_WorldBoundingBox, TRUE, nullptr) != 0;
+    const CKBOOL updateExtents = (CKBYTE)flags != 0;
+    if (updateExtents) {
+        // IDA resets extents to an inverted huge rect
+        m_RenderExtents = VxRect(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
     }
 
-    return TRUE;
+    // Mark extents as up-to-date for this test pass
+    ModifyMoveableFlags(VX_MOVEABLE_EXTENTSUPTODATE, 0);
+
+    CKDWORD vis = 1;
+
+    // USERBOX + BOXVALID path uses the local bbox and current world matrix
+    if ((m_MoveableFlags & (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID)) == (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID)) {
+        if (!(flags & CK_RENDER_CLEARVIEWPORT))
+            dev->SetWorldTransformationMatrix(m_WorldMatrix);
+
+        VxRect *ext = updateExtents ? &m_RenderExtents : nullptr;
+        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, ext);
+    } else if (m_CurrentMesh) {
+        // If the mesh has no vertices, consider it not visible
+        if (m_CurrentMesh->GetVertexCount() <= 0)
+            return FALSE;
+
+        // If mesh geometry changed, clear UPTODATE and invalidate scene-graph boxes
+        if (!(m_CurrentMesh->GetFlags() & 0x1)) {
+            m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
+            if (m_SceneGraphNode)
+                m_SceneGraphNode->InvalidateBox(TRUE);
+        }
+
+        const VxBbox &meshLocalBox = m_CurrentMesh->GetLocalBox();
+
+        if (!(flags & CK_RENDER_CLEARVIEWPORT))
+            dev->SetWorldTransformationMatrix(m_WorldMatrix);
+
+        VxRect *ext = updateExtents ? &m_RenderExtents : nullptr;
+
+        if (m_Skin) {
+            // With skin, IDA uses the entity cached local bbox
+            vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, ext);
+        } else {
+            vis = dev->m_RasterizerContext->ComputeBoxVisibility(meshLocalBox, FALSE, ext);
+        }
+    } else {
+        // No mesh: transform the origin and treat as a 1x1 extent
+        VxVector4 in(0.0f, 0.0f, 0.0f, 1.0f);
+        VxVector4 outH;
+        VxVector4 outS;
+        unsigned int clip = 0;
+        VxTransformData td;
+        memset(&td, 0, sizeof(td));
+        td.InVertices = &in;
+        td.InStride = 16;
+        td.OutVertices = &outH;
+        td.OutStride = 16;
+        td.ScreenVertices = &outS;
+        td.ScreenStride = 16;
+        td.ClipFlags = &clip;
+
+        dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, m_WorldMatrix);
+        dev->m_RasterizerContext->TransformVertices(1, &td);
+
+        if (updateExtents) {
+            const float x = outS.x;
+            const float y = outS.y;
+            const float w = 1.0f;
+            const float h = 1.0f;
+            if (x < m_RenderExtents.left)
+                m_RenderExtents.left = x;
+            if (y < m_RenderExtents.top)
+                m_RenderExtents.top = y;
+            if (x + w > m_RenderExtents.right)
+                m_RenderExtents.right = x + w;
+            if (y + h > m_RenderExtents.bottom)
+                m_RenderExtents.bottom = y + h;
+        }
+
+        vis = td.m_Offscreen ? 0 : 2;
+    }
+
+    if (vis) {
+        if (vis == 2 && m_SceneGraphNode)
+            m_SceneGraphNode->SetAsInsideFrustum();
+        return TRUE;
+    }
+
+    // IDA: sub_1000D2B0(&node->m_Entity) => node->m_Flags |= 2
+    if (m_SceneGraphNode)
+        m_SceneGraphNode->SetAsOutsideFrustum();
+    return FALSE;
 }
 
 CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
-    // Check this entity and all parents
-    if (!IsInViewFrustrum(rc, 0))
+    // IDA: 0x10006095
+    if (!rc)
         return FALSE;
 
-    // If parent is a place, check its clipping
-    if (m_Parent && m_Parent->GetClassID() == CKCID_PLACE) {
-        return m_Parent->IsInViewFrustrumHierarchic(rc);
+    RCKRenderContext *dev = (RCKRenderContext *)rc;
+    if (!dev->m_RasterizerContext || !m_SceneGraphNode)
+        return TRUE;
+
+    m_SceneGraphNode->SetAsPotentiallyVisible();
+    m_SceneGraphNode->ComputeHierarchicalBox();
+
+    const CKDWORD vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_SceneGraphNode->m_Bbox, TRUE, nullptr);
+    if (vis) {
+        if (vis == 2)
+            m_SceneGraphNode->SetAsInsideFrustum();
+        return TRUE;
     }
 
-    return TRUE;
+    m_SceneGraphNode->SetAsOutsideFrustum();
+    return FALSE;
 }
 
 //=============================================================================
