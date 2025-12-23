@@ -49,13 +49,7 @@ public:
     void SetFlags(CKDWORD flags) override;
     CKDWORD GetFlags() override;
     CK3dEntity *GetRootEntity() override;
-    void CenterAnimation(float frame) override;
-    float GetMergeFactor() override;
-    void SetMergeFactor(float factor) override;
-    CKBOOL IsMerged() override;
-    CKAnimation *CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic = FALSE) override;
     void SetCurrentStep(float Step) override;
-    float CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) override;
 
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
