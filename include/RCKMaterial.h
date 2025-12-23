@@ -218,7 +218,18 @@ public:
     // Sprite3D Batch Methods (non-virtual)
     //=========================================================================
     CKBOOL AddSprite3DBatch(RCKSprite3D *sprite);
+    void FlushSprite3DBatch();
     CKSprite3DBatch *GetSprite3DBatch() { return m_Sprite3DBatch; }
+
+    //=====================================================================
+    // Internal helpers (non-virtual)
+    //=====================================================================
+    // These helpers exist to mirror the original engine's behavior where
+    // channel rendering temporarily patches blend/flags directly without
+    // triggering side effects (e.g., transparency re-evaluation).
+    void PatchForChannelRender(VXBLEND_MODE sourceBlend, VXBLEND_MODE destBlend,
+                               VXBLEND_MODE &savedSourceBlend, VXBLEND_MODE &savedDestBlend, CKDWORD &savedFlags);
+    void RestoreAfterChannelRender(VXBLEND_MODE savedSourceBlend, VXBLEND_MODE savedDestBlend, CKDWORD savedFlags);
 
 protected:
     // Texture slots (4 for multi-texturing support)
@@ -234,8 +245,8 @@ protected:
     CKDWORD m_TextureBlendMode;
     CKDWORD m_TextureMinMode;
     CKDWORD m_TextureMagMode;
-    CKDWORD m_SourceBlend;
-    CKDWORD m_DestBlend;
+    VXBLEND_MODE m_SourceBlend;
+    VXBLEND_MODE m_DestBlend;
     CKDWORD m_ShadeMode;
     CKDWORD m_FillMode;
     CKDWORD m_TextureAddressMode;
