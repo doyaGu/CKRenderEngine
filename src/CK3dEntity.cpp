@@ -366,7 +366,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
                 }
                 CKSkinBoneData *boneData = m_Skin->GetBoneData(i);
                 if (boneData) {
-                    if (RCKSkinBoneData *rckBoneData = dynamic_cast<RCKSkinBoneData *>(boneData)) {
+                    if (RCKSkinBoneData *rckBoneData = static_cast<RCKSkinBoneData *>(boneData)) {
                         rckBoneData->SetFlags(boneFlags);
                     }
                     VxMatrix boneInitInv;
