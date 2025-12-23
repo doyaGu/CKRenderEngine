@@ -47,7 +47,9 @@ public:
     void AddRotationKey(float TimeStep, VxQuaternion *rot) override;
     void AddScaleKey(float TimeStep, VxVector *scl) override;
     void AddScaleAxisKey(float TimeStep, VxQuaternion *sclaxis) override;
-    
+
+    void CheckScaleKeys(VxVector &scale);
+
     CKBOOL Compare(CKObjectAnimation *anim, float threshold = 0.0f) override;
     CKBOOL ShareDataFrom(CKObjectAnimation *anim) override;
     CKObjectAnimation *Shared() override;
