@@ -45,13 +45,17 @@ class RCKSpriteText;
 struct VxCallBack {
     void *callback; // 0x00 (4 bytes)
     void *argument; // 0x04 (4 bytes)
-    CKBOOL temp;    // 0x08 (4 bytes)
+    union {
+        CKBOOL temp;    // 0x08 (4 bytes) - normal callbacks (0/1)
+        void *arg2;     // 0x08 (4 bytes) - temporary callback arrays store the Argument pointer here
+    };
     // Total: 12 bytes - NO beforeTransparent field per IDA
 };
 
 class CKCallbacksContainer {
 public:
     CKCallbacksContainer() : m_Callback(nullptr) {}
+    ~CKCallbacksContainer();
 
     CKBOOL AddPreCallback(void *Function,
                           void *Argument,
@@ -106,19 +110,20 @@ struct PMVertexEx {
     XArray<PMFace *> faces;         // 0x1C: Faces using this vertex
     PMVertexEx *collapseTarget;     // 0x28: Target vertex for edge collapse
     float collapseCost;             // 0x2C: Cost of collapsing to target
-    int heapIndex;                  // 0x30: Index in priority heap
-    int flags;                      // 0x34: Flags (-1 when removed from heap)
+    int arrayIndex;                 // 0x30: Index in vertex array (IDA: set by sub_10024297)
+    int heapIndex;                  // 0x34: Index in priority heap (IDA: set to -1 by sub_10024690)
 
-    PMVertexEx() : originalIndex(-1), collapseTarget(nullptr), collapseCost(0.0f), heapIndex(-1), flags(0) {
+    PMVertexEx() : originalIndex(-1), collapseTarget(nullptr), collapseCost(0.0f), arrayIndex(-1), heapIndex(-1) {
         position.x = position.y = position.z = 0.0f;
     }
 
-    PMVertexEx(const VxVector &pos, int index) : position(pos),
-                                                 originalIndex(index),
-                                                 collapseTarget(nullptr),
-                                                 collapseCost(0.0f),
-                                                 heapIndex(-1),
-                                                 flags(0) {}
+        PMVertexEx(const VxVector &pos, int index)
+                : position(pos),
+                    originalIndex(index),
+                    collapseTarget(nullptr),
+                    collapseCost(0.0f),
+                    arrayIndex(-1),
+                    heapIndex(-1) {}
 
     bool HasNeighbor(PMVertexEx *v) const {
         for (PMVertexEx **it = neighbors.Begin(); it != neighbors.End(); ++it) {
@@ -141,6 +146,9 @@ struct PMVertexEx {
             }
         }
     }
+
+    // IDA: RCKMesh::ProgressiveMeshData::VertexEx::RemoveIfNonNeighbor
+    static void RemoveIfNonNeighbor(PMVertexEx *v, PMVertexEx *other);
 };
 
 /**
@@ -172,6 +180,34 @@ struct PMFace {
         vertices[2] = v2;
     }
 
+    // IDA: sub_1002364A + scalar deleting destructor
+    ~PMFace() {
+        // Remove this face from each vertex's face list.
+        for (int i = 0; i < 3; ++i) {
+            PMVertexEx *v = vertices[i];
+            if (!v)
+                continue;
+
+            for (int fi = 0; fi < v->faces.Size(); ++fi) {
+                if (v->faces[fi] == this) {
+                    v->faces.RemoveAt(fi);
+                    break;
+                }
+            }
+        }
+
+        // Potentially remove neighbor relationships if this face was the last adjacency.
+        for (int i = 0; i < 3; ++i) {
+            const int j = (i + 1) % 3;
+            PMVertexEx *a = vertices[i];
+            PMVertexEx *b = vertices[j];
+            if (a && b) {
+                PMVertexEx::RemoveIfNonNeighbor(a, b);
+                PMVertexEx::RemoveIfNonNeighbor(b, a);
+            }
+        }
+    }
+
     bool ContainsVertex(PMVertexEx *v) const {
         return vertices[0] == v || vertices[1] == v || vertices[2] == v;
     }
@@ -200,13 +236,28 @@ struct PMFace {
         normal.z = e1.x * e2.y - e1.y * e2.x;
         // Normalize
         float len = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
-        if (len > 0.0001f) {
+        if (len >= EPSILON) {
             normal.x /= len;
             normal.y /= len;
             normal.z /= len;
         }
     }
 };
+
+// Out-of-line definition to avoid incomplete-type use before PMFace is defined.
+inline void PMVertexEx::RemoveIfNonNeighbor(PMVertexEx *v, PMVertexEx *other) {
+    if (!v || !other)
+        return;
+
+    // If any face of v still references other, they remain neighbors.
+    for (PMFace **fit = v->faces.Begin(); fit != v->faces.End(); ++fit) {
+        PMFace *f = *fit;
+        if (f && f->ContainsVertex(other))
+            return;
+    }
+
+    v->RemoveNeighbor(other);
+}
 
 /**
  * @brief Internal edge collapse data structure for progressive mesh algorithm.
@@ -288,28 +339,25 @@ struct PMEdgeCollapseData {
     }
 
     void AddToHeap(PMVertexEx *v) {
-        int index = heap.Size();
+        const int index = heap.Size();
         heap.PushBack(v);
         v->heapIndex = index;
         HeapifyUp(index);
     }
 
+    // IDA: sub_10024690
+    // Note: does NOT shrink the heap array; it inserts a null hole and heapifies it down.
     PMVertexEx *PopMinFromHeap() {
-        if (heap.Size() == 0) return nullptr;
+        if (heap.Size() == 0)
+            return nullptr;
 
         PMVertexEx *result = heap[0];
-        result->flags = -1; // Mark as removed
+        if (!result)
+            return nullptr;
 
-        // Move last to front and heapify
-        int lastIdx = heap.Size() - 1;
-        heap[0] = heap[lastIdx];
-        if (heap[0]) heap[0]->heapIndex = 0;
-        heap.RemoveAt(lastIdx);
-
-        if (heap.Size() > 0) {
-            HeapifyDown(0);
-        }
-
+        result->heapIndex = -1;
+        heap[0] = nullptr;
+        HeapifyDown(0);
         return result;
     }
 
@@ -338,6 +386,24 @@ struct PMEdgeCollapseData {
         HeapifyDown(v->heapIndex);
     }
 
+    // IDA: sub_100242FB (remove vertex by swapping last into removed slot)
+    void RemoveVertex(PMVertexEx *v) {
+        if (!v)
+            return;
+        if (v->arrayIndex < 0 || v->arrayIndex >= vertices.Size())
+            return;
+
+        const int idx = v->arrayIndex;
+        const int lastIdx = vertices.Size() - 1;
+        if (idx != lastIdx) {
+            vertices[idx] = vertices[lastIdx];
+            if (vertices[idx])
+                vertices[idx]->arrayIndex = idx;
+        }
+        vertices.RemoveAt(lastIdx);
+        delete v;
+    }
+
     void RemoveFace(PMFace *f) {
         if (f->arrayIndex < 0 || f->arrayIndex >= faces.Size()) return;
 
@@ -350,6 +416,24 @@ struct PMEdgeCollapseData {
         }
         faces.RemoveAt(lastIdx);
         f->arrayIndex = -1;
+    }
+
+    // IDA: sub_10024375 (remove face by swapping last into removed slot and deleting)
+    void DeleteFace(PMFace *f) {
+        if (!f)
+            return;
+        if (f->arrayIndex < 0 || f->arrayIndex >= faces.Size())
+            return;
+
+        const int idx = f->arrayIndex;
+        const int lastIdx = faces.Size() - 1;
+        if (idx != lastIdx) {
+            faces[idx] = faces[lastIdx];
+            if (faces[idx])
+                faces[idx]->arrayIndex = idx;
+        }
+        faces.RemoveAt(lastIdx);
+        delete f;
     }
 };
 
@@ -445,14 +529,30 @@ struct CKFace {
     // Note: Vertex indices are stored separately in m_FaceVertexIndices array
 };
 
-struct CKMaterialChannel {
-    Vx2DVector *m_uv;              // 0x00 - UV pointer for this channel
+struct VxMaterialChannel {
+    Vx2DVector *m_UVs;              // 0x00 - UV pointer for this channel
     CKMaterial *m_Material;        // 0x04
     VXBLEND_MODE m_SourceBlend;    // 0x08
     VXBLEND_MODE m_DestBlend;      // 0x0C
     CKDWORD m_Flags;               // 0x10
     XArray<CKWORD> *m_FaceIndices; // 0x14 - Per-channel face indices (nullptr if channel applies to all faces)
-    CKDWORD m_Reserved;            // 0x18 - Reserved/padding for alignment to 28 bytes
+
+    VxMaterialChannel()
+        : m_UVs(nullptr),
+          m_Material(nullptr),
+          m_SourceBlend(VXBLEND_ZERO),
+          m_DestBlend(VXBLEND_SRCCOLOR),
+          m_Flags(1),
+          m_FaceIndices(nullptr) {}
+
+    void Clear() {
+        if (m_FaceIndices) {
+            delete m_FaceIndices;
+            m_FaceIndices = nullptr;
+        }
+        delete[] m_UVs;
+        m_UVs = nullptr;
+    }
 };
 
 struct CKPrimitiveEntry {
