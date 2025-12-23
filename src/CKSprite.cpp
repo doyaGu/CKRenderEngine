@@ -169,7 +169,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
         rstCtx->SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
-        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_NOTEQUAL);
         rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
     } else {
         rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
@@ -246,8 +246,7 @@ CKBOOL RCKSprite::IsInVideoMemory() {
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
     RCKRenderContext *rctx = (RCKRenderContext *) ctx;
-    if (!rctx || !rctx->m_RasterizerContext) return FALSE;
-    return rctx->m_RasterizerContext->CopyToTexture(m_ObjectIndex, Src, Dest, CKRST_CUBEFACE_XPOS);
+    return rctx && rctx->m_RasterizerContext->CopyToTexture(m_ObjectIndex, Src, Dest, CKRST_CUBEFACE_XPOS);
 }
 
 CKBOOL RCKSprite::GetVideoTextureDesc(VxImageDescEx &desc) {
@@ -424,6 +423,11 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
         }
     }
     return CK_OK;
+}
+
+void RCKSprite::RestoreInitialSize() {
+    Vx2DVector size((float)GetWidth(), (float)GetHeight());
+    m_Rect.SetSize(size);
 }
 
 void RCKSprite::PostLoad() {
