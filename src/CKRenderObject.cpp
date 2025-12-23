@@ -139,10 +139,6 @@ int RCKRenderObject::GetMemoryOccupation() {
     return CKBeObject::GetMemoryOccupation() + sizeof(CKDWORD) + sizeof(CKCallbacksContainer *);
 }
 
-CKERROR RCKRenderObject::Copy(CKObject &o, CKDependenciesContext &context) {
-    return CKRenderObject::Copy(o, context);
-}
-
 CKSTRING RCKRenderObject::GetClassName() {
     return (CKSTRING) "Render Object";
 }
