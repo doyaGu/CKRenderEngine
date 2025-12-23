@@ -122,8 +122,8 @@ public:
     XArray<VxOption*> m_Options;
     CK2dEntity *m_2DRootFore;
     CK2dEntity *m_2DRootBack;
-    CKDWORD m_2DRootBackName;
-    CKDWORD m_2DRootForeName;
+    CK_ID m_2DRootBackId;
+    CK_ID m_2DRootForeId;
     XClassArray<VxEffectDescription> m_Effects;
 };
 

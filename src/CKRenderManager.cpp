@@ -254,14 +254,13 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         CK_DEBUG_LOG("2DRootFore entity flags modified");
         m_2DRootFore->Show(CKHIDE);
         CK_DEBUG_LOG("2DRootFore hidden");
-        m_2DRootForeName = m_2DRootFore->GetID();
+        m_2DRootForeId = m_2DRootFore->GetID();
     } else {
         CK_DEBUG_LOG("Failed to create 2DRootFore");
     }
 
     CK_DEBUG_LOG("About to create 2DRootBack");
-    m_2DRootBack = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootBack",
-                                                          CK_OBJECTCREATION_NONAMECHECK);
+    m_2DRootBack = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootBack", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootBack) {
         CK_DEBUG_LOG_FMT("2DRootBack created at %p", m_2DRootBack);
         m_2DRootBack->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
@@ -270,17 +269,13 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         CK_DEBUG_LOG("2DRootBack entity flags modified");
         m_2DRootBack->Show(CKHIDE);
         CK_DEBUG_LOG("2DRootBack hidden");
-        m_2DRootBackName = m_2DRootBack->GetID();
+        m_2DRootBackId = m_2DRootBack->GetID();
     } else {
         CK_DEBUG_LOG("Failed to create 2DRootBack");
     }
 
     // Register default material effects
     RegisterDefaultEffects();
-
-    // Initialize scene graph root node with full render context mask
-    m_SceneGraphRootNode.m_RenderContextMask = 0xFFFFFFFF;
-    m_SceneGraphRootNode.m_EntityMask = 0xFFFFFFFF;
 
     CK_DEBUG_LOG_FMT("RCKRenderManager initialization complete - %d drivers available", m_DriverCount);
 }
@@ -302,25 +297,6 @@ RCKRenderManager::~RCKRenderManager() {
             info.CloseFct(m_Rasterizers[i]);
         }
     }
-
-    // Clear effects
-    m_Effects.Clear();
-
-    // Clear options
-    m_Options.Clear();
-
-    // Clear vertex buffers
-    m_VertexBuffers.Clear();
-
-    // Clear rasterizers array
-    m_Rasterizers.Clear();
-
-    // Clear render contexts
-    m_RenderContexts.Clear();
-
-    // Clear callback arrays
-    m_TemporaryPreRenderCallbacks.Clear();
-    m_TemporaryPostRenderCallbacks.Clear();
 }
 
 CKERROR RCKRenderManager::PreClearAll() {
@@ -371,7 +347,7 @@ CKERROR RCKRenderManager::PostProcess() {
     // Set moved flag on all moved entities
     for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin(); 
          it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
-        (*it)->m_MoveableFlags |= 0x40000000;
+        (*it)->m_MoveableFlags |= VX_MOVEABLE_RESERVED2;
     }
 
     // Clear extents for all render contexts
@@ -437,20 +413,20 @@ CKERROR RCKRenderManager::SequenceRemovedFromScene(CKScene *scn, CK_ID *objids, 
 }
 
 CKERROR RCKRenderManager::OnCKEnd() {
-    CKObject *obj = m_Context->GetObject(m_2DRootForeName);
+    CKObject *obj = m_Context->GetObject(m_2DRootForeId);
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
         m_Context->DestroyObject(m_2DRootBack);
     }
     
-    obj = m_Context->GetObject(m_2DRootBackName);
+    obj = m_Context->GetObject(m_2DRootBackId);
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
         m_Context->DestroyObject(m_2DRootFore);
     }
     
     m_2DRootBack = nullptr;
     m_2DRootFore = nullptr;
-    m_2DRootForeName = 0;
-    m_2DRootBackName = 0;
+    m_2DRootForeId = 0;
+    m_2DRootBackId = 0;
     
     return CK_OK;
 }
@@ -777,24 +753,23 @@ void RCKRenderManager::CleanMovedEntities() {
     for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin();
          it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
         RCK3dEntity *entity = *it;
-        if ((entity->GetMoveableFlags() & 0x40000000) != 0) {
+        if ((entity->GetMoveableFlags() & VX_MOVEABLE_RESERVED2) != 0) {
             // Entity was moved this frame, clear both flags
-            entity->ModifyMoveableFlags(0, 0x40020000);
+            entity->m_MoveableFlags &= ~(VX_MOVEABLE_HASMOVED | VX_MOVEABLE_RESERVED2);
         } else {
             // Entity was not moved, just clear the flag and keep in list
-            entity->ModifyMoveableFlags(0, 0x40000000);
+            entity->m_MoveableFlags &= ~VX_MOVEABLE_RESERVED2;
             m_MovedEntities[count++] = entity;
         }
     }
     m_MovedEntities.Resize(count);
 }
 
-void RCKRenderManager::AddTemporaryCallback(CKCallbacksContainer *callbacks, void *Function, void *Argument,
-                                            CKBOOL preOrPost) {
+void RCKRenderManager::AddTemporaryCallback(CKCallbacksContainer *callbacks, void *Function, void *Argument, CKBOOL preOrPost) {
     VxCallBack cb;
     cb.callback = callbacks;
     cb.argument = Function;
-    cb.temp = (CKBOOL)(CKDWORD)Argument;
+    cb.arg2 = Argument;
     
     if (preOrPost)
         m_TemporaryPreRenderCallbacks.PushBack(cb);
@@ -829,7 +804,7 @@ void RCKRenderManager::RemoveAllTemporaryCallbacks() {
          it != m_TemporaryPreRenderCallbacks.End(); ++it) {
         CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
         if (container) {
-            container->RemovePreCallback(it->argument, (void *)(CKDWORD)it->temp);
+            container->RemovePreCallback(it->argument, it->arg2);
         }
     }
     
@@ -838,7 +813,7 @@ void RCKRenderManager::RemoveAllTemporaryCallbacks() {
          it != m_TemporaryPostRenderCallbacks.End(); ++it) {
         CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
         if (container) {
-            container->RemovePostCallback(it->argument, (void *)(CKDWORD)it->temp);
+            container->RemovePostCallback(it->argument, it->arg2);
         }
     }
     
