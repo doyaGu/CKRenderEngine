@@ -313,37 +313,6 @@ void RCKAnimation::SetCurrentStep(float Step) {
     m_Step = Step;
 }
 
-// The following are virtual methods meant to be overridden by derived classes.
-// CKAnimation provides stub implementations that do nothing or return default values.
-
-void RCKAnimation::CenterAnimation(float frame) {
-    // Stub - implemented in derived classes (e.g., CKKeyedAnimation)
-}
-
-float RCKAnimation::GetMergeFactor() {
-    // Stub - implemented in derived classes
-    return 0.0f;
-}
-
-void RCKAnimation::SetMergeFactor(float factor) {
-    // Stub - implemented in derived classes
-}
-
-CKBOOL RCKAnimation::IsMerged() {
-    // Stub - implemented in derived classes
-    return FALSE;
-}
-
-// 0x10075C30 - Returns nullptr in base class
-CKAnimation *RCKAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic) {
-    return nullptr;
-}
-
-float RCKAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) {
-    // Stub - implemented in derived classes
-    return 0.0f;
-}
-
 //=============================================================================
 // Static Class Methods (for class registration)
 // Based on IDA Pro analysis of original CK2_3D.dll
