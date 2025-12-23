@@ -809,8 +809,7 @@ CKBOOL RCKObjectAnimation::EvaluateScaleAxis(float Time, VxQuaternion &ScaleAxis
     return FALSE;
 }
 
-CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVector *Vertices, CKDWORD VStride,
-                                               VxCompressedVector *Normals) {
+CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVector *Vertices, CKDWORD VStride, VxCompressedVector *Normals) {
     // Based on IDA decompilation at 0x100574B4
     
     // Check flag 0x20 - morph disabled
@@ -901,8 +900,7 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
     return TRUE;
 }
 
-CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector *pos, VxVector *scale,
-                                        VxQuaternion *ScaleRot) {
+CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector *pos, VxVector *scale, VxQuaternion *ScaleRot) {
     // Clamp step to [0, 1]
     if (step > 1.0f)
         step = 1.0f;
@@ -1078,6 +1076,22 @@ void RCKObjectAnimation::AddScaleAxisKey(float TimeStep, VxQuaternion *sclaxis) 
     CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
     if (ctrl)
         ctrl->AddKey(&key);
+}
+
+void RCKObjectAnimation::CheckScaleKeys(VxVector &scale) {
+    if (m_KeyframeData) {
+        if (m_KeyframeData->m_RotationController && !m_KeyframeData->m_ScaleController) {
+            CreateController(CKANIMATION_LINSCL_CONTROL);
+        }
+        if (m_KeyframeData->m_ScaleController) {
+            CKAnimController *ctrl = m_KeyframeData->m_ScaleController;
+            if (ctrl->GetKeyCount() == 0) {
+                // Add a scale key at time 0 with the provided scale
+                CKScaleKey key(0.0f, scale);
+                ctrl->AddKey(&key);
+            }
+        }
+    }
 }
 
 //=============================================================================
