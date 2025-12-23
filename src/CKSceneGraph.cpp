@@ -14,11 +14,54 @@
 #define SCENEGRAPH_DEBUG_LOG(msg) CK_LOG("SceneGraph", msg)
 #define SCENEGRAPH_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("SceneGraph", fmt, __VA_ARGS__)
 
+static CKDWORD GetSceneGraphPriorityKey(const CKSceneGraphNode *n) {
+    const CKWORD p = (CKWORD)n->m_Priority;
+    const CKWORD mp = (CKWORD)n->m_MaxPriority;
+    return (CKDWORD)p | ((CKDWORD)mp << 16);
+}
+
 // Helper function to swap two transparent objects
 static void SwapTransparentObjects(CKTransparentObject *a, CKTransparentObject *b) {
     CKTransparentObject temp = *a;
     *a = *b;
     *b = temp;
+}
+
+// IDA sub_10009BB9: tie-breaker used by SortTransparentObjects when projected Z extents overlap.
+// Returns: -1, 0, 1 (ordering hint).
+static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cameraPos) {
+    // Mirrors the original epsilon (~FLT_EPSILON for 32-bit)
+    const float eps = FLT_EPSILON;
+    const VxBbox &localBox = a->m_LocalBoundingBox;
+
+    // Note: VxBbox layout in SDK is { Max, Min } under MSVC.
+    const float dz = localBox.Max.z - localBox.Min.z;
+    if (dz < eps) {
+        const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
+        const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+        if (prod != 0.0f)
+            return (prod >= 0.0f) ? 1 : -1;
+        return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
+    }
+
+    const float dy = localBox.Max.y - localBox.Min.y;
+    if (dy >= eps) {
+        const float dx = localBox.Max.x - localBox.Min.x;
+        if (dx >= eps)
+            return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
+
+        const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
+        const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+        if (prod == 0.0f)
+            return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
+        return (prod >= 0.0f) ? 1 : -1;
+    }
+
+    const VxPlane plane(a->m_WorldMatrix[1], a->m_WorldMatrix[3]);
+    const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+    if (prod == 0.0f)
+        return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
+    return (prod >= 0.0f) ? 1 : -1;
 }
 
 // =====================================================
@@ -92,7 +135,7 @@ void CKSceneGraphNode::RemoveNode(CKSceneGraphNode *node) {
 
     // Remove from children array using iterator-style removal
     int removeIndex = node->m_Index;
-    m_Children.RemoveAt(removeIndex);  // XArray::Remove
+    m_Children.RemoveAt(removeIndex);
 
     // Update indices of subsequent children
     int newIndex = removeIndex;
@@ -116,16 +159,16 @@ void CKSceneGraphNode::RemoveNode(CKSceneGraphNode *node) {
 void CKSceneGraphNode::PrioritiesChanged() {
     // IDA @ 0x10076fdd: Iterate upward updating m_Priority based on children
     for (CKSceneGraphNode *node = this; node != nullptr; node = node->m_Parent) {
-        CKWORD priority = 0;
+        short priority = 0;
         
         // Find maximum priority among children
         CKSceneGraphNode **it = node->m_Children.Begin();
         CKSceneGraphNode **end = node->m_Children.End();
         while (it < end) {
             CKSceneGraphNode *child = *it;
-            if (child->m_Priority > priority)
+            if ((int)child->m_Priority > (int)priority)
                 priority = child->m_Priority;
-            if (child->m_MaxPriority > priority)
+            if ((int)child->m_MaxPriority > (int)priority)
                 priority = child->m_MaxPriority;
             ++it;
         }
@@ -135,7 +178,7 @@ void CKSceneGraphNode::PrioritiesChanged() {
             break;
         
         // Update flags and priority
-        node->m_Flags |= 0x10;  // Need sort flag
+        node->MarkNeedSort();
         node->m_Priority = priority;
     }
 }
@@ -226,7 +269,7 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
                 if (updateParent && m_Parent->m_Parent)
                     m_Parent->EntityFlagsChanged(TRUE);
             }
-            m_Parent->m_Flags |= 0x10; // Need sort
+            m_Parent->MarkNeedSort();
         }
     } else {
         // Node should not be parsed
@@ -244,29 +287,29 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
             --m_Parent->m_ChildToBeParsedCount;
             if (updateParent && m_Parent->m_Parent)
                 m_Parent->EntityFlagsChanged(TRUE);
-            m_Parent->m_Flags |= 0x10; // Need sort
+            m_Parent->MarkNeedSort();
         }
     }
 }
 
 // IDA @ 0x10076f50
-void CKSceneGraphNode::SetPriority(CKWORD priority, CKBOOL propagate) {
+void CKSceneGraphNode::SetPriority(int priority, CKBOOL propagate) {
     // Clamp priority to [-10000, 10000] range
-    int p = (int)priority;
+    int p = priority;
     if (p < -10000)
         p = -10000;
     else if (p > 10000)
         p = 10000;
     
     // Store as offset (priority + 10000) so range becomes [0, 20000]
-    CKWORD newMaxPriority = (CKWORD)(p + 10000);
+    int newMaxPriority = p + 10000;
     
     if (m_MaxPriority == newMaxPriority || !m_Parent) {
         // No change or no parent - just update
         m_MaxPriority = newMaxPriority;
     } else {
         // Priority changed and has parent - mark parent for resort
-        m_Parent->m_Flags |= 0x10;
+        m_Parent->MarkNeedSort();
         m_MaxPriority = newMaxPriority;
         m_Parent->PrioritiesChanged();
     }
@@ -274,30 +317,36 @@ void CKSceneGraphNode::SetPriority(CKWORD priority, CKBOOL propagate) {
 
 void CKSceneGraphNode::InvalidateBox(CKBOOL propagate) {
     // Clear the "box valid" flags (0xC = 0x4 | 0x8)
-    m_Flags &= ~0xC;
+    InvalidateHierarchyBox();
 
     // Propagate to parents if requested
     if (propagate) {
         for (CKSceneGraphNode *parent = m_Parent;
-             parent && (parent->m_Flags & 0x8) != 0;
+             parent && parent->IsHierarchyBoxComputed();
              parent = parent->m_Parent) {
-            parent->m_Flags &= ~0xC;
+            parent->InvalidateHierarchyBox();
         }
     }
 }
 
 // IDA @ 0x1000d250: Clear visibility test flags (bits 0,1)
 void CKSceneGraphNode::SetAsPotentiallyVisible() {
-    m_Flags &= ~3u; // Clear bits 0 and 1
+    ClearFlags(CKSGN_FRUSTUM_MASK); // Clear bits 0 and 1
 }
 
 // IDA @ 0x1000d270: Set as inside frustum (bit 0)
 void CKSceneGraphNode::SetAsInsideFrustum() {
-    m_Flags |= 1u; // Set bit 0
+    // IDA @ 0x1000D270: this->m_Flags |= 1
+    SetFlags(CKSGN_INSIDEFRUSTUM);
+}
+
+void CKSceneGraphNode::SetAsOutsideFrustum() {
+    // IDA @ 0x1000D2B0: sets bit 1 (outside) without clearing bit 0
+    SetFlags(CKSGN_OUTSIDEFRUSTUM);
 }
 
 void CKSceneGraphNode::SortNodes() {
-    m_Flags &= ~0x10;
+    ClearNeedSort();
 
     if (m_ChildToBeParsedCount < 2)
         return;
@@ -310,10 +359,10 @@ void CKSceneGraphNode::SortNodes() {
         for (CKSceneGraphNode **curr = end - 1; curr >= i; --curr) {
             CKSceneGraphNode **prev = curr - 1;
 
-            CKDWORD currPriority = *reinterpret_cast<CKDWORD *>(&(*curr)->m_Priority);
-            CKDWORD prevPriority = *reinterpret_cast<CKDWORD *>(&(*prev)->m_Priority);
+            const CKDWORD currKey = GetSceneGraphPriorityKey(*curr);
+            const CKDWORD prevKey = GetSceneGraphPriorityKey(*prev);
 
-            if (currPriority > prevPriority) {
+            if (currKey > prevKey) {
                 CKSceneGraphNode *tmp = *curr;
                 *curr = *prev;
                 *prev = tmp;
@@ -335,8 +384,8 @@ void CKSceneGraphNode::SortNodes() {
 void CKSceneGraphNode::ClearTransparentFlags() {
     // IDA @ 0x100789A0
     // Clear flag 0x01 and set flag 0x02
-    m_Flags &= ~1u;
-    m_Flags |= 2u;
+    ClearFlags(CKSGN_INSIDEFRUSTUM);
+    SetFlags(CKSGN_OUTSIDEFRUSTUM);
     
     // Only traverse children that are to be parsed (not all children)
     int i = 0;
@@ -351,7 +400,12 @@ void CKSceneGraphNode::ClearTransparentFlags() {
 CKBOOL CKSceneGraphNode::CheckHierarchyFrustum() {
     // IDA @ 0x1000D290: return this->m_Flags & 1
     // Check flag 0x01 to determine if hierarchy frustum test passed
-    return (m_Flags & 0x01) != 0;
+    return HasAnyFlags(CKSGN_INSIDEFRUSTUM);
+}
+
+CKBOOL CKSceneGraphNode::IsAllOutsideFrustum() const {
+    // IDA @ 0x1000D2D0: return node->m_Flags & 2
+    return HasAnyFlags(CKSGN_OUTSIDEFRUSTUM);
 }
 
 void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
@@ -362,7 +416,7 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     SetAsPotentiallyVisible();
     SetAsInsideFrustum();
 
-    if ((m_Flags & 0x10) != 0)
+    if (NeedsSort())
         SortNodes();
 
     if (m_Entity->GetClassID() == CKCID_PLACE) {
@@ -384,7 +438,7 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     }
 
     if (m_Entity->GetClassID() == CKCID_CHARACTER)
-        m_Entity->m_MoveableFlags |= 0x20000000;
+        m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
 
     if ((m_EntityMask & dev->m_MaskFree) != 0 && m_Entity->IsToBeRendered()) {
         if (m_Entity->IsToBeRenderedLast()) {
@@ -418,11 +472,11 @@ void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWOR
     CKBOOL hierarchyVisible = FALSE;
 
     if (m_ChildToBeParsedCount != 0) {
-        if ((m_Flags & 0x10) != 0)
+        if (NeedsSort())
             SortNodes();
 
         if (m_Entity) {
-            m_Entity->ModifyMoveableFlags(0x20, 0);
+            m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
 
             if (!m_Entity->IsInViewFrustrumHierarchic((CKRenderContext *)rc)) {
                 if (m_Entity->GetClassID() == CKCID_CHARACTER) {
@@ -431,7 +485,7 @@ void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWOR
                     expanded.Min *= 2.0f;
 
                     if (rc->m_RasterizerContext->ComputeBoxVisibility(expanded, TRUE, nullptr))
-                        m_Entity->m_MoveableFlags |= 0x20000000;
+                        m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
                 }
 
                 ClearTransparentFlags();
@@ -457,7 +511,7 @@ void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWOR
             }
 
             if (m_Entity->GetClassID() == CKCID_CHARACTER)
-                m_Entity->m_MoveableFlags |= 0x20000000;
+                m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
 
             hierarchyVisible = CheckHierarchyFrustum();
 
@@ -514,7 +568,7 @@ void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWOR
         rc->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
     } else {
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-        CKDWORD renderFlags = flags | 0x100;
+        CKDWORD renderFlags = flags | CK_RENDER_CLEARVIEWPORT;
         m_Entity->Render((CKRenderContext *)rc, renderFlags);
         rc->m_SceneTraversalTimeProfiler.Reset();
     }
@@ -541,7 +595,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                 RCK3dEntity *entity = node->m_Entity;
 
                 if (CKIsChildClassOf(entity, CKCID_SPRITE3D)) {
-                    entity->ModifyMoveableFlags(0, 4);
+                    entity->m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
                     entity->UpdateBox(TRUE);
                 }
 
@@ -553,12 +607,16 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
                 ++it;
             } else {
-                node->m_Flags &= ~0x20;
+                node->ClearInTransparentList();
                 it = m_TransparentObjects.Remove(it);
             }
         }
 
         if (m_TransparentObjects.Size() > 0) {
+            // IDA: uses root entity world position for tie-breaking.
+            const CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
+            const VxVector cameraPos = rootEntity ? rootEntity->GetWorldMatrix()[3] : VxVector(0.0f, 0.0f, 0.0f);
+
             CKTransparentObject *begin = m_TransparentObjects.Begin();
             CKTransparentObject *end = m_TransparentObjects.End();
 
@@ -573,19 +631,37 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                         continue;
                     }
 
-                    if (k->m_Node->m_MaxPriority == prev->m_Node->m_MaxPriority && prev->m_ZhMax < k->m_ZhMin) {
-                        if (k->m_ZhMax < prev->m_ZhMin) {
-                            int cmp = (k->m_ZhMax > prev->m_ZhMax) ? 1 : ((k->m_ZhMax < prev->m_ZhMax) ? -1 : 0);
-                            if (cmp < 0) {
+                    if (k->m_Node->m_MaxPriority == prev->m_Node->m_MaxPriority) {
+                        // Only invoke the expensive tie-breaker when projected Z ranges overlap.
+                        // DLL overlap test pattern: prev.ZhMin <= k.ZhMax && k.ZhMin < prev.ZhMax
+                        if (prev->m_ZhMin <= k->m_ZhMax && k->m_ZhMin < prev->m_ZhMax) {
+                            const RCK3dEntity *a = prev->m_Node->m_Entity;
+                            const RCK3dEntity *b = k->m_Node->m_Entity;
+
+                            // sub_10009BB9 tie-breaker (may return -1/0/1)
+                            const int cmp1 = ClassifyTransparentOrder(a, b, cameraPos);
+                            if (cmp1 < 0) {
                                 SwapTransparentObjects(k, prev);
                                 noSwaps = FALSE;
                                 continue;
                             }
-                        }
+                            if (cmp1 > 0)
+                                continue;
 
-                        if (prev->m_ZhMax + 0.00000011920929f < k->m_ZhMax) {
-                            SwapTransparentObjects(k, prev);
-                            noSwaps = FALSE;
+                            const int cmp2 = ClassifyTransparentOrder(b, a, cameraPos);
+                            if (cmp2 > 0) {
+                                SwapTransparentObjects(k, prev);
+                                noSwaps = FALSE;
+                                continue;
+                            }
+                            if (cmp2 < 0)
+                                continue;
+
+                            // Final epsilon compare: if prev.ZhMax + FLT_EPSILON < k.ZhMax then swap.
+                            if (prev->m_ZhMax + EPSILON < k->m_ZhMax) {
+                                SwapTransparentObjects(k, prev);
+                                noSwaps = FALSE;
+                            }
                         }
                     }
                 }
@@ -610,7 +686,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                     node->m_Entity->Render((CKRenderContext *)dev, flags);
                     ++it;
                 } else {
-                    node->m_Flags &= ~0x20;
+                    node->ClearInTransparentList();
                     it = m_TransparentObjects.Remove(it);
                 }
             } else {
@@ -622,13 +698,13 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
 void CKSceneGraphRootNode::AddTransparentObject(CKSceneGraphNode *node) {
     // Check if already in the list (flag 0x20)
-    if ((node->m_Flags & 0x20) == 0) {
+    if (!node->IsInTransparentList()) {
         CKTransparentObject obj;
         obj.m_Node = node;
         obj.m_ZhMax = 0.0f;
         obj.m_ZhMin = 0.0f;
         m_TransparentObjects.PushBack(obj);
-        node->m_Flags |= 0x20; // Mark as added to transparent list
+        node->MarkInTransparentList();
     }
 }
 
@@ -647,7 +723,7 @@ void CKSceneGraphRootNode::Check() {
     while (it != m_TransparentObjects.End()) {
         CKSceneGraphNode *node = it->m_Node;
         RCK3dEntity *entity = node->m_Entity;
-        if (entity && entity->GetObjectFlags() & 0x10) {
+        if (entity && entity->IsToBeDeleted()) {
             it = m_TransparentObjects.Remove(it);
         } else {
             ++it;
@@ -669,7 +745,7 @@ CKDWORD CKSceneGraphNode::Rebuild() {
         return m_EntityMask;
     }
 
-    m_Flags |= 0x10;
+    MarkNeedSort();
 
     XArray<CKSceneGraphNode *> reordered;
     reordered.Resize(childCount);
@@ -699,10 +775,10 @@ CKDWORD CKSceneGraphNode::Rebuild() {
 }
 
 CKDWORD CKSceneGraphNode::ComputeHierarchicalBox() {
-    if ((m_Flags & 0x08) != 0)
-        return m_Flags & 0x04;
+    if (IsHierarchyBoxComputed())
+        return m_Flags & CKSGN_BOXVALID;
 
-    m_Flags |= 0x08;
+    SetFlags(CKSGN_BOXCOMPUTED);
 
     m_Entity->UpdateBox(TRUE);
 
@@ -716,13 +792,13 @@ CKDWORD CKSceneGraphNode::ComputeHierarchicalBox() {
             ++it;
         }
 
-        m_Flags |= 0x04;
+        SetFlags(CKSGN_BOXVALID);
     } else {
         CKSceneGraphNode **it = m_Children.Begin();
         while (it < m_Children.End()) {
             if ((*it)->ComputeHierarchicalBox()) {
                 m_Bbox = (*it)->m_Bbox;
-                m_Flags |= 0x04;
+                SetFlags(CKSGN_BOXVALID);
                 ++it;
                 break;
             }
@@ -736,5 +812,5 @@ CKDWORD CKSceneGraphNode::ComputeHierarchicalBox() {
         }
     }
 
-    return m_Flags & 0x04;
+    return m_Flags & CKSGN_BOXVALID;
 }
