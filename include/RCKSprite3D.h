@@ -36,6 +36,7 @@ public:
     CKBOOL IsToBeRendered() override;
     CKBOOL IsToBeRenderedLast() override;
     CKBOOL IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) override;
+    void UpdateBox(CKBOOL World) override;
     CKBOOL SetBoundingBox(const VxBbox *BBox, CKBOOL Local = FALSE) override;
     int RayIntersection(const VxVector *Pos1, const VxVector *Pos2, VxIntersectionDesc *Desc,
                         CK3dEntity *Ref, CK_RAYINTERSECTION iOptions = CKRAYINTERSECTION_DEFAULT) override;

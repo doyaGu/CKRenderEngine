@@ -193,9 +193,6 @@ RCKSprite3D::RCKSprite3D(CKContext *Context, CKSTRING name)
     m_LocalBoundingBox.Max.y = 1.0f;
     m_LocalBoundingBox.Max.z = 0.0f;
 
-    // Ensure meshless Sprite3D isn't collapsed to a point by UpdateBox().
-    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
-
     // Initialize UV mapping to full texture
     m_Rect.left = 0.0f;
     m_Rect.top = 0.0f;
@@ -346,10 +343,6 @@ void RCKSprite3D::SetSize(Vx2DVector &size) {
     m_LocalBoundingBox.Max.x = (m_Offset.x + 1.0f) * halfWidth;
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
 
-    // Meshless entities are treated as a point in UpdateBox() unless VX_MOVEABLE_USERBOX is set.
-    // Sprite3D bounding box is always defined by size/offset.
-    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
-
     // Invalidate scene graph bounding box
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);
@@ -376,9 +369,6 @@ void RCKSprite3D::SetOffset(Vx2DVector &offset) {
     m_LocalBoundingBox.Min.y = (m_Offset.y - 1.0f) * halfHeight;
     m_LocalBoundingBox.Max.x = (m_Offset.x + 1.0f) * halfWidth;
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
-
-    // Keep sprite bbox authoritative for UpdateBox().
-    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
 
     // Invalidate scene graph bounding box
     if (m_SceneGraphNode)
@@ -450,12 +440,14 @@ CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
     return TRUE;
 }
 
-CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
-    if (BBox && !(m_MoveableFlags & VX_MOVEABLE_UPTODATE)) {
+void RCKSprite3D::UpdateBox(CKBOOL World) {
+    if (!(m_MoveableFlags & VX_MOVEABLE_UPTODATE) && World) {
         m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
         m_MoveableFlags |= VX_MOVEABLE_BOXVALID | VX_MOVEABLE_UPTODATE;
     }
+}
 
+CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
     return TRUE;
 }
 
