@@ -96,6 +96,38 @@ void RCKTargetCamera::SetTarget(CK3dEntity *target) {
     }
 }
 
+void RCKTargetCamera::AddToScene(CKScene *scene, CKBOOL dependencies) {
+    // IDA: 0x10043C63
+    if (!scene) {
+        return;
+    }
+
+    RCK3dEntity::AddToScene(scene, dependencies);
+
+    if (dependencies) {
+        CK3dEntity *target = static_cast<CK3dEntity *>(m_Context->GetObject(m_Target));
+        if (target) {
+            target->AddToScene(scene, dependencies);
+        }
+    }
+}
+
+void RCKTargetCamera::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
+    // IDA: 0x10043CCE
+    if (!scene) {
+        return;
+    }
+
+    RCK3dEntity::RemoveFromScene(scene, dependencies);
+
+    if (dependencies) {
+        CK3dEntity *target = static_cast<CK3dEntity *>(m_Context->GetObject(m_Target));
+        if (target) {
+            target->RemoveFromScene(scene, dependencies);
+        }
+    }
+}
+
 //=============================================================================
 // CKObject Overrides
 //=============================================================================
