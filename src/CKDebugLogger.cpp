@@ -146,5 +146,5 @@ void CKDebugLogger::OpenFileIfNeeded() {
         return;
     }
 
-    fopen_s(&m_File, m_LogFilePath.c_str(), "a");
+    fopen_s(&m_File, m_LogFilePath.c_str(), "w");
 }
