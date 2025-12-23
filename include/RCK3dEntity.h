@@ -12,9 +12,6 @@
 
 class RCKSkin;
 
-#define CKRENDER_UPDATEEXTENTS 0x00000FF
-#define CKRENDER_DONTSETMATRIX 0x0000100
-
 class RCK3dEntity : public RCKRenderObject {
 public:
 
