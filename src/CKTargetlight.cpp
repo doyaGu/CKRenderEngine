@@ -271,7 +271,7 @@ CKStateChunk *RCKTargetLight::Save(CKFile *file, CKDWORD flags) {
     targetLightChunk->AddChunkAndDelete(baseChunk);
 
     // Write target-specific data with identifier 0x80000000
-    targetLightChunk->WriteIdentifier(0x80000000);
+    targetLightChunk->WriteIdentifier(CK_STATESAVE_TLIGHTTARGET);
 
     // Save target object reference
     CKObject *targetObject = m_Context->GetObject(m_Target);
@@ -317,7 +317,7 @@ CKERROR RCKTargetLight::Load(CKStateChunk *chunk, CKFile *file) {
     RCKLight::Load(chunk, file);
 
     // Load target object ID
-    if (chunk->SeekIdentifier(0x80000000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_TLIGHTTARGET)) {
         m_Target = chunk->ReadObjectID();
     }
 
