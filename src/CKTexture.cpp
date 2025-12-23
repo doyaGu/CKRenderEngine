@@ -177,12 +177,12 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             VxImageDescEx desc;
             GetImageDesc(desc);
 
-            for (int face = CKRST_CUBEFACE_XPOS; face < 6; ++face) {
+            for (CKRST_CUBEFACE face = CKRST_CUBEFACE_XPOS; face <= CKRST_CUBEFACE_ZNEG; face = static_cast<CKRST_CUBEFACE>(face + 1)) {
                 CKBYTE *imageData = LockSurfacePtr(face);
                 if (imageData) {
                     desc.Image = imageData;
                     result |= m_RasterizerContext->LoadCubeMapTexture(
-                        m_ObjectIndex, desc, static_cast<CKRST_CUBEFACE>(face), -1);
+                        m_ObjectIndex, desc, face, -1);
                     ReleaseSurfacePtr(face);
                 }
             }

@@ -79,16 +79,16 @@ void RCKTargetCamera::SetTarget(CK3dEntity *target) {
     // Clear flags on old target
     if (oldTarget) {
         CKDWORD flags = oldTarget->GetFlags();
-        flags &= ~0x200; // Clear "is target" flag
-        flags |= 0x2;    // Set some other flag
+        flags &= ~CK_3DENTITY_TARGETCAMERA; // Clear "is target" flag
+        flags |= CK_3DENTITY_FRAME;         // Set some other flag
         oldTarget->SetFlags(flags);
     }
 
     // Set flags on new target
     if (target) {
         CKDWORD flags = target->GetFlags();
-        flags |= 0x200; // Set "is target" flag
-        flags &= ~0x2;  // Clear some other flag
+        flags |= CK_3DENTITY_TARGETCAMERA; // Set "is target" flag
+        flags &= ~CK_3DENTITY_FRAME;       // Clear some other flag
         target->SetFlags(flags);
         m_Target = target->GetID();
     } else {
@@ -178,7 +178,7 @@ CKERROR RCKTargetCamera::PrepareDependencies(CKDependenciesContext &context) {
         }
     }
 
-    return context.FinishPrepareDependencies(this, CKCID_TARGETCAMERA);
+    return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
 /*************************************************
@@ -277,7 +277,7 @@ CKStateChunk *RCKTargetCamera::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCKCamera::Save(file, flags);
 
     // Return early if no file context and not in specific save modes
-    if (!file && (flags & 0x70000000) == 0) {
+    if (!file && !(flags & CK_STATESAVE_TCAMERAONLY)) {
         return baseChunk;
     }
 
@@ -290,8 +290,7 @@ CKStateChunk *RCKTargetCamera::Save(CKFile *file, CKDWORD flags) {
     targetCameraChunk->StartWrite();
     targetCameraChunk->AddChunkAndDelete(baseChunk);
 
-    // Write target-specific data with identifier 0x10000000
-    targetCameraChunk->WriteIdentifier(0x10000000);
+    targetCameraChunk->WriteIdentifier(CK_STATESAVE_TCAMERATARGET);
 
     // Save target object reference
     CKObject *targetObject = m_Context->GetObject(m_Target);
@@ -337,7 +336,7 @@ CKERROR RCKTargetCamera::Load(CKStateChunk *chunk, CKFile *file) {
     RCKCamera::Load(chunk, file);
 
     // Load target object ID
-    if (chunk->SeekIdentifier(0x10000000)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_TCAMERATARGET)) {
         m_Target = chunk->ReadObjectID();
     }
 
