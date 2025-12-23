@@ -58,7 +58,7 @@ protected:
     int m_StepCount;
     float m_FittingCoeff;
     CKDWORD m_Color;
-    CKDWORD m_LoadingFlag; // Non-zero while loading legacy data
+    CKBOOL m_Loading; // Non-zero while loading legacy data
 };
 
 #endif // RCKCURVE_H
