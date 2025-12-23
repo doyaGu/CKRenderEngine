@@ -89,7 +89,7 @@ public:
     // Offset 0x68: Current active mesh
     RCKMesh *m_CurrentMesh;
     // Offset 0x6C: Reference place (CKPlace*)
-    CKDWORD m_Place;
+    CK_ID m_Place;
     // Offset 0x70: Object animations array pointer (4 bytes)
     // IDA incorrectly shows XSObjectPointerArray but it's actually a pointer to heap-allocated array
     XObjectPointerArray *m_ObjectAnimations;
