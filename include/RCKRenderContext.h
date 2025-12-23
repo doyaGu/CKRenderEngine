@@ -11,15 +11,17 @@ class RCKMaterial;
 class RCK3dEntity;
 class RCKSprite3D;
 
-// IDA: sizeof = 220 bytes (0xDC)
-// Layout: VxDrawPrimitiveData (104 bytes) + m_CachedData (116 bytes = 29*4)
-// m_CachedData layout:
-//   [0-25]: Cached copy of VxDrawPrimitiveData (104/4 = 26 DWORDs)
-//   [26]: Indices pointer (dynamically allocated CKWORD array)
-//   [27]: MaxIndexCount (for allocation tracking)
-//   [28]: MaxVertexCount (for allocation tracking)
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
-    CKDWORD m_CachedData[29];  // 0x68 - Cached copy + index/vertex tracking
+    UserDrawPrimitiveDataClass();
+    ~UserDrawPrimitiveDataClass();
+
+    UserDrawPrimitiveDataClass(const UserDrawPrimitiveDataClass &) = delete;
+    UserDrawPrimitiveDataClass &operator=(const UserDrawPrimitiveDataClass &) = delete;
+
+    alignas(VxDrawPrimitiveData) unsigned char m_CachedDP[sizeof(VxDrawPrimitiveData)];
+    CKWORD *m_Indices;
+    int m_MaxIndexCount;
+    int m_MaxVertexCount;
 
     VxDrawPrimitiveData *GetStructure(CKRST_DPFLAGS DpFlags, int VertexCount);
     CKWORD *GetIndices(int IndicesCount);
@@ -35,10 +37,16 @@ struct CKRenderContextSettings
     CKDWORD m_StencilBpp;
 };
 
-struct CKObjectExtents {
+struct CKRenderExtents {
     VxRect m_Rect;      // 0x00 - Screen extent rectangle
-    CKDWORD m_Entity;   // 0x10 - Pointer to entity (stored as CKDWORD)
-    CKDWORD m_Camera;   // 0x14 - Associated camera
+    CKDWORD m_Flags;   // 0x10 - Pointer to entity (stored as CKDWORD)
+    CK_ID m_Camera;     // 0x14 - Associated camera
+};
+
+struct CKObjectExtents {
+    VxRect m_Rect;          // 0x00 - Screen extent rectangle
+    CK3dEntity *m_Entity;   // 0x10 - Pointer to entity
+    CK_ID m_Camera;         // 0x14 - Associated camera
 };
 
 class RCKRenderContext : public CKRenderContext {
@@ -165,6 +173,8 @@ public:
     void CallSprite3DBatches();
     void FlushSprite3DBatchesIfNeeded();  // IDA: sub_1000D2F0
     void AddExtents2D(const VxRect &rect, CKObject *obj);
+    void CheckObjectExtents();
+    void RenderTransparents(CKDWORD flags);
     
     // Internal pick methods
     CK3dEntity *Pick3D(const Vx2DVector &pt, VxIntersectionDesc *desc, CK3dEntity *filter, CKBOOL ignoreUnpickable);
@@ -186,7 +196,6 @@ public:
 
     void PreDelete() override;
     void CheckPreDeletion() override;
-    void CheckPostDeletion() override;
 
     int GetMemoryOccupation() override;
     CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
@@ -235,7 +244,7 @@ public:
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
     CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
     CKRasterizerDriver *m_RasterizerDriver; // 0xAC (4 bytes)
-    CKDWORD m_DriverIndex;                  // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
+    int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
     CKDWORD m_Shading;                      // 0xB4 (4 bytes)
     CKDWORD m_TextureEnabled;               // 0xB8 (4 bytes)
     CKDWORD m_DisplayWireframe;             // 0xBC (4 bytes)
@@ -249,7 +258,7 @@ public:
     CKRenderContextSettings m_Settings;     // 0x1D4 (28 bytes)
     CKRenderContextSettings m_FullscreenSettings; // 0x1F0 (28 bytes)
     VxRect m_CurrentExtents;                // 0x20C (16 bytes)
-    CKDWORD m_FpsFrameCount;                // 0x21C (4 bytes) - frame counter used for FPS smoothing
+    int m_FpsFrameCount;                    // 0x21C (4 bytes) - frame counter used for FPS smoothing
     CKDWORD m_TimeFpsCalc;                  // 0x220 (4 bytes)
     VxTimeProfiler m_RenderTimeProfiler;    // 0x224 (16 bytes)
     float m_SmoothedFps;                    // 0x234 (4 bytes)
@@ -265,8 +274,7 @@ public:
     VxTimeProfiler m_TransparentObjectsSortTimeProfiler; // 0x300 (16 bytes)
     RCK3dEntity *m_Current3dEntity;         // 0x310 (4 bytes)
     RCKTexture *m_TargetTexture;            // 0x314 (4 bytes)
-    // NOTE: m_Texture removed - not in IDA structure
-    CKRST_CUBEFACE m_CubeMapFace;            // 0x318 (4 bytes) - changed type to match IDA
+    CKRST_CUBEFACE m_CubeMapFace;           // 0x318 (4 bytes) - changed type to match IDA
     float m_FocalLength;                    // 0x31C (4 bytes)
     float m_EyeSeparation;                  // 0x320 (4 bytes)
     CKDWORD m_Flags;                        // 0x324 (4 bytes)
@@ -282,11 +290,11 @@ public:
     UserDrawPrimitiveDataClass *m_UserDrawPrimitiveData; // 0x364 (4 bytes)
     CKDWORD m_MaskFree;                     // 0x368 (4 bytes)
     CKDWORD m_VertexBufferIndex;            // 0x36C (4 bytes)
-    CKDWORD m_StartIndex;                   // 0x370 (4 bytes)
+    int m_StartIndex;                       // 0x370 (4 bytes)
     CKDWORD m_DpFlags;                      // 0x374 (4 bytes)
     CKDWORD m_VertexBufferCount;            // 0x378 (4 bytes)
     XArray<CKObjectExtents> m_ObjectExtents; // 0x37C (12 bytes) - Object screen extents for picking
-    XArray<CKObjectExtents> m_Extents;      // 0x388 (12 bytes) - Additional extents array
+    XArray<CKRenderExtents> m_Extents;      // 0x388 (12 bytes) - Additional extents array
     XObjectArray m_RootObjects;             // 0x394 (12 bytes) - single array for both 3D and 2D roots
     RCKCamera *m_Camera;                    // 0x3A0 (4 bytes)
     RCKTexture *m_NCUTex;                   // 0x3A4 (4 bytes)
