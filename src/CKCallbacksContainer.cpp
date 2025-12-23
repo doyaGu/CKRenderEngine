@@ -3,6 +3,10 @@
 #include "CKRenderContext.h"
 #include "RCKRenderManager.h"
 
+CKCallbacksContainer::~CKCallbacksContainer() {
+    Clear();
+}
+
 CKBOOL CKCallbacksContainer::AddPreCallback(void *Function, void *Argument, CKBOOL Temporary, CKRenderManager *renderManager) {
     if (!Function) {
         return FALSE;
@@ -43,25 +47,20 @@ CKBOOL CKCallbacksContainer::SetCallBack(void *Function, void *Argument) {
         return FALSE;
     }
 
-    if (m_Callback) {
-        if (m_Callback->callback == Function && m_Callback->argument == Argument) {
-            return FALSE; // Callback already exists
-        }
-        delete m_Callback; // Remove old callback
-        m_Callback = nullptr;
+    if (!m_Callback) {
+        m_Callback = new VxCallBack{nullptr, nullptr, FALSE};
     }
-
-    m_Callback = new VxCallBack{Function, Argument, FALSE};
+    m_Callback->callback = Function;
+    m_Callback->argument = Argument;
+    m_Callback->temp = FALSE;
     return TRUE;
 }
 
 CKBOOL CKCallbacksContainer::RemoveCallBack() {
-    if (!m_Callback) {
-        return FALSE; // No callback to remove
+    if (m_Callback) {
+        delete m_Callback;
+        m_Callback = nullptr;
     }
-
-    delete m_Callback;
-    m_Callback = nullptr;
     return TRUE;
 }
 
@@ -108,41 +107,27 @@ CKBOOL CKCallbacksContainer::RemovePostCallback(void *Function, void *Argument) 
 typedef void (*CK_RENDERCALLBACK_SIMPLE)(CKRenderContext *Dev, void *Argument);
 
 void CKCallbacksContainer::ExecutePreCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly) {
-    for (XClassArray<VxCallBack>::Iterator it = m_PreCallBacks.Begin(); it != m_PreCallBacks.End();) {
+    for (XClassArray<VxCallBack>::Iterator it = m_PreCallBacks.Begin(); it != m_PreCallBacks.End(); ++it) {
         if (temporaryOnly && !it->temp) {
-            ++it;
             continue;
         }
 
         CK_RENDERCALLBACK_SIMPLE func = (CK_RENDERCALLBACK_SIMPLE) it->callback;
         if (func) {
             func(dev, it->argument);
-        }
-
-        if (it->temp) {
-            it = m_PreCallBacks.Remove(it);
-        } else {
-            ++it;
         }
     }
 }
 
 void CKCallbacksContainer::ExecutePostCallbacks(CKRenderContext *dev, CKBOOL temporaryOnly) {
-    for (XClassArray<VxCallBack>::Iterator it = m_PostCallBacks.Begin(); it != m_PostCallBacks.End();) {
+    for (XClassArray<VxCallBack>::Iterator it = m_PostCallBacks.Begin(); it != m_PostCallBacks.End(); ++it) {
         if (temporaryOnly && !it->temp) {
-            ++it;
             continue;
         }
 
         CK_RENDERCALLBACK_SIMPLE func = (CK_RENDERCALLBACK_SIMPLE) it->callback;
         if (func) {
             func(dev, it->argument);
-        }
-
-        if (it->temp) {
-            it = m_PostCallBacks.Remove(it);
-        } else {
-            ++it;
         }
     }
 }
