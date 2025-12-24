@@ -10,14 +10,6 @@
 // Static class ID
 CK_CLASSID RCKCurvePoint::m_ClassID = CKCID_CURVEPOINT;
 
-CKBOOL RCKCurvePoint::IsHiddenByParent() {
-    return RCK3dEntity::IsHiddenByParent();
-}
-
-CKBOOL RCKCurvePoint::IsVisible() {
-    return RCK3dEntity::IsVisible();
-}
-
 /**
  * @brief RCKCurvePoint constructor
  * @param Context The CKContext instance
