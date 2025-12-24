@@ -70,6 +70,23 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    struct EdgeTessInfo {
+        int BasePatch1;
+        int BasePatch2;
+        CKBOOL Hard;
+    };
+
+    CKBOOL IsEdgeHard(int edgeIndex) const;
+    int GetPatchCornerForVertex(const CKPatch &patch, int vertexIndex) const;
+    void *GetTextureChannelPtr(int textureChannel, CKDWORD *strideOut) const;
+    void WriteTextureCoordinate(void *base, CKDWORD stride, int vertexIndex, float u, float v) const;
+    CKBOOL GetCornerTextureCoordinate(int textureChannel, int patchIndex, int cornerIndex, float &outU, float &outV) const;
+    CKBOOL DoPatchesShareUVOnEdge(int edgeIndex) const;
+    void EnsureCornerVertexMapAllocated(int patchCount);
+    int ComputeQuadVertexIndex(int patchIndex, int steps, int i, int j, const XArray<int> &interiorBase, const XArray<EdgeTessInfo> &edgeTess) const;
+    int ComputeTriVertexIndex(int patchIndex, int steps, int uSteps, int vSteps, const XArray<int> &interiorBase, const XArray<EdgeTessInfo> &edgeTess) const;
+    int TriInteriorOffset(int steps, int row, int col) const;
+
     // Helper methods for tessellation
     void EvaluateTriPatch(CKPatch *patch, float u, float v, float w, VxVector *result);
     void EvaluateQuadPatch(CKPatch *patch, float u, float v, VxVector *result);
