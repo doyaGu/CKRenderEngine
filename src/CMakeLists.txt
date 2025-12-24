@@ -7,6 +7,14 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/CKDebugLogger.h
         ${CKRE_INCLUDE_DIR}/CKException.h
 
+        ${CKRE_INCLUDE_DIR}/MeshAdjacency.h
+        ${CKRE_INCLUDE_DIR}/RadixSort.h
+        ${CKRE_INCLUDE_DIR}/MeshStriper.h
+        ${CKRE_INCLUDE_DIR}/NvStripifier.h
+        ${CKRE_INCLUDE_DIR}/VertexCacheOptimizer.h
+        ${CKRE_INCLUDE_DIR}/NearestPointGrid.h
+        ${CKRE_INCLUDE_DIR}/PlaceFitter.h
+
         ${CKRE_INCLUDE_DIR}/RCKRenderManager.h
         ${CKRE_INCLUDE_DIR}/RCKRenderContext.h
         ${CKRE_INCLUDE_DIR}/RCKMaterial.h
@@ -43,8 +51,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKVertexBuffer.h
         )
 
-set(CKRE_PRIVATE_HEADERS
-        )
+set(CKRE_PRIVATE_HEADERS)
 
 set(CKRE_SOURCES
         CK2_3D.cpp
@@ -85,7 +92,12 @@ set(CKRE_SOURCES
         CKSprite.cpp
         CKSpriteText.cpp
         CKSkin.cpp
-
+        
+        MeshAdjacency.cpp
+        RadixSort.cpp
+        MeshStriper.cpp
+        NvStripifier.cpp
+        VertexCacheOptimizer.cpp
         NearestPointGrid.cpp
         PlaceFitter.cpp
 

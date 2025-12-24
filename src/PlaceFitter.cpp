@@ -1,9 +1,9 @@
 #include "PlaceFitter.h"
 
+#include "XArray.h"
+#include "VxMath.h"
 #include "CK3dEntity.h"
 #include "CKMesh.h"
-#include "VxMath.h"
-#include "XArray.h"
 #include "NearestPointGrid.h"
 
 static void CollectHierarchyWorldVertices(CK3dEntity *root, XArray<VxVector> &outWorldPoints) {
