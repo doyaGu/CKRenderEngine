@@ -615,15 +615,17 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
         if (m_TransparentObjects.Size() > 0) {
             // IDA: uses root entity world position for tie-breaking.
-            const CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-            const VxVector cameraPos = rootEntity ? rootEntity->GetWorldMatrix()[3] : VxVector(0.0f, 0.0f, 0.0f);
+            VxVector cameraPos(0.0f);
 
-            CKTransparentObject *begin = m_TransparentObjects.Begin();
-            CKTransparentObject *end = m_TransparentObjects.End();
+            const CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
+            if (rootEntity) {
+                const VxMatrix &rootWorldMatrix = rootEntity->GetWorldMatrix();
+                cameraPos = static_cast<VxVector>(rootWorldMatrix[3]);
+            }
 
             CKBOOL noSwaps = TRUE;
-            for (CKTransparentObject *i = begin + 1; i != end; ++i) {
-                for (CKTransparentObject *k = end - 1; k != (i - 1); --k) {
+            for (CKTransparentObject *i = m_TransparentObjects.Begin() + 1; i != m_TransparentObjects.End(); ++i) {
+                for (CKTransparentObject *k = m_TransparentObjects.End() - 1; k != (i - 1); --k) {
                     CKTransparentObject *prev = k - 1;
 
                     if (k->m_Node->m_MaxPriority > prev->m_Node->m_MaxPriority) {
@@ -633,13 +635,25 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                     }
 
                     if (k->m_Node->m_MaxPriority == prev->m_Node->m_MaxPriority) {
-                        // Only invoke the expensive tie-breaker when projected Z ranges overlap.
-                        // DLL overlap test pattern: prev.ZhMin <= k.ZhMax && k.ZhMin < prev.ZhMax
-                        if (prev->m_ZhMin <= k->m_ZhMax && k->m_ZhMin < prev->m_ZhMax) {
+                        // IDA/DLL behavior:
+                        // - If projected Z ranges do NOT overlap, swap directly.
+                        // - If they overlap, use sub_10009BB9 as an expensive tie-breaker,
+                        //   then a final epsilon compare using FLT_EPSILON.
+                        //
+                        // Overlap test reconstructed from FPU status checks in the DLL:
+                        //   (prev.ZhMin < k.ZhMax) && (k.ZhMin <= prev.ZhMax)
+                        if (prev->m_ZhMin < k->m_ZhMax) {
+                            if (!(k->m_ZhMin <= prev->m_ZhMax)) {
+                                // Non-overlap case: swap.
+                                SwapTransparentObjects(k, prev);
+                                noSwaps = FALSE;
+                                continue;
+                            }
+
+                            // Overlap case: tie-breaker.
                             const RCK3dEntity *a = prev->m_Node->m_Entity;
                             const RCK3dEntity *b = k->m_Node->m_Entity;
 
-                            // sub_10009BB9 tie-breaker (may return -1/0/1)
                             const int cmp1 = ClassifyTransparentOrder(a, b, cameraPos);
                             if (cmp1 < 0) {
                                 SwapTransparentObjects(k, prev);
@@ -650,16 +664,15 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                                 continue;
 
                             const int cmp2 = ClassifyTransparentOrder(b, a, cameraPos);
+                            if (cmp2 < 0)
+                                continue;
                             if (cmp2 > 0) {
                                 SwapTransparentObjects(k, prev);
                                 noSwaps = FALSE;
                                 continue;
                             }
-                            if (cmp2 < 0)
-                                continue;
 
-                            // Final epsilon compare: if prev.ZhMax + FLT_EPSILON < k.ZhMax then swap.
-                            if (prev->m_ZhMax + EPSILON < k->m_ZhMax) {
+                            if (prev->m_ZhMax + FLT_EPSILON < k->m_ZhMax) {
                                 SwapTransparentObjects(k, prev);
                                 noSwaps = FALSE;
                             }
@@ -675,7 +688,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
             dev->m_Stats.TransparentObjectsSortTime = dev->m_TransparentObjectsSortTimeProfiler.Current();
 
             for (CKTransparentObject *renderIt = m_TransparentObjects.Begin(); renderIt != m_TransparentObjects.End(); ++renderIt)
-                renderIt->m_Node->m_Entity->Render((CKRenderContext *) dev, flags);
+                renderIt->m_Node->m_Entity->Render(dev, flags);
         }
     } else {
         CKTransparentObject *it = m_TransparentObjects.Begin();
@@ -684,7 +697,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
             if ((dev->m_MaskFree & node->m_RenderContextMask) != 0) {
                 if (node->m_TimeFpsCalc == timeFpsCalc) {
-                    node->m_Entity->Render((CKRenderContext *) dev, flags);
+                    node->m_Entity->Render(dev, flags);
                     ++it;
                 } else {
                     node->ClearInTransparentList();
@@ -700,10 +713,10 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 void CKSceneGraphRootNode::AddTransparentObject(CKSceneGraphNode *node) {
     // Check if already in the list (flag 0x20)
     if (!node->IsInTransparentList()) {
-        CKTransparentObject obj;
+        CKTransparentObject obj = {};
         obj.m_Node = node;
-        obj.m_ZhMax = 0.0f;
         obj.m_ZhMin = 0.0f;
+        obj.m_ZhMax = 0.0f;
         m_TransparentObjects.PushBack(obj);
         node->MarkInTransparentList();
     }
