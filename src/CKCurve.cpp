@@ -16,14 +16,6 @@
 
 CK_CLASSID RCKCurve::m_ClassID = CKCID_CURVE;
 
-CKBOOL RCKCurve::IsHiddenByParent() {
-    return RCK3dEntity::IsHiddenByParent();
-}
-
-CKBOOL RCKCurve::IsVisible() {
-    return RCK3dEntity::IsVisible();
-}
-
 /**
  * @brief RCKCurve constructor
  * @param Context The CKContext instance
