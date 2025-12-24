@@ -1,23 +1,18 @@
 #include "RCKRenderObject.h"
+
+#include "CKSceneGraph.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCK3dEntity.h"
-#include "CKSceneGraph.h"
-#include "CKDebugLogger.h"
-
-#define RENDEROBJ_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("RenderObject", fmt, __VA_ARGS__)
 
 CK_CLASSID RCKRenderObject::m_ClassID = CKCID_RENDEROBJECT;
 
 void RCKRenderObject::AddToRenderContext(CKRenderContext *context) {
     // IDA @ 0x10076984
     RCKRenderContext *dev = (RCKRenderContext *) context;
-    RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: entity=%p mask=0x%x devMask=0x%x",
-                            this, m_InRenderContext, dev->m_MaskFree);
     m_InRenderContext |= dev->m_MaskFree;
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
         RCK3dEntity *entity = (RCK3dEntity *) this;
-        RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: Setting mask on scene graph node, start=%d", dev->m_Start);
         if (dev->m_Start) {
             entity->m_SceneGraphNode->m_RenderContextMask = m_InRenderContext;
         } else {
