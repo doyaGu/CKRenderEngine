@@ -22,7 +22,6 @@ public:
     void PreSave(CKFile *file, CKDWORD flags) override;
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
-    void PostLoad() override;
 
     int GetMemoryOccupation() override;
 

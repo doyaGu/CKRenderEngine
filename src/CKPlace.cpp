@@ -101,8 +101,8 @@ void RCKPlace::CheckPreDeletion() {
         CKPortalEntry &entry = *it;
 
         // Check if place or portal is marked for deletion
-        CKBOOL placeToBeDeleted = entry.place && reinterpret_cast<CKObject*>(entry.place)->IsToBeDeleted();
-        CKBOOL portalToBeDeleted = entry.portal && reinterpret_cast<CKObject*>(entry.portal)->IsToBeDeleted();
+        CKBOOL placeToBeDeleted = entry.place && reinterpret_cast<CKObject *>(entry.place)->IsToBeDeleted();
+        CKBOOL portalToBeDeleted = entry.portal && reinterpret_cast<CKObject *>(entry.portal)->IsToBeDeleted();
 
         if (placeToBeDeleted || portalToBeDeleted) {
             it = m_Portals.Remove(it);
@@ -514,7 +514,7 @@ CKBOOL RCKPlace::ComputeBestFitBBox(CKPlace *p2, VxMatrix &BBoxMatrix) {
     if (!p2) return FALSE;
 
     PlaceFitter fitter;
-    return fitter.ComputeBestFitBBox(reinterpret_cast<CK3dEntity*>(this),
-                                    reinterpret_cast<CK3dEntity*>(p2),
-                                    BBoxMatrix);
+    return fitter.ComputeBestFitBBox(reinterpret_cast<CK3dEntity *>(this),
+                                     reinterpret_cast<CK3dEntity *>(p2),
+                                     BBoxMatrix);
 }

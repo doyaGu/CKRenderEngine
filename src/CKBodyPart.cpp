@@ -13,15 +13,18 @@
 #include <cmath>
 #include <cstring>
 
+// Static class ID
+CK_CLASSID RCKBodyPart::m_ClassID = CKCID_BODYPART;
+
 /**
  * @brief RCKBodyPart constructor
  * @param Context The CKContext instance
  * @param name Optional name for the body part
  */
 RCKBodyPart::RCKBodyPart(CKContext *Context, CKSTRING name)
-        : RCK3dObject(Context, name),
-            m_Character(nullptr),
-            m_ExclusiveAnimation(nullptr) {
+    : RCK3dObject(Context, name),
+      m_Character(nullptr),
+      m_ExclusiveAnimation(nullptr) {
     // IDA: m_RotationJoint.m_Flags = 7, vectors initialized to 0
     m_RotationJoint.m_Flags = 7;
     m_RotationJoint.m_Min.Set(0.0f, 0.0f, 0.0f);
@@ -32,8 +35,7 @@ RCKBodyPart::RCKBodyPart(CKContext *Context, CKSTRING name)
 /**
  * @brief RCKBodyPart destructor
  */
-RCKBodyPart::~RCKBodyPart() {
-}
+RCKBodyPart::~RCKBodyPart() {}
 
 /**
  * @brief Get the class ID for RCKBodyPart
@@ -179,7 +181,7 @@ CKERROR RCKBodyPart::Copy(CKObject &o, CKDependenciesContext &context) {
     if (err != CK_OK)
         return err;
 
-    RCKBodyPart &src = (RCKBodyPart &)o;
+    RCKBodyPart &src = (RCKBodyPart &) o;
     m_Character = src.m_Character;
     m_ExclusiveAnimation = src.m_ExclusiveAnimation;
     std::memcpy(&m_RotationJoint, &src.m_RotationJoint, sizeof(m_RotationJoint));
@@ -235,10 +237,10 @@ void RCKBodyPart::SetRotationJoint(const CKIkJoint *joint) {
 CKERROR RCKBodyPart::FitToJoint() {
     // IDA: 0x1000e89f - uses Vx3DMatrixToEulerAngles/FromEulerAngles directly
     VxVector euler(0.0f, 0.0f, 0.0f);
-    
+
     // Extract Euler angles from local matrix
     Vx3DMatrixToEulerAngles(GetLocalMatrix(), &euler.x, &euler.y, &euler.z);
-    
+
     // Apply joint limits for each axis
     // NOTE: The original DLL uses (16 << (i - 1)) which creates an off-by-one mapping:
     //   i=0: 16 >> 1 = 8 (undefined but MSVC gives 8) - checks non-standard bit
@@ -250,20 +252,17 @@ CKERROR RCKBodyPart::FitToJoint() {
             float *angle = &euler.x + i;
             float *minVal = &m_RotationJoint.m_Min.x + i;
             float *maxVal = &m_RotationJoint.m_Max.x + i;
-            
+
             if (*angle < *minVal)
                 *angle = *minVal;
             if (*angle > *maxVal)
                 *angle = *maxVal;
         }
     }
-    
+
     // Apply modified euler angles back to local matrix
     Vx3DMatrixFromEulerAngles(m_LocalMatrix, euler.x, euler.y, euler.z);
     LocalMatrixChanged(FALSE, TRUE);
-    
+
     return CK_OK;
 }
-
-// Static class ID
-CK_CLASSID RCKBodyPart::m_ClassID = CKCID_BODYPART;

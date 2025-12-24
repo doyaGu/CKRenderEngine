@@ -96,13 +96,13 @@ void RCKSpriteText::SetFont(CKSTRING FontName, int FontSize, int Weight, CKBOOL 
 // SetAlign: 0x1006212a
 void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
     m_Flags &= 0xFFFF0000;
-    m_Flags |= (CKDWORD)align & 0xFFFF;
+    m_Flags |= (CKDWORD) align & 0xFFFF;
     Redraw();
 }
 
 // GetAlign: 0x10062173
 CKSPRITETEXT_ALIGNMENT RCKSpriteText::GetAlign() {
-    return (CKSPRITETEXT_ALIGNMENT)(m_Flags & 0xFFFF0000);
+    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF0000);
 }
 
 // ClearFont: 0x1006218c

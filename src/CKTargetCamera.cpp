@@ -153,7 +153,7 @@ Implementation based on decompilation at 0x10043d49.
 *************************************************/
 void RCKTargetCamera::CheckPostDeletion() {
     CKObject::CheckPostDeletion();
-    
+
     // Clear target if the object no longer exists
     if (!m_Context->GetObject(m_Target)) {
         m_Target = 0;
@@ -398,16 +398,16 @@ Implementation based on decompilation at 0x10043f12.
 *************************************************/
 int RCKTargetCamera::GetDependenciesCount(int mode) {
     switch (mode) {
-        case 1: // CK_DEPENDENCIES_COPY
-            return 1;
-        case 2: // CK_DEPENDENCIES_SAVE
-            return 1;
-        case 3:
-            return 0;
-        case 4: // CK_DEPENDENCIES_DELETE
-            return 1;
-        default:
-            return 0;
+    case 1: // CK_DEPENDENCIES_COPY
+        return 1;
+    case 2: // CK_DEPENDENCIES_SAVE
+        return 1;
+    case 3:
+        return 0;
+    case 4: // CK_DEPENDENCIES_DELETE
+        return 1;
+    default:
+        return 0;
     }
 }
 

@@ -12,8 +12,8 @@ CK_CLASSID RCKRenderObject::m_ClassID = CKCID_RENDEROBJECT;
 void RCKRenderObject::AddToRenderContext(CKRenderContext *context) {
     // IDA @ 0x10076984
     RCKRenderContext *dev = (RCKRenderContext *) context;
-    RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: entity=%p mask=0x%x devMask=0x%x", 
-                             this, m_InRenderContext, dev->m_MaskFree);
+    RENDEROBJ_DEBUG_LOG_FMT("AddToRenderContext: entity=%p mask=0x%x devMask=0x%x",
+                            this, m_InRenderContext, dev->m_MaskFree);
     m_InRenderContext |= dev->m_MaskFree;
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
         RCK3dEntity *entity = (RCK3dEntity *) this;

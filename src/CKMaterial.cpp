@@ -432,8 +432,8 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
             m_TextureBlendMode = chunk->ReadDword();
             m_TextureMinMode = chunk->ReadDword();
             m_TextureMagMode = chunk->ReadDword();
-            m_SourceBlend = (VXBLEND_MODE)chunk->ReadDword();
-            m_DestBlend = (VXBLEND_MODE)chunk->ReadDword();
+            m_SourceBlend = (VXBLEND_MODE) chunk->ReadDword();
+            m_DestBlend = (VXBLEND_MODE) chunk->ReadDword();
             m_ShadeMode = chunk->ReadDword();
             m_FillMode = chunk->ReadDword();
             m_TextureAddressMode = chunk->ReadDword();
@@ -511,8 +511,8 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
             m_TextureBlendMode = packedModes & 0xF;
             m_TextureMinMode = (packedModes >> 4) & 0xF;
             m_TextureMagMode = (packedModes >> 8) & 0xF;
-            m_SourceBlend = (VXBLEND_MODE)((packedModes >> 12) & 0xF);
-            m_DestBlend = (VXBLEND_MODE)((packedModes >> 16) & 0xF);
+            m_SourceBlend = (VXBLEND_MODE) ((packedModes >> 12) & 0xF);
+            m_DestBlend = (VXBLEND_MODE) ((packedModes >> 16) & 0xF);
             m_ShadeMode = (packedModes >> 20) & 0xF;
             m_FillMode = (packedModes >> 24) & 0xF;
             m_TextureAddressMode = packedModes >> 28;
@@ -678,8 +678,7 @@ CKSTRING RCKMaterial::GetClassName() {
  */
 int RCKMaterial::GetDependenciesCount(int mode) {
     int count;
-    switch (mode)
-    {
+    switch (mode) {
     case 1:
         count = 1;
         break;
@@ -1134,7 +1133,7 @@ void RCKMaterial::PatchForChannelRender(VXBLEND_MODE sourceBlend, VXBLEND_MODE d
     savedSourceBlend = m_SourceBlend;
     savedDestBlend = m_DestBlend;
     savedFlags = m_Flags;
-    
+
     m_SourceBlend = sourceBlend;
     m_DestBlend = destBlend;
 
@@ -1472,7 +1471,9 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
         rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage);
 
         CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-        texMatrix = (refEntity == reinterpret_cast<RCK3dEntity *>(rootEntity)) ? VxMatrix::Identity() : refEntity->m_WorldMatrix;
+        texMatrix = (refEntity == reinterpret_cast<RCK3dEntity *>(rootEntity))
+                        ? VxMatrix::Identity()
+                        : refEntity->m_WorldMatrix;
 
         // IDA: Copy row 3 to row 2 and force [2][2] = 1.0f (even for root entity)
         texMatrix[2][0] = texMatrix[3][0];
@@ -1738,9 +1739,9 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
         rst->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
 
         // Bump environment mapping operation
-        rst->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);  // D3DTOP_BUMPENVMAP
-        rst->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE); // D3DTA_TEXTURE
-        rst->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT); // D3DTA_CURRENT
+        rst->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+        rst->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        rst->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
 
         // Bump environment matrix (scale values as CKDWORD via memcpy)
         CKDWORD bumpValD;
@@ -1882,14 +1883,14 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
     rst->SetRenderState(VXRENDERSTATE_TEXTUREFACTOR, textureFactor);
 
     // Stage: DOT3 operation (normal map dot light direction)
-    rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);  // D3DTOP_DOTPRODUCT3
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE); // D3DTA_TEXTURE
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR); // D3DTA_TFACTOR
+    rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);
+    rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR);
 
     // Stage+1: Modulate with diffuse texture
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_MODULATE);   // D3DTOP_MODULATE
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE); // D3DTA_TEXTURE
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT); // D3DTA_CURRENT
+    rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
 
     // Set filter modes
     rst->SetTextureStageState(stage + 1, CKRST_TSS_MAGFILTER, m_TextureMagMode);
@@ -2256,19 +2257,19 @@ CKBOOL RCKMaterial::AddSprite3DBatch(RCKSprite3D *sprite) {
     if (!m_Sprite3DBatch) {
         m_Sprite3DBatch = new CKSprite3DBatch();
     }
-    
+
     // Fill the batch with sprite data
     sprite->FillBatch(m_Sprite3DBatch);
-    
+
     // Check if batch flag (0x20) is already set
     if ((m_Flags & 0x20) != 0) {
         return FALSE; // Batch already existed
     }
-    
+
     // Set batch flag (0x20) in the low byte (IDA preserves the high bytes)
     const CKDWORD high = (m_Flags & ~0xFF);
-    const CKBYTE low = (CKBYTE)m_Flags;
-    m_Flags = high | (CKDWORD)(low | 0x20);
+    const CKBYTE low = (CKBYTE) m_Flags;
+    m_Flags = high | (CKDWORD) (low | 0x20);
     return TRUE;
 }
 

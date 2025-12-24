@@ -426,16 +426,13 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 void RCKSprite::RestoreInitialSize() {
-    Vx2DVector size((float)GetWidth(), (float)GetHeight());
+    Vx2DVector size((float) GetWidth(), (float) GetHeight());
     m_Rect.SetSize(size);
 }
 
-void RCKSprite::PostLoad() {
-    RCK2dEntity::PostLoad();
-}
-
 int RCKSprite::GetMemoryOccupation() {
-    return RCK2dEntity::GetMemoryOccupation() + sizeof(CKBitmapData) + sizeof(VX_PIXELFORMAT) + sizeof(CKRasterizerContext *) + sizeof(CKDWORD);
+    return RCK2dEntity::GetMemoryOccupation() + sizeof(CKBitmapData) + sizeof(VX_PIXELFORMAT) + sizeof(
+        CKRasterizerContext *) + sizeof(CKDWORD);
 }
 
 CKERROR RCKSprite::PrepareDependencies(CKDependenciesContext &context) {

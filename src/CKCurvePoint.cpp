@@ -175,7 +175,7 @@ CKERROR RCKCurvePoint::RemapDependencies(CKDependenciesContext &context) {
         return err;
     }
 
-    m_Curve = (CKCurve *)context.Remap(m_Curve);
+    m_Curve = (CKCurve *) context.Remap(m_Curve);
     SetParent(m_Curve, TRUE);
     return CK_OK;
 }

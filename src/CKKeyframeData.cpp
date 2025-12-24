@@ -47,7 +47,7 @@ CKKeyframeData::CKKeyframeData()
       m_ScaleAxisController(nullptr),
       m_MorphController(nullptr),
       m_Length(100.0f),
-      m_RefCount(1),  // Start with reference count of 1
+      m_RefCount(1),
       m_ObjectAnimation(nullptr) {}
 
 CKKeyframeData::~CKKeyframeData() {

@@ -23,6 +23,7 @@ CKBOOL RCKCurve::IsHiddenByParent() {
 CKBOOL RCKCurve::IsVisible() {
     return RCK3dEntity::IsVisible();
 }
+
 /**
  * @brief RCKCurve constructor
  * @param Context The CKContext instance
@@ -147,14 +148,14 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
             m_FittingCoeff = chunk->ReadFloat();
 
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVESTEPS))
-            m_StepCount = (int)chunk->ReadDword();
+            m_StepCount = (int) chunk->ReadDword();
 
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEOPEN))
-            m_Opened = (CKBOOL)chunk->ReadDword();
+            m_Opened = (CKBOOL) chunk->ReadDword();
 
         // Load control point sub-chunks in legacy format
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVESAVEPOINTS)) {
-            int pointCount = (int)chunk->ReadDword();
+            int pointCount = (int) chunk->ReadDword();
             for (int i = 0; i < pointCount; ++i) {
                 CK_ID objectID = chunk->ReadObjectID();
                 CKObject *object = m_Context->GetObject(objectID);
@@ -177,13 +178,13 @@ CKERROR RCKCurve::Load(CKStateChunk *chunk, CKFile *file) {
 
             // Load curve properties
             m_FittingCoeff = chunk->ReadFloat();
-            m_StepCount = (int)chunk->ReadDword();
-            m_Opened = (CKBOOL)chunk->ReadDword();
+            m_StepCount = (int) chunk->ReadDword();
+            m_Opened = (CKBOOL) chunk->ReadDword();
         }
 
         // Load control point sub-chunks if not in file context
         if (!file && chunk->SeekIdentifier(CK_STATESAVE_CURVESAVEPOINTS)) {
-            int pointCount = (int)chunk->ReadDword();
+            int pointCount = (int) chunk->ReadDword();
             for (int i = 0; i < pointCount; ++i) {
                 CK_ID objectID = chunk->ReadObjectID();
                 CKObject *object = m_Context->GetObject(objectID);
@@ -599,7 +600,7 @@ CKERROR RCKCurve::GetTangents(CKCurvePoint *pt, VxVector *InTangent, VxVector *O
         return CKERR_INVALIDPARAMETER;
     }
 
-    int i = m_ControlPoints.GetPosition((CKObject *)pt);
+    int i = m_ControlPoints.GetPosition((CKObject *) pt);
     return GetTangentsByIndex(i, InTangent, OutTangent);
 }
 
@@ -703,7 +704,7 @@ CKERROR RCKCurve::SetTangents(CKCurvePoint *pt, VxVector *InTangent, VxVector *O
         return CKERR_INVALIDPARAMETER;
     }
 
-    int i = m_ControlPoints.GetPosition((CKObject *)pt);
+    int i = m_ControlPoints.GetPosition((CKObject *) pt);
     return SetTangentsByIndex(i, InTangent, OutTangent);
 }
 
@@ -721,8 +722,8 @@ CKERROR RCKCurve::RemoveControlPoint(CKCurvePoint *pt, CKBOOL DeletePoint) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    m_ControlPoints.Remove((CKObject *)pt);
-    RCKCurvePoint *cp = (RCKCurvePoint *)pt;
+    m_ControlPoints.Remove((CKObject *) pt);
+    RCKCurvePoint *cp = (RCKCurvePoint *) pt;
     cp->SetCurve(nullptr);
 
     ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
@@ -735,19 +736,19 @@ CKERROR RCKCurve::InsertControlPoint(CKCurvePoint *prev, CKCurvePoint *pt) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    if (m_ControlPoints.IsHere((CKObject *)pt)) {
+    if (m_ControlPoints.IsHere((CKObject *) pt)) {
         return CKERR_ALREADYPRESENT;
     }
 
-    int pos = m_ControlPoints.GetPosition((CKObject *)prev);
+    int pos = m_ControlPoints.GetPosition((CKObject *) prev);
     if (pos < 0) {
-        m_ControlPoints.PushBack((CKObject *)pt);
+        m_ControlPoints.PushBack((CKObject *) pt);
     } else {
-        m_ControlPoints.Insert(pos, (CKObject *)pt);
+        m_ControlPoints.Insert(pos, (CKObject *) pt);
     }
 
-    RCKCurvePoint *cp = (RCKCurvePoint *)pt;
-    cp->SetCurve((CKCurve *)this);
+    RCKCurvePoint *cp = (RCKCurvePoint *) pt;
+    cp->SetCurve((CKCurve *) this);
 
     ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     return CK_OK;
@@ -759,13 +760,13 @@ CKERROR RCKCurve::AddControlPoint(CKCurvePoint *pt) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    if (m_ControlPoints.IsHere((CKObject *)pt)) {
+    if (m_ControlPoints.IsHere((CKObject *) pt)) {
         return CKERR_ALREADYPRESENT;
     }
 
-    m_ControlPoints.PushBack((CKObject *)pt);
-    RCKCurvePoint *cp = (RCKCurvePoint *)pt;
-    cp->SetCurve((CKCurve *)this);
+    m_ControlPoints.PushBack((CKObject *) pt);
+    RCKCurvePoint *cp = (RCKCurvePoint *) pt;
+    cp->SetCurve((CKCurve *) this);
 
     ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     return CK_OK;
@@ -849,7 +850,7 @@ CKERROR RCKCurve::UpdateMesh() {
                 ++totalSteps;
             } else if (prev && cur) {
                 float segLen = cur->GetLength() - prev->GetLength();
-                int segSteps = (int)std::floor((double)m_StepCount * (double)invTotalLen * (double)segLen);
+                int segSteps = (int) floor((double) m_StepCount * (double) invTotalLen * (double) segLen);
                 if (segSteps < 1) segSteps = 1;
                 totalSteps += segSteps;
             }
@@ -861,7 +862,7 @@ CKERROR RCKCurve::UpdateMesh() {
                 ++totalSteps;
             } else {
                 float segLen = m_Length - prev->GetLength();
-                int segSteps = (int)std::floor((double)m_StepCount * (double)invTotalLen * (double)segLen);
+                int segSteps = (int) floor((double) m_StepCount * (double) invTotalLen * (double) segLen);
                 if (segSteps < 1) segSteps = 1;
                 totalSteps += segSteps;
             }
@@ -871,7 +872,7 @@ CKERROR RCKCurve::UpdateMesh() {
         mesh->SetLineCount(totalSteps);
 
         CKDWORD posStride = 0;
-        char *posPtr = (char *)mesh->GetPositionsPtr(&posStride);
+        char *posPtr = (char *) mesh->GetPositionsPtr(&posStride);
 
         const int segmentCount = m_Opened ? (cpCount - 1) : cpCount;
 
@@ -923,17 +924,17 @@ CKERROR RCKCurve::UpdateMesh() {
             VxVector m1;
             pEnd->GetTangents(&m1, nullptr);
 
-            int segSteps = (int)std::floor((double)(l1 - l0) * (double)m_StepCount * (double)invTotalLen);
+            int segSteps = (int) std::floor((double) (l1 - l0) * (double) m_StepCount * (double) invTotalLen);
             if (segSteps < 1) segSteps = 1;
 
             if (linear || segSteps == 1) {
-                *(VxVector *)posPtr = p0;
+                *(VxVector *) posPtr = p0;
                 posPtr += posStride;
             } else {
-                const float invSegSteps = 1.0f / (float)segSteps;
+                const float invSegSteps = 1.0f / (float) segSteps;
                 for (int s = 0; s < segSteps; ++s) {
-                    const float t = (float)s * invSegSteps;
-                    *(VxVector *)posPtr = hermite(p0, p1, m0, m1, t);
+                    const float t = (float) s * invSegSteps;
+                    *(VxVector *) posPtr = hermite(p0, p1, m0, m1, t);
                     posPtr += posStride;
                 }
             }
@@ -947,7 +948,7 @@ CKERROR RCKCurve::UpdateMesh() {
             lastPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0]);
         }
         if (lastPt) {
-            lastPt->GetFittedVector((VxVector *)posPtr);
+            lastPt->GetFittedVector((VxVector *) posPtr);
         }
 
         CKDWORD colStride = 0;
@@ -1127,7 +1128,7 @@ void RCKCurve::Update() {
             } else {
                 VxVector prevPos = p0;
                 for (int j = 1; j <= 100; ++j) {
-                    const float t = (float)j / 100.0f;
+                    const float t = (float) j / 100.0f;
                     VxVector pos = hermite(p0, p1, m0, m1, t);
                     VxVector delta;
                     delta.x = pos.x - prevPos.x;

@@ -4,24 +4,22 @@
 
 int ObjTypeIndex(CKRST_OBJECTTYPE Type) {
     switch (Type) {
-        case CKRST_OBJ_TEXTURE: return 0;
-        case CKRST_OBJ_SPRITE: return 1;
-        case CKRST_OBJ_VERTEXBUFFER: return 2;
-        case CKRST_OBJ_INDEXBUFFER: return 3;
-        case CKRST_OBJ_VERTEXSHADER: return 4;
-        case CKRST_OBJ_PIXELSHADER: return 5;
-        default: return 0;
+    case CKRST_OBJ_TEXTURE: return 0;
+    case CKRST_OBJ_SPRITE: return 1;
+    case CKRST_OBJ_VERTEXBUFFER: return 2;
+    case CKRST_OBJ_INDEXBUFFER: return 3;
+    case CKRST_OBJ_VERTEXSHADER: return 4;
+    case CKRST_OBJ_PIXELSHADER: return 5;
+    default: return 0;
     }
 }
 
-CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd)
-{
+CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd) {
     CKRasterizer *rst = new CKRasterizer;
     if (!rst)
         return NULL;
 
-    if (!rst->Start(AppWnd))
-    {
+    if (!rst->Start(AppWnd)) {
         delete rst;
         rst = NULL;
     }
@@ -29,10 +27,8 @@ CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd)
     return rst;
 }
 
-void CKNULLRasterizerClose(CKRasterizer *rst)
-{
-    if (rst)
-    {
+void CKNULLRasterizerClose(CKRasterizer *rst) {
+    if (rst) {
         rst->Close();
         delete rst;
     }
@@ -44,8 +40,7 @@ CKRasterizer::CKRasterizer()
       m_OtherRasterizers(),
       m_ProblematicDrivers(),
       m_Drivers(),
-      m_FullscreenContext(NULL)
-{
+      m_FullscreenContext(NULL) {
     m_ObjectsIndex.Resize(INIT_OBJECTSLOTS);
     m_ObjectsIndex.Fill(0);
     memset(m_ObjectsIndex.Begin(), CKRST_OBJ_VERTEXBUFFER, INIT_OBJECTSLOTS / 2);
@@ -58,13 +53,11 @@ CKRasterizer::CKRasterizer()
     m_FirstFreeIndex[ObjTypeIndex(CKRST_OBJ_PIXELSHADER)] = 1;
 }
 
-CKRasterizer::~CKRasterizer()
-{
+CKRasterizer::~CKRasterizer() {
     m_FullscreenContext = NULL;
 }
 
-CKBOOL CKRasterizer::Start(WIN_HANDLE AppWnd)
-{
+CKBOOL CKRasterizer::Start(WIN_HANDLE AppWnd) {
     m_MainWindow = AppWnd;
     CKRasterizerDriver *driver = new CKRasterizerDriver;
     driver->InitNULLRasterizerCaps(this);
@@ -72,25 +65,21 @@ CKBOOL CKRasterizer::Start(WIN_HANDLE AppWnd)
     return TRUE;
 }
 
-CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers)
-{
+CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers) {
     int i = 0;
     int objectsIndexCount = m_ObjectsIndex.Size();
     for (i = m_FirstFreeIndex[ObjTypeIndex(Type)]; i < objectsIndexCount; ++i)
         if ((Type & m_ObjectsIndex[i]) == 0)
             break;
 
-    if (i > objectsIndexCount)
-    {
+    if (i > objectsIndexCount) {
         m_ObjectsIndex.Resize(2 * i);
         memset(&m_ObjectsIndex[i], 0, i);
 
         int driverCount = GetDriverCount();
-        for (int d = 0; d < driverCount; d++)
-        {
+        for (int d = 0; d < driverCount; d++) {
             CKRasterizerDriver *driver = GetDriver(d);
-            if (driver)
-            {
+            if (driver) {
                 for (XArray<CKRasterizerContext *>::Iterator it = driver->m_Contexts.Begin();
                      it != driver->m_Contexts.End(); ++it)
                     (*it)->UpdateObjectArrays(this);
@@ -101,8 +90,7 @@ CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers
     m_ObjectsIndex[i] |= Type;
     m_FirstFreeIndex[ObjTypeIndex(Type)] = i + 1;
 
-    if (WarnOthers)
-    {
+    if (WarnOthers) {
         for (CKRasterizer **it = m_OtherRasterizers.Begin(); it != m_OtherRasterizers.End(); ++it)
             (*it)->CreateObjectIndex(Type, FALSE);
     }
@@ -110,21 +98,18 @@ CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers
     return i;
 }
 
-CKBOOL CKRasterizer::ReleaseObjectIndex(CKDWORD ObjectIndex, CKRST_OBJECTTYPE Type, CKBOOL WarnOthers)
-{
-    if (ObjectIndex > (CKDWORD)m_ObjectsIndex.Size())
+CKBOOL CKRasterizer::ReleaseObjectIndex(CKDWORD ObjectIndex, CKRST_OBJECTTYPE Type, CKBOOL WarnOthers) {
+    if (ObjectIndex > (CKDWORD) m_ObjectsIndex.Size())
         return FALSE;
     if ((m_ObjectsIndex[ObjectIndex] & Type) == 0)
         return FALSE;
 
-    m_ObjectsIndex[ObjectIndex] &= ~(CKBYTE)Type;
+    m_ObjectsIndex[ObjectIndex] &= ~(CKBYTE) Type;
 
     int driverCount = GetDriverCount();
-    for (int d = 0; d < driverCount; d++)
-    {
+    for (int d = 0; d < driverCount; d++) {
         CKRasterizerDriver *driver = GetDriver(d);
-        if (driver)
-        {
+        if (driver) {
             for (XArray<CKRasterizerContext *>::Iterator it = driver->m_Contexts.Begin();
                  it != driver->m_Contexts.End(); ++it)
                 (*it)->DeleteObject(ObjectIndex, Type);
@@ -141,26 +126,22 @@ CKBOOL CKRasterizer::ReleaseObjectIndex(CKDWORD ObjectIndex, CKRST_OBJECTTYPE Ty
     return TRUE;
 }
 
-XBYTE *CKRasterizer::AllocateObjects(int size)
-{
+XBYTE *CKRasterizer::AllocateObjects(int size) {
     m_Objects.Allocate(size);
-    return (XBYTE *)m_Objects.Buffer();
+    return (XBYTE *) m_Objects.Buffer();
 }
 
-void CKRasterizer::LinkRasterizer(CKRasterizer *rst)
-{
+void CKRasterizer::LinkRasterizer(CKRasterizer *rst) {
     if (rst != this)
         m_OtherRasterizers.PushBack(rst);
 }
 
-void CKRasterizer::RemoveLinkedRasterizer(CKRasterizer *rst)
-{
+void CKRasterizer::RemoveLinkedRasterizer(CKRasterizer *rst) {
     if (rst != this)
         m_OtherRasterizers.Remove(rst);
 }
 
-CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
-{
+CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName) {
     VxConfiguration config;
     int cline;
     XString error;
@@ -171,8 +152,7 @@ CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
 
     ConstSectionIt sectionIt = config.BeginSections();
     for (VxConfigurationSection *section = *sectionIt;
-         section != NULL && --sectionCount > 0; section = config.GetNextSection(sectionIt))
-    {
+         section != NULL && --sectionCount > 0; section = config.GetNextSection(sectionIt)) {
         CKDriverProblems driverProblems;
 
         VxConfigurationEntry *companyEntry = section->GetEntry("Company");
@@ -184,15 +164,13 @@ CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
             driverProblems.m_Renderer = rendererEntry->GetValue();
 
         VxConfigurationEntry *exactVersionEntry = section->GetEntry("ExactVersion");
-        if (exactVersionEntry)
-        {
+        if (exactVersionEntry) {
             driverProblems.m_Version = exactVersionEntry->GetValue();
             driverProblems.m_VersionMustBeExact = TRUE;
         }
 
         VxConfigurationEntry *upToVersionEntry = section->GetEntry("UpToVersion");
-        if (upToVersionEntry)
-        {
+        if (upToVersionEntry) {
             driverProblems.m_Version = upToVersionEntry->GetValue();
             driverProblems.m_VersionMustBeExact = FALSE;
         }
@@ -222,8 +200,7 @@ CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
             maxTextureHeightEntry->GetValueAsInteger(driverProblems.m_RealMaxTextureHeight);
 
         VxConfigurationSection *bugRGBASection = section->GetSubSection("Bug_RGBA");
-        if (bugRGBASection)
-        {
+        if (bugRGBASection) {
             VxConfigurationEntry *bug32ARGB8888 = bugRGBASection->GetEntry("_32_ARGB8888");
             if (bug32ARGB8888)
                 driverProblems.m_TextureFormatsRGBABug.PushBack(_32_ARGB8888);
@@ -274,8 +251,7 @@ CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
         }
 
         VxConfigurationSection *OsSection = section->GetSubSection("Os");
-        if (OsSection)
-        {
+        if (OsSection) {
             VxConfigurationEntry *win95 = OsSection->GetEntry("VXOS_WIN95");
             if (win95)
                 driverProblems.m_ConcernedOS.PushBack(VXOS_WIN95);
@@ -315,33 +291,24 @@ CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName)
     return TRUE;
 }
 
-CKDriverProblems *CKRasterizer::FindDriverProblems(const XString &Vendor, const XString &Renderer, const XString &Version, const XString &DeviceDesc, int Bpp)
-{
+CKDriverProblems *CKRasterizer::FindDriverProblems(const XString &Vendor, const XString &Renderer, const XString &Version, const XString &DeviceDesc, int Bpp) {
     if (m_ProblematicDrivers.Size() == 0)
         return NULL;
 
-    for (XClassArray<CKDriverProblems>::Iterator it = m_ProblematicDrivers.Begin(); it != m_ProblematicDrivers.End(); ++it)
-    {
-        if (Vendor != "" && it->m_Vendor == Vendor)
-        {
+    for (XClassArray<CKDriverProblems>::Iterator it = m_ProblematicDrivers.Begin(); it != m_ProblematicDrivers.End(); ++it) {
+        if (Vendor != "" && it->m_Vendor == Vendor) {
             if (it->m_Renderer != "" && it->m_Renderer != Renderer)
                 continue;
-        }
-        else
-        {
+        } else {
             if (it->m_DeviceDesc != DeviceDesc)
                 continue;
         }
 
-        if (it->m_Version != "" && Version != "")
-        {
-            if (it->m_VersionMustBeExact)
-            {
+        if (it->m_Version != "" && Version != "") {
+            if (it->m_VersionMustBeExact) {
                 if (it->m_Version != Version)
                     continue;
-            }
-            else
-            {
+            } else {
                 int major1, minor1, patch1;
                 sscanf(it->m_Version.CStr(), "%d.%d.%d", &major1, &minor1, &patch1);
                 int major2, minor2, patch2;
@@ -365,58 +332,46 @@ CKDriverProblems *CKRasterizer::FindDriverProblems(const XString &Vendor, const 
     return NULL;
 }
 
-void ConvertAttenuationModelFromDX5(float &_a0, float &_a1, float &_a2, float range)
-{
+void ConvertAttenuationModelFromDX5(float &_a0, float &_a1, float &_a2, float range) {
     _a0 = 1.0f / (_a0 + _a1 + _a2);
     _a1 = (_a2 + _a2 + _a1) * (_a0 / range) * _a0;
     _a2 = _a0 * _a2 * _a0 / (range * range) + _a1 * _a1 / _a0;
 }
 
-CKDWORD CKRSTGetVertexFormat(CKRST_DPFLAGS DpFlags, CKDWORD &VertexSize)
-{
+CKDWORD CKRSTGetVertexFormat(CKRST_DPFLAGS DpFlags, CKDWORD &VertexSize) {
     CKDWORD count = 0;
     for (CKDWORD flag = CKRST_DP_STAGEFLAGS(DpFlags); flag != 0; flag >>= 1)
         ++count;
 
     CKDWORD format;
-    if (DpFlags & CKRST_DP_TRANSFORM)
-    {
+    if (DpFlags & CKRST_DP_TRANSFORM) {
         format = CKRST_VF_POSITION;
         VertexSize = sizeof(VxVector);
 
-        if (DpFlags & CKRST_DP_LIGHT)
-        {
+        if (DpFlags & CKRST_DP_LIGHT) {
             format |= CKRST_VF_NORMAL;
             VertexSize += sizeof(VxVector);
-        }
-        else
-        {
-            if (DpFlags & CKRST_DP_DIFFUSE)
-            {
+        } else {
+            if (DpFlags & CKRST_DP_DIFFUSE) {
                 format |= CKRST_VF_DIFFUSE;
                 VertexSize += sizeof(CKDWORD);
             }
 
-            if (DpFlags & CKRST_DP_SPECULAR)
-            {
+            if (DpFlags & CKRST_DP_SPECULAR) {
                 format |= CKRST_VF_SPECULAR;
                 VertexSize += sizeof(CKDWORD);
             }
         }
-    }
-    else
-    {
+    } else {
         format = CKRST_VF_RASTERPOS;
         VertexSize = sizeof(VxVector4);
 
-        if (DpFlags & CKRST_DP_DIFFUSE)
-        {
+        if (DpFlags & CKRST_DP_DIFFUSE) {
             format |= CKRST_VF_DIFFUSE;
             VertexSize += sizeof(CKDWORD);
         }
 
-        if (DpFlags & CKRST_DP_SPECULAR)
-        {
+        if (DpFlags & CKRST_DP_SPECULAR) {
             format |= CKRST_VF_SPECULAR;
             VertexSize += sizeof(CKDWORD);
         }
@@ -428,11 +383,9 @@ CKDWORD CKRSTGetVertexFormat(CKRST_DPFLAGS DpFlags, CKDWORD &VertexSize)
     return format;
 }
 
-CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat)
-{
+CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat) {
     CKDWORD vertexSize;
-    switch (VertexFormat & 0xF)
-    {
+    switch (VertexFormat & 0xF) {
     case CKRST_VF_POSITION:
         vertexSize = 12;
         break;
@@ -464,17 +417,14 @@ CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat)
         vertexSize += 4;
 
     CKWORD tex = VertexFormat >> 16;
-    if (tex == 0)
-    {
+    if (tex == 0) {
         vertexSize += 8 * ((VertexFormat & CKRST_VF_TEXMASK) >> 8);
         return vertexSize;
     }
 
-    if ((VertexFormat & CKRST_VF_TEXMASK) != 0)
-    {
+    if ((VertexFormat & CKRST_VF_TEXMASK) != 0) {
         CKDWORD texSize[4] = {8, 12, 16, 4};
-        for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i)
-        {
+        for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i) {
             vertexSize += texSize[tex & 3];
             tex >>= 2;
         }
@@ -483,62 +433,48 @@ CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat)
     return vertexSize;
 }
 
-CKBYTE *CKRSTLoadVertexBuffer(CKBYTE *VBMem, CKDWORD VFormat, CKDWORD VSize, VxDrawPrimitiveData *data)
-{
-    CKBYTE *positionPtr = (CKBYTE *)data->PositionPtr;
+CKBYTE *CKRSTLoadVertexBuffer(CKBYTE *VBMem, CKDWORD VFormat, CKDWORD VSize, VxDrawPrimitiveData *data) {
+    CKBYTE *positionPtr = (CKBYTE *) data->PositionPtr;
     if (VFormat == CKRST_VF_VERTEX &&
         VSize == sizeof(CKVertex) &&
         data->PositionStride == sizeof(CKVertex) &&
         data->NormalStride == sizeof(CKVertex) &&
         data->TexCoordStride == sizeof(CKVertex) &&
         data->NormalPtr == positionPtr + sizeof(VxVector) &&
-        data->TexCoordPtr == positionPtr + sizeof(VxVector4) + 2 * sizeof(CKDWORD))
-    {
+        data->TexCoordPtr == positionPtr + sizeof(VxVector4) + 2 * sizeof(CKDWORD)) {
         memcpy(VBMem, positionPtr, data->VertexCount * sizeof(CKVertex));
         return &VBMem[data->VertexCount * sizeof(CKVertex)];
     }
 
     int offset;
-    if (VFormat & CKRST_VF_RASTERPOS)
-    {
+    if (VFormat & CKRST_VF_RASTERPOS) {
         VxCopyStructure(data->VertexCount, VBMem, VSize, sizeof(VxVector4), data->PositionPtr, data->PositionStride);
         offset = sizeof(VxVector4);
-    }
-    else
-    {
+    } else {
         VxCopyStructure(data->VertexCount, VBMem, VSize, sizeof(VxVector), data->PositionPtr, data->PositionStride);
         offset = sizeof(VxVector);
     }
 
-    if (VFormat & CKRST_VF_NORMAL)
-    {
+    if (VFormat & CKRST_VF_NORMAL) {
         if (data->NormalPtr)
             VxCopyStructure(data->VertexCount, &VBMem[offset], VSize, sizeof(VxVector), data->NormalPtr, data->NormalStride);
         offset += sizeof(VxVector);
     }
 
-    if (VFormat & CKRST_VF_DIFFUSE)
-    {
-        if (data->ColorPtr)
-        {
+    if (VFormat & CKRST_VF_DIFFUSE) {
+        if (data->ColorPtr) {
             VxCopyStructure(data->VertexCount, &VBMem[offset], VSize, sizeof(CKDWORD), data->ColorPtr, data->ColorStride);
-        }
-        else
-        {
+        } else {
             CKDWORD src = 0xFFFFFFFF;
             VxFillStructure(data->VertexCount, &VBMem[offset], VSize, sizeof(CKDWORD), &src);
         }
         offset += sizeof(CKDWORD);
     }
 
-    if (VFormat & CKRST_VF_SPECULAR)
-    {
-        if (data->SpecularColorPtr)
-        {
+    if (VFormat & CKRST_VF_SPECULAR) {
+        if (data->SpecularColorPtr) {
             VxCopyStructure(data->VertexCount, &VBMem[offset], VSize, sizeof(CKDWORD), data->SpecularColorPtr, data->SpecularColorStride);
-        }
-        else
-        {
+        } else {
             CKDWORD src = 0;
             VxFillStructure(data->VertexCount, &VBMem[offset], VSize, sizeof(CKDWORD), &src);
         }
@@ -546,16 +482,13 @@ CKBYTE *CKRSTLoadVertexBuffer(CKBYTE *VBMem, CKDWORD VFormat, CKDWORD VSize, VxD
     }
 
     CKDWORD texCount = CKRST_VF_GETTEXCOUNT(VFormat);
-    if (texCount != 0)
-    {
+    if (texCount != 0) {
         if (data->TexCoordPtr)
             VxCopyStructure(data->VertexCount, &VBMem[offset], VSize, 2 * sizeof(float), data->TexCoordPtr, data->TexCoordStride);
         offset += 2 * sizeof(float);
     }
-    if (texCount > 1)
-    {
-        for (CKDWORD i = 0; i < texCount - 1; ++i)
-        {
+    if (texCount > 1) {
+        for (CKDWORD i = 0; i < texCount - 1; ++i) {
             if (data->TexCoordPtrs[i])
                 VxCopyStructure(data->VertexCount, &VBMem[offset], VSize, 2 * sizeof(float), data->TexCoordPtrs[i], data->TexCoordStrides[i]);
             offset += 2 * sizeof(float);
@@ -565,8 +498,7 @@ CKBYTE *CKRSTLoadVertexBuffer(CKBYTE *VBMem, CKDWORD VFormat, CKDWORD VSize, VxD
     return &VBMem[data->VertexCount * VSize];
 }
 
-void CKRSTSetupDPFromVertexBuffer(CKBYTE *VBMem, CKVertexBufferDesc *VB, VxDrawPrimitiveData &DpData)
-{
+void CKRSTSetupDPFromVertexBuffer(CKBYTE *VBMem, CKVertexBufferDesc *VB, VxDrawPrimitiveData &DpData) {
     DpData.PositionPtr = VBMem;
     DpData.PositionStride = VB->m_VertexSize;
 
@@ -576,38 +508,29 @@ void CKRSTSetupDPFromVertexBuffer(CKBYTE *VBMem, CKVertexBufferDesc *VB, VxDrawP
     else
         ptr = VBMem + 16;
 
-    if ((VB->m_VertexFormat & CKRST_VF_NORMAL) != 0)
-    {
+    if ((VB->m_VertexFormat & CKRST_VF_NORMAL) != 0) {
         DpData.NormalPtr = ptr;
         DpData.NormalStride = VB->m_VertexSize;
         ptr += 12;
-    }
-    else
-    {
+    } else {
         DpData.NormalPtr = NULL;
         DpData.NormalStride = 0;
     }
 
-    if ((VB->m_VertexFormat & CKRST_VF_DIFFUSE) != 0)
-    {
+    if ((VB->m_VertexFormat & CKRST_VF_DIFFUSE) != 0) {
         DpData.ColorPtr = ptr;
         DpData.ColorStride = VB->m_VertexSize;
         ptr += 4;
-    }
-    else
-    {
+    } else {
         DpData.ColorPtr = NULL;
         DpData.ColorStride = 0;
     }
 
-    if ((VB->m_VertexFormat & CKRST_VF_SPECULAR) != 0)
-    {
+    if ((VB->m_VertexFormat & CKRST_VF_SPECULAR) != 0) {
         DpData.SpecularColorPtr = ptr;
         DpData.SpecularColorStride = VB->m_VertexSize;
         ptr += 4;
-    }
-    else
-    {
+    } else {
         DpData.SpecularColorPtr = NULL;
         DpData.SpecularColorStride = 0;
     }
@@ -619,8 +542,7 @@ void CKRSTSetupDPFromVertexBuffer(CKBYTE *VBMem, CKVertexBufferDesc *VB, VxDrawP
     memset(DpData.TexCoordPtrs, NULL, sizeof(DpData.TexCoordPtrs));
     memset(DpData.TexCoordStrides, 0, sizeof(DpData.TexCoordStrides));
     if ((VB->m_VertexFormat & CKRST_VF_TEXMASK) > CKRST_VF_TEX1)
-        for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i)
-        {
+        for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i) {
             DpData.TexCoordPtrs[i] = ptr;
             DpData.TexCoordStrides[i] = VB->m_VertexSize;
             ptr += 8;
