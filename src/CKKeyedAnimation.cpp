@@ -162,6 +162,28 @@ CKERROR RCKKeyedAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
     return CK_OK;
 }
 
+CKERROR RCKKeyedAnimation::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = RCKAnimation::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+
+    // Remap contained object animations
+    m_Animations.Remap(context);
+
+    // Root animation cache is an optimization: rebuild it lazily
+    m_RootAnimation = nullptr;
+
+    // Ensure parent pointer is consistent for contained animations
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *objAnim = reinterpret_cast<RCKObjectAnimation *>(*it);
+        if (objAnim) {
+            objAnim->m_ParentKeyedAnimation = this;
+        }
+    }
+
+    return CK_OK;
+}
+
 //=============================================================================
 // CKKeyedAnimation Virtual Methods
 //=============================================================================
@@ -170,8 +192,8 @@ CKERROR RCKKeyedAnimation::AddAnimation(CKObjectAnimation *anim) {
     if (!anim)
         return CKERR_INVALIDPARAMETER;
 
-    // Add to animations array
-    m_Animations.PushBack(anim);
+    // Add to animations array (avoid duplicates)
+    m_Animations.AddIfNotHere(anim);
 
     // Set the parent keyed animation on the object animation
     RCKObjectAnimation *objAnim = (RCKObjectAnimation *) anim;
@@ -181,6 +203,11 @@ CKERROR RCKKeyedAnimation::AddAnimation(CKObjectAnimation *anim) {
     ModifyObjectFlags(0, CK_OBJECT_NOTTOBESAVED); // Clear NOTTOBESAVED (0x400)
     m_Flags &= ~0x40;                             // Clear flag 0x40
 
+    // Root animation cache may have changed
+    if (m_RootEntity && objAnim->Get3dEntity() == reinterpret_cast<CK3dEntity *>(m_RootEntity)) {
+        m_RootAnimation = objAnim;
+    }
+
     return CK_OK;
 }
 
@@ -188,8 +215,17 @@ CKERROR RCKKeyedAnimation::RemoveAnimation(CKObjectAnimation *anim) {
     if (!anim)
         return CKERR_INVALIDPARAMETER;
 
+    RCKObjectAnimation *objAnim = reinterpret_cast<RCKObjectAnimation *>(anim);
+    if (objAnim && objAnim->m_ParentKeyedAnimation == this) {
+        objAnim->m_ParentKeyedAnimation = nullptr;
+    }
+
+    if (m_RootAnimation == objAnim) {
+        m_RootAnimation = nullptr;
+    }
+
     // Remove from animations array
-    m_Animations.Remove(anim);
+    m_Animations.RemoveObject(anim);
 
     // Modify flags
     ModifyObjectFlags(0, CK_OBJECT_NOTTOBESAVED); // Clear NOTTOBESAVED (0x400)
@@ -239,6 +275,12 @@ CKObjectAnimation *RCKKeyedAnimation::GetAnimation(int index) {
 }
 
 void RCKKeyedAnimation::Clear() {
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *objAnim = reinterpret_cast<RCKObjectAnimation *>(*it);
+        if (objAnim && objAnim->m_ParentKeyedAnimation == this) {
+            objAnim->m_ParentKeyedAnimation = nullptr;
+        }
+    }
     m_Animations.Clear();
     m_RootAnimation = nullptr;
 }
@@ -282,11 +324,6 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
 
     RCKKeyedAnimation *otherAnim = (RCKKeyedAnimation *) anim2;
 
-    // Check if this animation is merged (has flag 0x80)
-    CK_OBJECTCREATION_OPTIONS creationFlags = (m_Flags & 0x80)
-                                                  ? CK_OBJECTCREATION_DYNAMIC
-                                                  : CK_OBJECTCREATION_NONAMECHECK;
-
     // Create name for the merged animation
     char buffer[260];
     CKSTRING thisName = GetName();
@@ -300,8 +337,10 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
     sprintf(buffer, "%s+%s", thisName, otherName);
 
     // Create a new keyed animation object
-    CKObject *mergedObj = m_Context->CreateObject(CKCID_KEYEDANIMATION, buffer, creationFlags, nullptr);
+    CKObject *mergedObj = m_Context->CreateObject(CKCID_KEYEDANIMATION, buffer, CK_OBJECTCREATION_SameDynamic, nullptr);
     RCKKeyedAnimation *merged = (RCKKeyedAnimation *) mergedObj;
+    if (!merged)
+        return nullptr;
 
     // Set the character for the merged animation
     merged->m_Character = (RCKCharacter *) character;
@@ -314,6 +353,7 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
 
     // Set merged animation properties
     merged->m_Merged = TRUE;
+    merged->m_MergeFactor = m_MergeFactor;
     merged->m_RootEntity = m_RootEntity;
 
     // Process all animations from this keyed animation
@@ -334,24 +374,19 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
 
         if (otherObjAnim) {
             // Both animations have this entity, create merged object animation
-            if (creationFlags == CK_OBJECTCREATION_DYNAMIC) {
-                thisObjAnim->ModifyObjectFlags(CK_OBJECT_DYNAMIC, 0);
-            } else {
-                thisObjAnim->ModifyObjectFlags(0, CK_OBJECT_DYNAMIC);
-            }
-
             CKObjectAnimation *mergedObjAnim = thisObjAnim->CreateMergedAnimation(otherObjAnim, dynamic);
             if (mergedObjAnim) {
                 merged->AddAnimation(mergedObjAnim);
             }
         } else if (!dynamic) {
             // Only this animation has this entity - copy it
-            // For now, simplified: just use standard copy without detailed dependency control
+            // Use default SDK copy dependencies (controls deep-copy/share behavior)
             CKDependencies dep;
+            CKCopyDefaultClassDependencies(dep, CK_DEPENDENCIES_COPY);
             dep.m_Flags = CK_DEPENDENCIES_CUSTOM;
 
             CKObjectAnimation *copiedAnim = (CKObjectAnimation *) m_Context->CopyObject(
-                thisObjAnim, &dep, nullptr, creationFlags);
+                thisObjAnim, &dep, nullptr, CK_OBJECTCREATION_SameDynamic);
 
             if (copiedAnim) {
                 merged->AddAnimation(copiedAnim);
@@ -376,10 +411,11 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
             if (!existingAnim) {
                 // Copy this animation
                 CKDependencies dep;
+                CKCopyDefaultClassDependencies(dep, CK_DEPENDENCIES_COPY);
                 dep.m_Flags = CK_DEPENDENCIES_CUSTOM;
 
                 CKObjectAnimation *copiedAnim = (CKObjectAnimation *) m_Context->CopyObject(
-                    otherObjAnim, &dep, nullptr, creationFlags);
+                    otherObjAnim, &dep, nullptr, CK_OBJECTCREATION_SameDynamic);
 
                 if (copiedAnim) {
                     merged->AddAnimation(copiedAnim);
@@ -409,8 +445,7 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
     return (CKAnimation *) merged;
 }
 
-float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out,
-                                          CKDWORD OutTransitionMode, float length, float FrameTo) {
+float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) {
     if (!in)
         return 0.0f;
 
@@ -461,7 +496,7 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out,
         return -1.0f;
 
     // Get the number of steps in animIn
-    float inStepCount = fabs(animIn->GetLength());
+    float inStepCount = fabsf(animIn->GetLength());
 
     // Copy the flag 0x8 from animIn if present
     if (animIn->m_Flags & 0x8) {
@@ -479,14 +514,8 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out,
     if (currentCount < inAnimCount) {
         int neededCount = inAnimCount - currentCount;
         for (int i = 0; i < neededCount; ++i) {
-            // Check if we should create dynamic objects
-            CKBOOL isDynamic = (m_ObjectFlags & (CK_OBJECT_DYNAMIC | CK_OBJECT_HIERACHICALHIDE)) ==
-                (CK_OBJECT_DYNAMIC | CK_OBJECT_HIERACHICALHIDE);
-
-            CK_OBJECTCREATION_OPTIONS opts = isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
-
             RCKObjectAnimation *newAnim = (RCKObjectAnimation *) m_Context->CreateObject(
-                CKCID_OBJECTANIMATION, nullptr, opts, nullptr);
+                CKCID_OBJECTANIMATION, nullptr, CK_OBJECTCREATION_SameDynamic, nullptr);
 
             if (newAnim) {
                 m_Animations.PushBack(newAnim);
