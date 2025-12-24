@@ -1,18 +1,12 @@
 #include "CKSceneGraph.h"
+
+#include "VxVector.h"
 #include "CKRenderedScene.h"
+#include "CKRasterizer.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCK3dEntity.h"
-#include "RCKSprite3D.h"
 #include "RCKPlace.h"
-#include "CKRasterizer.h"
-#include "VxRect.h"
-#include "VxMath.h"
-#include "VxMatrix.h"
-#include "CKDebugLogger.h"
-
-#define SCENEGRAPH_DEBUG_LOG(msg) CK_LOG("SceneGraph", msg)
-#define SCENEGRAPH_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("SceneGraph", fmt, __VA_ARGS__)
 
 static CKDWORD GetSceneGraphPriorityKey(const CKSceneGraphNode *n) {
     const CKWORD p = (CKWORD) n->m_Priority;
@@ -84,9 +78,6 @@ CKSceneGraphNode::CKSceneGraphNode(RCK3dEntity *entity) {
 }
 
 CKSceneGraphNode::~CKSceneGraphNode() {
-    // Clear children array
-    SCENEGRAPH_DEBUG_LOG_FMT("~CKSceneGraphNode: Destroying node=%p entity=%p childrenCount=%d",
-                             this, m_Entity, m_Children.Size());
     m_Children.Clear();
 }
 
@@ -232,26 +223,17 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
     if (!m_Parent)
         return;
 
-    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p index=%d parent=%p parentChildCount=%d parentToBeParsed=%d",
-                             m_Entity, m_Index, m_Parent, m_Parent->m_Children.Size(),
-                             m_Parent->m_ChildToBeParsedCount);
-
     // Check if parent has children
     if (m_Parent->m_Children.Size() == 0)
         return;
 
     CKBOOL shouldParse = IsToBeParsed();
-    SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p shouldParse=%d", m_Entity, shouldParse);
-
     if (shouldParse) {
         // Node should be parsed
         if (m_Index >= m_Parent->m_ChildToBeParsedCount) {
             // Need to move to parsed section
             if (m_Parent->m_Children.Size() == 1) {
                 m_Parent->m_ChildToBeParsedCount = 1;
-                SCENEGRAPH_DEBUG_LOG_FMT(
-                    "EntityFlagsChanged: entity=%p ADDED to parse (single child), parent count now=%d",
-                    m_Entity, m_Parent->m_ChildToBeParsedCount);
                 if (updateParent && m_Parent->m_Parent)
                     m_Parent->EntityFlagsChanged(TRUE);
             } else {
@@ -265,8 +247,6 @@ void CKSceneGraphNode::EntityFlagsChanged(CKBOOL updateParent) {
                     m_Index = swapIndex;
                 }
                 ++m_Parent->m_ChildToBeParsedCount;
-                SCENEGRAPH_DEBUG_LOG_FMT("EntityFlagsChanged: entity=%p ADDED to parse, parent count now=%d",
-                                         m_Entity, m_Parent->m_ChildToBeParsedCount);
                 if (updateParent && m_Parent->m_Parent)
                     m_Parent->EntityFlagsChanged(TRUE);
             }
