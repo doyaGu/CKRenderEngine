@@ -9,7 +9,6 @@
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
 #include "CKRasterizer.h"
-#include "CKDebugLogger.h"
 #include "CKException.h"
 
 #include "RCKRenderManager.h"
@@ -42,10 +41,6 @@
 #include "RCKSpriteText.h"
 
 #define VIRTOOLS_RENDERENGIEN_GUID CKGUID(0xAABCF63, 0)
-
-// Debug logging macros (core)
-#define CK_DEBUG_LOG(msg) CK_LOG("Core", msg)
-#define CK_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("Core", fmt, __VA_ARGS__)
 
 extern void SetProcessorSpecific_FunctionsPtr();
 extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
@@ -95,13 +90,10 @@ void EnumerateRasterizers() {
         XString dir = ps.GetDrive();
         dir << ps.GetDir();
 
-        CK_DEBUG_LOG_FMT("EnumerateRasterizers: Searching in directory: %s", dir.Str());
-
         // Search for DX8 rasterizers
         CKDirectoryParser dp8(dir.Str(), (CKSTRING) "*DX8Rasterizer.dll", TRUE);
         char *file = dp8.GetNextFile();
         while (file != nullptr) {
-            CK_DEBUG_LOG_FMT("Found DX8 rasterizer: %s", file);
             RegisterRasterizer(file);
             file = dp8.GetNextFile();
         }
@@ -110,15 +102,11 @@ void EnumerateRasterizers() {
         CKDirectoryParser dp9(dir.Str(), (CKSTRING) "*DX9Rasterizer.dll", TRUE);
         file = dp9.GetNextFile();
         while (file != nullptr) {
-            CK_DEBUG_LOG_FMT("Found DX9 rasterizer: %s", file);
             RegisterRasterizer(file);
             file = dp9.GetNextFile();
         }
 
-        CK_DEBUG_LOG_FMT("EnumerateRasterizers: Found %d rasterizers", g_RasterizersInfo.Size());
-
         if (g_RasterizersInfo.Size() == 0) {
-            CK_DEBUG_LOG("EnumerateRasterizers: No rasterizers found, using NULL rasterizer");
             CKRasterizerInfo info;
             info.StartFct = CKNULLRasterizerStart;
             info.CloseFct = CKNULLRasterizerClose;
@@ -164,18 +152,13 @@ void InitializeCK2_3D() {
 }
 
 CKERROR InitInstanceFct(CKContext *context) {
-    CK_DEBUG_LOG("InitInstanceFct: Starting");
     new RCKRenderManager(context);
-    CK_DEBUG_LOG("InitInstanceFct: RCKRenderManager created");
     return CK_OK;
 }
 
 PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
-    CK_DEBUG_LOG("CKGetPluginInfo: Starting");
     EnumerateRasterizers();
-    CK_DEBUG_LOG("CKGetPluginInfo: Rasterizers enumerated");
     InitializeCK2_3D();
-    CK_DEBUG_LOG("CKGetPluginInfo: CK2_3D initialized");
     SetProcessorSpecific_FunctionsPtr();
 
     g_PluginInfo.m_Author = "Virtools";
@@ -206,10 +189,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     case DLL_PROCESS_ATTACH:
         g_DllHandle = hModule;
         CKInstallExceptionHandler();
-        CK_DEBUG_LOG("DLL_PROCESS_ATTACH - CK2_3D.dll loaded with exception handler");
         break;
     case DLL_PROCESS_DETACH:
-        CK_DEBUG_LOG("DLL_PROCESS_DETACH - CK2_3D.dll unloading");
         CKRemoveExceptionHandler();
         ReleaseRasterizers();
         break;
