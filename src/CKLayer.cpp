@@ -3,12 +3,8 @@
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKObject.h"
-#include "RCKGrid.h"
 #include "CKGridManager.h"
-#include "CKEnums.h"
 #include "VxColor.h"
-
-#include <cstring>
 
 /**
  * @brief RCKLayer constructor
@@ -24,13 +20,17 @@ RCKLayer::RCKLayer(CKContext *Context, CKSTRING name, CK_ID owner)
       m_Flags(1),
       m_SquareArray(nullptr) {
     // Get owner grid from context
-    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+    m_Grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
 
     // Allocate square array if grid exists
     if (m_Grid) {
         const int width = m_Grid->GetWidth();
         const int length = m_Grid->GetLength();
-        m_SquareArray = new CKSquare[width * length];
+        const int count = width * length;
+        m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
+        if (m_SquareArray) {
+            memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
+        }
     }
 }
 
@@ -128,7 +128,7 @@ CKBOOL RCKLayer::IsVisible() {
 
 void RCKLayer::InitOwner(CK_ID owner) {
     // Get owner grid from context
-    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+    m_Grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
 
     // Delete existing square array
     delete[] m_SquareArray;
@@ -138,13 +138,17 @@ void RCKLayer::InitOwner(CK_ID owner) {
     if (m_Grid) {
         const int width = m_Grid->GetWidth();
         const int length = m_Grid->GetLength();
-        m_SquareArray = new CKSquare[width * length];
+        const int count = width * length;
+        m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
+        if (m_SquareArray) {
+            memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
+        }
     }
 }
 
 void RCKLayer::SetOwner(CK_ID owner) {
     // Original simply sets m_Grid from context lookup without class validation
-    m_Grid = static_cast<RCKGrid *>(m_Context->GetObject(owner));
+    m_Grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
 }
 
 CK_ID RCKLayer::GetOwner() {
@@ -168,10 +172,9 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
-    // Get grid manager - required for save
+    // Grid manager is used for file metadata (associated color/param).
+    // When unavailable, we still write a structurally valid payload.
     CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
-    if (!gridMgr)
-        return nullptr;
 
     // Only write layer payload if saving to file or flag 0x10 is set
     if (file || (flags & 0x10u) != 0) {
@@ -191,10 +194,13 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
 
             VxColor color;
             color.Set(0.0f, 0.0f, 0.0f, 0.0f);
-            gridMgr->GetAssociatedColor(static_cast<int>(m_Type), &color);
+            if (gridMgr)
+                gridMgr->GetAssociatedColor(m_Type, &color);
             chunk->WriteDword(color.GetRGBA());
 
-            CKGUID paramGuid = gridMgr->GetAssociatedParam(static_cast<int>(m_Type));
+            CKGUID paramGuid = CKGUID(0, 0);
+            if (gridMgr)
+                paramGuid = gridMgr->GetAssociatedParam(m_Type);
             chunk->WriteGuid(paramGuid);
         }
 
@@ -245,7 +251,7 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
             m_Type = gridMgr->RegisterType(layerName);
 
         // Load grid reference
-        m_Grid = reinterpret_cast<RCKGrid *>(chunk->ReadObject(m_Context));
+        m_Grid = reinterpret_cast<CKGrid *>(chunk->ReadObject(m_Context));
 
         if (!file) {
             // Skip type index in runtime chunks (type is re-derived from layer name)
@@ -253,7 +259,7 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Load format
-        m_Format = static_cast<CKDWORD>(chunk->ReadInt());
+        m_Format = chunk->ReadInt();
 
         // Handle file-specific loading
         if (file) {
@@ -289,8 +295,22 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
         if (!m_Format) {
             void *raw = nullptr;
             const int bufferSize = chunk->ReadBuffer(&raw);
-            m_SquareArray = reinterpret_cast<CKSquare *>(raw);
-            CKConvertEndianArray32(reinterpret_cast<CKDWORD *>(m_SquareArray), bufferSize >> 2);
+            if (raw && bufferSize > 0 && m_Grid) {
+                const int width = m_Grid->GetWidth();
+                const int length = m_Grid->GetLength();
+                const int count = width * length;
+                const int expectedBytes = count * static_cast<int>(sizeof(CKSquare));
+
+                m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
+                if (m_SquareArray) {
+                    memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
+                    const int copyBytes = (bufferSize < expectedBytes) ? bufferSize : expectedBytes;
+                    memcpy(m_SquareArray, raw, static_cast<size_t>(copyBytes));
+                    CKConvertEndianArray32(reinterpret_cast<CKDWORD *>(m_SquareArray), expectedBytes >> 2);
+                }
+            }
+            if (raw)
+                CKDeletePointer(raw);
         }
     }
 
@@ -313,7 +333,7 @@ CKERROR RCKLayer::RemapDependencies(CKDependenciesContext &context) {
     if (err != CK_OK)
         return err;
 
-    m_Grid = static_cast<RCKGrid *>(context.Remap(reinterpret_cast<CKObject *>(m_Grid)));
+    m_Grid = static_cast<CKGrid *>(context.Remap(reinterpret_cast<CKObject *>(m_Grid)));
     return CK_OK;
 }
 
