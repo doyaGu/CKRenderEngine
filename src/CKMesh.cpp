@@ -1,25 +1,21 @@
 #include "RCKMesh.h"
 
-#include "VxMath.h"
+#include "CKMemoryPool.h"
 #include "CKStateChunk.h"
-#include "CKDefines2.h"
 #include "CKFile.h"
 #include "CKContext.h"
+#include "CKScene.h"
+#include "CKMaterial.h"
 #include "CK3dEntity.h"
 #include "CKSkin.h"
 #include "CKObjectAnimation.h"
 #include "CKKeyframeData.h"
-#include "CKMaterial.h"
+#include "CKRasterizer.h"
 #include "RCKMaterial.h"
 #include "RCKTexture.h"
-#include "CKRenderEngineTypes.h"
-#include "CKScene.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
-#include "CKRasterizer.h"
-#include "CKMemoryPool.h"
-#include "CKDebugLogger.h"
 
 // External global for transparency update flag
 extern CKBOOL g_UpdateTransparency;
@@ -27,9 +23,6 @@ extern CKBOOL g_UpdateTransparency;
 // External VxMath normal building functions
 extern void (*g_BuildNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 extern void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
-
-#define MESH_DEBUG_LOG(msg) CK_LOG("Mesh", msg)
-#define MESH_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("Mesh", fmt, __VA_ARGS__)
 
 CKVBuffer *RCKMesh::GetVBuffer(CKMaterialGroup *group) const {
     if (!group || !group->m_RemapData)
@@ -1598,8 +1591,6 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk)
         return CKERR_INVALIDPARAMETER;
 
-    MESH_DEBUG_LOG_FMT("Load: Starting for mesh %s", GetName() ? GetName() : "(null)");
-
     // Call base class load
     CKBeObject::Load(chunk, file);
 
@@ -2238,7 +2229,7 @@ int RCKMesh::GetDependenciesCount(int mode) {
 
 CKSTRING RCKMesh::GetDependencies(int i, int mode) {
     if (i == 0) {
-        return "Material";
+        return (CKSTRING) "Material";
     }
     return nullptr;
 }
