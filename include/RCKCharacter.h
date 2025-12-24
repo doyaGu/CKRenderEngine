@@ -4,14 +4,32 @@
 #include "RCK3dEntity.h"
 #include "XObjectArray.h"
 
+typedef enum CK_SECONDARYANIMATION_RUNTIME_MODE {
+    CKSECONDARYANIMATIONRUNTIME_STARTINGWARP = 1,
+    CKSECONDARYANIMATIONRUNTIME_PLAYING = 2,
+    CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP = 3,
+} CK_SECONDARYANIMATION_RUNTIME_MODE;
+
 struct CKSecondaryAnimation {
-  CK_ID AnimID;
-  RCKKeyedAnimation *Animation;
-  CKDWORD Flags;
-  float WarpLength;
-  CKDWORD field_14;
-  CK_SECONDARYANIMATION_FLAGS Mode;
-  CKDWORD field_1C;
+  CK_ID SourceAnimId;                      // CK_ID of the secondary animation (owned by this character)
+  RCKKeyedAnimation *Transition;           // Temporary transition animation when warping (may be null)
+  CKDWORD Flags;                           // CK_SECONDARYANIMATION_FLAGS bitmask (CKSECONDARYANIMATION_*)
+  float WarpLength;                        // Warp duration (seconds or frames as per SDK behavior)
+  CKDWORD StartingFrameBits;               // Raw float bits of starting frame
+  CK_SECONDARYANIMATION_RUNTIME_MODE RuntimeMode;
+  CKDWORD LoopCountRemaining;              // Only meaningful when LOOPNTIMES is set
+
+  float GetStartingFrame() const {
+    float frame = 0.0f;
+    static_assert(sizeof(StartingFrameBits) == sizeof(frame), "StartingFrameBits must be 32-bit");
+    memcpy(&frame, &StartingFrameBits, sizeof(frame));
+    return frame;
+  }
+
+  void SetStartingFrame(float frame) {
+    static_assert(sizeof(StartingFrameBits) == sizeof(frame), "StartingFrameBits must be 32-bit");
+    memcpy(&StartingFrameBits, &frame, sizeof(frame));
+  }
 };
 
 class RCKCharacter : public RCK3dEntity {
@@ -52,8 +70,6 @@ public:
     void AddToScene(CKScene *scene, CKBOOL dependencies = TRUE) override;
     void RemoveFromScene(CKScene *scene, CKBOOL dependencies = TRUE) override;
 
-    void ApplyPatchForOlderVersion(int NbObject, CKFileObject *FileObjects) override;
-
     const VxBbox &GetBoundingBox(CKBOOL Local = FALSE) override;
     CKBOOL GetBaryCenter(VxVector *Pos) override;
     float GetRadius() override;
@@ -68,6 +84,7 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    void PreDeleteBodyPartsForAnimation(CKAnimation *anim);
     void FindFloorReference();
     void RemoveSecondaryAnimationAt(int index);
 
