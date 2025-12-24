@@ -18,8 +18,7 @@
 
 extern int (*g_RayIntersection)(RCKMesh *, VxVector &, VxVector &, VxIntersectionDesc *, CK_RAYINTERSECTION, VxMatrix const &);
 
-#define ENTITY_DEBUG_LOG(msg) CK_LOG("3dEntity", msg)
-#define ENTITY_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("3dEntity", fmt, __VA_ARGS__)
+CK_CLASSID RCK3dEntity::m_ClassID = CKCID_3DENTITY;
 
 /*************************************************
 Summary: PostLoad method for RCK3dEntity.
@@ -37,9 +36,6 @@ Implementation based on decompilation at 0x1000A138:
 - Calls CKObject::PostLoad() at the end
 *************************************************/
 void RCK3dEntity::PostLoad() {
-    ENTITY_DEBUG_LOG_FMT("PostLoad: Starting for entity=%p meshes=%d currentMesh=%p",
-                         this, m_Meshes.Size(), m_CurrentMesh);
-
     if (m_Skin) {
         UpdateSkin();
     }
@@ -56,8 +52,6 @@ void RCK3dEntity::PostLoad() {
     }
 
     CKObject::PostLoad();
-
-    ENTITY_DEBUG_LOG_FMT("PostLoad: Complete for entity=%p", this);
 }
 
 /*************************************************
@@ -91,18 +85,11 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk)
         return CKERR_INVALIDPARAMETER;
 
-    ENTITY_DEBUG_LOG_FMT("Load: Starting for entity %s", GetName() ? GetName() : "(null)");
-
     // Call base class load first to handle basic object data
     CKERROR err = CKBeObject::Load(chunk, file);
     if (err != CK_OK) {
-        ENTITY_DEBUG_LOG_FMT("Load: Base class load failed with error %d", err);
         return err;
     }
-
-    // Log the object flags IMMEDIATELY after CKBeObject::Load to see what SDK restored
-    ENTITY_DEBUG_LOG_FMT("Load: After CKBeObject::Load - m_ObjectFlags=0x%X CK_OBJECT_VISIBLE=%d",
-                         m_ObjectFlags, (m_ObjectFlags & CK_OBJECT_VISIBLE) ? 1 : 0);
 
     // Preserve moveable flags that should not be modified during load
     // Based on IDA: v16 = GetMoveableFlags() & 0x40000
@@ -136,7 +123,6 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     if (chunk->SeekIdentifier(CK_STATESAVE_MESHS)) {
         // Read current mesh object first
         CKMesh *currentMesh = (CKMesh *) chunk->ReadObject(m_Context);
-        ENTITY_DEBUG_LOG_FMT("Load: Read current mesh = %p", currentMesh);
 
         // Load mesh array into a temporary array to preserve original ordering/deduplication
         XObjectPointerArray tempMeshes;
@@ -148,13 +134,11 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             if (mesh && mesh != lastMesh) {
                 m_Meshes.AddIfNotHere(mesh);
                 lastMesh = mesh;
-                ENTITY_DEBUG_LOG_FMT("Load: Added mesh = %p (%s)", mesh, mesh->GetName());
             }
         }
 
         // Set current mesh
         SetCurrentMesh(currentMesh, TRUE);
-        ENTITY_DEBUG_LOG_FMT("Load: Set current mesh to %p", m_CurrentMesh);
     }
 
     // Load main entity data (chunk 0x100000) - new format
@@ -173,9 +157,6 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             VX_MOVEABLE_HASMOVED | VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT |
             VX_MOVEABLE_STENCILONLY | VX_MOVEABLE_RESERVED2;
         CKDWORD moveableFlags = moveableFlagsRaw & ~clearMask;
-
-        ENTITY_DEBUG_LOG_FMT("Load: entityFlags=0x%X moveableFlags=0x%X m_ObjectFlags=0x%X",
-                             entityFlags, moveableFlags, m_ObjectFlags);
 
         // IDA line 120-123: if ( v16 ) v53 |= 0x40000u;
         if (preservedFlags) {
@@ -241,9 +222,6 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
         // IDA line 155: SetMoveableFlags(this, v53);
         SetMoveableFlags(moveableFlags);
-
-        ENTITY_DEBUG_LOG_FMT("Load: After sync - m_MoveableFlags=0x%X VISIBLE=%d IsVisible=%d",
-                             m_MoveableFlags, (m_MoveableFlags & VX_MOVEABLE_VISIBLE) ? 1 : 0, IsVisible() ? 1 : 0);
 
         // IDA line 156-157: Read optional Place (if entityFlags & 0x10000)
         if (m_3dEntityFlags & CK_3DENTITY_PLACEVALID) {
@@ -446,13 +424,6 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         defaultBbox.Max = VxVector(1.0f, 1.0f, 1.0f);
         SetBoundingBox(&defaultBbox, TRUE);
     }
-
-    // FINAL VISIBILITY CHECK
-    // Log the final visibility state for debugging
-    ENTITY_DEBUG_LOG_FMT("Load: Final state - m_ObjectFlags=0x%X m_MoveableFlags=0x%X VISIBLE=%d/%d",
-                         m_ObjectFlags, m_MoveableFlags,
-                         (m_ObjectFlags & CK_OBJECT_VISIBLE) ? 1 : 0,
-                         (m_MoveableFlags & VX_MOVEABLE_VISIBLE) ? 1 : 0);
 
     return CK_OK;
 }
@@ -743,9 +714,6 @@ RCK3dEntity::RCK3dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Co
     RCKRenderManager *renderManager = (RCKRenderManager *) m_Context->GetRenderManager();
     if (renderManager) {
         m_SceneGraphNode = renderManager->CreateNode(this);
-        ENTITY_DEBUG_LOG_FMT("Constructor: Created scene graph node=%p for entity=%p", m_SceneGraphNode, this);
-    } else {
-        ENTITY_DEBUG_LOG("Constructor: WARNING - No RenderManager, cannot create scene graph node!");
     }
 }
 
@@ -1232,10 +1200,6 @@ CKMesh *RCK3dEntity::SetCurrentMesh(CKMesh *m, CKBOOL add_if_not_here) {
             AddMesh(m);
     }
 
-    ENTITY_DEBUG_LOG_FMT(
-        "SetCurrentMesh: entity=%p name=%s old=%p new=%p add=%d size=%d",
-        this, GetName() ? GetName() : "(null)", old, m, add_if_not_here, m_Meshes.Size());
-
     return old;
 }
 
@@ -1254,8 +1218,7 @@ CKERROR RCK3dEntity::AddMesh(CKMesh *mesh) {
         return CKERR_INVALIDPARAMETER;
 
     m_Meshes.AddIfNotHere(mesh);
-    ENTITY_DEBUG_LOG_FMT("AddMesh: entity=%p name=%s mesh=%p current=%p size=%d", this,
-                         GetName() ? GetName() : "(null)", mesh, m_CurrentMesh, m_Meshes.Size());
+
     return CK_OK;
 }
 
@@ -1271,8 +1234,6 @@ CKERROR RCK3dEntity::RemoveMesh(CKMesh *mesh) {
         SetCurrentMesh(newCurrent, FALSE);
     }
 
-    ENTITY_DEBUG_LOG_FMT("RemoveMesh: entity=%p name=%s removed=%p newCurrent=%p size=%d", this,
-                         GetName() ? GetName() : "(null)", mesh, m_CurrentMesh, m_Meshes.Size());
     return CK_OK;
 }
 
@@ -3156,7 +3117,6 @@ Implementation based on decompilation at 0x10005494:
 *************************************************/
 void RCK3dEntity::Show(CK_OBJECT_SHOWOPTION show) {
     // IDA: 0x10005494
-    ENTITY_DEBUG_LOG_FMT("Show called: entity=%p show=0x%x", this, show);
 
     // Call base class Show
     CKObject::Show(show);
@@ -3168,15 +3128,12 @@ void RCK3dEntity::Show(CK_OBJECT_SHOWOPTION show) {
     // show & 2 means "hide children too" (CKHIDE_HIERARCHY = 2)
     if ((show & CKSHOW) != 0) {
         m_MoveableFlags |= VX_MOVEABLE_VISIBLE;
-        ENTITY_DEBUG_LOG_FMT("Show: entity=%p made VISIBLE", this);
     } else {
         m_MoveableFlags &= ~VX_MOVEABLE_VISIBLE;
-        ENTITY_DEBUG_LOG_FMT("Show: entity=%p made INVISIBLE", this);
 
         // If hiding children too, set hierarchical hide flag
         if ((show & CKHIERARCHICALHIDE) != 0) {
             m_MoveableFlags |= VX_MOVEABLE_HIERARCHICALHIDE;
-            ENTITY_DEBUG_LOG_FMT("Show: entity=%p set HIERARCHICALHIDE", this);
         }
     }
 
@@ -3342,10 +3299,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
 
 //=============================================================================
 // Static Class Methods (for class registration)
-// Based on IDA Pro analysis of original CK2_3D.dll
 //=============================================================================
-
-CK_CLASSID RCK3dEntity::m_ClassID = CKCID_3DENTITY;
 
 CKSTRING RCK3dEntity::GetClassName() {
     return (CKSTRING) "3D Entity";
