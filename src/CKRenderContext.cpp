@@ -3,8 +3,22 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
-#include <vector>
-
+#include "VxMath.h"
+#include "VxIntersect.h"
+#include "CKGlobals.h"
+#include "CKTimeManager.h"
+#include "CKAttributeManager.h"
+#include "CKParameterOut.h"
+#include "CKRenderManager.h"
+#include "CKMaterial.h"
+#include "CKTexture.h"
+#include "CK2dEntity.h"
+#include "CKSprite.h"
+#include "CK3dEntity.h"
+#include "CKCamera.h"
+#include "CKSceneGraph.h"
+#include "CKRasterizer.h"
+#include "CKRasterizerTypes.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
@@ -13,46 +27,8 @@
 #include "RCKTexture.h"
 #include "RCKMaterial.h"
 #include "RCKSprite3D.h"
-#include "CKRenderManager.h"
-#include "CKRasterizer.h"
-#include "CKRasterizerTypes.h"
-#include "CK3dEntity.h"
-#include "CKCamera.h"
-#include "CKLight.h"
-#include "CKMaterial.h"
-#include "CKTexture.h"
-#include "CKSprite.h"
-#include "CK2dEntity.h"
-#include "CKTimeManager.h"
-#include "CKAttributeManager.h"
-#include "CKParameterOut.h"
-#include "CKSceneGraph.h"
-#include "CKGlobals.h"
-#include "VxMath.h"
-#include "VxIntersect.h"
-#include "CKDebugLogger.h"
 
-// Debug logging macros
-#define RC_DEBUG_LOG(msg) CK_LOG("RenderContext", msg)
-#define RC_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("RenderContext", fmt, __VA_ARGS__)
-
-static XString ResolveDumpPath(CKSTRING filename) {
-    if (!filename || !*filename)
-        return XString();
-
-    // Original behavior: "\\Foo.bmp" means "root of current drive".
-    if (filename[0] == '\\' || filename[0] == '/') {
-        char cwd[MAX_PATH] = {};
-        GetCurrentDirectoryA(MAX_PATH, cwd);
-        // cwd is like "C:\\..." -> keep "C:" and append filename
-        XString out = cwd;
-        out = out.Substring(0, 2);
-        out += filename;
-        return out;
-    }
-
-    return XString(filename);
-}
+CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
 CK_CLASSID RCKRenderContext::GetClassID() {
     return m_ClassID;
@@ -318,12 +294,17 @@ void RCKRenderContext::LoadPVInformationTexture() {
                 bi.bmiHeader.biBitCount = 32;
                 bi.bmiHeader.biCompression = BI_RGB;
 
-                std::vector<CKDWORD> srcPixels((size_t) srcW * (size_t) srcH);
+                const size_t pixelCount = (size_t) srcW * (size_t) srcH;
+                CKDWORD *srcPixels = nullptr;
+                if (pixelCount > 0) {
+                    srcPixels = new CKDWORD[pixelCount];
+                }
+
                 HDC hdc = GetDC(nullptr);
-                const int got = GetDIBits(hdc, hBitmap, 0, (UINT) srcH, srcPixels.data(), &bi, DIB_RGB_COLORS);
+                const int got = srcPixels ? GetDIBits(hdc, hBitmap, 0, (UINT) srcH, srcPixels, &bi, DIB_RGB_COLORS) : 0;
                 ReleaseDC(nullptr, hdc);
 
-                if (got) {
+                if (got && srcPixels) {
                     CKBYTE *dst = m_NCUTex->LockSurfacePtr(0);
                     if (dst) {
                         const int dstW = m_NCUTex->GetWidth();
@@ -346,6 +327,9 @@ void RCKRenderContext::LoadPVInformationTexture() {
                         m_NCUTex->ReleaseSurfacePtr(0);
                     }
                 }
+
+                if (srcPixels)
+                    delete[] srcPixels;
             }
 
             DeleteObject(hBitmap);
@@ -726,8 +710,6 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     if ((renderFlags & CK_RENDER_SKIPDRAWSCENE) != 0)
         return CK_OK;
 
-    RC_DEBUG_LOG_FMT("DrawScene called: RenderedScene=%p, Flags=0x%x", m_RenderedScene, renderFlags);
-
     ++m_DrawSceneCalls;
     memset(&m_Stats, 0, sizeof(VxStats));
     m_Stats.SmoothedFps = m_SmoothedFps;
@@ -939,8 +921,6 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     // IDA: 0x1006948e
     VxTimeProfiler profiler;
-
-    RC_DEBUG_LOG_FMT("Render called: Active=%d, Rasterizer=%p, Flags=0x%x", m_Active, m_RasterizerContext, Flags);
 
     if (!m_Active)
         return CKERR_RENDERCONTEXTINACTIVE;
@@ -2461,16 +2441,12 @@ void RCKRenderContext::GetStereoParameters(float &EyeSeparation, float &FocalLen
     EyeSeparation = m_FocalLength;
 }
 
-CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp,
-                                 int StencilBpp, int RefreshRate) {
-    // IDA: 0x1006711b
-    RC_DEBUG_LOG_FMT("Create called - Window=%p, Driver=%d, Fullscreen=%d, Bpp=%d", Window, Driver, Fullscreen, Bpp);
-
+CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp, int StencilBpp, int RefreshRate) {
     // Initialize timing and stereo parameters
     m_SmoothedFps = 0.0f;
     m_TimeFpsCalc = 0;
     m_RenderTimeProfiler.Reset();
-    m_FocalLength = 0.40000001f;
+    m_FocalLength = 0.4f;
     m_EyeSeparation = 100.0f;
 
     // Check if another context is fullscreen
@@ -2583,7 +2559,6 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         m_WinRect.bottom = m_FullscreenSettings.m_Rect.bottom; // IDA bug: sets .right again, we fix it
     }
 
-    RC_DEBUG_LOG_FMT("Create: returning CK_OK (fullscreen=%d, %dx%d)", Fullscreen, width, height);
     return CK_OK;
 }
 
@@ -2984,6 +2959,39 @@ void RCKRenderContext::CheckObjectExtents() {
     }
 }
 
+int RCKRenderContext::ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cam) {
+    // IDA: sub_10009BB9
+    const VxBbox &localBox = a->m_LocalBoundingBox;
+
+    const float dz = localBox.Max.z - localBox.Min.z;
+    if (dz < EPSILON) {
+        const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
+        const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+        if (prod != 0.0f)
+            return (prod >= 0.0f) ? 1 : -1;
+        return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
+    }
+
+    const float dy = localBox.Max.y - localBox.Min.y;
+    if (dy >= EPSILON) {
+        const float dx = localBox.Max.x - localBox.Min.x;
+        if (dx >= EPSILON)
+            return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
+
+        const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
+        const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+        if (prod == 0.0f)
+            return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
+        return (prod >= 0.0f) ? 1 : -1;
+    }
+
+    const VxPlane plane(a->m_WorldMatrix[1], a->m_WorldMatrix[3]);
+    const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+    if (prod == 0.0f)
+        return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
+    return (prod >= 0.0f) ? 1 : -1;
+}
+
 void RCKRenderContext::RenderTransparents(CKDWORD flags) {
     // IDA: 0x1006d070
     const int count = m_TransparentObjects.Size();
@@ -3032,48 +3040,13 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
             VxProjectBoxZExtents(mvp, bbox, items[i].zhMin, items[i].zhMax);
         }
 
+        // IDA: uses root entity world position for tie-breaking.
+        VxVector cameraPos(0.0f);
         const CK3dEntity *rootEntity = m_RenderedScene ? m_RenderedScene->GetRootEntity() : nullptr;
-        const VxVector cameraPos = rootEntity ? rootEntity->GetWorldMatrix()[3] : VxVector(0.0f, 0.0f, 0.0f);
-
-        // IDA sub_10009BB9: tie-breaker used when projected Z extents overlap.
-        auto classifyTransparentOrder = [](const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cam) -> int {
-            const VxBbox &localBox = a->m_LocalBoundingBox;
-
-            const float dz = localBox.Max.z - localBox.Min.z;
-            if (dz < EPSILON) {
-                const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
-                const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
-                if (prod != 0.0f)
-                    return (prod >= 0.0f) ? 1 : -1;
-                return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
-            }
-
-            const float dy = localBox.Max.y - localBox.Min.y;
-            if (dy >= EPSILON) {
-                const float dx = localBox.Max.x - localBox.Min.x;
-                if (dx >= EPSILON)
-                    return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
-
-                const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
-                const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
-                if (prod == 0.0f)
-                    return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
-                return (prod >= 0.0f) ? 1 : -1;
-            }
-
-            const VxPlane plane(a->m_WorldMatrix[1], a->m_WorldMatrix[3]);
-            const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
-            if (prod == 0.0f)
-                return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
-            return (prod >= 0.0f) ? 1 : -1;
-        };
-
-        auto getPriorityWord = [](const RCK3dEntity *entity) -> CKWORD {
-            CKWORD value = 0;
-            if (entity)
-                memcpy(&value, (const char *) entity + 0x2A, sizeof(value));
-            return value;
-        };
+        if (rootEntity) {
+            const VxMatrix &rootWorld = rootEntity->GetWorldMatrix();
+            cameraPos = static_cast<VxVector>(rootWorld[3]);
+        }
 
         CKBOOL noSwaps = TRUE;
         for (int i = 1; i < count; ++i) {
@@ -3084,8 +3057,11 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                 if (!curr.entity || !prev.entity)
                     continue;
 
-                const CKWORD currPri = getPriorityWord(curr.entity);
-                const CKWORD prevPri = getPriorityWord(prev.entity);
+                const CKSceneGraphNode *currNode = curr.entity ? curr.entity->m_SceneGraphNode : nullptr;
+                const CKSceneGraphNode *prevNode = prev.entity ? prev.entity->m_SceneGraphNode : nullptr;
+
+                const CKWORD currPri = currNode ? (CKWORD) currNode->m_MaxPriority : 0;
+                const CKWORD prevPri = prevNode ? (CKWORD) prevNode->m_MaxPriority : 0;
 
                 if (currPri > prevPri) {
                     TransparentItem tmp = curr;
@@ -3096,9 +3072,19 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                 }
 
                 if (currPri == prevPri) {
-                    // Overlap test: prev.zhMin <= curr.zhMax && curr.zhMin < prev.zhMax
-                    if (prev.zhMin <= curr.zhMax && curr.zhMin < prev.zhMax) {
-                        const int cmp1 = classifyTransparentOrder(prev.entity, curr.entity, cameraPos);
+                    // IDA-aligned behavior (same as CKSceneGraphRootNode::SortTransparentObjects):
+                    // - If projected Z ranges do NOT overlap, swap directly.
+                    // - If they overlap, use the expensive tie-breaker, then a final FLT_EPSILON compare.
+                    if (prev.zhMin < curr.zhMax) {
+                        if (!(curr.zhMin <= prev.zhMax)) {
+                            TransparentItem tmp = curr;
+                            curr = prev;
+                            prev = tmp;
+                            noSwaps = FALSE;
+                            continue;
+                        }
+
+                        const int cmp1 = ClassifyTransparentOrder(prev.entity, curr.entity, cameraPos);
                         if (cmp1 < 0) {
                             TransparentItem tmp = curr;
                             curr = prev;
@@ -3109,7 +3095,9 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                         if (cmp1 > 0)
                             continue;
 
-                        const int cmp2 = classifyTransparentOrder(curr.entity, prev.entity, cameraPos);
+                        const int cmp2 = ClassifyTransparentOrder(curr.entity, prev.entity, cameraPos);
+                        if (cmp2 < 0)
+                            continue;
                         if (cmp2 > 0) {
                             TransparentItem tmp = curr;
                             curr = prev;
@@ -3117,8 +3105,6 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                             noSwaps = FALSE;
                             continue;
                         }
-                        if (cmp2 < 0)
-                            continue;
 
                         if (prev.zhMax + EPSILON < curr.zhMax) {
                             TransparentItem tmp = curr;
@@ -3175,8 +3161,6 @@ void RCKRenderContext::AddExtents2D(const VxRect &rect, CKObject *obj) {
 // Static Class Registration Methods
 //=============================================================================
 
-CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
-
 CKObject *RCKRenderContext::CreateInstance(CKContext *Context) {
     return new RCKRenderContext(Context, nullptr);
 }
@@ -3194,7 +3178,6 @@ CKSTRING RCKRenderContext::GetDependencies(int i, int mode) {
 }
 
 void RCKRenderContext::Register() {
-    // Based on IDA decompilation
     CKClassNeedNotificationFrom(m_ClassID, CKCID_RENDEROBJECT);
 }
 
@@ -3213,7 +3196,8 @@ void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
 // ============================================================
 
 UserDrawPrimitiveDataClass::UserDrawPrimitiveDataClass()
-    : m_Indices(nullptr),
+    : VxDrawPrimitiveData(),
+      m_Indices(nullptr),
       m_MaxIndexCount(0),
       m_MaxVertexCount(0) {
     memset((VxDrawPrimitiveData *) this, 0, sizeof(VxDrawPrimitiveData));
@@ -3244,9 +3228,9 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
     cached->Flags = DpFlags & 0xEFFFFFFF; // Mask out CKRST_DP_VBUFFER flag
 
     // Match original behavior: null out optional pointers based on flags.
-    if ((DpFlags & 0x20) == 0) // CKRST_DP_SPECULAR
+    if (!(DpFlags & CKRST_DP_SPECULAR))
         cached->SpecularColorPtr = nullptr;
-    if ((DpFlags & 0x10) == 0) // CKRST_DP_DIFFUSE
+    if (!(DpFlags & CKRST_DP_DIFFUSE))
         cached->ColorPtr = nullptr;
 
     return cached;
@@ -3273,19 +3257,19 @@ void UserDrawPrimitiveDataClass::AllocateStructure() {
     const int maxVertices = m_MaxVertexCount;
 
     // Strides must be valid; many callers rely on them.
-    PositionStride = 16;     // VxVector4 (x,y,z,rhw)
-    NormalStride = 12;       // VxVector
-    ColorStride = 4;         // DWORD
-    SpecularColorStride = 4; // DWORD
-    TexCoordStride = 8;      // Vx2DVector
+    PositionStride = sizeof(VxVector4);
+    NormalStride = sizeof(VxVector);
+    ColorStride = sizeof(CKDWORD);
+    SpecularColorStride = sizeof(CKDWORD);
+    TexCoordStride = sizeof(Vx2DVector);
     for (int i = 0; i < (CKRST_MAX_STAGES - 1); ++i)
         TexCoordStrides[i] = 8;
 
-    ColorPtr = VxNewAligned(4 * maxVertices, 16);         // DWORD per vertex
-    SpecularColorPtr = VxNewAligned(4 * maxVertices, 16); // DWORD per vertex
-    NormalPtr = VxNewAligned(12 * maxVertices, 16);       // VxVector (12 bytes) per vertex
-    PositionPtr = VxNewAligned(16 * maxVertices, 16);     // VxVector4 (16 bytes) per vertex
-    TexCoordPtr = VxNewAligned(8 * maxVertices, 16);      // Vx2DVector (8 bytes) per vertex
+    ColorPtr = VxNewAligned(sizeof(CKDWORD) * maxVertices, 16);         // DWORD per vertex
+    SpecularColorPtr = VxNewAligned(sizeof(CKDWORD) * maxVertices, 16); // DWORD per vertex
+    NormalPtr = VxNewAligned(sizeof(VxVector) * maxVertices, 16);       // VxVector (12 bytes) per vertex
+    PositionPtr = VxNewAligned(sizeof(VxVector4) * maxVertices, 16);     // VxVector4 (16 bytes) per vertex
+    TexCoordPtr = VxNewAligned(sizeof(Vx2DVector) * maxVertices, 16);      // Vx2DVector (8 bytes) per vertex
 
     for (int i = 0; i < 7; ++i) {
         TexCoordPtrs[i] = VxNewAligned(8 * maxVertices, 16); // Vx2DVector per vertex

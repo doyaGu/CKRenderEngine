@@ -220,6 +220,8 @@ private:
     void DrawPVInformationWatermark();
     void FillStateString();
 
+    static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cam);
+
 public:
     // =====================================================================
     // Binary-aligned member layout - matches IDA RCKRenderContext (956 bytes)
