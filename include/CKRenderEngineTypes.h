@@ -501,7 +501,7 @@ struct VxDriverDescEx {
     char DriverDesc[512];
     char DriverDesc2[512];
     CKBOOL Hardware;
-    CKDWORD DisplayModeCount;
+    int DisplayModeCount;
     VxDisplayMode *DisplayModes;
     XSArray<VxImageDescEx> TextureFormats;
     Vx2DCapsDesc Caps2D;
