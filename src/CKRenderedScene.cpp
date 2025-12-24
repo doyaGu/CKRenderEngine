@@ -1,10 +1,10 @@
 #include "CKRenderedScene.h"
 
+#include "VxMatrix.h"
 #include "CKRenderContext.h"
 #include "CKRasterizer.h"
 #include "CK3dEntity.h"
 #include "CKMaterial.h"
-#include "RCKMaterial.h"
 #include "CKLight.h"
 #include "CKCamera.h"
 #include "CKSceneGraph.h"
@@ -14,10 +14,6 @@
 #include "RCK2dEntity.h"
 #include "RCKCamera.h"
 #include "RCKLight.h"
-#include "VxMatrix.h"
-
-#include <cmath>
-#include <cstring>
 
 extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
@@ -195,7 +191,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             rootEntity->GetPosition(&rootPos, nullptr);
             camera->InverseTransform(&camPos, &rootPos, nullptr);
 
-            float z = rc->m_NearPlane / fabs(camPos.z);
+            float z = rc->m_NearPlane / fabsf(camPos.z);
             float right = (camera->m_LocalBoundingBox.Max.x - camPos.x) * z;
             float left = (camera->m_LocalBoundingBox.Min.x - camPos.x) * z;
             float top = (camera->m_LocalBoundingBox.Max.y - camPos.y) * z;
