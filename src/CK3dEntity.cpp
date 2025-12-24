@@ -1,9 +1,6 @@
 #include "RCK3dEntity.h"
-#include "RCKRenderContext.h"
-#include "RCKRenderManager.h"
-#include "RCKMesh.h"
-#include "RCKObjectAnimation.h"
-#include "RCKSkin.h"
+
+#include "VxMath.h"
 #include "CKSkin.h"
 #include "CKMesh.h"
 #include "CKSceneGraph.h"
@@ -13,8 +10,11 @@
 #include "CKScene.h"
 #include "CKDependencies.h"
 #include "CKRasterizer.h"
-#include "VxMath.h"
-#include "CKDebugLogger.h"
+#include "RCKRenderContext.h"
+#include "RCKRenderManager.h"
+#include "RCKMesh.h"
+#include "RCKObjectAnimation.h"
+#include "RCKSkin.h"
 
 extern int (*g_RayIntersection)(RCKMesh *, VxVector &, VxVector &, VxIntersectionDesc *, CK_RAYINTERSECTION, VxMatrix const &);
 

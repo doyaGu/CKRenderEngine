@@ -1,10 +1,10 @@
 #include "RCKTargetLight.h"
-#include "RCKLight.h"
-#include "RCK3dEntity.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
-#include "VxMath.h"
+#include "RCKLight.h"
+#include "RCK3dEntity.h"
 
 // Static class ID definition
 CK_CLASSID RCKTargetLight::m_ClassID = CKCID_TARGETLIGHT;

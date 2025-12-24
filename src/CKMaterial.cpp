@@ -14,6 +14,8 @@
  */
 
 #include "RCKMaterial.h"
+
+#include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -28,7 +30,6 @@
 #include "RCK3dEntity.h"
 #include "RCKLight.h"
 #include "RCKSprite3D.h"
-#include "VxMath.h"
 
 // Static class ID (initialized during registration)
 CK_CLASSID RCKMaterial::m_ClassID = CKCID_MATERIAL;

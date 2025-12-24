@@ -1,11 +1,10 @@
 #include "RCKLight.h"
-#include "RCK3dEntity.h"
+
+#include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "VxMath.h"
-#include "CKRasterizerTypes.h"
 #include "CKRasterizer.h"
-#include "CKContext.h"
+#include "RCK3dEntity.h"
 
 // Static class ID definition
 CK_CLASSID RCKLight::m_ClassID = CKCID_LIGHT;

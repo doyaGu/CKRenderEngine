@@ -1,16 +1,16 @@
 #include "RCKCharacter.h"
-#include "RCK3dEntity.h"
-#include "RCKBodyPart.h"
-#include "RCKAnimation.h"
-#include "RCKKeyedAnimation.h"
-#include "RCKObjectAnimation.h"
-#include "CKCharacter.h"
+
+#include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKScene.h"
 #include "CKDependencies.h"
-#include "VxMath.h"
+#include "RCK3dEntity.h"
+#include "RCKBodyPart.h"
+#include "RCKAnimation.h"
+#include "RCKKeyedAnimation.h"
+#include "RCKObjectAnimation.h"
 
 //=============================================================================
 // Constructor/Destructor

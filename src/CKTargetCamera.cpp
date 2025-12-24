@@ -1,11 +1,11 @@
 #include "RCKTargetCamera.h"
-#include "RCKCamera.h"
-#include "RCK3dEntity.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKDependencies.h"
-#include "VxMath.h"
+#include "RCKCamera.h"
+#include "RCK3dEntity.h"
 
 // Static class ID definition
 CK_CLASSID RCKTargetCamera::m_ClassID = CKCID_TARGETCAMERA;

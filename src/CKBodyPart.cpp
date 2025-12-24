@@ -10,9 +10,6 @@
 #include "RCKCharacter.h"
 #include "RCKAnimation.h"
 
-#include <cmath>
-#include <cstring>
-
 // Static class ID
 CK_CLASSID RCKBodyPart::m_ClassID = CKCID_BODYPART;
 
