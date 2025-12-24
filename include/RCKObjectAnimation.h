@@ -81,6 +81,11 @@ public:
     void CreateTransition(float length, CKObjectAnimation *AnimIn, float StepFrom, CKObjectAnimation *AnimOut, float StepTo, CKBOOL Veloc, CKBOOL DontTurn, CKAnimKey *startingset = NULL) override;
     void Clone(CKObjectAnimation *anim) override;
 
+    // Ensure keyframe data is exclusive to this animation and clear controllers
+    void ResetKeyframeData();
+    // Set keyframe data length and propagate to all controllers
+    void SetKeyframeLength(float length);
+
     // Static methods for class registration
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
