@@ -6,55 +6,53 @@
 #include "XArray.h"
 #include "NearestPointGrid.h"
 
-namespace {
-    static void CollectHierarchyWorldVertices(CK3dEntity *root, XArray<VxVector> &outWorldPoints) {
-        if (!root) return;
+static void CollectHierarchyWorldVertices(CK3dEntity *root, XArray<VxVector> &outWorldPoints) {
+    if (!root) return;
 
-        CK3dEntity *current = nullptr;
-        while ((current = root->HierarchyParser(current)) != nullptr) {
-            CKMesh *mesh = current->GetCurrentMesh();
-            if (!mesh) continue;
+    CK3dEntity *current = nullptr;
+    while ((current = root->HierarchyParser(current)) != nullptr) {
+        CKMesh *mesh = current->GetCurrentMesh();
+        if (!mesh) continue;
 
-            // Prefer modifier vertices for CKPatchMesh compatibility.
-            CKDWORD stride = 0;
-            CKBYTE *vptr = mesh->GetModifierVertices(&stride);
-            int vcount = mesh->GetModifierVertexCount();
+        // Prefer modifier vertices for CKPatchMesh compatibility.
+        CKDWORD stride = 0;
+        CKBYTE *vptr = mesh->GetModifierVertices(&stride);
+        int vcount = mesh->GetModifierVertexCount();
 
-            if (!vptr || stride == 0 || vcount <= 0) {
-                // Fallback to raw positions.
-                stride = 0;
-                vptr = reinterpret_cast<CKBYTE *>(mesh->GetPositionsPtr(&stride));
-                vcount = mesh->GetVertexCount();
-            }
+        if (!vptr || stride == 0 || vcount <= 0) {
+            // Fallback to raw positions.
+            stride = 0;
+            vptr = reinterpret_cast<CKBYTE *>(mesh->GetPositionsPtr(&stride));
+            vcount = mesh->GetVertexCount();
+        }
 
-            if (!vptr || stride == 0 || vcount <= 0) continue;
+        if (!vptr || stride == 0 || vcount <= 0) continue;
 
-            const VxMatrix &world = current->GetWorldMatrix();
-            for (int i = 0; i < vcount; ++i, vptr += stride) {
-                const VxVector &localPos = *reinterpret_cast<const VxVector *>(vptr);
-                VxVector worldPos;
-                Vx3DMultiplyMatrixVector(&worldPos, world, &localPos);
-                outWorldPoints.PushBack(worldPos);
-            }
+        const VxMatrix &world = current->GetWorldMatrix();
+        for (int i = 0; i < vcount; ++i, vptr += stride) {
+            const VxVector &localPos = *reinterpret_cast<const VxVector *>(vptr);
+            VxVector worldPos;
+            Vx3DMultiplyMatrixVector(&worldPos, world, &localPos);
+            outWorldPoints.PushBack(worldPos);
         }
     }
+}
 
-    static VxBbox UnionBox(const VxBbox &a, const VxBbox &b) {
-        VxBbox u;
-        u.Min.x = (a.Min.x < b.Min.x) ? a.Min.x : b.Min.x;
-        u.Min.y = (a.Min.y < b.Min.y) ? a.Min.y : b.Min.y;
-        u.Min.z = (a.Min.z < b.Min.z) ? a.Min.z : b.Min.z;
-        u.Max.x = (a.Max.x > b.Max.x) ? a.Max.x : b.Max.x;
-        u.Max.y = (a.Max.y > b.Max.y) ? a.Max.y : b.Max.y;
-        u.Max.z = (a.Max.z > b.Max.z) ? a.Max.z : b.Max.z;
-        return u;
-    }
+static VxBbox UnionBox(const VxBbox &a, const VxBbox &b) {
+    VxBbox u;
+    u.Min.x = (a.Min.x < b.Min.x) ? a.Min.x : b.Min.x;
+    u.Min.y = (a.Min.y < b.Min.y) ? a.Min.y : b.Min.y;
+    u.Min.z = (a.Min.z < b.Min.z) ? a.Min.z : b.Min.z;
+    u.Max.x = (a.Max.x > b.Max.x) ? a.Max.x : b.Max.x;
+    u.Max.y = (a.Max.y > b.Max.y) ? a.Max.y : b.Max.y;
+    u.Max.z = (a.Max.z > b.Max.z) ? a.Max.z : b.Max.z;
+    return u;
+}
 
-    static float Max3(float a, float b, float c) {
-        float m = (a > b) ? a : b;
-        return (m > c) ? m : c;
-    }
-} // namespace
+static float Max3(float a, float b, float c) {
+    float m = (a > b) ? a : b;
+    return (m > c) ? m : c;
+}
 
 PlaceFitter::PlaceFitter()
     : m_TargetCells(64),

@@ -1,11 +1,11 @@
-#pragma once
+#ifndef PLACEFITTER_H
+#define PLACEFITTER_H
 
 #include "CKTypes.h"
 
 class CK3dEntity;
 class VxMatrix;
 
-// Helper used by CKPlace::ComputeBestFitBBox in original CK2_3D.dll.
 // Responsible for finding common vertices between two places and fitting an oriented bounding box.
 class PlaceFitter {
 public:
@@ -21,3 +21,5 @@ private:
     float m_GridThreshold; // In grid-space units (cell coordinates)
     int m_MinCommonPoints;
 };
+
+#endif // PLACEFITTER_H
