@@ -6,6 +6,7 @@
 #include "CKRenderEngineEnums.h"
 #include "CKRenderManager.h"
 #include "CKSceneGraph.h"
+#include "VertexCacheOptimizer.h"
 
 class RCK3dEntity;
 
@@ -100,7 +101,7 @@ public:
     CKSceneGraphRootNode m_SceneGraphRootNode;               // 0x64 (84 bytes)
     XObjectPointerArray m_MovedEntities;                     // 0xB8
     XObjectPointerArray m_Entities;                          // 0xC4
-    CKDWORD m_ReservedState[27];                             // 0xD0-0x138 padding/state placeholders
+    VertexCacheOptimizer m_VertexCacheOptimizer;             // 0xD0
     XArray<CKVertexBuffer *> m_VertexBuffers;
     VxOption m_ForceLinearFog;
     VxOption m_ForceSoftware;
