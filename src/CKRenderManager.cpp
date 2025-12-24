@@ -1,22 +1,17 @@
 #include "RCKRenderManager.h"
+
+#include "CKLevel.h"
+#include "CKRasterizer.h"
+#include "CKMaterial.h"
+#include "CKParameterManager.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
 #include "RCKMesh.h"
-#include "CKLevel.h"
 #include "RCKTexture.h"
 #include "RCKSprite.h"
 #include "RCKSpriteText.h"
 #include "RCKVertexBuffer.h"
-#include "CKRasterizer.h"
-#include "VxImageDescEx.h"
-#include "VxMath.h"
-#include "CKMaterial.h"
-#include "CKParameterManager.h"
-#include "CKDebugLogger.h"
-
-#define CK_DEBUG_LOG(msg) CK_LOG("RenderManager", msg)
-#define CK_DEBUG_LOG_FMT(fmt, ...) CK_LOG_FMT("RenderManager", fmt, __VA_ARGS__)
 
 // External reference to rasterizer info array from CK2_3D.cpp
 extern XClassArray<CKRasterizerInfo> g_RasterizersInfo;
@@ -27,7 +22,6 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
 
     if (!rstDriver) {
         // NULL rasterizer case
-        CK_DEBUG_LOG("UpdateDriverDescCaps: NULL rasterizer driver, using defaults");
         memset(&drvDesc->DriverDesc, 0, sizeof(drvDesc->DriverDesc));
         strcpy(drvDesc->DriverDesc, "NULL Rasterizer");
         strcpy(drvDesc->DriverDesc2, "NULL Rasterizer");
@@ -49,8 +43,6 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     strncpy(drvDesc->DriverDesc2, rstDriver->m_Desc.CStr(), sizeof(drvDesc->DriverDesc2) - 1);
     drvDesc->Hardware = rstDriver->m_Hardware;
 
-    CK_DEBUG_LOG_FMT("UpdateDriverDescCaps: Driver=%s, Hardware=%d", drvDesc->DriverDesc, drvDesc->Hardware);
-
     // Copy 3D and 2D caps
     memcpy(&drvDesc->Caps3D, &rstDriver->m_3DCaps, sizeof(Vx3DCapsDesc));
     drvDesc->Caps2D = rstDriver->m_2DCaps;
@@ -61,7 +53,6 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     for (int i = 0; i < texFormatCount; ++i) {
         drvDesc->TextureFormats[i] = rstDriver->m_TextureFormats[i].Format;
     }
-    CK_DEBUG_LOG_FMT("UpdateDriverDescCaps: Texture formats: %d", texFormatCount);
 
     // Copy display modes
     int displayModeCount = rstDriver->m_DisplayModes.Size();
@@ -71,21 +62,9 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     }
     drvDesc->DisplayModes = new VxDisplayMode[displayModeCount];
     memcpy(drvDesc->DisplayModes, rstDriver->m_DisplayModes.Begin(), displayModeCount * sizeof(VxDisplayMode));
-
-    CK_DEBUG_LOG_FMT("UpdateDriverDescCaps: Display modes: %d", displayModeCount);
-    // Log first few display modes for debugging
-    for (int i = 0; i < displayModeCount && i < 5; ++i) {
-        CK_DEBUG_LOG_FMT("  Mode[%d]: %dx%d@%dbpp %dHz", i,
-                         drvDesc->DisplayModes[i].Width,
-                         drvDesc->DisplayModes[i].Height,
-                         drvDesc->DisplayModes[i].Bpp,
-                         drvDesc->DisplayModes[i].RefreshRate);
-    }
 }
 
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, (CKSTRING) "Render Manager") {
-    CK_DEBUG_LOG("RCKRenderManager::RCKRenderManager - Starting initialization");
-
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
     m_SpriteVideoFormat.Set("SpriteVideoFormat", _16_ARGB1555);
@@ -147,34 +126,27 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // Get main window for rasterizer initialization
     WIN_HANDLE mainWindow = m_Context->GetMainWindow();
-    CK_DEBUG_LOG_FMT("MainWindow handle: %p", mainWindow);
 
     // Start rasterizers and count available drivers
     int rstInfoCount = g_RasterizersInfo.Size();
-    CK_DEBUG_LOG_FMT("Rasterizer info count: %d", rstInfoCount);
 
     for (CKRasterizerInfo *rstInfo = g_RasterizersInfo.Begin(); rstInfo != g_RasterizersInfo.End();) {
         CKRasterizer *rasterizer = nullptr;
 
         if (rstInfo->StartFct) {
-            CK_DEBUG_LOG_FMT("Starting rasterizer: %s", rstInfo->Desc.CStr());
             rasterizer = rstInfo->StartFct(mainWindow);
         }
 
         if (rasterizer) {
             int driverCount = rasterizer->GetDriverCount();
-            CK_DEBUG_LOG_FMT("Rasterizer started successfully, driver count: %d", driverCount);
             m_DriverCount += driverCount;
             m_Rasterizers.PushBack(rasterizer);
             ++rstInfo;
         } else {
-            CK_DEBUG_LOG("Rasterizer failed to start, removing from list");
             // Remove failed rasterizer info - move to next without incrementing
             rstInfo = g_RasterizersInfo.Remove(rstInfo);
         }
     }
-
-    CK_DEBUG_LOG_FMT("Total driver count: %d", m_DriverCount);
 
     // Link rasterizers together
     int rasterizerCount = m_Rasterizers.Size();
@@ -207,7 +179,6 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
                 drvDesc->RasterizerDriver = rstDriver;
                 drvDesc->DriverId = driverId;
                 UpdateDriverDescCaps(drvDesc);
-                CK_DEBUG_LOG_FMT("Hardware driver %d: %s", driverId, drvDesc->DriverDesc);
                 ++driverId;
             }
         }
@@ -226,58 +197,35 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
                 drvDesc->RasterizerDriver = rstDriver;
                 drvDesc->DriverId = driverId;
                 UpdateDriverDescCaps(drvDesc);
-                CK_DEBUG_LOG_FMT("Software driver %d: %s", driverId, drvDesc->DriverDesc);
                 ++driverId;
             }
         }
     }
 
     // Create default material
-    CK_DEBUG_LOG("About to create default material");
     m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
     if (m_DefaultMat) {
-        CK_DEBUG_LOG_FMT("Default material created at %p", m_DefaultMat);
         m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-        CK_DEBUG_LOG("Default material flags modified");
-    } else {
-        CK_DEBUG_LOG("Failed to create default material");
     }
-
     // Create 2D root entities
-    CK_DEBUG_LOG("About to create 2DRootFore");
     m_2DRootFore = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootFore", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootFore) {
-        CK_DEBUG_LOG_FMT("2DRootFore created at %p", m_2DRootFore);
         m_2DRootFore->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-        CK_DEBUG_LOG("2DRootFore flags modified");
         ((RCK2dEntity *) m_2DRootFore)->ModifyFlags(0, CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW);
-        CK_DEBUG_LOG("2DRootFore entity flags modified");
         m_2DRootFore->Show(CKHIDE);
-        CK_DEBUG_LOG("2DRootFore hidden");
         m_2DRootForeId = m_2DRootFore->GetID();
-    } else {
-        CK_DEBUG_LOG("Failed to create 2DRootFore");
     }
 
-    CK_DEBUG_LOG("About to create 2DRootBack");
     m_2DRootBack = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootBack", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootBack) {
-        CK_DEBUG_LOG_FMT("2DRootBack created at %p", m_2DRootBack);
         m_2DRootBack->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-        CK_DEBUG_LOG("2DRootBack flags modified");
         ((RCK2dEntity *) m_2DRootBack)->ModifyFlags(0, CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW);
-        CK_DEBUG_LOG("2DRootBack entity flags modified");
         m_2DRootBack->Show(CKHIDE);
-        CK_DEBUG_LOG("2DRootBack hidden");
         m_2DRootBackId = m_2DRootBack->GetID();
-    } else {
-        CK_DEBUG_LOG("Failed to create 2DRootBack");
     }
 
     // Register default material effects
     RegisterDefaultEffects();
-
-    CK_DEBUG_LOG_FMT("RCKRenderManager initialization complete - %d drivers available", m_DriverCount);
 }
 
 RCKRenderManager::~RCKRenderManager() {
@@ -332,7 +280,6 @@ CKERROR RCKRenderManager::PreClearAll() {
     }
 
     m_DefaultMat = nullptr;
-    CK_DEBUG_LOG_FMT("RCKRenderManager PreClearAll complete");
     return CK_OK;
 }
 
@@ -363,8 +310,6 @@ CKERROR RCKRenderManager::PostProcess() {
 }
 
 CKERROR RCKRenderManager::SequenceAddedToScene(CKScene *scn, CK_ID *objids, int count) {
-    CK_DEBUG_LOG_FMT("SequenceAddedToScene: scn=%p, count=%d", scn, count);
-
     CKLevel *level = m_Context->GetCurrentLevel();
     if (!level)
         return CK_OK;
@@ -379,7 +324,6 @@ CKERROR RCKRenderManager::SequenceAddedToScene(CKScene *scn, CK_ID *objids, int 
             for (int j = 0; j < count; ++j) {
                 CKObject *obj = m_Context->GetObject(objids[j]);
                 if (obj && CKIsChildClassOf(obj, CKCID_RENDEROBJECT)) {
-                    CK_DEBUG_LOG_FMT("SequenceAddedToScene: Adding object to render context");
                     ctx->AddObject((CKRenderObject *) obj);
                 }
             }
@@ -477,26 +421,18 @@ static VxDriverDesc s_DriverDescCache[16];
 static int s_DriverDescCacheCount = 0;
 
 VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
-    CK_DEBUG_LOG_FMT("GetRenderDriverDescription: Driver=%d, m_DriverCount=%d", Driver, m_DriverCount);
-
     if (Driver < 0 || Driver >= m_DriverCount || Driver >= 16) {
-        CK_DEBUG_LOG("GetRenderDriverDescription: Driver index out of range!");
         return nullptr;
     }
 
     VxDriverDescEx *drv = &m_Drivers[Driver];
-    CK_DEBUG_LOG_FMT("GetRenderDriverDescription: drv=%p, CapsUpToDate=%d", drv, drv->CapsUpToDate);
 
     if (!drv->CapsUpToDate) {
-        CK_DEBUG_LOG("GetRenderDriverDescription: Updating caps");
         UpdateDriverDescCaps(drv);
     }
 
-    CK_DEBUG_LOG("GetRenderDriverDescription: Getting desc from cache");
-
     // Copy data to VxDriverDesc - directly copy without XSArray issues
     VxDriverDesc *desc = &s_DriverDescCache[Driver];
-    CK_DEBUG_LOG_FMT("GetRenderDriverDescription: desc=%p, copying data", desc);
 
     strncpy(desc->DriverDesc, drv->DriverDesc, sizeof(desc->DriverDesc) - 1);
     desc->DriverDesc[sizeof(desc->DriverDesc) - 1] = '\0';
@@ -510,9 +446,6 @@ VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
     // desc->TextureFormats stays as-is (caller should use drv->TextureFormats)
     desc->Caps2D = drv->Caps2D;
     desc->Caps3D = drv->Caps3D;
-
-    CK_DEBUG_LOG_FMT("GetRenderDriverDescription: Returning desc=%p, DriverDesc=%s, DriverName=%s",
-                     desc, desc->DriverDesc, desc->DriverName);
 
     return desc;
 }
@@ -671,11 +604,7 @@ CKMaterial *RCKRenderManager::GetDefaultMaterial() {
     if (!m_DefaultMat) {
         m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
         if (m_DefaultMat) {
-            CK_DEBUG_LOG_FMT("Default material created at %p", m_DefaultMat);
             m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-            CK_DEBUG_LOG("Default material flags modified");
-        } else {
-            CK_DEBUG_LOG("Failed to create default material");
         }
     }
     return m_DefaultMat;
@@ -992,10 +921,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
 CKSceneGraphNode *RCKRenderManager::CreateNode(RCK3dEntity *entity) {
     CKSceneGraphNode *node = new CKSceneGraphNode(entity);
     if (node) {
-        // Add to root node
         m_SceneGraphRootNode.AddNode(node);
-        CK_DEBUG_LOG_FMT("CreateNode: Created node for entity=%p, total children=%d",
-                         entity, m_SceneGraphRootNode.m_Children.Size());
     }
     return node;
 }
@@ -1019,7 +945,7 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
 
 CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     // IDA: 0x1006f7f0
-    if (DriverIndex >= (int) m_DriverCount)
+    if (DriverIndex >= m_DriverCount)
         return nullptr;
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
@@ -1038,7 +964,7 @@ CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
 int RCKRenderManager::GetPreferredSoftwareDriver() {
     // IDA: 0x100733f0
     // First pass: prefer OpenGL software driver
-    for (int i = 0; i < (int) m_DriverCount; ++i) {
+    for (int i = 0; i < m_DriverCount; ++i) {
         CKRasterizerDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware && driver->m_2DCaps.Family == CKRST_OPENGL) {
             return i;
@@ -1046,7 +972,7 @@ int RCKRenderManager::GetPreferredSoftwareDriver() {
     }
 
     // Second pass: any software driver
-    for (int i = 0; i < (int) m_DriverCount; ++i) {
+    for (int i = 0; i < m_DriverCount; ++i) {
         CKRasterizerDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware) {
             return i;
