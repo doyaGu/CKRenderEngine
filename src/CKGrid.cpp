@@ -1,4 +1,5 @@
 #include "RCKGrid.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -13,14 +14,6 @@
 #include "RCKMaterial.h"
 #include "RCKMesh.h"
 #include "RCKTexture.h"
-
-static inline CKSTRING GridManager_GetNameFromType(CKGridManager *mgr, int type) {
-    if (!mgr)
-        return nullptr;
-    typedef CKSTRING(__thiscall *Fn)(CKGridManager *, int);
-    Fn fn = *reinterpret_cast<Fn *>(*reinterpret_cast<char **>(mgr) + 0x7C);
-    return fn ? fn(mgr, type) : nullptr;
-}
 
 /**
  * @brief RCKGrid constructor
@@ -71,7 +64,7 @@ CK_CLASSID RCKGrid::GetClassID() {
 void RCKGrid::UpdateBox(CKBOOL World) {
     // Set local bounding box from (0,0,0) to (width, 1, length)
     m_LocalBoundingBox.Min.Set(0.0f, 0.0f, 0.0f);
-    m_LocalBoundingBox.Max.Set((float)m_Width, 1.0f, (float)m_Length);
+    m_LocalBoundingBox.Max.Set((float) m_Width, 1.0f, (float) m_Length);
 
     if (World) {
         m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
@@ -118,18 +111,18 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = RCK3dEntity::Save(file, flags);
 
     // If no file and no special flags, return base chunk only
-    if (!file && (flags & CK_STATESAVE_GRIDONLY) == 0)
+    if (!file && !(flags & CK_STATESAVE_GRIDONLY))
         return baseChunk;
 
     // Create a new state chunk for grid data
-    CKStateChunk *chunk = CreateCKStateChunk(50, file);
+    CKStateChunk *chunk = CreateCKStateChunk(CKCID_GRID, file);
     chunk->StartWrite();
 
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
     // Write grid specific data
-    chunk->WriteIdentifier(0x400000u); // Grid identifier
+    chunk->WriteIdentifier(CK_STATESAVE_GRIDDATA); // Grid identifier
 
     // Write grid properties
     chunk->WriteInt(m_Width);
@@ -182,7 +175,7 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
     RCK3dEntity::Load(chunk, file);
 
     // Load grid data if identifier is found
-    if (chunk->SeekIdentifier(0x400000u)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_GRIDDATA)) {
         // Read grid properties
         m_Width = chunk->ReadInt();
         m_Length = chunk->ReadInt();
@@ -412,12 +405,12 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     // Create the mesh
     char buffer[256];
     sprintf(buffer, "%s mesh", GetName());
-    m_Mesh = (RCKMesh *)m_Context->CreateObject(CKCID_MESH, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    m_Mesh = (RCKMesh *) m_Context->CreateObject(CKCID_MESH, buffer, CK_OBJECTCREATION_NONAMECHECK);
     if (!m_Mesh)
         return;
 
-    float width = (float)m_Width;
-    float length = (float)m_Length;
+    float width = (float) m_Width;
+    float length = (float) m_Length;
     const float eps = 0.0001f;
 
     // Set up 12 vertices for the grid visualization
@@ -475,14 +468,14 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     CKDWORD whiteColor = RGBAFTOCOLOR(white.r, white.g, white.b, white.a);
     for (int i = 0; i < 4; ++i) {
         m_Mesh->SetVertexColor(i, whiteColor);
-        m_Mesh->SetVertexSpecularColor(i, 0xFF000000);
+        m_Mesh->SetVertexSpecularColor(i, A_MASK);
     }
 
     // Orange color for border vertices
     CKDWORD orangeColor = RGBAFTOCOLOR(1.0f, 0.5f, 0.1f, white.a);
     for (int i = 4; i < 12; ++i) {
         m_Mesh->SetVertexColor(i, orangeColor);
-        m_Mesh->SetVertexSpecularColor(i, 0xFF000000);
+        m_Mesh->SetVertexSpecularColor(i, A_MASK);
     }
 
     // Build face normals
@@ -491,7 +484,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
 
     // Create main material (with alpha blend for transparency)
     sprintf(buffer, "%s material", GetName());
-    CKMaterial *material = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    CKMaterial *material = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
     m_Mesh->SetFaceMaterial(0, material);
     m_Mesh->SetFaceMaterial(1, material);
 
@@ -507,7 +500,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
 
     // Create wireframe material for border
     sprintf(buffer, "%s material2", GetName());
-    CKMaterial *material2 = (CKMaterial *)m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    CKMaterial *material2 = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
     for (int i = 2; i < 10; ++i)
         m_Mesh->SetFaceMaterial(i, material2);
 
@@ -518,7 +511,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
 
     // Create texture for grid visualization
     sprintf(buffer, "%s texture", GetName());
-    CKTexture *texture = (CKTexture *)m_Context->CreateObject(CKCID_TEXTURE, buffer, CK_OBJECTCREATION_NONAMECHECK);
+    CKTexture *texture = (CKTexture *) m_Context->CreateObject(CKCID_TEXTURE, buffer, CK_OBJECTCREATION_NONAMECHECK);
 
     // Calculate texture size based on grid dimensions (power of 2, max 256)
     int texWidth, texHeight;
@@ -538,8 +531,8 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     texture->SetDesiredVideoFormat(_16_BGR565);
 
     // Calculate texture coordinates
-    float uScale = (float)(m_Width * 2) / (float)texWidth;
-    float vScale = (float)(m_Length * 2) / (float)texHeight;
+    float uScale = (float) (m_Width * 2) / (float) texWidth;
+    float vScale = (float) (m_Length * 2) / (float) texHeight;
 
     m_Mesh->SetVertexTextureCoordinates(0, 0.0f, 0.0f, 0);
     m_Mesh->SetVertexTextureCoordinates(1, 0.0f, vScale, 0);
@@ -548,15 +541,15 @@ void RCKGrid::ConstructMeshTexture(float scale) {
 
     // Get grid manager for layer color info
     int layerCount = GetLayerCount();
-    CKLayer **layers = new CKLayer*[layerCount];
+    CKLayer **layers = new CKLayer *[layerCount];
     VxColor *layerColors = new VxColor[layerCount];
     memset(layerColors, 0, sizeof(VxColor) * layerCount);
 
-    CKGridManager *gridMgr = (CKGridManager *)m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
+    CKGridManager *gridMgr = (CKGridManager *) m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
     if (gridMgr) {
         // Gather layer information and colors
         for (int i = 0; i < layerCount; ++i) {
-            layers[i] = (CKLayer *)m_Layers.GetObject(m_Context, i);
+            layers[i] = (CKLayer *) m_Layers.GetObject(m_Context, i);
             if (layers[i] && layers[i]->IsVisible()) {
                 // Get layer color from grid manager
                 // The layer stores color info that we use for texture generation
@@ -578,9 +571,9 @@ void RCKGrid::ConstructMeshTexture(float scale) {
                             int value = 0;
                             // Get cell value from layer
                             // Multiply by layer color and accumulate
-                            r += (int)(value * layerColors[j].r);
-                            g += (int)(value * layerColors[j].g);
-                            b += (int)(value * layerColors[j].b);
+                            r += (int) (value * layerColors[j].r);
+                            g += (int) (value * layerColors[j].g);
+                            b += (int) (value * layerColors[j].b);
                         }
                     }
 
@@ -590,11 +583,11 @@ void RCKGrid::ConstructMeshTexture(float scale) {
                     if (b > 255) b = 255;
 
                     // Write 2x2 pixels (grid cells are 2 pixels in texture)
-                    CKDWORD color = 0xFF000000 | (r << 16) | (g << 8) | b;
-                    *(CKDWORD *)pixelPtr = color;
-                    *(CKDWORD *)(pixelPtr + 4) = color;
-                    *(CKDWORD *)(pixelPtr + 4 * texWidth) = color;
-                    *(CKDWORD *)(pixelPtr + 4 * texWidth + 4) = color;
+                    CKDWORD color = A_MASK | (r << 16) | (g << 8) | b;
+                    *(CKDWORD *) pixelPtr = color;
+                    *(CKDWORD *) (pixelPtr + 4) = color;
+                    *(CKDWORD *) (pixelPtr + 4 * texWidth) = color;
+                    *(CKDWORD *) (pixelPtr + 4 * texWidth + 4) = color;
 
                     pixelPtr += 8;
                 }
@@ -781,14 +774,12 @@ CKBOOL RCKGrid::HasCompatibleClass(CK3dEntity *entity) {
         return FALSE;
 
     // Get Grid Manager
-    CKGridManager *gridMgr = (CKGridManager *)m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
+    CKGridManager *gridMgr = (CKGridManager *) m_Context->GetManagerByGuid(GRID_MANAGER_GUID);
     if (!gridMgr)
         return FALSE;
 
-    // Get the grid classification category from the manager (vtable+172)
-    typedef int(__thiscall *GetCategoryFn)(CKGridManager *);
-    GetCategoryFn getCategoryFn = *reinterpret_cast<GetCategoryFn *>(*reinterpret_cast<char **>(gridMgr) + 0xAC);
-    int gridCategory = getCategoryFn(gridMgr);
+    // Get the grid classification category from the manager
+    int gridCategory = gridMgr->GetGridClassificationCategory();
 
     CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
 
@@ -842,8 +833,8 @@ CKLayer *RCKGrid::AddLayer(int type, int format) {
     if (!gridMgr)
         return nullptr;
 
-    // Validate type exists in manager (vtable+124 = GetNameFromType)
-    CKSTRING layerName = GridManager_GetNameFromType(gridMgr, type);
+    // Validate type exists in manager
+    CKSTRING layerName = gridMgr->GetTypeName(type);
     if (!layerName)
         return nullptr;
 
@@ -949,7 +940,7 @@ CKERROR RCKGrid::RemoveLayer(int type) {
         return CKERR_INVALIDPARAMETER;
 
     // Validate type exists
-    if (!GridManager_GetNameFromType(gridMgr, type))
+    if (!gridMgr->GetTypeName(type))
         return CKERR_INVALIDPARAMETER;
 
     CKLayer *layer = GetLayer(type);
@@ -979,7 +970,6 @@ CKERROR RCKGrid::RemoveLayerByName(char *name) {
     if (!type)
         return CKERR_INVALIDPARAMETER;
 
-    // Match original behavior: call RemoveLayer and always return CK_OK
     RemoveLayer(type);
     return CK_OK;
 }
