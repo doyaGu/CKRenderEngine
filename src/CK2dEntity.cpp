@@ -365,34 +365,34 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
         // Get texture dimensions
         VxImageDescEx desc;
         texture->GetSystemTextureDesc(desc);
-        
+
         if (desc.Image) {
             // Clamp UV coordinates to [0, 1] range
             if (srcU < 0.0f) srcU = 0.0f;
             if (srcU > 1.0f) srcU = 1.0f;
             if (srcV < 0.0f) srcV = 0.0f;
             if (srcV > 1.0f) srcV = 1.0f;
-            
+
             // Calculate pixel coordinates
-            int pixelX = (int)(srcU * (float)desc.Width);
-            int pixelY = (int)(srcV * (float)desc.Height);
-            
+            int pixelX = (int) (srcU * (float) desc.Width);
+            int pixelY = (int) (srcV * (float) desc.Height);
+
             // Clamp to valid pixel range
             if (pixelX >= desc.Width) pixelX = desc.Width - 1;
             if (pixelY >= desc.Height) pixelY = desc.Height - 1;
             if (pixelX < 0) pixelX = 0;
             if (pixelY < 0) pixelY = 0;
-            
+
             // Sample the pixel at the calculated position
-            CKBYTE *imageData = (CKBYTE *)desc.Image;
+            CKBYTE *imageData = (CKBYTE *) desc.Image;
             int bytesPerPixel = desc.BitsPerPixel / 8;
             int pitch = desc.Width * bytesPerPixel;
             int pixelOffset = pixelY * pitch + pixelX * bytesPerPixel;
-            
+
             // Check alpha channel (assume ARGB or RGBA format)
             // For most Virtools textures, alpha is typically the 4th byte or first byte
             CKBYTE alpha = 255; // Default to opaque
-            
+
             if (bytesPerPixel == 4) {
                 // 32-bit texture with alpha
                 if (desc.AlphaMask == 0xFF000000) {
@@ -409,17 +409,17 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
                 // 16-bit texture, check if it has alpha (e.g., ARGB4444, ARGB1555)
                 if (desc.AlphaMask != 0) {
                     // Extract alpha bits
-                    CKWORD pixel = *(CKWORD*)(imageData + pixelOffset);
+                    CKWORD pixel = *(CKWORD *) (imageData + pixelOffset);
                     if (desc.AlphaMask == 0xF000) {
                         // 4-bit alpha (ARGB4444)
-                        alpha = (CKBYTE)((pixel >> 12) * 17); // Scale 0-15 to 0-255
+                        alpha = (CKBYTE) ((pixel >> 12) * 17); // Scale 0-15 to 0-255
                     } else if (desc.AlphaMask == 0x8000) {
                         // 1-bit alpha (ARGB1555)
                         alpha = (pixel & 0x8000) ? 255 : 0;
                     }
                 }
             }
-            
+
             // Alpha threshold for picking (alpha > 128 = opaque enough to pick)
             if (alpha <= 128) {
                 return nullptr; // Transparent, not pickable
@@ -491,7 +491,7 @@ CKBOOL RCK2dEntity::SetParent(CK2dEntity *parent) {
     CKRenderContext *rc = m_Context->GetPlayerRenderContext();
 
     CK2dEntity *foreground = rc ? rc->Get2dRoot(FALSE) : nullptr; // Foreground root
-    CK2dEntity *background = rc ? rc->Get2dRoot(TRUE) : nullptr; // Background root
+    CK2dEntity *background = rc ? rc->Get2dRoot(TRUE) : nullptr;  // Background root
 
     // Remove from current parent
     if (m_Parent) {

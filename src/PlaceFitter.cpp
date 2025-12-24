@@ -7,65 +7,62 @@
 #include "NearestPointGrid.h"
 
 namespace {
+    static void CollectHierarchyWorldVertices(CK3dEntity *root, XArray<VxVector> &outWorldPoints) {
+        if (!root) return;
 
-static void CollectHierarchyWorldVertices(CK3dEntity* root, XArray<VxVector>& outWorldPoints) {
-    if (!root) return;
+        CK3dEntity *current = nullptr;
+        while ((current = root->HierarchyParser(current)) != nullptr) {
+            CKMesh *mesh = current->GetCurrentMesh();
+            if (!mesh) continue;
 
-    CK3dEntity* current = nullptr;
-    while ((current = root->HierarchyParser(current)) != nullptr) {
-        CKMesh* mesh = current->GetCurrentMesh();
-        if (!mesh) continue;
+            // Prefer modifier vertices for CKPatchMesh compatibility.
+            CKDWORD stride = 0;
+            CKBYTE *vptr = mesh->GetModifierVertices(&stride);
+            int vcount = mesh->GetModifierVertexCount();
 
-        // Prefer modifier vertices for CKPatchMesh compatibility.
-        CKDWORD stride = 0;
-        CKBYTE* vptr = mesh->GetModifierVertices(&stride);
-        int vcount = mesh->GetModifierVertexCount();
+            if (!vptr || stride == 0 || vcount <= 0) {
+                // Fallback to raw positions.
+                stride = 0;
+                vptr = reinterpret_cast<CKBYTE *>(mesh->GetPositionsPtr(&stride));
+                vcount = mesh->GetVertexCount();
+            }
 
-        if (!vptr || stride == 0 || vcount <= 0) {
-            // Fallback to raw positions.
-            stride = 0;
-            vptr = reinterpret_cast<CKBYTE*>(mesh->GetPositionsPtr(&stride));
-            vcount = mesh->GetVertexCount();
-        }
+            if (!vptr || stride == 0 || vcount <= 0) continue;
 
-        if (!vptr || stride == 0 || vcount <= 0) continue;
-
-        const VxMatrix& world = current->GetWorldMatrix();
-        for (int i = 0; i < vcount; ++i, vptr += stride) {
-            const VxVector& localPos = *reinterpret_cast<const VxVector*>(vptr);
-            VxVector worldPos;
-            Vx3DMultiplyMatrixVector(&worldPos, world, &localPos);
-            outWorldPoints.PushBack(worldPos);
+            const VxMatrix &world = current->GetWorldMatrix();
+            for (int i = 0; i < vcount; ++i, vptr += stride) {
+                const VxVector &localPos = *reinterpret_cast<const VxVector *>(vptr);
+                VxVector worldPos;
+                Vx3DMultiplyMatrixVector(&worldPos, world, &localPos);
+                outWorldPoints.PushBack(worldPos);
+            }
         }
     }
-}
 
-static VxBbox UnionBox(const VxBbox& a, const VxBbox& b) {
-    VxBbox u;
-    u.Min.x = (a.Min.x < b.Min.x) ? a.Min.x : b.Min.x;
-    u.Min.y = (a.Min.y < b.Min.y) ? a.Min.y : b.Min.y;
-    u.Min.z = (a.Min.z < b.Min.z) ? a.Min.z : b.Min.z;
-    u.Max.x = (a.Max.x > b.Max.x) ? a.Max.x : b.Max.x;
-    u.Max.y = (a.Max.y > b.Max.y) ? a.Max.y : b.Max.y;
-    u.Max.z = (a.Max.z > b.Max.z) ? a.Max.z : b.Max.z;
-    return u;
-}
+    static VxBbox UnionBox(const VxBbox &a, const VxBbox &b) {
+        VxBbox u;
+        u.Min.x = (a.Min.x < b.Min.x) ? a.Min.x : b.Min.x;
+        u.Min.y = (a.Min.y < b.Min.y) ? a.Min.y : b.Min.y;
+        u.Min.z = (a.Min.z < b.Min.z) ? a.Min.z : b.Min.z;
+        u.Max.x = (a.Max.x > b.Max.x) ? a.Max.x : b.Max.x;
+        u.Max.y = (a.Max.y > b.Max.y) ? a.Max.y : b.Max.y;
+        u.Max.z = (a.Max.z > b.Max.z) ? a.Max.z : b.Max.z;
+        return u;
+    }
 
-static float Max3(float a, float b, float c) {
-    float m = (a > b) ? a : b;
-    return (m > c) ? m : c;
-}
-
+    static float Max3(float a, float b, float c) {
+        float m = (a > b) ? a : b;
+        return (m > c) ? m : c;
+    }
 } // namespace
 
 PlaceFitter::PlaceFitter()
     : m_TargetCells(64),
       m_MaxCells(128),
       m_GridThreshold(0.5f),
-      m_MinCommonPoints(3) {
-}
+      m_MinCommonPoints(3) {}
 
-CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity* p1, CK3dEntity* p2, VxMatrix& bboxMatrix) {
+CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix &bboxMatrix) {
     if (!p1 || !p2) return FALSE;
 
     XArray<VxVector> points1;
@@ -92,9 +89,9 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity* p1, CK3dEntity* p2, VxMatrix&
     float cellSize = maxDim / float(m_TargetCells - 1);
     if (cellSize <= 0.0f) cellSize = 1.0f;
 
-    int sizeX = (int)(extent.x / cellSize) + 2;
-    int sizeY = (int)(extent.y / cellSize) + 2;
-    int sizeZ = (int)(extent.z / cellSize) + 2;
+    int sizeX = (int) (extent.x / cellSize) + 2;
+    int sizeY = (int) (extent.y / cellSize) + 2;
+    int sizeZ = (int) (extent.z / cellSize) + 2;
 
     if (sizeX < 1) sizeX = 1;
     if (sizeY < 1) sizeY = 1;
@@ -110,14 +107,14 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity* p1, CK3dEntity* p2, VxMatrix&
 
     // Add p1 points in grid space.
     for (int i = 0; i < points1.Size(); ++i) {
-        const VxVector& w = points1[i];
+        const VxVector &w = points1[i];
         VxVector gp;
         gp.x = (w.x - ubox.Min.x) / cellSize;
         gp.y = (w.y - ubox.Min.y) / cellSize;
         gp.z = (w.z - ubox.Min.z) / cellSize;
 
         if (gp.x >= 0.0f && gp.y >= 0.0f && gp.z >= 0.0f &&
-            gp.x < (float)sizeX && gp.y < (float)sizeY && gp.z < (float)sizeZ) {
+            gp.x < (float) sizeX && gp.y < (float) sizeY && gp.z < (float) sizeZ) {
             grid.AddPoint(gp, i);
         }
     }
@@ -129,14 +126,14 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity* p1, CK3dEntity* p2, VxMatrix&
 
     XArray<VxVector> commonWorld;
     for (int j = 0; j < points2.Size(); ++j) {
-        const VxVector& w = points2[j];
+        const VxVector &w = points2[j];
         VxVector gp;
         gp.x = (w.x - ubox.Min.x) / cellSize;
         gp.y = (w.y - ubox.Min.y) / cellSize;
         gp.z = (w.z - ubox.Min.z) / cellSize;
 
         if (gp.x < 0.0f || gp.y < 0.0f || gp.z < 0.0f ||
-            gp.x >= (float)sizeX || gp.y >= (float)sizeY || gp.z >= (float)sizeZ) {
+            gp.x >= (float) sizeX || gp.y >= (float) sizeY || gp.z >= (float) sizeZ) {
             continue;
         }
 
@@ -149,9 +146,9 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity* p1, CK3dEntity* p2, VxMatrix&
 
     if (commonWorld.Size() < m_MinCommonPoints) return FALSE;
 
-    return VxComputeBestFitBBox(reinterpret_cast<const XBYTE*>(commonWorld.Begin()),
-                               sizeof(VxVector),
-                               commonWorld.Size(),
-                               bboxMatrix,
-                               0.0f);
+    return VxComputeBestFitBBox(reinterpret_cast<const XBYTE *>(commonWorld.Begin()),
+                                sizeof(VxVector),
+                                commonWorld.Size(),
+                                bboxMatrix,
+                                0.0f);
 }

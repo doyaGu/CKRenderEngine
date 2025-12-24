@@ -1,28 +1,24 @@
 #include "CKRasterizer.h"
 
-CKDWORD GetMsb(CKDWORD data, CKDWORD index)
-{
+CKDWORD GetMsb(CKDWORD data, CKDWORD index) {
 #define OPERAND_SIZE (sizeof(CKDWORD) * 8)
     CKDWORD i = OPERAND_SIZE - 1;
     if (data != 0) {
-        while (!(data & (1 << (OPERAND_SIZE - 1))))
-        {
+        while (!(data & (1 << (OPERAND_SIZE - 1)))) {
             data <<= 1;
             --i;
         }
     } else {
-        i = 0; 
+        i = 0;
     }
     return (i > index) ? index : i;
 #undef OPERAND_SIZE
 }
 
-CKDWORD GetLsb(CKDWORD data, CKDWORD index)
-{
+CKDWORD GetLsb(CKDWORD data, CKDWORD index) {
     CKDWORD i = 0;
     if (data != 0) {
-        while (!(data & 1))
-        {
+        while (!(data & 1)) {
             data >>= 1;
             ++i;
         }
@@ -39,8 +35,7 @@ CKRasterizerContext::CKRasterizerContext()
       m_PixelFormat(),
       m_CurrentMaterialData(),
       m_CurrentLightData(),
-      m_DirtyRects()
-{
+      m_DirtyRects() {
     m_Driver = NULL;
     m_PosX = 0;
     m_PosY = 0;
@@ -94,23 +89,19 @@ CKRasterizerContext::CKRasterizerContext()
 
 CKRasterizerContext::~CKRasterizerContext() {}
 
-CKBOOL CKRasterizerContext::SetMaterial(CKMaterialData *mat)
-{
+CKBOOL CKRasterizerContext::SetMaterial(CKMaterialData *mat) {
     if (mat)
         memcpy(&m_CurrentMaterialData, mat, sizeof(m_CurrentMaterialData));
     return FALSE;
 }
 
-CKBOOL CKRasterizerContext::SetViewport(CKViewportData *data)
-{
+CKBOOL CKRasterizerContext::SetViewport(CKViewportData *data) {
     memcpy(&m_ViewportData, data, sizeof(m_ViewportData));
     return TRUE;
 }
 
-CKBOOL CKRasterizerContext::SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat)
-{
-    switch (Type)
-    {
+CKBOOL CKRasterizerContext::SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) {
+    switch (Type) {
     case VXMATRIX_WORLD:
         memcpy(&m_WorldMatrix, Mat, sizeof(m_WorldMatrix));
         Vx3DMultiplyMatrix(m_ModelViewMatrix, m_ViewMatrix, m_WorldMatrix);
@@ -131,13 +122,11 @@ CKBOOL CKRasterizerContext::SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatri
     return TRUE;
 }
 
-CKBOOL CKRasterizerContext::DeleteObject(CKDWORD ObjIndex, CKRST_OBJECTTYPE Type)
-{
-    if (ObjIndex >= (CKDWORD)m_Textures.Size())
+CKBOOL CKRasterizerContext::DeleteObject(CKDWORD ObjIndex, CKRST_OBJECTTYPE Type) {
+    if (ObjIndex >= (CKDWORD) m_Textures.Size())
         return FALSE;
 
-    switch (Type)
-    {
+    switch (Type) {
     case CKRST_OBJ_TEXTURE:
         if (m_Textures[ObjIndex])
             delete m_Textures[ObjIndex];
@@ -174,51 +163,44 @@ CKBOOL CKRasterizerContext::DeleteObject(CKDWORD ObjIndex, CKRST_OBJECTTYPE Type
     return TRUE;
 }
 
-CKBOOL CKRasterizerContext::FlushObjects(CKDWORD TypeMask)
-{
+CKBOOL CKRasterizerContext::FlushObjects(CKDWORD TypeMask) {
     if ((TypeMask & CKRST_OBJ_TEXTURE) != 0)
-        for (XArray<CKTextureDesc *>::Iterator it = m_Textures.Begin(); it != m_Textures.End(); ++it)
-        {
+        for (XArray<CKTextureDesc *>::Iterator it = m_Textures.Begin(); it != m_Textures.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
         }
 
     if ((TypeMask & CKRST_OBJ_SPRITE) != 0)
-        for (XArray<CKSpriteDesc *>::Iterator it = m_Sprites.Begin(); it != m_Sprites.End(); ++it)
-        {
+        for (XArray<CKSpriteDesc *>::Iterator it = m_Sprites.Begin(); it != m_Sprites.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
         }
 
     if ((TypeMask & CKRST_OBJ_VERTEXBUFFER) != 0)
-        for (XArray<CKVertexBufferDesc *>::Iterator it = m_VertexBuffers.Begin(); it != m_VertexBuffers.End(); ++it)
-        {
+        for (XArray<CKVertexBufferDesc *>::Iterator it = m_VertexBuffers.Begin(); it != m_VertexBuffers.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
         }
 
     if ((TypeMask & CKRST_OBJ_INDEXBUFFER) != 0)
-        for (XArray<CKIndexBufferDesc *>::Iterator it = m_IndexBuffers.Begin(); it != m_IndexBuffers.End(); ++it)
-        {
+        for (XArray<CKIndexBufferDesc *>::Iterator it = m_IndexBuffers.Begin(); it != m_IndexBuffers.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
         }
 
     if ((TypeMask & CKRST_OBJ_VERTEXSHADER) != 0)
-        for (XArray<CKVertexShaderDesc *>::Iterator it = m_VertexShaders.Begin(); it != m_VertexShaders.End(); ++it)
-        {
+        for (XArray<CKVertexShaderDesc *>::Iterator it = m_VertexShaders.Begin(); it != m_VertexShaders.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
         }
 
     if ((TypeMask & CKRST_OBJ_PIXELSHADER) != 0)
-        for (XArray<CKPixelShaderDesc *>::Iterator it = m_PixelShaders.Begin(); it != m_PixelShaders.End(); ++it)
-        {
+        for (XArray<CKPixelShaderDesc *>::Iterator it = m_PixelShaders.Begin(); it != m_PixelShaders.End(); ++it) {
             if (*it)
                 delete *it;
             *it = NULL;
@@ -227,12 +209,10 @@ CKBOOL CKRasterizerContext::FlushObjects(CKDWORD TypeMask)
     return TRUE;
 }
 
-void CKRasterizerContext::UpdateObjectArrays(CKRasterizer *rst)
-{
+void CKRasterizerContext::UpdateObjectArrays(CKRasterizer *rst) {
     int newSize = rst->m_ObjectsIndex.Size();
     int oldSize = m_Textures.Size();
-    if (newSize != oldSize)
-    {
+    if (newSize != oldSize) {
         m_Textures.Resize(newSize);
         m_Sprites.Resize(newSize);
         m_VertexBuffers.Resize(newSize);
@@ -250,9 +230,8 @@ void CKRasterizerContext::UpdateObjectArrays(CKRasterizer *rst)
     }
 }
 
-CKTextureDesc *CKRasterizerContext::GetTextureData(CKDWORD Texture)
-{
-    if (Texture >= (CKDWORD)m_Textures.Size())
+CKTextureDesc *CKRasterizerContext::GetTextureData(CKDWORD Texture) {
+    if (Texture >= (CKDWORD) m_Textures.Size())
         return NULL;
     CKTextureDesc *data = m_Textures[Texture];
     if (!data)
@@ -262,9 +241,8 @@ CKTextureDesc *CKRasterizerContext::GetTextureData(CKDWORD Texture)
     return data;
 }
 
-CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &SurfDesc)
-{
-    if (Sprite >= (CKDWORD)m_Sprites.Size())
+CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &SurfDesc) {
+    if (Sprite >= (CKDWORD) m_Sprites.Size())
         return FALSE;
 
     CKSpriteDesc *sprite = m_Sprites[Sprite];
@@ -282,8 +260,7 @@ CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &Surf
         return FALSE;
     surface.Image = image;
 
-    for (XArray<CKSPRTextInfo>::Iterator it = sprite->Textures.Begin(); it != sprite->Textures.End(); ++it)
-    {
+    for (XArray<CKSPRTextInfo>::Iterator it = sprite->Textures.Begin(); it != sprite->Textures.End(); ++it) {
         int spriteBytesPerLine = it->w * bytesPerPixel;
         int textureBytesPerLine = it->sw * bytesPerPixel;
 
@@ -291,8 +268,7 @@ CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &Surf
             memset(image, 0, it->sh * textureBytesPerLine);
 
         XBYTE *src = &SurfDesc.Image[it->y * SurfDesc.BytesPerLine + it->x * bytesPerPixel];
-        for (int h = 0; h < it->h; ++h)
-        {
+        for (int h = 0; h < it->h; ++h) {
             memcpy(image, src, spriteBytesPerLine);
             image += textureBytesPerLine;
             src += SurfDesc.BytesPerLine;
@@ -307,9 +283,8 @@ CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &Surf
     return TRUE;
 }
 
-CKSpriteDesc *CKRasterizerContext::GetSpriteData(CKDWORD Sprite)
-{
-    if (Sprite >= (CKDWORD)m_Sprites.Size())
+CKSpriteDesc *CKRasterizerContext::GetSpriteData(CKDWORD Sprite) {
+    if (Sprite >= (CKDWORD) m_Sprites.Size())
         return NULL;
     CKSpriteDesc *data = m_Sprites[Sprite];
     if (!data)
@@ -319,9 +294,8 @@ CKSpriteDesc *CKRasterizerContext::GetSpriteData(CKDWORD Sprite)
     return data;
 }
 
-CKVertexBufferDesc *CKRasterizerContext::GetVertexBufferData(CKDWORD VB)
-{
-    if (VB >= (CKDWORD)m_VertexBuffers.Size())
+CKVertexBufferDesc *CKRasterizerContext::GetVertexBufferData(CKDWORD VB) {
+    if (VB >= (CKDWORD) m_VertexBuffers.Size())
         return NULL;
     CKVertexBufferDesc *data = m_VertexBuffers[VB];
     if (!data)
@@ -331,19 +305,18 @@ CKVertexBufferDesc *CKRasterizerContext::GetVertexBufferData(CKDWORD VB)
     return data;
 }
 
-CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *Data)
-{
+CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *Data) {
     if (!Data->InVertices)
         return FALSE;
 
     unsigned int offscreen = 0;
     UpdateMatrices(WORLD_TRANSFORM);
 
-    VxVector4 *outVertices = (VxVector4 *)Data->OutVertices;
+    VxVector4 *outVertices = (VxVector4 *) Data->OutVertices;
     unsigned int outStride = Data->OutStride;
-    if (!outVertices)
-    {
-        outVertices = (VxVector4 *)m_Driver->m_Owner->AllocateObjects(VertexCount * (sizeof(VxVector4) / sizeof(CKDWORD)));
+    if (!outVertices) {
+        outVertices = (VxVector4 *) m_Driver->m_Owner->AllocateObjects(
+            VertexCount * (sizeof(VxVector4) / sizeof(CKDWORD)));
         outStride = sizeof(VxVector4);
     }
 
@@ -351,11 +324,9 @@ CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *
     VxStridedData in(Data->InVertices, Data->InStride);
     Vx3DMultiplyMatrixVector4Strided(&out, &in, m_TotalMatrix, VertexCount);
 
-    if (Data->ClipFlags)
-    {
+    if (Data->ClipFlags) {
         offscreen = 0xFFFFFFFF;
-        for (int v = 0; v < VertexCount; ++v)
-        {
+        for (int v = 0; v < VertexCount; ++v) {
             unsigned int clipFlag = 0;
 
             float w = outVertices->w;
@@ -378,15 +349,13 @@ CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *
         }
     }
 
-    VxVector4 *screenVertices = (VxVector4 *)Data->ScreenVertices;
-    if (screenVertices)
-    {
+    VxVector4 *screenVertices = (VxVector4 *) Data->ScreenVertices;
+    if (screenVertices) {
         float halfWidth = m_ViewportData.ViewWidth * 0.5f;
         float halfHeight = m_ViewportData.ViewHeight * 0.5f;
         float centerX = m_ViewportData.ViewX + halfWidth;
         float centerY = m_ViewportData.ViewY + halfHeight;
-        for (int v = 0; v < VertexCount; ++v)
-        {
+        for (int v = 0; v < VertexCount; ++v) {
             float w = 1.0f / outVertices->w;
             screenVertices->w = w;
             screenVertices->z = w * outVertices->z;
@@ -400,25 +369,21 @@ CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *
     return TRUE;
 }
 
-CKDWORD CKRasterizerContext::ComputeBoxVisibility(const VxBbox &box, CKBOOL World, VxRect *extents)
-{
+CKDWORD CKRasterizerContext::ComputeBoxVisibility(const VxBbox &box, CKBOOL World, VxRect *extents) {
     UpdateMatrices(World ? VIEW_TRANSFORM : WORLD_TRANSFORM);
 
     VXCLIP_FLAGS orClipFlags, andClipFlags;
-    if (extents)
-    {
+    if (extents) {
         VxRect screen(
-            (float)m_ViewportData.ViewX,
-            (float)m_ViewportData.ViewY,
-            (float)(m_ViewportData.ViewX + m_ViewportData.ViewWidth),
-            (float)(m_ViewportData.ViewY + m_ViewportData.ViewHeight));
+            (float) m_ViewportData.ViewX,
+            (float) m_ViewportData.ViewY,
+            (float) (m_ViewportData.ViewX + m_ViewportData.ViewWidth),
+            (float) (m_ViewportData.ViewY + m_ViewportData.ViewHeight));
         if (World)
             VxTransformBox2D(m_ViewProjMatrix, box, &screen, extents, orClipFlags, andClipFlags);
         else
             VxTransformBox2D(m_TotalMatrix, box, &screen, extents, orClipFlags, andClipFlags);
-    }
-    else
-    {
+    } else {
         if (World)
             VxTransformBox2D(m_ViewProjMatrix, box, NULL, NULL, orClipFlags, andClipFlags);
         else
@@ -433,8 +398,7 @@ CKDWORD CKRasterizerContext::ComputeBoxVisibility(const VxBbox &box, CKBOOL Worl
         return CBV_ALLINSIDE;
 }
 
-void CKRasterizerContext::InitDefaultRenderStatesValue()
-{
+void CKRasterizerContext::InitDefaultRenderStatesValue() {
     m_StateCache[VXRENDERSTATE_SHADEMODE].DefaultValue = 2;
     m_StateCache[VXRENDERSTATE_SRCBLEND].DefaultValue = 2;
     m_StateCache[VXRENDERSTATE_ALPHAFUNC].DefaultValue = 8;
@@ -490,9 +454,8 @@ void CKRasterizerContext::InitDefaultRenderStatesValue()
     m_StateCache[VXRENDERSTATE_TEXTURETARGET].DefaultValue = 0;
 }
 
-CKIndexBufferDesc *CKRasterizerContext::GetIndexBufferData(CKDWORD IB)
-{
-    if (IB >= (CKDWORD)m_IndexBuffers.Size())
+CKIndexBufferDesc *CKRasterizerContext::GetIndexBufferData(CKDWORD IB) {
+    if (IB >= (CKDWORD) m_IndexBuffers.Size())
         return NULL;
     CKIndexBufferDesc *data = m_IndexBuffers[IB];
     if (!data)
@@ -502,9 +465,8 @@ CKIndexBufferDesc *CKRasterizerContext::GetIndexBufferData(CKDWORD IB)
     return data;
 }
 
-CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFormat)
-{
-    if (Sprite >= (CKDWORD)m_Sprites.Size() || !DesiredFormat)
+CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFormat) {
+    if (Sprite >= (CKDWORD) m_Sprites.Size() || !DesiredFormat)
         return FALSE;
 
     CKDWORD width = DesiredFormat->Format.Width;
@@ -521,36 +483,28 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
 
     CKDWORD widthMsb = GetMsb(width, maxWidthMsb);
     CKDWORD widthLsb = GetLsb(width, maxWidthMsb);
-    short sw = (short)(1 << widthMsb);
+    short sw = (short) (1 << widthMsb);
 
-    if (width < minTextureWidth)
-    {
+    if (width < minTextureWidth) {
         wti[0].x = 0;
-        wti[0].w = (short)width;
-        wti[0].sw = (short)minTextureWidth;
+        wti[0].w = (short) width;
+        wti[0].sw = (short) minTextureWidth;
         wc = 1;
-    }
-    else if (widthMsb == widthLsb && width == sw)
-    {
+    } else if (widthMsb == widthLsb && width == sw) {
         wti[0].x = 0;
         wti[0].w = sw;
         wti[0].sw = sw;
         wc = 1;
-    }
-    else if (widthMsb + 1 <= maxWidthMsb && (1 << (widthMsb + 1)) - width <= 32)
-    {
+    } else if (widthMsb + 1 <= maxWidthMsb && (1 << (widthMsb + 1)) - width <= 32) {
         wti[0].x = 0;
-        wti[0].w = (short)width;
-        wti[0].sw = (short)(1 << (widthMsb + 1));
+        wti[0].w = (short) width;
+        wti[0].sw = (short) (1 << (widthMsb + 1));
         wc = 1;
-    }
-    else
-    {
+    } else {
         short x = 0;
-        short w = (short)width;
-        for (CKSPRTextInfo *pti = &wti[0]; w >= minTextureWidth && wc < 15; ++pti)
-        {
-            sw = (short)(1 << widthMsb);
+        short w = (short) width;
+        for (CKSPRTextInfo *pti = &wti[0]; w >= minTextureWidth && wc < 15; ++pti) {
+            sw = (short) (1 << widthMsb);
 
             pti->x = x;
             pti->w = sw;
@@ -561,11 +515,10 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
             widthMsb = GetMsb(w, maxWidthMsb);
             ++wc;
         }
-        if (w != 0)
-        {
+        if (w != 0) {
             wti[wc].x = x;
             wti[wc].w = w;
-            wti[wc].sw = (short)minTextureWidth;
+            wti[wc].sw = (short) minTextureWidth;
             ++wc;
         }
     }
@@ -575,46 +528,37 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
 
     CKDWORD heightMsb = GetMsb(height, maxHeightMsb);
     CKDWORD heightLsb = GetLsb(height, maxHeightMsb);
-    short sh = (short)(1 << heightMsb);
+    short sh = (short) (1 << heightMsb);
 
     CKDWORD maxRatio = m_Driver->m_3DCaps.MaxTextureRatio;
     CKDWORD minHeight = m_Driver->m_3DCaps.MinTextureHeight;
 
-    if (maxRatio != 0)
-    {
+    if (maxRatio != 0) {
         CKDWORD h = (wti[0].sw / maxRatio);
         if (minHeight < h)
             minHeight = h;
     }
 
-    if (height < minHeight)
-    {
+    if (height < minHeight) {
         hti[0].y = 0;
-        hti[0].h = (short)height;
-        hti[0].sh = (short)minHeight;
+        hti[0].h = (short) height;
+        hti[0].sh = (short) minHeight;
         hc = 1;
-    }
-    else if (heightMsb == heightLsb && height == sh)
-    {
+    } else if (heightMsb == heightLsb && height == sh) {
         hti[0].y = 0;
         hti[0].h = sh;
         hti[0].sh = sh;
         hc = 1;
-    }
-    else if (heightMsb + 1 <= maxHeightMsb && (1 << (heightMsb + 1)) - height <= 32)
-    {
+    } else if (heightMsb + 1 <= maxHeightMsb && (1 << (heightMsb + 1)) - height <= 32) {
         hti[0].y = 0;
-        hti[0].h = (short)height;
-        hti[0].sh = (short)(1 << (heightMsb + 1));
+        hti[0].h = (short) height;
+        hti[0].sh = (short) (1 << (heightMsb + 1));
         hc = 1;
-    }
-    else
-    {
+    } else {
         short y = 0;
-        short h = (short)height;
-        for (CKSPRTextInfo *pti = &hti[0]; h >= minHeight && hc < 15; ++pti)
-        {
-            sh = (short)(1 << heightMsb);
+        short h = (short) height;
+        for (CKSPRTextInfo *pti = &hti[0]; h >= minHeight && hc < 15; ++pti) {
+            sh = (short) (1 << heightMsb);
 
             pti->y = y;
             pti->h = sh;
@@ -625,11 +569,10 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
             heightMsb = GetMsb(h, maxHeightMsb);
             ++hc;
         }
-        if (h != 0)
-        {
+        if (h != 0) {
             hti[hc].y = y;
             hti[hc].h = h;
-            hti[hc].sh = (short)minHeight;
+            hti[hc].sh = (short) minHeight;
             ++hc;
         }
     }
@@ -645,10 +588,8 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
     sprite->Textures.Memset(0);
     sprite->Owner = m_Driver->m_Owner;
 
-    for (int j = 0; j < hc; ++j)
-    {
-        for (int i = 0; i < wc; ++i)
-        {
+    for (int j = 0; j < hc; ++j) {
+        for (int i = 0; i < wc; ++i) {
             CKSPRTextInfo *info = &sprite->Textures[j * wc + i];
             info->x = wti[i].x;
             info->w = wti[i].w;
@@ -679,10 +620,8 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
     return TRUE;
 }
 
-void CKRasterizerContext::UpdateMatrices(CKDWORD Flags)
-{
-    if ((Flags & m_MatrixUptodate) == 0)
-    {
+void CKRasterizerContext::UpdateMatrices(CKDWORD Flags) {
+    if ((Flags & m_MatrixUptodate) == 0) {
         if ((Flags & WORLD_TRANSFORM) != 0)
             Vx3DMultiplyMatrix4(m_TotalMatrix, m_ProjectionMatrix, m_ModelViewMatrix);
         if ((Flags & VIEW_TRANSFORM) != 0)
@@ -691,8 +630,7 @@ void CKRasterizerContext::UpdateMatrices(CKDWORD Flags)
     }
 }
 
-CKDWORD CKRasterizerContext::GetDynamicVertexBuffer(CKDWORD VertexFormat, CKDWORD VertexCount, CKDWORD VertexSize, CKDWORD AddKey)
-{
+CKDWORD CKRasterizerContext::GetDynamicVertexBuffer(CKDWORD VertexFormat, CKDWORD VertexCount, CKDWORD VertexSize, CKDWORD AddKey) {
     if ((m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CANDOVERTEXBUFFER) == 0)
         return 0;
 
@@ -703,10 +641,8 @@ CKDWORD CKRasterizerContext::GetDynamicVertexBuffer(CKDWORD VertexFormat, CKDWOR
     index += 1;
 
     CKVertexBufferDesc *vb = m_VertexBuffers[index];
-    if (!vb || vb->m_MaxVertexCount < VertexCount)
-    {
-        if (vb)
-        {
+    if (!vb || vb->m_MaxVertexCount < VertexCount) {
+        if (vb) {
             delete vb;
             m_VertexBuffers[index] = NULL;
         }

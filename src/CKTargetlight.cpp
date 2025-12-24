@@ -65,7 +65,7 @@ Implementation based on decompilation at 0x10044229.
 *************************************************/
 void RCKTargetLight::SetTarget(CK3dEntity *target) {
     // Don't allow setting self as target (compares pointers)
-    if (target == reinterpret_cast<CK3dEntity*>(this))
+    if (target == reinterpret_cast<CK3dEntity *>(this))
         return;
 
     // Clear flags on old target
@@ -80,8 +80,8 @@ void RCKTargetLight::SetTarget(CK3dEntity *target) {
     // Set flags on new target
     if (target) {
         CKDWORD flags = target->GetFlags();
-        flags |= 0x100;  // Set "is target" flag (BYTE1 |= 1)
-        flags &= ~0x2;   // Clear flag 0x2 (& 0xFFFFFFFD)
+        flags |= 0x100; // Set "is target" flag (BYTE1 |= 1)
+        flags &= ~0x2;  // Clear flag 0x2 (& 0xFFFFFFFD)
         target->SetFlags(flags);
         m_Target = target->GetID();
     } else {
@@ -148,7 +148,7 @@ CKBOOL RCKTargetLight::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
     // Check if the object is our target
     if (obj && obj->GetID() == m_Target)
         return TRUE;
-    
+
     // Delegate to base class for other checks
     return RCK3dEntity::IsObjectUsed(obj, cid);
 }
@@ -168,7 +168,7 @@ CKERROR RCKTargetLight::PrepareDependencies(CKDependenciesContext &context) {
     CKERROR result = RCK3dEntity::PrepareDependencies(context);
     if (result != CK_OK)
         return result;
-    
+
     // Check if we need to prepare target dependencies
     if (context.GetClassDependencies(CKCID_TARGETLIGHT) & 1) {
         CKObject *targetObject = m_Context->GetObject(m_Target);
@@ -176,7 +176,7 @@ CKERROR RCKTargetLight::PrepareDependencies(CKDependenciesContext &context) {
             targetObject->PrepareDependencies(context);
         }
     }
-    
+
     // Finish preparing dependencies for this class
     return context.FinishPrepareDependencies(this, m_ClassID);
 }
@@ -195,13 +195,13 @@ CKERROR RCKTargetLight::RemapDependencies(CKDependenciesContext &context) {
     CKERROR result = RCK3dEntity::RemapDependencies(context);
     if (result != CK_OK)
         return result;
-    
+
     // Remap target ID
     if (m_Target) {
         CKObject *remapped = context.Remap(m_Context->GetObject(m_Target));
         m_Target = remapped ? remapped->GetID() : 0;
     }
-    
+
     return CK_OK;
 }
 
@@ -347,16 +347,16 @@ Implementation based on decompilation at 0x100445B0.
 *************************************************/
 int RCKTargetLight::GetDependenciesCount(int mode) {
     switch (mode) {
-        case 1: // CK_DEPENDENCIES_COPY
-            return 1;
-        case 2: // CK_DEPENDENCIES_DELETE
-            return 1;
-        case 3: // CK_DEPENDENCIES_REPLACE
-            return 0;
-        case 4: // CK_DEPENDENCIES_SAVE
-            return 1;
-        default:
-            return 0;
+    case 1: // CK_DEPENDENCIES_COPY
+        return 1;
+    case 2: // CK_DEPENDENCIES_DELETE
+        return 1;
+    case 3: // CK_DEPENDENCIES_REPLACE
+        return 0;
+    case 4: // CK_DEPENDENCIES_SAVE
+        return 1;
+    default:
+        return 0;
     }
 }
 

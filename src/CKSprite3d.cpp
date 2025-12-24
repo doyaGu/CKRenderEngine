@@ -247,7 +247,7 @@ Remarks:
 Implementation based on decompilation at 0x10043238:
 *************************************************/
 int RCKSprite3D::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
-    if (obj == (CKObject *)m_Material) {
+    if (obj == (CKObject *) m_Material) {
         return TRUE;
     }
     return RCK3dEntity::IsObjectUsed(obj, cid);
@@ -274,11 +274,11 @@ CKERROR RCKSprite3D::PrepareDependencies(CKDependenciesContext &context) {
     // Check if material dependency is enabled
     if ((context.GetClassDependencies(CKCID_SPRITE3D) & 1) != 0) {
         if (m_Material) {
-            ((CKObject *)m_Material)->PrepareDependencies(context);
+            ((CKObject *) m_Material)->PrepareDependencies(context);
         }
     }
 
-    return context.FinishPrepareDependencies((CKObject *)this, m_ClassID);
+    return context.FinishPrepareDependencies((CKObject *) this, m_ClassID);
 }
 
 /*************************************************
@@ -298,7 +298,7 @@ CKERROR RCKSprite3D::RemapDependencies(CKDependenciesContext &context) {
     }
 
     // Remap material reference
-    CKMaterial *material = (CKMaterial *)context.Remap((CKObject *)m_Material);
+    CKMaterial *material = (CKMaterial *) context.Remap((CKObject *) m_Material);
     SetMaterial(material);
 
     return CK_OK;
@@ -409,7 +409,7 @@ CKBOOL RCKSprite3D::IsToBeRenderedLast() {
 }
 
 CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
-    RCKRenderContext *dev = (RCKRenderContext *)rc;
+    RCKRenderContext *dev = (RCKRenderContext *) rc;
 
     UpdateOrientation(rc);
     ModifyMoveableFlags(VX_MOVEABLE_EXTENTSUPTODATE, 0);
@@ -455,11 +455,11 @@ void RCKSprite3D::UpdateOrientation(CKRenderContext *rc) {
     if (!rc)
         return;
 
-    RCKRenderContext *dev = (RCKRenderContext *)rc;
+    RCKRenderContext *dev = (RCKRenderContext *) rc;
     if (!dev->m_RenderedScene)
         return;
 
-    RCK3dEntity *rootEntity = (RCK3dEntity *)dev->m_RenderedScene->GetRootEntity();
+    RCK3dEntity *rootEntity = (RCK3dEntity *) dev->m_RenderedScene->GetRootEntity();
     if (!rootEntity)
         return;
 
@@ -540,16 +540,16 @@ Implementation based on decompilation at 0x10043580
 *************************************************/
 int RCKSprite3D::GetDependenciesCount(int mode) {
     switch (mode) {
-        case CK_DEPENDENCIES_COPY:
-            return 1;
-        case CK_DEPENDENCIES_DELETE:
-            return 1;
-        case CK_DEPENDENCIES_REPLACE:
-            return 0;
-        case CK_DEPENDENCIES_SAVE:
-            return 1;
-        default:
-            return 0;
+    case CK_DEPENDENCIES_COPY:
+        return 1;
+    case CK_DEPENDENCIES_DELETE:
+        return 1;
+    case CK_DEPENDENCIES_REPLACE:
+        return 0;
+    case CK_DEPENDENCIES_SAVE:
+        return 1;
+    default:
+        return 0;
     }
 }
 
@@ -593,20 +593,20 @@ CKSprite3D *RCKSprite3D::CreateInstance(CKContext *Context) {
 void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
     if (!batch)
         return;
-    
+
     // Check if clipping is needed from scene graph node
     // If the node's flag bit 0 is not set, we need clipping (from IDA: m_Flags & 1)
-    CKSceneGraphNode *node = (CKSceneGraphNode *)m_SceneGraphNode;
+    CKSceneGraphNode *node = (CKSceneGraphNode *) m_SceneGraphNode;
     if (node) {
         // Set batch flag if clipping needed (flag bit 0 == 0 means not inside frustum)
         batch->m_Flags |= node->CheckHierarchyFrustum() ? 0 : 1;
     }
-    
+
     // Expand vertex array by 4 vertices (one quad for the sprite)
     // This adds 4 vertices (128 bytes since CKVertex is 32 bytes)
     int currentSize = batch->m_Vertices.Size();
     batch->m_Vertices.Resize(currentSize + 4);
-    
+
     // Get pointer to the 4 new vertices at the end
     CKVertex *vertices = batch->m_Vertices.Begin() + currentSize;
 
@@ -658,20 +658,20 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
     vertices[3].V.y = pos3.y;
     vertices[3].V.z = pos3.z;
     vertices[3].V.w = 1.0f;
-    
+
     // Set texture coordinates from m_Rect
     // Vertex 0: left, bottom
     vertices[0].tu = m_Rect.left;
     vertices[0].tv = m_Rect.bottom;
-    
+
     // Vertex 1: left, top
     vertices[1].tu = m_Rect.left;
     vertices[1].tv = m_Rect.top;
-    
+
     // Vertex 2: right, top
     vertices[2].tu = m_Rect.right;
     vertices[2].tv = m_Rect.top;
-    
+
     // Vertex 3: right, bottom
     vertices[3].tu = m_Rect.right;
     vertices[3].tv = m_Rect.bottom;
@@ -686,7 +686,7 @@ void RCKSprite3D::FillBatch(CKSprite3DBatch *batch) {
 //=============================================================================
 
 CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
-    RCKRenderContext *dev = (RCKRenderContext *)Dev;
+    RCKRenderContext *dev = (RCKRenderContext *) Dev;
 
     // Local VxTimeProfiler constructed at entry (used by Dev debug mode).
     VxTimeProfiler profiler;
@@ -719,7 +719,7 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
                 if (cb.callback) {
-                    ((CK_RENDEROBJECT_CALLBACK)cb.callback)(Dev, (CKRenderObject *)this, cb.argument);
+                    ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CKRenderObject *) this, cb.argument);
                 }
             }
 
@@ -737,7 +737,7 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
                 if (cb.callback) {
-                    ((CK_RENDEROBJECT_CALLBACK)cb.callback)(Dev, (CKRenderObject *)this, cb.argument);
+                    ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CKRenderObject *) this, cb.argument);
                 }
             }
 
@@ -750,7 +750,7 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
     }
 
     if ((Flags & 0xFF) != 0) {
-        dev->AddExtents2D(m_RenderExtents, (CKObject *)this);
+        dev->AddExtents2D(m_RenderExtents, (CKObject *) this);
     }
 
     if ((dev->m_Flags & 1) != 0) {
@@ -775,47 +775,47 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
 // If the intersection point is within the sprite bounds, it's a hit.
 //=============================================================================
 
-int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2, 
-                                  VxIntersectionDesc *Desc, CK3dEntity *Ref, 
-                                  CK_RAYINTERSECTION iOptions) {
+int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
+                                 VxIntersectionDesc *Desc, CK3dEntity *Ref,
+                                 CK_RAYINTERSECTION iOptions) {
     // Transform ray into local space
     VxVector localPos1 = *Pos1;
     VxVector localPos2 = *Pos2;
-    
-    if (Ref != (CK3dEntity *)this) {
+
+    if (Ref != (CK3dEntity *) this) {
         InverseTransform(&localPos1, Pos1, Ref);
         InverseTransform(&localPos2, Pos2, Ref);
     }
-    
+
     // Calculate ray direction
     VxVector rayDir;
     rayDir.x = localPos2.x - localPos1.x;
     rayDir.y = localPos2.y - localPos1.y;
     rayDir.z = localPos2.z - localPos1.z;
-    
+
     // The sprite is in the XY plane at Z=0
     // Find intersection with Z=0 plane
     if (rayDir.z == 0.0f) {
-        return 0;  // Ray parallel to sprite plane
+        return 0; // Ray parallel to sprite plane
     }
-    
+
     // t = -localPos1.z / rayDir.z gives us the parameter where ray hits Z=0
     float t = -localPos1.z / rayDir.z;
-    
+
     // Calculate intersection point
     VxVector intersectPoint;
     intersectPoint.x = localPos1.x + t * rayDir.x;
     intersectPoint.y = localPos1.y + t * rayDir.y;
-    intersectPoint.z = 0.0f;  // On the sprite plane
-    
+    intersectPoint.z = 0.0f; // On the sprite plane
+
     // Check if intersection point is within sprite bounds
     if (intersectPoint.x < m_LocalBoundingBox.Min.x ||
         intersectPoint.x > m_LocalBoundingBox.Max.x ||
         intersectPoint.y < m_LocalBoundingBox.Min.y ||
         intersectPoint.y > m_LocalBoundingBox.Max.y) {
-        return 0;  // Outside sprite bounds
+        return 0; // Outside sprite bounds
     }
-    
+
     // Fill in intersection description if provided
     if (Desc) {
         Desc->Distance = t;
@@ -848,5 +848,5 @@ int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
         Desc->IntersectionNormal.z = -1.0f;
     }
 
-    return 1;  // Intersection found
+    return 1; // Intersection found
 }

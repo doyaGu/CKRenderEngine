@@ -4,6 +4,8 @@
 #include "CKContext.h"
 #include "CKCharacter.h"
 
+CK_CLASSID RCKAnimation::m_ClassID = CKCID_ANIMATION;
+
 //=============================================================================
 // Constructor/Destructor
 //=============================================================================
@@ -11,15 +13,13 @@
 RCKAnimation::RCKAnimation(CKContext *Context, CKSTRING name)
     : CKAnimation(Context, name),
       m_Character(nullptr),
-      m_Length(100.0f),         // Default from IDA: 100.0f
-      m_Step(0.0f),             // Default from IDA: 0.0f
+      m_Length(100.0f),
+      m_Step(0.0f),
       m_RootEntity(nullptr),
-      m_Flags(CKANIMATION_LINKTOFRAMERATE | CKANIMATION_CANBEBREAK),  // Default from IDA: 5
-      m_FrameRate(30.0f) {      // Default from IDA: 30.0f
-}
+      m_Flags(CKANIMATION_LINKTOFRAMERATE | CKANIMATION_CANBEBREAK),
+      m_FrameRate(30.0f) {}
 
-RCKAnimation::~RCKAnimation() {
-}
+RCKAnimation::~RCKAnimation() {}
 
 CK_CLASSID RCKAnimation::GetClassID() {
     return m_ClassID;
@@ -179,7 +179,7 @@ float RCKAnimation::GetFrame() {
 // 0x10047745 - Complex calculation with frame rate
 float RCKAnimation::GetNextFrame(float delta_t) {
     float currentFrame = m_Step * m_Length;
-    
+
     if ((m_Flags & CKANIMATION_LINKTOFRAMERATE) != 0) {
         // Frame rate linked: advance by delta_t * frameRate * 0.001
         return currentFrame + delta_t * m_FrameRate * 0.001f;
@@ -241,23 +241,23 @@ CKBOOL RCKAnimation::IsLinkedToFrameRate() {
 // 0x100477D2 - TransitionMode stored in bits 8-16
 void RCKAnimation::SetTransitionMode(CK_ANIMATION_TRANSITION_MODE mode) {
     m_Flags &= ~CKANIMATION_TRANSITION_ALL;
-    m_Flags |= ((CKDWORD)mode << CK_TRANSITION_MODE_SHIFT);
+    m_Flags |= ((CKDWORD) mode << CK_TRANSITION_MODE_SHIFT);
 }
 
 // 0x10047805
 CK_ANIMATION_TRANSITION_MODE RCKAnimation::GetTransitionMode() {
-    return (CK_ANIMATION_TRANSITION_MODE)((m_Flags & CKANIMATION_TRANSITION_ALL) >> CK_TRANSITION_MODE_SHIFT);
+    return (CK_ANIMATION_TRANSITION_MODE) ((m_Flags & CKANIMATION_TRANSITION_ALL) >> CK_TRANSITION_MODE_SHIFT);
 }
 
 // 0x1004781E - SecondaryAnimationMode stored in bits 18-23
 void RCKAnimation::SetSecondaryAnimationMode(CK_SECONDARYANIMATION_FLAGS mode) {
     m_Flags &= ~CKANIMATION_SECONDARY_ALL;
-    m_Flags |= ((CKDWORD)mode << CK_SECONDARY_FLAGS_SHIFT);
+    m_Flags |= ((CKDWORD) mode << CK_SECONDARY_FLAGS_SHIFT);
 }
 
 // 0x10047851
 CK_SECONDARYANIMATION_FLAGS RCKAnimation::GetSecondaryAnimationMode() {
-    return (CK_SECONDARYANIMATION_FLAGS)((m_Flags & CKANIMATION_SECONDARY_ALL) >> CK_SECONDARY_FLAGS_SHIFT);
+    return (CK_SECONDARYANIMATION_FLAGS) ((m_Flags & CKANIMATION_SECONDARY_ALL) >> CK_SECONDARY_FLAGS_SHIFT);
 }
 
 // 0x1004786A - CanBeInterrupt uses bit 2 (value 4)
@@ -301,7 +301,7 @@ CKDWORD RCKAnimation::GetFlags() {
 // 0x100478D0 - Has special handling for CKKeyedAnimation (class 18)
 CK3dEntity *RCKAnimation::GetRootEntity() {
     // If no root entity and this is a CKKeyedAnimation, rebuild it
-    if (!m_RootEntity && CKIsChildClassOf((CKObject*)this, CKCID_KEYEDANIMATION)) {
+    if (!m_RootEntity && CKIsChildClassOf((CKObject *) this, CKCID_KEYEDANIMATION)) {
         // RCKKeyedAnimation::RebuildHierarchy(this);
         // This is handled by derived class
     }
@@ -317,8 +317,6 @@ void RCKAnimation::SetCurrentStep(float Step) {
 // Static Class Methods (for class registration)
 // Based on IDA Pro analysis of original CK2_3D.dll
 //=============================================================================
-
-CK_CLASSID RCKAnimation::m_ClassID = CKCID_ANIMATION;
 
 // 0x10047C74
 CKSTRING RCKAnimation::GetClassName() {

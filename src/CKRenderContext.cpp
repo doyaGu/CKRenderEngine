@@ -54,8 +54,6 @@ static XString ResolveDumpPath(CKSTRING filename) {
     return XString(filename);
 }
 
-
-
 CK_CLASSID RCKRenderContext::GetClassID() {
     return m_ClassID;
 }
@@ -133,7 +131,7 @@ CKERROR RCKRenderContext::PrepareDependencies(CKDependenciesContext &context) {
 void RCKRenderContext::AddObject(CKRenderObject *obj) {
     // Based on IDA at 0x10067c2a
     if (obj && obj->IsRootObject() && !obj->IsInRenderContext(this)) {
-        ((RCKRenderObject *)obj)->AddToRenderContext(this);
+        ((RCKRenderObject *) obj)->AddToRenderContext(this);
         m_RenderedScene->AddObject(obj);
     }
 }
@@ -142,9 +140,9 @@ void RCKRenderContext::AddObjectWithHierarchy(CKRenderObject *obj) {
     // Based on IDA at 0x10067cb5
     if (obj) {
         AddObject(obj);
-        
+
         if (CKIsChildClassOf(obj, CKCID_3DENTITY)) {
-            CK3dEntity *ent = (CK3dEntity *)obj;
+            CK3dEntity *ent = (CK3dEntity *) obj;
             for (int i = 0; i < ent->GetChildrenCount(); ++i) {
                 CK3dEntity *child = ent->GetChild(i);
                 AddObjectWithHierarchy(child);
@@ -156,19 +154,19 @@ void RCKRenderContext::AddObjectWithHierarchy(CKRenderObject *obj) {
 void RCKRenderContext::RemoveObject(CKRenderObject *obj) {
     // Based on IDA at 0x10067d40
     if (obj && obj->IsInRenderContext(this)) {
-        ((RCKRenderObject *)obj)->RemoveFromRenderContext(this);
-        
+        ((RCKRenderObject *) obj)->RemoveFromRenderContext(this);
+
         // If it's a 3D entity, also clear it from object extents
         if (CKIsChildClassOf(obj, CKCID_3DENTITY)) {
             int count = m_ObjectExtents.Size();
             for (int i = 0; i < count; ++i) {
-                if (m_ObjectExtents[i].m_Entity == (CK3dEntity *)obj) {
+                if (m_ObjectExtents[i].m_Entity == (CK3dEntity *) obj) {
                     m_ObjectExtents[i].m_Entity = nullptr;
                     break;
                 }
             }
         }
-        
+
         m_RenderedScene->RemoveObject(obj);
     }
 }
@@ -207,13 +205,13 @@ const XObjectArray &RCKRenderContext::Compute2dRootObjects() {
 
     // Add background children
     for (int i = 0; i < bgCount; ++i) {
-        CK2dEntity *child = (CK2dEntity*)bgRoot->GetChild(i);
+        CK2dEntity *child = (CK2dEntity *) bgRoot->GetChild(i);
         m_RootObjects[i] = child ? child->GetID() : 0;
     }
 
     // Add foreground children
     for (int j = 0; j < fgCount; ++j) {
-        CK2dEntity *child = (CK2dEntity*)fgRoot->GetChild(j);
+        CK2dEntity *child = (CK2dEntity *) fgRoot->GetChild(j);
         m_RootObjects[bgCount + j] = child ? child->GetID() : 0;
     }
 
@@ -222,17 +220,17 @@ const XObjectArray &RCKRenderContext::Compute2dRootObjects() {
 
 CK2dEntity *RCKRenderContext::Get2dRoot(CKBOOL background) {
     // IDA: 0x10068053
-    RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+    RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
     return background ? rm->m_2DRootBack : rm->m_2DRootFore;
 }
 
 void RCKRenderContext::DetachAll() {
     // Based on IDA at 0x10067e01
     m_ObjectExtents.Resize(0);
-    
+
     if (m_RasterizerContext)
         m_RasterizerContext->FlushRenderStateCache();
-    
+
     m_RenderedScene->DetachAll();
 }
 
@@ -245,8 +243,8 @@ CK_RENDER_FLAGS RCKRenderContext::ResolveRenderFlags(CK_RENDER_FLAGS Flags) cons
     // Original engine treats "use current settings" as "no options in the low 16 bits".
     // This allows passing high-bit flags (e.g. CK_RENDER_PLAYERCONTEXT) without specifying options.
     return ((Flags & CK_RENDER_OPTIONSMASK) == 0)
-        ? static_cast<CK_RENDER_FLAGS>(m_RenderFlags)
-        : Flags;
+               ? static_cast<CK_RENDER_FLAGS>(m_RenderFlags)
+               : Flags;
 }
 
 void RCKRenderContext::ExecutePreRenderCallbacks() {
@@ -278,7 +276,7 @@ void RCKRenderContext::LoadPVInformationTexture() {
     m_PVInformation = m_Context->GetPVInformation();
     if (m_PVInformation) {
         m_PVTimeProfiler.Reset();
-        
+
         // Load appropriate bitmap based on PV information state
         // PVInformation values: 4 = resource 0x67, 6 = resource 0x65, other = resource 0x66
         HMODULE hModule = GetModuleHandleA("CK2_3D.dll");
@@ -290,20 +288,20 @@ void RCKRenderContext::LoadPVInformationTexture() {
         } else {
             hBitmap = LoadBitmapA(hModule, MAKEINTRESOURCEA(0x66));
         }
-        
+
         // Create NCU texture if not already created
         if (!m_NCUTex) {
-            m_NCUTex = (RCKTexture *)m_Context->CreateObject(
-                CKCID_TEXTURE, 
-                (CKSTRING)"NCUTex",
-                CK_OBJECTCREATION_NONAMECHECK, 
+            m_NCUTex = (RCKTexture *) m_Context->CreateObject(
+                CKCID_TEXTURE,
+                (CKSTRING) "NCUTex",
+                CK_OBJECTCREATION_NONAMECHECK,
                 nullptr);
             if (m_NCUTex) {
                 m_NCUTex->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
                 m_NCUTex->Create(256, 32, 32, 0);
             }
         }
-        
+
         if (hBitmap && m_NCUTex) {
             // Convert bitmap and blit to texture system memory.
             // (Original used VxConvertBitmap*/VxDoBlit-like helpers; we replicate outcome.)
@@ -320,9 +318,9 @@ void RCKRenderContext::LoadPVInformationTexture() {
                 bi.bmiHeader.biBitCount = 32;
                 bi.bmiHeader.biCompression = BI_RGB;
 
-                std::vector<CKDWORD> srcPixels((size_t)srcW * (size_t)srcH);
+                std::vector<CKDWORD> srcPixels((size_t) srcW * (size_t) srcH);
                 HDC hdc = GetDC(nullptr);
-                const int got = GetDIBits(hdc, hBitmap, 0, (UINT)srcH, srcPixels.data(), &bi, DIB_RGB_COLORS);
+                const int got = GetDIBits(hdc, hBitmap, 0, (UINT) srcH, srcPixels.data(), &bi, DIB_RGB_COLORS);
                 ReleaseDC(nullptr, hdc);
 
                 if (got) {
@@ -331,17 +329,17 @@ void RCKRenderContext::LoadPVInformationTexture() {
                         const int dstW = m_NCUTex->GetWidth();
                         const int dstH = m_NCUTex->GetHeight();
 
-                        CKDWORD *dst32 = (CKDWORD *)dst;
+                        CKDWORD *dst32 = (CKDWORD *) dst;
                         for (int y = 0; y < dstH; ++y) {
                             const int sy = (srcH * y) / dstH;
                             for (int x = 0; x < dstW; ++x) {
                                 const int sx = (srcW * x) / dstW;
-                                const CKDWORD bgra = srcPixels[(size_t)sy * (size_t)srcW + (size_t)sx];
-                                const CKBYTE b = (CKBYTE)(bgra & 0xFF);
-                                const CKBYTE g = (CKBYTE)((bgra >> 8) & 0xFF);
-                                const CKBYTE r = (CKBYTE)((bgra >> 16) & 0xFF);
-                                const CKBYTE a = (CKBYTE)((bgra >> 24) & 0xFF);
-                                dst32[(size_t)y * (size_t)dstW + (size_t)x] = (CKDWORD)a << 24 | (CKDWORD)r << 16 | (CKDWORD)g << 8 | (CKDWORD)b;
+                                const CKDWORD bgra = srcPixels[(size_t) sy * (size_t) srcW + (size_t) sx];
+                                const CKBYTE b = (CKBYTE) (bgra & 0xFF);
+                                const CKBYTE g = (CKBYTE) ((bgra >> 8) & 0xFF);
+                                const CKBYTE r = (CKBYTE) ((bgra >> 16) & 0xFF);
+                                const CKBYTE a = (CKBYTE) ((bgra >> 24) & 0xFF);
+                                dst32[(size_t) y * (size_t) dstW + (size_t) x] = (CKDWORD) a << 24 | (CKDWORD) r << 16 | (CKDWORD) g << 8 | (CKDWORD) b;
                             }
                         }
 
@@ -360,14 +358,14 @@ void RCKRenderContext::DrawPVInformationWatermark() {
     // Draws the PV Information watermark texture at the bottom center of viewport
     if (!m_NCUTex)
         return;
-    
+
     // For PVInformation 4 or 6, only display for first 5 seconds
     if (m_PVInformation == 6 || m_PVInformation == 4) {
         float elapsed = m_PVTimeProfiler.Current();
         if (elapsed >= 5000.0f)
             return;
     }
-    
+
     // Set up render states
     m_NCUTex->SetAsCurrent(this, FALSE, 0);
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
@@ -384,35 +382,47 @@ void RCKRenderContext::DrawPVInformationWatermark() {
     m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_DECAL);
     m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
     m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
-    
+
     // Calculate watermark position (centered at bottom of viewport)
     int texWidth = m_NCUTex->GetWidth();
     int texHeight = m_NCUTex->GetHeight();
-    float x1 = (float)((m_ViewportData.ViewWidth - texWidth) / 2 + m_ViewportData.ViewX);
-    float x2 = (float)((texWidth + m_ViewportData.ViewWidth) / 2 + m_ViewportData.ViewX);
-    float y1 = (float)(m_ViewportData.ViewY + m_ViewportData.ViewHeight - texHeight);
-    float y2 = (float)(m_ViewportData.ViewY + m_ViewportData.ViewHeight);
-    
+    float x1 = (float) ((m_ViewportData.ViewWidth - texWidth) / 2 + m_ViewportData.ViewX);
+    float x2 = (float) ((texWidth + m_ViewportData.ViewWidth) / 2 + m_ViewportData.ViewX);
+    float y1 = (float) (m_ViewportData.ViewY + m_ViewportData.ViewHeight - texHeight);
+    float y2 = (float) (m_ViewportData.ViewY + m_ViewportData.ViewHeight);
+
     // Set up draw primitive data for quad
     VxDrawPrimitiveData dp;
     memset(&dp, 0, sizeof(dp));
-    
+
     VxUV uvs[4] = {
         {0.0f, 0.0f},
         {1.0f, 0.0f},
         {1.0f, 1.0f},
         {0.0f, 1.0f}
     };
-    
+
     CKDWORD colors[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
-    
+
     // Position data (x, y, z, rhw format for transformed vertices)
     float positions[16];
-    positions[0] = x1; positions[1] = y1; positions[2] = 0.0f; positions[3] = 1.0f;
-    positions[4] = x2; positions[5] = y1; positions[6] = 0.0f; positions[7] = 1.0f;
-    positions[8] = x2; positions[9] = y2; positions[10] = 0.0f; positions[11] = 1.0f;
-    positions[12] = x1; positions[13] = y2; positions[14] = 0.0f; positions[15] = 1.0f;
-    
+    positions[0] = x1;
+    positions[1] = y1;
+    positions[2] = 0.0f;
+    positions[3] = 1.0f;
+    positions[4] = x2;
+    positions[5] = y1;
+    positions[6] = 0.0f;
+    positions[7] = 1.0f;
+    positions[8] = x2;
+    positions[9] = y2;
+    positions[10] = 0.0f;
+    positions[11] = 1.0f;
+    positions[12] = x1;
+    positions[13] = y2;
+    positions[14] = 0.0f;
+    positions[15] = 1.0f;
+
     dp.Flags = CKRST_DP_TRANSFORM;
     dp.VertexCount = 4;
     dp.TexCoordPtr = uvs;
@@ -421,9 +431,9 @@ void RCKRenderContext::DrawPVInformationWatermark() {
     dp.PositionStride = 16;
     dp.ColorPtr = colors;
     dp.ColorStride = 4;
-    
+
     m_RasterizerContext->DrawPrimitive(VX_TRIANGLEFAN, nullptr, 0, &dp);
-    
+
     // Restore render states
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
@@ -442,12 +452,12 @@ void RCKRenderContext::FillStateString() {
 
     auto appendUIntLine = [this](CKDWORD value) {
         XString tmp;
-        tmp.Format("%u\n", (unsigned)value);
+        tmp.Format("%u\n", (unsigned) value);
         m_StateString += tmp;
     };
 
     auto appendEnumLine = [this, &appendUIntLine](CKDWORD value, const char *const *table, int tableSize) {
-        if ((int)value >= 0 && (int)value < tableSize && table[value]) {
+        if ((int) value >= 0 && (int) value < tableSize && table[value]) {
             m_StateString += table[value];
         } else {
             appendUIntLine(value);
@@ -513,20 +523,20 @@ void RCKRenderContext::FillStateString() {
     appendOnOff(GetState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0);
 
     m_StateString += "Fill Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_FILLMODE), kFillMode, (int)(sizeof(kFillMode) / sizeof(kFillMode[0])));
+    appendEnumLine(GetState(VXRENDERSTATE_FILLMODE), kFillMode, (int) (sizeof(kFillMode) / sizeof(kFillMode[0])));
 
     m_StateString += "Shade Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_SHADEMODE), kShadeMode, (int)(sizeof(kShadeMode) / sizeof(kShadeMode[0])));
+    appendEnumLine(GetState(VXRENDERSTATE_SHADEMODE), kShadeMode, (int) (sizeof(kShadeMode) / sizeof(kShadeMode[0])));
 
     m_StateString += "Cull Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_CULLMODE), kCullMode, (int)(sizeof(kCullMode) / sizeof(kCullMode[0])));
+    appendEnumLine(GetState(VXRENDERSTATE_CULLMODE), kCullMode, (int) (sizeof(kCullMode) / sizeof(kCullMode[0])));
 
     if (GetState(VXRENDERSTATE_ZENABLE) != 0) {
         m_StateString += "ZWrite : ";
         appendOnOff(GetState(VXRENDERSTATE_ZWRITEENABLE) != 0);
 
         m_StateString += "Z Cmp Function : ";
-        appendEnumLine(GetState(VXRENDERSTATE_ZFUNC), kCmpFunc, (int)(sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_ZFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Zbias : ";
         appendUIntLine(GetState(VXRENDERSTATE_ZBIAS));
@@ -534,7 +544,7 @@ void RCKRenderContext::FillStateString() {
 
     if (GetState(VXRENDERSTATE_ALPHATESTENABLE) != 0) {
         m_StateString += "Alpha Cmp Func : ";
-        appendEnumLine(GetState(VXRENDERSTATE_ALPHAFUNC), kCmpFunc, (int)(sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_ALPHAFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Alpha Ref Value : ";
         appendUIntLine(GetState(VXRENDERSTATE_ALPHAREF));
@@ -545,14 +555,14 @@ void RCKRenderContext::FillStateString() {
 
     if (GetState(VXRENDERSTATE_ALPHABLENDENABLE) != 0) {
         m_StateString += "Alpha Blending : ";
-        appendEnumLine(GetState(VXRENDERSTATE_SRCBLEND), kBlendMode, (int)(sizeof(kBlendMode) / sizeof(kBlendMode[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_SRCBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
         m_StateString += "->";
-        appendEnumLine(GetState(VXRENDERSTATE_DESTBLEND), kBlendMode, (int)(sizeof(kBlendMode) / sizeof(kBlendMode[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_DESTBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
     }
 
     if (GetState(VXRENDERSTATE_FOGENABLE) != 0) {
         m_StateString += "Fog : ";
-        appendEnumLine(GetState(VXRENDERSTATE_FOGPIXELMODE), kFogMode, (int)(sizeof(kFogMode) / sizeof(kFogMode[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_FOGPIXELMODE), kFogMode, (int) (sizeof(kFogMode) / sizeof(kFogMode[0])));
     }
 
     if (GetState(VXRENDERSTATE_SPECULARENABLE) != 0) {
@@ -565,16 +575,16 @@ void RCKRenderContext::FillStateString() {
 
     if (GetState(VXRENDERSTATE_STENCILENABLE) != 0) {
         m_StateString += "Stencil Fail : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILFAIL), kStencilOp, (int)(sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_STENCILFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Zfail : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILZFAIL), kStencilOp, (int)(sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_STENCILZFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Pass : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILPASS), kStencilOp, (int)(sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_STENCILPASS), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Cmp Func : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILFUNC), kCmpFunc, (int)(sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        appendEnumLine(GetState(VXRENDERSTATE_STENCILFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Stencil Ref Value : ";
         appendUIntLine(GetState(VXRENDERSTATE_STENCILREF));
@@ -655,8 +665,8 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
             CKDWORD colors[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
             VxVector4 positions[4];
 
-            float w = (float)m_Settings.m_Rect.right;
-            float h = (float)m_Settings.m_Rect.bottom;
+            float w = (float) m_Settings.m_Rect.right;
+            float h = (float) m_Settings.m_Rect.bottom;
 
             positions[0] = VxVector4(0.0f, 0.0f, 0.0f, 1.0f);
             positions[1] = VxVector4(w, 0.0f, 0.0f, 1.0f);
@@ -675,7 +685,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
             m_RasterizerContext->DrawPrimitive(VX_TRIANGLEFAN, nullptr, 0, &dp);
 
             // Background drawn: clear Z / stencil if requested, but do not clear back buffer.
-            renderFlags = (CK_RENDER_FLAGS)(renderFlags & ~CK_RENDER_CLEARBACK);
+            renderFlags = (CK_RENDER_FLAGS) (renderFlags & ~CK_RENDER_CLEARBACK);
 
             m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
             m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
@@ -747,7 +757,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         return CKERR_INVALIDRENDERCONTEXT;
 
     CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
-    
+
     // Check if we need to do back-to-front or have render target
     if (!(renderFlags & CK_RENDER_DOBACKTOFRONT) && !m_TargetTexture)
         return CK_OK;
@@ -771,12 +781,12 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         // Render-to-texture path
         int height = m_TargetTexture->GetHeight();
         int width = m_TargetTexture->GetWidth();
-        VxRect rect(0.0f, 0.0f, (float)width, (float)height);
-        
+        VxRect rect(0.0f, 0.0f, (float) width, (float) height);
+
         // Get current pixel format and target's video format
         VX_PIXELFORMAT srcFormat = GetPixelFormat(nullptr, nullptr, nullptr);
         VX_PIXELFORMAT dstFormat = m_TargetTexture->GetVideoPixelFormat();
-        
+
         // Handle pixel format conversion
         // _32_RGB888 -> _32_ARGB8888
         if (srcFormat == _32_RGB888)
@@ -788,21 +798,21 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
             srcFormat = _16_ARGB1555;
         if (dstFormat == _16_RGB555)
             dstFormat = _16_ARGB1555;
-        
+
         // If formats don't match, re-create texture with correct format
         if (dstFormat != srcFormat) {
             m_TargetTexture->SetDesiredVideoFormat(srcFormat);
             m_TargetTexture->FreeVideoMemory();
             m_TargetTexture->SystemToVideoMemory(this, FALSE);
         }
-        
+
         // Copy render context to texture
         if (!m_TargetTexture->CopyContext(this, &rect, &rect, m_CubeMapFace)) {
             m_TargetTexture = nullptr;
         }
     } else {
         // Normal back-to-front path
-        
+
         // PV Information watermark handling
         if (m_Context->IsPlaying()) {
             if (m_Context->GetPVInformation() != m_PVInformation) {
@@ -812,7 +822,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
                 DrawPVInformationWatermark();
             }
         }
-        
+
         // Call rasterizer BackToFront
         CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
         m_RasterizerContext->BackToFront(waitVbl);
@@ -824,14 +834,14 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         if ((m_Flags & 1) != 0) {
             // Debug mode is active
             if (m_CurrentObjectDesc.Length() > 0) {
-                HDC hdc = GetDC((HWND)m_WinHandle);
+                HDC hdc = GetDC((HWND) m_WinHandle);
                 RECT rc;
                 rc.left = 1;
                 rc.top = 1;
                 rc.right = 300;
                 rc.bottom = 400;
                 SetBkMode(hdc, TRANSPARENT);
-                
+
                 // Draw shadow (black text offset by 1,1)
                 SetTextColor(hdc, 0x000000);
                 DrawTextA(hdc, m_CurrentObjectDesc.CStr(), -1, &rc, DT_NOCLIP);
@@ -841,11 +851,11 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
                 DrawTextA(hdc, m_CurrentObjectDesc.CStr(), -1, &rc, DT_NOCLIP);
                 rc.left--;
                 rc.top--;
-                
+
                 // Draw white text
                 SetTextColor(hdc, 0xFFFFFF);
                 DrawTextA(hdc, m_CurrentObjectDesc.CStr(), -1, &rc, DT_NOCLIP);
-                
+
                 // If showing cache state (m_Flags bit 2)
                 if ((m_Flags & 2) != 0) {
                     m_CurrentObjectDesc = "Cache State:";
@@ -861,12 +871,12 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
                     SetTextColor(hdc, 0xFFFFFF);
                     DrawTextA(hdc, m_StateString.CStr(), -1, &rc, DT_NOCLIP);
                 }
-                
-                ReleaseDC((HWND)m_WinHandle, hdc);
+
+                ReleaseDC((HWND) m_WinHandle, hdc);
             }
-            
+
             m_CurrentObjectDesc = "DEBUG RENDER MODE : Ins,Home,Page Up\n\n";
-            
+
             // Wait for input
             CKBOOL done = FALSE;
             while (!done) {
@@ -896,13 +906,13 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
                 // Ctrl+Alt+F11 - exit debug mode
                 if (GetAsyncKeyState(VK_CONTROL) && GetAsyncKeyState(VK_MENU)) {
                     if (GetAsyncKeyState(VK_F11)) {
-                        m_Flags &= ~1;  // Clear debug mode flag
+                        m_Flags &= ~1; // Clear debug mode flag
                         m_FpsInterval = 1;
                         done = TRUE;
                     }
                 }
             }
-            
+
             // Wait for keys to be released
             while (GetAsyncKeyState(VK_INSERT)) {}
             while (GetAsyncKeyState(VK_HOME)) {}
@@ -911,10 +921,10 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
             while (GetAsyncKeyState(VK_MENU)) {}
             while (GetAsyncKeyState('R')) {}
         }
-        
+
         // Check for Ctrl+Alt+F11 to enter debug mode
         if (GetAsyncKeyState(VK_CONTROL) && GetAsyncKeyState(VK_MENU) && GetAsyncKeyState(VK_F11)) {
-            m_Flags |= 1;  // Set debug mode flag
+            m_Flags |= 1; // Set debug mode flag
             m_FpsInterval = 1;
             m_CurrentObjectDesc = "DEBUG RENDER MODE : Ins,Home,Page Up\n\n";
             // Wait for keys to be released
@@ -945,7 +955,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     if (timeManager) {
         CKDWORD limitOptions = timeManager->GetLimitOptions();
         if (limitOptions & CK_FRAMERATE_SYNC) {
-            renderFlags = (CK_RENDER_FLAGS)(renderFlags | CK_RENDER_WAITVBL);
+            renderFlags = (CK_RENDER_FLAGS) (renderFlags | CK_RENDER_WAITVBL);
         }
     }
 
@@ -961,9 +971,9 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
             CKAttributeType attrType = attrManager->GetAttributeTypeByName("1CamPl8ne4SterCube2Rend");
             CKParameterOut *attrParam = m_RenderedScene->m_AttachedCamera->GetAttributeParameter(attrType);
             if (attrParam) {
-                CKDWORD *pCameraId = (CKDWORD *)attrParam->GetReadDataPtr(FALSE);
+                CKDWORD *pCameraId = (CKDWORD *) attrParam->GetReadDataPtr(FALSE);
                 if (pCameraId) {
-                    m_Camera = (RCKCamera *)m_Context->GetObject(*pCameraId);
+                    m_Camera = (RCKCamera *) m_Context->GetObject(*pCameraId);
                 }
             }
         }
@@ -984,14 +994,14 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         // Get right vector from world matrix (first row)
         VxVector rightVec(originalWorldMat[0][0], originalWorldMat[0][1], originalWorldMat[0][2]);
         rightVec.Normalize();
-        
+
         // Calculate eye offset
         float halfFocal = -0.5f * m_FocalLength;
         VxVector eyeOffset = rightVec * halfFocal;
 
         VxMatrix leftWorldMat = originalWorldMat;
         VxMatrix rightWorldMat = originalWorldMat;
-        
+
         // Offset position for left and right eye
         leftWorldMat[3][0] -= eyeOffset.x;
         leftWorldMat[3][1] -= eyeOffset.y;
@@ -1051,7 +1061,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     ++m_TimeFpsCalc;
     float elapsed = m_RenderTimeProfiler.Current();
     if (elapsed >= 1000.0f) {
-        float fps = (float)m_TimeFpsCalc * 1000.0f / elapsed;
+        float fps = (float) m_TimeFpsCalc * 1000.0f / elapsed;
         m_RenderTimeProfiler.Reset();
         m_TimeFpsCalc = 0;
         // Smooth FPS: 90% new value + 10% old value
@@ -1069,7 +1079,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         CKRenderExtents extents;
         extents.m_Rect = VxRect();
         GetViewRect(extents.m_Rect);
-        extents.m_Flags = (CKDWORD)renderFlags;  // Store flags
+        extents.m_Flags = (CKDWORD) renderFlags; // Store flags
         extents.m_Camera = GetAttachedCamera() ? GetAttachedCamera()->GetID() : 0;
         m_Extents.PushBack(extents);
     }
@@ -1120,7 +1130,6 @@ VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS F
     // IDA: 0x1006bc74
     if ((Flags & CKRST_DP_VBUFFER) != 0 && m_RasterizerContext &&
         (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CANDOVERTEXBUFFER) != 0) {
-
         CKDWORD vertexSize = 0;
         CKDWORD vertexFormat = CKRSTGetVertexFormat(Flags, vertexSize);
         CKDWORD index = m_RasterizerContext->GetDynamicVertexBuffer(vertexFormat, VertexCount, vertexSize, (Flags & CKRST_DP_DOCLIP) != 0);
@@ -1140,7 +1149,7 @@ VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS F
     m_VertexBufferCount = 0;
 
     // IDA: 0x1006bdb1 - call UserDrawPrimitiveDataClass::GetStructure
-    return m_UserDrawPrimitiveData->GetStructure((CKRST_DPFLAGS)(Flags & ~CKRST_DP_VBUFFER), VertexCount);
+    return m_UserDrawPrimitiveData->GetStructure((CKRST_DPFLAGS) (Flags & ~CKRST_DP_VBUFFER), VertexCount);
 }
 
 CKWORD *RCKRenderContext::GetDrawPrimitiveIndices(int IndicesCount) {
@@ -1196,10 +1205,10 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     m_FullscreenSettings = savedSettings;
 
     // Save window parent and position
-    m_AppHandle = (CKDWORD)VxGetParent((void *)m_WinHandle);
-    VxGetWindowRect((void *)m_WinHandle, &m_WinRect);
-    VxScreenToClient((void *)m_AppHandle, (CKPOINT *)&m_WinRect.left);
-    VxScreenToClient((void *)m_AppHandle, (CKPOINT *)&m_WinRect.right);
+    m_AppHandle = (CKDWORD) VxGetParent((void *) m_WinHandle);
+    VxGetWindowRect((void *) m_WinHandle, &m_WinRect);
+    VxScreenToClient((void *) m_AppHandle, (CKPOINT *) &m_WinRect.left);
+    VxScreenToClient((void *) m_AppHandle, (CKPOINT *) &m_WinRect.right);
 
     // Destroy current device
     DestroyDevice();
@@ -1211,12 +1220,12 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     rect.right = Width;
     rect.bottom = Height;
 
-    err = Create((void *)m_WinHandle, Driver, &rect, TRUE, Bpp, 0, 0, RefreshRate);
+    err = Create((void *) m_WinHandle, Driver, &rect, TRUE, Bpp, 0, 0, RefreshRate);
 
     if (err != CK_OK) {
         // Failed - restore window
-        VxSetParent((void *)m_WinHandle, (void *)m_AppHandle);
-        VxMoveWindow((void *)m_WinHandle, m_WinRect.left, m_WinRect.top,
+        VxSetParent((void *) m_WinHandle, (void *) m_AppHandle);
+        VxMoveWindow((void *) m_WinHandle, m_WinRect.left, m_WinRect.top,
                      m_WinRect.right - m_WinRect.left, m_WinRect.bottom - m_WinRect.top, FALSE);
 
         // Try to recreate old context
@@ -1226,15 +1235,15 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
         oldRect.right = m_FullscreenSettings.m_Rect.right + oldRect.left;
         oldRect.bottom = m_FullscreenSettings.m_Rect.bottom + oldRect.top;
 
-        Create((void *)m_WinHandle, m_DriverIndex, &oldRect, FALSE,
+        Create((void *) m_WinHandle, m_DriverIndex, &oldRect, FALSE,
                m_FullscreenSettings.m_Bpp, m_FullscreenSettings.m_Zbpp,
                m_FullscreenSettings.m_StencilBpp, 0);
     } else {
         // Success
         m_RenderedScene->UpdateViewportSize(TRUE, CK_RENDER_USECURRENTSETTINGS);
-        Clear((CK_RENDER_FLAGS)(CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL), 0);
+        Clear((CK_RENDER_FLAGS) (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL), 0);
         BackToFront(CK_RENDER_USECURRENTSETTINGS);
-        Clear((CK_RENDER_FLAGS)(CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL), 0);
+        Clear((CK_RENDER_FLAGS) (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL), 0);
     }
 
     return err;
@@ -1253,8 +1262,8 @@ CKERROR RCKRenderContext::StopFullScreen() {
     DestroyDevice();
 
     // Restore window parent and position
-    VxSetParent((void *)m_WinHandle, (void *)m_AppHandle);
-    VxMoveWindow((void *)m_WinHandle, m_WinRect.left, m_WinRect.top,
+    VxSetParent((void *) m_WinHandle, (void *) m_AppHandle);
+    VxMoveWindow((void *) m_WinHandle, m_WinRect.left, m_WinRect.top,
                  m_WinRect.right - m_WinRect.left, m_WinRect.bottom - m_WinRect.top, FALSE);
 
     // Recreate windowed context with saved settings
@@ -1264,7 +1273,7 @@ CKERROR RCKRenderContext::StopFullScreen() {
     rect.right = m_FullscreenSettings.m_Rect.right + rect.left;
     rect.bottom = m_FullscreenSettings.m_Rect.bottom + rect.top;
 
-    CKERROR err = Create((void *)m_WinHandle, m_DriverIndex, &rect, FALSE,
+    CKERROR err = Create((void *) m_WinHandle, m_DriverIndex, &rect, FALSE,
                          m_FullscreenSettings.m_Bpp, m_FullscreenSettings.m_Zbpp,
                          m_FullscreenSettings.m_StencilBpp, 0);
 
@@ -1287,11 +1296,11 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     // Cannot change driver while fullscreen
     if (m_Fullscreen)
         return FALSE;
-    
+
     // Already on this driver
     if (NewDriver == m_DriverIndex)
         return FALSE;
-    
+
     // If -1, use current driver index
     if (NewDriver == -1) {
         NewDriver = m_DriverIndex;
@@ -1324,12 +1333,12 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_FullscreenSettings.m_Bpp = m_RasterizerContext->m_Bpp;
     m_FullscreenSettings.m_Zbpp = m_RasterizerContext->m_ZBpp;
     m_FullscreenSettings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
-    
+
     m_DeviceValid = TRUE;
-    
+
     // Notify render manager we're destroying device
-    m_RenderManager->DestroyingDevice((CKRenderContext *)this);
-    
+    m_RenderManager->DestroyingDevice((CKRenderContext *) this);
+
     // Destroy old context
     if (m_RasterizerDriver && m_RasterizerContext) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
@@ -1337,23 +1346,23 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
     m_ProjectionUpdated = FALSE;
-    
+
     // Set new driver and create context
     m_RasterizerDriver = newDriver;
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
-    
+
     // Copy settings
     m_RasterizerContext->m_EnableScreenDump = m_RenderManager->m_EnableScreenDump.Value;
     m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
-    
+
     // Try to create the context with current settings
     BOOL created = m_RasterizerContext->Create(
-        (WIN_HANDLE)m_WinHandle,
+        (WIN_HANDLE) m_WinHandle,
         m_Settings.m_Rect.left, m_Settings.m_Rect.top,
         m_Settings.m_Rect.right, m_Settings.m_Rect.bottom,
         m_Settings.m_Bpp, 0, 0,
         m_Settings.m_Zbpp, m_Settings.m_StencilBpp);
-    
+
     if (created) {
         // Success - update driver index and settings
         m_DriverIndex = NewDriver;
@@ -1364,10 +1373,10 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_Settings.m_Bpp = m_RasterizerContext->m_Bpp;
         m_Settings.m_Zbpp = m_RasterizerContext->m_ZBpp;
         m_Settings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
-        
+
         if (m_RasterizerContext)
             m_RasterizerContext->SetTransparentMode(m_TransparentMode);
-        
+
         m_DeviceValid = FALSE;
         return TRUE;
     } else {
@@ -1376,9 +1385,9 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_RasterizerDriver = oldDriver;
         m_RasterizerContext = m_RasterizerDriver->CreateContext();
         m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
-        
+
         BOOL restored = m_RasterizerContext->Create(
-            (WIN_HANDLE)m_WinHandle,
+            (WIN_HANDLE) m_WinHandle,
             m_FullscreenSettings.m_Rect.left, m_FullscreenSettings.m_Rect.top,
             m_FullscreenSettings.m_Rect.right, m_FullscreenSettings.m_Rect.bottom,
             m_FullscreenSettings.m_Bpp, 0, 0,
@@ -1400,12 +1409,12 @@ WIN_HANDLE RCKRenderContext::GetWindowHandle() {
 
 void RCKRenderContext::ScreenToClient(Vx2DVector *ioPoint) {
     // IDA: 0x1006c075
-    VxScreenToClient((void *)m_WinHandle, (CKPOINT *)ioPoint);
+    VxScreenToClient((void *) m_WinHandle, (CKPOINT *) ioPoint);
 }
 
 void RCKRenderContext::ClientToScreen(Vx2DVector *ioPoint) {
     // IDA: 0x1006c096
-    VxClientToScreen((void *)m_WinHandle, (CKPOINT *)ioPoint);
+    VxClientToScreen((void *) m_WinHandle, (CKPOINT *) ioPoint);
 }
 
 CKERROR RCKRenderContext::SetWindowRect(VxRect &rect, CKDWORD Flags) {
@@ -1420,17 +1429,17 @@ void RCKRenderContext::GetWindowRect(VxRect &rect, CKBOOL ScreenRelative) {
         pt1.y = m_Settings.m_Rect.top;
         pt2.x = m_Settings.m_Rect.right + m_Settings.m_Rect.left;
         pt2.y = m_Settings.m_Rect.bottom + m_Settings.m_Rect.top;
-        VxClientToScreen((void *)m_WinHandle, &pt1);
-        VxClientToScreen((void *)m_WinHandle, &pt2);
-        rect.left = (float)pt1.x;
-        rect.top = (float)pt1.y;
-        rect.right = (float)pt2.x;
-        rect.bottom = (float)pt2.y;
+        VxClientToScreen((void *) m_WinHandle, &pt1);
+        VxClientToScreen((void *) m_WinHandle, &pt2);
+        rect.left = (float) pt1.x;
+        rect.top = (float) pt1.y;
+        rect.right = (float) pt2.x;
+        rect.bottom = (float) pt2.y;
     } else {
-        rect.left = (float)m_Settings.m_Rect.left;
-        rect.top = (float)m_Settings.m_Rect.top;
-        rect.right = (float)(m_Settings.m_Rect.right + m_Settings.m_Rect.left);
-        rect.bottom = (float)(m_Settings.m_Rect.bottom + m_Settings.m_Rect.top);
+        rect.left = (float) m_Settings.m_Rect.left;
+        rect.top = (float) m_Settings.m_Rect.top;
+        rect.right = (float) (m_Settings.m_Rect.right + m_Settings.m_Rect.left);
+        rect.bottom = (float) (m_Settings.m_Rect.bottom + m_Settings.m_Rect.top);
     }
 }
 
@@ -1457,9 +1466,9 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
             rect.top = PosY;
             rect.bottom = SizeY + PosY;
             rect.right = SizeX + PosX;
-            Create((void *)m_WinHandle, m_DriverIndex, &rect, FALSE, -1, -1, -1, 0);
+            Create((void *) m_WinHandle, m_DriverIndex, &rect, FALSE, -1, -1, -1, 0);
         } else {
-            Create((void *)m_WinHandle, m_DriverIndex, nullptr, FALSE, -1, -1, -1, 0);
+            Create((void *) m_WinHandle, m_DriverIndex, nullptr, FALSE, -1, -1, -1, 0);
         }
 
         if (!m_RasterizerContext)
@@ -1479,7 +1488,7 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     if ((Flags & VX_RESIZE_NOSIZE) == 0) {
         if (!SizeX || !SizeY) {
             CKRECT clientRect;
-            VxGetClientRect((void *)m_WinHandle, &clientRect);
+            VxGetClientRect((void *) m_WinHandle, &clientRect);
             SizeX = clientRect.right;
             SizeY = clientRect.bottom;
         }
@@ -1503,19 +1512,19 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
 
 void RCKRenderContext::SetViewRect(VxRect &rect) {
     // IDA: 0x1006ce58
-    m_ViewportData.ViewX = (int)rect.left;
-    m_ViewportData.ViewY = (int)rect.top;
-    m_ViewportData.ViewWidth = (int)rect.GetWidth();
-    m_ViewportData.ViewHeight = (int)rect.GetHeight();
+    m_ViewportData.ViewX = (int) rect.left;
+    m_ViewportData.ViewY = (int) rect.top;
+    m_ViewportData.ViewWidth = (int) rect.GetWidth();
+    m_ViewportData.ViewHeight = (int) rect.GetHeight();
     UpdateProjection(TRUE);
 }
 
 void RCKRenderContext::GetViewRect(VxRect &rect) {
     // IDA: 0x1006cec2
-    rect.left = (float)m_ViewportData.ViewX;
-    rect.top = (float)m_ViewportData.ViewY;
-    rect.right = rect.left + (float)m_ViewportData.ViewWidth;
-    rect.bottom = rect.top + (float)m_ViewportData.ViewHeight;
+    rect.left = (float) m_ViewportData.ViewX;
+    rect.top = (float) m_ViewportData.ViewY;
+    rect.right = rect.left + (float) m_ViewportData.ViewWidth;
+    rect.bottom = rect.top + (float) m_ViewportData.ViewHeight;
 }
 
 VX_PIXELFORMAT RCKRenderContext::GetPixelFormat(int *Bpp, int *Zbpp, int *StencilBpp) {
@@ -1581,7 +1590,7 @@ CKBOOL RCKRenderContext::GetClearZBuffer() {
 
 void RCKRenderContext::GetGlobalRenderMode(VxShadeType *Shading, CKBOOL *Texture, CKBOOL *Wireframe) {
     // IDA: 0x10067b26
-    *Shading = (VxShadeType)m_Shading;
+    *Shading = (VxShadeType) m_Shading;
     *Texture = m_TextureEnabled;
     *Wireframe = m_DisplayWireframe;
 }
@@ -1656,7 +1665,7 @@ void RCKRenderContext::SetFogColor(CKDWORD Color) {
 
 VXFOG_MODE RCKRenderContext::GetFogMode() {
     // IDA: 0x1006b83d
-    return (VXFOG_MODE)m_RenderedScene->m_FogMode;
+    return (VXFOG_MODE) m_RenderedScene->m_FogMode;
 }
 
 float RCKRenderContext::GetFogStart() {
@@ -1704,24 +1713,24 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
 
     // Update stats based on primitive type
     switch (pType) {
-        case VX_POINTLIST:
-            m_Stats.NbPointsDrawn += data->VertexCount;
-            break;
-        case VX_LINELIST:
-            m_Stats.NbLinesDrawn += indexcount >> 1;
-            break;
-        case VX_LINESTRIP:
-            m_Stats.NbLinesDrawn += indexcount - 1;
-            break;
-        case VX_TRIANGLELIST:
-            m_Stats.NbTrianglesDrawn += indexcount / 3;
-            break;
-        case VX_TRIANGLESTRIP:
-        case VX_TRIANGLEFAN:
-            m_Stats.NbTrianglesDrawn += indexcount - 2;
-            break;
-        default:
-            break;
+    case VX_POINTLIST:
+        m_Stats.NbPointsDrawn += data->VertexCount;
+        break;
+    case VX_LINELIST:
+        m_Stats.NbLinesDrawn += indexcount >> 1;
+        break;
+    case VX_LINESTRIP:
+        m_Stats.NbLinesDrawn += indexcount - 1;
+        break;
+    case VX_TRIANGLELIST:
+        m_Stats.NbTrianglesDrawn += indexcount / 3;
+        break;
+    case VX_TRIANGLESTRIP:
+    case VX_TRIANGLEFAN:
+        m_Stats.NbTrianglesDrawn += indexcount - 2;
+        break;
+    default:
+        break;
     }
 
     m_Stats.NbVerticesProcessed += data->VertexCount;
@@ -1744,7 +1753,7 @@ void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data,
     if (!data)
         return;
     if (Ref) {
-        m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, ((RCK3dEntity *)Ref)->m_WorldMatrix);
+        m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, ((RCK3dEntity *) Ref)->m_WorldMatrix);
     }
     m_RasterizerContext->TransformVertices(VertexCount, data);
 }
@@ -1791,21 +1800,21 @@ CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &Plane
 CK2dEntity *RCKRenderContext::_Pick2D(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
     // Adjust point to local coordinates
     Vx2DVector localPt;
-    localPt.x = pt.x - (float)m_Settings.m_Rect.left;
-    localPt.y = pt.y - (float)m_Settings.m_Rect.top;
-    
+    localPt.x = pt.x - (float) m_Settings.m_Rect.left;
+    localPt.y = pt.y - (float) m_Settings.m_Rect.top;
+
     // Try foreground 2D root first (FALSE = foreground)
-    RCK2dEntity *root = (RCK2dEntity *)Get2dRoot(FALSE);
+    RCK2dEntity *root = (RCK2dEntity *) Get2dRoot(FALSE);
     CK2dEntity *result = root->Pick(localPt, ignoreUnpickable);
     if (result)
         return result;
-    
+
     // Then try background 2D root (TRUE = background)
-    root = (RCK2dEntity *)Get2dRoot(TRUE);
+    root = (RCK2dEntity *) Get2dRoot(TRUE);
     return root->Pick(localPt, ignoreUnpickable);
 }
 
-// IDA: 0x100682be - Internal 3D picking method  
+// IDA: 0x100682be - Internal 3D picking method
 CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *desc, CK3dEntity *filter, CKBOOL ignoreUnpickable) {
     if (!desc)
         return nullptr;
@@ -1816,10 +1825,10 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
 
     const Vx2DVector localPt = pt;
 
-    const float viewX = (float)m_ViewportData.ViewX;
-    const float viewY = (float)m_ViewportData.ViewY;
-    const float viewWidth = (float)m_ViewportData.ViewWidth;
-    const float viewHeight = (float)m_ViewportData.ViewHeight;
+    const float viewX = (float) m_ViewportData.ViewX;
+    const float viewY = (float) m_ViewportData.ViewY;
+    const float viewWidth = (float) m_ViewportData.ViewWidth;
+    const float viewHeight = (float) m_ViewportData.ViewHeight;
 
     if (localPt.x < viewX || localPt.y < viewY)
         return nullptr;
@@ -1844,7 +1853,7 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
             if (localPt.y < ext->m_Rect.top || localPt.y > ext->m_Rect.bottom)
                 continue;
 
-            CKCamera *camera = (CKCamera *)m_Context->GetObject(ext->m_Camera);
+            CKCamera *camera = (CKCamera *) m_Context->GetObject(ext->m_Camera);
             if (!camera)
                 continue;
 
@@ -1884,7 +1893,7 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
 
             for (int j = 0; j < objCount; ++j) {
                 CKObjectExtents *objExt = &m_ObjectExtents[j];
-                CK3dEntity *entity = (CK3dEntity *)objExt->m_Entity;
+                CK3dEntity *entity = (CK3dEntity *) objExt->m_Entity;
                 if (!entity)
                     continue;
                 if (filter && entity != filter)
@@ -1896,7 +1905,7 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
                 if (!VxIntersect::RayBox(ray, bbox))
                     continue;
 
-                if (entity->RayIntersection((VxVector *)&rayStart, (VxVector *)&rayEnd, &tempDesc, nullptr, CKRAYINTERSECTION_SEGMENT)) {
+                if (entity->RayIntersection((VxVector *) &rayStart, (VxVector *) &rayEnd, &tempDesc, nullptr, CKRAYINTERSECTION_SEGMENT)) {
                     if (tempDesc.Distance < bestDistance) {
                         memcpy(desc, &tempDesc, sizeof(VxIntersectionDesc));
                         bestDistance = tempDesc.Distance;
@@ -1939,7 +1948,7 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
 
     for (int i = 0; i < objCount; ++i) {
         CKObjectExtents *ext = &m_ObjectExtents[i];
-        CK3dEntity *entity = (CK3dEntity *)ext->m_Entity;
+        CK3dEntity *entity = (CK3dEntity *) ext->m_Entity;
         if (!entity)
             continue;
         if (filter && entity != filter)
@@ -1954,8 +1963,8 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *d
 
         memset(&tempDesc, 0, sizeof(tempDesc));
 
-        if (RCKMesh *mesh = (RCKMesh *)entity->GetCurrentMesh()) {
-            if (mesh->Pick2D(localPt, &tempDesc, this, (RCK3dEntity *)entity)) {
+        if (RCKMesh *mesh = (RCKMesh *) entity->GetCurrentMesh()) {
+            if (mesh->Pick2D(localPt, &tempDesc, this, (RCK3dEntity *) entity)) {
                 VxVector transformedPt;
                 entity->Transform(&transformedPt, &tempDesc.IntersectionPoint, m_RenderedScene->m_RootEntity);
 
@@ -1996,25 +2005,25 @@ CKRenderObject *RCKRenderContext::Pick(int x, int y, CKPICKRESULT *oRes, CKBOOL 
 CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iIgnoreUnpickable) {
     VxIntersectionDesc desc;
     memset(&desc, 0, sizeof(VxIntersectionDesc));
-    
+
     // Convert screen point to local coordinates (relative to render context window)
     Vx2DVector localPt;
-    localPt.x = (float)(pt.x - m_Settings.m_Rect.left);
-    localPt.y = (float)(pt.y - m_Settings.m_Rect.top);
-    
+    localPt.x = (float) (pt.x - m_Settings.m_Rect.left);
+    localPt.y = (float) (pt.y - m_Settings.m_Rect.top);
+
     // Pick 3D objects first
     CK3dEntity *picked3D = Pick3D(localPt, &desc, nullptr, iIgnoreUnpickable);
-    
+
     // Fill result structure if provided
     if (oRes) {
         // Convert local coords back to screen coords for 2D picking
         Vx2DVector screenPt;
-        screenPt.x = localPt.x + (float)m_Settings.m_Rect.left;
-        screenPt.y = localPt.y + (float)m_Settings.m_Rect.top;
-        
+        screenPt.x = localPt.x + (float) m_Settings.m_Rect.left;
+        screenPt.y = localPt.y + (float) m_Settings.m_Rect.top;
+
         // Also pick 2D entities
         CK2dEntity *picked2D = _Pick2D(screenPt, iIgnoreUnpickable);
-        
+
         // Copy intersection data from desc to oRes
         oRes->IntersectionPoint = desc.IntersectionPoint;
         oRes->IntersectionNormal = desc.IntersectionNormal;
@@ -2022,7 +2031,7 @@ CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iI
         oRes->TexV = desc.TexV;
         oRes->Distance = desc.Distance;
         oRes->FaceIndex = desc.FaceIndex;
-        
+
         // Set Sprite to 2D entity ID if found
         if (picked2D) {
             oRes->Sprite = picked2D->GetID();
@@ -2030,7 +2039,7 @@ CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iI
             oRes->Sprite = 0;
         }
     }
-    
+
     // Return 3D picked object (or null if none)
     return picked3D;
 }
@@ -2043,13 +2052,13 @@ static int RectIntersectTest(const VxRect *a, const VxRect *b) {
     if (a->right <= b->left) return 0;
     if (a->top >= b->bottom) return 0;
     if (a->bottom <= b->top) return 0;
-    
+
     // Check if a is fully inside b
     if (a->left >= b->left && a->right <= b->right &&
         a->top >= b->top && a->bottom <= b->bottom) {
         return 1;
     }
-    
+
     // Partial intersection
     return 2;
 }
@@ -2058,13 +2067,13 @@ static int RectIntersectTest(const VxRect *a, const VxRect *b) {
 CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObjects, CKBOOL Intersect) {
     // Copy rect and adjust to local coordinates
     VxRect pickRect = r;
-    float offsetX = (float)m_Settings.m_Rect.left;
-    float offsetY = (float)m_Settings.m_Rect.top;
+    float offsetX = (float) m_Settings.m_Rect.left;
+    float offsetY = (float) m_Settings.m_Rect.top;
     pickRect.left -= offsetX;
     pickRect.right -= offsetX;
     pickRect.top -= offsetY;
     pickRect.bottom -= offsetY;
-    
+
     // Normalize rect
     if (pickRect.left > pickRect.right) {
         float t = pickRect.left;
@@ -2076,27 +2085,27 @@ CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObject
         pickRect.top = pickRect.bottom;
         pickRect.bottom = t;
     }
-    
+
     // Iterate through 3D entities in rendered scene
     if (m_RenderedScene) {
         int count = m_RenderedScene->m_3DEntities.Size();
         for (int i = 0; i < count; ++i) {
-            CK3dEntity *ent = (CK3dEntity *)m_RenderedScene->m_3DEntities[i];
+            CK3dEntity *ent = (CK3dEntity *) m_RenderedScene->m_3DEntities[i];
             if (!ent)
                 continue;
-            
+
             // Check if not pickable
             if (!ent->IsPickable())
                 continue;
-            
+
             // Check if visible
             if (!ent->IsVisible())
                 continue;
-            
+
             // Get screen extents
             VxRect extRect;
             ent->GetRenderExtents(extRect);
-            
+
             // Test intersection
             int result = RectIntersectTest(&extRect, &pickRect);
             if (result) {
@@ -2107,7 +2116,7 @@ CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObject
             }
         }
     }
-    
+
     // Iterate through background 2D entities (Get2dRoot(TRUE))
     {
         CK2dEntity *root2D = Get2dRoot(TRUE);
@@ -2152,7 +2161,7 @@ CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObject
             }
         }
     }
-    
+
     return CK_OK;
 }
 
@@ -2161,11 +2170,11 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
     if (cam) {
         cam->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
         m_RenderedScene->m_AttachedCamera = cam;
-        
+
         // Copy camera's world matrix to root entity
         const VxMatrix &worldMat = cam->GetWorldMatrix();
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
-        
+
         if (cam->GetFlags() & CK_3DENTITY_CAMERAIGNOREASPECT) {
             SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
         }
@@ -2178,7 +2187,7 @@ void RCKRenderContext::DetachViewpointFromCamera() {
 
 CKCamera *RCKRenderContext::GetAttachedCamera() {
     // IDA: 0x1006b919
-    return (CKCamera *)m_RenderedScene->m_AttachedCamera;
+    return (CKCamera *) m_RenderedScene->m_AttachedCamera;
 }
 
 CK3dEntity *RCKRenderContext::GetViewpoint() {
@@ -2231,12 +2240,12 @@ void RCKRenderContext::Activate(CKBOOL active) {
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf25
-    return m_RasterizerContext->CopyToMemoryBuffer((CKRECT *)iRect, buffer, desc);
+    return m_RasterizerContext->CopyToMemoryBuffer((CKRECT *) iRect, buffer, desc);
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf5a
-    return m_RasterizerContext->CopyFromMemoryBuffer((CKRECT *)iRect, buffer, desc);
+    return m_RasterizerContext->CopyFromMemoryBuffer((CKRECT *) iRect, buffer, desc);
 }
 
 CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBUFFER_TYPE buffer) {
@@ -2249,7 +2258,7 @@ CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBU
     if (!requiredBytes)
         return -1;
 
-    XBYTE *mem = new XBYTE[(size_t)requiredBytes];
+    XBYTE *mem = new XBYTE[(size_t) requiredBytes];
     desc.Image = mem;
 
     if (DumpToMemory(rect, buffer, desc)) {
@@ -2270,7 +2279,7 @@ VxDirectXData *RCKRenderContext::GetDirectXInfo() {
     // IDA: 0x1006bb75
     // Only return DirectX info if Family is 0 (DirectX family)
     if (m_RasterizerContext && m_RasterizerContext->m_Driver->m_2DCaps.Family == 0) {
-        return (VxDirectXData *)m_RasterizerContext->GetImplementationSpecificData();
+        return (VxDirectXData *) m_RasterizerContext->GetImplementationSpecificData();
     }
     return nullptr;
 }
@@ -2315,14 +2324,14 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         }
     }
 
-    const CKBOOL rstOk = m_RasterizerContext->SetTargetTexture(textureIndex, width, height, (CKRST_CUBEFACE)CubeMapFace);
+    const CKBOOL rstOk = m_RasterizerContext->SetTargetTexture(textureIndex, width, height, (CKRST_CUBEFACE) CubeMapFace);
     if (!rstOk) {
         if ((m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE) == 0)
             return FALSE;
     }
 
     if (texture) {
-        m_TargetTexture = (RCKTexture *)texture;
+        m_TargetTexture = (RCKTexture *) texture;
 
         m_Settings.m_Rect.left = 0;
         m_Settings.m_Rect.top = 0;
@@ -2392,7 +2401,7 @@ void RCKRenderContext::UsedStencilBits(CKDWORD stencilBits) {
 int RCKRenderContext::GetFirstFreeStencilBits() {
     // Original semantics: return the first bit index where the used mask is 0, else -1.
     for (int i = 0; i < 32; ++i) {
-        if (((1u << i) & (CKDWORD)m_StencilFreeMask) == 0)
+        if (((1u << i) & (CKDWORD) m_StencilFreeMask) == 0)
             return i;
     }
     return -1;
@@ -2419,10 +2428,10 @@ VxDrawPrimitiveData *RCKRenderContext::LockCurrentVB(CKDWORD VertexCount) {
 
     void *lockedPtr = m_RasterizerContext->LockVertexBuffer(m_VertexBufferIndex, m_StartIndex, VertexCount, lockFlags);
 
-    VxDrawPrimitiveData *dp = (VxDrawPrimitiveData *)m_UserDrawPrimitiveData->m_CachedDP;
-    dp->VertexCount = (int)VertexCount;
-    dp->Flags = (CKDWORD)m_DpFlags;
-    CKRSTSetupDPFromVertexBuffer((CKBYTE *)lockedPtr, vbDesc, *dp);
+    VxDrawPrimitiveData *dp = (VxDrawPrimitiveData *) m_UserDrawPrimitiveData->m_CachedDP;
+    dp->VertexCount = (int) VertexCount;
+    dp->Flags = (CKDWORD) m_DpFlags;
+    CKRSTSetupDPFromVertexBuffer((CKBYTE *) lockedPtr, vbDesc, *dp);
 
     ++m_VertexBufferCount;
     return dp;
@@ -2483,16 +2492,16 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     // Get the rasterizer driver
     m_RasterizerDriver = m_RenderManager->GetDriver(Driver);
     if (!m_RasterizerDriver)
-        return CK_OK;  // IDA returns CK_OK here, not an error
+        return CK_OK; // IDA returns CK_OK here, not an error
 
-    m_WinHandle = (CKDWORD)Window;
+    m_WinHandle = (CKDWORD) Window;
 
     // Get rect from parameter or window client rect
     CKRECT localRect;
     if (rect) {
         localRect = *rect;
     } else {
-        VxGetClientRect((void *)m_WinHandle, &localRect);
+        VxGetClientRect((void *) m_WinHandle, &localRect);
     }
 
     // Set driver index for non-fullscreen mode
@@ -2504,9 +2513,9 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // For fullscreen, reparent window to desktop
     if (Fullscreen) {
-        m_AppHandle = (CKDWORD)VxGetParent((void *)m_WinHandle);
-        VxSetParent((void *)m_WinHandle, nullptr);
-        if (!VxMoveWindow((void *)m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
+        m_AppHandle = (CKDWORD) VxGetParent((void *) m_WinHandle);
+        VxSetParent((void *) m_WinHandle, nullptr);
+        if (!VxMoveWindow((void *) m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
             m_DeviceValid = FALSE;
             return CKERR_INVALIDOPERATION;
         }
@@ -2526,7 +2535,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     m_RasterizerContext->m_EnsureVertexShader = (m_RenderManager->m_EnsureVertexShader.Value != 0);
 
     // Create the actual rasterizer context
-    if (!m_RasterizerContext->Create((WIN_HANDLE)m_WinHandle, localRect.left, localRect.top,
+    if (!m_RasterizerContext->Create((WIN_HANDLE) m_WinHandle, localRect.left, localRect.top,
                                      width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp)) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerContext = nullptr;
@@ -2571,7 +2580,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         m_WinRect.left = 0;
         m_WinRect.top = 0;
         m_WinRect.right = m_FullscreenSettings.m_Rect.right;
-        m_WinRect.bottom = m_FullscreenSettings.m_Rect.bottom;  // IDA bug: sets .right again, we fix it
+        m_WinRect.bottom = m_FullscreenSettings.m_Rect.bottom; // IDA bug: sets .right again, we fix it
     }
 
     RC_DEBUG_LOG_FMT("Create: returning CK_OK (fullscreen=%d, %dx%d)", Fullscreen, width, height);
@@ -2586,26 +2595,26 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     // Note: VxTimeProfiler constructors called implicitly
     // Note: XString constructors called implicitly
     // Note: XArray constructors called implicitly
-    
+
     m_Current3dEntity = nullptr;
     m_RenderManager = (RCKRenderManager *) Context->GetRenderManager();
     m_MaskFree = m_RenderManager->GetRenderContextMaskFree();
     if (!m_MaskFree) {
-        m_Context->OutputToConsole((CKSTRING)"Error: no more render context mask available", TRUE);
+        m_Context->OutputToConsole((CKSTRING) "Error: no more render context mask available", TRUE);
     }
     m_WinHandle = 0;
     m_AppHandle = 0;
     m_RenderFlags = CK_RENDER_DEFAULTSETTINGS;
-    
+
     // Create RenderedScene
     m_RenderedScene = new CKRenderedScene(this);
-    
+
     // Create UserDrawPrimitiveData
     m_UserDrawPrimitiveData = new UserDrawPrimitiveDataClass();
-    
+
     m_Fullscreen = FALSE;
     m_Active = FALSE;
-    m_Perspective = TRUE;  // IDA: m_Perspective = 1
+    m_Perspective = TRUE; // IDA: m_Perspective = 1
     m_ProjectionUpdated = FALSE;
     m_DeviceValid = FALSE;
     m_Start = FALSE;
@@ -2615,60 +2624,60 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_DriverIndex = 0;
     m_DisplayWireframe = FALSE;
     m_TextureEnabled = TRUE;
-    m_Shading = GouraudShading;  // IDA: 2
+    m_Shading = GouraudShading; // IDA: 2
     m_Zoom = 1.0f;
     m_NearPlane = 1.0f;
-    m_FarPlane = 4000.0f;  // IDA: 4000.0
-    m_Fov = PI / 4.0f;   // IDA: PI/4
-    
+    m_FarPlane = 4000.0f; // IDA: 4000.0
+    m_Fov = PI / 4.0f;    // IDA: PI/4
+
     // Initialize viewport
     m_ViewportData.ViewX = 0;
     m_ViewportData.ViewY = 0;
     m_ViewportData.ViewWidth = 0;
     m_ViewportData.ViewHeight = 0;
     m_ViewportData.ViewZMin = 0.0f;
-    m_ViewportData.ViewZMax = 1.0f;  // IDA: 1.0
-    
+    m_ViewportData.ViewZMax = 1.0f; // IDA: 1.0
+
     // Allocate object extents array - IDA uses XVoidArray
     // m_ObjectExtents is now XVoidArray, need to allocate differently
     // IDA: XArray<CKObjectExtents>::Allocate(&this->m_ObjectExtents, 500);
     // For XVoidArray, we need to resize it
     m_ObjectExtents.Resize(500);
-    
+
     // Clear stats
     memset(&m_Stats, 0, sizeof(m_Stats));
-    
+
     // Initialize window rect
     m_WinRect.left = -1;  // IDA
-    m_WinRect.right = -1;  // IDA
+    m_WinRect.right = -1; // IDA
     m_WinRect.top = 0;
     m_WinRect.bottom = 0;
-    
+
     // Initialize current extents
-    m_CurrentExtents.left = 1000000.0f;   // IDA
-    m_CurrentExtents.top = 1000000.0f;    // IDA
-    m_CurrentExtents.bottom = -1000000.0f;  // IDA
-    m_CurrentExtents.right = -1000000.0f;   // IDA
-    
+    m_CurrentExtents.left = 1000000.0f;    // IDA
+    m_CurrentExtents.top = 1000000.0f;     // IDA
+    m_CurrentExtents.bottom = -1000000.0f; // IDA
+    m_CurrentExtents.right = -1000000.0f;  // IDA
+
     m_FpsFrameCount = 0;
     m_TimeFpsCalc = 0;
     m_SmoothedFps = 0.0f;
     m_Flags = 0;
     m_SceneTraversalCalls = 0;
     m_TargetTexture = nullptr;
-    m_CubeMapFace = CKRST_CUBEFACE_XPOS;  // IDA: 0
+    m_CubeMapFace = CKRST_CUBEFACE_XPOS; // IDA: 0
     m_DrawSceneCalls = 0;
     m_SortTransparentObjects = 0;
-    m_FocalLength = 0.40000001f;  // IDA: 0.40000001
-    m_EyeSeparation = 100.0f;     // IDA: 100.0
+    m_FocalLength = 0.40000001f; // IDA: 0.40000001
+    m_EyeSeparation = 100.0f;    // IDA: 100.0
     m_Camera = nullptr;
-    m_PVInformation = (CKDWORD)-1;  // IDA: -1
+    m_PVInformation = (CKDWORD) -1; // IDA: -1
     m_NCUTex = nullptr;
     m_DpFlags = 0;
     m_VertexBufferCount = 0;
     m_VertexBufferIndex = 0;
-    m_StartIndex = (CKDWORD)-1;  // IDA: -1
-    
+    m_StartIndex = (CKDWORD) -1; // IDA: -1
+
     // Additional fields initialization
     m_StencilFreeMask = 0;
     m_FpsInterval = 0;
@@ -2682,17 +2691,17 @@ RCKRenderContext::~RCKRenderContext() {
     DestroyDevice();
     DetachAll();
     ClearCallbacks();
-    
+
     if (m_UserDrawPrimitiveData) {
         delete m_UserDrawPrimitiveData;
         m_UserDrawPrimitiveData = nullptr;
     }
-    
+
     if (m_RenderedScene) {
         delete m_RenderedScene;
         m_RenderedScene = nullptr;
     }
-    
+
     // Release the render context mask
     if (m_RenderManager)
         m_RenderManager->ReleaseRenderContextMaskFree(m_MaskFree);
@@ -2720,32 +2729,32 @@ CKERROR RCKRenderContext::Copy(CKObject &o, CKDependenciesContext &context) {
 CKBOOL RCKRenderContext::DestroyDevice() {
     // Based on IDA at 0x10067558
     m_DeviceValid = TRUE;
-    
+
     // Notify render manager that device is being destroyed
     if (m_RenderManager)
         m_RenderManager->DestroyingDevice(this);
-    
+
     // Destroy the rasterizer context
     if (m_RasterizerDriver)
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
-    
+
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
     m_DeviceValid = FALSE;
     m_Fullscreen = FALSE;
-    
+
     return TRUE;
 }
 
 void RCKRenderContext::ClearCallbacks() {
     // Based on IDA at 0x1006d7a2
-    RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+    RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
     if (rm) {
         rm->RemoveTemporaryCallback(&m_PreRenderCallBacks);
         rm->RemoveTemporaryCallback(&m_PostRenderCallBacks);
         rm->RemoveTemporaryCallback(&m_PostSpriteRenderCallBacks);
     }
-    
+
     // Clear callback containers
     m_PreRenderCallBacks.Clear();
     m_PostRenderCallBacks.Clear();
@@ -2789,10 +2798,10 @@ void RCKRenderContext::SetFullViewport(CKViewportData *vp, int width, int height
 
 void RCKRenderContext::SetClipRect(VxRect *rect) {
     // IDA: 0x1006c808
-    int left = (int)rect->left;
-    int top = (int)rect->top;
-    int right = (int)rect->right;
-    int bottom = (int)rect->bottom;
+    int left = (int) rect->left;
+    int top = (int) rect->top;
+    int right = (int) rect->right;
+    int bottom = (int) rect->bottom;
 
     const int clipWidth = right - left;
     const int clipHeight = bottom - top;
@@ -2803,18 +2812,18 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
     m_RasterizerContext->m_ViewportData.ViewHeight = (clipHeight >= 1) ? clipHeight : 1;
     m_RasterizerContext->SetViewport(&m_RasterizerContext->m_ViewportData);
 
-    const double invW = 1.0 / (double)clipWidth;
-    const double invH = 1.0 / (double)clipHeight;
-    const float dx = (float)(right + left - (m_ViewportData.ViewWidth + 2 * m_ViewportData.ViewX));
-    const float dy = (float)(top + bottom - (m_ViewportData.ViewHeight + 2 * m_ViewportData.ViewY));
+    const double invW = 1.0 / (double) clipWidth;
+    const double invH = 1.0 / (double) clipHeight;
+    const float dx = (float) (right + left - (m_ViewportData.ViewWidth + 2 * m_ViewportData.ViewX));
+    const float dy = (float) (top + bottom - (m_ViewportData.ViewHeight + 2 * m_ViewportData.ViewY));
 
     VxMatrix clipProj;
     clipProj.Clear();
 
-    clipProj[0][0] = (float)((double)m_ViewportData.ViewWidth * (double)m_ProjectionMatrix[0][0] / (double)clipWidth);
-    clipProj[1][1] = (float)((double)m_ViewportData.ViewHeight * (double)m_ProjectionMatrix[1][1] / (double)clipHeight);
-    clipProj[2][0] = (float)(-dx * invW);
-    clipProj[2][1] = (float)(dy * invH);
+    clipProj[0][0] = (float) ((double) m_ViewportData.ViewWidth * (double) m_ProjectionMatrix[0][0] / (double)clipWidth);
+    clipProj[1][1] = (float) ((double) m_ViewportData.ViewHeight * (double) m_ProjectionMatrix[1][1] / (double)clipHeight);
+    clipProj[2][0] = (float) (-dx * invW);
+    clipProj[2][1] = (float) (dy * invH);
     clipProj[2][2] = m_FarPlane / (m_FarPlane - m_NearPlane);
     clipProj[3][2] = -clipProj[2][2] * m_NearPlane;
     clipProj[2][3] = 1.0f;
@@ -2826,11 +2835,11 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     // IDA: 0x1006c68d
     if (!forceUpdate && m_ProjectionUpdated)
         return;
-    
+
     if (!m_RasterizerContext)
         return;
-    
-    const float aspect = (float)((double)m_ViewportData.ViewWidth / (double)m_ViewportData.ViewHeight);
+
+    const float aspect = (float) ((double) m_ViewportData.ViewWidth / (double) m_ViewportData.ViewHeight);
 
     if (m_Perspective)
         m_ProjectionMatrix.Perspective(m_Fov, aspect, m_NearPlane, m_FarPlane);
@@ -2841,12 +2850,12 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     m_RasterizerContext->SetViewport(&m_ViewportData);
     m_ProjectionUpdated = TRUE;
 
-    const float right = (float)m_Settings.m_Rect.right;
-    const float bottom = (float)m_Settings.m_Rect.bottom;
+    const float right = (float) m_Settings.m_Rect.right;
+    const float bottom = (float) m_Settings.m_Rect.bottom;
     VxRect rect(0.0f, 0.0f, right, bottom);
 
-    ((RCK2dEntity *)Get2dRoot(TRUE))->SetRect(rect);
-    ((RCK2dEntity *)Get2dRoot(FALSE))->SetRect(rect);
+    ((RCK2dEntity *) Get2dRoot(TRUE))->SetRect(rect);
+    ((RCK2dEntity *) Get2dRoot(FALSE))->SetRect(rect);
 }
 
 void RCKRenderContext::FlushSprite3DBatchesIfNeeded() {
@@ -2864,11 +2873,11 @@ void RCKRenderContext::AddSprite3DBatch(RCKSprite3D *sprite) {
     // IDA: 0x1006DBF9
     if (!sprite)
         return;
-    
+
     RCKMaterial *material = static_cast<RCKMaterial *>(sprite->GetMaterial());
     if (!material)
         return;
-    
+
     // Add sprite data to material's batch (returns TRUE if this is a new batch)
     if (material->AddSprite3DBatch(sprite)) {
         // If we already have pending batches and sorting is enabled, flush first
@@ -2914,47 +2923,47 @@ void RCKRenderContext::CallSprite3DBatches() {
 
             const int spriteCount = batch->m_Vertices.Size() >> 2;
             if (spriteCount) {
-            m_Stats.NbObjectDrawn += spriteCount;
-            m_Stats.NbTrianglesDrawn += 2 * spriteCount;
-            m_Stats.NbVerticesProcessed += 4 * spriteCount;
+                m_Stats.NbObjectDrawn += spriteCount;
+                m_Stats.NbTrianglesDrawn += 2 * spriteCount;
+                m_Stats.NbVerticesProcessed += 4 * spriteCount;
 
-            material->SetAsCurrent(this, FALSE, 0);
+                material->SetAsCurrent(this, FALSE, 0);
 
-            CKVertex *vertices = batch->m_Vertices.Begin();
-            VxFillStructure(4 * spriteCount, &vertices->Diffuse, sizeof(CKVertex), 8, colors);
-            batch->m_VertexCount = 4 * spriteCount;
+                CKVertex *vertices = batch->m_Vertices.Begin();
+                VxFillStructure(4 * spriteCount, &vertices->Diffuse, sizeof(CKVertex), 8, colors);
+                batch->m_VertexCount = 4 * spriteCount;
 
-            const int indexCount = 6 * spriteCount;
-            batch->m_Indices.Resize(indexCount);
+                const int indexCount = 6 * spriteCount;
+                batch->m_Indices.Resize(indexCount);
 
-            CKWORD *indices = batch->m_Indices.Begin();
-            if (indexCount > (int)batch->m_IndexCount) {
-                int v = 0;
-                for (int j = 0; j < spriteCount; ++j) {
-                    indices[0] = (CKWORD)v;
-                    indices[1] = (CKWORD)(v + 1);
-                    indices[2] = (CKWORD)(v + 2);
-                    indices[3] = (CKWORD)v;
-                    indices[4] = (CKWORD)(v + 2);
-                    indices[5] = (CKWORD)(v + 3);
-                    v += 4;
-                    indices += 6;
+                CKWORD *indices = batch->m_Indices.Begin();
+                if (indexCount > (int) batch->m_IndexCount) {
+                    int v = 0;
+                    for (int j = 0; j < spriteCount; ++j) {
+                        indices[0] = (CKWORD) v;
+                        indices[1] = (CKWORD) (v + 1);
+                        indices[2] = (CKWORD) (v + 2);
+                        indices[3] = (CKWORD) v;
+                        indices[4] = (CKWORD) (v + 2);
+                        indices[5] = (CKWORD) (v + 3);
+                        v += 4;
+                        indices += 6;
+                    }
+                    batch->m_IndexCount = indexCount;
+                    indices = batch->m_Indices.Begin();
                 }
-                batch->m_IndexCount = indexCount;
-                indices = batch->m_Indices.Begin();
-            }
 
-            dpData.Flags = CKRST_DP_TR_VCST;
-            if (batch->m_Flags) {
-                dpData.Flags |= CKRST_DP_DOCLIP;
-            }
-            dpData.VertexCount = 4 * spriteCount;
-            dpData.PositionPtr = vertices;
-            dpData.ColorPtr = &vertices->Diffuse;
-            dpData.SpecularColorPtr = &vertices->Specular;
-            dpData.TexCoordPtr = &vertices->tu;
+                dpData.Flags = CKRST_DP_TR_VCST;
+                if (batch->m_Flags) {
+                    dpData.Flags |= CKRST_DP_DOCLIP;
+                }
+                dpData.VertexCount = 4 * spriteCount;
+                dpData.PositionPtr = vertices;
+                dpData.ColorPtr = &vertices->Diffuse;
+                dpData.SpecularColorPtr = &vertices->Specular;
+                dpData.TexCoordPtr = &vertices->tu;
 
-            m_RasterizerContext->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
+                m_RasterizerContext->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
             }
         }
 
@@ -2973,7 +2982,7 @@ void RCKRenderContext::CheckObjectExtents() {
                 it->m_Entity = nullptr;
         }
     }
-}   
+}
 
 void RCKRenderContext::RenderTransparents(CKDWORD flags) {
     // IDA: 0x1006d070
@@ -2985,7 +2994,7 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
         if (count == 1) {
             RCK3dEntity *entity = m_TransparentObjects[0];
             if (entity)
-                entity->Render((CKRenderContext *)this, flags);
+                entity->Render((CKRenderContext *) this, flags);
             return;
         }
 
@@ -3062,7 +3071,7 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
         auto getPriorityWord = [](const RCK3dEntity *entity) -> CKWORD {
             CKWORD value = 0;
             if (entity)
-                memcpy(&value, (const char *)entity + 0x2A, sizeof(value));
+                memcpy(&value, (const char *) entity + 0x2A, sizeof(value));
             return value;
         };
 
@@ -3130,13 +3139,13 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
 
         for (int i = 0; i < count; ++i) {
             if (items[i].entity)
-                items[i].entity->Render((CKRenderContext *)this, flags);
+                items[i].entity->Render((CKRenderContext *) this, flags);
         }
     } else {
         for (int i = 0; i < count; ++i) {
             RCK3dEntity *entity = m_TransparentObjects[i];
             if (entity)
-                entity->Render((CKRenderContext *)this, flags);
+                entity->Render((CKRenderContext *) this, flags);
         }
     }
 }
@@ -3146,7 +3155,7 @@ void RCKRenderContext::AddExtents2D(const VxRect &rect, CKObject *obj) {
         // Add to object extents list
         CKObjectExtents extents;
         extents.m_Rect = rect;
-        extents.m_Entity = (CK3dEntity *)obj;
+        extents.m_Entity = (CK3dEntity *) obj;
         extents.m_Camera = 0;
         m_ObjectExtents.PushBack(extents);
     } else {
@@ -3183,22 +3192,17 @@ int RCKRenderContext::GetDependenciesCount(int mode) {
 CKSTRING RCKRenderContext::GetDependencies(int i, int mode) {
     return nullptr;
 }
- 
+
 void RCKRenderContext::Register() {
     // Based on IDA decompilation
     CKClassNeedNotificationFrom(m_ClassID, CKCID_RENDEROBJECT);
 }
 
 void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
-    RC_DEBUG_LOG("PrepareCameras called");
-
-    // Keep consistent with ResolveRenderFlags().
     if (!(Flags & CK_RENDER_OPTIONSMASK))
         Flags = static_cast<CK_RENDER_FLAGS>(m_RenderFlags);
 
     m_RenderedScene->PrepareCameras(Flags);
-
-    RC_DEBUG_LOG("PrepareCameras complete");
 }
 
 // ============================================================
@@ -3209,19 +3213,19 @@ void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
 // ============================================================
 
 UserDrawPrimitiveDataClass::UserDrawPrimitiveDataClass()
-        : m_Indices(nullptr),
-            m_MaxIndexCount(0),
-            m_MaxVertexCount(0) {
-        memset((VxDrawPrimitiveData *)this, 0, sizeof(VxDrawPrimitiveData));
-        memset(m_CachedDP, 0, sizeof(m_CachedDP));
+    : m_Indices(nullptr),
+      m_MaxIndexCount(0),
+      m_MaxVertexCount(0) {
+    memset((VxDrawPrimitiveData *) this, 0, sizeof(VxDrawPrimitiveData));
+    memset(m_CachedDP, 0, sizeof(m_CachedDP));
 }
 
 UserDrawPrimitiveDataClass::~UserDrawPrimitiveDataClass() {
-        delete[] m_Indices;
-        m_Indices = nullptr;
-        m_MaxIndexCount = 0;
-        m_MaxVertexCount = 0;
-        ClearStructure();
+    delete[] m_Indices;
+    m_Indices = nullptr;
+    m_MaxIndexCount = 0;
+    m_MaxVertexCount = 0;
+    ClearStructure();
 }
 
 VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFlags, int VertexCount) {
@@ -3233,16 +3237,16 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
         AllocateStructure();
     }
 
-    memcpy(m_CachedDP, (VxDrawPrimitiveData *)this, sizeof(VxDrawPrimitiveData));
-    VxDrawPrimitiveData *cached = (VxDrawPrimitiveData *)m_CachedDP;
+    memcpy(m_CachedDP, (VxDrawPrimitiveData *) this, sizeof(VxDrawPrimitiveData));
+    VxDrawPrimitiveData *cached = (VxDrawPrimitiveData *) m_CachedDP;
 
     cached->VertexCount = VertexCount;
-    cached->Flags = DpFlags & 0xEFFFFFFF;  // Mask out CKRST_DP_VBUFFER flag
+    cached->Flags = DpFlags & 0xEFFFFFFF; // Mask out CKRST_DP_VBUFFER flag
 
     // Match original behavior: null out optional pointers based on flags.
-    if ((DpFlags & 0x20) == 0)  // CKRST_DP_SPECULAR
+    if ((DpFlags & 0x20) == 0) // CKRST_DP_SPECULAR
         cached->SpecularColorPtr = nullptr;
-    if ((DpFlags & 0x10) == 0)  // CKRST_DP_DIFFUSE
+    if ((DpFlags & 0x10) == 0) // CKRST_DP_DIFFUSE
         cached->ColorPtr = nullptr;
 
     return cached;
@@ -3261,7 +3265,7 @@ void UserDrawPrimitiveDataClass::ClearStructure() {
     }
 
     // Re-initialize the base structure
-    memset((VxDrawPrimitiveData *)this, 0, sizeof(VxDrawPrimitiveData));
+    memset((VxDrawPrimitiveData *) this, 0, sizeof(VxDrawPrimitiveData));
 }
 
 void UserDrawPrimitiveDataClass::AllocateStructure() {
@@ -3269,25 +3273,25 @@ void UserDrawPrimitiveDataClass::AllocateStructure() {
     const int maxVertices = m_MaxVertexCount;
 
     // Strides must be valid; many callers rely on them.
-    PositionStride = 16;        // VxVector4 (x,y,z,rhw)
-    NormalStride = 12;          // VxVector
-    ColorStride = 4;            // DWORD
-    SpecularColorStride = 4;    // DWORD
-    TexCoordStride = 8;         // Vx2DVector
+    PositionStride = 16;     // VxVector4 (x,y,z,rhw)
+    NormalStride = 12;       // VxVector
+    ColorStride = 4;         // DWORD
+    SpecularColorStride = 4; // DWORD
+    TexCoordStride = 8;      // Vx2DVector
     for (int i = 0; i < (CKRST_MAX_STAGES - 1); ++i)
         TexCoordStrides[i] = 8;
 
-    ColorPtr = VxNewAligned(4 * maxVertices, 16);      // DWORD per vertex
-    SpecularColorPtr = VxNewAligned(4 * maxVertices, 16);  // DWORD per vertex
-    NormalPtr = VxNewAligned(12 * maxVertices, 16);    // VxVector (12 bytes) per vertex
-    PositionPtr = VxNewAligned(16 * maxVertices, 16);  // VxVector4 (16 bytes) per vertex
-    TexCoordPtr = VxNewAligned(8 * maxVertices, 16);   // Vx2DVector (8 bytes) per vertex
+    ColorPtr = VxNewAligned(4 * maxVertices, 16);         // DWORD per vertex
+    SpecularColorPtr = VxNewAligned(4 * maxVertices, 16); // DWORD per vertex
+    NormalPtr = VxNewAligned(12 * maxVertices, 16);       // VxVector (12 bytes) per vertex
+    PositionPtr = VxNewAligned(16 * maxVertices, 16);     // VxVector4 (16 bytes) per vertex
+    TexCoordPtr = VxNewAligned(8 * maxVertices, 16);      // Vx2DVector (8 bytes) per vertex
 
     for (int i = 0; i < 7; ++i) {
-        TexCoordPtrs[i] = VxNewAligned(8 * maxVertices, 16);  // Vx2DVector per vertex
+        TexCoordPtrs[i] = VxNewAligned(8 * maxVertices, 16); // Vx2DVector per vertex
     }
 
-    memcpy(m_CachedDP, (VxDrawPrimitiveData *)this, sizeof(VxDrawPrimitiveData));
+    memcpy(m_CachedDP, (VxDrawPrimitiveData *) this, sizeof(VxDrawPrimitiveData));
 }
 
 CKWORD *UserDrawPrimitiveDataClass::GetIndices(int IndicesCount) {
@@ -3299,5 +3303,3 @@ CKWORD *UserDrawPrimitiveDataClass::GetIndices(int IndicesCount) {
     }
     return m_Indices;
 }
-
-// Size check: sizeof(RCKRenderContext) = ? (should be 956)

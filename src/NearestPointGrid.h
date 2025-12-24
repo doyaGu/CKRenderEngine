@@ -12,11 +12,9 @@
 /* some stored 3d points.
 /*
 /**************************************************/
-class NearestPointGrid
-{
+class NearestPointGrid {
 protected:
-    struct Point
-    {
+    struct Point {
         VxVector pt;
         int index;
     };
@@ -39,8 +37,7 @@ protected:
     float m_Threshold2;
 
     //--- Get Cell
-    inline Cell *&GetCell(const int x, const int y, const int z)
-    {
+    inline Cell *&GetCell(const int x, const int y, const int z) {
         return m_Grid[x + m_SizeX * y + m_SizeXY * z];
     }
 
@@ -55,8 +52,7 @@ public:
     void SetGridDimensions(const int sizeX, const int sizeY, const int sizeZ);
 
     //--- Set Threshold
-    inline void SetThreshold(const float threshold)
-    {
+    inline void SetThreshold(const float threshold) {
         m_Threshold = threshold;
         m_Threshold2 = threshold * threshold;
     }

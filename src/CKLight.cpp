@@ -429,8 +429,7 @@ CKStateChunk *RCKLight::Save(CKFile *file, CKDWORD flags) {
     // Convert diffuse color to packed DWORD format (ARGB with alpha forced to 0xFF)
     // IDA: sub_1001BA90 returns RGBAFTOCOLOR(this) | 0xFF000000
     // RGBAFTOCOLOR uses: (A << 24) | (R << 16) | (G << 8) | (B << 0)
-    CKDWORD packedColor = RGBAFTOCOLOR(&m_LightData.Diffuse) | A_MASK;
-    lightChunk->WriteDword(packedColor);
+    lightChunk->WriteDword(m_LightData.Diffuse.GetRGB());
 
     // Write attenuation and range
     lightChunk->WriteFloat(m_LightData.Attenuation0);
@@ -541,10 +540,7 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
             // r = BYTE2(color) / 255 (bits 16-23), g = BYTE1(color) / 255 (bits 8-15)
             // b = BYTE0(color) / 255 (bits 0-7), a = HIBYTE(color) / 255 (bits 24-31)
             CKDWORD packedColor = chunk->ReadDword();
-            m_LightData.Diffuse.r = (float)((packedColor >> 16) & 0xFF) / 255.0f;  // R = BYTE2
-            m_LightData.Diffuse.g = (float)((packedColor >> 8) & 0xFF) / 255.0f;   // G = BYTE1
-            m_LightData.Diffuse.b = (float)(packedColor & 0xFF) / 255.0f;          // B = BYTE0
-            m_LightData.Diffuse.a = (float)((packedColor >> 24) & 0xFF) / 255.0f;  // A = HIBYTE
+            m_LightData.Diffuse.Set(packedColor);
 
             // Read attenuation and range
             m_LightData.Attenuation0 = chunk->ReadFloat();

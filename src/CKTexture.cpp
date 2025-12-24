@@ -482,10 +482,10 @@ CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
     chunk->AddChunkAndDelete(baseChunk);
 
     CKDWORD identifiers[4] = {
-        CK_STATESAVE_TEXAVIFILENAME,   // 0x1000
-        CK_STATESAVE_TEXREADER,        // 0x100000
-        CK_STATESAVE_TEXCOMPRESSED,    // 0x20000
-        CK_STATESAVE_TEXFILENAMES      // 0x10000
+        CK_STATESAVE_TEXAVIFILENAME, // 0x1000
+        CK_STATESAVE_TEXREADER,      // 0x100000
+        CK_STATESAVE_TEXCOMPRESSED,  // 0x20000
+        CK_STATESAVE_TEXFILENAMES    // 0x10000
     };
     DumpToChunk(chunk, m_Context, file, identifiers);
 
@@ -499,7 +499,7 @@ CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
     dword |= (m_SaveOptions << 16);
     if (IsTransparent())
         dword |= 0x100;
-    if (m_BitmapFlags & 0x10)  // IsCubeMap
+    if (m_BitmapFlags & 0x10) // IsCubeMap
         dword |= 0x400;
     if (m_DesiredVideoFormat != UNKNOWN_PF)
         dword |= 0x200;

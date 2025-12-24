@@ -589,7 +589,7 @@ CKBOOL RCKSkin::CalcLocalBBox(CKContext *context, VxBbox *bbox) {
 }
 
 CKBOOL RCKSkin::CalcBonesBBox(CKContext *context, CK3dEntity *owner, VxBbox *bbox) {
-    (void)context;
+    (void) context;
     if (!bbox)
         return FALSE;
 

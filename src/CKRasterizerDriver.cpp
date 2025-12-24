@@ -4,8 +4,7 @@ CKRasterizerDriver::CKRasterizerDriver()
     : m_DisplayModes(),
       m_TextureFormats(),
       m_Desc(),
-      m_Contexts()
-{
+      m_Contexts() {
     m_Stereo = FALSE;
     m_Hardware = FALSE;
     m_CapsUpToDate = FALSE;
@@ -18,23 +17,20 @@ CKRasterizerDriver::CKRasterizerDriver()
 
 CKRasterizerDriver::~CKRasterizerDriver() {}
 
-CKRasterizerContext *CKRasterizerDriver::CreateContext()
-{
+CKRasterizerContext *CKRasterizerDriver::CreateContext() {
     CKRasterizerContext *context = new CKRasterizerContext();
     context->m_Driver = this;
     m_Contexts.PushBack(context);
     return context;
 }
 
-CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
-{
+CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context) {
     m_Contexts.Remove(Context);
     if (Context) delete Context;
     return TRUE;
 }
 
-void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner)
-{
+void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner) {
     m_Owner = Owner;
     m_Desc = "NULL Rasterizer";
     m_CapsUpToDate = TRUE;
