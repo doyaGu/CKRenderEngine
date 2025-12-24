@@ -345,8 +345,8 @@ CKERROR RCKRenderManager::PreProcess() {
 
 CKERROR RCKRenderManager::PostProcess() {
     // Set moved flag on all moved entities
-    for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin(); 
-         it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
+    for (RCK3dEntity **it = (RCK3dEntity **) m_MovedEntities.Begin();
+         it != (RCK3dEntity **) m_MovedEntities.End(); ++it) {
         (*it)->m_MoveableFlags |= VX_MOVEABLE_RESERVED2;
     }
 
@@ -364,7 +364,7 @@ CKERROR RCKRenderManager::PostProcess() {
 
 CKERROR RCKRenderManager::SequenceAddedToScene(CKScene *scn, CK_ID *objids, int count) {
     CK_DEBUG_LOG_FMT("SequenceAddedToScene: scn=%p, count=%d", scn, count);
-    
+
     CKLevel *level = m_Context->GetCurrentLevel();
     if (!level)
         return CK_OK;
@@ -417,17 +417,17 @@ CKERROR RCKRenderManager::OnCKEnd() {
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
         m_Context->DestroyObject(m_2DRootBack);
     }
-    
+
     obj = m_Context->GetObject(m_2DRootBackId);
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
         m_Context->DestroyObject(m_2DRootFore);
     }
-    
+
     m_2DRootBack = nullptr;
     m_2DRootFore = nullptr;
     m_2DRootForeId = 0;
     m_2DRootBackId = 0;
-    
+
     return CK_OK;
 }
 
@@ -651,7 +651,7 @@ int RCKRenderManager::GetEffectCount() {
 int RCKRenderManager::AddEffect(const VxEffectDescription &NewEffect) {
     int size = m_Effects.Size();
     m_Effects.PushBack(NewEffect);
-    m_Effects[size].EffectIndex = (VX_EFFECT)size;
+    m_Effects[size].EffectIndex = (VX_EFFECT) size;
     return size;
 }
 
@@ -684,7 +684,7 @@ CKMaterial *RCKRenderManager::GetDefaultMaterial() {
 void RCKRenderManager::DetachAllObjects() {
     m_MovedEntities.Clear();
     m_Entities.Clear();
-    
+
     for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
         CKRenderContext *ctx = (CKRenderContext *) m_Context->GetObject(*it);
         if (ctx) {
@@ -697,7 +697,7 @@ void RCKRenderManager::DetachAllObjects() {
 void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
     RCKRenderContext *rctx = (RCKRenderContext *) ctx;
     CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
-    
+
     for (int i = 0; i < CKGetClassCount(); ++i) {
         if (CKIsChildClassOf(i, CKCID_TEXTURE)) {
             int count = m_Context->GetObjectsCountByClassID(i);
@@ -722,8 +722,8 @@ void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
 }
 
 void RCKRenderManager::DeleteAllVertexBuffers() {
-    for (CKVertexBuffer **it = (CKVertexBuffer **)m_VertexBuffers.Begin(); 
-         it < (CKVertexBuffer **)m_VertexBuffers.End(); ++it) {
+    for (CKVertexBuffer **it = (CKVertexBuffer **) m_VertexBuffers.Begin();
+         it < (CKVertexBuffer **) m_VertexBuffers.End(); ++it) {
         if (*it) {
             delete *it;
         }
@@ -732,8 +732,8 @@ void RCKRenderManager::DeleteAllVertexBuffers() {
 }
 
 void RCKRenderManager::SaveLastFrameMatrix() {
-    for (RCK3dEntity **it = (RCK3dEntity **)m_Entities.Begin();
-         it != (RCK3dEntity **)m_Entities.End(); ++it) {
+    for (RCK3dEntity **it = (RCK3dEntity **) m_Entities.Begin();
+         it != (RCK3dEntity **) m_Entities.End(); ++it) {
         (*it)->SaveLastFrameMatrix();
     }
 }
@@ -750,8 +750,8 @@ void RCKRenderManager::UnregisterLastFrameEntity(RCK3dEntity *entity) {
 
 void RCKRenderManager::CleanMovedEntities() {
     int count = 0;
-    for (RCK3dEntity **it = (RCK3dEntity **)m_MovedEntities.Begin();
-         it != (RCK3dEntity **)m_MovedEntities.End(); ++it) {
+    for (RCK3dEntity **it = (RCK3dEntity **) m_MovedEntities.Begin();
+         it != (RCK3dEntity **) m_MovedEntities.End(); ++it) {
         RCK3dEntity *entity = *it;
         if ((entity->GetMoveableFlags() & VX_MOVEABLE_RESERVED2) != 0) {
             // Entity was moved this frame, clear both flags
@@ -770,7 +770,7 @@ void RCKRenderManager::AddTemporaryCallback(CKCallbacksContainer *callbacks, voi
     cb.callback = callbacks;
     cb.argument = Function;
     cb.arg2 = Argument;
-    
+
     if (preOrPost)
         m_TemporaryPreRenderCallbacks.PushBack(cb);
     else
@@ -784,7 +784,7 @@ void RCKRenderManager::RemoveTemporaryCallback(CKCallbacksContainer *callbacks) 
             m_TemporaryPreRenderCallbacks.RemoveAt(i);
         }
     }
-    
+
     // Remove from post-render callbacks array
     for (int i = m_TemporaryPostRenderCallbacks.Size() - 1; i >= 0; --i) {
         if (m_TemporaryPostRenderCallbacks[i].callback == callbacks) {
@@ -802,21 +802,21 @@ void RCKRenderManager::RemoveAllTemporaryCallbacks() {
     // Remove all pre-render callbacks from their containers
     for (VxCallBack *it = m_TemporaryPreRenderCallbacks.Begin();
          it != m_TemporaryPreRenderCallbacks.End(); ++it) {
-        CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
+        CKCallbacksContainer *container = (CKCallbacksContainer *) it->callback;
         if (container) {
             container->RemovePreCallback(it->argument, it->arg2);
         }
     }
-    
+
     // Remove all post-render callbacks from their containers
     for (VxCallBack *it = m_TemporaryPostRenderCallbacks.Begin();
          it != m_TemporaryPostRenderCallbacks.End(); ++it) {
-        CKCallbacksContainer *container = (CKCallbacksContainer *)it->callback;
+        CKCallbacksContainer *container = (CKCallbacksContainer *) it->callback;
         if (container) {
             container->RemovePostCallback(it->argument, it->arg2);
         }
     }
-    
+
     ClearTemporaryCallbacks();
 }
 
@@ -994,7 +994,7 @@ CKSceneGraphNode *RCKRenderManager::CreateNode(RCK3dEntity *entity) {
     if (node) {
         // Add to root node
         m_SceneGraphRootNode.AddNode(node);
-        CK_DEBUG_LOG_FMT("CreateNode: Created node for entity=%p, total children=%d", 
+        CK_DEBUG_LOG_FMT("CreateNode: Created node for entity=%p, total children=%d",
                          entity, m_SceneGraphRootNode.m_Children.Size());
     }
     return node;
@@ -1003,12 +1003,12 @@ CKSceneGraphNode *RCKRenderManager::CreateNode(RCK3dEntity *entity) {
 void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
     if (!node)
         return;
-    
+
     // Remove from parent
     if (node->m_Parent) {
         node->m_Parent->RemoveNode(node);
     }
-    
+
     // Delete the node
     delete node;
 }
@@ -1019,7 +1019,7 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
 
 CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     // IDA: 0x1006f7f0
-    if (DriverIndex >= (int)m_DriverCount)
+    if (DriverIndex >= (int) m_DriverCount)
         return nullptr;
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
@@ -1038,20 +1038,20 @@ CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
 int RCKRenderManager::GetPreferredSoftwareDriver() {
     // IDA: 0x100733f0
     // First pass: prefer OpenGL software driver
-    for (int i = 0; i < (int)m_DriverCount; ++i) {
+    for (int i = 0; i < (int) m_DriverCount; ++i) {
         CKRasterizerDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware && driver->m_2DCaps.Family == CKRST_OPENGL) {
             return i;
         }
     }
-    
+
     // Second pass: any software driver
-    for (int i = 0; i < (int)m_DriverCount; ++i) {
+    for (int i = 0; i < (int) m_DriverCount; ++i) {
         CKRasterizerDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware) {
             return i;
         }
     }
-    
+
     return 0;
 }
