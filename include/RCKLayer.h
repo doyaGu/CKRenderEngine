@@ -5,6 +5,8 @@
 
 #include "CKLayer.h"
 
+class CKGrid;
+
 class RCKLayer : public CKLayer {
 public:
     // CKLayer implementation
@@ -51,9 +53,9 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    RCKGrid *m_Grid;
-    CKDWORD m_Type;
-    CKDWORD m_Format;
+    CKGrid *m_Grid;
+    int m_Type;
+    int m_Format;
     CKDWORD m_Flags;
     CKSquare *m_SquareArray;
 };
