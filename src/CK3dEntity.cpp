@@ -310,19 +310,19 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Set world matrix respecting file/context rules from original implementation (IDA: 0x1000AE7C..0x1000AF11)
     // - If file != NULL: always SetWorldMatrix
-    // - Else: SetWorldMatrix only when the preserved WORLDALIGNED flag is not set, OR when the current mesh has an initial value in the current scene.
-    if (file) {
-        SetWorldMatrix(worldMatrix, TRUE);
-    } else {
-        CKBOOL shouldSetMatrix = TRUE;
+    // - Else: apply the loaded world matrix unless the *preserved* VX_MOVEABLE_WORLDALIGNED gate is set.
+    //         If the current mesh has an initial value in the current scene, the gate is cleared and we apply.
+    CKDWORD preservedWorldAligned = preservedFlags;
+    if (!file) {
         CKMesh *meshForInit = GetCurrentMesh();
         CKScene *currentScene = m_Context ? m_Context->GetCurrentScene() : nullptr;
         if (meshForInit && currentScene && currentScene->GetObjectInitialValue(meshForInit)) {
-            shouldSetMatrix = FALSE;
+            preservedWorldAligned = 0;
         }
-        if (!shouldSetMatrix) {
-            SetWorldMatrix(worldMatrix, TRUE);
-        }
+    }
+
+    if (file || !preservedWorldAligned) {
+        SetWorldMatrix(worldMatrix, TRUE);
     }
 
     // Load skin data (chunk 0x200000) - complex vertex weighting system
@@ -882,7 +882,7 @@ CKBOOL RCK3dEntity::SetParent(CK3dEntity *Parent, CKBOOL KeepWorldPos) {
     if (newPlace != m_Place) {
         UpdatePlace(newPlace);
     }
-    
+
     return TRUE;
 }
 
