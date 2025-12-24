@@ -1,5 +1,6 @@
 #include "RCKCurve.h"
 
+#include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -8,11 +9,6 @@
 #include "RCK3dEntity.h"
 #include "RCKCurvePoint.h"
 #include "RCKMesh.h"
-
-#include "VxMath.h"
-
-#include <cmath>
-#include <cstdio>
 
 CK_CLASSID RCKCurve::m_ClassID = CKCID_CURVE;
 
@@ -384,7 +380,7 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
             if (s < 0.0f) s = 0.0f;
             return s;
         }
-        float intPart = std::floor(s);
+        float intPart = floorf(s);
         s -= intPart;
         while (s < 0.0f) {
             s += 1.0f;
@@ -670,9 +666,9 @@ CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
 
     float newBias = 0.0f;
     // Choose a stable component (matches DLL dominant-axis selection).
-    const float ax = std::fabs(chordDiff.x);
-    const float ay = std::fabs(chordDiff.y);
-    const float az = std::fabs(chordDiff.z);
+    const float ax = fabsf(chordDiff.x);
+    const float ay = fabsf(chordDiff.y);
+    const float az = fabsf(chordDiff.z);
     if (ax >= ay && ax >= az) {
         if (chordDiff.x != 0.0f) {
             newBias = (tanSum.x / (1.0f - tension) + chordSum.x) / chordDiff.x;
@@ -916,7 +912,7 @@ CKERROR RCKCurve::UpdateMesh() {
             VxVector m1;
             pEnd->GetTangents(&m1, nullptr);
 
-            int segSteps = (int) std::floor((double) (l1 - l0) * (double) m_StepCount * (double) invTotalLen);
+            int segSteps = (int) floor((double) (l1 - l0) * (double) m_StepCount * (double) invTotalLen);
             if (segSteps < 1) segSteps = 1;
 
             if (linear || segSteps == 1) {
