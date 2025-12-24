@@ -1,8 +1,8 @@
 #include "RCKSkin.h"
-#include "CK3dEntity.h"
-#include "CKContext.h"
+
 #include "VxMath.h"
 #include "VxMatrix.h"
+#include "CK3dEntity.h"
 
 //-----------------------------------------------------------------------------
 // RCKSkinBoneData Implementation

@@ -2,11 +2,10 @@
 
 #include "CKBitmapReader.h"
 #include "CKPathManager.h"
-#include "CKRasterizer.h"
 #include "CKStateChunk.h"
+#include "CKRasterizer.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
-#include "VxMath.h"
 
 CK_CLASSID RCKTexture::m_ClassID = CKCID_TEXTURE;
 

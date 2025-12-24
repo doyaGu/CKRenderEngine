@@ -1,10 +1,7 @@
 #include "RCKSpriteText.h"
 
-#include "CKContext.h"
 #include "CKStateChunk.h"
-#include "CKFile.h"
 #include "CKBitmapData.h"
-#include "VxMath.h"
 
 CK_CLASSID RCKSpriteText::m_ClassID = CKCID_SPRITETEXT;
 

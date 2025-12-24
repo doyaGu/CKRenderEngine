@@ -1,14 +1,14 @@
 #include "RCKSprite.h"
-#include "CKRasterizer.h"
-#include "RCKRenderManager.h"
-#include "RCKRenderContext.h"
+
 #include "CKPathManager.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "VxMath.h"
 #include "CKBitmapData.h"
 #include "CKBitmapReader.h"
 #include "CKGlobals.h"
+#include "CKRasterizer.h"
+#include "RCKRenderManager.h"
+#include "RCKRenderContext.h"
 
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;
 

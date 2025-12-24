@@ -1,13 +1,16 @@
 #include "RCKPlace.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKObject.h"
 #include "CKBeObject.h"
-#include "RCK3dEntity.h"
 #include "CK3dEntity.h"
 #include "CKCamera.h"
 #include "PlaceFitter.h"
+
+// Static class ID
+CK_CLASSID RCKPlace::m_ClassID = CKCID_PLACE;
 
 /**
  * @brief RCKPlace constructor
@@ -376,9 +379,6 @@ void RCKPlace::Register() {
 CKPlace *RCKPlace::CreateInstance(CKContext *Context) {
     return reinterpret_cast<CKPlace *>(new RCKPlace(Context));
 }
-
-// Static class ID
-CK_CLASSID RCKPlace::m_ClassID = CKCID_PLACE;
 
 //-----------------------------------------------------------------------------
 // CKPlace virtual method implementations

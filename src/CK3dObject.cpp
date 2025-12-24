@@ -3,11 +3,9 @@
 
 CK_CLASSID RCK3dObject::m_ClassID = CKCID_3DOBJECT;
 
-RCK3dObject::RCK3dObject(CKContext *Context, CKSTRING name) : RCK3dEntity(Context, name) {
-}
+RCK3dObject::RCK3dObject(CKContext *Context, CKSTRING name) : RCK3dEntity(Context, name) {}
 
-RCK3dObject::~RCK3dObject() {
-}
+RCK3dObject::~RCK3dObject() {}
 
 CK_CLASSID RCK3dObject::GetClassID() {
     return m_ClassID;
@@ -32,7 +30,7 @@ CKSTRING RCK3dObject::GetDependencies(int i, int mode) {
 
 void RCK3dObject::Register() {
     // Register associated parameter GUID
-    CKClassRegisterAssociatedParameter(RCK3dObject::m_ClassID, CKPGUID_OBJECT3D);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_OBJECT3D);
 }
 
 CK3dObject *RCK3dObject::CreateInstance(CKContext *Context) {

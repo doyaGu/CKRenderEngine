@@ -1,10 +1,11 @@
 #include "RCKLayer.h"
+
+#include "VxColor.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKObject.h"
 #include "CKGridManager.h"
-#include "VxColor.h"
 
 /**
  * @brief RCKLayer constructor
@@ -387,7 +388,7 @@ CKERROR RCKLayer::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKLayer::GetClassName() {
-    return "Layer";
+    return (CKSTRING) "Layer";
 }
 
 int RCKLayer::GetDependenciesCount(int mode) {

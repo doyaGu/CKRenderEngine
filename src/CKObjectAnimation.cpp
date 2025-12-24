@@ -1,16 +1,15 @@
 #include "RCKObjectAnimation.h"
-#include "RCKKeyedAnimation.h"
-#include "RCK3dEntity.h"
-#include "RCKMesh.h"
+
+#include "VxMath.h"
 #include "CKBodyPart.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKSceneGraph.h"
 #include "CKMemoryPool.h"
-#include "VxMath.h"
-
-#include <algorithm>
+#include "RCKKeyedAnimation.h"
+#include "RCK3dEntity.h"
+#include "RCKMesh.h"
 
 CK_CLASSID RCKObjectAnimation::m_ClassID = CKCID_OBJECTANIMATION;
 

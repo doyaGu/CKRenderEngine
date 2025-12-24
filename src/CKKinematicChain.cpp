@@ -6,11 +6,10 @@
  */
 
 #include "RCKKinematicChain.h"
-#include "RCKBodyPart.h"
-#include "CKStateChunk.h"
-#include "CKFile.h"
 
-#include <cmath>
+#include "CKFile.h"
+#include "CKStateChunk.h"
+#include "RCKBodyPart.h"
 
 // Static class ID
 CK_CLASSID RCKKinematicChain::m_ClassID = CKCID_KINEMATICCHAIN;

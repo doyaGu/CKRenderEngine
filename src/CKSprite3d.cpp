@@ -1,14 +1,13 @@
 #include "RCKSprite3D.h"
-#include "RCK3dEntity.h"
-#include "RCKMaterial.h"
-#include "RCKRenderContext.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "CKContext.h"
 #include "CKSceneGraph.h"
 #include "CKRasterizer.h"
 #include "CKRasterizerTypes.h"
-#include "VxMath.h"
+#include "RCK3dEntity.h"
+#include "RCKMaterial.h"
+#include "RCKRenderContext.h"
 
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
 

@@ -1,8 +1,8 @@
 #include "RCKVertexBuffer.h"
 
+#include "CKRasterizer.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
-#include "CKRasterizer.h"
 
 RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(), m_MemoryPool() {
     m_CKContext = context;
