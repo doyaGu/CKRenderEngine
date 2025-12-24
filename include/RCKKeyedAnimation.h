@@ -24,6 +24,7 @@ public:
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // Override CKAnimation methods with RCKKeyedAnimation-specific implementations
     void CenterAnimation(float frame) override;
@@ -36,6 +37,10 @@ public:
     static void Register();
     static CKKeyedAnimation *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
+
+    // Internal helpers used to match original CK2_3D.dll serialization behavior.
+    RCKObjectAnimation *GetRootAnimationInternal() const { return m_RootAnimation; }
+    const VxVector &GetRootVectorInternal() const { return m_Vector; }
 
 protected:
     XSObjectPointerArray m_Animations; // 0x34-0x3B (XSArray has m_Begin at 0x34, m_End at 0x38)
