@@ -18,8 +18,6 @@ public:
 
     //----------------------------------------------------------
     // Internal functions
-    CKBOOL IsHiddenByParent() override;
-    CKBOOL IsVisible() override;
 
     explicit RCKCurve(CKContext *Context, CKSTRING name = nullptr);
     ~RCKCurve() override;
