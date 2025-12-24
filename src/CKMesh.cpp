@@ -1,8 +1,5 @@
 #include "RCKMesh.h"
 
-#include <cmath>
-#include <algorithm>
-
 #include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKDefines2.h"
@@ -17,7 +14,6 @@
 #include "RCKTexture.h"
 #include "CKRenderEngineTypes.h"
 #include "CKScene.h"
-#include "CKRenderManager.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
@@ -264,7 +260,7 @@ void ProgressiveMeshPreRenderCallback(CKRenderContext *ctx, CK3dEntity *entity, 
             float dx = eyePos.x - objPos.x;
             float dy = eyePos.y - objPos.y;
             float dz = eyePos.z - objPos.z;
-            distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+            distance = sqrtf(dx * dx + dy * dy + dz * dz);
         }
     }
 
