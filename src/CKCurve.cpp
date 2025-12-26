@@ -12,6 +12,63 @@
 
 CK_CLASSID RCKCurve::m_ClassID = CKCID_CURVE;
 
+// Static helper: normalize index for open/closed curves
+static int NormalizeIndex(int index, int count, CKBOOL opened) {
+    if (count <= 0)
+        return 0;
+    if (opened) {
+        if (index < 0)
+            return 0;
+        if (index >= count)
+            return count - 1;
+        return index;
+    }
+    if (index >= 0) {
+        return index % count;
+    }
+    return (count + index) % count;
+}
+
+// Static helper: normalize step for open/closed curves
+static float NormalizeStep(float step, CKBOOL opened) {
+    if (opened) {
+        if (step > 1.0f)
+            step = 1.0f;
+        if (step < 0.0f)
+            step = 0.0f;
+        return step;
+    }
+    if (step >= 1.0f) {
+        int intPart = (int)step;
+        step -= (float)intPart;
+    }
+    while (step < 0.0f) {
+        step += 1.0f;
+    }
+    return step;
+}
+
+// Static helper: Hermite spline interpolation
+static void HermiteInterpolate(VxVector *result, const VxVector &p0, const VxVector &p1,
+                               const VxVector &m0, const VxVector &m1, float t) {
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    const float h00 = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    const float h10 = t3 - 2.0f * t2 + t;
+    const float h01 = -2.0f * t3 + 3.0f * t2;
+    const float h11 = t3 - t2;
+    result->x = h00 * p0.x + h10 * m0.x + h01 * p1.x + h11 * m1.x;
+    result->y = h00 * p0.y + h10 * m0.y + h01 * p1.y + h11 * m1.y;
+    result->z = h00 * p0.z + h10 * m0.z + h01 * p1.z + h11 * m1.z;
+}
+
+// Static helper: linear interpolation
+static void LinearInterpolate(VxVector *result, const VxVector &p0, const VxVector &p1, float t) {
+    result->x = p0.x + (p1.x - p0.x) * t;
+    result->y = p0.y + (p1.y - p0.y) * t;
+    result->z = p0.z + (p1.z - p0.z) * t;
+}
+
 /**
  * @brief RCKCurve constructor
  * @param Context The CKContext instance
@@ -340,21 +397,17 @@ CKBOOL RCKCurve::IsOpen() {
 }
 
 CKERROR RCKCurve::GetPos(float step, VxVector *Pos, VxVector *Dir) {
-    if (!Pos) {
+    if (!Pos)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    // Ensure curve is updated
-    if (!IsUpToDate()) {
+    if (!IsUpToDate())
         Update();
-    }
 
     VxVector localPos;
     VxVector localDir;
     CKERROR err = GetLocalPos(step, &localPos, Dir ? &localDir : nullptr);
-    if (err != CK_OK) {
+    if (err != CK_OK)
         return err;
-    }
 
     Vx3DMultiplyMatrixVector(Pos, m_WorldMatrix, &localPos);
     if (Dir) {
@@ -365,124 +418,61 @@ CKERROR RCKCurve::GetPos(float step, VxVector *Pos, VxVector *Dir) {
 }
 
 CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
-    if (!Pos) {
+    if (!Pos)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    // Ensure curve is updated
-    if (!IsUpToDate()) {
+    if (!IsUpToDate())
         Update();
-    }
-
-    auto normalizeStep = [this](float s) {
-        if (m_Opened) {
-            if (s > 1.0f) s = 1.0f;
-            if (s < 0.0f) s = 0.0f;
-            return s;
-        }
-        float intPart = floorf(s);
-        s -= intPart;
-        while (s < 0.0f) {
-            s += 1.0f;
-        }
-        return s;
-    };
-
-    auto normalizeIndex = [this](int index, int count) {
-        if (count <= 0) return 0;
-        if (m_Opened) {
-            if (index < 0) return 0;
-            if (index >= count) return count - 1;
-            return index;
-        }
-        index %= count;
-        if (index < 0) index += count;
-        return index;
-    };
 
     const int count = m_ControlPoints.Size();
-    if (count < 2) {
+    if (count == 0 || count == 1)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    step = normalizeStep(step);
-
+    step = NormalizeStep(step, m_Opened);
     const float targetLen = step * m_Length;
 
+    VxVector p0, p1;
+    VxVector t0, t1;
+
     int endIndex = m_Opened ? (count - 1) : 0;
+    RCKCurvePoint **ppPoints = (RCKCurvePoint **)m_ControlPoints.Begin();
     for (int i = 0; i < count; ++i) {
-        RCKCurvePoint *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-        if (!pt) {
-            continue;
-        }
-        const float ptLen = pt->GetLength();
-        if (!(ptLen < targetLen)) {
-            endIndex = i;
-            break;
+        RCKCurvePoint *pt = ppPoints[i];
+        if (pt) {
+            const float ptLen = pt->GetLength();
+            if (!(ptLen < targetLen)) {
+                endIndex = i;
+                break;
+            }
         }
     }
 
     int startIndex = endIndex - 1;
-    if (startIndex < 0) {
+    if (startIndex < 0)
         startIndex = m_Opened ? 0 : (count - 1);
-    }
 
-    RCKCurvePoint *startPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[startIndex]);
-    RCKCurvePoint *endPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[endIndex]);
-    if (!startPt || !endPt) {
+    RCKCurvePoint *startPt = (RCKCurvePoint *)m_ControlPoints[startIndex];
+    RCKCurvePoint *endPt = (RCKCurvePoint *)m_ControlPoints[endIndex];
+    if (!startPt || !endPt)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    VxVector p0;
-    VxVector p1;
     startPt->GetFittedVector(&p0);
     endPt->GetFittedVector(&p1);
-
-    VxVector t0;
-    VxVector t1;
     startPt->GetTangents(nullptr, &t0);
     endPt->GetTangents(&t1, nullptr);
 
-    float l0 = startPt->GetLength();
-    float l1 = 0.0f;
-    if (endIndex == 0) {
-        l1 = m_Length;
-    } else {
-        l1 = endPt->GetLength();
-    }
+    const float l0 = startPt->GetLength();
+    float l1 = (endIndex == 0) ? m_Length : endPt->GetLength();
 
     const float segLen = l1 - l0;
     float u = 0.0f;
-    if (segLen != 0.0f) {
+    if (segLen != 0.0f)
         u = (targetLen - l0) / segLen;
-    }
 
     const CKBOOL linear = startPt->IsLinear();
 
-    auto lerp = [](const VxVector &a, const VxVector &b, float t) {
-        VxVector r;
-        r.x = a.x + (b.x - a.x) * t;
-        r.y = a.y + (b.y - a.y) * t;
-        r.z = a.z + (b.z - a.z) * t;
-        return r;
-    };
-
-    auto hermite = [](const VxVector &p0, const VxVector &p1, const VxVector &m0, const VxVector &m1, float t) {
-        const float t2 = t * t;
-        const float t3 = t2 * t;
-        const float h00 = (2.0f * t3 - 3.0f * t2 + 1.0f);
-        const float h10 = (t3 - 2.0f * t2 + t);
-        const float h01 = (-2.0f * t3 + 3.0f * t2);
-        const float h11 = (t3 - t2);
-        VxVector r;
-        r.x = h00 * p0.x + h10 * m0.x + h01 * p1.x + h11 * m1.x;
-        r.y = h00 * p0.y + h10 * m0.y + h01 * p1.y + h11 * m1.y;
-        r.z = h00 * p0.z + h10 * m0.z + h01 * p1.z + h11 * m1.z;
-        return r;
-    };
-
     if (linear) {
-        *Pos = lerp(p0, p1, u);
+        LinearInterpolate(Pos, p0, p1, u);
         if (Dir) {
             Dir->x = p1.x - p0.x;
             Dir->y = p1.y - p0.y;
@@ -492,10 +482,10 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
         return CK_OK;
     }
 
-    *Pos = hermite(p0, p1, t0, t1, u);
+    HermiteInterpolate(Pos, p0, p1, t0, t1, u);
     if (Dir) {
-        float u2 = u + 0.01f;
-        VxVector pos2 = hermite(p0, p1, t0, t1, u2);
+        VxVector pos2;
+        HermiteInterpolate(&pos2, p0, p1, t0, t1, u + 0.01f);
         Dir->x = pos2.x - Pos->x;
         Dir->y = pos2.y - Pos->y;
         Dir->z = pos2.z - Pos->z;
@@ -506,33 +496,18 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
 }
 
 CKERROR RCKCurve::GetTangentsByIndex(int index, VxVector *InTangent, VxVector *OutTangent) {
-    if (index < 0 || index >= m_ControlPoints.Size()) {
+    const int count = m_ControlPoints.Size();
+    if (index < 0 || index >= count)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    RCKCurvePoint *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[index]);
-    if (!pt) {
+    RCKCurvePoint *pt = (RCKCurvePoint *)m_ControlPoints[index];
+    if (!pt)
         return CKERR_INVALIDPARAMETER;
-    }
 
     if (!pt->IsTCB()) {
         pt->GetTangents(InTangent, OutTangent);
         return CK_OK;
     }
-
-    auto normalizeIndex = [this](int idx, int count) {
-        if (count <= 0) return 0;
-        if (m_Opened) {
-            if (idx < 0) return 0;
-            if (idx >= count) return count - 1;
-            return idx;
-        }
-        idx %= count;
-        if (idx < 0) idx += count;
-        return idx;
-    };
-
-    const int count = m_ControlPoints.Size();
 
     VxVector p;
     pt->GetReservedVector(&p);
@@ -541,25 +516,22 @@ CKERROR RCKCurve::GetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
     const float continuity = pt->GetContinuity();
     const float bias = pt->GetBias();
 
-    const int prevIndex = normalizeIndex(index - 1, count);
-    const int nextIndex = normalizeIndex(index + 1, count);
+    const int prevIndex = NormalizeIndex(index - 1, count, m_Opened);
+    const int nextIndex = NormalizeIndex(index + 1, count, m_Opened);
 
-    RCKCurvePoint *prevPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[prevIndex]);
-    RCKCurvePoint *nextPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[nextIndex]);
-    if (!prevPt || !nextPt) {
+    RCKCurvePoint *prevPt = (RCKCurvePoint *)m_ControlPoints[prevIndex];
+    RCKCurvePoint *nextPt = (RCKCurvePoint *)m_ControlPoints[nextIndex];
+    if (!prevPt || !nextPt)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    VxVector pPrev;
-    VxVector pNext;
+    VxVector pPrev, pNext;
     prevPt->GetReservedVector(&pPrev);
     nextPt->GetReservedVector(&pNext);
 
-    VxVector dn;
+    VxVector dn, dp;
     dn.x = p.x - pPrev.x;
     dn.y = p.y - pPrev.y;
     dn.z = p.z - pPrev.z;
-    VxVector dp;
     dp.x = pNext.x - p.x;
     dp.y = pNext.y - p.y;
     dp.z = pNext.z - p.z;
@@ -593,14 +565,13 @@ CKERROR RCKCurve::GetTangents(CKCurvePoint *pt, VxVector *InTangent, VxVector *O
 }
 
 CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *OutTangent) {
-    if (index < 0 || index >= m_ControlPoints.Size()) {
+    const int count = m_ControlPoints.Size();
+    if (index < 0 || index >= count)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    RCKCurvePoint *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[index]);
-    if (!pt) {
+    RCKCurvePoint *pt = (RCKCurvePoint *)m_ControlPoints[index];
+    if (!pt)
         return CKERR_INVALIDPARAMETER;
-    }
 
     // Non-TCB points store explicit tangents directly.
     if (!pt->IsTCB()) {
@@ -609,55 +580,34 @@ CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
     }
 
     // TCB points: DLL derives a bias update from requested tangents.
-    auto normalizeIndex = [this](int idx, int count) {
-        if (count <= 0) return 0;
-        if (m_Opened) {
-            if (idx < 0) return 0;
-            if (idx >= count) return count - 1;
-            return idx;
-        }
-        idx %= count;
-        if (idx < 0) idx += count;
-        return idx;
-    };
+    const int prevIndex = NormalizeIndex(index - 1, count, m_Opened);
+    const int nextIndex = NormalizeIndex(index + 1, count, m_Opened);
 
-    const int count = m_ControlPoints.Size();
-    const int prevIndex = normalizeIndex(index - 1, count);
-    const int nextIndex = normalizeIndex(index + 1, count);
-
-    RCKCurvePoint *prevPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[prevIndex]);
-    RCKCurvePoint *nextPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[nextIndex]);
-    if (!prevPt || !nextPt || !InTangent || !OutTangent) {
+    RCKCurvePoint *prevPt = (RCKCurvePoint *)m_ControlPoints[prevIndex];
+    RCKCurvePoint *nextPt = (RCKCurvePoint *)m_ControlPoints[nextIndex];
+    if (!prevPt || !nextPt || !InTangent || !OutTangent)
         return CKERR_INVALIDPARAMETER;
-    }
 
-    VxVector pPrev;
-    VxVector pCur;
-    VxVector pNext;
+    VxVector pPrev, pCur, pNext;
     prevPt->GetReservedVector(&pPrev);
     pt->GetReservedVector(&pCur);
     nextPt->GetReservedVector(&pNext);
 
-    VxVector dn;
+    VxVector dn, dp;
     dn.x = pCur.x - pPrev.x;
     dn.y = pCur.y - pPrev.y;
     dn.z = pCur.z - pPrev.z;
-    VxVector dp;
     dp.x = pNext.x - pCur.x;
     dp.y = pNext.y - pCur.y;
     dp.z = pNext.z - pCur.z;
 
-    VxVector chordSum;
+    VxVector chordSum, chordDiff, tanSum;
     chordSum.x = dn.x + dp.x;
     chordSum.y = dn.y + dp.y;
     chordSum.z = dn.z + dp.z;
-
-    VxVector chordDiff;
     chordDiff.x = dn.x - dp.x;
     chordDiff.y = dn.y - dp.y;
     chordDiff.z = dn.z - dp.z;
-
-    VxVector tanSum;
     tanSum.x = InTangent->x + OutTangent->x;
     tanSum.y = InTangent->y + OutTangent->y;
     tanSum.z = InTangent->z + OutTangent->z;
@@ -670,17 +620,14 @@ CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
     const float ay = fabsf(chordDiff.y);
     const float az = fabsf(chordDiff.z);
     if (ax >= ay && ax >= az) {
-        if (chordDiff.x != 0.0f) {
+        if (chordDiff.x != 0.0f)
             newBias = (tanSum.x / (1.0f - tension) + chordSum.x) / chordDiff.x;
-        }
     } else if (ay >= az) {
-        if (chordDiff.y != 0.0f) {
+        if (chordDiff.y != 0.0f)
             newBias = (tanSum.y / (1.0f - tension) + chordSum.y) / chordDiff.y;
-        }
     } else {
-        if (chordDiff.z != 0.0f) {
+        if (chordDiff.z != 0.0f)
             newBias = (tanSum.z / (1.0f - tension) + chordSum.z) / chordDiff.z;
-        }
     }
 
     pt->SetBias(newBias);
@@ -809,19 +756,17 @@ CKERROR RCKCurve::CreateLineMesh() {
 }
 
 CKERROR RCKCurve::UpdateMesh() {
-    if (!IsVisible()) {
+    if (!IsVisible())
         return CK_OK;
-    }
 
     RCKMesh *mesh = m_CurrentMesh;
     if (mesh) {
-        mesh->ModifyObjectFlags(0x23u, 0);
+        mesh->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
     } else {
         CreateLineMesh();
         mesh = m_CurrentMesh;
-        if (!mesh) {
+        if (!mesh)
             return CKERR_NOTFOUND;
-        }
     }
 
     VxVector zero(0.0f, 0.0f, 0.0f);
@@ -831,15 +776,16 @@ CKERROR RCKCurve::UpdateMesh() {
         const float invTotalLen = (m_Length != 0.0f) ? (1.0f / m_Length) : 0.0f;
 
         int totalSteps = 0;
-        RCKCurvePoint *prev = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0]);
+        RCKCurvePoint *prev = (RCKCurvePoint *)m_ControlPoints[0];
         for (int i = 1; i < cpCount; ++i) {
-            RCKCurvePoint *cur = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
+            RCKCurvePoint *cur = (RCKCurvePoint *)m_ControlPoints[i];
             if (prev && prev->IsLinear()) {
                 ++totalSteps;
             } else if (prev && cur) {
                 float segLen = cur->GetLength() - prev->GetLength();
-                int segSteps = (int) floor((double) m_StepCount * (double) invTotalLen * (double) segLen);
-                if (segSteps < 1) segSteps = 1;
+                int segSteps = (int)(m_StepCount * invTotalLen * segLen);
+                if (segSteps < 1)
+                    segSteps = 1;
                 totalSteps += segSteps;
             }
             prev = cur;
@@ -850,8 +796,9 @@ CKERROR RCKCurve::UpdateMesh() {
                 ++totalSteps;
             } else {
                 float segLen = m_Length - prev->GetLength();
-                int segSteps = (int) floor((double) m_StepCount * (double) invTotalLen * (double) segLen);
-                if (segSteps < 1) segSteps = 1;
+                int segSteps = (int)(m_StepCount * invTotalLen * segLen);
+                if (segSteps < 1)
+                    segSteps = 1;
                 totalSteps += segSteps;
             }
         }
@@ -860,33 +807,17 @@ CKERROR RCKCurve::UpdateMesh() {
         mesh->SetLineCount(totalSteps);
 
         CKDWORD posStride = 0;
-        char *posPtr = (char *) mesh->GetPositionsPtr(&posStride);
+        char *posPtr = (char *)mesh->GetPositionsPtr(&posStride);
 
         const int segmentCount = m_Opened ? (cpCount - 1) : cpCount;
 
-        auto hermite = [](const VxVector &p0, const VxVector &p1, const VxVector &m0, const VxVector &m1, float t) {
-            const float t2 = t * t;
-            const float t3 = t2 * t;
-            const float h00 = (2.0f * t3 - 3.0f * t2 + 1.0f);
-            const float h10 = (t3 - 2.0f * t2 + t);
-            const float h01 = (-2.0f * t3 + 3.0f * t2);
-            const float h11 = (t3 - t2);
-            VxVector r;
-            r.x = h00 * p0.x + h10 * m0.x + h01 * p1.x + h11 * m1.x;
-            r.y = h00 * p0.y + h10 * m0.y + h01 * p1.y + h11 * m1.y;
-            r.z = h00 * p0.z + h10 * m0.z + h01 * p1.z + h11 * m1.z;
-            return r;
-        };
-
+        VxVector p0, p1, m0, m1;
         for (int i = 0; i < segmentCount; ++i) {
-            RCKCurvePoint *pStart = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-            if (!pStart) {
+            RCKCurvePoint *pStart = (RCKCurvePoint *)m_ControlPoints[i];
+            if (!pStart)
                 continue;
-            }
 
-            VxVector p0;
             pStart->GetFittedVector(&p0);
-            VxVector m0;
             pStart->GetTangents(nullptr, &m0);
             const CKBOOL linear = pStart->IsLinear();
 
@@ -895,34 +826,31 @@ CKERROR RCKCurve::UpdateMesh() {
 
             RCKCurvePoint *pEnd = nullptr;
             if (i + 1 < cpCount) {
-                pEnd = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i + 1]);
-                if (pEnd) {
+                pEnd = (RCKCurvePoint *)m_ControlPoints[i + 1];
+                if (pEnd)
                     l1 = pEnd->GetLength();
-                }
             } else {
-                pEnd = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0]);
+                pEnd = (RCKCurvePoint *)m_ControlPoints[0];
             }
 
-            if (!pEnd) {
+            if (!pEnd)
                 continue;
-            }
 
-            VxVector p1;
             pEnd->GetFittedVector(&p1);
-            VxVector m1;
             pEnd->GetTangents(&m1, nullptr);
 
-            int segSteps = (int) floor((double) (l1 - l0) * (double) m_StepCount * (double) invTotalLen);
-            if (segSteps < 1) segSteps = 1;
+            int segSteps = (int)((l1 - l0) * m_StepCount * invTotalLen);
+            if (segSteps < 1)
+                segSteps = 1;
 
             if (linear || segSteps == 1) {
-                *(VxVector *) posPtr = p0;
+                *(VxVector *)posPtr = p0;
                 posPtr += posStride;
             } else {
-                const float invSegSteps = 1.0f / (float) segSteps;
+                const float invSegSteps = 1.0f / (float)segSteps;
                 for (int s = 0; s < segSteps; ++s) {
-                    const float t = (float) s * invSegSteps;
-                    *(VxVector *) posPtr = hermite(p0, p1, m0, m1, t);
+                    const float t = (float)s * invSegSteps;
+                    HermiteInterpolate((VxVector *)posPtr, p0, p1, m0, m1, t);
                     posPtr += posStride;
                 }
             }
@@ -930,14 +858,12 @@ CKERROR RCKCurve::UpdateMesh() {
 
         // Final vertex.
         RCKCurvePoint *lastPt = nullptr;
-        if (m_Opened) {
-            lastPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[cpCount - 1]);
-        } else {
-            lastPt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0]);
-        }
-        if (lastPt) {
-            lastPt->GetFittedVector((VxVector *) posPtr);
-        }
+        if (m_Opened)
+            lastPt = (RCKCurvePoint *)m_ControlPoints[cpCount - 1];
+        else
+            lastPt = (RCKCurvePoint *)m_ControlPoints[0];
+        if (lastPt)
+            lastPt->GetFittedVector((VxVector *)posPtr);
 
         CKDWORD colStride = 0;
         CKDWORD specStride = 0;
@@ -960,9 +886,8 @@ CKERROR RCKCurve::UpdateMesh() {
         mesh->CreateLineStrip(0, m_StepCount, 0);
     }
 
-    if (!m_Context->IsInInterfaceMode()) {
+    if (!m_Context->IsInInterfaceMode())
         mesh->Show(CKHIDE);
-    }
 
     return CK_OK;
 }
@@ -977,81 +902,58 @@ void RCKCurve::SetColor(const VxColor &color) {
 }
 
 void RCKCurve::Update() {
-    // Based on decompilation at 0x1001586D
-    if (m_Loading) {
+    if (m_Loading)
         return;
-    }
 
     const int count = m_ControlPoints.Size();
 
     VxMatrix invCurveWorld;
     Vx3DInverseMatrix(invCurveWorld, m_WorldMatrix);
 
+    VxVector worldPos, localPos;
+    RCKCurvePoint **ppPoints = (RCKCurvePoint **)m_ControlPoints.Begin();
+
     // Cache curve-space positions into curve points (reserved + fitted).
     for (int i = 0; i < count; ++i) {
-        RCKCurvePoint *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-        if (!pt) {
+        RCKCurvePoint *pt = ppPoints[i];
+        if (!pt)
             continue;
-        }
-        VxVector worldPos;
         pt->GetPosition(&worldPos, nullptr);
-
-        VxVector localPos;
         Vx3DMultiplyMatrixVector(&localPos, invCurveWorld, &worldPos);
-
         pt->SetReservedVector(&localPos);
         pt->SetFittedVector(&localPos);
     }
 
     // Compute tangents for all points (stores explicit computed tangents on the points).
+    VxVector inT, outT;
     for (int i = 0; i < count; ++i) {
-        VxVector inT;
-        VxVector outT;
         GetTangentsByIndex(i, &inT, &outT);
-        RCKCurvePoint *pt = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-        if (pt) {
+        RCKCurvePoint *pt = ppPoints[i];
+        if (pt)
             pt->SetTangents(&inT, &outT);
-        }
     }
 
     // Optional fitting pass (only when coeff > 0).
     if (m_FittingCoeff > 0.0f) {
-        auto normalizeIndex = [this](int idx, int cnt) {
-            if (cnt <= 0) return 0;
-            if (m_Opened) {
-                if (idx < 0) return 0;
-                if (idx >= cnt) return cnt - 1;
-                return idx;
-            }
-            idx %= cnt;
-            if (idx < 0) idx += cnt;
-            return idx;
-        };
-
+        VxVector pPrev, pCur, pNext, mid, fitted;
         for (int i = 0; i < count; ++i) {
-            const int prevIndex = normalizeIndex(i - 1, count);
-            const int nextIndex = normalizeIndex(i + 1, count);
+            const int prevIndex = NormalizeIndex(i - 1, count, m_Opened);
+            const int nextIndex = NormalizeIndex(i + 1, count, m_Opened);
 
-            RCKCurvePoint *prev = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[prevIndex]);
-            RCKCurvePoint *cur = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-            RCKCurvePoint *next = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[nextIndex]);
-            if (!prev || !cur || !next) {
+            RCKCurvePoint *prev = ppPoints[prevIndex];
+            RCKCurvePoint *cur = ppPoints[i];
+            RCKCurvePoint *next = ppPoints[nextIndex];
+            if (!prev || !cur || !next)
                 continue;
-            }
 
-            VxVector pPrev;
-            VxVector pCur;
-            VxVector pNext;
             prev->GetReservedVector(&pPrev);
             cur->GetReservedVector(&pCur);
             next->GetReservedVector(&pNext);
 
-            VxVector mid;
             mid.x = (pPrev.x + pNext.x) * 0.5f;
             mid.y = (pPrev.y + pNext.y) * 0.5f;
             mid.z = (pPrev.z + pNext.z) * 0.5f;
 
-            VxVector fitted;
             fitted.x = pCur.x + (mid.x - pCur.x) * m_FittingCoeff;
             fitted.y = pCur.y + (mid.y - pCur.y) * m_FittingCoeff;
             fitted.z = pCur.z + (mid.z - pCur.z) * m_FittingCoeff;
@@ -1064,72 +966,48 @@ void RCKCurve::Update() {
     m_Length = 0.0f;
     const int segmentCount = m_Opened ? (count - 1) : count;
     if (count > 1) {
-        auto hermite = [](const VxVector &p0, const VxVector &p1, const VxVector &m0, const VxVector &m1, float t) {
-            const float t2 = t * t;
-            const float t3 = t2 * t;
-            const float h00 = (2.0f * t3 - 3.0f * t2 + 1.0f);
-            const float h10 = (t3 - 2.0f * t2 + t);
-            const float h01 = (-2.0f * t3 + 3.0f * t2);
-            const float h11 = (t3 - t2);
-            VxVector r;
-            r.x = h00 * p0.x + h10 * m0.x + h01 * p1.x + h11 * m1.x;
-            r.y = h00 * p0.y + h10 * m0.y + h01 * p1.y + h11 * m1.y;
-            r.z = h00 * p0.z + h10 * m0.z + h01 * p1.z + h11 * m1.z;
-            return r;
-        };
-
+        VxVector p0, p1, m0, m1, prevPos, curPos, delta;
         for (int i = 0; i < segmentCount; ++i) {
-            RCKCurvePoint *pStart = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i]);
-            if (!pStart) {
+            RCKCurvePoint *pStart = ppPoints[i];
+            if (!pStart)
                 continue;
-            }
 
-            VxVector p0;
             pStart->GetFittedVector(&p0);
-            VxVector m0;
             pStart->GetTangents(nullptr, &m0);
-
             pStart->SetCurveLength(m_Length);
             const CKBOOL linear = pStart->IsLinear();
 
             RCKCurvePoint *pEnd = nullptr;
-            if (i + 1 < count) {
-                pEnd = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[i + 1]);
-            } else {
-                pEnd = reinterpret_cast<RCKCurvePoint *>(m_ControlPoints[0]);
-            }
-            if (!pEnd) {
+            if (i + 1 < count)
+                pEnd = ppPoints[i + 1];
+            else
+                pEnd = ppPoints[0];
+            if (!pEnd)
                 continue;
-            }
 
-            VxVector p1;
             pEnd->GetFittedVector(&p1);
-            VxVector m1;
             pEnd->GetTangents(&m1, nullptr);
 
             if (linear) {
-                VxVector delta;
                 delta.x = p1.x - p0.x;
                 delta.y = p1.y - p0.y;
                 delta.z = p1.z - p0.z;
                 m_Length += delta.Magnitude();
             } else {
-                VxVector prevPos = p0;
+                prevPos = p0;
                 for (int j = 1; j <= 100; ++j) {
-                    const float t = (float) j / 100.0f;
-                    VxVector pos = hermite(p0, p1, m0, m1, t);
-                    VxVector delta;
-                    delta.x = pos.x - prevPos.x;
-                    delta.y = pos.y - prevPos.y;
-                    delta.z = pos.z - prevPos.z;
+                    const float t = (float)j / 100.0f;
+                    HermiteInterpolate(&curPos, p0, p1, m0, m1, t);
+                    delta.x = curPos.x - prevPos.x;
+                    delta.y = curPos.y - prevPos.y;
+                    delta.z = curPos.z - prevPos.z;
                     m_Length += delta.Magnitude();
-                    prevPos = pos;
+                    prevPos = curPos;
                 }
             }
 
-            if (i != count - 1) {
+            if (i != count - 1)
                 pEnd->SetCurveLength(m_Length);
-            }
         }
     }
 
