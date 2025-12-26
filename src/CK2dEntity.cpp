@@ -318,10 +318,10 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
         return nullptr;
 
     // IDA line 16-24: Recursively check children in reverse order (back to front)
-    // IDA uses End()-1 to Begin()-1 (exclusive), which is effectively Size()-1 down to 0
     CK2dEntity *picked = nullptr;
-    for (CK2dEntity **it = m_Children.End() - 1; it >= m_Children.Begin(); --it) {
-        picked = ((RCK2dEntity *) *it)->Pick(pt, ignoreUnpickable);
+    for (int i = m_Children.Size() - 1; i >= 0; --i) {
+        RCK2dEntity *entity = (RCK2dEntity *) m_Children[i];
+        picked = entity->Pick(pt, ignoreUnpickable);
         if (picked)
             return picked;
     }
