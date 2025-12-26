@@ -103,7 +103,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     }
 
     // Check driver support for clamping
-    if ((rstCtx->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) == 0)
+    if (!(rstCtx->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA))
         Clamping = FALSE;
 
     CKBOOL needsAlpha = (m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 || Clamping;
@@ -199,8 +199,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             SetAlphaForTransparentColor(desc);
 
         // Handle clamping
-        if ((m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) !=
-            0) {
+        if ((m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0) {
             if (Clamp)
                 SetBorderColorForClamp(desc);
         } else {

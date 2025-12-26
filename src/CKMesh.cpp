@@ -5035,7 +5035,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         return FALSE;
 
     // Check if rasterizer supports index buffers
-    if ((rst->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & 0x10000) == 0)
+    if (!(rst->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CANDOINDEXBUFFER))
         return FALSE;
 
     CKBOOL needNewBuffer = FALSE;
