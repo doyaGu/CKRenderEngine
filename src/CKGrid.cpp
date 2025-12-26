@@ -216,14 +216,14 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
  * IDA: 0x1001970b
  */
 int RCKGrid::GetMemoryOccupation() {
-    // Base class memory + 32 (grid specific fields)
-    int size = RCK3dEntity::GetMemoryOccupation() + 32;
+    // Base class memory + grid specific fields
+    int size = RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKGrid) - sizeof(RCK3dEntity));
 
     // Add memory for layers array internal storage
-    size += m_Layers.GetMemoryOccupation(0);
+    size += m_Layers.GetMemoryOccupation(FALSE);
 
-    // Add memory for layer cell data: 4 * width * length * layerCount
-    size += 4 * m_Width * m_Length * m_Layers.Size();
+    // Add memory for layer cell data: sizeof(CKDWORD) * width * length * layerCount
+    size += sizeof(CKDWORD) * m_Width * m_Length * m_Layers.Size();
 
     return size;
 }

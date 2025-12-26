@@ -744,14 +744,14 @@ CK_CLASSID RCK3dEntity::GetClassID() {
 
 int RCK3dEntity::GetMemoryOccupation() {
     // IDA: 0x1000A0AC
-    int size = RCKRenderObject::GetMemoryOccupation() + 336;
+    int size = RCKRenderObject::GetMemoryOccupation() + (sizeof(RCK3dEntity) - sizeof(RCKRenderObject));
     size += m_Meshes.GetMemoryOccupation(FALSE);
     size += m_Children.GetMemoryOccupation(FALSE);
 
     if (m_Callbacks) {
         size += m_Callbacks->m_PreCallBacks.GetMemoryOccupation(FALSE);
         size += m_Callbacks->m_PostCallBacks.GetMemoryOccupation(FALSE);
-        size += 28;
+        size += sizeof(CKCallbacksContainer);
     }
 
     return size;

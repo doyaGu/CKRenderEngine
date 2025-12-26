@@ -140,7 +140,9 @@ CKERROR RCKKeyedAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 int RCKKeyedAnimation::GetMemoryOccupation() {
-    return sizeof(RCKKeyedAnimation);
+    int size = RCKAnimation::GetMemoryOccupation() + (sizeof(RCKKeyedAnimation) - sizeof(RCKAnimation));
+    size += m_Animations.GetMemoryOccupation(FALSE);
+    return size;
 }
 
 CKERROR RCKKeyedAnimation::Copy(CKObject &o, CKDependenciesContext &context) {

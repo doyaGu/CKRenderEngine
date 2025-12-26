@@ -1918,55 +1918,56 @@ void RCKMesh::CheckPreDeletion() {
 
 int RCKMesh::GetMemoryOccupation() {
     // Match IDA at 0x10026678
-    // Call base class and add this class size (180 bytes for RCKMesh specific data)
-    int size = CKBeObject::GetMemoryOccupation() + 180;
+    // Call base class and add this class size
+    int size = CKBeObject::GetMemoryOccupation() + (sizeof(RCKMesh) - sizeof(CKBeObject));
 
-    // Vertex array: 32 bytes per VxVertex
-    size += m_Vertices.Size() * 32;
+    // Vertex array: sizeof(VxVertex) per vertex
+    size += m_Vertices.GetMemoryOccupation(FALSE);
 
-    // Vertex colors: 16 bytes per VxColors (IDA shows 16, not 8)
-    size += m_VertexColors.Size() * 16;
+    // Vertex colors: sizeof(VxColors) per color
+    size += m_VertexColors.GetMemoryOccupation(FALSE);
 
-    // Faces: 16 bytes per CKFace (IDA shows 16)
-    size += m_Faces.Size() * 16;
+    // Faces: sizeof(CKFace) per face
+    size += m_Faces.GetMemoryOccupation(FALSE);
 
     // Render callbacks
     if (m_RenderCallbacks) {
-        // Add callback array sizes + 28 for callback structure
-        size += m_RenderCallbacks->m_PreCallBacks.Size() * 12;
-        size += m_RenderCallbacks->m_PostCallBacks.Size() * 12 + 28;
+        // Add callback array sizes + callback container
+        size += m_RenderCallbacks->m_PreCallBacks.GetMemoryOccupation(FALSE);
+        size += m_RenderCallbacks->m_PostCallBacks.GetMemoryOccupation(FALSE);
+        size += sizeof(CKCallbacksContainer);
     }
 
-    // Material groups: 52 bytes each plus face indices
-    size += m_MaterialGroups.Size() * 52;
+    // Material groups: sizeof(CKMaterialGroup) each plus face indices
+    size += m_MaterialGroups.GetMemoryOccupation(FALSE);
     for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
         CKMaterialGroup *group = m_MaterialGroups[i];
         if (group) {
             // Add size from face indices array
-            size += group->m_FaceIndices.Size() * sizeof(CKWORD);
+            size += group->m_FaceIndices.GetMemoryOccupation(FALSE);
             // Each primitive entry has indices
             for (int j = 0; j < group->m_Primitives.Size(); ++j) {
-                size += group->m_Primitives[j].m_Indices.Size() * sizeof(CKWORD);
+                size += group->m_Primitives[j].m_Indices.GetMemoryOccupation(FALSE);
             }
         }
     }
 
-    // Material channels: 24 bytes each
+    // Material channels: sizeof(VxMaterialChannel) each
     for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
-        size += 24;
+        size += sizeof(VxMaterialChannel);
         // If channel has UV data
         if (m_MaterialChannels[i].m_UVs) {
-            size += m_Vertices.Size() * 8; // 8 bytes per Vx2DVector
+            size += m_Vertices.GetMemoryOccupation(FALSE);
         }
         // If channel has custom face indices
         if (m_MaterialChannels[i].m_FaceIndices) {
-            size += m_MaterialChannels[i].m_FaceIndices->Size() * sizeof(CKWORD);
+            size += m_MaterialChannels[i].m_FaceIndices->GetMemoryOccupation(FALSE);
         }
     }
 
     // Progressive mesh
     if (m_ProgressiveMesh) {
-        size += m_ProgressiveMesh->m_Data.Size() * sizeof(CKDWORD);
+        size += m_ProgressiveMesh->m_Data.GetMemoryOccupation(FALSE);
     }
 
     return size;

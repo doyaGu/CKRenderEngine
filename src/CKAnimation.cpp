@@ -130,7 +130,7 @@ CKERROR RCKAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 int RCKAnimation::GetMemoryOccupation() {
-    return CKSceneObject::GetMemoryOccupation() + 24;
+    return CKSceneObject::GetMemoryOccupation() + (sizeof(RCKAnimation) - sizeof(CKSceneObject));
 }
 
 CKERROR RCKAnimation::Copy(CKObject &o, CKDependenciesContext &context) {

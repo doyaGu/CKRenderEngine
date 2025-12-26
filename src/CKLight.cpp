@@ -679,7 +679,7 @@ Remarks:
 Implementation based on decompilation at 0x1001b36b.
 *************************************************/
 int RCKLight::GetMemoryOccupation() {
-    return RCK3dEntity::GetMemoryOccupation() + 112;
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKLight) - sizeof(RCK3dEntity));
 }
 
 /*************************************************

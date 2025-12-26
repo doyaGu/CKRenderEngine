@@ -1388,8 +1388,7 @@ void RCK2dEntity::CheckPreDeletion() {
 
 int RCK2dEntity::GetMemoryOccupation() {
     // IDA: 0x1005f793 - RCKRenderObject::GetMemoryOccupation(this) + 96
-    return RCKRenderObject::GetMemoryOccupation() + sizeof(VxRect) * 4 + sizeof(VxRect *) + sizeof(CKDWORD) * 2 + sizeof
-        (CK2dEntity *) + sizeof(CKMaterial *) + sizeof(XArray<CK2dEntity *>);
+    return RCKRenderObject::GetMemoryOccupation() + (sizeof(RCK2dEntity) - sizeof(RCKRenderObject));
 }
 
 CKERROR RCK2dEntity::PrepareDependencies(CKDependenciesContext &context) {

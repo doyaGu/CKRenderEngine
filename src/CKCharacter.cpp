@@ -336,7 +336,7 @@ void RCKCharacter::CheckPreDeletion() {
 }
 
 int RCKCharacter::GetMemoryOccupation() {
-    return RCK3dEntity::GetMemoryOccupation() + 68 + m_BodyParts.GetMemoryOccupation() + m_Animations.GetMemoryOccupation();
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCharacter) - sizeof(RCK3dEntity)) + m_BodyParts.GetMemoryOccupation(FALSE) + m_Animations.GetMemoryOccupation(FALSE);
 }
 
 int RCKCharacter::IsObjectUsed(CKObject *o, CK_CLASSID cid) {

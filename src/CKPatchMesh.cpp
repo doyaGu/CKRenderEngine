@@ -597,24 +597,24 @@ CK_CLASSID RCKPatchMesh::GetClassID() {
  * Based on IDA analysis at 0x1003abb7
  */
 int RCKPatchMesh::GetMemoryOccupation() {
-    int base = RCKMesh::GetMemoryOccupation() + 168; // Extra fields size
+    int base = RCKMesh::GetMemoryOccupation() + (sizeof(RCKPatchMesh) - sizeof(RCKMesh));
 
-    // Vertex and vector memory
-    int vertVecMem = 12 * (m_VertCount + m_VecCount);
+    // Vertex and vector memory (VxVector = 12 bytes)
+    int vertVecMem = sizeof(VxVector) * (m_VertCount + m_VecCount);
 
     // Calculate texture channel memory
-    int channelMem = 0;
+    int channelMem = m_TexturePatches.GetMemoryOccupation(FALSE); // sizeof(CKPatchChannel) each
     for (int i = 0; i < m_TexturePatches.Size(); ++i) {
-        int patchesSize = m_TexturePatches[i].Patches.Size();
-        int uvsSize = m_TexturePatches[i].UVs.Size();
-        channelMem += 8 * patchesSize + 8 * uvsSize + 40; // 40 = CKPatchChannel base size
+        int patchesSize = m_TexturePatches[i].Patches.GetMemoryOccupation(FALSE);
+        int uvsSize = m_TexturePatches[i].UVs.GetMemoryOccupation(FALSE);
+        channelMem += sizeof(Vx2DVector) * patchesSize + sizeof(Vx2DVector) * uvsSize + sizeof(CKPatchChannel);
     }
 
-    // Patches memory (56 bytes each)
-    int patchesMem = 56 * m_Patches.Size();
+    // Patches memory (sizeof(CKPatch) each)
+    int patchesMem = m_Patches.GetMemoryOccupation(FALSE);
 
-    // Edges memory (12 bytes each)
-    int edgesMem = 12 * m_PatchEdges.Size();
+    // Edges memory (sizeof(CKPatchEdge) each)
+    int edgesMem = m_PatchEdges.GetMemoryOccupation(FALSE);
 
     return base + vertVecMem + channelMem + patchesMem + edgesMem;
 }

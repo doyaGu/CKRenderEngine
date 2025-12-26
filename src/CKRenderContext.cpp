@@ -55,14 +55,14 @@ void RCKRenderContext::CheckPreDeletion() {
 }
 
 int RCKRenderContext::GetMemoryOccupation() {
-    int size = CKObject::GetMemoryOccupation() + 936;
+    int size = CKObject::GetMemoryOccupation() + (sizeof(RCKRenderContext) - sizeof(CKObject));
     size += m_RenderedScene->m_3DEntities.GetMemoryOccupation();
     size += m_RenderedScene->m_Cameras.GetMemoryOccupation();
     size += m_RenderedScene->m_Lights.GetMemoryOccupation();
     if (m_UserDrawPrimitiveData)
-        size += 200 * m_UserDrawPrimitiveData->m_MaxVertexCount
-            + 4 * m_UserDrawPrimitiveData->m_MaxIndexCount
-            + 220;
+        size += sizeof(UserDrawPrimitiveDataClass)
+            + m_UserDrawPrimitiveData->m_MaxVertexCount * sizeof(VxDrawPrimitiveData)
+            + m_UserDrawPrimitiveData->m_MaxIndexCount * sizeof(CKWORD);
     return size;
 }
 
