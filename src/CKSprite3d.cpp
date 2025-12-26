@@ -208,9 +208,8 @@ CK_CLASSID RCKSprite3D::GetClassID() {
 }
 
 int RCKSprite3D::GetMemoryOccupation() {
-    // Base class memory + Sprite3D specific members (32 bytes)
-    // m_Material (4) + m_Mode (4) + m_Offset (8) + m_Rect (16) = 32
-    return RCK3dEntity::GetMemoryOccupation() + 32;
+    // Base class memory + Sprite3D specific members
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKSprite3D) - sizeof(RCK3dEntity));
 }
 
 /*************************************************

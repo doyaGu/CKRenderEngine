@@ -211,10 +211,10 @@ void RCKKinematicChain::CheckPreDeletion() {
 
 /**
  * GetMemoryOccupation - Based on IDA decompilation at 0x10054C57
- * Returns: CKObject::GetMemoryOccupation() + 16 + (116 * m_ChainBodyCount)
+ * Returns: base + sizeof delta + (sizeof(CKIKChainBodyData) * chain count)
  */
 int RCKKinematicChain::GetMemoryOccupation() {
-    return CKObject::GetMemoryOccupation() + 16 + (116 * m_ChainBodyCount);
+    return CKObject::GetMemoryOccupation() + (sizeof(RCKKinematicChain) - sizeof(CKObject)) + (sizeof(CKIKChainBodyData) * m_ChainBodyCount);
 }
 
 /**

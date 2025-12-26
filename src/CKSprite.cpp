@@ -431,8 +431,7 @@ void RCKSprite::RestoreInitialSize() {
 }
 
 int RCKSprite::GetMemoryOccupation() {
-    return RCK2dEntity::GetMemoryOccupation() + sizeof(CKBitmapData) + sizeof(VX_PIXELFORMAT) + sizeof(
-        CKRasterizerContext *) + sizeof(CKDWORD);
+    return RCK2dEntity::GetMemoryOccupation() + (sizeof(RCKSprite) - sizeof(RCK2dEntity));
 }
 
 CKERROR RCKSprite::PrepareDependencies(CKDependenciesContext &context) {

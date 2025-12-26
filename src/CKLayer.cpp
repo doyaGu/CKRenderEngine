@@ -343,8 +343,7 @@ CKERROR RCKLayer::RemapDependencies(CKDependenciesContext &context) {
  * @return Memory size in bytes
  */
 int RCKLayer::GetMemoryOccupation() {
-    // Original returns CKObject::GetMemoryOccupation() + 20 (5 fields * 4 bytes)
-    return CKObject::GetMemoryOccupation() + 20;
+    return CKObject::GetMemoryOccupation() + (sizeof(RCKLayer) - sizeof(CKObject));
 }
 
 /**

@@ -158,7 +158,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKCurvePoint::GetMemoryOccupation() {
-    return RCK3dEntity::GetMemoryOccupation() + 76;
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCurvePoint) - sizeof(RCK3dEntity));
 }
 
 CKERROR RCKCurvePoint::RemapDependencies(CKDependenciesContext &context) {

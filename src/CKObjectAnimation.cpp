@@ -675,8 +675,8 @@ int RCKObjectAnimation::GetMemoryOccupation() {
     // Call base class first to get base size
     int size = CKObject::GetMemoryOccupation();
 
-    // Add RCKObjectAnimation-specific fields (36 bytes for members from 0x1C to 0x3F)
-    size += 36;
+    // Add RCKObjectAnimation-specific fields
+    size += sizeof(RCKObjectAnimation) - sizeof(CKObject);
 
     // If we own the keyframe data, add its size
     if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation == this) {

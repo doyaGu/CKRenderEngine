@@ -143,8 +143,7 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
  * @return Memory size in bytes
  */
 int RCKBodyPart::GetMemoryOccupation() {
-    // IDA: RCK3dEntity::GetMemoryOccupation() + 48
-    return RCK3dEntity::GetMemoryOccupation() + 48;
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKBodyPart) - sizeof(RCK3dEntity));
 }
 
 /**

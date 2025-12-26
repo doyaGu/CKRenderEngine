@@ -131,7 +131,7 @@ CK_CLASSID RCKRenderObject::GetClassID() {
 }
 
 int RCKRenderObject::GetMemoryOccupation() {
-    return CKBeObject::GetMemoryOccupation() + sizeof(CKDWORD) + sizeof(CKCallbacksContainer *);
+    return CKBeObject::GetMemoryOccupation() + (sizeof(RCKRenderObject) - sizeof(CKBeObject));
 }
 
 CKSTRING RCKRenderObject::GetClassName() {
