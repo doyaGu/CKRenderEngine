@@ -1776,202 +1776,267 @@ CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &Plane
     return m_RasterizerContext->GetUserClipPlane(ClipPlaneIndex, PlaneEquation);
 }
 
-// IDA: 0x1006823c - Internal 2D picking method
+// IDA: 0x1006823b - Internal 2D picking method
 CK2dEntity *RCKRenderContext::_Pick2D(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
-    // Adjust point to local coordinates
-    Vx2DVector localPt;
-    localPt.x = pt.x - (float) m_Settings.m_Rect.left;
-    localPt.y = pt.y - (float) m_Settings.m_Rect.top;
+    // IDA lines 9-13: Copy point and adjust to local coordinates
+    float x = pt.x;
+    float y = pt.y;
+    x = x - (float) m_Settings.m_Rect.left;
+    y = y - (float) m_Settings.m_Rect.top;
 
-    // Try foreground 2D root first (FALSE = foreground)
+    Vx2DVector localPt;
+    localPt.x = x;
+    localPt.y = y;
+
+    // IDA line 14-15: Try foreground 2D root first (Get2dRoot(0) = foreground)
     RCK2dEntity *root = (RCK2dEntity *) Get2dRoot(FALSE);
     CK2dEntity *result = root->Pick(localPt, ignoreUnpickable);
     if (result)
         return result;
 
-    // Then try background 2D root (TRUE = background)
+    // IDA line 18-19: Then try background 2D root (Get2dRoot(1) = background)
     root = (RCK2dEntity *) Get2dRoot(TRUE);
     return root->Pick(localPt, ignoreUnpickable);
 }
 
-// IDA: 0x100682be - Internal 3D picking method
-CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *desc, CK3dEntity *filter, CKBOOL ignoreUnpickable) {
-    if (!desc)
-        return nullptr;
-
+// IDA: 0x100682bc - Internal 3D picking method
+CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *idesc, CK3dEntity *filter, CKBOOL ignoreUnpickable) {
+    // IDA line 83-85: Get object extent count, early exit if empty
     const int objCount = m_ObjectExtents.Size();
     if (objCount == 0)
         return nullptr;
 
-    const Vx2DVector localPt = pt;
+    // IDA line 86-89: Copy point to local variable
+    Vx2DVector localPt;
+    localPt.x = pt.x;
+    localPt.y = pt.y;
 
+    // IDA line 89-90: Initialize rayStart to (0,0,0)
+    VxVector rayStart(0.0f, 0.0f, 0.0f);
+    VxVector rayEnd;
+
+    // IDA line 91-98: Viewport bounds check
     const float viewX = (float) m_ViewportData.ViewX;
     const float viewY = (float) m_ViewportData.ViewY;
-    const float viewWidth = (float) m_ViewportData.ViewWidth;
-    const float viewHeight = (float) m_ViewportData.ViewHeight;
 
     if (localPt.x < viewX || localPt.y < viewY)
         return nullptr;
-    if (localPt.x > viewX + viewWidth || localPt.y > viewY + viewHeight)
+
+    const float viewWidth = (float) m_ViewportData.ViewWidth;
+    const float viewHeight = (float) m_ViewportData.ViewHeight;
+
+    if (viewX + viewWidth < localPt.x || viewY + viewHeight < localPt.y)
         return nullptr;
 
+    // IDA line 99: Calculate inverse view width
     const float invViewWidth = 1.0f / viewWidth;
 
     // =========================================================================
-    // Path 1: camera-relative picking using m_Extents (IDA: 0x100682BE)
+    // Path 1: Camera-relative picking using m_Extents (IDA: 0x100683b3-0x100687c0)
     // =========================================================================
     const int extCount = m_Extents.Size();
     if (extCount > 0) {
         VxIntersectionDesc tempDesc;
-        memset(&tempDesc, 0, sizeof(tempDesc));
 
+        // IDA line 105: Iterate extents backward
         for (int i = extCount - 1; i >= 0; --i) {
             CKRenderExtents *ext = &m_Extents[i];
 
-            if (localPt.x < ext->m_Rect.left || localPt.x > ext->m_Rect.right)
+            // IDA line 108-118: Check if point is within extent rect
+            if (localPt.x < ext->m_Rect.left || ext->m_Rect.right < localPt.x)
                 continue;
-            if (localPt.y < ext->m_Rect.top || localPt.y > ext->m_Rect.bottom)
+            if (localPt.y < ext->m_Rect.top || ext->m_Rect.bottom < localPt.y)
                 continue;
 
+            // IDA line 120-121: Get camera from extent
             CKCamera *camera = (CKCamera *) m_Context->GetObject(ext->m_Camera);
             if (!camera)
                 continue;
 
-            const float rayLength = camera->GetBackPlane();
+            // IDA line 123-124: Get camera back plane and FOV
+            const float backPlane = camera->GetBackPlane();
             const float cameraFov = camera->GetFov();
+
+            // IDA line 125-126: Initialize ray (VxRay constructor)
+            VxRay ray;
+            // IDA line 127-129: Get camera position and set ray origin
+            camera->GetPosition(&ray.m_Origin);
+            const VxMatrix &camMat = camera->GetWorldMatrix();
+            ray.m_Direction.x = camMat[2][0];
+            ray.m_Direction.y = camMat[2][1];
+            ray.m_Direction.z = camMat[2][2];
+
+            // IDA line 130-131: Calculate half FOV tangent
             const float halfFovTan = tanf(cameraFov * 0.5f);
+
+            // IDA line 132: Calculate scale factor
             const float extentWidth = ext->m_Rect.GetWidth();
             const float scale = halfFovTan / (extentWidth * 0.5f);
 
-            const VxMatrix &camMat = camera->GetWorldMatrix();
+            // IDA line 133-138: Adjust ray direction by camera right vector
             const VxVector camRight(camMat[0][0], camMat[0][1], camMat[0][2]);
-            const VxVector camUp(camMat[1][0], camMat[1][1], camMat[1][2]);
-            const VxVector camFwd(camMat[2][0], camMat[2][1], camMat[2][2]);
-
             const float extCenterX = (ext->m_Rect.left + ext->m_Rect.right) * 0.5f;
-            const float extCenterY = (ext->m_Rect.top + ext->m_Rect.bottom) * 0.5f;
             const float offsetX = (localPt.x - extCenterX) * scale;
+            ray.m_Direction.x += camRight.x * offsetX;
+            ray.m_Direction.y += camRight.y * offsetX;
+            ray.m_Direction.z += camRight.z * offsetX;
+
+            // IDA line 139-144: Adjust ray direction by camera up vector (subtracted)
+            const VxVector camUp(camMat[1][0], camMat[1][1], camMat[1][2]);
+            const float extCenterY = (ext->m_Rect.top + ext->m_Rect.bottom) * 0.5f;
             const float offsetY = (localPt.y - extCenterY) * scale;
+            ray.m_Direction.x -= camUp.x * offsetY;
+            ray.m_Direction.y -= camUp.y * offsetY;
+            ray.m_Direction.z -= camUp.z * offsetY;
 
-            const VxVector rayStart(camMat[3][0], camMat[3][1], camMat[3][2]);
-            VxVector rayDir(
-                camFwd.x + camRight.x * offsetX - camUp.x * offsetY,
-                camFwd.y + camRight.y * offsetX - camUp.y * offsetY,
-                camFwd.z + camRight.z * offsetX - camUp.z * offsetY);
-            rayDir.Normalize();
+            // IDA line 145: Normalize ray direction
+            ray.m_Direction.Normalize();
 
-            VxRay ray;
-            ray.m_Origin = rayStart;
-            ray.m_Direction = rayDir;
+            // IDA line 146-147: Calculate ray end point
+            VxVector rayEndPt;
+            rayEndPt.x = ray.m_Origin.x + ray.m_Direction.x * backPlane;
+            rayEndPt.y = ray.m_Origin.y + ray.m_Direction.y * backPlane;
+            rayEndPt.z = ray.m_Origin.z + ray.m_Direction.z * backPlane;
 
-            const VxVector rayEnd(rayStart.x + rayDir.x * rayLength,
-                                  rayStart.y + rayDir.y * rayLength,
-                                  rayStart.z + rayDir.z * rayLength);
-
-            float bestDistance = rayLength;
+            // IDA line 148-149: Initialize best distance and picked entity
+            float bestDistance = backPlane;
             CK3dEntity *pickedEntity = nullptr;
 
+            // IDA line 150-165: Iterate through object extents
             for (int j = 0; j < objCount; ++j) {
                 CKObjectExtents *objExt = &m_ObjectExtents[j];
-                CK3dEntity *entity = (CK3dEntity *) objExt->m_Entity;
+                RCK3dEntity *entity = (RCK3dEntity *) objExt->m_Entity;
+
+                // IDA line 153: Skip null entities and apply filter
                 if (!entity)
                     continue;
-                if (filter && entity != filter)
+                if (filter && entity != (RCK3dEntity *) filter)
                     continue;
-                if (!ignoreUnpickable && !entity->IsPickable())
+                // IDA: Check pickable flag unless ignoreUnpickable
+                if (!ignoreUnpickable && (entity->GetMoveableFlags() & VX_MOVEABLE_PICKABLE) == 0)
                     continue;
 
+                // IDA line 155: Get bounding box
                 const VxBbox &bbox = entity->GetBoundingBox(FALSE);
-                if (!VxIntersect::RayBox(ray, bbox))
-                    continue;
 
-                if (entity->RayIntersection((VxVector *) &rayStart, (VxVector *) &rayEnd, &tempDesc, nullptr, CKRAYINTERSECTION_SEGMENT)) {
-                    if (tempDesc.Distance < bestDistance) {
-                        memcpy(desc, &tempDesc, sizeof(VxIntersectionDesc));
-                        bestDistance = tempDesc.Distance;
-                        pickedEntity = entity;
+                // IDA line 156-163: Test ray-box intersection, then ray intersection
+                if (VxIntersect::RayBox(ray, bbox)) {
+                    if (entity->RayIntersection(&ray.m_Origin, &rayEndPt, &tempDesc, nullptr, CKRAYINTERSECTION_SEGMENT)) {
+                        if (tempDesc.Distance < bestDistance) {
+                            memcpy(idesc, &tempDesc, sizeof(VxIntersectionDesc));
+                            bestDistance = tempDesc.Distance;
+                            pickedEntity = (CK3dEntity *) entity;
+                        }
                     }
                 }
             }
 
+            // IDA line 166-167: If found, return picked entity
             if (pickedEntity)
                 return pickedEntity;
 
+            // IDA line 168-169: If extent has CLEARBACK flag, return null (stop searching)
             if ((ext->m_Flags & CK_RENDER_CLEARBACK) != 0)
                 return nullptr;
         }
     }
 
     // =========================================================================
-    // Path 2: standard picking using m_ObjectExtents
+    // Path 2: Standard picking using m_ObjectExtents (IDA: 0x100687db-0x10068ab4)
     // =========================================================================
-    const float nx = (localPt.x - viewX) * 2.0f * invViewWidth - 1.0f;
-    const float ny = (viewY - localPt.y) * 2.0f * invViewWidth + viewHeight * invViewWidth;
 
-    VxVector rayStart(0.0f, 0.0f, 0.0f);
-    VxVector rayEnd(0.0f, 0.0f, m_NearPlane);
+    // IDA line 175-176: Calculate normalized screen coordinates
+    const float nx = (localPt.x - viewX + localPt.x - viewX) * invViewWidth - 1.0f;
+    const float ny = (viewY - localPt.y + viewY - localPt.y + viewHeight) * invViewWidth;
 
+    // IDA line 177-190: Calculate ray start/end based on perspective mode
     if (m_Perspective) {
+        // IDA line 179-182: Perspective projection
         const float halfFovTan = tanf(m_Fov * 0.5f);
         rayEnd.x = nx * m_NearPlane * halfFovTan;
         rayEnd.y = ny * m_NearPlane * halfFovTan;
     } else {
+        // IDA line 186-189: Orthographic projection
         rayStart.x = nx / m_Zoom;
-        rayStart.y = ny / m_Zoom;
         rayEnd.x = rayStart.x;
+        rayStart.y = ny / m_Zoom;
         rayEnd.y = rayStart.y;
     }
 
+    // IDA line 191: Set ray end Z to near plane
+    rayEnd.z = m_NearPlane;
+
+    // IDA line 192-195: Initialize best distance and result entity
     float bestDistance = 1.0e30f;
     CK3dEntity *bestEntity = nullptr;
+    RCK3dEntity *currentEntity = nullptr;
     VxIntersectionDesc tempDesc;
 
-    for (int i = 0; i < objCount; ++i) {
-        CKObjectExtents *ext = &m_ObjectExtents[i];
-        CK3dEntity *entity = (CK3dEntity *) ext->m_Entity;
-        if (!entity)
+    // IDA line 196-248: Iterate through object extents
+    for (int k = 0; k < objCount; ++k) {
+        CKObjectExtents *ext = &m_ObjectExtents[k];
+        currentEntity = (RCK3dEntity *) ext->m_Entity;
+
+        // IDA line 199: Skip null entities and apply filter
+        if (!currentEntity)
             continue;
-        if (filter && entity != filter)
+        if (filter && currentEntity != (RCK3dEntity *) filter)
             continue;
-        if (!ignoreUnpickable && !entity->IsPickable())
+        // IDA: Check pickable flag unless ignoreUnpickable
+        if (!ignoreUnpickable && (currentEntity->GetMoveableFlags() & VX_MOVEABLE_PICKABLE) == 0)
             continue;
 
-        if (localPt.x > ext->m_Rect.right || localPt.x < ext->m_Rect.left)
+        // IDA line 201-212: Check if point is within object extent rect
+        if (localPt.x > ext->m_Rect.right)
             continue;
-        if (localPt.y > ext->m_Rect.bottom || localPt.y < ext->m_Rect.top)
+        if (localPt.x < ext->m_Rect.left)
+            continue;
+        if (localPt.y > ext->m_Rect.bottom)
+            continue;
+        if (localPt.y < ext->m_Rect.top)
             continue;
 
+        // IDA line 214-215: Clear temp descriptor
         memset(&tempDesc, 0, sizeof(tempDesc));
 
-        if (RCKMesh *mesh = (RCKMesh *) entity->GetCurrentMesh()) {
-            if (mesh->Pick2D(localPt, &tempDesc, this, (RCK3dEntity *) entity)) {
-                VxVector transformedPt;
-                entity->Transform(&transformedPt, &tempDesc.IntersectionPoint, m_RenderedScene->m_RootEntity);
+        // IDA line 216: Get transformed intersection point
+        VxVector transformedPt;
 
+        // IDA line 216-228: Check mesh Pick2D
+        if (currentEntity->GetCurrentMesh()) {
+            RCKMesh *mesh = (RCKMesh *) currentEntity->GetCurrentMesh();
+            if (mesh->Pick2D(localPt, &tempDesc, this, currentEntity)) {
+                // IDA line 220: Transform intersection point to root entity space
+                currentEntity->Transform(&transformedPt, &tempDesc.IntersectionPoint, m_RenderedScene->m_RootEntity);
+
+                // IDA line 221-222: Calculate distance from rayStart
                 VxVector diff;
                 diff.x = transformedPt.x - rayStart.x;
                 diff.y = transformedPt.y - rayStart.y;
                 diff.z = transformedPt.z - rayStart.z;
-                const float distance = diff.Magnitude();
+                const float dist = diff.Magnitude();
 
-                if (distance < bestDistance) {
-                    memcpy(desc, &tempDesc, sizeof(VxIntersectionDesc));
-                    bestDistance = distance;
-                    bestEntity = entity;
+                // IDA line 223-227: Update best if closer
+                if (dist < bestDistance) {
+                    memcpy(idesc, &tempDesc, sizeof(VxIntersectionDesc));
+                    bestDistance = dist;
+                    bestEntity = (CK3dEntity *) currentEntity;
                 }
             }
         }
 
+        // IDA line 231-242: Ray intersection test
         CK3dEntity *refEntity = m_RenderedScene ? m_RenderedScene->m_RootEntity : nullptr;
-        if (entity->RayIntersection(&rayStart, &rayEnd, &tempDesc, refEntity, CKRAYINTERSECTION_DEFAULT)) {
+        if (currentEntity->RayIntersection(&rayStart, &rayEnd, &tempDesc, refEntity, CKRAYINTERSECTION_DEFAULT)) {
             if (tempDesc.Distance < bestDistance) {
-                memcpy(desc, &tempDesc, sizeof(VxIntersectionDesc));
+                memcpy(idesc, &tempDesc, sizeof(VxIntersectionDesc));
                 bestDistance = tempDesc.Distance;
-                bestEntity = entity;
+                bestEntity = (CK3dEntity *) currentEntity;
             }
         }
     }
 
+    // IDA line 249: Return best entity found
     return bestEntity;
 }
 
@@ -1983,28 +2048,27 @@ CKRenderObject *RCKRenderContext::Pick(int x, int y, CKPICKRESULT *oRes, CKBOOL 
 
 // IDA: 0x1006810c
 CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iIgnoreUnpickable) {
+    // IDA line 14: Initialize VxIntersectionDesc
     VxIntersectionDesc desc;
-    memset(&desc, 0, sizeof(VxIntersectionDesc));
 
-    // Convert screen point to local coordinates (relative to render context window)
+    // IDA line 15-17: Convert screen point to local coordinates (relative to render context window)
     Vx2DVector localPt;
-    localPt.x = (float) (pt.x - m_Settings.m_Rect.left);
     localPt.y = (float) (pt.y - m_Settings.m_Rect.top);
+    localPt.x = (float) (pt.x - m_Settings.m_Rect.left);
 
-    // Pick 3D objects first
-    CK3dEntity *picked3D = Pick3D(localPt, &desc, nullptr, iIgnoreUnpickable);
+    // IDA line 18: Pick 3D objects
+    CK3dEntity *obj = Pick3D(localPt, &desc, nullptr, iIgnoreUnpickable);
 
-    // Fill result structure if provided
+    // IDA line 19-34: Fill result structure if provided
     if (oRes) {
-        // Convert local coords back to screen coords for 2D picking
-        Vx2DVector screenPt;
-        screenPt.x = localPt.x + (float) m_Settings.m_Rect.left;
-        screenPt.y = localPt.y + (float) m_Settings.m_Rect.top;
+        // IDA line 21-22: Convert local coords back to screen coords for 2D picking
+        localPt.x = (float) m_Settings.m_Rect.left + localPt.x;
+        localPt.y = (float) m_Settings.m_Rect.top + localPt.y;
 
-        // Also pick 2D entities
-        CK2dEntity *picked2D = _Pick2D(screenPt, iIgnoreUnpickable);
+        // IDA line 23: Also pick 2D entities
+        CK2dEntity *sprite = _Pick2D(localPt, iIgnoreUnpickable);
 
-        // Copy intersection data from desc to oRes
+        // IDA line 24-29: Copy intersection data from desc to oRes
         oRes->IntersectionPoint = desc.IntersectionPoint;
         oRes->IntersectionNormal = desc.IntersectionNormal;
         oRes->TexU = desc.TexU;
@@ -2012,136 +2076,171 @@ CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iI
         oRes->Distance = desc.Distance;
         oRes->FaceIndex = desc.FaceIndex;
 
-        // Set Sprite to 2D entity ID if found
-        if (picked2D) {
-            oRes->Sprite = picked2D->GetID();
+        // IDA line 30-34: Set Sprite to 2D entity ID if found
+        if (sprite) {
+            oRes->Sprite = sprite->GetID();
         } else {
             oRes->Sprite = 0;
         }
     }
 
-    // Return 3D picked object (or null if none)
-    return picked3D;
+    // IDA line 36: Return 3D picked object (or null if none)
+    return obj;
 }
 
-// Helper function for rectangle intersection test
+// IDA: 0x1006ED80 - Rectangle intersection test
 // Returns: 0 = no intersection, 1 = fully contained, 2 = partial intersection
 static int RectIntersectTest(const VxRect *a, const VxRect *b) {
-    // Check for no intersection
-    if (a->left >= b->right) return 0;
-    if (a->right <= b->left) return 0;
-    if (a->top >= b->bottom) return 0;
-    if (a->bottom <= b->top) return 0;
+    // IDA line 23-28: Check a.left >= b.right (no intersection)
+    if (a->left >= b->right)
+        return 0;
+    // IDA line 29-30: Check a.right < b.left (no intersection)
+    if (a->right < b->left)
+        return 0;
+    // IDA line 31-36: Check a.top >= b.bottom (no intersection)
+    if (a->top >= b->bottom)
+        return 0;
+    // IDA line 37-38: Check a.bottom < b.top (no intersection)
+    if (a->bottom < b->top)
+        return 0;
 
-    // Check if a is fully inside b
-    if (a->left >= b->left && a->right <= b->right &&
-        a->top >= b->top && a->bottom <= b->bottom) {
-        return 1;
-    }
+    // IDA line 39-40: Check if a.left < b.left (partial)
+    if (a->left < b->left)
+        return 2;
+    // IDA line 41-46: Check if a.right > b.right (partial)
+    if (a->right > b->right)
+        return 2;
+    // IDA line 47-48: Check if a.top < b.top (partial)
+    if (a->top < b->top)
+        return 2;
+    // IDA line 49-56: Check if a.bottom > b.bottom (partial), else fully inside
+    if (a->bottom > b->bottom)
+        return 2;
 
-    // Partial intersection
-    return 2;
+    // Fully contained
+    return 1;
 }
 
 // IDA: 0x10068abc
 CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObjects, CKBOOL Intersect) {
-    // Copy rect and adjust to local coordinates
+    // IDA line 29-30: Return error if oObjects is null (shouldn't happen with reference, but matches IDA check)
+    // In C++ with reference this check is not needed, but we keep the logic flow
+
+    // IDA line 31-34: Convert rect to local integer coordinates
+    int localLeft = (int) r.left - m_Settings.m_Rect.left;
+    int localTop = (int) r.top - m_Settings.m_Rect.top;
+    int localRight = (int) r.right - m_Settings.m_Rect.left;
+    int localBottom = (int) r.bottom - m_Settings.m_Rect.top;
+
+    // IDA line 35-36: Initialize temp rects
+    VxRect extRect;
+    VxRect homogRect;
+
+    // IDA line 37: Copy input rect to pickRect
     VxRect pickRect = r;
-    float offsetX = (float) m_Settings.m_Rect.left;
-    float offsetY = (float) m_Settings.m_Rect.top;
-    pickRect.left -= offsetX;
-    pickRect.right -= offsetX;
-    pickRect.top -= offsetY;
-    pickRect.bottom -= offsetY;
 
-    // Normalize rect
-    if (pickRect.left > pickRect.right) {
-        float t = pickRect.left;
-        pickRect.left = pickRect.right;
-        pickRect.right = t;
-    }
-    if (pickRect.top > pickRect.bottom) {
-        float t = pickRect.top;
-        pickRect.top = pickRect.bottom;
-        pickRect.bottom = t;
-    }
+    // IDA line 38-41: Create offset and apply to pickRect (sub_10060010)
+    Vx2DVector offset;
+    offset.x = (float) m_Settings.m_Rect.left;
+    offset.y = (float) m_Settings.m_Rect.top;
+    pickRect.left -= offset.x;
+    pickRect.right -= offset.x;
+    pickRect.top -= offset.y;
+    pickRect.bottom -= offset.y;
 
-    // Iterate through 3D entities in rendered scene
+    // IDA line 42: Normalize pickRect (sub_1006ED20)
+    pickRect.Normalize();
+
+    // IDA line 43-66: Iterate through 3D entities in rendered scene
     if (m_RenderedScene) {
-        int count = m_RenderedScene->m_3DEntities.Size();
-        for (int i = 0; i < count; ++i) {
-            CK3dEntity *ent = (CK3dEntity *) m_RenderedScene->m_3DEntities[i];
+        for (CK3dEntity **it = (CK3dEntity **) m_RenderedScene->m_3DEntities.Begin();
+             it != (CK3dEntity **) m_RenderedScene->m_3DEntities.End(); ++it) {
+            CK3dEntity *ent = *it;
             if (!ent)
                 continue;
 
-            // Check if not pickable
-            if (!ent->IsPickable())
+            // IDA line 52: Check if interface object (ObjectFlags & 2) (sub_10060380)
+            if ((ent->GetObjectFlags() & CK_OBJECT_INTERFACEOBJ) != 0)
                 continue;
 
-            // Check if visible
+            // IDA line 54: Check if visible
             if (!ent->IsVisible())
                 continue;
 
-            // Get screen extents
-            VxRect extRect;
+            // IDA line 56: Get render extents
             ent->GetRenderExtents(extRect);
 
-            // Test intersection
+            // IDA line 57-61: Test intersection
             int result = RectIntersectTest(&extRect, &pickRect);
-            if (result) {
-                // result 1 = fully contained, result 2 = partial intersection
+            if (result != 0) {
+                // IDA line 60: If not Intersect mode OR result is not partial (2)
                 if (!Intersect || result != 2) {
-                    oObjects.Insert(0, ent);
+                    // IDA line 61: InsertFront
+                    oObjects.PushFront(ent);
                 }
             }
         }
     }
 
-    // Iterate through background 2D entities (Get2dRoot(TRUE))
+    // IDA line 67-85: Iterate through background 2D entities (Get2dRoot(1))
     {
+        CK2dEntity *current = nullptr;
         CK2dEntity *root2D = Get2dRoot(TRUE);
-        CK2dEntity *current = nullptr;
-        while ((current = root2D->HierarchyParser(current)) != nullptr) {
-            // IDA: skip interface objects and non-pickable 2D entities
+        while (true) {
+            current = root2D->HierarchyParser(current);
+            if (!current)
+                break;
+
+            // IDA line 75: Skip interface objects (ObjectFlags & 1)
             if ((current->GetObjectFlags() & CK_OBJECT_INTERFACEOBJ) != 0)
                 continue;
+            // IDA line 75: Skip non-pickable 2D entities (Flags & 0x80)
             if ((current->GetFlags() & CK_2DENTITY_NOTPICKABLE) != 0)
                 continue;
 
-            VxRect homogRect, extRect;
+            // IDA line 77: Get extents
             current->GetExtents(homogRect, extRect);
 
-            const int result = RectIntersectTest(&extRect, &pickRect);
-            if (result) {
+            // IDA line 78-82: Test intersection
+            int result = RectIntersectTest(&extRect, &pickRect);
+            if (result != 0) {
                 if (!Intersect || result != 2) {
-                    oObjects.Insert(0, current);
+                    oObjects.PushFront(current);
                 }
             }
         }
     }
 
-    // Iterate through foreground 2D entities (Get2dRoot(FALSE))
+    // IDA line 86-104: Iterate through foreground 2D entities (Get2dRoot(0))
     {
-        CK2dEntity *root2D = Get2dRoot(FALSE);
         CK2dEntity *current = nullptr;
-        while ((current = root2D->HierarchyParser(current)) != nullptr) {
+        CK2dEntity *root2D = Get2dRoot(FALSE);
+        while (true) {
+            current = root2D->HierarchyParser(current);
+            if (!current)
+                break;
+
+            // IDA line 94: Skip interface objects
             if ((current->GetObjectFlags() & CK_OBJECT_INTERFACEOBJ) != 0)
                 continue;
+            // IDA line 94: Skip non-pickable 2D entities
             if ((current->GetFlags() & CK_2DENTITY_NOTPICKABLE) != 0)
                 continue;
 
-            VxRect homogRect, extRect;
+            // IDA line 96: Get extents
             current->GetExtents(homogRect, extRect);
 
-            const int result = RectIntersectTest(&extRect, &pickRect);
-            if (result) {
+            // IDA line 97-101: Test intersection
+            int result = RectIntersectTest(&extRect, &pickRect);
+            if (result != 0) {
                 if (!Intersect || result != 2) {
-                    oObjects.Insert(0, current);
+                    oObjects.PushFront(current);
                 }
             }
         }
     }
 
+    // IDA line 105: Return CK_OK
     return CK_OK;
 }
 
