@@ -60,8 +60,7 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
     return state;
 }
 
-VxDrawPrimitiveData *
-RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) {
+VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) {
     CKBYTE *mem;
     if (m_Valid) {
         CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
@@ -82,8 +81,7 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
     }
 }
 
-CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount,
-                             CKDWORD StartVertex, CKDWORD VertexCount) {
+CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) {
     CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
 
     if (VertexCount == 0)
