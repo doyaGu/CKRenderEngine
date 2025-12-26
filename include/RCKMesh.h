@@ -167,6 +167,9 @@ public:
     CKBOOL CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveData *data);
     CKBOOL CheckHWIndexBuffer(CKRasterizerContext *rst);
 
+    // Progressive mesh rendering (IDA: 0x100257b1)
+    void BuildRenderMesh();
+
     // Render-group remap helpers (IDA: VBuffer stored in CKMaterialGroup::m_RemapData)
     CKVBuffer *GetVBuffer(CKMaterialGroup *group) const;
     void DeleteVBuffer(CKMaterialGroup *group);
