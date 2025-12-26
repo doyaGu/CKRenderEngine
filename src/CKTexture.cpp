@@ -97,7 +97,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
 
     // Check if texture is invalid
-    if ((m_BitmapFlags & 1) != 0) {
+    if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0) {
         rstCtx->SetTexture(0, TextureStage);
         return FALSE;
     }
@@ -106,7 +106,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     if ((rstCtx->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) == 0)
         Clamping = FALSE;
 
-    CKBOOL needsAlpha = (m_BitmapFlags & 2) != 0 || Clamping;
+    CKBOOL needsAlpha = (m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 || Clamping;
     CKBOOL needsCreate = FALSE;
     CKBOOL needsRestore = FALSE;
     CKBOOL isRenderTarget = FALSE;
@@ -132,7 +132,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     } else {
         // Check if texture needs to be restored
         if (!isRenderTarget) {
-            needsRestore = ((m_BitmapFlags & 4) != 0 || (Clamping && (m_BitmapFlags & 8) == 0));
+            needsRestore = ((m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) != 0 || (Clamping && !(m_BitmapFlags & CKBITMAPDATA_CLAMPUPTODATE)));
         }
         m_RasterizerContext = rstCtx;
     }
@@ -141,7 +141,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
         Restore(Clamping);
 
     if (!isRenderTarget) {
-        if ((m_BitmapFlags & 2) != 0 || Clamping) {
+        if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 || Clamping) {
             rstCtx->SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
             rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
             rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
@@ -159,18 +159,16 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
     if (!m_RasterizerContext)
         return FALSE;
 
-    if ((m_BitmapFlags & 1) != 0)
+    if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0)
         return FALSE;
 
     // Clear clamping-related flags
-    m_BitmapFlags &= ~0x0C;
+    m_BitmapFlags &= ~(CKBITMAPDATA_FORCERESTORE | CKBITMAPDATA_CLAMPUPTODATE);
 
     CKBOOL result = FALSE;
 
     // Check for cube map case
-    if ((m_BitmapFlags & 0x10) != 0 &&
-        GetSlotCount() == 6 &&
-        GetWidth() == GetHeight()) {
+    if ((m_BitmapFlags & CKBITMAPDATA_CUBEMAP) != 0 && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
         CKTextureDesc *texDesc = m_RasterizerContext->GetTextureData(m_ObjectIndex);
         if (texDesc && (texDesc->Flags & CKRST_TEXTURE_CUBEMAP) != 0) {
             VxImageDescEx desc;
@@ -197,7 +195,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
         desc.Image = imageData;
 
         // Handle transparency
-        if ((m_BitmapFlags & 2) != 0)
+        if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0)
             SetAlphaForTransparentColor(desc);
 
         // Handle clamping
@@ -206,7 +204,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             if (Clamp)
                 SetBorderColorForClamp(desc);
         } else {
-            m_BitmapFlags |= 8;
+            m_BitmapFlags |= CKBITMAPDATA_CLAMPUPTODATE;
         }
 
         // Load mipmaps if present
@@ -230,7 +228,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
 CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(Dev);
 
-    if ((m_BitmapFlags & 1) != 0)
+    if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0)
         return FALSE;
 
     if (!dev->m_RasterizerContext)
@@ -253,9 +251,7 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
         desc.Flags |= CKRST_TEXTURE_MANAGED;
 
     // Check for cube map
-    if ((m_BitmapFlags & 0x10) != 0 &&
-        GetSlotCount() == 6 &&
-        GetWidth() == GetHeight()) {
+    if ((m_BitmapFlags & CKBITMAPDATA_CUBEMAP) != 0 && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
         desc.Flags |= CKRST_TEXTURE_CUBEMAP;
     }
 
@@ -269,9 +265,8 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
 
         // If no alpha format and we need alpha, find nearest format with alpha
         if (!HasAlphaFormat(desc.Format)) {
-            if ((m_BitmapFlags & 2) != 0 ||
-                (Clamping && (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps &
-                    CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
+            if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 ||
+                (Clamping && (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
                 FindNearestFormatWithAlpha(dev->m_RasterizerDriver, desc.Format);
             }
         }
@@ -498,7 +493,7 @@ CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
     dword |= (m_SaveOptions << 16);
     if (IsTransparent())
         dword |= 0x100;
-    if (m_BitmapFlags & 0x10) // IsCubeMap
+    if (m_BitmapFlags & CKBITMAPDATA_CUBEMAP)
         dword |= 0x400;
     if (m_DesiredVideoFormat != UNKNOWN_PF)
         dword |= 0x200;
