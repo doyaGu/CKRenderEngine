@@ -18,11 +18,17 @@ public:
     ~RCKKeyedAnimation() override;
     CK_CLASSID GetClassID() override;
 
+    // CKObject virtual methods
+    void CheckPreDeletion() override;
+    CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    void PreSave(CKFile *file, CKDWORD flags) override;
+
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
@@ -41,6 +47,10 @@ public:
     // Internal helpers used to match original CK2_3D.dll serialization behavior.
     RCKObjectAnimation *GetRootAnimationInternal() const { return m_RootAnimation; }
     const VxVector &GetRootVectorInternal() const { return m_Vector; }
+
+    void UpdateRootEntity();
+
+    static void SetParentKeyedAnimation(RCKObjectAnimation *objAnim, RCKKeyedAnimation *parent);
 
 protected:
     XSObjectPointerArray m_Animations; // 0x34-0x3B (XSArray has m_Begin at 0x34, m_End at 0x38)
