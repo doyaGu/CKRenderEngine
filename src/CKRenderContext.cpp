@@ -2405,7 +2405,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
 
     const CKBOOL rstOk = m_RasterizerContext->SetTargetTexture(textureIndex, width, height, (CKRST_CUBEFACE) CubeMapFace);
     if (!rstOk) {
-        if ((m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE) == 0)
+        if (!(m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE))
             return FALSE;
     }
 
