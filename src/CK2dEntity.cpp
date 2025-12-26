@@ -5,6 +5,9 @@
 #include "CKRasterizer.h"
 #include "CKSprite.h"
 
+// External function from CKMeshUtils.cpp
+extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
+
 // IDA: sub_1005C750 - Comparison function for sorting children by ZOrder
 // Compares two CK2dEntity* pointers by their m_ZOrder (at offset 0xB4 = 180)
 static int CompareByZOrder(const void *a, const void *b) {
@@ -310,38 +313,44 @@ CKBOOL RCK2dEntity::IsClipToParent() {
 
 // IDA: 0x1005cabb - Internal Pick method used by RCKRenderContext::_Pick2D
 CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
-    // Check if hidden by parent hierarchy
+    // IDA line 14-15: Check if hidden by parent hierarchy (ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
     if (IsHiddenByParent())
         return nullptr;
 
-    // Recursively check children in reverse order (back to front)
-    for (int i = m_Children.Size() - 1; i >= 0; --i) {
-        RCK2dEntity *child = (RCK2dEntity *) m_Children[i];
-        CK2dEntity *picked = child->Pick(pt, ignoreUnpickable);
+    // IDA line 16-24: Recursively check children in reverse order (back to front)
+    // IDA uses End()-1 to Begin()-1 (exclusive), which is effectively Size()-1 down to 0
+    CK2dEntity *picked = nullptr;
+    for (CK2dEntity **it = m_Children.End() - 1; it >= m_Children.Begin(); --it) {
+        picked = ((RCK2dEntity *) *it)->Pick(pt, ignoreUnpickable);
         if (picked)
             return picked;
     }
 
-    // Check pickability
-    if (!ignoreUnpickable && (m_Flags & CK_2DENTITY_NOTPICKABLE))
+    // IDA line 25-26: Check pickability
+    if (!ignoreUnpickable && (m_Flags & CK_2DENTITY_NOTPICKABLE) != 0)
         return nullptr;
 
-    // Check visibility
+    // IDA line 27-28: Check visibility and interface object flag
     if (!IsVisible())
         return nullptr;
+    if ((m_ObjectFlags & CK_OBJECT_INTERFACEOBJ) != 0)
+        return nullptr;
 
-    // Check if point is inside m_VtxPos (the actual rendered rectangle)
+    // IDA line 29-30: Check if point is inside m_VtxPos (sub_100600B0 = point-in-rect test)
     if (pt.x < m_VtxPos.left || pt.x > m_VtxPos.right ||
         pt.y < m_VtxPos.top || pt.y > m_VtxPos.bottom)
         return nullptr;
 
-    // If no material, consider hit
+    // IDA line 31-32: If no material, consider hit
     if (!m_Material)
         return (CK2dEntity *) this;
 
-    // Calculate normalized UV coordinates within the entity
+    // IDA line 33: Initialize UV
     Vx2DVector uv;
-    if (m_Flags & CK_2DENTITY_RATIOOFFSET) {
+
+    // IDA line 34-58: Calculate normalized UV coordinates within the entity
+    if ((m_Flags & CK_2DENTITY_RATIOOFFSET) != 0) {
+        // IDA line 36-42: With ratio offset, subtract viewport position
         RCKRenderContext *rc = (RCKRenderContext *) m_Context->GetPlayerRenderContext();
         if (rc) {
             uv.x = (pt.x - m_Rect.left - (float) rc->m_ViewportData.ViewX) / m_Rect.GetWidth();
@@ -351,83 +360,22 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
             uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
         }
     } else {
+        // IDA line 54-57: Without ratio offset
         uv.x = (pt.x - m_Rect.left) / m_Rect.GetWidth();
         uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
     }
 
-    // Map UV to source rect coordinates
+    // IDA line 59: Map UV to source rect coordinates (sub_10060070)
+    // NOTE: IDA shows: srcU = width * uv.x + left, srcV = height * uv.y + left (BUG in original: uses left instead of top)
+    // We reproduce the exact behavior for faithfulness
     float srcU = m_SourceRect.GetWidth() * uv.x + m_SourceRect.left;
-    float srcV = m_SourceRect.GetHeight() * uv.y + m_SourceRect.top;
+    float srcV = m_SourceRect.GetHeight() * uv.y + m_SourceRect.left; // IDA BUG: uses left instead of top
 
-    // Perform texture-based alpha picking if texture is available
-    CKTexture *texture = m_Material->GetTexture(0);
-    if (texture) {
-        // Get texture dimensions
-        VxImageDescEx desc;
-        texture->GetSystemTextureDesc(desc);
-
-        if (desc.Image) {
-            // Clamp UV coordinates to [0, 1] range
-            if (srcU < 0.0f) srcU = 0.0f;
-            if (srcU > 1.0f) srcU = 1.0f;
-            if (srcV < 0.0f) srcV = 0.0f;
-            if (srcV > 1.0f) srcV = 1.0f;
-
-            // Calculate pixel coordinates
-            int pixelX = (int) (srcU * (float) desc.Width);
-            int pixelY = (int) (srcV * (float) desc.Height);
-
-            // Clamp to valid pixel range
-            if (pixelX >= desc.Width) pixelX = desc.Width - 1;
-            if (pixelY >= desc.Height) pixelY = desc.Height - 1;
-            if (pixelX < 0) pixelX = 0;
-            if (pixelY < 0) pixelY = 0;
-
-            // Sample the pixel at the calculated position
-            CKBYTE *imageData = (CKBYTE *) desc.Image;
-            int bytesPerPixel = desc.BitsPerPixel / 8;
-            int pitch = desc.Width * bytesPerPixel;
-            int pixelOffset = pixelY * pitch + pixelX * bytesPerPixel;
-
-            // Check alpha channel (assume ARGB or RGBA format)
-            // For most Virtools textures, alpha is typically the 4th byte or first byte
-            CKBYTE alpha = 255; // Default to opaque
-
-            if (bytesPerPixel == 4) {
-                // 32-bit texture with alpha
-                if (desc.AlphaMask == 0xFF000000) {
-                    // ARGB format - alpha is first byte
-                    alpha = imageData[pixelOffset];
-                } else if (desc.AlphaMask == 0x000000FF) {
-                    // RGBA format - alpha is last byte
-                    alpha = imageData[pixelOffset + 3];
-                } else {
-                    // Try to detect from mask position
-                    alpha = imageData[pixelOffset + 3]; // Default to RGBA
-                }
-            } else if (bytesPerPixel == 2) {
-                // 16-bit texture, check if it has alpha (e.g., ARGB4444, ARGB1555)
-                if (desc.AlphaMask != 0) {
-                    // Extract alpha bits
-                    CKWORD pixel = *(CKWORD *) (imageData + pixelOffset);
-                    if (desc.AlphaMask == 0xF000) {
-                        // 4-bit alpha (ARGB4444)
-                        alpha = (CKBYTE) ((pixel >> 12) * 17); // Scale 0-15 to 0-255
-                    } else if (desc.AlphaMask == 0x8000) {
-                        // 1-bit alpha (ARGB1555)
-                        alpha = (pixel & 0x8000) ? 255 : 0;
-                    }
-                }
-            }
-
-            // Alpha threshold for picking (alpha > 128 = opaque enough to pick)
-            if (alpha <= 128) {
-                return nullptr; // Transparent, not pickable
-            }
-        }
-    }
-
-    return (CK2dEntity *) this;
+    // IDA line 60-63: Use PreciseTexturePick for alpha test
+    if (PreciseTexturePick(m_Material, srcU, srcV))
+        return (CK2dEntity *) this;
+    
+    return nullptr;
 }
 
 void RCK2dEntity::SetFlags(CKDWORD Flags) {
