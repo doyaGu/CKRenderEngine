@@ -428,13 +428,13 @@ CKSTRING RCKTargetCamera::GetDependencies(int i, int mode) {
 
 void RCKTargetCamera::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(RCKTargetCamera::m_ClassID, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCKTargetCamera, CKCID_3DENTITY);
 
     // Register associated parameter GUID: CKPGUID_TARGETCAMERA
-    CKClassRegisterAssociatedParameter(RCKTargetCamera::m_ClassID, CKPGUID_TARGETCAMERA);
+    CKPARAMETERFROMCLASS(RCKTargetCamera, CKPGUID_TARGETCAMERA);
 
     // Register default dependencies
-    CKClassRegisterDefaultDependencies(RCKTargetCamera::m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKTargetCamera, CK_DEPENDENCIES_COPY);
 }
 
 CKTargetCamera *RCKTargetCamera::CreateInstance(CKContext *Context) {

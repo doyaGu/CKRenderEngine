@@ -3328,17 +3328,17 @@ CKSTRING RCK3dEntity::GetDependencies(int i, int mode) {
 
 void RCK3dEntity::Register() {
     // Based on IDA decompilation at 0x1000b3c4
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_OBJECTANIMATION);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_MESH);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCK3dEntity, CKCID_OBJECTANIMATION);
+    CKCLASSNOTIFYFROMCID(RCK3dEntity, CKCID_MESH);
+    CKCLASSNOTIFYFROMCID(RCK3dEntity, CKCID_3DENTITY);
 
     // Register associated parameter GUID: {5B8A05D5, 31EA28D4}
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_3DENTITY);
+    CKPARAMETERFROMCLASS(RCK3dEntity, CKPGUID_3DENTITY);
 
     // Register default dependencies for different modes
-    CKClassRegisterDefaultDependencies(m_ClassID, 6, 1); // Copy mode
-    CKClassRegisterDefaultDependencies(m_ClassID, 4, 2); // Delete mode
-    CKClassRegisterDefaultDependencies(m_ClassID, 7, 4); // Save mode
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCK3dEntity, 6);
+    CKCLASSDEFAULTDELETEDEPENDENCIES(RCK3dEntity, CK_DEPENDENCIES_SAVE);
+    CKCLASSDEFAULTSAVEDEPENDENCIES(RCK3dEntity, 7);
 }
 
 CK3dEntity *RCK3dEntity::CreateInstance(CKContext *Context) {

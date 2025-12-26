@@ -370,10 +370,10 @@ CKSTRING RCKPlace::GetDependencies(int i, int mode) {
 
 void RCKPlace::Register() {
     // Register notifications for classes that can affect this place
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_LEVEL);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_CAMERA);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_PLACE);
+    CKCLASSNOTIFYFROMCID(RCKPlace, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCKPlace, CKCID_LEVEL);
+    CKCLASSNOTIFYFROMCID(RCKPlace, CKCID_CAMERA);
+    CKPARAMETERFROMCLASS(RCKPlace, CKPGUID_PLACE);
 }
 
 CKPlace *RCKPlace::CreateInstance(CKContext *Context) {

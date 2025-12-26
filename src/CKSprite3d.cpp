@@ -569,13 +569,13 @@ CKSTRING RCKSprite3D::GetDependencies(int i, int mode) {
 
 void RCKSprite3D::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(RCKSprite3D::m_ClassID, CKCID_MATERIAL);
+    CKCLASSNOTIFYFROMCID(RCKSprite3D, CKCID_MATERIAL);
 
     // Register associated parameter GUID: CKPGUID_SPRITE3D
-    CKClassRegisterAssociatedParameter(RCKSprite3D::m_ClassID, CKPGUID_SPRITE3D);
+    CKPARAMETERFROMCLASS(RCKSprite3D, CKPGUID_SPRITE3D);
 
     // Register default dependencies
-    CKClassRegisterDefaultDependencies(RCKSprite3D::m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKSprite3D, CK_DEPENDENCIES_COPY);
 }
 
 CKSprite3D *RCKSprite3D::CreateInstance(CKContext *Context) {

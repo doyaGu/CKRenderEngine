@@ -611,10 +611,10 @@ CKSTRING RCKKeyedAnimation::GetDependencies(int i, int mode) {
 
 void RCKKeyedAnimation::Register() {
     // Based on IDA analysis
-    CKClassNeedNotificationFrom(RCKKeyedAnimation::m_ClassID, RCKObjectAnimation::m_ClassID);
+    CKCLASSNOTIFYFROM(RCKKeyedAnimation, RCKObjectAnimation);
 
     // Register associated parameter GUID: {0x5BF0D34D, 0x19E69236} (same as Animation)
-    CKClassRegisterAssociatedParameter(RCKKeyedAnimation::m_ClassID, CKPGUID_ANIMATION);
+    CKPARAMETERFROMCLASS(RCKKeyedAnimation, CKPGUID_ANIMATION);
 }
 
 CKKeyedAnimation *RCKKeyedAnimation::CreateInstance(CKContext *Context) {

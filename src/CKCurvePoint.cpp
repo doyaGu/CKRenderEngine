@@ -397,7 +397,7 @@ CKSTRING RCKCurvePoint::GetDependencies(int i, int mode) {
 
 void RCKCurvePoint::Register() {
     // Based on IDA decompilation
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_CURVEPOINT);
+    CKPARAMETERFROMCLASS(RCKCurvePoint, CKPGUID_CURVEPOINT);
 }
 
 CKCurvePoint *RCKCurvePoint::CreateInstance(CKContext *Context) {

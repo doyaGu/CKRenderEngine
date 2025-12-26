@@ -2124,10 +2124,10 @@ CKSTRING RCKObjectAnimation::GetDependencies(int i, int mode) {
 
 void RCKObjectAnimation::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_OBJECTANIMATION);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_OBJECTANIMATION);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
+    CKCLASSNOTIFYFROMCID(RCKObjectAnimation, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCKObjectAnimation, CKCID_OBJECTANIMATION);
+    CKPARAMETERFROMCLASS(RCKObjectAnimation, CKPGUID_OBJECTANIMATION);
+    CKCLASSDEFAULTOPTIONS(RCKObjectAnimation, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
 }
 
 CKObjectAnimation *RCKObjectAnimation::CreateInstance(CKContext *Context) {

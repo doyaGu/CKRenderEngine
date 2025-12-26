@@ -2251,9 +2251,9 @@ CKSTRING RCKMesh::GetDependencies(int i, int mode) {
 
 void RCKMesh::Register() {
     // Based on IDA decompilation at 0x10028b53
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_MATERIAL);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_MESH);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
+    CKCLASSNOTIFYFROMCID(RCKMesh, CKCID_MATERIAL);
+    CKPARAMETERFROMCLASS(RCKMesh, CKPGUID_MESH);
+    CKCLASSDEFAULTOPTIONS(RCKMesh, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
 }
 
 CKMesh *RCKMesh::CreateInstance(CKContext *Context) {

@@ -377,13 +377,13 @@ CKSTRING RCKTargetLight::GetDependencies(int i, int mode) {
 
 void RCKTargetLight::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(RCKTargetLight::m_ClassID, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCKTargetLight, CKCID_3DENTITY);
 
     // Register associated parameter GUID: CKPGUID_TARGETLIGHT
-    CKClassRegisterAssociatedParameter(RCKTargetLight::m_ClassID, CKPGUID_TARGETLIGHT);
+    CKPARAMETERFROMCLASS(RCKTargetLight, CKPGUID_TARGETLIGHT);
 
     // Register default dependencies
-    CKClassRegisterDefaultDependencies(RCKTargetLight::m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKTargetLight, CK_DEPENDENCIES_COPY);
 }
 
 CKTargetLight *RCKTargetLight::CreateInstance(CKContext *Context) {

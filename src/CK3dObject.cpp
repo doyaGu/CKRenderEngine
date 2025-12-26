@@ -30,7 +30,7 @@ CKSTRING RCK3dObject::GetDependencies(int i, int mode) {
 
 void RCK3dObject::Register() {
     // Register associated parameter GUID
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_OBJECT3D);
+    CKPARAMETERFROMCLASS(RCK3dObject, CKPGUID_OBJECT3D);
 }
 
 CK3dObject *RCK3dObject::CreateInstance(CKContext *Context) {

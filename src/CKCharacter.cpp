@@ -286,10 +286,10 @@ CKSTRING RCKCharacter::GetDependencies(int i, int mode) {
 }
 
 void RCKCharacter::Register() {
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_ANIMATION);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_BODYPART);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_CHARACTER);
-    CKClassRegisterDefaultDependencies(m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSNOTIFYFROMCID(RCKCharacter, CKCID_ANIMATION);
+    CKCLASSNOTIFYFROMCID(RCKCharacter, CKCID_BODYPART);
+    CKPARAMETERFROMCLASS(RCKCharacter, CKPGUID_CHARACTER);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKCharacter, CK_DEPENDENCIES_COPY);
 }
 
 CKCharacter *RCKCharacter::CreateInstance(CKContext *Context) {

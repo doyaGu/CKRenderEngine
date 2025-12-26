@@ -3277,7 +3277,7 @@ CKSTRING RCKRenderContext::GetDependencies(int i, int mode) {
 }
 
 void RCKRenderContext::Register() {
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_RENDEROBJECT);
+    CKCLASSNOTIFYFROMCID(RCKRenderContext, CKCID_RENDEROBJECT);
 }
 
 void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
