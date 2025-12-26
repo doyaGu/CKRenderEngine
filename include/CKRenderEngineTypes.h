@@ -467,6 +467,31 @@ struct CKProgressiveMesh {
                           m_Reserved(0),
                           m_EdgeCollapseStruct(nullptr) {}
 
+    // Copy constructor - matches IDA sub_100298F0
+    // Note: Does NOT deep copy m_EdgeCollapseStruct (runtime data only)
+    CKProgressiveMesh(const CKProgressiveMesh &other)
+        : m_VertexCount(other.m_VertexCount),
+          m_MorphEnabled(other.m_MorphEnabled),
+          m_MorphStep(other.m_MorphStep),
+          m_EdgeCollapseData(other.m_EdgeCollapseData),
+          m_Reserved(other.m_Reserved),
+          m_EdgeCollapseStruct(nullptr),  // Do not copy runtime pointer
+          m_Data(other.m_Data) {}
+
+    // Copy assignment operator
+    CKProgressiveMesh &operator=(const CKProgressiveMesh &other) {
+        if (this != &other) {
+            m_VertexCount = other.m_VertexCount;
+            m_MorphEnabled = other.m_MorphEnabled;
+            m_MorphStep = other.m_MorphStep;
+            m_EdgeCollapseData = other.m_EdgeCollapseData;
+            m_Reserved = other.m_Reserved;
+            // Do not copy m_EdgeCollapseStruct - it's runtime data
+            m_Data = other.m_Data;
+        }
+        return *this;
+    }
+
     ~CKProgressiveMesh() {
         if (m_EdgeCollapseStruct) {
             delete m_EdgeCollapseStruct;

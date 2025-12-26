@@ -228,52 +228,11 @@ static int ClampPMVertexCount(RCKMesh *mesh, int target) {
 }
 
 void ProgressiveMeshPreRenderCallback(CKRenderContext *ctx, CK3dEntity *entity, CKMesh *meshObj, void *data) {
+    // Match IDA at 0x100238dd
+    // The original callback simply calls BuildRenderMesh
     RCKMesh *mesh = (RCKMesh *) (meshObj ? meshObj : data);
-    if (!mesh || !mesh->IsPM())
-        return;
-
-    int maxVertices = mesh->GetVertexCount();
-    int current = mesh->GetVerticesRendered();
-    if (current <= 0 || current > maxVertices)
-        current = maxVertices;
-
-    if (!mesh->IsPMGeoMorphEnabled()) {
-        mesh->SetVerticesRendered(ClampPMVertexCount(mesh, current));
-        return;
-    }
-
-    float radius = mesh->GetRadius();
-    float distance = 0.0f;
-    if (ctx && entity) {
-        CK3dEntity *view = ctx->GetViewpoint();
-        if (view) {
-            VxVector eyePos;
-            VxVector objPos;
-            view->GetPosition(&eyePos, nullptr);
-            entity->GetPosition(&objPos, nullptr);
-            float dx = eyePos.x - objPos.x;
-            float dy = eyePos.y - objPos.y;
-            float dz = eyePos.z - objPos.z;
-            distance = sqrtf(dx * dx + dy * dy + dz * dz);
-        }
-    }
-
-    int minVertices = (std::max)(3, maxVertices / 8);
-    if (radius > 0.0f && distance > 0.0f) {
-        float start = radius * 12.0f;
-        float end = radius * 72.0f;
-        if (distance <= start) {
-            current = maxVertices;
-        } else if (distance >= end) {
-            current = minVertices;
-        } else {
-            float t = (distance - start) / (end - start);
-            float lerp = maxVertices - t * (float) (maxVertices - minVertices);
-            current = (int) lerp;
-        }
-    }
-
-    mesh->SetVerticesRendered(ClampPMVertexCount(mesh, current));
+    if (mesh)
+        mesh->BuildRenderMesh();
 }
 
 // Constructor
@@ -2165,11 +2124,11 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
     }
 
     // Copy progressive mesh if present
+    // Match IDA at 0x10029251-0x100292cc
     if (source->m_ProgressiveMesh) {
-        m_ProgressiveMesh = new CKProgressiveMesh();
-        // Copy progressive mesh data
-        // Note: Detailed PM copy would require more reverse engineering
-        // For now, add the pre-render callback
+        // Allocate and copy using the copy constructor (matches IDA sub_100298F0)
+        m_ProgressiveMesh = new CKProgressiveMesh(*source->m_ProgressiveMesh);
+        // Add the pre-render callback
         AddPreRenderCallBack(ProgressiveMeshPreRenderCallback, this, FALSE);
     }
 
@@ -2542,6 +2501,301 @@ void RCKMesh::DestroyPM() {
 
     // Rebuild render groups
     CreateRenderGroups();
+}
+
+/**
+ * @brief Look up parent vertex for progressive mesh at given LOD level.
+ *
+ * This is a helper function matching IDA sub_10023DD7.
+ * Given a vertex index and current LOD vertex count, finds the
+ * parent vertex index by traversing the collapse chain.
+ *
+ * @param pm Progressive mesh data
+ * @param vertexIndex Original vertex index
+ * @return Parent vertex index at current LOD level
+ */
+static int PMGetParentVertex(CKProgressiveMesh *pm, int vertexIndex) {
+    if (pm->m_VertexCount <= 0)
+        return 0;
+
+    while (vertexIndex >= pm->m_VertexCount) {
+        vertexIndex = (int) pm->m_Data[vertexIndex];
+    }
+    return vertexIndex;
+}
+
+/**
+ * @brief Look up parent vertex with LOD limit for geo-morphing.
+ *
+ * This is a helper function matching IDA sub_10023E13.
+ * Similar to PMGetParentVertex but with an explicit vertex count limit.
+ *
+ * @param pm Progressive mesh data
+ * @param vertexIndex Original vertex index
+ * @param vertexCount Maximum vertex count (LOD level)
+ * @return Parent vertex index at given LOD level
+ */
+static int PMGetParentVertexEx(CKProgressiveMesh *pm, int vertexIndex, int vertexCount) {
+    if (vertexCount <= 0)
+        return 0;
+
+    while (vertexIndex >= vertexCount) {
+        vertexIndex = (int) pm->m_Data[vertexIndex];
+    }
+    return vertexIndex;
+}
+
+/**
+ * @brief Linear interpolation between two VxVectors.
+ *
+ * Matches IDA sub_10029720.
+ *
+ * @param result Output vector
+ * @param t Interpolation factor (0-1)
+ * @param from Source vector
+ * @param to Target vector
+ */
+static void VxVectorLerp(VxVector *result, float t, const VxVector *from, const VxVector *to) {
+    result->x = from->x + (to->x - from->x) * t;
+    result->y = from->y + (to->y - from->y) * t;
+    result->z = from->z + (to->z - from->z) * t;
+}
+
+void RCKMesh::BuildRenderMesh() {
+    // Match IDA at 0x100257b1
+    // Check if object is up-to-date; if so, nothing to do
+    if (m_ObjectFlags & CK_OBJECT_UPTODATE)
+        return;
+
+    // Must have progressive mesh data
+    if (!m_ProgressiveMesh)
+        return;
+
+    // Prepare material groups with proper primitive sizes
+    const int faceCount = m_FaceVertexIndices.Size() / 3;
+    for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+        CKMaterialGroup *group = m_MaterialGroups[i];
+        // Resize primitives for face count (IDA: sub_1002A0F0)
+        group->m_Primitives.Resize(1);
+        CKPrimitiveEntry &prim = group->m_Primitives[0];
+        prim.m_Indices.Reserve(3 * faceCount);
+        prim.m_Indices.Resize(0);
+        prim.m_Type = VX_TRIANGLELIST;
+        group->m_FaceIndices.Resize(0);
+        group->m_HasValidPrimitives = 0x10000;
+        group->m_MaxVertexIndex = 0;
+        group->m_BaseVertex = 0;
+        group->m_MinVertexIndex = 0;
+        // Set vertex count for the group
+        group->m_VertexCount = m_Vertices.Size();
+    }
+
+    // Allocate temporary face index buffer
+    int pmVertexCount = 0;
+    XArray<CKWORD> renderIndices;
+    renderIndices.Reserve(m_FaceVertexIndices.Size());
+
+    if (m_ProgressiveMesh->m_MorphEnabled) {
+        // Geo-morphing enabled - need to interpolate vertices
+        m_Valid = FALSE;
+
+        // Determine current and target LOD levels
+        int targetVertexCount = m_Vertices.Size();
+        int currentCount = targetVertexCount;
+
+        if (m_ProgressiveMesh->m_MorphStep) {
+            // With morph step, use additive stepping
+            while (currentCount > m_ProgressiveMesh->m_VertexCount) {
+                currentCount -= m_ProgressiveMesh->m_MorphStep;
+            }
+            int nextLod = currentCount + m_ProgressiveMesh->m_MorphStep;
+            if (nextLod >= targetVertexCount)
+                nextLod = targetVertexCount;
+            targetVertexCount = nextLod;
+        } else if (m_ProgressiveMesh->m_VertexCount) {
+            // Without morph step, use power-of-2 stepping
+            while (currentCount >= m_ProgressiveMesh->m_VertexCount) {
+                currentCount >>= 1;
+            }
+            targetVertexCount = currentCount * 2;
+        } else {
+            currentCount = 0;
+            targetVertexCount = 1;
+        }
+
+        // Calculate interpolation factor
+        float lerpFactor = 0.0f;
+        if (targetVertexCount != currentCount) {
+            lerpFactor = (float) (m_ProgressiveMesh->m_VertexCount - currentCount) /
+                         (float) (targetVertexCount - currentCount);
+        }
+
+        // Store target vertex count in reserved field for later use
+        m_ProgressiveMesh->m_Reserved = targetVertexCount;
+
+        // Resize interpolated vertex storage
+        m_ProgressiveMesh->m_EdgeCollapseData.Resize(m_Vertices.Size() * sizeof(VxVertex) / sizeof(CKDWORD));
+
+        // Track which vertices have been processed
+        XArray<int> processed;
+        processed.Resize(m_Vertices.Size());
+        memset(processed.Begin(), 0, processed.Size() * sizeof(int));
+
+        // Get pointers to face data
+        CKWORD *faceIndices = m_FaceVertexIndices.Begin();
+        CKFace *faces = m_Faces.Begin();
+        VxVertex *interpVertices = (VxVertex *) m_ProgressiveMesh->m_EdgeCollapseData.Begin();
+
+        // Process each face
+        for (int faceIdx = 0; faceIdx < m_Faces.Size(); faceIdx++) {
+            // Get remapped vertex indices at target LOD
+            CKWORD v0 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[0], targetVertexCount);
+            CKWORD v1 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[1], targetVertexCount);
+            CKWORD v2 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[2], targetVertexCount);
+
+            // Add face index to appropriate material group
+            CKWORD faceIdxWord = (CKWORD) faceIdx;
+            m_MaterialGroups[faces[faceIdx].m_MatIndex]->m_FaceIndices.PushBack(faceIdxWord);
+
+            // Skip degenerate faces (where two or more vertices collapsed together)
+            if (v0 == v1 || v1 == v2 || v2 == v0)
+                break;
+
+            // Get vertex indices at current LOD for interpolation
+            CKWORD c0 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[0], currentCount);
+            CKWORD c1 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[1], currentCount);
+            CKWORD c2 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[2], currentCount);
+
+            // Process each vertex of the face
+            CKWORD targetVerts[3] = {v0, v1, v2};
+            CKWORD currentVerts[3] = {c0, c1, c2};
+
+            for (int vi = 0; vi < 3; vi++) {
+                int tv = targetVerts[vi];
+                int cv = currentVerts[vi];
+
+                if (!processed[tv]) {
+                    processed[tv] = 1;
+
+                    // Interpolate position
+                    VxVertex *targetVert = &m_Vertices[tv];
+                    VxVertex *currentVert = &m_Vertices[cv];
+                    VxVectorLerp(&interpVertices[tv].m_Position, lerpFactor, &currentVert->m_Position, &targetVert->m_Position);
+
+                    // Interpolate normal
+                    VxVectorLerp(&interpVertices[tv].m_Normal, lerpFactor, &currentVert->m_Normal, &targetVert->m_Normal);
+
+                    // Interpolate UV coordinates
+                    interpVertices[tv].m_UV.x = currentVert->m_UV.x * lerpFactor +
+                                                targetVert->m_UV.x * (1.0f - lerpFactor);
+                    interpVertices[tv].m_UV.y = currentVert->m_UV.y * lerpFactor +
+                                                targetVert->m_UV.y * (1.0f - lerpFactor);
+                }
+            }
+
+            // Add indices to material group primitives
+            CKMaterialGroup *group = m_MaterialGroups[faces[faceIdx].m_MatIndex];
+            group->m_Primitives[0].m_Indices.PushBack(v0);
+            group->m_Primitives[0].m_Indices.PushBack(v1);
+            group->m_Primitives[0].m_Indices.PushBack(v2);
+
+            // Track indices for normal rebuilding
+            renderIndices.PushBack(v0);
+            renderIndices.PushBack(v1);
+            renderIndices.PushBack(v2);
+
+            faceIndices += 3;
+        }
+
+        pmVertexCount = renderIndices.Size();
+    } else {
+        // Geo-morphing disabled - simple vertex remapping
+        m_ProgressiveMesh->m_Reserved = m_ProgressiveMesh->m_VertexCount;
+
+        CKWORD *faceIndices = m_FaceVertexIndices.Begin();
+        CKFace *faces = m_Faces.Begin();
+
+        for (int faceIdx = 0; faceIdx < m_Faces.Size(); faceIdx++) {
+            // Get remapped vertex indices at current LOD
+            CKWORD v0 = (CKWORD) PMGetParentVertex(m_ProgressiveMesh, faceIndices[0]);
+            CKWORD v1 = (CKWORD) PMGetParentVertex(m_ProgressiveMesh, faceIndices[1]);
+            CKWORD v2 = (CKWORD) PMGetParentVertex(m_ProgressiveMesh, faceIndices[2]);
+
+            // Skip degenerate faces
+            if (v0 == v1 || v1 == v2 || v2 == v0)
+                break;
+
+            // Add face index to material group
+            CKWORD faceIdxWord = (CKWORD) faceIdx;
+            m_MaterialGroups[faces[faceIdx].m_MatIndex]->m_FaceIndices.PushBack(faceIdxWord);
+
+            // Add indices to material group primitives
+            CKMaterialGroup *group = m_MaterialGroups[faces[faceIdx].m_MatIndex];
+            group->m_Primitives[0].m_Indices.PushBack(v0);
+            group->m_Primitives[0].m_Indices.PushBack(v1);
+            group->m_Primitives[0].m_Indices.PushBack(v2);
+
+            // Track for normal rebuilding
+            renderIndices.PushBack(v0);
+            renderIndices.PushBack(v1);
+            renderIndices.PushBack(v2);
+            pmVertexCount += 3;
+
+            faceIndices += 3;
+        }
+    }
+
+    // Rebuild normals if needed (IDA: flag 0x1000000)
+    if (pmVertexCount && (m_Flags & VXMESH_PM_BUILDNORM)) {
+        g_BuildNormalsFunc(m_Faces.Begin(),
+                          renderIndices.Begin(),
+                          pmVertexCount / 3,
+                          m_Vertices.Begin(),
+                          m_ProgressiveMesh->m_Reserved);
+        m_Flags &= ~VXMESH_PM_BUILDNORM;
+    }
+
+    // Update material channels
+    for (int ch = 0; ch < m_MaterialChannels.Size(); ch++) {
+        VxMaterialChannel &channel = m_MaterialChannels[ch];
+        if (!channel.m_FaceIndices) {
+            channel.m_FaceIndices = new XArray<CKWORD>();
+        }
+        channel.m_FaceIndices->Resize(0);
+
+        for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+            CKMaterialGroup *group = m_MaterialGroups[i];
+            XArray<CKWORD> &primIndices = group->m_Primitives[0].m_Indices;
+            for (CKWORD *it = primIndices.Begin(); it != primIndices.End(); ++it) {
+                channel.m_FaceIndices->PushBack(*it);
+            }
+        }
+    }
+
+    // Clean up empty material groups (IDA: sub_1002A380)
+    // Keep group 0, remove others that have no faces
+    int groupIdx = 1;
+    while (groupIdx < m_MaterialGroups.Size()) {
+        CKMaterialGroup *group = m_MaterialGroups[groupIdx];
+        if (!group->m_Material && group->m_FaceIndices.Size() == 0) {
+            delete group;
+            m_MaterialGroups.RemoveAt(groupIdx);
+
+            // Update face material indices
+            for (int fi = 0; fi < m_Faces.Size(); fi++) {
+                if (m_Faces[fi].m_MatIndex > groupIdx)
+                    m_Faces[fi].m_MatIndex--;
+            }
+        } else {
+            groupIdx++;
+        }
+    }
+
+    // Mark mesh as modified
+    m_FaceChannelMask = 0;
+    m_Flags |= VXMESH_POS_CHANGED;
+    CKObject::ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
+    VertexMove();
 }
 
 // =============================================
