@@ -1,12 +1,12 @@
 #include "RCKObjectAnimation.h"
 
 #include "VxMath.h"
-#include "CKBodyPart.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
-#include "CKSceneGraph.h"
 #include "CKMemoryPool.h"
+#include "CKBodyPart.h"
+#include "CKSceneGraph.h"
 #include "RCKKeyedAnimation.h"
 #include "RCK3dEntity.h"
 #include "RCKMesh.h"
@@ -125,7 +125,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
         chunk->WriteObject(m_Entity);
 
         // Write merged animation data if flag CK_OBJECTANIMATION_MERGED is set
-        if (m_Flags & CK_OBJECTANIMATION_MERGED) {
+        if (IsMerged()) {
             chunk->WriteFloat(m_MergeFactor);
             chunk->WriteObject(m_Anim1);
             chunk->WriteObject(m_Anim2);
@@ -156,7 +156,7 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteFloat(0.0f);
 
         // Write merged animation data if flag CK_OBJECTANIMATION_MERGED is set
-        if (m_Flags & CK_OBJECTANIMATION_MERGED) {
+        if (IsMerged()) {
             chunk->WriteFloat(m_MergeFactor);
             chunk->WriteObject(m_Anim1);
             chunk->WriteObject(m_Anim2);
@@ -331,7 +331,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
             const float length = chunk->ReadFloat();
             SetKeyframeLength(length);
 
-            if (m_Flags & CK_OBJECTANIMATION_MERGED) {
+            if (IsMerged()) {
                 m_MergeFactor = chunk->ReadFloat();
                 m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
                 m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
@@ -647,9 +647,9 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMERGE)) {
             m_MergeFactor = chunk->ReadFloat();
             if (chunk->ReadInt())
-                m_Flags |= 0x80;
+                m_Flags |= CK_OBJECTANIMATION_MERGED;
             else
-                m_Flags &= ~0x80;
+                m_Flags &= ~CK_OBJECTANIMATION_MERGED;
 
             m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
             m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
@@ -731,6 +731,52 @@ CKERROR RCKObjectAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
     m_field_38 = src->m_field_38;
     m_ParentKeyedAnimation = src->m_ParentKeyedAnimation;
 
+    return CK_OK;
+}
+
+// Based on IDA decompilation at 0x100585aa
+void RCKObjectAnimation::CheckPreDeletion() {
+    CKObject::CheckPreDeletion();
+    
+    // Clear m_Anim1 if it's being deleted
+    if (m_Anim1 && m_Anim1->IsToBeDeleted())
+        m_Anim1 = nullptr;
+    
+    // Clear m_Anim2 if it's being deleted
+    if (m_Anim2 && m_Anim2->IsToBeDeleted())
+        m_Anim2 = nullptr;
+    
+    // Clear m_Entity if it's being deleted
+    if (m_Entity && m_Entity->IsToBeDeleted())
+        m_Entity = nullptr;
+}
+
+// Based on IDA decompilation at 0x10058662
+CKBOOL RCKObjectAnimation::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
+    if (obj == (CKObject *)m_Anim1)
+        return TRUE;
+    if (obj == (CKObject *)m_Anim2)
+        return TRUE;
+    if (obj == (CKObject *)m_Entity)
+        return TRUE;
+    return CKObject::IsObjectUsed(obj, cid);
+}
+
+// Based on IDA decompilation at 0x1005c31d
+CKERROR RCKObjectAnimation::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::RemapDependencies(context);
+    if (err != CK_OK)
+        return err;
+    
+    // Remap m_Entity (offset 0x24 = 36 bytes)
+    m_Entity = (RCK3dEntity *)context.Remap((CKObject *)m_Entity);
+    
+    // Remap m_Anim1 (offset 0x30 = 48 bytes)
+    m_Anim1 = (RCKObjectAnimation *)context.Remap((CKObject *)m_Anim1);
+    
+    // Remap m_Anim2 (offset 0x34 = 52 bytes)
+    m_Anim2 = (RCKObjectAnimation *)context.Remap((CKObject *)m_Anim2);
+    
     return CK_OK;
 }
 
@@ -901,13 +947,13 @@ CKMorphController *RCKObjectAnimation::GetMorphController() {
 
 CKBOOL RCKObjectAnimation::EvaluatePosition(float Time, VxVector &Pos) {
     // Flag 0x04 disables position evaluation
-    if (m_Flags & 0x04) {
+    if (m_Flags & CK_OBJECTANIMATION_IGNOREPOS) {
         Pos.Set(0.0f, 0.0f, 0.0f);
         return FALSE;
     }
 
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         if (m_MergeFactor == 0.0f) {
             // Use only first animation
             float normalizedTime = Time / m_KeyframeData->m_Length;
@@ -954,13 +1000,13 @@ CKBOOL RCKObjectAnimation::EvaluatePosition(float Time, VxVector &Pos) {
 
 CKBOOL RCKObjectAnimation::EvaluateScale(float Time, VxVector &Scl) {
     // Flag 0x10 disables scale evaluation
-    if (m_Flags & 0x10) {
+    if (m_Flags & CK_OBJECTANIMATION_IGNORESCALE) {
         Scl.Set(1.0f, 1.0f, 1.0f);
         return FALSE;
     }
 
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         VxVector scale2;
         float normalizedTime = Time / m_KeyframeData->m_Length;
         float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
@@ -994,13 +1040,13 @@ CKBOOL RCKObjectAnimation::EvaluateScale(float Time, VxVector &Scl) {
 
 CKBOOL RCKObjectAnimation::EvaluateRotation(float Time, VxQuaternion &Rot) {
     // Flag 0x08 disables rotation evaluation
-    if (m_Flags & 0x08) {
+    if (m_Flags & CK_OBJECTANIMATION_IGNOREROT) {
         Rot = VxQuaternion(); // Identity quaternion
         return FALSE;
     }
 
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         if (m_MergeFactor == 0.0f) {
             // Use only first animation
             float normalizedTime = Time / m_KeyframeData->m_Length;
@@ -1048,11 +1094,11 @@ CKBOOL RCKObjectAnimation::EvaluateRotation(float Time, VxQuaternion &Rot) {
 
 CKBOOL RCKObjectAnimation::EvaluateScaleAxis(float Time, VxQuaternion &ScaleAxis) {
     // Flag 0x40 disables scale axis evaluation
-    if (m_Flags & 0x40)
+    if (m_Flags & CK_OBJECTANIMATION_IGNORESCALEROT)
         return FALSE;
 
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         VxQuaternion axis1, axis2;
         float normalizedTime = Time / m_KeyframeData->m_Length;
         float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
@@ -1088,11 +1134,11 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
     // Based on IDA decompilation at 0x100574B4
 
     // Check flag 0x20 - morph disabled
-    if (m_Flags & 0x20)
+    if (m_Flags & CK_OBJECTANIMATION_IGNOREMORPH)
         return FALSE;
 
     // Check for merged animation (flag 0x80)
-    if (!(m_Flags & 0x80)) {
+    if (!IsMerged()) {
         // Direct morph controller evaluation
         if (m_KeyframeData && m_KeyframeData->m_MorphController) {
             RCKMorphController *ctrl = reinterpret_cast<RCKMorphController *>(m_KeyframeData->m_MorphController);
@@ -1204,7 +1250,7 @@ CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector 
 
 CKBOOL RCKObjectAnimation::HasMorphNormalInfo() {
     // Check for merged animation
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasMorphNormalInfo())
             return TRUE;
@@ -1226,7 +1272,7 @@ CKBOOL RCKObjectAnimation::HasMorphNormalInfo() {
 }
 
 CKBOOL RCKObjectAnimation::HasMorphInfo() {
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasMorphInfo())
             return TRUE;
@@ -1238,7 +1284,7 @@ CKBOOL RCKObjectAnimation::HasMorphInfo() {
 }
 
 CKBOOL RCKObjectAnimation::HasScaleInfo() {
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasScaleInfo())
             return TRUE;
@@ -1250,7 +1296,7 @@ CKBOOL RCKObjectAnimation::HasScaleInfo() {
 }
 
 CKBOOL RCKObjectAnimation::HasPositionInfo() {
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasPositionInfo())
             return TRUE;
@@ -1262,7 +1308,7 @@ CKBOOL RCKObjectAnimation::HasPositionInfo() {
 }
 
 CKBOOL RCKObjectAnimation::HasRotationInfo() {
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasRotationInfo())
             return TRUE;
@@ -1274,7 +1320,7 @@ CKBOOL RCKObjectAnimation::HasRotationInfo() {
 }
 
 CKBOOL RCKObjectAnimation::HasScaleAxisInfo() {
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasScaleAxisInfo())
             return TRUE;
@@ -1521,7 +1567,7 @@ void RCKObjectAnimation::SetMergeFactor(float factor) {
 
 CKBOOL RCKObjectAnimation::IsMerged() {
     // Check flag bit 7 (0x80) to determine if this is a merged animation
-    return (m_Flags & 0x80) != 0;
+    return (m_Flags & CK_OBJECTANIMATION_MERGED) != 0;
 }
 
 CKObjectAnimation *RCKObjectAnimation::CreateMergedAnimation(CKObjectAnimation *subanim2, CKBOOL Dynamic) {
@@ -1545,7 +1591,7 @@ CKObjectAnimation *RCKObjectAnimation::CreateMergedAnimation(CKObjectAnimation *
     merged->SetLength(len1 >= len2 ? len1 : len2);
 
     // Set the merged flag (0x80)
-    merged->m_Flags |= 0x80;
+    merged->m_Flags |= CK_OBJECTANIMATION_MERGED;
 
     // Set the source animations
     merged->m_Anim1 = this;
@@ -1573,11 +1619,52 @@ float RCKObjectAnimation::GetLength() {
 }
 
 void RCKObjectAnimation::GetVelocity(float step, VxVector *vel) {
-    if (vel) {
-        vel->x = 0.0f;
-        vel->y = 0.0f;
-        vel->z = 0.0f;
+    // Based on IDA decompilation at 0x10057efd
+    // This function calculates the positional velocity at a given step
+    // by evaluating position at two nearby time steps and computing the difference
+    
+    if (!vel)
+        return;
+    
+    VxVector pos1, pos2;
+    VxVector velocity(0.0f, 0.0f, 0.0f);
+    
+    float evalStep = 0.0f;
+    
+    // Calculate frame from step
+    float frame = step * m_KeyframeData->m_Length;
+    
+    // Determine which direction to sample (forward or backward)
+    if (frame + 1.0f < m_KeyframeData->m_Length) {
+        // Can sample forward
+        evalStep = (frame + 1.0f) / m_KeyframeData->m_Length;
+    } else {
+        // Sample backward
+        evalStep = (frame - 1.0f) / m_KeyframeData->m_Length;
     }
+    
+    // Evaluate position at current step (stored in pos1)
+    EvaluateKeys(step, nullptr, &pos1, nullptr, nullptr);
+    
+    // Evaluate position at nearby step (stored in pos2)
+    EvaluateKeys(evalStep, nullptr, &pos2, nullptr, nullptr);
+    
+    // Calculate velocity as position difference if entity exists
+    if (m_Entity) {
+        if (step < evalStep) {
+            // Forward difference: velocity = pos2 - pos1
+            velocity.x = pos2.x - pos1.x;
+            velocity.y = pos2.y - pos1.y;
+            velocity.z = pos2.z - pos1.z;
+        } else {
+            // Backward difference: velocity = pos1 - pos2
+            velocity.x = pos1.x - pos2.x;
+            velocity.y = pos1.y - pos2.y;
+            velocity.z = pos1.z - pos2.z;
+        }
+    }
+    
+    *vel = velocity;
 }
 
 //=============================================================================
@@ -1731,11 +1818,13 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
     return CK_OK;
 }
 
+// Based on IDA decompilation at 0x10058042
 CKERROR RCKObjectAnimation::SetFrame(float frame, CKKeyedAnimation *anim) {
-    float length = GetLength();
-    if (length > 0.0f)
-        m_CurrentStep = frame / length;
-    return CK_OK;
+    if (!m_KeyframeData || m_KeyframeData->m_Length == 0.0f)
+        return CKERR_INVALIDOPERATION;  // -123 in IDA
+    
+    float step = frame / m_KeyframeData->m_Length;
+    return SetStep(step, anim);
 }
 
 float RCKObjectAnimation::GetCurrentStep() {
@@ -1746,8 +1835,24 @@ float RCKObjectAnimation::GetCurrentStep() {
 // CKObjectAnimation Virtual Methods - 3D Entity
 //=============================================================================
 
+// Based on IDA decompilation at 0x1005808e
 void RCKObjectAnimation::Set3dEntity(CK3dEntity *ent) {
-    m_Entity = reinterpret_cast<RCK3dEntity *>(ent);
+    RCK3dEntity *newEntity = reinterpret_cast<RCK3dEntity *>(ent);
+    
+    if (m_Entity != newEntity) {
+        // Remove from old entity's animation list
+        if (m_Entity) {
+            reinterpret_cast<CK3dEntity *>(m_Entity)->RemoveObjectAnimation(this);
+        }
+        
+        // Set new entity
+        m_Entity = newEntity;
+        
+        // Add to new entity's animation list
+        if (newEntity) {
+            reinterpret_cast<CK3dEntity *>(newEntity)->AddObjectAnimation(this);
+        }
+    }
 }
 
 CK3dEntity *RCKObjectAnimation::Get3dEntity() {
@@ -1762,7 +1867,7 @@ int RCKObjectAnimation::GetMorphVertexCount() {
     // Based on IDA decompilation at 0x100580F9
 
     // Check for merged animation (flag 0x80)
-    if (m_Flags & 0x80) {
+    if (IsMerged()) {
         // Return max vertex count from both sub-animations
         int count1 = m_Anim1->GetMorphVertexCount();
         int count2 = m_Anim2->GetMorphVertexCount();
