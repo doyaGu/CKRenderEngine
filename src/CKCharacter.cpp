@@ -13,9 +13,39 @@
 #include "RCKObjectAnimation.h"
 
 //=============================================================================
-// Constructor/Destructor
-// Based on decompilation at 0x1000F9B0 and 0x1000FB5B
+// Helper function corresponding to sub_10048148 in IDA
+// Iterates animation entities and sets exclusive animation on body parts
+// When exclusiveAnim is non-null, sets the body part's exclusive animation to it
+// When exclusiveAnim is null, clears the body part's exclusive animation
 //=============================================================================
+
+static void NotifyBodyPartsInAnimation(CKAnimation *anim, CKAnimation *exclusiveAnim) {
+    // This only works for CKKeyedAnimation which has GetAnimation/GetAnimationCount methods
+    if (!anim || !CKIsChildClassOf(anim, CKCID_KEYEDANIMATION)) {
+        return;
+    }
+
+    CKKeyedAnimation *keyedAnim = (CKKeyedAnimation *)anim;
+    int count = keyedAnim->GetAnimationCount();
+
+    for (int i = 0; i < count; ++i) {
+        CKObjectAnimation *objAnim = keyedAnim->GetAnimation(i);
+        if (!objAnim)
+            continue;
+
+        // Get the entity from the object animation (vtable+0xF4)
+        CK3dEntity *entity = objAnim->Get3dEntity();
+        if (!entity)
+            continue;
+
+        // Check if it's a body part (CKCID_BODYPART = 0x2A = 42)
+        if (CKIsChildClassOf(entity, CKCID_BODYPART)) {
+            // Call SetExclusiveAnimation (vtable+0x1D8) on the body part
+            CKBodyPart *bp = (CKBodyPart *)entity;
+            bp->SetExclusiveAnimation(exclusiveAnim);
+        }
+    }
+}
 
 RCKCharacter::RCKCharacter(CKContext *Context, CKSTRING name)
     : RCK3dEntity(Context, name),
@@ -35,38 +65,42 @@ RCKCharacter::RCKCharacter(CKContext *Context, CKSTRING name)
       m_FrameSrc(0.0f),
       m_AnimSrc(nullptr),
       m_TransitionMode(0) {
+    // Based on IDA decompilation at 0x1000F9B0
     // Create the warper animation (internal transition animation)
-    // Based on DLL: Creates a CKKeyedAnimation for transitions
     CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
-    m_Warper = (RCKKeyedAnimation *) m_Context->CreateObject(
+    m_Warper = (RCKKeyedAnimation *)m_Context->CreateObject(
         CKCID_KEYEDANIMATION,
         nullptr,
         CK_OBJECTCREATION_SameDynamic,
         nullptr);
 
     if (m_Warper) {
-        // Set the character reference on the warper using RCKAnimation interface
-        ((RCKAnimation *) m_Warper)->m_Character = (RCKCharacter *) this;
+        // Set the character reference on the warper
+        ((RCKAnimation *)m_Warper)->m_Character = this;
 
-        // Modify object flags: set 0x23 (hidden, internal, no save)
-        ((CKObject *) m_Warper)->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+        // Set flag 0x08 (CKANIMATION_INTERNAL) on the warper
+        CKDWORD flags = ((RCKAnimation *)m_Warper)->m_Flags;
+        flags |= CKANIMATION_ALLOWTURN;
+        ((RCKAnimation *)m_Warper)->m_Flags = flags;
+
+        // Modify object flags: set 0x23 (CK_OBJECT_NOTTOBELISTEDANDSAVED)
+        ((CKObject *)m_Warper)->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
     }
 }
 
 RCKCharacter::~RCKCharacter() {
-    // Clear body parts array
-    m_BodyParts.Clear();
-
-    // Clear animations array
-    m_Animations.Clear();
-
+    // Based on IDA decompilation at 0x1000FB5B
     // Delete secondary animations array
     if (m_SecondaryAnimations) {
         delete[] m_SecondaryAnimations;
         m_SecondaryAnimations = nullptr;
     }
-    m_SecondaryAnimationsCount = 0;
-    m_SecondaryAnimationsAllocated = 0;
+
+    // Clear animations array
+    m_Animations.Clear();
+
+    // Clear body parts array
+    m_BodyParts.Clear();
 }
 
 //=============================================================================
@@ -402,54 +436,53 @@ CKBOOL RCKCharacter::GetBaryCenter(VxVector *Pos) {
 }
 
 void RCKCharacter::AddToScene(CKScene *scene, CKBOOL dependencies) {
-    // Based on decompilation at 0x1001227F
+    // Based on IDA decompilation at 0x1001227F
     if (!scene) return;
 
     RCK3dEntity::AddToScene(scene, dependencies);
 
     if (dependencies) {
         // Add all body parts to scene
-        int bpCount = m_BodyParts.Size();
-        for (int i = 0; i < bpCount; ++i) {
-            CKObject *bp = m_BodyParts.GetObject(i);
+        for (CKObject **it = m_BodyParts.Begin(); it != m_BodyParts.End(); ++it) {
+            CKObject *bp = *it;
             if (bp) {
-                ((CKBeObject *) bp)->AddToScene(scene, dependencies);
+                ((CKBeObject *)bp)->AddToScene(scene, dependencies);
             }
         }
 
         // Add all animations to scene
-        int animCount = m_Animations.Size();
-        for (int i = 0; i < animCount; ++i) {
-            CKObject *anim = m_Animations.GetObject(i);
+        for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+            CKObject *anim = *it;
             if (anim) {
-                ((CKBeObject *) anim)->AddToScene(scene, dependencies);
+                ((CKBeObject *)anim)->AddToScene(scene, dependencies);
             }
         }
     }
 }
 
 void RCKCharacter::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
-    // Based on decompilation at 0x10012357
+    // Based on IDA decompilation at 0x10012357
+    // NOTE: Original has a bug - it calls AddToScene on animations instead of RemoveFromScene
+    // We preserve this behavior for binary compatibility
     if (!scene) return;
 
     RCK3dEntity::RemoveFromScene(scene, dependencies);
 
     if (dependencies) {
         // Remove all body parts from scene
-        int bpCount = m_BodyParts.Size();
-        for (int i = 0; i < bpCount; ++i) {
-            CKObject *bp = m_BodyParts.GetObject(i);
+        for (CKObject **it = m_BodyParts.Begin(); it != m_BodyParts.End(); ++it) {
+            CKObject *bp = *it;
             if (bp) {
-                ((CKBeObject *) bp)->RemoveFromScene(scene, dependencies);
+                ((CKBeObject *)bp)->RemoveFromScene(scene, dependencies);
             }
         }
 
-        // Remove all animations from scene
-        int animCount = m_Animations.Size();
-        for (int i = 0; i < animCount; ++i) {
-            CKObject *anim = m_Animations.GetObject(i);
+        // BUG in original: This should call RemoveFromScene, but original calls AddToScene
+        // Keeping original behavior for binary compatibility
+        for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+            CKObject *anim = *it;
             if (anim) {
-                ((CKBeObject *) anim)->RemoveFromScene(scene, dependencies);
+                ((CKBeObject *)anim)->AddToScene(scene, dependencies);
             }
         }
     }
@@ -477,16 +510,16 @@ CKERROR RCKCharacter::PrepareDependencies(CKDependenciesContext &context) {
         ((CKObject *) m_FloorRef)->PrepareDependencies(context);
     }
 
-    // Prepare animations if needed
+    // Prepare animations if needed (if not copying, or if anim deps bit 2 set, or char deps bit 0 set)
     if (!context.IsInMode(CK_DEPENDENCIES_COPY) || (animDeps & 4) != 0 || (charDeps & 1) != 0) {
         m_Animations.Prepare(context);
     }
 
     // Prepare secondary animations if deleting
     if (context.IsInMode(CK_DEPENDENCIES_DELETE)) {
-        for (int i = 0; i < m_SecondaryAnimationsAllocated; ++i) {
-            if (m_SecondaryAnimations && m_SecondaryAnimations[i].Transition) {
-                ((CKObject *) m_SecondaryAnimations[i].Transition)->PrepareDependencies(context);
+        for (CKWORD i = 0; i < m_SecondaryAnimationsAllocated; ++i) {
+            if (m_SecondaryAnimations && m_SecondaryAnimations[i].Animation) {
+                ((CKObject *) m_SecondaryAnimations[i].Animation)->PrepareDependencies(context);
             }
         }
 
@@ -505,31 +538,26 @@ CKERROR RCKCharacter::RemapDependencies(CKDependenciesContext &context) {
         return err;
     }
 
+    // Get class dependencies (result ignored but call matches IDA)
+    context.GetClassDependencies(CKCID_CHARACTER);
+
     // Remap body parts
     m_BodyParts.Remap(context);
-
-    // Remap floor reference
-    if (m_FloorRef) {
-        m_FloorRef = (RCK3dEntity *) context.Remap((CKObject *) m_FloorRef);
-    }
 
     // Remap animations
     m_Animations.Remap(context);
 
-    // Remap active animation
-    if (m_ActiveAnimation) {
-        m_ActiveAnimation = (RCKKeyedAnimation *) context.Remap((CKObject *) m_ActiveAnimation);
-    }
+    // Remap active animation (always, no conditional)
+    m_ActiveAnimation = (RCKKeyedAnimation *) context.Remap((CKObject *) m_ActiveAnimation);
+
+    // Remap floor reference
+    m_FloorRef = (RCK3dEntity *) context.Remap((CKObject *) m_FloorRef);
 
     // Remap destination animation
-    if (m_AnimDest) {
-        m_AnimDest = (RCKAnimation *) context.Remap((CKObject *) m_AnimDest);
-    }
+    m_AnimDest = (RCKAnimation *) context.Remap((CKObject *) m_AnimDest);
 
     // Remap root body part
-    if (m_RootBodyPart) {
-        m_RootBodyPart = (RCKBodyPart *) context.Remap((CKObject *) m_RootBodyPart);
-    }
+    m_RootBodyPart = (RCKBodyPart *) context.Remap((CKObject *) m_RootBodyPart);
 
     return CK_OK;
 }
@@ -543,20 +571,35 @@ CKERROR RCKCharacter::Copy(CKObject &o, CKDependenciesContext &context) {
 
     RCKCharacter *src = (RCKCharacter *) &o;
 
-    // Copy animations array
-    m_Animations = src->m_Animations;
+    // Check class dependencies for animation copy
+    CKDWORD charDeps = context.GetClassDependencies(CKCID_CHARACTER);
+    CKDWORD animDeps = context.GetClassDependencies(CKCID_ANIMATION);
+
+    // Copy animations if deps allow (CKCID_ANIMATION=33, check bit 2; or CKCID_CHARACTER bit 0)
+    if ((animDeps & 4) != 0 || (charDeps & 1) != 0) {
+        // Copy animations array
+        m_Animations = src->m_Animations;
+
+        // Copy active animation reference
+        m_ActiveAnimation = src->m_ActiveAnimation;
+
+        // Copy destination animation reference
+        m_AnimDest = src->m_AnimDest;
+
+        // If dest anim was the source's warper, use our warper
+        if (m_AnimDest == (RCKAnimation *)src->m_Warper) {
+            m_AnimDest = (RCKAnimation *)m_Warper;
+        }
+    }
 
     // Copy body parts array
     m_BodyParts = src->m_BodyParts;
 
-    // Copy active animation reference
-    m_ActiveAnimation = src->m_ActiveAnimation;
-
-    // Copy destination animation reference
-    m_AnimDest = src->m_AnimDest;
-
     // Copy root body part reference
     m_RootBodyPart = src->m_RootBodyPart;
+
+    // Copy active animation reference (yes, again - matches IDA)
+    m_ActiveAnimation = src->m_ActiveAnimation;
 
     // Copy frame destination
     m_FrameDest = src->m_FrameDest;
@@ -769,60 +812,169 @@ CKERROR RCKCharacter::SetActiveAnimation(CKAnimation *anim) {
 }
 
 CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transitionmode, float warplength) {
-    // Based on decompilation at 0x10010982
-    // This is a complex function handling animation transitions
+    // Based on IDA decompilation at 0x10010982
+    VxTimeProfiler profiler;
 
-    if (!anim) {
+    RCKKeyedAnimation *destAnim = (RCKKeyedAnimation *)anim;
+
+    if (!destAnim) {
+        // Null animation passed - clear destination
+        m_AnimDest = nullptr;
+        if (m_ActiveAnimation) {
+            // If active animation can be interrupted, clear it
+            if ((((RCKAnimation *)m_ActiveAnimation)->m_Flags & CKANIMATION_CANBEBREAK) != 0) {
+                m_ActiveAnimation = nullptr;
+            }
+        }
         return CKERR_INVALIDPARAMETER;
     }
 
-    // Store transition parameters
-    m_TransitionMode = transitionmode;
-    m_AnimSrc = (RCKAnimation *) m_ActiveAnimation;
-
-    // Get source frame
-    if (m_ActiveAnimation) {
-        m_FrameSrc = ((CKAnimation *) m_ActiveAnimation)->GetFrame();
-    } else {
-        m_FrameSrc = 0.0f;
-    }
-
-    // Set destination animation and frame
-    m_AnimDest = (RCKAnimation *) anim;
-    m_FrameDest = warplength;
-
-    // Handle different transition modes
-    // CK_TRANSITION_FROMNOW (0x01) - immediate transition
-    // CK_TRANSITION_FROMWARPFROMCURRENT (0x02) - warp from current
-    // CK_TRANSITION_TOSTART (0x08) - start from beginning
-    // CK_TRANSITION_WARPSTART (0x12) - combined warp start
-    // CK_TRANSITION_WARPMASK (0x132) - mask for warp modes
-
-    if (transitionmode == CK_TRANSITION_FROMNOW) {
-        // Immediate transition - just set active animation
-        m_ActiveAnimation = (RCKKeyedAnimation *) anim;
-        m_AnimDest = nullptr;
-    } else if (transitionmode & CK_TRANSITION_WARPMASK) {
-        // Warp transition modes
-        if (m_Warper && CKIsChildClassOf((CKObject *) anim, CKCID_KEYEDANIMATION)) {
-            CKKeyedAnimation *destAnim = (CKKeyedAnimation *) anim;
-
-            // Create transition from current to destination
-            ((CKKeyedAnimation *) m_Warper)->CreateTransition(
-                (CKKeyedAnimation *) m_AnimSrc,
-                destAnim,
-                transitionmode,
-                warplength,
-                0.0f);
-
-            ((CKAnimation *) m_Warper)->SetFrame(0.0f);
-
-            // Set warper as active animation during transition
-            m_ActiveAnimation = m_Warper;
+    // Handle CK_TRANSITION_FROMANIMATION flag (0x200)
+    if ((transitionmode & CK_TRANSITION_FROMANIMATION) != 0) {
+        CKDWORD animTransMode = anim->GetTransitionMode();
+        if (animTransMode) {
+            transitionmode = animTransMode;
         }
     }
-    // Otherwise just leave m_AnimDest set and wait for end
 
+    // Check animation belongs to this character
+    if (((RCKAnimation *)destAnim)->m_Character != this) {
+        return CKERR_INVALIDPARAMETER;
+    }
+
+    if (!m_ActiveAnimation) {
+        // No active animation - set destination and initialize
+        m_AnimDest = (RCKAnimation *)destAnim;
+        anim->SetStep(0.0f);
+        if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+            ((CKKeyedAnimation *)destAnim)->CenterAnimation(0.0f);
+        }
+        anim->SetStep(0.0f);
+        m_FrameDest = 0.0f;
+        return CK_OK;
+    }
+
+    // CK_TRANSITION_LOOPIFEQUAL (0x80) - If same animation, loop
+    if ((transitionmode & CK_TRANSITION_LOOPIFEQUAL) != 0 && destAnim == m_ActiveAnimation) {
+        // Check if step > 0.3 (animation is playing)
+        if (((RCKAnimation *)destAnim)->m_Step > 0.3f) {
+            m_AnimDest = (RCKAnimation *)destAnim;
+            m_FrameDest = 0.0f;
+        }
+        return CK_OK;
+    }
+
+    RCKKeyedAnimation *activeAnim = m_ActiveAnimation;
+    CKDWORD activeFlags = 0;
+    if (activeAnim) {
+        activeFlags = ((RCKAnimation *)activeAnim)->m_Flags;
+    }
+
+    // Check if we can break or animation step is 0
+    if (((transitionmode & CK_TRANSITION_FROMNOW) == CK_TRANSITION_FROMNOW && (activeFlags & CKANIMATION_CANBEBREAK) != 0) ||
+        ((RCKAnimation *)m_ActiveAnimation)->m_Step == 0.0f) {
+        
+        if (activeAnim == destAnim) {
+            // Same animation - just set destination
+            m_AnimDest = (RCKAnimation *)destAnim;
+            m_FrameDest = 0.0f;
+        } else {
+            // Different animation - align and switch
+            AlignCharacterWithRootPosition();
+            m_ActiveAnimation = destAnim;
+            if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+                ((CKKeyedAnimation *)destAnim)->CenterAnimation(0.0f);
+            }
+            anim->SetStep(0.0f);
+            m_AnimDest = nullptr;
+            m_FrameDest = 0.0f;
+        }
+    }
+    // CK_TRANSITION_TOSTART (0x08) - Wait until current ends
+    else if ((transitionmode & CK_TRANSITION_TOSTART) == CK_TRANSITION_TOSTART) {
+        m_AnimDest = (RCKAnimation *)destAnim;
+        m_FrameDest = 0.0f;
+    }
+    // CK_TRANSITION_WARPMASK (0x132) - Warp transitions
+    else if ((transitionmode & CK_TRANSITION_WARPMASK) != 0) {
+        if (m_AnimDest != (RCKAnimation *)destAnim && destAnim) {
+            if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+                float frameDest = 0.0f;
+
+                // Check if we're currently warping and dest can't be interrupted
+                if (m_ActiveAnimation == m_Warper && m_AnimDest && !((CKAnimation *)m_AnimDest)->CanBeInterrupt()) {
+                    return CK_OK;
+                }
+
+                if (m_ActiveAnimation) {
+                    if (((CKObject *)m_ActiveAnimation)->GetClassID() == CKCID_KEYEDANIMATION) {
+                        if (((CKAnimation *)m_ActiveAnimation)->CanBeInterrupt()) {
+                            // Animation can be interrupted - create warp now
+                            AlignCharacterWithRootPosition();
+                            frameDest = m_Warper->CreateTransition(
+                                (CKAnimation *)m_ActiveAnimation,
+                                anim,
+                                transitionmode,
+                                warplength,
+                                0.0f);
+                            m_FrameSrc = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
+                            ((CKKeyedAnimation *)m_Warper)->CenterAnimation(0.0f);
+                            ((CKAnimation *)m_Warper)->SetStep(0.0f);
+                            m_AnimSrc = (RCKAnimation *)m_ActiveAnimation;
+                            m_ActiveAnimation = m_Warper;
+                            m_AnimDest = (RCKAnimation *)destAnim;
+                            m_FrameDest = frameDest;
+                            m_TransitionMode = transitionmode;
+                        } else {
+                            // Can't interrupt - check if at end
+                            float curFrame = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
+                            float curLen = ((CKAnimation *)m_ActiveAnimation)->GetLength();
+                            CKBOOL atEnd = (curLen == curFrame);
+
+                            if (((CKAnimation *)m_ActiveAnimation)->IsLinkedToFrameRate()) {
+                                float checkFrame = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
+                                float checkLen = ((CKAnimation *)m_ActiveAnimation)->GetLength();
+                                atEnd = (checkLen - 0.3f <= checkFrame);
+                            }
+
+                            if (atEnd) {
+                                AlignCharacterWithRootPosition();
+                                if (((CKObject *)m_ActiveAnimation)->GetClassID() == CKCID_KEYEDANIMATION) {
+                                    frameDest = m_Warper->CreateTransition(
+                                        (CKAnimation *)m_ActiveAnimation,
+                                        anim,
+                                        transitionmode,
+                                        warplength,
+                                        0.0f);
+                                }
+                                ((CKKeyedAnimation *)m_Warper)->CenterAnimation(0.0f);
+                                ((CKAnimation *)m_Warper)->SetStep(0.0f);
+                                m_ActiveAnimation = m_Warper;
+                                m_AnimDest = (RCKAnimation *)destAnim;
+                                m_FrameDest = frameDest;
+                            }
+                        }
+                    }
+                } else {
+                    // No active animation
+                    m_ActiveAnimation = destAnim;
+                    m_AnimDest = nullptr;
+                    m_FrameDest = 0.0f;
+                }
+            } else {
+                // Not keyed animation
+                m_ActiveAnimation = destAnim;
+                m_AnimDest = nullptr;
+                m_FrameDest = 0.0f;
+            }
+        }
+    } else {
+        // Default - just set destination
+        m_AnimDest = (RCKAnimation *)destAnim;
+        m_FrameDest = 0.0f;
+    }
+
+    m_Context->AddProfileTime(CK_PROFILE_ANIMATIONTIME, profiler.Current());
     return CK_OK;
 }
 
@@ -982,21 +1134,21 @@ void RCKCharacter::ProcessAnimation(float deltat) {
 
     for (int i = 0; i < m_SecondaryAnimationsCount; ++i) {
         CKSecondaryAnimation &secAnim = m_SecondaryAnimations[i];
-        const CK_SECONDARYANIMATION_RUNTIME_MODE mode = secAnim.RuntimeMode;
+        const CK_SECONDARYANIMATION_RUNTIME_MODE mode = secAnim.Mode;
 
         if (mode == CKSECONDARYANIMATIONRUNTIME_STARTINGWARP) {
-            RCKAnimation *anim = secAnim.Transition;
+            RCKKeyedAnimation *anim = secAnim.Animation;
             if (!anim) {
                 continue;
             }
 
-            const float next = anim->GetNextFrame(deltat);
-            const float remaining = next - anim->GetLength();
+            const float next = ((CKAnimation *)anim)->GetNextFrame(deltat);
+            const float remaining = next - ((CKAnimation *)anim)->GetLength();
             if (remaining < 0.0f) {
-                anim->SetFrame(next);
+                ((CKAnimation *)anim)->SetFrame(next);
             } else {
-                secAnim.RuntimeMode = CKSECONDARYANIMATIONRUNTIME_PLAYING;
-                auto *source = (CKAnimation *) m_Context->GetObject(secAnim.SourceAnimId);
+                secAnim.Mode = CKSECONDARYANIMATIONRUNTIME_PLAYING;
+                auto *source = (CKAnimation *)m_Context->GetObject(secAnim.AnimID);
                 PreDeleteBodyPartsForAnimation(source);
 
                 const float startFrame = secAnim.GetStartingFrame();
@@ -1008,15 +1160,15 @@ void RCKCharacter::ProcessAnimation(float deltat) {
         }
 
         if (mode == CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP) {
-            RCKAnimation *anim = secAnim.Transition;
+            RCKKeyedAnimation *anim = secAnim.Animation;
             if (!anim) {
                 continue;
             }
 
-            const float next = anim->GetNextFrame(deltat);
-            const float remaining = next - anim->GetLength();
+            const float next = ((CKAnimation *)anim)->GetNextFrame(deltat);
+            const float remaining = next - ((CKAnimation *)anim)->GetLength();
             if (remaining < 0.0f) {
-                anim->SetFrame(next);
+                ((CKAnimation *)anim)->SetFrame(next);
             } else {
                 const int removeIndex = i;
                 --i;
@@ -1029,7 +1181,7 @@ void RCKCharacter::ProcessAnimation(float deltat) {
             continue;
         }
 
-        auto *anim = (CKAnimation *) m_Context->GetObject(secAnim.SourceAnimId);
+        auto *anim = (CKAnimation *)m_Context->GetObject(secAnim.AnimID);
         if (!anim) {
             continue;
         }
@@ -1045,7 +1197,7 @@ void RCKCharacter::ProcessAnimation(float deltat) {
         if ((secAnim.Flags & CKSECONDARYANIMATION_LOOP) != 0) {
             anim->SetFrame(remaining);
         } else if ((secAnim.Flags & CKSECONDARYANIMATION_LOOPNTIMES) != 0) {
-            if ((int) --secAnim.LoopCountRemaining > 0) {
+            if ((int)--secAnim.LoopCountRemaining > 0) {
                 anim->SetFrame(remaining);
             } else if ((secAnim.Flags & CKSECONDARYANIMATION_LASTFRAME) != 0) {
                 anim->SetFrame(anim->GetLength());
@@ -1060,36 +1212,35 @@ void RCKCharacter::ProcessAnimation(float deltat) {
         }
 
         if (removeIt) {
-            if ((secAnim.Flags & CKSECONDARYANIMATION_DOWARP) != 0 && CKIsChildClassOf((CKObject *) anim, CKCID_KEYEDANIMATION)) {
+            if ((secAnim.Flags & CKSECONDARYANIMATION_DOWARP) != 0 && CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
                 RCKKeyedAnimation *active = m_ActiveAnimation;
-                if (active && CKIsChildClassOf((CKObject *) active, CKCID_KEYEDANIMATION)) {
-                    RCKKeyedAnimation *transition = secAnim.Transition;
+                if (active && CKIsChildClassOf((CKObject *)active, CKCID_KEYEDANIMATION)) {
+                    RCKKeyedAnimation *transition = secAnim.Animation;
                     if (!transition) {
-                        transition = (RCKKeyedAnimation *) m_Context->CreateObject(
+                        CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
+                        transition = (RCKKeyedAnimation *)m_Context->CreateObject(
                             CKCID_KEYEDANIMATION,
                             nullptr,
-                            CK_OBJECTCREATION_SameDynamic,
+                            isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
                             nullptr);
-                        secAnim.Transition = transition;
+                        secAnim.Animation = transition;
                         if (transition) {
-                            ((RCKAnimation *) transition)->m_Flags |= CKANIMATION_SECONDARYWARPER;
+                            ((RCKAnimation *)transition)->m_Flags |= CKANIMATION_SECONDARYWARPER;
                         }
                     }
 
                     if (transition) {
-                        float targetFrame = ((CKAnimation *) active)->GetFrame() + secAnim.WarpLength;
-                        const float activeLen = ((CKAnimation *) active)->GetLength();
-                        if (activeLen != 0.0f) {
-                            while (targetFrame >= activeLen) {
-                                targetFrame -= activeLen;
-                            }
+                        float targetFrame = ((CKAnimation *)active)->GetFrame() + secAnim.WarpLength;
+                        const float activeLen = ((CKAnimation *)active)->GetLength();
+                        while (targetFrame >= activeLen) {
+                            targetFrame -= activeLen;
                         }
 
-                        transition->CreateTransition(anim, active, 0, secAnim.WarpLength, targetFrame);
+                        transition->CreateTransition(anim, (CKAnimation *)active, 0, secAnim.WarpLength, targetFrame);
                         secAnim.Flags |= CKSECONDARYANIMATION_DOWARP;
-                        ((CKAnimation *) transition)->SetFrame(0.0f);
-                        PreDeleteBodyPartsForAnimation(transition);
-                        secAnim.RuntimeMode = CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP;
+                        ((CKAnimation *)transition)->SetFrame(0.0f);
+                        PreDeleteBodyPartsForAnimation((CKAnimation *)transition);
+                        secAnim.Mode = CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP;
                         continue;
                     }
                 }
@@ -1115,7 +1266,8 @@ void RCKCharacter::SetAutomaticProcess(CKBOOL process) {
 }
 
 CKBOOL RCKCharacter::IsAutomaticProcess() {
-    // Based on decompilation at 0x10011022
+    // Based on IDA decompilation at 0x10011022
+    // Returns non-zero if flag is set (cast to CKBOOL)
     return (m_3dEntityFlags & CK_3DENTITY_CHARACTERDOPROCESS) != 0;
 }
 
@@ -1151,66 +1303,102 @@ void RCKCharacter::GetEstimatedVelocity(float deltat, VxVector *velocity) {
 //=============================================================================
 
 CKERROR RCKCharacter::PlaySecondaryAnimation(CKAnimation *anim, float StartingFrame, CK_SECONDARYANIMATION_FLAGS PlayFlags, float warplength, int LoopCount) {
-    // Based on decompilation at 0x10010011
+    // Based on IDA decompilation at 0x10010011
     if (!anim) {
         return CKERR_INVALIDPARAMETER;
     }
 
     // Check animation belongs to this character
-    if (anim->GetCharacter() != (CKCharacter *) this) {
+    if (((RCKAnimation *)anim)->m_Character != this) {
         return CKERR_INVALIDPARAMETER;
+    }
+
+    // Handle FROMANIMATION flag - get mode from animation itself
+    if ((PlayFlags & CKSECONDARYANIMATION_FROMANIMATION) != 0) {
+        CK_SECONDARYANIMATION_FLAGS animMode = anim->GetSecondaryAnimationMode();
+        if (animMode) {
+            PlayFlags = animMode;
+        }
     }
 
     CK_ID animID = anim->GetID();
 
     // Check if already playing
     for (int i = 0; i < m_SecondaryAnimationsCount; ++i) {
-        if (m_SecondaryAnimations[i].SourceAnimId == animID) {
+        if (m_SecondaryAnimations[i].AnimID == animID) {
             return CK_OK; // Already playing
         }
     }
 
+    CKSecondaryAnimation *oldArray = m_SecondaryAnimations;
+
     // Ensure we have space
-    if (m_SecondaryAnimationsCount >= m_SecondaryAnimationsAllocated) {
-        int newSize = m_SecondaryAnimationsAllocated + 2;
-        CKSecondaryAnimation *newArray = new CKSecondaryAnimation[newSize];
-
-        if (m_SecondaryAnimations) {
-            memcpy(newArray, m_SecondaryAnimations, sizeof(CKSecondaryAnimation) * m_SecondaryAnimationsAllocated);
-            delete[] m_SecondaryAnimations;
+    if (m_SecondaryAnimationsAllocated <= m_SecondaryAnimationsCount) {
+        m_SecondaryAnimations = new CKSecondaryAnimation[m_SecondaryAnimationsAllocated + 2];
+        if (oldArray) {
+            memcpy(m_SecondaryAnimations, oldArray, sizeof(CKSecondaryAnimation) * m_SecondaryAnimationsAllocated);
+            delete[] oldArray;
         }
-
-        m_SecondaryAnimations = newArray;
-        m_SecondaryAnimationsAllocated = (CKWORD) newSize;
-
-        // Initialize new slots
+        // Initialize new slots (2 new entries)
         memset(&m_SecondaryAnimations[m_SecondaryAnimationsCount], 0, sizeof(CKSecondaryAnimation) * 2);
+        m_SecondaryAnimationsAllocated += 2;
     }
 
-    // Add the secondary animation
-    CKSecondaryAnimation &secAnim = m_SecondaryAnimations[m_SecondaryAnimationsCount];
-    secAnim.SourceAnimId = animID;
-    secAnim.Flags = PlayFlags;
-    secAnim.WarpLength = warplength;
-    secAnim.SetStartingFrame(StartingFrame);
-    secAnim.RuntimeMode = CKSECONDARYANIMATIONRUNTIME_PLAYING;
-    secAnim.LoopCountRemaining = LoopCount;
-    secAnim.Transition = nullptr;
+    // Handle DOWARP flag - create transition from active animation
+    if ((PlayFlags & CKSECONDARYANIMATION_DOWARP) != 0) {
+        if (CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
+            RCKKeyedAnimation *activeKeyed = m_ActiveAnimation;
+            if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION)) {
+                RCKKeyedAnimation *transition = m_SecondaryAnimations[m_SecondaryAnimationsCount].Animation;
+                if (!transition) {
+                    CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
+                    transition = (RCKKeyedAnimation *)m_Context->CreateObject(
+                        CKCID_KEYEDANIMATION,
+                        nullptr,
+                        isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
+                        nullptr);
 
-    // Set frame
-    anim->SetFrame(StartingFrame);
+                    CKDWORD flags = ((RCKAnimation *)transition)->m_Flags;
+                    flags |= CKANIMATION_SECONDARYWARPER;
+                    ((RCKAnimation *)transition)->m_Flags = flags;
+                    ((CKKeyedAnimation *)transition)->Clear();
+                }
+
+                m_SecondaryAnimations[m_SecondaryAnimationsCount].Animation = transition;
+                transition->CreateTransition((CKAnimation *)activeKeyed, anim, 0, warplength, StartingFrame);
+                m_SecondaryAnimations[m_SecondaryAnimationsCount].Mode = CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP;
+                m_SecondaryAnimations[m_SecondaryAnimationsCount].WarpLength = warplength;
+                ((CKAnimation *)transition)->SetFrame(0.0f);
+                PreDeleteBodyPartsForAnimation((CKAnimation *)transition);
+                m_SecondaryAnimations[m_SecondaryAnimationsCount].Mode = CKSECONDARYANIMATIONRUNTIME_STARTINGWARP;
+            }
+        }
+    } else {
+        // No warp - just set the frame and start playing
+        anim->SetFrame(StartingFrame);
+        if (CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
+            PreDeleteBodyPartsForAnimation(anim);
+        }
+        m_SecondaryAnimations[m_SecondaryAnimationsCount].Mode = CKSECONDARYANIMATIONRUNTIME_PLAYING;
+    }
+
+    // Set common fields
+    m_SecondaryAnimations[m_SecondaryAnimationsCount].SetStartingFrame(StartingFrame);
+    m_SecondaryAnimations[m_SecondaryAnimationsCount].AnimID = animID;
+    m_SecondaryAnimations[m_SecondaryAnimationsCount].Flags = PlayFlags;
+    m_SecondaryAnimations[m_SecondaryAnimationsCount].LoopCountRemaining = LoopCount;
 
     m_SecondaryAnimationsCount++;
     return CK_OK;
 }
 
 CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, float warplength) {
-    // Based on decompilation at 0x1001044B
+    // Based on IDA decompilation at 0x1001044B
     if (!anim) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    if (anim->GetCharacter() != (CKCharacter *) this) {
+    if (((RCKAnimation *)anim)->m_Character != this) {
         return CKERR_INVALIDPARAMETER;
     }
 
@@ -1218,62 +1406,68 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, flo
 
     // Find the secondary animation
     int idx = -1;
-    for (int i = 0; i < m_SecondaryAnimationsCount; ++i) {
-        if (m_SecondaryAnimations[i].SourceAnimId == animID) {
-            idx = i;
-            break;
+    for (int i = 0; i < m_SecondaryAnimationsCount && m_SecondaryAnimations[i].AnimID != animID; ++i) {
+        idx = i;
+    }
+
+    // Check if we found it (need to verify the condition matched)
+    if (idx >= m_SecondaryAnimationsCount || m_SecondaryAnimations[idx].AnimID != animID) {
+        // Re-scan properly
+        idx = -1;
+        for (int i = 0; i < m_SecondaryAnimationsCount; ++i) {
+            if (m_SecondaryAnimations[i].AnimID == animID) {
+                idx = i;
+                break;
+            }
         }
     }
 
-    if (idx < 0) {
+    if (idx < 0 || idx >= m_SecondaryAnimationsCount) {
         return CK_OK; // Not playing
     }
 
     int warped = 0;
     if (warp) {
-        if (m_SecondaryAnimations[idx].RuntimeMode == CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP) {
+        if (m_SecondaryAnimations[idx].Mode == CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP) {
             return CK_OK;
         }
 
-        RCKKeyedAnimation *active = m_ActiveAnimation;
-        if (active && CKIsChildClassOf((CKObject *) active, CKCID_KEYEDANIMATION)) {
-            RCKKeyedAnimation *transition = m_SecondaryAnimations[idx].Transition;
+        RCKKeyedAnimation *activeKeyed = m_ActiveAnimation;
+        if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION)) {
+            RCKKeyedAnimation *transition = m_SecondaryAnimations[idx].Animation;
             if (!transition) {
-                transition = (RCKKeyedAnimation *) m_Context->CreateObject(
+                CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
+                transition = (RCKKeyedAnimation *)m_Context->CreateObject(
                     CKCID_KEYEDANIMATION,
                     nullptr,
-                    CK_OBJECTCREATION_SameDynamic,
+                    isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
                     nullptr);
-                m_SecondaryAnimations[idx].Transition = transition;
+                m_SecondaryAnimations[idx].Animation = transition;
                 if (transition) {
-                    ((RCKAnimation *) transition)->m_Flags |= CKANIMATION_SECONDARYWARPER;
+                    ((RCKAnimation *)transition)->m_Flags |= CKANIMATION_SECONDARYWARPER;
                 }
             }
 
             CKAnimation *fromAnim = nullptr;
-            if (m_SecondaryAnimations[idx].RuntimeMode == CKSECONDARYANIMATIONRUNTIME_PLAYING) {
-                fromAnim = (CKAnimation *) m_Context->GetObject(m_SecondaryAnimations[idx].SourceAnimId);
+            if (m_SecondaryAnimations[idx].Mode == CKSECONDARYANIMATIONRUNTIME_PLAYING) {
+                fromAnim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[idx].AnimID);
             } else {
-                fromAnim = (CKAnimation *) m_SecondaryAnimations[idx].Transition;
+                fromAnim = (CKAnimation *)m_SecondaryAnimations[idx].Animation;
             }
 
-            float targetFrame = ((CKAnimation *) active)->GetFrame() + warplength;
-            const float activeLen = ((CKAnimation *) active)->GetLength();
-            if (activeLen != 0.0f) {
-                while (targetFrame >= activeLen) {
-                    targetFrame -= activeLen;
-                }
+            float targetFrame = ((CKAnimation *)activeKeyed)->GetFrame() + warplength;
+            const float activeLen = ((CKAnimation *)activeKeyed)->GetLength();
+            while (targetFrame >= activeLen) {
+                targetFrame -= activeLen;
             }
 
-            if (transition && fromAnim && CKIsChildClassOf((CKObject *) fromAnim, CKCID_KEYEDANIMATION)) {
-                transition->CreateTransition(fromAnim, active, 0, warplength, targetFrame);
+            if (transition && fromAnim && CKIsChildClassOf((CKObject *)fromAnim, CKCID_KEYEDANIMATION)) {
+                transition->CreateTransition(fromAnim, (CKAnimation *)activeKeyed, 0, warplength, targetFrame);
                 m_SecondaryAnimations[idx].Flags |= CKSECONDARYANIMATION_DOWARP;
                 m_SecondaryAnimations[idx].WarpLength = warplength;
-                ((CKAnimation *) transition)->SetFrame(0.0f);
-
-                PreDeleteBodyPartsForAnimation(transition);
-
-                m_SecondaryAnimations[idx].RuntimeMode = CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP;
+                ((CKAnimation *)transition)->SetFrame(0.0f);
+                PreDeleteBodyPartsForAnimation((CKAnimation *)transition);
+                m_SecondaryAnimations[idx].Mode = CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP;
                 warped = 1;
             }
         }
@@ -1286,7 +1480,19 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, flo
 }
 
 CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, float warplength) {
-    return StopSecondaryAnimation(anim, FALSE, warplength);
+    // Based on IDA decompilation at 0x100106FC
+    if (!anim) {
+        return CKERR_INVALIDPARAMETER;
+    }
+
+    // Get secondary animation mode from animation and check DOWARP flag
+    // The mode is returned as-is from GetSecondaryAnimationMode, then AND with 0x800000
+    // 0x800000 = CKSECONDARYANIMATION_DOWARP (0x80) << 16 after it's stored in m_Flags
+    // But GetSecondaryAnimationMode returns the shifted-back value, so we check 0x80
+    int mode = anim->GetSecondaryAnimationMode();
+    CKBOOL warp = (mode & CKSECONDARYANIMATION_DOWARP) != 0;
+
+    return StopSecondaryAnimation(anim, warp, warplength);
 }
 
 int RCKCharacter::GetSecondaryAnimationsCount() {
@@ -1297,22 +1503,28 @@ CKAnimation *RCKCharacter::GetSecondaryAnimation(int index) {
     if (index < 0 || index >= m_SecondaryAnimationsCount || !m_SecondaryAnimations) {
         return nullptr;
     }
-    return (CKAnimation *) m_Context->GetObject(m_SecondaryAnimations[index].SourceAnimId);
+    return (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
 }
 
 void RCKCharacter::FlushSecondaryAnimations() {
-    // Based on decompilation at 0x10012264
-    // Clear body parts and animations arrays
-    m_BodyParts.Clear();
-    m_Animations.Clear();
-
-    // Delete secondary animations array
-    if (m_SecondaryAnimations) {
-        delete[] m_SecondaryAnimations;
-        m_SecondaryAnimations = nullptr;
+    // Based on IDA decompilation at 0x100103CD
+    // First find floor reference if not set
+    if (!m_FloorRef) {
+        FindFloorReference();
     }
+
+    // Iterate through secondary animations and update body parts
+    for (CKWORD i = 0; i < m_SecondaryAnimationsCount; ++i) {
+        RCKAnimation *anim = (RCKAnimation *)m_Context->GetObjectA(m_SecondaryAnimations[i].AnimID);
+        if (anim) {
+            // For each animation, iterate through entities and notify body parts
+            // This corresponds to sub_10048148 which iterates entities and calls method at vtable[118]
+            // on body parts with parameter 0
+            NotifyBodyPartsInAnimation(anim, 0);
+        }
+    }
+
     m_SecondaryAnimationsCount = 0;
-    m_SecondaryAnimationsAllocated = 0;
 }
 
 //=============================================================================
@@ -1434,32 +1646,46 @@ void RCKCharacter::FindFloorReference() {
 }
 
 void RCKCharacter::RemoveSecondaryAnimationAt(int index) {
-    // Based on decompilation at 0x10011AB1
+    // Based on IDA decompilation at 0x10011AB1
     if (index < 0 || index >= m_SecondaryAnimationsCount) {
         return;
     }
 
-    CKAnimation *anim = (CKAnimation *) m_Context->GetObject(m_SecondaryAnimations[index].SourceAnimId);
+    CKAnimation *anim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
     if (anim) {
-        PreDeleteBodyPartsForAnimation(anim);
+        PreDeleteBodyPartsForAnimation(nullptr); // Pass null to indicate no animation context
     }
 
-    const int newCount = (int) m_SecondaryAnimationsCount - 1;
-    m_SecondaryAnimationsCount = (CKWORD) newCount;
+    const int newCount = m_SecondaryAnimationsCount - 1;
+    m_SecondaryAnimationsCount = (CKWORD)newCount;
 
     if (index == newCount) {
-        memset(&m_SecondaryAnimations[index], 0, sizeof(CKSecondaryAnimation));
+        // Last element - just clear it
+        m_SecondaryAnimations[index].StartingFrameBits = 0;
+        m_SecondaryAnimations[index].AnimID = 0;
+        m_SecondaryAnimations[index].Flags = 0;
+        m_SecondaryAnimations[index].WarpLength = 0;
+        m_SecondaryAnimations[index].Padding = 0;
+        m_SecondaryAnimations[index].LoopCountRemaining = 0;
         return;
     }
 
-    RCKKeyedAnimation *preserved = m_SecondaryAnimations[index].Transition;
-    memmove(
-        &m_SecondaryAnimations[index],
-        &m_SecondaryAnimations[index + 1],
-        sizeof(CKSecondaryAnimation) * (newCount - index));
+    // Preserve the Animation pointer from the element being removed
+    RCKKeyedAnimation *preserved = m_SecondaryAnimations[index].Animation;
 
-    memset(&m_SecondaryAnimations[newCount], 0, sizeof(CKSecondaryAnimation));
-    m_SecondaryAnimations[newCount].Transition = preserved;
+    // Move remaining elements down
+    for (int i = index; i < newCount; ++i) {
+        memcpy(&m_SecondaryAnimations[i], &m_SecondaryAnimations[i + 1], sizeof(CKSecondaryAnimation));
+    }
+
+    // Clear the last slot and restore preserved animation pointer
+    m_SecondaryAnimations[newCount].StartingFrameBits = 0;
+    m_SecondaryAnimations[newCount].AnimID = 0;
+    m_SecondaryAnimations[newCount].Flags = 0;
+    m_SecondaryAnimations[newCount].WarpLength = 0;
+    m_SecondaryAnimations[newCount].Padding = 0;
+    m_SecondaryAnimations[newCount].LoopCountRemaining = 0;
+    m_SecondaryAnimations[newCount].Animation = preserved;
 }
 
 void RCKCharacter::PreDeleteBodyPartsForAnimation(CKAnimation *anim) {
