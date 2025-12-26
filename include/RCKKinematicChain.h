@@ -8,14 +8,19 @@
  * @brief Internal structure for IK chain body data.
  * Size: 116 bytes per body part in the chain.
  * Used during IKSetEffectorPos for joint constraint evaluation.
+ *
+ * Layout based on IDA analysis:
+ * - offset 0: CKIkJoint m_RotationJoint (40 bytes)
+ * - offset 40: CKBodyPart* m_BodyPart
+ * - offset 44: VxMatrix m_LocalTransform (64 bytes)
+ * - offset 108: CKDWORD m_IsLocked
+ * - offset 112: CKDWORD m_WasAtLimit
+ * Total: 116 bytes
  */
 struct CKIKChainBodyData {
-    CKDWORD m_JointFlags;          // offset 0: Joint constraint flags (bits 0-2 = axis locks, 4-6 = limits enabled)
-    VxVector m_MinAngles;          // offset 4: Minimum rotation angles per axis
-    VxVector m_MaxAngles;          // offset 16: Maximum rotation angles per axis
-    float m_Reserved[6];           // offset 28: Reserved/padding
+    CKIkJoint m_RotationJoint;     // offset 0: Rotation joint data (40 bytes)
     CKBodyPart *m_BodyPart;        // offset 40: Pointer to body part
-    float m_TransformData[16];     // offset 44: Transform matrix data (4x4)
+    VxMatrix m_LocalTransform;     // offset 44: Saved local transform matrix (64 bytes)
     CKDWORD m_IsLocked;            // offset 108: Whether this joint is locked
     CKDWORD m_WasAtLimit;          // offset 112: Whether joint was at limit during last solve
 };
@@ -55,13 +60,15 @@ public:
     static CK_CLASSID m_ClassID;
 
 private:
-    // IK helper method - performs rotation iteration for IK solving
+    // IK helper methods
     CKERROR IKRotateToward(VxVector *targetDelta, CKBodyPart *endBody);
+    static void SVDDecompose(float **a, int m, int n, float *w, float **v);
+    static void SVDSolve(float **u, float *w, float **v, int m, int n, float *b, float *x);
 
-    CKBodyPart *m_StartEffector;   // offset +20
-    CKBodyPart *m_EndEffector;     // offset +24
-    CKDWORD m_ChainBodyCount;      // offset +28: Number of body parts in chain
-    CKIKChainBodyData *m_ChainData; // offset +32: Pointer to IK chain body data array
+    CKBodyPart *m_StartEffector;   // offset +20 (0x14)
+    CKBodyPart *m_EndEffector;     // offset +24 (0x18)
+    CKDWORD m_ChainBodyCount;      // offset +28 (0x1C): Number of body parts in chain
+    CKIKChainBodyData *m_ChainData; // offset +32 (0x20): Pointer to IK chain body data array
 };
 
 #endif // RCKKINEMATICCHAIN_H
