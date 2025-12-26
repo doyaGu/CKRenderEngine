@@ -19,6 +19,9 @@ public:
 
     int GetMemoryOccupation() override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    void CheckPreDeletion() override;
+    CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // CKObjectAnimation virtual methods
     CKAnimController *CreateController(CKANIMATION_CONTROLLER ControlType) override;
@@ -102,7 +105,7 @@ protected:
     float m_MergeFactor;             // 0x2C - Note: animation length is stored in m_KeyframeData->m_Length
     RCKObjectAnimation *m_Anim1;     // 0x30 - First source animation for merged animations
     RCKObjectAnimation *m_Anim2;     // 0x34 - Second source animation for merged animations
-    CKDWORD m_field_38;              // 0x38 - Unknown/reserved field
+    CKDWORD m_field_38;              // 0x38 - Reserved/unknown field (set to 0 in constructor)
     RCKKeyedAnimation *m_ParentKeyedAnimation; // 0x3C - Parent keyed animation (used in SetStep)
 };
 
