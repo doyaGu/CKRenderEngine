@@ -1,8 +1,10 @@
 #include "RCKAnimation.h"
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
 #include "CKCharacter.h"
+#include "RCKKeyedAnimation.h"
 
 CK_CLASSID RCKAnimation::m_ClassID = CKCID_ANIMATION;
 
@@ -39,34 +41,34 @@ CKStateChunk *RCKAnimation::Save(CKFile *file, CKDWORD flags) {
     chunk->AddChunkAndDelete(baseChunk);
 
     // Save flags and frame rate (identifier 0x10)
-    if (file || (flags & 0x10) != 0) {
-        chunk->WriteIdentifier(0x10);
+    if (file || (flags & CK_STATESAVE_ANIMATIONDATA) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATIONDATA);
         chunk->WriteDword(m_Flags);
         chunk->WriteFloat(m_FrameRate);
     }
 
     // Save length (identifier 0x40)
-    if (file || (flags & 0x40) != 0) {
-        chunk->WriteIdentifier(0x40);
+    if (file || (flags & CK_STATESAVE_ANIMATIONLENGTH) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATIONLENGTH);
         chunk->WriteFloat(m_Length);
     }
 
     // Save root entity (identifier 0x80)
-    if (file || (flags & 0x80) != 0) {
-        chunk->WriteIdentifier(0x80);
+    if (file || (flags & CK_STATESAVE_ANIMATIONBODYPARTS) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATIONBODYPARTS);
         chunk->WriteObjectArray(nullptr, 0); // Empty object array (legacy)
         chunk->WriteObject((CKObject *) m_RootEntity);
     }
 
     // Save character (identifier 0x100)
-    if (file || (flags & 0x100) != 0) {
-        chunk->WriteIdentifier(0x100);
+    if (file || (flags & CK_STATESAVE_ANIMATIONCHARACTER) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATIONCHARACTER);
         chunk->WriteObject((CKObject *) m_Character);
     }
 
     // Save step (identifier 0x200)
-    if (file || (flags & 0x200) != 0) {
-        chunk->WriteIdentifier(0x200);
+    if (file || (flags & CK_STATESAVE_ANIMATIONCURRENTSTEP) != 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_ANIMATIONCURRENTSTEP);
         chunk->WriteFloat(m_Step);
     }
 
@@ -88,12 +90,12 @@ CKERROR RCKAnimation::Load(CKStateChunk *chunk, CKFile *file) {
     CKObject::Load(chunk, file);
 
     // Load length (identifier 0x40)
-    if (chunk->SeekIdentifier(0x40)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_ANIMATIONLENGTH)) {
         m_Length = chunk->ReadFloat();
     }
 
     // Load flags and frame rate (identifier 0x10)
-    int size10 = chunk->SeekIdentifierAndReturnSize(0x10);
+    int size10 = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_ANIMATIONDATA);
     if (size10 > 0) {
         if (size10 == 12) {
             // Old format: canInterrupt, linkedToFrameRate, frameRate
@@ -110,19 +112,19 @@ CKERROR RCKAnimation::Load(CKStateChunk *chunk, CKFile *file) {
     }
 
     // Load root entity (identifier 0x80)
-    if (chunk->SeekIdentifier(0x80)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_ANIMATIONBODYPARTS)) {
         XObjectArray objArray;
         objArray.Load(chunk); // Load and discard (legacy)
         m_RootEntity = (RCK3dEntity *) chunk->ReadObject(m_Context);
     }
 
     // Load character (identifier 0x100)
-    if (chunk->SeekIdentifier(0x100)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_ANIMATIONCHARACTER)) {
         m_Character = (RCKCharacter *) chunk->ReadObject(m_Context);
     }
 
     // Load step (identifier 0x200)
-    if (chunk->SeekIdentifier(0x200)) {
+    if (chunk->SeekIdentifier(CK_STATESAVE_ANIMATIONCURRENTSTEP)) {
         m_Step = chunk->ReadFloat();
     }
 
@@ -131,6 +133,19 @@ CKERROR RCKAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 
 int RCKAnimation::GetMemoryOccupation() {
     return CKSceneObject::GetMemoryOccupation() + (sizeof(RCKAnimation) - sizeof(CKSceneObject));
+}
+
+// Based on IDA decompilation at 0x10047904
+void RCKAnimation::CheckPreDeletion() {
+    CKObject::CheckPreDeletion();
+    
+    // Clear m_Character if it's being deleted
+    if (m_Character && reinterpret_cast<CKObject*>(m_Character)->IsToBeDeleted())
+        m_Character = nullptr;
+    
+    // Clear m_RootEntity if it's being deleted
+    if (m_RootEntity && reinterpret_cast<CKObject*>(m_RootEntity)->IsToBeDeleted())
+        m_RootEntity = nullptr;
 }
 
 CKERROR RCKAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
@@ -196,11 +211,9 @@ float RCKAnimation::GetStep() {
 
 // 0x10047EF0 - Set m_Step as normalized position
 void RCKAnimation::SetFrame(float frame) {
-    if (m_Length != 0.0f) {
-        m_Step = frame / m_Length;
-    } else {
-        m_Step = 0.0f;
-    }
+    // Original has no zero check - divides directly
+    // This matches the IDA decompilation exactly
+    m_Step = frame / m_Length;
 }
 
 // SetStep and SetCurrentStep both set m_Step directly
@@ -233,9 +246,9 @@ float RCKAnimation::GetLinkedFrameRate() {
     return m_FrameRate;
 }
 
-// 0x10047F90
+// 0x10047F90 - Returns flag value directly (0 or 1)
 CKBOOL RCKAnimation::IsLinkedToFrameRate() {
-    return (m_Flags & CKANIMATION_LINKTOFRAMERATE) != 0;
+    return m_Flags & CKANIMATION_LINKTOFRAMERATE;
 }
 
 // 0x100477D2 - TransitionMode stored in bits 8-16
@@ -269,9 +282,9 @@ void RCKAnimation::SetCanBeInterrupt(CKBOOL can) {
     }
 }
 
-// 0x10047FB0
+// 0x10047FB0 - Returns the flag value directly (0 or 4), not normalized bool
 CKBOOL RCKAnimation::CanBeInterrupt() {
-    return (m_Flags & CKANIMATION_CANBEBREAK) != 0;
+    return m_Flags & CKANIMATION_CANBEBREAK;
 }
 
 // 0x1004789D - CharacterOrientation uses bit 4 (value 0x10)
@@ -283,9 +296,9 @@ void RCKAnimation::SetCharacterOrientation(CKBOOL orient) {
     }
 }
 
-// 0x10047FD0
+// 0x10047FD0 - Returns the flag value directly (0 or 0x10), not normalized bool
 CKBOOL RCKAnimation::DoesCharacterTakeOrientation() {
-    return (m_Flags & CKANIMATION_ALIGNORIENTATION) != 0;
+    return m_Flags & CKANIMATION_ALIGNORIENTATION;
 }
 
 // 0x10061E40
@@ -299,11 +312,11 @@ CKDWORD RCKAnimation::GetFlags() {
 }
 
 // 0x100478D0 - Has special handling for CKKeyedAnimation (class 18)
+// If this is a keyed animation and root entity is null, it calls UpdateRootEntity
 CK3dEntity *RCKAnimation::GetRootEntity() {
-    // If no root entity and this is a CKKeyedAnimation, rebuild it
-    if (!m_RootEntity && CKIsChildClassOf((CKObject *) this, CKCID_KEYEDANIMATION)) {
-        // RCKKeyedAnimation::RebuildHierarchy(this);
-        // This is handled by derived class
+    if (!m_RootEntity && CKIsChildClassOf(this, CKCID_KEYEDANIMATION)) {
+        // Cast to RCKKeyedAnimation and call UpdateRootEntity
+        static_cast<RCKKeyedAnimation*>(static_cast<CKAnimation*>(this))->UpdateRootEntity();
     }
     return (CK3dEntity *) m_RootEntity;
 }
