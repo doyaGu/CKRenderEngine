@@ -23,6 +23,8 @@ public:
 
     int GetMemoryOccupation() override;
 
+    void CheckPreDeletion() override;
+
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
