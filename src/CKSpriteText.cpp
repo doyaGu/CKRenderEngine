@@ -263,8 +263,7 @@ CKSTRING RCKSpriteText::GetDependencies(int i, int mode) {
 
 // Register: 0x10062671
 void RCKSpriteText::Register() {
-    CKGUID guid(0x5C2E69E3, 0xFE156F09);
-    CKClassRegisterAssociatedParameter(m_ClassID, guid);
+    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_SPRITETEXT);
 }
 
 // CreateInstance: 0x100626a2

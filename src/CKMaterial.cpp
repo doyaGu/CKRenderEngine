@@ -723,7 +723,7 @@ void RCKMaterial::Register() {
     CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_MATERIAL);
 
     // Register default options
-    CKClassRegisterDefaultOptions(m_ClassID, 2);
+    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
 }
 
 /**
