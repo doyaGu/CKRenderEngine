@@ -394,10 +394,10 @@ CKBOOL RCKTexture::SetUserMipMapMode(CKBOOL UserMipmap) {
             m_MipMaps->Resize(mipCount);
 
             VxImageDescEx mipDesc;
-            mipDesc.AlphaMask = 0xFF000000;
-            mipDesc.RedMask = 0x00FF0000;
-            mipDesc.GreenMask = 0x0000FF00;
-            mipDesc.BlueMask = 0x000000FF;
+            mipDesc.AlphaMask = A_MASK;
+            mipDesc.RedMask = R_MASK;
+            mipDesc.GreenMask = G_MASK;
+            mipDesc.BlueMask = B_MASK;
             mipDesc.BitsPerPixel = 32;
             mipDesc.Width = GetWidth();
             mipDesc.Height = GetHeight();
@@ -468,7 +468,7 @@ CK_CLASSID RCKTexture::GetClassID() {
 
 CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *baseChunk = CKBeObject::Save(file, flags);
-    if (!file && (flags & 0x2FF000) == 0)
+    if (!file && !(flags & CK_STATESAVE_OLDTEXONLY))
         return baseChunk;
 
     CKStateChunk *chunk = CreateCKStateChunk(CKCID_TEXTURE, file);
