@@ -7,6 +7,7 @@
 #include "RCKAnimation.h"
 
 class RCKKeyedAnimation : public RCKAnimation {
+    friend class RCKCharacter;  // Allow RCKCharacter to access protected members
 public:
 
 #undef CK_PURE
