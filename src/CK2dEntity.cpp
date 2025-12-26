@@ -1442,10 +1442,10 @@ CKSTRING RCK2dEntity::GetDependencies(int i, int mode) {
 }
 
 void RCK2dEntity::Register() {
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_MATERIAL);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_2DENTITY);
-    CKClassRegisterDefaultDependencies(m_ClassID, 3, CK_DEPENDENCIES_COPY);
-    CKClassRegisterDefaultDependencies(m_ClassID, 3, CK_DEPENDENCIES_SAVE);
+    CKCLASSNOTIFYFROMCID(RCK2dEntity, CKCID_MATERIAL);
+    CKPARAMETERFROMCLASS(RCK2dEntity, CKPGUID_2DENTITY);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCK2dEntity, CK_DEPENDENCIES_REPLACE);
+    CKCLASSDEFAULTSAVEDEPENDENCIES(RCK2dEntity, CK_DEPENDENCIES_REPLACE);
 }
 
 RCK2dEntity *RCK2dEntity::CreateInstance(CKContext *Context) {

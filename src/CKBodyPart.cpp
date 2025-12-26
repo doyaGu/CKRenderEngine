@@ -199,8 +199,8 @@ CKSTRING RCKBodyPart::GetDependencies(int i, int mode) {
 
 void RCKBodyPart::Register() {
     // IDA: 0x1000ec81 - CKGUID(0x4BA2618E, 0x7AAD0D02)
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_CHARACTER);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_BODYPART);
+    CKCLASSNOTIFYFROMCID(RCKBodyPart, CKCID_CHARACTER);
+    CKPARAMETERFROMCLASS(RCKBodyPart, CKPGUID_BODYPART);
 }
 
 CKBodyPart *RCKBodyPart::CreateInstance(CKContext *Context) {

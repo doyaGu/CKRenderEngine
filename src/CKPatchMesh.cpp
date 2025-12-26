@@ -574,9 +574,9 @@ CKSTRING RCKPatchMesh::GetDependencies(int i, int mode) {
 }
 
 void RCKPatchMesh::Register() {
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_MATERIAL);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_PATCHMESH);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
+    CKCLASSNOTIFYFROMCID(RCKPatchMesh, CKCID_MATERIAL);
+    CKPARAMETERFROMCLASS(RCKPatchMesh, CKPGUID_PATCHMESH);
+    CKCLASSDEFAULTOPTIONS(RCKPatchMesh, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
 }
 
 CKPatchMesh *RCKPatchMesh::CreateInstance(CKContext *Context) {

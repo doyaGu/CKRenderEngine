@@ -336,10 +336,10 @@ CKSTRING RCKAnimation::GetDependencies(int i, int mode) {
 // 0x10047C8C
 void RCKAnimation::Register() {
     // Registers for notification from 3D entities (class 33 = CKCID_3DENTITY)
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_3DENTITY);
+    CKCLASSNOTIFYFROMCID(RCKAnimation, CKCID_3DENTITY);
 
     // Register associated parameter GUID: {0x5BF0D34D, 0x19E69236}
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_ANIMATION);
+    CKPARAMETERFROMCLASS(RCKAnimation, CKPGUID_ANIMATION);
 }
 
 // 0x10047CCD

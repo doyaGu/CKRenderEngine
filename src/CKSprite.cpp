@@ -65,8 +65,8 @@ CKSTRING RCKSprite::GetDependencies(int i, int mode) {
 
 void RCKSprite::Register() {
     // Based on IDA decompilation
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_SPRITE);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
+    CKPARAMETERFROMCLASS(RCKSprite, CKPGUID_SPRITE);
+    CKCLASSDEFAULTOPTIONS(RCKSprite, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
 }
 
 CKSprite *RCKSprite::CreateInstance(CKContext *Context) {

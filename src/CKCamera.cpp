@@ -531,7 +531,7 @@ CKSTRING RCKCamera::GetDependencies(int i, int mode) {
 }
 
 void RCKCamera::Register() {
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_CAMERA);
+    CKPARAMETERFROMCLASS(RCKCamera, CKPGUID_CAMERA);
 }
 
 CKCamera *RCKCamera::CreateInstance(CKContext *Context) {

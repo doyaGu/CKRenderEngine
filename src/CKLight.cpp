@@ -726,7 +726,7 @@ CKSTRING RCKLight::GetDependencies(int i, int mode) {
 
 void RCKLight::Register() {
     // Register associated parameter GUID
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_LIGHT);
+    CKPARAMETERFROMCLASS(RCKLight, CKPGUID_LIGHT);
 }
 
 CKLight *RCKLight::CreateInstance(CKContext *Context) {

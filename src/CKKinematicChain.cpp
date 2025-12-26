@@ -59,10 +59,10 @@ CKSTRING RCKKinematicChain::GetDependencies(int i, int mode) {
 
 void RCKKinematicChain::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_BODYPART);
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_CHARACTER);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_KINEMATICCHAIN);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
+    CKCLASSNOTIFYFROMCID(RCKKinematicChain, CKCID_BODYPART);
+    CKCLASSNOTIFYFROMCID(RCKKinematicChain, CKCID_CHARACTER);
+    CKPARAMETERFROMCLASS(RCKKinematicChain, CKPGUID_KINEMATICCHAIN);
+    CKCLASSDEFAULTOPTIONS(RCKKinematicChain, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
 }
 
 CKKinematicChain *RCKKinematicChain::CreateInstance(CKContext *Context) {

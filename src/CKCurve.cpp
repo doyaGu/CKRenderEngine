@@ -1152,8 +1152,8 @@ CKSTRING RCKCurve::GetDependencies(int i, int mode) {
 
 void RCKCurve::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_CURVEPOINT);
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_CURVE);
+    CKCLASSNOTIFYFROMCID(RCKCurve, CKCID_CURVEPOINT);
+    CKPARAMETERFROMCLASS(RCKCurve, CKPGUID_CURVE);
 }
 
 CKCurve *RCKCurve::CreateInstance(CKContext *Context) {

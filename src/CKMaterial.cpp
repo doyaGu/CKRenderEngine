@@ -717,13 +717,13 @@ CKSTRING RCKMaterial::GetDependencies(int i, int mode) {
  */
 void RCKMaterial::Register() {
     // Register notification from textures
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_TEXTURE);
+    CKCLASSNOTIFYFROMCID(RCKMaterial, CKCID_TEXTURE);
 
     // Register associated parameter GUID
-    CKClassRegisterAssociatedParameter(m_ClassID, CKPGUID_MATERIAL);
+    CKPARAMETERFROMCLASS(RCKMaterial, CKPGUID_MATERIAL);
 
     // Register default options
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
+    CKCLASSDEFAULTOPTIONS(RCKMaterial, CK_GENERALOPTIONS_CANUSECURRENTOBJECT);
 }
 
 /**

@@ -400,9 +400,9 @@ CKSTRING RCKLayer::GetDependencies(int i, int mode) {
 
 void RCKLayer::Register() {
     // Based on IDA decompilation
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_GRID);
-    CKClassRegisterDefaultOptions(m_ClassID, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
-    CKClassRegisterDefaultDependencies(m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSNOTIFYFROMCID(RCKLayer, CKCID_GRID);
+    CKCLASSDEFAULTOPTIONS(RCKLayer, CK_GENERALOPTIONS_NODUPLICATENAMECHECK);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKLayer, CK_DEPENDENCIES_COPY);
 }
 
 CKLayer *RCKLayer::CreateInstance(CKContext *Context) {

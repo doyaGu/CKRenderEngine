@@ -354,10 +354,9 @@ CKSTRING RCKGrid::GetDependencies(int i, int mode) {
 
 void RCKGrid::Register() {
     // Based on IDA decompilation at 0x10019bd4
-    CKClassNeedNotificationFrom(m_ClassID, CKCID_LAYER);
-    // IDA shows CKGUID(1535772117, 837429460) = 0x5B8749C5, 0x31E8C1D4
-    CKClassRegisterAssociatedParameter(m_ClassID, CKGUID(0x5B8749C5, 0x31E8C1D4));
-    CKClassRegisterDefaultDependencies(m_ClassID, 1, CK_DEPENDENCIES_COPY);
+    CKCLASSNOTIFYFROMCID(RCKGrid, CKCID_LAYER);
+    CKPARAMETERFROMCLASS(RCKGrid, CKPGUID_3DENTITY);
+    CKCLASSDEFAULTCOPYDEPENDENCIES(RCKGrid, CK_DEPENDENCIES_COPY);
 }
 
 CKGrid *RCKGrid::CreateInstance(CKContext *Context) {
