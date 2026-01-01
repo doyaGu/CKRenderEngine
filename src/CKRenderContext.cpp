@@ -1336,7 +1336,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
 
     // Try to create the context with current settings
-    BOOL created = m_RasterizerContext->Create(
+    CKBOOL created = m_RasterizerContext->Create(
         (WIN_HANDLE) m_WinHandle,
         m_Settings.m_Rect.left, m_Settings.m_Rect.top,
         m_Settings.m_Rect.right, m_Settings.m_Rect.bottom,
@@ -1366,7 +1366,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_RasterizerContext = m_RasterizerDriver->CreateContext();
         m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
 
-        BOOL restored = m_RasterizerContext->Create(
+        CKBOOL restored = m_RasterizerContext->Create(
             (WIN_HANDLE) m_WinHandle,
             m_FullscreenSettings.m_Rect.left, m_FullscreenSettings.m_Rect.top,
             m_FullscreenSettings.m_Rect.right, m_FullscreenSettings.m_Rect.bottom,
