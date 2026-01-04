@@ -1185,10 +1185,10 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     m_FullscreenSettings = savedSettings;
 
     // Save window parent and position
-    m_AppHandle = (CKDWORD) VxGetParent((void *) m_WinHandle);
-    VxGetWindowRect((void *) m_WinHandle, &m_WinRect);
-    VxScreenToClient((void *) m_AppHandle, (CKPOINT *) &m_WinRect.left);
-    VxScreenToClient((void *) m_AppHandle, (CKPOINT *) &m_WinRect.right);
+    m_AppHandle = VxGetParent(m_WinHandle);
+    VxGetWindowRect(m_WinHandle, &m_WinRect);
+    VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.left);
+    VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.right);
 
     // Destroy current device
     DestroyDevice();
@@ -1200,12 +1200,12 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     rect.right = Width;
     rect.bottom = Height;
 
-    err = Create((void *) m_WinHandle, Driver, &rect, TRUE, Bpp, 0, 0, RefreshRate);
+    err = Create(m_WinHandle, Driver, &rect, TRUE, Bpp, 0, 0, RefreshRate);
 
     if (err != CK_OK) {
         // Failed - restore window
-        VxSetParent((void *) m_WinHandle, (void *) m_AppHandle);
-        VxMoveWindow((void *) m_WinHandle, m_WinRect.left, m_WinRect.top,
+        VxSetParent(m_WinHandle, m_AppHandle);
+        VxMoveWindow(m_WinHandle, m_WinRect.left, m_WinRect.top,
                      m_WinRect.right - m_WinRect.left, m_WinRect.bottom - m_WinRect.top, FALSE);
 
         // Try to recreate old context
@@ -1215,7 +1215,7 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
         oldRect.right = m_FullscreenSettings.m_Rect.right + oldRect.left;
         oldRect.bottom = m_FullscreenSettings.m_Rect.bottom + oldRect.top;
 
-        Create((void *) m_WinHandle, m_DriverIndex, &oldRect, FALSE,
+        Create(m_WinHandle, m_DriverIndex, &oldRect, FALSE,
                m_FullscreenSettings.m_Bpp, m_FullscreenSettings.m_Zbpp,
                m_FullscreenSettings.m_StencilBpp, 0);
     } else {
@@ -1242,8 +1242,8 @@ CKERROR RCKRenderContext::StopFullScreen() {
     DestroyDevice();
 
     // Restore window parent and position
-    VxSetParent((void *) m_WinHandle, (void *) m_AppHandle);
-    VxMoveWindow((void *) m_WinHandle, m_WinRect.left, m_WinRect.top,
+    VxSetParent(m_WinHandle, m_AppHandle);
+    VxMoveWindow(m_WinHandle, m_WinRect.left, m_WinRect.top,
                  m_WinRect.right - m_WinRect.left, m_WinRect.bottom - m_WinRect.top, FALSE);
 
     // Recreate windowed context with saved settings
@@ -1253,7 +1253,7 @@ CKERROR RCKRenderContext::StopFullScreen() {
     rect.right = m_FullscreenSettings.m_Rect.right + rect.left;
     rect.bottom = m_FullscreenSettings.m_Rect.bottom + rect.top;
 
-    CKERROR err = Create((void *) m_WinHandle, m_DriverIndex, &rect, FALSE,
+    CKERROR err = Create(m_WinHandle, m_DriverIndex, &rect, FALSE,
                          m_FullscreenSettings.m_Bpp, m_FullscreenSettings.m_Zbpp,
                          m_FullscreenSettings.m_StencilBpp, 0);
 
@@ -1337,7 +1337,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
 
     // Try to create the context with current settings
     CKBOOL created = m_RasterizerContext->Create(
-        (WIN_HANDLE) m_WinHandle,
+        m_WinHandle,
         m_Settings.m_Rect.left, m_Settings.m_Rect.top,
         m_Settings.m_Rect.right, m_Settings.m_Rect.bottom,
         m_Settings.m_Bpp, 0, 0,
@@ -1367,7 +1367,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
 
         CKBOOL restored = m_RasterizerContext->Create(
-            (WIN_HANDLE) m_WinHandle,
+            m_WinHandle,
             m_FullscreenSettings.m_Rect.left, m_FullscreenSettings.m_Rect.top,
             m_FullscreenSettings.m_Rect.right, m_FullscreenSettings.m_Rect.bottom,
             m_FullscreenSettings.m_Bpp, 0, 0,
@@ -1384,17 +1384,17 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
 }
 
 WIN_HANDLE RCKRenderContext::GetWindowHandle() {
-    return (WIN_HANDLE) m_WinHandle;
+    return m_WinHandle;
 }
 
 void RCKRenderContext::ScreenToClient(Vx2DVector *ioPoint) {
     // IDA: 0x1006c075
-    VxScreenToClient((void *) m_WinHandle, (CKPOINT *) ioPoint);
+    VxScreenToClient(m_WinHandle, (CKPOINT *) ioPoint);
 }
 
 void RCKRenderContext::ClientToScreen(Vx2DVector *ioPoint) {
     // IDA: 0x1006c096
-    VxClientToScreen((void *) m_WinHandle, (CKPOINT *) ioPoint);
+    VxClientToScreen(m_WinHandle, (CKPOINT *) ioPoint);
 }
 
 CKERROR RCKRenderContext::SetWindowRect(VxRect &rect, CKDWORD Flags) {
@@ -1409,8 +1409,8 @@ void RCKRenderContext::GetWindowRect(VxRect &rect, CKBOOL ScreenRelative) {
         pt1.y = m_Settings.m_Rect.top;
         pt2.x = m_Settings.m_Rect.right + m_Settings.m_Rect.left;
         pt2.y = m_Settings.m_Rect.bottom + m_Settings.m_Rect.top;
-        VxClientToScreen((void *) m_WinHandle, &pt1);
-        VxClientToScreen((void *) m_WinHandle, &pt2);
+        VxClientToScreen(m_WinHandle, &pt1);
+        VxClientToScreen(m_WinHandle, &pt2);
         rect.left = (float) pt1.x;
         rect.top = (float) pt1.y;
         rect.right = (float) pt2.x;
@@ -1446,9 +1446,9 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
             rect.top = PosY;
             rect.bottom = SizeY + PosY;
             rect.right = SizeX + PosX;
-            Create((void *) m_WinHandle, m_DriverIndex, &rect, FALSE, -1, -1, -1, 0);
+            Create(m_WinHandle, m_DriverIndex, &rect, FALSE, -1, -1, -1, 0);
         } else {
-            Create((void *) m_WinHandle, m_DriverIndex, nullptr, FALSE, -1, -1, -1, 0);
+            Create(m_WinHandle, m_DriverIndex, nullptr, FALSE, -1, -1, -1, 0);
         }
 
         if (!m_RasterizerContext)
@@ -1468,7 +1468,7 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     if ((Flags & VX_RESIZE_NOSIZE) == 0) {
         if (!SizeX || !SizeY) {
             CKRECT clientRect;
-            VxGetClientRect((void *) m_WinHandle, &clientRect);
+            VxGetClientRect(m_WinHandle, &clientRect);
             SizeX = clientRect.right;
             SizeY = clientRect.bottom;
         }
@@ -2569,14 +2569,14 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     if (!m_RasterizerDriver)
         return CK_OK; // IDA returns CK_OK here, not an error
 
-    m_WinHandle = (CKDWORD) Window;
+    m_WinHandle = Window;
 
     // Get rect from parameter or window client rect
     CKRECT localRect;
     if (rect) {
         localRect = *rect;
     } else {
-        VxGetClientRect((void *) m_WinHandle, &localRect);
+        VxGetClientRect(m_WinHandle, &localRect);
     }
 
     // Set driver index for non-fullscreen mode
@@ -2588,9 +2588,9 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // For fullscreen, reparent window to desktop
     if (Fullscreen) {
-        m_AppHandle = (CKDWORD) VxGetParent((void *) m_WinHandle);
-        VxSetParent((void *) m_WinHandle, nullptr);
-        if (!VxMoveWindow((void *) m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
+        m_AppHandle = VxGetParent(m_WinHandle);
+        VxSetParent(m_WinHandle, nullptr);
+        if (!VxMoveWindow(m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
             m_DeviceValid = FALSE;
             return CKERR_INVALIDOPERATION;
         }
@@ -2610,7 +2610,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     m_RasterizerContext->m_EnsureVertexShader = (m_RenderManager->m_EnsureVertexShader.Value != 0);
 
     // Create the actual rasterizer context
-    if (!m_RasterizerContext->Create((WIN_HANDLE) m_WinHandle, localRect.left, localRect.top,
+    if (!m_RasterizerContext->Create(m_WinHandle, localRect.left, localRect.top,
                                      width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp)) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerContext = nullptr;
@@ -2663,12 +2663,6 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
 RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRenderContext(Context, name) {
     // IDA: 0x10066952
-    // Note: CKCallbacksContainer constructors are called implicitly by member initialization
-    // Note: VxFrustum, VxMatrix, VxRect constructors are called implicitly
-    // Note: CKRenderContextSettings constructors called implicitly
-    // Note: VxTimeProfiler constructors called implicitly
-    // Note: XString constructors called implicitly
-    // Note: XArray constructors called implicitly
 
     m_Current3dEntity = nullptr;
     m_RenderManager = (RCKRenderManager *) Context->GetRenderManager();
@@ -2676,8 +2670,8 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     if (!m_MaskFree) {
         m_Context->OutputToConsole((CKSTRING) "Error: no more render context mask available", TRUE);
     }
-    m_WinHandle = 0;
-    m_AppHandle = 0;
+    m_WinHandle = nullptr;
+    m_AppHandle = nullptr;
     m_RenderFlags = CK_RENDER_DEFAULTSETTINGS;
 
     // Create RenderedScene
@@ -2688,7 +2682,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
 
     m_Fullscreen = FALSE;
     m_Active = FALSE;
-    m_Perspective = TRUE; // IDA: m_Perspective = 1
+    m_Perspective = TRUE;
     m_ProjectionUpdated = FALSE;
     m_DeviceValid = FALSE;
     m_Start = FALSE;
@@ -2698,11 +2692,11 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_DriverIndex = 0;
     m_DisplayWireframe = FALSE;
     m_TextureEnabled = TRUE;
-    m_Shading = GouraudShading; // IDA: 2
+    m_Shading = GouraudShading;
     m_Zoom = 1.0f;
     m_NearPlane = 1.0f;
-    m_FarPlane = 4000.0f; // IDA: 4000.0
-    m_Fov = PI / 4.0f;    // IDA: PI/4
+    m_FarPlane = 4000.0f;
+    m_Fov = PI / 4.0f;
 
     // Initialize viewport
     m_ViewportData.ViewX = 0;
@@ -2710,28 +2704,24 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_ViewportData.ViewWidth = 0;
     m_ViewportData.ViewHeight = 0;
     m_ViewportData.ViewZMin = 0.0f;
-    m_ViewportData.ViewZMax = 1.0f; // IDA: 1.0
+    m_ViewportData.ViewZMax = 1.0f;
 
-    // Allocate object extents array - IDA uses XVoidArray
-    // m_ObjectExtents is now XVoidArray, need to allocate differently
-    // IDA: XArray<CKObjectExtents>::Allocate(&this->m_ObjectExtents, 500);
-    // For XVoidArray, we need to resize it
     m_ObjectExtents.Resize(500);
 
     // Clear stats
     memset(&m_Stats, 0, sizeof(m_Stats));
 
     // Initialize window rect
-    m_WinRect.left = -1;  // IDA
-    m_WinRect.right = -1; // IDA
+    m_WinRect.left = -1;
+    m_WinRect.right = -1;
     m_WinRect.top = 0;
     m_WinRect.bottom = 0;
 
     // Initialize current extents
-    m_CurrentExtents.left = 1000000.0f;    // IDA
-    m_CurrentExtents.top = 1000000.0f;     // IDA
-    m_CurrentExtents.bottom = -1000000.0f; // IDA
-    m_CurrentExtents.right = -1000000.0f;  // IDA
+    m_CurrentExtents.left = 1000000.0f;
+    m_CurrentExtents.top = 1000000.0f;
+    m_CurrentExtents.bottom = -1000000.0f;
+    m_CurrentExtents.right = -1000000.0f;
 
     m_FpsFrameCount = 0;
     m_TimeFpsCalc = 0;
@@ -2739,18 +2729,18 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_Flags = 0;
     m_SceneTraversalCalls = 0;
     m_TargetTexture = nullptr;
-    m_CubeMapFace = CKRST_CUBEFACE_XPOS; // IDA: 0
+    m_CubeMapFace = CKRST_CUBEFACE_XPOS;
     m_DrawSceneCalls = 0;
     m_SortTransparentObjects = 0;
-    m_FocalLength = 0.40000001f; // IDA: 0.40000001
-    m_EyeSeparation = 100.0f;    // IDA: 100.0
+    m_FocalLength = 0.4f;
+    m_EyeSeparation = 100.0f;
     m_Camera = nullptr;
-    m_PVInformation = (CKDWORD) -1; // IDA: -1
+    m_PVInformation = (CKDWORD) -1;
     m_NCUTex = nullptr;
     m_DpFlags = 0;
     m_VertexBufferCount = 0;
     m_VertexBufferIndex = 0;
-    m_StartIndex = (CKDWORD) -1; // IDA: -1
+    m_StartIndex = (CKDWORD) -1;
 
     // Additional fields initialization
     m_StencilFreeMask = 0;
