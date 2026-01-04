@@ -1026,7 +1026,7 @@ void RCKPatchMesh::BuildRenderMesh() {
         if (texIndex >= 0 && texIndex < m_TexturePatches.Size()) {
             CK_ID matId = m_TexturePatches[texIndex].Material;
             if (matId)
-                mat = (CKMaterial *)m_Context->GetObjectA(matId);
+                mat = (CKMaterial *)m_Context->GetObject(matId);
         }
         if (!mat)
             break;

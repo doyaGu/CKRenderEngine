@@ -91,7 +91,7 @@ void RCKGrid::PreSave(CKFile *file, CKDWORD flags) {
 
     // Save all layer objects to the file
     for (int i = 0; i < m_Layers.Size(); ++i) {
-        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+        CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
         if (layerObject) {
             file->SaveObject(layerObject, flags);
         }
@@ -142,7 +142,7 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     // If not saving to file, save layer sub-chunks
     if (!file) {
         for (int i = 0; i < m_Layers.Size(); ++i) {
-            CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+            CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
             if (layerObject) {
                 CKStateChunk *layerChunk = layerObject->Save(nullptr, flags);
                 chunk->WriteSubChunk(layerChunk);
@@ -194,7 +194,7 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
         // If not loading from file, load layer sub-chunks
         if (!file) {
             for (int i = 0; i < m_Layers.Size(); ++i) {
-                CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+                CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
                 CKStateChunk *subChunk = chunk->ReadSubChunk();
                 if (layerObject) {
                     layerObject->Load(subChunk, nullptr);
@@ -901,7 +901,7 @@ CKLayer *RCKGrid::AddLayerByName(char *name, int format) {
 
 CKLayer *RCKGrid::GetLayer(int type) {
     for (int i = 0; i < m_Layers.Size(); ++i) {
-        CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->GetObjectA(m_Layers[i]));
+        CKLayer *layer = reinterpret_cast<CKLayer *>(m_Context->GetObject(m_Layers[i]));
         if (layer && layer->GetType() == type)
             return layer;
     }
@@ -930,7 +930,7 @@ int RCKGrid::GetLayerCount() {
 CKLayer *RCKGrid::GetLayerByIndex(int index) {
     if (index < 0 || index >= m_Layers.Size())
         return nullptr;
-    return reinterpret_cast<CKLayer *>(m_Context->GetObjectA(m_Layers[index]));
+    return reinterpret_cast<CKLayer *>(m_Context->GetObject(m_Layers[index]));
 }
 
 CKERROR RCKGrid::RemoveLayer(int type) {
@@ -975,7 +975,7 @@ CKERROR RCKGrid::RemoveLayerByName(char *name) {
 
 CKERROR RCKGrid::RemoveAllLayers() {
     for (int i = 0; i < m_Layers.Size(); ++i) {
-        CKObject *layerObject = m_Context->GetObjectA(m_Layers[i]);
+        CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
         if (layerObject)
             m_Context->DestroyObject(layerObject);
     }

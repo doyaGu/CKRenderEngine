@@ -51,7 +51,7 @@ RCKObjectAnimation::~RCKObjectAnimation() {
                 CK_ID *ids = m_Context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
 
                 for (int i = 0; i < count; ++i) {
-                    RCKObjectAnimation *other = static_cast<RCKObjectAnimation *>(m_Context->GetObjectA(ids[i]));
+                    RCKObjectAnimation *other = static_cast<RCKObjectAnimation *>(m_Context->GetObject(ids[i]));
                     if (other && other->m_KeyframeData == m_KeyframeData && other != this) {
                         // Transfer ownership
                         m_KeyframeData->m_ObjectAnimation = other;

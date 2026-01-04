@@ -3781,7 +3781,7 @@ CKERROR RCKMesh::CreatePM() {
         CK_ID *ids = m_Context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
         const int count = m_Context->GetObjectsCountByClassID(CKCID_OBJECTANIMATION);
         for (int i = 0; i < count; ++i) {
-            CKObjectAnimation *oa = (CKObjectAnimation *) m_Context->GetObjectA(ids[i]);
+            CKObjectAnimation *oa = (CKObjectAnimation *) m_Context->GetObject(ids[i]);
             if (!oa)
                 continue;
 
