@@ -228,10 +228,10 @@ public:
     // Base class CKRenderContext at offset 0x00 (20 bytes)
     // =====================================================================
     
-    CKDWORD m_WinHandle;                    // 0x14 (4 bytes)
-    CKDWORD m_AppHandle;                    // 0x18 (4 bytes) - WIN_HANDLE
+    WIN_HANDLE m_WinHandle;                    // 0x14 (4 bytes)
+    WIN_HANDLE m_AppHandle;                    // 0x18 (4 bytes) - WIN_HANDLE
     CKRECT m_WinRect;                       // 0x1C (16 bytes)
-    CKDWORD m_RenderFlags;                  // 0x2C (4 bytes) - CK_RENDER_FLAGS stored as DWORD
+    CK_RENDER_FLAGS m_RenderFlags;          // 0x2C (4 bytes) - CK_RENDER_FLAGS stored as DWORD
     CKRenderedScene *m_RenderedScene;       // 0x30 (4 bytes)
     CKBOOL m_Fullscreen;                    // 0x34 (4 bytes)
     CKBOOL m_Active;                        // 0x38 (4 bytes)
@@ -240,15 +240,15 @@ public:
     CKBOOL m_Start;                         // 0x44 (4 bytes)
     CKBOOL m_TransparentMode;               // 0x48 (4 bytes)
     CKBOOL m_DeviceValid;                   // 0x4C (4 bytes)
-    CKCallbacksContainer m_PreRenderCallBacks;      // 0x50 (28 bytes)
+    CKCallbacksContainer m_PreRenderCallBacks;   // 0x50 (28 bytes)
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
-    CKCallbacksContainer m_PostSpriteRenderCallBacks;     // 0x88 (28 bytes)
+    CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
     CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
     CKRasterizerDriver *m_RasterizerDriver; // 0xAC (4 bytes)
     int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
     CKDWORD m_Shading;                      // 0xB4 (4 bytes)
-    CKDWORD m_TextureEnabled;               // 0xB8 (4 bytes)
+    CKBOOL m_TextureEnabled;                // 0xB8 (4 bytes)
     CKDWORD m_DisplayWireframe;             // 0xBC (4 bytes)
     VxFrustum m_Frustum;                    // 0xC0 (172 bytes)
     float m_Fov;                            // 0x16C (4 bytes)
