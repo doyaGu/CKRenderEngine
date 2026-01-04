@@ -24,13 +24,11 @@ static void SwapTransparentObjects(CKTransparentObject *a, CKTransparentObject *
 // IDA sub_10009BB9: tie-breaker used by SortTransparentObjects when projected Z extents overlap.
 // Returns: -1, 0, 1 (ordering hint).
 static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cameraPos) {
-    // Mirrors the original epsilon (~FLT_EPSILON for 32-bit)
-    const float eps = FLT_EPSILON;
     const VxBbox &localBox = a->m_LocalBoundingBox;
 
     // Note: VxBbox layout in SDK is { Max, Min } under MSVC.
     const float dz = localBox.Max.z - localBox.Min.z;
-    if (dz < eps) {
+    if (dz < EPSILON) {
         const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
         const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
         if (prod != 0.0f)
@@ -39,9 +37,9 @@ static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, 
     }
 
     const float dy = localBox.Max.y - localBox.Min.y;
-    if (dy >= eps) {
+    if (dy >= EPSILON) {
         const float dx = localBox.Max.x - localBox.Min.x;
-        if (dx >= eps)
+        if (dx >= EPSILON)
             return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
 
         const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
@@ -618,7 +616,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                         // IDA/DLL behavior:
                         // - If projected Z ranges do NOT overlap, swap directly.
                         // - If they overlap, use sub_10009BB9 as an expensive tie-breaker,
-                        //   then a final epsilon compare using FLT_EPSILON.
+                        //   then a final epsilon compare using EPSILON.
                         //
                         // Overlap test reconstructed from FPU status checks in the DLL:
                         //   (prev.ZhMin < k.ZhMax) && (k.ZhMin <= prev.ZhMax)
@@ -652,7 +650,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                                 continue;
                             }
 
-                            if (prev->m_ZhMax + FLT_EPSILON < k->m_ZhMax) {
+                            if (prev->m_ZhMax + EPSILON < k->m_ZhMax) {
                                 SwapTransparentObjects(k, prev);
                                 noSwaps = FALSE;
                             }
