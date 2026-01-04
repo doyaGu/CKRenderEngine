@@ -63,7 +63,7 @@ CKStateChunk *RCKBodyPart::Save(CKFile *file, CKDWORD flags) {
     chunk->AddChunkAndDelete(baseChunk);
 
     // Identifier 0x04000000: character reference + optional rotation joint block.
-    chunk->WriteIdentifier(0x04000000);
+    chunk->WriteIdentifier(CK_STATESAVE_BODYPARTCHARACTER);
     chunk->WriteObject(reinterpret_cast<CKObject *>(m_Character));
 
     // Rotation joint block is present only if CK_3DENTITY_IKJOINTVALID is set.
@@ -95,7 +95,7 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
     const int version = chunk->GetDataVersion();
 
     if (version >= 5) {
-        if (chunk->SeekIdentifier(0x04000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTCHARACTER)) {
             m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
             if ((GetFlags() & CK_3DENTITY_IKJOINTVALID) != 0) {
                 chunk->ReadAndFillBuffer_LEndian(sizeof(CKIkJoint), &m_RotationJoint);
@@ -108,9 +108,9 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
         // NOTE: The flag calculation uses (base << (i - 1)) which is UB for i=0,
         // but MSVC produces a right shift, resulting in unusual flag mappings.
         // We match this behavior exactly for binary compatibility.
-        if (chunk->SeekIdentifier(0x01000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTROTJOINT)) {
             VxVector v5[6];
-            std::memset(v5, 0, sizeof(v5));
+            memset(v5, 0, sizeof(v5));
             chunk->ReadAndFillBuffer_LEndian(v5);
 
             // IDA: Min = v5[3], Max = v5[4], Damping = v5[5]
@@ -130,7 +130,7 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
 
-        if (chunk->SeekIdentifier(0x04000000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTCHARACTER)) {
             m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
         }
     }
@@ -180,7 +180,7 @@ CKERROR RCKBodyPart::Copy(CKObject &o, CKDependenciesContext &context) {
     RCKBodyPart &src = (RCKBodyPart &) o;
     m_Character = src.m_Character;
     m_ExclusiveAnimation = src.m_ExclusiveAnimation;
-    std::memcpy(&m_RotationJoint, &src.m_RotationJoint, sizeof(m_RotationJoint));
+    memcpy(&m_RotationJoint, &src.m_RotationJoint, sizeof(m_RotationJoint));
     return CK_OK;
 }
 
@@ -222,12 +222,12 @@ CKAnimation *RCKBodyPart::GetExclusiveAnimation() const {
 
 void RCKBodyPart::GetRotationJoint(CKIkJoint *joint) const {
     // IDA: 0x1000e857 - direct memcpy, no null check
-    std::memcpy(joint, &m_RotationJoint, sizeof(CKIkJoint));
+    memcpy(joint, &m_RotationJoint, sizeof(CKIkJoint));
 }
 
 void RCKBodyPart::SetRotationJoint(const CKIkJoint *joint) {
     // IDA: 0x1000e87b - direct memcpy, no null check or flag modification
-    std::memcpy(&m_RotationJoint, joint, sizeof(CKIkJoint));
+    memcpy(&m_RotationJoint, joint, sizeof(CKIkJoint));
 }
 
 CKERROR RCKBodyPart::FitToJoint() {
