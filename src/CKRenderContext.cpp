@@ -3163,7 +3163,7 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                 if (currPri == prevPri) {
                     // IDA-aligned behavior (same as CKSceneGraphRootNode::SortTransparentObjects):
                     // - If projected Z ranges do NOT overlap, swap directly.
-                    // - If they overlap, use the expensive tie-breaker, then a final FLT_EPSILON compare.
+                    // - If they overlap, use the expensive tie-breaker, then a final EPSILON compare.
                     if (prev.zhMin < curr.zhMax) {
                         if (!(curr.zhMin <= prev.zhMax)) {
                             TransparentItem tmp = curr;
