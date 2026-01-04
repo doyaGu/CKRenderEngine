@@ -499,7 +499,7 @@ void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
         RCKCamera *cam = (RCKCamera *) m_AttachedCamera;
         RCK3dEntity *rootEntity = (RCK3dEntity *) m_RootEntity;
 
-        std::memcpy(&rootEntity->m_WorldMatrix, &cam->m_WorldMatrix, sizeof(rootEntity->m_WorldMatrix));
+        memcpy(&rootEntity->m_WorldMatrix, &cam->m_WorldMatrix, sizeof(rootEntity->m_WorldMatrix));
         ((RCK3dEntity *) m_RootEntity)->WorldMatrixChanged(TRUE, FALSE);
 
         if (!cam->IsUpToDate()) {
