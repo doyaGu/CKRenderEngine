@@ -190,7 +190,7 @@ public:
     void CheckPreDeletion() override;
 
     int GetMemoryOccupation() override;
-    int IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
+    CKBOOL IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
 
     //--------------------------------------------
     // Dependencies Functions	{Secret}

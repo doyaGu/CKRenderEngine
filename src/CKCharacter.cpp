@@ -373,7 +373,7 @@ int RCKCharacter::GetMemoryOccupation() {
     return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCharacter) - sizeof(RCK3dEntity)) + m_BodyParts.GetMemoryOccupation(FALSE) + m_Animations.GetMemoryOccupation(FALSE);
 }
 
-int RCKCharacter::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
+CKBOOL RCKCharacter::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
     // Based on decompilation at 0x10012558
     if (cid == CKCID_ANIMATION) {
         // Check if animation is in our list
