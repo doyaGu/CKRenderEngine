@@ -1,7 +1,11 @@
 #include "RCKRenderContext.h"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
+#endif
 
 #include "VxMath.h"
 #include "VxIntersect.h"
@@ -575,6 +579,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 
     // Screen dump functionality (Ctrl+Alt+F10)
     // VK_CONTROL=17, VK_MENU(Alt)=18, VK_F10=121
+#if defined(_WIN32)
     if (m_RenderManager->m_EnableScreenDump.Value &&
         GetAsyncKeyState(VK_CONTROL) &&
         GetAsyncKeyState(VK_MENU) &&
@@ -587,6 +592,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         while (GetAsyncKeyState(VK_CONTROL)) {}
         while (GetAsyncKeyState(VK_MENU)) {}
     }
+#endif
 
     if (m_TargetTexture) {
         // Render-to-texture path
@@ -642,6 +648,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     // Debug mode handling (Ctrl+Alt+F11 to enter, various keys while in debug mode)
     // VK_F11=122, VK_R=82, VK_INSERT=45, VK_HOME=36, VK_PRIOR(PageUp)=33
     if (m_RenderManager->m_EnableDebugMode.Value) {
+#if defined(_WIN32)
         if ((m_Flags & 1) != 0) {
             // Debug mode is active
             if (m_CurrentObjectDesc.Length() > 0) {
@@ -742,6 +749,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
             while (GetAsyncKeyState(VK_CONTROL)) {}
             while (GetAsyncKeyState(VK_MENU)) {}
         }
+#endif
     }
 
     return CK_OK;
