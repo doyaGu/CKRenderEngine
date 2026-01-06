@@ -148,7 +148,9 @@ void RCKKinematicChain::CheckPreDeletion() {
  * Returns: base + 16 + 116 * chain count
  */
 int RCKKinematicChain::GetMemoryOccupation() {
-    return CKObject::GetMemoryOccupation() + (sizeof(RCKKinematicChain) - sizeof(CKObject)) + (sizeof(CKIKChainBodyData) * m_ChainBodyCount);
+    int size = CKObject::GetMemoryOccupation() + (sizeof(RCKKinematicChain) - sizeof(CKObject));
+    size += sizeof(CKIKChainBodyData) * m_ChainBodyCount;
+    return size;
 }
 
 /**
