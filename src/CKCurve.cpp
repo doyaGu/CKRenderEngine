@@ -272,7 +272,9 @@ void RCKCurve::CheckPreDeletion() {
  */
 int RCKCurve::GetMemoryOccupation() {
     // Based on decompilation at 0x100160f0: base + sizeof delta + pointer array
-    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCurve) - sizeof(RCK3dEntity)) + m_ControlPoints.GetMemoryOccupation(FALSE);
+    int size = RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCurve) - sizeof(RCK3dEntity));
+    size += m_ControlPoints.GetMemoryOccupation(FALSE);
+    return size;
 }
 
 /**
