@@ -46,7 +46,7 @@ extern void SetProcessorSpecific_FunctionsPtr();
 extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
 extern void CKNULLRasterizerClose(CKRasterizer *rst);
 
-HMODULE g_DllHandle = nullptr;
+INSTANCE_HANDLE g_DllHandle = nullptr;
 CKBOOL g_EnumerationDone = FALSE;
 CKPluginInfo g_PluginInfo;
 
