@@ -1940,7 +1940,7 @@ int RCKMesh::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
         int matCount = GetMaterialCount();
         for (int i = 0; i < matCount; ++i) {
             if (o == GetMaterial(i)) {
-                return 1;
+                return TRUE;
             }
         }
     }
