@@ -636,7 +636,7 @@ CKERROR RCKPatchMesh::Copy(CKObject &o, CKDependenciesContext &context) {
         return CKERR_OUTOFMEMORY;
 
     Load(chunk, nullptr);
-    delete chunk;
+    DeleteCKStateChunk(chunk);
 
     return CK_OK;
 }
