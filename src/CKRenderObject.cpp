@@ -66,21 +66,21 @@ CKBOOL RCKRenderObject::AddPreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, 
     if (!m_Callbacks) {
         m_Callbacks = new CKCallbacksContainer();
     }
-    return m_Callbacks->AddPreCallback(Function, Argument, Temp, m_Context->GetRenderManager());
+    return m_Callbacks->AddPreCallback((void *) Function, Argument, Temp, m_Context->GetRenderManager());
 }
 
 CKBOOL RCKRenderObject::RemovePreRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
     if (!m_Callbacks) {
         return FALSE;
     }
-    return m_Callbacks->RemovePreCallback(Function, Argument);
+    return m_Callbacks->RemovePreCallback((void *) Function, Argument);
 }
 
 CKBOOL RCKRenderObject::SetRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
     if (!m_Callbacks) {
         m_Callbacks = new CKCallbacksContainer();
     }
-    return m_Callbacks->SetCallBack(Function, Argument);
+    return m_Callbacks->SetCallBack((void *) Function, Argument);
 }
 
 CKBOOL RCKRenderObject::RemoveRenderCallBack() {
@@ -94,14 +94,14 @@ CKBOOL RCKRenderObject::AddPostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function,
     if (!m_Callbacks) {
         m_Callbacks = new CKCallbacksContainer();
     }
-    return m_Callbacks->AddPostCallback(Function, Argument, Temp, m_Context->GetRenderManager());
+    return m_Callbacks->AddPostCallback((void *) Function, Argument, Temp, m_Context->GetRenderManager());
 }
 
 CKBOOL RCKRenderObject::RemovePostRenderCallBack(CK_RENDEROBJECT_CALLBACK Function, void *Argument) {
     if (!m_Callbacks) {
         return FALSE;
     }
-    return m_Callbacks->RemovePostCallback(Function, Argument);
+    return m_Callbacks->RemovePostCallback((void *) Function, Argument);
 }
 
 void RCKRenderObject::RemoveAllCallbacks() {
