@@ -56,8 +56,7 @@ bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
     XArray<CKDWORD> tempV1;
     tempV1.Resize(m_Edges.Size());
 
-    int i;
-    for (i = 0; i < m_Edges.Size(); i++) {
+    for (int i = 0; i < m_Edges.Size(); i++) {
         tempFaces[i] = m_Edges[i].faces[0];
         tempV0[i] = m_Edges[i].vertices[0];
         tempV1[i] = m_Edges[i].vertices[1];
@@ -74,7 +73,7 @@ bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
     CKDWORD TmpBuffer[3];
 
     int edgesCount = m_Edges.Size();
-    for (i = 0; i < edgesCount; i++) {
+    for (int i = 0; i < edgesCount; i++) {
         CKDWORD Face = tempFaces[Sorted[i]]; // Owner face
         CKDWORD Ref0 = tempV0[Sorted[i]];    // Vertex ref #1
         CKDWORD Ref1 = tempV1[Sorted[i]];    // Vertex ref #2
@@ -114,7 +113,7 @@ bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
         m_Edges.Resize(0);
     } else {
         // we have to "compress"
-        i = 0;
+        int i = 0;
         int lastEdge = edgesCount - 1;
         while (i != lastEdge) {
             if (m_Edges[i++].faces[0] == 0xffffffff) {
