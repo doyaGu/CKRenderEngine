@@ -969,11 +969,10 @@ CKERROR RCKGrid::RemoveLayerByName(char *name) {
         return CKERR_INVALIDPARAMETER;
 
     const int type = gridMgr->GetTypeFromName(name);
-    if (!type)
+    if (type == 0)
         return CKERR_INVALIDPARAMETER;
 
-    RemoveLayer(type);
-    return CK_OK;
+    return RemoveLayer(type);
 }
 
 CKERROR RCKGrid::RemoveAllLayers() {
