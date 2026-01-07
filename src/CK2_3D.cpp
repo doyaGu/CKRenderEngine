@@ -184,6 +184,8 @@ void ReleaseRasterizers() {
     }
 }
 
+#if !defined(CK_LIB)
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
@@ -199,3 +201,5 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     }
     return TRUE;
 }
+
+#endif // CK_LIB
