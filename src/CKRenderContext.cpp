@@ -566,7 +566,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
 
 CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     // IDA: 0x1006abdd
-    if (m_DeviceValid)
+    if (m_DeviceDestroying)
         return CK_OK;
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
@@ -1151,7 +1151,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_FullscreenSettings.m_Zbpp = m_RasterizerContext->m_ZBpp;
     m_FullscreenSettings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
 
-    m_DeviceValid = TRUE;
+    m_DeviceDestroying = TRUE;
 
     // Notify render manager we're destroying device
     m_RenderManager->DestroyingDevice((CKRenderContext *) this);
@@ -1194,7 +1194,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         if (m_RasterizerContext)
             m_RasterizerContext->SetTransparentMode(m_TransparentMode);
 
-        m_DeviceValid = FALSE;
+        m_DeviceDestroying = FALSE;
         return TRUE;
     } else {
         // Failed - restore old driver
@@ -1210,7 +1210,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
             m_FullscreenSettings.m_Bpp, 0, 0,
             m_FullscreenSettings.m_Zbpp, m_FullscreenSettings.m_StencilBpp);
 
-        m_DeviceValid = FALSE;
+        m_DeviceDestroying = FALSE;
 
         if (!restored) {
             m_RasterizerDriver->DestroyContext(m_RasterizerContext);
@@ -1272,7 +1272,7 @@ int RCKRenderContext::GetWidth() {
 
 CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWORD Flags) {
     // IDA: 0x1006cb04
-    if (m_DeviceValid)
+    if (m_DeviceDestroying)
         return CKERR_INVALIDRENDERCONTEXT;
 
     // If no rasterizer context, try to create one
@@ -2421,14 +2421,14 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         m_DriverIndex = Driver;
     }
 
-    m_DeviceValid = TRUE;
+    m_DeviceDestroying = TRUE;
 
     // For fullscreen, reparent window to desktop
     if (Fullscreen) {
         m_AppHandle = VxGetParent(m_WinHandle);
         VxSetParent(m_WinHandle, nullptr);
         if (!VxMoveWindow(m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
-            m_DeviceValid = FALSE;
+            m_DeviceDestroying = FALSE;
             return CKERR_INVALIDOPERATION;
         }
     }
@@ -2451,7 +2451,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
                                      width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp)) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerContext = nullptr;
-        m_DeviceValid = FALSE;
+        m_DeviceDestroying = FALSE;
         return CKERR_CANCREATERENDERCONTEXT;
     }
 
@@ -2475,7 +2475,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         m_FullscreenSettings = m_Settings;
     }
 
-    m_DeviceValid = FALSE;
+    m_DeviceDestroying = FALSE;
     m_ProjectionUpdated = FALSE;
     m_Active = TRUE;
     m_VertexBufferCount = 0;
@@ -2521,7 +2521,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_Active = FALSE;
     m_Perspective = TRUE;
     m_ProjectionUpdated = FALSE;
-    m_DeviceValid = FALSE;
+    m_DeviceDestroying = FALSE;
     m_Start = FALSE;
     m_TransparentMode = FALSE;
     m_RasterizerContext = nullptr;
@@ -2629,7 +2629,7 @@ CKERROR RCKRenderContext::Copy(CKObject &o, CKDependenciesContext &context) {
 
 CKBOOL RCKRenderContext::DestroyDevice() {
     // Based on IDA at 0x10067558
-    m_DeviceValid = TRUE;
+    m_DeviceDestroying = TRUE;
 
     // Notify render manager that device is being destroyed
     if (m_RenderManager)
@@ -2641,7 +2641,7 @@ CKBOOL RCKRenderContext::DestroyDevice() {
 
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
-    m_DeviceValid = FALSE;
+    m_DeviceDestroying = FALSE;
     m_Fullscreen = FALSE;
 
     return TRUE;
