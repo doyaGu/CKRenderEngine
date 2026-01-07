@@ -733,8 +733,17 @@ CKERROR RCKGrid::AddClassification(int classType) {
  * IDA: 0x10019046
  */
 CKERROR RCKGrid::AddClassificationByName(char *name) {
+    if (!name)
+        return CKERR_INVALIDPARAMETER;
+
     CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
-    int attrType = attrMgr->GetAttributeTypeByName(name);
+    if (!attrMgr)
+        return CKERR_INVALIDPARAMETER;
+
+    const CKAttributeType attrType = attrMgr->GetAttributeTypeByName(name);
+    if (!attrMgr->IsAttributeIndexValid(attrType))
+        return CKERR_INVALIDPARAMETER;
+
     if (SetAttribute(attrType, 0))
         return CK_OK;
     return CKERR_INVALIDPARAMETER;
@@ -759,8 +768,17 @@ CKERROR RCKGrid::RemoveClassification(int classType) {
  * IDA: 0x100190a7
  */
 CKERROR RCKGrid::RemoveClassificationByName(char *name) {
+    if (!name)
+        return CKERR_INVALIDPARAMETER;
+
     CKAttributeManager *attrMgr = m_Context->GetAttributeManager();
-    int attrType = attrMgr->GetAttributeTypeByName(name);
+    if (!attrMgr)
+        return CKERR_INVALIDPARAMETER;
+
+    const CKAttributeType attrType = attrMgr->GetAttributeTypeByName(name);
+    if (!attrMgr->IsAttributeIndexValid(attrType))
+        return CKERR_INVALIDPARAMETER;
+
     if (RemoveAttribute(attrType))
         return CK_OK;
     return CKERR_INVALIDPARAMETER;
