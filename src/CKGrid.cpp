@@ -644,9 +644,10 @@ void RCKGrid::DestroyMeshTexture() {
         if (tex)
             m_Context->DestroyObject(tex);
         m_Context->DestroyObject(mat0);
-        if (mat2)
-            m_Context->DestroyObject(mat2);
     }
+
+    if (mat2 && mat2 != mat0)
+        m_Context->DestroyObject(mat2);
 
     m_Context->DestroyObject(m_Mesh);
     m_Mesh = nullptr;
