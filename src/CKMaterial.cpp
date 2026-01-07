@@ -1821,23 +1821,24 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
     rst->SetTextureStageState(stage + 1, CKRST_TSS_TEXCOORDINDEX, stage);
 
     // Get light source entity
-    RCKLight *lightEntity = nullptr;
+    CKObject *lightObj = nullptr;
     if (m_EffectParameter) {
         CK_ID *idPtr = (CK_ID *) m_EffectParameter->GetReadDataPtr();
         if (idPtr) {
-            lightEntity = (RCKLight *) m_Context->GetObject(*idPtr);
+            lightObj = m_Context->GetObject(*idPtr);
         }
     }
 
     // Fall back to root entity if no light specified
-    if (!lightEntity) {
-        lightEntity = (RCKLight *) dev->m_RenderedScene->GetRootEntity();
+    if (!lightObj && dev && dev->m_RenderedScene) {
+        lightObj = dev->m_RenderedScene->GetRootEntity();
     }
 
     // Calculate light direction in object space
     VxVector lightDir(0.0f, 0.0f, 1.0f);
 
-    if (CKIsChildClassOf((CKObject *) lightEntity, CKCID_LIGHT)) {
+    if (lightObj && CKIsChildClassOf(lightObj, CKCID_LIGHT)) {
+        RCKLight *lightEntity = (RCKLight *) lightObj;
         // It's a light - get direction based on type
         if (lightEntity->GetType() == VX_LIGHTDIREC) {
             // Directional light - use Z axis of light's world matrix
@@ -1852,9 +1853,9 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
             VxVector objPos(rst->m_WorldMatrix[3][0], rst->m_WorldMatrix[3][1], rst->m_WorldMatrix[3][2]);
             lightDir = objPos - lightPos;
         }
-    } else {
+    } else if (lightObj && CKIsChildClassOf(lightObj, CKCID_3DENTITY)) {
         // Not a light - use direction from entity to object
-        const VxMatrix &entityMatrix = ((RCK3dEntity *) lightEntity)->GetWorldMatrix();
+        const VxMatrix &entityMatrix = ((RCK3dEntity *) lightObj)->GetWorldMatrix();
         VxVector entityPos(entityMatrix[3][0], entityMatrix[3][1], entityMatrix[3][2]);
         VxVector objPos(rst->m_WorldMatrix[3][0], rst->m_WorldMatrix[3][1], rst->m_WorldMatrix[3][2]);
         lightDir = objPos - entityPos;
