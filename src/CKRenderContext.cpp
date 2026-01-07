@@ -790,7 +790,10 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
             if (attrParam) {
                 CKDWORD *pCameraId = (CKDWORD *) attrParam->GetReadDataPtr(FALSE);
                 if (pCameraId) {
-                    m_Camera = (RCKCamera *) m_Context->GetObject(*pCameraId);
+                    CKObject *cameraObj = m_Context->GetObject(*pCameraId);
+                    if (cameraObj && CKIsChildClassOf(cameraObj, CKCID_CAMERA)) {
+                        m_Camera = (RCKCamera *) cameraObj;
+                    }
                 }
             }
         }
