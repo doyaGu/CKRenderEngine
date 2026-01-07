@@ -2367,14 +2367,14 @@ void RCKRenderContext::SetTextureMatrix(const VxMatrix &M, int Stage) {
 
 void RCKRenderContext::SetStereoParameters(float EyeSeparation, float FocalLength) {
     // IDA: 0x10068093
-    m_EyeSeparation = FocalLength;
-    m_FocalLength = EyeSeparation;
+    m_EyeSeparation = EyeSeparation;
+    m_FocalLength = FocalLength;
 }
 
 void RCKRenderContext::GetStereoParameters(float &EyeSeparation, float &FocalLength) {
     // IDA: 0x100680b8
-    FocalLength = m_EyeSeparation;
-    EyeSeparation = m_FocalLength;
+    EyeSeparation = m_EyeSeparation;
+    FocalLength = m_FocalLength;
 }
 
 CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL Fullscreen, int Bpp, int Zbpp, int StencilBpp, int RefreshRate) {
