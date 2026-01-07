@@ -366,10 +366,8 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
     }
 
     // IDA line 59: Map UV to source rect coordinates (sub_10060070)
-    // NOTE: IDA shows: srcU = width * uv.x + left, srcV = height * uv.y + left (BUG in original: uses left instead of top)
-    // We reproduce the exact behavior for faithfulness
     float srcU = m_SourceRect.GetWidth() * uv.x + m_SourceRect.left;
-    float srcV = m_SourceRect.GetHeight() * uv.y + m_SourceRect.left; // IDA BUG: uses left instead of top
+    float srcV = m_SourceRect.GetHeight() * uv.y + m_SourceRect.top;
 
     // IDA line 60-63: Use PreciseTexturePick for alpha test
     if (PreciseTexturePick(m_Material, srcU, srcV))
