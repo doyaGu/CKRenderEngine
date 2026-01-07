@@ -1503,7 +1503,11 @@ CKAnimation *RCKCharacter::GetSecondaryAnimation(int index) {
     if (index < 0 || index >= m_SecondaryAnimationsCount || !m_SecondaryAnimations) {
         return nullptr;
     }
-    return (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
+    CKObject *obj = m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
+    if (!obj || !CKIsChildClassOf(obj, CKCID_ANIMATION)) {
+        return nullptr;
+    }
+    return (CKAnimation *) obj;
 }
 
 void RCKCharacter::FlushSecondaryAnimations() {
@@ -1515,7 +1519,8 @@ void RCKCharacter::FlushSecondaryAnimations() {
 
     // Iterate through secondary animations and update body parts
     for (CKWORD i = 0; i < m_SecondaryAnimationsCount; ++i) {
-        RCKAnimation *anim = (RCKAnimation *)m_Context->GetObject(m_SecondaryAnimations[i].AnimID);
+        CKObject *obj = m_Context->GetObject(m_SecondaryAnimations[i].AnimID);
+        RCKAnimation *anim = (obj && CKIsChildClassOf(obj, CKCID_ANIMATION)) ? (RCKAnimation *) obj : nullptr;
         if (anim) {
             // For each animation, iterate through entities and notify body parts
             // This corresponds to sub_10048148 which iterates entities and calls method at vtable[118]
