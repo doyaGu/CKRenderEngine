@@ -239,7 +239,7 @@ public:
     CKBOOL m_ProjectionUpdated;             // 0x40 (4 bytes)
     CKBOOL m_Start;                         // 0x44 (4 bytes)
     CKBOOL m_TransparentMode;               // 0x48 (4 bytes)
-    CKBOOL m_DeviceValid;                   // 0x4C (4 bytes)
+    CKBOOL m_DeviceDestroying;              // 0x4C (4 bytes) - TRUE while destroying/recreating the device
     CKCallbacksContainer m_PreRenderCallBacks;   // 0x50 (28 bytes)
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
     CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
