@@ -2404,7 +2404,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     // Get the rasterizer driver
     m_RasterizerDriver = m_RenderManager->GetDriver(Driver);
     if (!m_RasterizerDriver)
-        return CK_OK; // IDA returns CK_OK here, not an error
+        return CKERR_INVALIDRENDERCONTEXT;
 
     m_WinHandle = Window;
 
