@@ -108,22 +108,35 @@ set(CKRE_SOURCES
         CKRasterizer.cpp
         CKRasterizerDriver.cpp
         CKRasterizerContext.cpp
-
-        CK2_3D.rc
 )
 
-add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+# Add resource file only for shared builds
+if (BUILD_SHARED_LIBS)
+    list(APPEND CKRE_SOURCES CK2_3D.rc)
+endif ()
 
-target_include_directories(CK2_3D PRIVATE
-        $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+add_library(CK2_3D ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+add_library(CK2_3D::CK2_3D ALIAS CK2_3D)
+
+target_include_directories(CK2_3D 
+        PUBLIC
+            $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         )
 
 target_link_libraries(CK2_3D PUBLIC CK2 VxMath)
+
+# Define CK_LIB for static builds
+if (NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(CK2_3D PUBLIC CK_LIB)
+endif ()
 
 set_target_properties(CK2_3D PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
         ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
         )
