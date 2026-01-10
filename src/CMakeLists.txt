@@ -49,7 +49,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/CKRenderedScene.h
         ${CKRE_INCLUDE_DIR}/CKSceneGraph.h
         ${CKRE_INCLUDE_DIR}/RCKVertexBuffer.h
-        )
+)
 
 set(CKRE_PRIVATE_HEADERS)
 
@@ -92,7 +92,7 @@ set(CKRE_SOURCES
         CKSprite.cpp
         CKSpriteText.cpp
         CKSkin.cpp
-        
+
         MeshAdjacency.cpp
         RadixSort.cpp
         MeshStriper.cpp
@@ -108,35 +108,70 @@ set(CKRE_SOURCES
         CKRasterizer.cpp
         CKRasterizerDriver.cpp
         CKRasterizerContext.cpp
+
+        CK2_3D.rc
 )
 
-# Add resource file only for shared builds
-if (BUILD_SHARED_LIBS)
-    list(APPEND CKRE_SOURCES CK2_3D.rc)
-endif ()
-
-add_library(CK2_3D ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
-add_library(CK2_3D::CK2_3D ALIAS CK2_3D)
-
-target_include_directories(CK2_3D 
-        PUBLIC
+# Function to configure common target settings
+function(ckre_configure_target TARGET_NAME)
+    target_include_directories(${TARGET_NAME}
+            PUBLIC
             $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        PRIVATE
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        )
+            PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 
-target_link_libraries(CK2_3D PUBLIC CK2 VxMath)
+    get_target_property(_ckre_type ${TARGET_NAME} TYPE)
+    if (_ckre_type STREQUAL "STATIC_LIBRARY")
+        set(_ckre_ck2_dep CK2)
+        if (TARGET CK2Static)
+            set(_ckre_ck2_dep CK2Static)
+        endif ()
+        set(_ckre_vxmath_dep VxMath)
+        if (TARGET VxMathStatic)
+            set(_ckre_vxmath_dep VxMathStatic)
+        endif ()
+        target_link_libraries(${TARGET_NAME} PRIVATE ${_ckre_ck2_dep} ${_ckre_vxmath_dep})
+    else ()
+        target_link_libraries(${TARGET_NAME} PRIVATE CK2 VxMath)
+    endif ()
 
-# Define CK_LIB for static builds
-if (NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(CK2_3D PUBLIC CK_LIB)
+    set_target_properties(${TARGET_NAME} PROPERTIES
+            VERSION ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR}
+    )
+endfunction()
+
+# Track created targets for export
+set(CKRE_TARGETS)
+
+if (CKRE_BUILD_SHARED)
+    add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+    ckre_configure_target(CK2_3D)
+
+    # Shared library specific settings
+    set_target_properties(CK2_3D PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    )
+
+    list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
 
-set_target_properties(CK2_3D PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR}
-        )
+if (CKRE_BUILD_STATIC)
+    set(CKRE_STATIC_SOURCES ${CKRE_SOURCES})
+    list(FILTER CKRE_STATIC_SOURCES EXCLUDE REGEX "\\.rc$")
+
+    add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+    ckre_configure_target(CK2_3DStatic)
+
+    # Static library specific settings
+    set_target_properties(CK2_3DStatic PROPERTIES
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+            POSITION_INDEPENDENT_CODE ON
+    )
+
+    list(APPEND CKRE_TARGETS CK2_3DStatic)
+endif ()
