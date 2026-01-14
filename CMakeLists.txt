@@ -183,23 +183,6 @@ if (CKRE_INSTALL)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    # Install CK2_3D to RenderEngines directory (shared) or lib directory (static)
-    if (TARGET CK2_3D)
-        install(TARGETS CK2_3D
-                EXPORT CKRenderEngineTargets
-                RUNTIME DESTINATION RenderEngines
-                LIBRARY DESTINATION RenderEngines
-                ARCHIVE DESTINATION lib
-        )
-    endif ()
-
-    if (TARGET CK2_3DStatic)
-        install(TARGETS CK2_3DStatic
-                EXPORT CKRenderEngineTargets
-                ARCHIVE DESTINATION lib
-        )
-    endif ()
-
     # Install public headers to include root
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
             DESTINATION include
