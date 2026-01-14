@@ -4,8 +4,6 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/Version.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineTypes.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineEnums.h
-        ${CKRE_INCLUDE_DIR}/CKDebugLogger.h
-        ${CKRE_INCLUDE_DIR}/CKException.h
 
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
@@ -56,7 +54,10 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKVertexBuffer.h
 )
 
-set(CKRE_PRIVATE_HEADERS)
+set(CKRE_PRIVATE_HEADERS
+    CKDebugLogger.h
+    CKException.h
+)
 
 set(CKRE_SOURCES
         CK2_3D.cpp
