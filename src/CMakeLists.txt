@@ -7,10 +7,15 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/CKDebugLogger.h
         ${CKRE_INCLUDE_DIR}/CKException.h
 
+        ${CKRE_INCLUDE_DIR}/CKRasterizer.h
+        ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
+        ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
+
         ${CKRE_INCLUDE_DIR}/MeshAdjacency.h
         ${CKRE_INCLUDE_DIR}/RadixSort.h
         ${CKRE_INCLUDE_DIR}/MeshStriper.h
         ${CKRE_INCLUDE_DIR}/NvStripifier.h
+        ${CKRE_INCLUDE_DIR}/VertexCache.h
         ${CKRE_INCLUDE_DIR}/VertexCacheOptimizer.h
         ${CKRE_INCLUDE_DIR}/NearestPointGrid.h
         ${CKRE_INCLUDE_DIR}/PlaceFitter.h
@@ -105,12 +110,13 @@ set(CKRE_SOURCES
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
 
-        CKRasterizer.cpp
-        CKRasterizerDriver.cpp
-        CKRasterizerContext.cpp
-
         CK2_3D.rc
 )
+
+# Add the CKRasterizer subdirectory (shared or static builds)
+if (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
+    add_subdirectory(CKRasterizer)
+endif ()
 
 # Function to configure common target settings
 function(ckre_configure_target TARGET_NAME)
@@ -157,6 +163,8 @@ if (CKRE_BUILD_SHARED)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     )
 
+    target_link_libraries(CK2_3D PRIVATE CKRasterizerLib)
+
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
 
@@ -170,8 +178,29 @@ if (CKRE_BUILD_STATIC)
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            POSITION_INDEPENDENT_CODE ON
     )
 
     list(APPEND CKRE_TARGETS CK2_3DStatic)
+endif ()
+
+# =============================================================================
+# Installation
+# =============================================================================
+if (CKRE_INSTALL)
+    # Install CK2_3D to RenderEngines directory (shared) or lib directory (static)
+    if (TARGET CK2_3D)
+        install(TARGETS CK2_3D
+                EXPORT CKRenderEngineTargets
+                RUNTIME DESTINATION RenderEngines
+                LIBRARY DESTINATION RenderEngines
+                ARCHIVE DESTINATION lib
+        )
+    endif ()
+
+    if (TARGET CK2_3DStatic)
+        install(TARGETS CK2_3DStatic
+                EXPORT CKRenderEngineTargets
+                ARCHIVE DESTINATION lib
+        )
+    endif ()
 endif ()
