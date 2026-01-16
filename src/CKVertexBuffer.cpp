@@ -64,7 +64,7 @@ VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVe
     CKBYTE *mem;
     if (m_Valid) {
         CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
-        mem = (CKBYTE *) rstCtx->LockVertexBuffer(m_ObjectIndex, VertexCount, LockFlags);
+        mem = (CKBYTE *) rstCtx->LockVertexBuffer(m_ObjectIndex, StartVertex, VertexCount, static_cast<CKRST_LOCKFLAGS>(LockFlags));
     } else {
         mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
     }
