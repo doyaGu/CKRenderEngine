@@ -106,6 +106,14 @@ void EnumerateRasterizers() {
             file = dp9.GetNextFile();
         }
 
+        // Search for OpenGL rasterizers
+        CKDirectoryParser dpGL(dir.Str(), (CKSTRING) "*GLRasterizer.dll", TRUE);
+        file = dpGL.GetNextFile();
+        while (file != nullptr) {
+            RegisterRasterizer(file);
+            file = dpGL.GetNextFile();
+        }
+
         if (g_RasterizersInfo.Size() == 0) {
             CKRasterizerInfo info;
             info.StartFct = CKNULLRasterizerStart;
