@@ -16,7 +16,7 @@ if (CKRE_BUILD_SHARED)
     list(APPEND _ckre_dx9_targets CKDX9Rasterizer)
 
     set_target_properties(CKDX9Rasterizer PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/RenderEngines"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
             FOLDER "Rasterizer"
