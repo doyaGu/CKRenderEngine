@@ -333,7 +333,16 @@ CKDriverProblems *CKRasterizer::FindDriverProblems(const XString &Vendor, const 
 }
 
 void ConvertAttenuationModelFromDX5(float &_a0, float &_a1, float &_a2, float range) {
-    _a0 = 1.0f / (_a0 + _a1 + _a2);
+    const float sum = _a0 + _a1 + _a2;
+    if (range <= 0.0f || sum <= 0.0f)
+    {
+        _a0 = 1.0f;
+        _a1 = 0.0f;
+        _a2 = 0.0f;
+        return;
+    }
+
+    _a0 = 1.0f / sum;
     _a1 = (_a2 + _a2 + _a1) * (_a0 / range) * _a0;
     _a2 = _a0 * _a2 * _a0 / (range * range) + _a1 * _a1 / _a0;
 }
