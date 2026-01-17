@@ -255,12 +255,13 @@ CKBOOL CKRasterizerContext::LoadSprite(CKDWORD Sprite, const VxImageDescEx &Surf
     VxImageDescEx surface = SurfDesc;
     int bytesPerPixel = SurfDesc.BitsPerPixel / 8;
 
-    CKBYTE *image = m_Driver->m_Owner->AllocateObjects(sprite->Textures[0].sw * sprite->Textures[0].sh);
-    if (!image)
+    CKBYTE *imageBuffer = m_Driver->m_Owner->AllocateObjects(sprite->Textures[0].sw * sprite->Textures[0].sh);
+    if (!imageBuffer)
         return FALSE;
-    surface.Image = image;
+    surface.Image = imageBuffer;
 
     for (XArray<CKSPRTextInfo>::Iterator it = sprite->Textures.Begin(); it != sprite->Textures.End(); ++it) {
+        CKBYTE *image = imageBuffer;
         int spriteBytesPerLine = it->w * bytesPerPixel;
         int textureBytesPerLine = it->sw * bytesPerPixel;
 
