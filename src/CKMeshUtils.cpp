@@ -251,7 +251,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
     if (earlyOutMask == 0) {
         int bestI1 = 0;           // v65
         int bestI2 = 0;           // v67
-        float bestFaceIdx = 0.0f; // v66
+        int bestFaceIdx = -1;     // v66
 
         const VxVector *faceNormalPtr = (const VxVector *) faces; // v59 - points to face normal
         CKWORD *indexPtr = indices;                               // v64
@@ -306,7 +306,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                         minDist = dist;
                         bestI1 = i1;
                         bestI2 = i2;
-                        bestFaceIdx = *(float *) &f; // Store face index as float (IDA line 180)
+                        bestFaceIdx = f;
                     }
                 }
             }
@@ -321,8 +321,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
             // Calculate intersection point: origin + direction * minDist (IDA lines 190-191)
             desc->IntersectionPoint = origin + direction * minDist;
 
-            // Get face index back from float (IDA line 192)
-            int faceIdx = *(int *) &bestFaceIdx;
+            int faceIdx = bestFaceIdx;
             int indexBase = faceIdx * 3;
 
             // Get vertex pointers (IDA lines 193-195)
