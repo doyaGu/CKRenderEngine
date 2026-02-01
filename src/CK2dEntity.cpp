@@ -1059,7 +1059,7 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
     if (chunk->GetDataVersion() >= 5) {
         // New format (version 5+)
-        if (chunk->SeekIdentifier(0x10F000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYONLY)) {
             CKDWORD saveFlags = chunk->ReadDword();
             m_Flags = saveFlags & ~(CK_2DENTITY_UPDATEHOMOGENEOUSCOORD | CK_2DENTITY_RESERVED0 | CK_2DENTITY_RESERVED1 | CK_2DENTITY_RESERVED2);
 
@@ -1105,17 +1105,17 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
         }
 
         // Read material for CK2dEntity only
-        if (GetClassID() == CKCID_2DENTITY && chunk->SeekIdentifier(0x200000)) {
+        if (GetClassID() == CKCID_2DENTITY && chunk->SeekIdentifier(CK_STATESAVE_2DENTITYMATERIAL)) {
             m_Material = (CKMaterial *) chunk->ReadObject(m_Context);
         } else {
             m_Material = nullptr;
         }
     } else {
         // Old format (version < 5)
-        if (chunk->SeekIdentifier(0x4000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYFLAGS)) {
             m_Flags = chunk->ReadDword();
-            if (!(m_Flags & 1)) {
-                m_Flags |= 1;
+            if (!(m_Flags & CK_2DENTITY_RESERVED3)) {
+                m_Flags |= CK_2DENTITY_RESERVED3;
                 Show(CKHIDE);
             }
             m_Flags &= ~CK_2DENTITY_UPDATEHOMOGENEOUSCOORD;
@@ -1126,7 +1126,7 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             m_HomogeneousRect = new VxRect();
         }
 
-        if (chunk->SeekIdentifier(0x8000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYPOS)) {
             if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
                 m_HomogeneousRect->left = chunk->ReadFloat();
                 m_HomogeneousRect->top = chunk->ReadFloat();
@@ -1138,7 +1138,7 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
 
-        if (chunk->SeekIdentifier(0x2000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYSIZE)) {
             if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
                 float w = chunk->ReadFloat();
                 float h = chunk->ReadFloat();
@@ -1152,14 +1152,14 @@ CKERROR RCK2dEntity::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
 
-        if (chunk->SeekIdentifier(0x1000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYSRCSIZE)) {
             m_SourceRect.right = (float) chunk->ReadInt();
             m_SourceRect.left = (float) chunk->ReadInt();
             m_SourceRect.top = (float) chunk->ReadInt();
             m_SourceRect.bottom = (float) chunk->ReadInt();
         }
 
-        if (chunk->SeekIdentifier(0x100000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_2DENTITYZORDER)) {
             m_ZOrder = chunk->ReadInt();
         }
     }
@@ -1206,7 +1206,7 @@ void RCK2dEntity::PreSave(CKFile *file, CKDWORD flags) {
         // IDA uses SaveObjects with array pointer and count
         int count = m_Children.Size();
         if (count > 0) {
-            file->SaveObjects((CKObject **) m_Children.Begin(), count, 0xFFFFFFFF);
+            file->SaveObjects((CKObject **) m_Children.Begin(), count);
         }
     }
 }
@@ -1219,7 +1219,7 @@ CKStateChunk *RCK2dEntity::Save(CKFile *file, CKDWORD flags) {
     chunk->StartWrite();
     chunk->AddChunkAndDelete(baseChunk);
 
-    chunk->WriteIdentifier(0x10F000);
+    chunk->WriteIdentifier(CK_STATESAVE_2DENTITYONLY);
 
     // Build save flags
     CKDWORD saveFlags = m_Flags;
@@ -1260,7 +1260,7 @@ CKStateChunk *RCK2dEntity::Save(CKFile *file, CKDWORD flags) {
 
     // Write material if present
     if (m_Material) {
-        chunk->WriteIdentifier(0x200000);
+        chunk->WriteIdentifier(CK_STATESAVE_2DENTITYMATERIAL);
         chunk->WriteObject(m_Material);
     }
 
