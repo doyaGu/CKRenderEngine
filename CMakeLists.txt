@@ -47,9 +47,14 @@ enable_language(RC)
 # =============================================================================
 # C++ standard
 # =============================================================================
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED YES)
-set(CMAKE_CXX_EXTENSIONS NO)
+# When built as part of Ballanced, inherit the top-level policy.
+# When built standalone, default to C++17.
+if (CKRE_IS_TOP_LEVEL)
+    if (NOT CMAKE_CXX_STANDARD)
+        set(CMAKE_CXX_STANDARD 17)
+    endif ()
+    set(CMAKE_CXX_STANDARD_REQUIRED YES)
+endif ()
 
 # =============================================================================
 # Top-level project settings
@@ -86,11 +91,6 @@ if (MSVC)
 endif ()
 
 # =============================================================================
-# CMake module path
-# =============================================================================
-list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-# =============================================================================
 # Virtools SDK
 # =============================================================================
 if (NOT TARGET VxMath OR NOT TARGET CK2)
@@ -116,7 +116,7 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
             FetchContent_Declare(
                     virtools_sdk
                     GIT_REPOSITORY https://github.com/doyaGu/Virtools-SDK-2.1.git
-                    GIT_TAG master
+                    GIT_TAG main
             )
             FetchContent_MakeAvailable(virtools_sdk)
             set(VIRTOOLS_SDK_PATH "${virtools_sdk_SOURCE_DIR}" CACHE PATH "Path to the Virtools SDK" FORCE)
@@ -125,7 +125,36 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
         endif ()
     endif ()
 
-    find_package(VirtoolsSDK REQUIRED)
+    find_path(VIRTOOLS_SDK_INCLUDE_DIR CKAll.h
+            HINTS $ENV{VIRTOOLS_SDK_PATH} ${VIRTOOLS_SDK_PATH}
+            PATH_SUFFIXES Include Includes include includes
+    )
+    if (NOT VIRTOOLS_SDK_INCLUDE_DIR)
+        message(FATAL_ERROR "[CKRenderEngine] Virtools SDK headers not found. Expected CKAll.h under ${VIRTOOLS_SDK_PATH}.")
+    endif ()
+
+    foreach (_lib IN ITEMS CK2 VxMath)
+        find_library(VIRTOOLS_SDK_${_lib}_LIB NAMES ${_lib}
+                HINTS $ENV{VIRTOOLS_SDK_PATH} ${VIRTOOLS_SDK_PATH}
+                PATH_SUFFIXES Lib lib
+        )
+        if (NOT VIRTOOLS_SDK_${_lib}_LIB)
+            message(FATAL_ERROR "[CKRenderEngine] Virtools SDK library '${_lib}' not found under ${VIRTOOLS_SDK_PATH}.")
+        endif ()
+
+        if (NOT TARGET ${_lib})
+            add_library(${_lib} UNKNOWN IMPORTED)
+            set_target_properties(${_lib} PROPERTIES
+                    IMPORTED_LOCATION "${VIRTOOLS_SDK_${_lib}_LIB}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${VIRTOOLS_SDK_INCLUDE_DIR}"
+            )
+            target_compile_options(${_lib} INTERFACE
+                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:MSVC>:/Zc:strictStrings->>
+                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-fpermissive>>
+                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-Wno-write-strings>>
+            )
+        endif ()
+    endforeach ()
 endif ()
 
 # =============================================================================
