@@ -319,50 +319,64 @@ CKBOOL CKRasterizerContext::TransformVertices(int VertexCount, VxTransformData *
         outVertices = (VxVector4 *) m_Driver->m_Owner->AllocateObjects(
             VertexCount * (sizeof(VxVector4) / sizeof(CKDWORD)));
         outStride = sizeof(VxVector4);
+    } else if (outStride == 0) {
+        outStride = sizeof(VxVector4);
     }
 
     VxStridedData out(outVertices, outStride);
     VxStridedData in(Data->InVertices, Data->InStride);
     Vx3DMultiplyMatrixVector4Strided(&out, &in, m_TotalMatrix, VertexCount);
 
+    CKBYTE *outPtr = (CKBYTE *) outVertices;
+
     if (Data->ClipFlags) {
         offscreen = 0xFFFFFFFF;
         for (int v = 0; v < VertexCount; ++v) {
+            VxVector4 *vertex = (VxVector4 *) outPtr;
             unsigned int clipFlag = 0;
 
-            float w = outVertices->w;
-            if (-w > outVertices->x)
+            float w = vertex->w;
+            if (-w > vertex->x)
                 clipFlag |= VXCLIP_LEFT;
-            if (outVertices->x > w)
+            if (vertex->x > w)
                 clipFlag |= VXCLIP_RIGHT;
-            if (-w > outVertices->y)
+            if (-w > vertex->y)
                 clipFlag |= VXCLIP_BOTTOM;
-            if (outVertices->y > w)
+            if (vertex->y > w)
                 clipFlag |= VXCLIP_TOP;
-            if (outVertices->z < 0.0f)
+            if (vertex->z < 0.0f)
                 clipFlag |= VXCLIP_FRONT;
-            if (outVertices->z > w)
+            if (vertex->z > w)
                 clipFlag |= VXCLIP_BACK;
 
             offscreen &= clipFlag;
             Data->ClipFlags[v] = clipFlag;
-            outVertices += outStride;
+            outPtr += outStride;
         }
     }
 
     VxVector4 *screenVertices = (VxVector4 *) Data->ScreenVertices;
     if (screenVertices) {
+        unsigned int screenStride = Data->ScreenStride;
+        if (screenStride == 0)
+            screenStride = sizeof(VxVector4);
+
+        CKBYTE *screenPtr = (CKBYTE *) screenVertices;
+        CKBYTE *outScreenPtr = (CKBYTE *) outVertices;
         float halfWidth = m_ViewportData.ViewWidth * 0.5f;
         float halfHeight = m_ViewportData.ViewHeight * 0.5f;
         float centerX = m_ViewportData.ViewX + halfWidth;
         float centerY = m_ViewportData.ViewY + halfHeight;
         for (int v = 0; v < VertexCount; ++v) {
-            float w = 1.0f / outVertices->w;
-            screenVertices->w = w;
-            screenVertices->z = w * outVertices->z;
-            screenVertices->y = centerY - outVertices->y * w * halfHeight;
-            screenVertices->x = centerX + outVertices->x * w * halfWidth;
-            screenVertices += Data->ScreenStride;
+            VxVector4 *outVertex = (VxVector4 *) outScreenPtr;
+            VxVector4 *screenVertex = (VxVector4 *) screenPtr;
+            float w = 1.0f / outVertex->w;
+            screenVertex->w = w;
+            screenVertex->z = w * outVertex->z;
+            screenVertex->y = centerY - outVertex->y * w * halfHeight;
+            screenVertex->x = centerX + outVertex->x * w * halfWidth;
+            outScreenPtr += outStride;
+            screenPtr += screenStride;
         }
     }
 
