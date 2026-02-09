@@ -359,12 +359,12 @@ CKERROR RCKRenderManager::SequenceRemovedFromScene(CKScene *scn, CK_ID *objids, 
 CKERROR RCKRenderManager::OnCKEnd() {
     CKObject *obj = m_Context->GetObject(m_2DRootForeId);
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
-        m_Context->DestroyObject(m_2DRootFore);
+        m_Context->DestroyObject(obj);
     }
 
     obj = m_Context->GetObject(m_2DRootBackId);
     if (obj && CKIsChildClassOf(obj, CKCID_2DENTITY)) {
-        m_Context->DestroyObject(m_2DRootBack);
+        m_Context->DestroyObject(obj);
     }
 
     m_2DRootFore = nullptr;
