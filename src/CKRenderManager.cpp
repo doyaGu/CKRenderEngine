@@ -417,12 +417,11 @@ int RCKRenderManager::GetRenderDriverCount() {
     return m_DriverCount;
 }
 
-// Static array to hold VxDriverDesc structures - use fixed size to avoid dynamic allocation issues
-static VxDriverDesc s_DriverDescCache[16];
-static int s_DriverDescCacheCount = 0;
+// Cache public driver descriptors to keep returned pointers valid between calls.
+static XClassArray<VxDriverDesc> s_DriverDescCache;
 
 VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
-    if (Driver < 0 || Driver >= m_DriverCount || Driver >= 16) {
+    if (Driver < 0 || Driver >= m_DriverCount) {
         return nullptr;
     }
 
@@ -432,7 +431,10 @@ VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
         UpdateDriverDescCaps(drv);
     }
 
-    // Copy data to VxDriverDesc - directly copy without XSArray issues
+    if (s_DriverDescCache.Size() < m_DriverCount) {
+        s_DriverDescCache.Resize(m_DriverCount);
+    }
+
     VxDriverDesc *desc = &s_DriverDescCache[Driver];
 
     strncpy(desc->DriverDesc, drv->DriverDesc, sizeof(desc->DriverDesc) - 1);
@@ -442,9 +444,12 @@ VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
     desc->IsHardware = drv->Hardware;
     desc->DisplayModeCount = drv->DisplayModeCount;
     desc->DisplayModes = drv->DisplayModes;
-    // Point to the same TextureFormats - no copy needed
-    // Note: We can't easily copy XSArray, so we reference the original
-    // desc->TextureFormats stays as-is (caller should use drv->TextureFormats)
+    int textureFormatCount = drv->TextureFormats.Size();
+    desc->TextureFormats.Resize(textureFormatCount);
+    for (int i = 0; i < textureFormatCount; ++i) {
+        desc->TextureFormats[i] = drv->TextureFormats[i];
+    }
+
     desc->Caps2D = drv->Caps2D;
     desc->Caps3D = drv->Caps3D;
 
