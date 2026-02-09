@@ -70,8 +70,10 @@ void RegisterRasterizer(char *dll) {
     }
 
     CKRST_GETINFO getInfoFunc = (CKRST_GETINFO) sl.GetFunctionPtr((CKSTRING) "CKRasterizerGetInfo");
-    if (!getInfoFunc)
+    if (!getInfoFunc) {
         sl.ReleaseLibrary();
+        return;
+    }
 
     CKRasterizerInfo info;
     getInfoFunc(&info);
