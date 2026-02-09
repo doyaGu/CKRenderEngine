@@ -41,6 +41,8 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     drvDesc->CapsUpToDate = rstDriver->m_CapsUpToDate;
     strncpy(drvDesc->DriverDesc, rstDriver->m_Desc.CStr(), sizeof(drvDesc->DriverDesc) - 1);
     strncpy(drvDesc->DriverDesc2, rstDriver->m_Desc.CStr(), sizeof(drvDesc->DriverDesc2) - 1);
+    drvDesc->DriverDesc[sizeof(drvDesc->DriverDesc) - 1] = '\0';
+    drvDesc->DriverDesc2[sizeof(drvDesc->DriverDesc2) - 1] = '\0';
     drvDesc->Hardware = rstDriver->m_Hardware;
 
     // Copy 3D and 2D caps
