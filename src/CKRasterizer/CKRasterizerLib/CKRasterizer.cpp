@@ -72,9 +72,13 @@ CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers
         if ((Type & m_ObjectsIndex[i]) == 0)
             break;
 
-    if (i > objectsIndexCount) {
-        m_ObjectsIndex.Resize(2 * i);
-        memset(&m_ObjectsIndex[i], 0, i);
+    if (i >= objectsIndexCount) {
+        int newSize = objectsIndexCount > 0 ? objectsIndexCount * 2 : i + 1;
+        if (newSize <= i)
+            newSize = i + 1;
+
+        m_ObjectsIndex.Resize(newSize);
+        memset(&m_ObjectsIndex[objectsIndexCount], 0, newSize - objectsIndexCount);
 
         int driverCount = GetDriverCount();
         for (int d = 0; d < driverCount; d++) {
@@ -99,7 +103,7 @@ CKDWORD CKRasterizer::CreateObjectIndex(CKRST_OBJECTTYPE Type, CKBOOL WarnOthers
 }
 
 CKBOOL CKRasterizer::ReleaseObjectIndex(CKDWORD ObjectIndex, CKRST_OBJECTTYPE Type, CKBOOL WarnOthers) {
-    if (ObjectIndex > (CKDWORD) m_ObjectsIndex.Size())
+    if (ObjectIndex >= (CKDWORD) m_ObjectsIndex.Size())
         return FALSE;
     if ((m_ObjectsIndex[ObjectIndex] & Type) == 0)
         return FALSE;
