@@ -315,7 +315,7 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
     CK_OBJECTCREATION_OPTIONS options = dynamicFlag ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
 
     // Create name for the merged animation
-    char buffer[260];
+    char buffer[MAX_PATH];
     CKSTRING otherName = otherAnim->GetName();
     CKSTRING thisName = GetName();
 
