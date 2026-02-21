@@ -17,7 +17,7 @@ CK_CLASSID RCK3dObject::GetClassID() {
 //=============================================================================
 
 CKSTRING RCK3dObject::GetClassName() {
-    return (CKSTRING) "3D Object";
+    return "3D Object";
 }
 
 int RCK3dObject::GetDependenciesCount(int mode) {

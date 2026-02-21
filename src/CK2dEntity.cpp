@@ -1416,7 +1416,7 @@ CKERROR RCK2dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
 }
 
 CKSTRING RCK2dEntity::GetClassName() {
-    return (CKSTRING) "2dEntity";
+    return "2dEntity";
 }
 
 int RCK2dEntity::GetDependenciesCount(int mode) {
@@ -1433,9 +1433,9 @@ int RCK2dEntity::GetDependenciesCount(int mode) {
 CKSTRING RCK2dEntity::GetDependencies(int i, int mode) {
     // IDA: 0x1005f958
     if (i == 0)
-        return (CKSTRING) "Material";
+        return "Material";
     if (i == 1)
-        return (CKSTRING) "Children";
+        return "Children";
     return nullptr;
 }
 

@@ -3302,7 +3302,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
 //=============================================================================
 
 CKSTRING RCK3dEntity::GetClassName() {
-    return (CKSTRING) "3D Entity";
+    return "3D Entity";
 }
 
 int RCK3dEntity::GetDependenciesCount(int mode) {
@@ -3319,9 +3319,9 @@ int RCK3dEntity::GetDependenciesCount(int mode) {
 CKSTRING RCK3dEntity::GetDependencies(int i, int mode) {
     // Based on IDA decompilation at 0x1000b38b
     switch (i) {
-    case 0: return (CKSTRING) "Meshes";
-    case 1: return (CKSTRING) "Children";
-    case 2: return (CKSTRING) "Animation";
+    case 0: return "Meshes";
+    case 1: return "Children";
+    case 2: return "Animation";
     default: return nullptr;
     }
 }

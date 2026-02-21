@@ -519,7 +519,7 @@ CKERROR RCKCamera::Load(CKStateChunk *chunk, CKFile *file) {
 //=============================================================================
 
 CKSTRING RCKCamera::GetClassName() {
-    return (CKSTRING) "Camera";
+    return "Camera";
 }
 
 int RCKCamera::GetDependenciesCount(int mode) {

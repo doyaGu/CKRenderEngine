@@ -36,7 +36,7 @@ protected:
     void Redraw();
     CKBOOL IsUpToDate();
 
-    CKSTRING m_Text;
+    char *m_Text;
     CKDWORD m_FontColor;
     CKDWORD m_BkColor;
     FONT_HANDLE m_Font;

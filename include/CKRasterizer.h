@@ -92,7 +92,7 @@ public:
     void RemoveLinkedRasterizer(CKRasterizer *rst);
 
     //----- Buggy driver information
-    CKBOOL LoadVideoCardFile(const char *FileName);
+    CKBOOL LoadVideoCardFile(CKSTRING FileName);
     CKDriverProblems *FindDriverProblems(const XString &Vendor, const XString &Renderer, const XString &Version,
                                          const XString &DeviceDesc, int Bpp);
 

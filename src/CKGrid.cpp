@@ -344,7 +344,7 @@ CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKGrid::GetClassName() {
-    return (CKSTRING) "Grid";
+    return "Grid";
 }
 
 int RCKGrid::GetDependenciesCount(int mode) {
@@ -732,7 +732,7 @@ CKERROR RCKGrid::AddClassification(int classType) {
  * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
  * IDA: 0x10019046
  */
-CKERROR RCKGrid::AddClassificationByName(char *name) {
+CKERROR RCKGrid::AddClassificationByName(CKSTRING name) {
     if (!name)
         return CKERR_INVALIDPARAMETER;
 
@@ -767,7 +767,7 @@ CKERROR RCKGrid::RemoveClassification(int classType) {
  * @return CK_OK on success, CKERR_INVALIDPARAMETER on failure
  * IDA: 0x100190a7
  */
-CKERROR RCKGrid::RemoveClassificationByName(char *name) {
+CKERROR RCKGrid::RemoveClassificationByName(CKSTRING name) {
     if (!name)
         return CKERR_INVALIDPARAMETER;
 
@@ -887,7 +887,7 @@ CKLayer *RCKGrid::AddLayer(int type, int format) {
  * @return The created layer, or nullptr on failure
  * IDA: 0x1001935d
  */
-CKLayer *RCKGrid::AddLayerByName(char *name, int format) {
+CKLayer *RCKGrid::AddLayerByName(CKSTRING name, int format) {
     if (!name)
         return nullptr;
 
@@ -930,7 +930,7 @@ CKLayer *RCKGrid::GetLayer(int type) {
     return nullptr;
 }
 
-CKLayer *RCKGrid::GetLayerByName(char *name) {
+CKLayer *RCKGrid::GetLayerByName(CKSTRING name) {
     if (!name)
         return nullptr;
 
@@ -979,7 +979,7 @@ CKERROR RCKGrid::RemoveLayer(int type) {
  * @return CK_OK
  * IDA: 0x100195e9
  */
-CKERROR RCKGrid::RemoveLayerByName(char *name) {
+CKERROR RCKGrid::RemoveLayerByName(CKSTRING name) {
     if (!name)
         return CKERR_INVALIDPARAMETER;
 

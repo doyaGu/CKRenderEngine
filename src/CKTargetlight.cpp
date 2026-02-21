@@ -330,7 +330,7 @@ CKERROR RCKTargetLight::Load(CKStateChunk *chunk, CKFile *file) {
 //=============================================================================
 
 CKSTRING RCKTargetLight::GetClassName() {
-    return (CKSTRING) "Target Light";
+    return "Target Light";
 }
 
 /*************************************************
@@ -371,7 +371,7 @@ Implementation based on decompilation at 0x10044610.
 *************************************************/
 CKSTRING RCKTargetLight::GetDependencies(int i, int mode) {
     if (i == 0)
-        return (CKSTRING) "Target";
+        return "Target";
     return nullptr;
 }
 

@@ -671,7 +671,7 @@ CKERROR RCKMaterial::Copy(CKObject &o, CKDependenciesContext &context) {
  * @brief Returns the class name for this material type.
  */
 CKSTRING RCKMaterial::GetClassName() {
-    return (CKSTRING) "Material";
+    return "Material";
 }
 
 /**
@@ -706,7 +706,7 @@ CKSTRING RCKMaterial::GetDependencies(int i, int mode) {
     if (i != 0) {
         return nullptr;
     } else {
-        return (CKSTRING) "Texture";
+        return "Texture";
     }
 }
 

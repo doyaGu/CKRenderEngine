@@ -522,7 +522,7 @@ void RCKSprite3D::UpdateOrientation(CKRenderContext *rc) {
 //=============================================================================
 
 CKSTRING RCKSprite3D::GetClassName() {
-    return (CKSTRING) "3D Sprite";
+    return "3D Sprite";
 }
 
 /*************************************************
@@ -562,7 +562,7 @@ Implementation based on decompilation at 0x100435D2
 *************************************************/
 CKSTRING RCKSprite3D::GetDependencies(int i, int mode) {
     if (i == 0) {
-        return (CKSTRING) "Material";
+        return "Material";
     }
     return nullptr;
 }

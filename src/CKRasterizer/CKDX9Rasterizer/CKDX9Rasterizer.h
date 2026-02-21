@@ -385,7 +385,7 @@ public:
 
     //---- To Enable more direct creation of system objects	without
     //---- CK2_3D holding a copy of the texture
-    virtual CKBOOL CreateTextureFromFile(CKDWORD Texture, const char *Filename, TexFromFile *param);
+    virtual CKBOOL CreateTextureFromFile(CKDWORD Texture, CKSTRING Filename, TexFromFile *param);
 
 protected:
     //-----------------------

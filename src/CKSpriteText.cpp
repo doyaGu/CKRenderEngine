@@ -169,23 +169,23 @@ CKStateChunk *RCKSpriteText::Save(CKFile *file, CKDWORD flags) {
     chunk->StartWrite();
     chunk->AddChunkAndDelete(parentChunk);
 
-    // Write text (identifier 0x1000000)
-    chunk->WriteIdentifier(0x1000000);
+    // Write text
+    chunk->WriteIdentifier(CK_STATESAVE_SPRITETEXT);
     chunk->WriteString(m_Text);
 
-    // Write font info (identifier 0x2000000)
+    // Write font info
     VXFONTINFO fontInfo;
     VxGetFontInfo(m_Font, fontInfo);
 
-    chunk->WriteIdentifier(0x2000000);
-    chunk->WriteString((CKSTRING) fontInfo.FaceName.CStr());
+    chunk->WriteIdentifier(CK_STATESAVE_SPRITEFONT);
+    chunk->WriteString(fontInfo.FaceName.CStr());
     chunk->WriteInt(fontInfo.Height);
     chunk->WriteInt(fontInfo.Weight);
     chunk->WriteInt(fontInfo.Italic);
     chunk->WriteInt(fontInfo.Underline);
 
-    // Write colors (identifier 0x4000000)
-    chunk->WriteIdentifier(0x4000000);
+    // Write colors
+    chunk->WriteIdentifier(CK_STATESAVE_SPRITETEXTCOLOR);
     chunk->WriteDword(m_FontColor);
     chunk->WriteDword(m_BkColor);
 
@@ -200,17 +200,17 @@ CKERROR RCKSpriteText::Load(CKStateChunk *chunk, CKFile *file) {
 
     RCKSprite::Load(chunk, file);
 
-    // Read text (identifier 0x1000000)
-    if (chunk->SeekIdentifier(0x1000000)) {
-        CKSTRING text = nullptr;
+    // Read text
+    if (chunk->SeekIdentifier(CK_STATESAVE_SPRITETEXT)) {
+        char *text = nullptr;
         chunk->ReadString(&text);
         SetText(text);
         CKDeletePointer(text);
     }
 
-    // Read font info (identifier 0x2000000)
-    if (chunk->SeekIdentifier(0x2000000)) {
-        CKSTRING fontName = nullptr;
+    // Read font info
+    if (chunk->SeekIdentifier(CK_STATESAVE_SPRITEFONT)) {
+        char *fontName = nullptr;
         chunk->ReadString(&fontName);
         int fontSize = chunk->ReadInt();
         int weight = chunk->ReadInt();
@@ -220,8 +220,8 @@ CKERROR RCKSpriteText::Load(CKStateChunk *chunk, CKFile *file) {
         CKDeletePointer(fontName);
     }
 
-    // Read colors (identifier 0x4000000)
-    if (chunk->SeekIdentifier(0x4000000)) {
+    // Read colors
+    if (chunk->SeekIdentifier(CK_STATESAVE_SPRITETEXTCOLOR)) {
         m_FontColor = chunk->ReadDword();
         m_BkColor = chunk->ReadDword();
     }
@@ -248,7 +248,7 @@ CKERROR RCKSpriteText::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // GetClassName: 0x10062659
 CKSTRING RCKSpriteText::GetClassName() {
-    return (CKSTRING) "SpriteText";
+    return "SpriteText";
 }
 
 // GetDependenciesCount: returns 0 (no dependencies)
