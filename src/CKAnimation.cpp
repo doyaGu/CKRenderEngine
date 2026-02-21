@@ -333,7 +333,7 @@ void RCKAnimation::SetCurrentStep(float Step) {
 
 // 0x10047C74
 CKSTRING RCKAnimation::GetClassName() {
-    return (CKSTRING) "Animation";
+    return "Animation";
 }
 
 // 0x10047C7E

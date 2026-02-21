@@ -145,7 +145,7 @@ void CKRasterizer::RemoveLinkedRasterizer(CKRasterizer *rst) {
         m_OtherRasterizers.Remove(rst);
 }
 
-CKBOOL CKRasterizer::LoadVideoCardFile(const char *FileName) {
+CKBOOL CKRasterizer::LoadVideoCardFile(CKSTRING FileName) {
     VxConfiguration config;
     int cline;
     XString error;

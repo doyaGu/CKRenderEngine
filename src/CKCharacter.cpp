@@ -302,7 +302,7 @@ CKERROR RCKCharacter::Load(CKStateChunk *chunk, CKFile *file) {
 CK_CLASSID RCKCharacter::m_ClassID = CKCID_CHARACTER;
 
 CKSTRING RCKCharacter::GetClassName() {
-    return (CKSTRING) "Character";
+    return "Character";
 }
 
 int RCKCharacter::GetDependenciesCount(int mode) {
@@ -314,7 +314,7 @@ int RCKCharacter::GetDependenciesCount(int mode) {
 
 CKSTRING RCKCharacter::GetDependencies(int i, int mode) {
     if (i == 0 && mode == 1) {
-        return (CKSTRING) "Share Animations";
+        return "Share Animations";
     }
     return nullptr;
 }

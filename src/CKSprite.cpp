@@ -52,7 +52,7 @@ CK_CLASSID RCKSprite::GetClassID() {
 }
 
 CKSTRING RCKSprite::GetClassName() {
-    return (CKSTRING) "Sprite";
+    return "Sprite";
 }
 
 int RCKSprite::GetDependenciesCount(int mode) {

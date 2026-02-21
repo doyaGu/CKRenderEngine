@@ -3520,7 +3520,7 @@ CKBOOL CKDX9RasterizerContext::UnlockIndexBuffer(CKDWORD IB)
     return SUCCEEDED(ib->DxBuffer->Unlock());
 }
 
-CKBOOL CKDX9RasterizerContext::CreateTextureFromFile(CKDWORD Texture, const char *Filename, TexFromFile *param)
+CKBOOL CKDX9RasterizerContext::CreateTextureFromFile(CKDWORD Texture, CKSTRING Filename, TexFromFile *param)
 {
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);

@@ -718,7 +718,7 @@ CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
 }
 
 CKSTRING RCKTexture::GetClassName() {
-    return (CKSTRING) "Texture";
+    return "Texture";
 }
 
 int RCKTexture::GetDependenciesCount(int mode) {

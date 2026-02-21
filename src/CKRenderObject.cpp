@@ -135,7 +135,7 @@ int RCKRenderObject::GetMemoryOccupation() {
 }
 
 CKSTRING RCKRenderObject::GetClassName() {
-    return (CKSTRING) "Render Object";
+    return "Render Object";
 }
 
 int RCKRenderObject::GetDependenciesCount(int mode) {

@@ -186,7 +186,7 @@ CKERROR RCKBodyPart::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKBodyPart::GetClassName() {
-    return (CKSTRING) "BodyPart";
+    return "BodyPart";
 }
 
 int RCKBodyPart::GetDependenciesCount(int mode) {

@@ -41,7 +41,7 @@ RCKKinematicChain::~RCKKinematicChain() {
 }
 
 CKSTRING RCKKinematicChain::GetClassName() {
-    return (CKSTRING) "Kinematic Chain";
+    return "Kinematic Chain";
 }
 
 int RCKKinematicChain::GetDependenciesCount(int mode) {

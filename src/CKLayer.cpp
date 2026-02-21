@@ -387,7 +387,7 @@ CKERROR RCKLayer::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKLayer::GetClassName() {
-    return (CKSTRING) "Layer";
+    return "Layer";
 }
 
 int RCKLayer::GetDependenciesCount(int mode) {

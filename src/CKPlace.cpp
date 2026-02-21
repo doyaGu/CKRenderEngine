@@ -344,7 +344,7 @@ CKERROR RCKPlace::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKPlace::GetClassName() {
-    return (CKSTRING) "Place";
+    return "Place";
 }
 
 int RCKPlace::GetDependenciesCount(int mode) {
@@ -365,7 +365,7 @@ int RCKPlace::GetDependenciesCount(int mode) {
 CKSTRING RCKPlace::GetDependencies(int i, int mode) {
     if (i != 0)
         return nullptr;
-    return (CKSTRING) "Portals";
+    return "Portals";
 }
 
 void RCKPlace::Register() {

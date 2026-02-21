@@ -713,7 +713,7 @@ CKERROR RCKLight::Copy(CKObject &o, CKDependenciesContext &context) {
 //=============================================================================
 
 CKSTRING RCKLight::GetClassName() {
-    return (CKSTRING) "Light";
+    return "Light";
 }
 
 int RCKLight::GetDependenciesCount(int mode) {

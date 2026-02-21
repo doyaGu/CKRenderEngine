@@ -381,7 +381,7 @@ CKERROR RCKTargetCamera::Load(CKStateChunk *chunk, CKFile *file) {
 //=============================================================================
 
 CKSTRING RCKTargetCamera::GetClassName() {
-    return (CKSTRING) "Target Camera";
+    return "Target Camera";
 }
 
 /*************************************************
@@ -422,7 +422,7 @@ Implementation based on decompilation at 0x10043f70.
 *************************************************/
 CKSTRING RCKTargetCamera::GetDependencies(int i, int mode) {
     if (i == 0)
-        return (CKSTRING) "Target";
+        return "Target";
     return nullptr;
 }
 

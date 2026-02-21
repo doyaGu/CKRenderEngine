@@ -562,7 +562,7 @@ void RCKPatchMesh::PreSave(CKFile *file, CKDWORD flags) {
 //=============================================================================
 
 CKSTRING RCKPatchMesh::GetClassName() {
-    return (CKSTRING) "Patch Mesh";
+    return "Patch Mesh";
 }
 
 int RCKPatchMesh::GetDependenciesCount(int mode) {

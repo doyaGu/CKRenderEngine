@@ -692,7 +692,7 @@ void RCKKeyedAnimation::SetParentKeyedAnimation(RCKObjectAnimation *objAnim, RCK
 //=============================================================================
 
 CKSTRING RCKKeyedAnimation::GetClassName() {
-    return (CKSTRING) "Keyed Animation";
+    return "Keyed Animation";
 }
 
 int RCKKeyedAnimation::GetDependenciesCount(int mode) {

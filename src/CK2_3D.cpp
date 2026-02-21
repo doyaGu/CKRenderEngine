@@ -53,7 +53,7 @@ CKPluginInfo g_PluginInfo;
 // Exported for use by RCKRenderManager
 XClassArray<CKRasterizerInfo> g_RasterizersInfo;
 
-void RegisterRasterizer(char *dll) {
+void RegisterRasterizer(const char *dll) {
     if (!dll || *dll == '\0')
         return;
 
@@ -69,7 +69,7 @@ void RegisterRasterizer(char *dll) {
         }
     }
 
-    CKRST_GETINFO getInfoFunc = (CKRST_GETINFO) sl.GetFunctionPtr((CKSTRING) "CKRasterizerGetInfo");
+    CKRST_GETINFO getInfoFunc = (CKRST_GETINFO) sl.GetFunctionPtr("CKRasterizerGetInfo");
     if (!getInfoFunc) {
         sl.ReleaseLibrary();
         return;
@@ -93,15 +93,15 @@ void EnumerateRasterizers() {
         dir << ps.GetDir();
 
         // Search for DX8 rasterizers
-        CKDirectoryParser dp8(dir.Str(), (CKSTRING) "*DX8Rasterizer.dll", TRUE);
-        char *file = dp8.GetNextFile();
+        CKDirectoryParser dp8(dir.Str(), "*DX8Rasterizer.dll", TRUE);
+        const char *file = dp8.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
             file = dp8.GetNextFile();
         }
 
         // Search for DX9 rasterizers
-        CKDirectoryParser dp9(dir.Str(), (CKSTRING) "*DX9Rasterizer.dll", TRUE);
+        CKDirectoryParser dp9(dir.Str(), "*DX9Rasterizer.dll", TRUE);
         file = dp9.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -109,7 +109,7 @@ void EnumerateRasterizers() {
         }
 
         // Search for OpenGL rasterizers
-        CKDirectoryParser dpGL(dir.Str(), (CKSTRING) "*GLRasterizer.dll", TRUE);
+        CKDirectoryParser dpGL(dir.Str(), "*GLRasterizer.dll", TRUE);
         file = dpGL.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -173,7 +173,7 @@ PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
 
     g_PluginInfo.m_Author = "Virtools";
     g_PluginInfo.m_Description = "Default Render Engine";
-    g_PluginInfo.m_Extension = (CKSTRING) "";
+    g_PluginInfo.m_Extension = "";
     g_PluginInfo.m_Type = CKPLUGIN_RENDERENGINE_DLL;
     g_PluginInfo.m_Version = 0x000001;
     g_PluginInfo.m_InitInstanceFct = InitInstanceFct;

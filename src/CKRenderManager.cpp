@@ -66,7 +66,7 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     memcpy(drvDesc->DisplayModes, rstDriver->m_DisplayModes.Begin(), displayModeCount * sizeof(VxDisplayMode));
 }
 
-RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, (CKSTRING) "Render Manager") {
+RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
     m_SpriteVideoFormat.Set("SpriteVideoFormat", _16_ARGB1555);
@@ -205,12 +205,12 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     }
 
     // Create default material
-    m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
+    m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
     if (m_DefaultMat) {
         m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
     }
     // Create 2D root entities
-    m_2DRootFore = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootFore", CK_OBJECTCREATION_NONAMECHECK);
+    m_2DRootFore = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, "2DRootFore", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootFore) {
         m_2DRootFore->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
         ((RCK2dEntity *) m_2DRootFore)->ModifyFlags(0, CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW);
@@ -218,7 +218,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         m_2DRootForeId = m_2DRootFore->GetID();
     }
 
-    m_2DRootBack = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, (CKSTRING) "2DRootBack", CK_OBJECTCREATION_NONAMECHECK);
+    m_2DRootBack = (CK2dEntity *) m_Context->CreateObject(CKCID_2DENTITY, "2DRootBack", CK_OBJECTCREATION_NONAMECHECK);
     if (m_2DRootBack) {
         m_2DRootBack->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
         ((RCK2dEntity *) m_2DRootBack)->ModifyFlags(0, CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW);
@@ -610,7 +610,7 @@ CKBOOL RCKRenderManager::ReleaseObjectIndex(CKDWORD index, CKRST_OBJECTTYPE type
 
 CKMaterial *RCKRenderManager::GetDefaultMaterial() {
     if (!m_DefaultMat) {
-        m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
+        m_DefaultMat = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, "Default Mat", CK_OBJECTCREATION_NONAMECHECK);
         if (m_DefaultMat) {
             m_DefaultMat->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
         }
@@ -877,22 +877,20 @@ void RCKRenderManager::RegisterDefaultEffects() {
         return;
 
     // Register Material Effect enum
-    pm->RegisterNewEnum(CKPGUID_MATERIALEFFECT, (CKSTRING) "Material Effect", (CKSTRING) effectEnum.CStr());
+    pm->RegisterNewEnum(CKPGUID_MATERIALEFFECT, "Material Effect", (CKSTRING) effectEnum.CStr());
     CKParameterTypeDesc *typeDesc = pm->GetParameterTypeDescription(CKPGUID_MATERIALEFFECT);
     if (typeDesc)
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register Tex Coords Generator enum
-    pm->RegisterNewEnum(CKPGUID_TEXGENEFFECT, (CKSTRING) "Tex Coords Generator",
-                        (CKSTRING)
+    pm->RegisterNewEnum(CKPGUID_TEXGENEFFECT, "Tex Coords Generator",
                         "None=0,Transform=1,Reflect=2,Chrome=3,Planar=4,CubeMap Reflect=31,CubeMap SkyMap=32,CubeMap Normals=33,CubeMap Positions=34");
     typeDesc = pm->GetParameterTypeDescription(CKPGUID_TEXGENEFFECT);
     if (typeDesc)
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register Texture Blending enum
-    pm->RegisterNewEnum(CKPGUID_TEXCOMBINE, (CKSTRING) "Texture Blending",
-                        (CKSTRING)
+    pm->RegisterNewEnum(CKPGUID_TEXCOMBINE, "Texture Blending",
                         "None=0,Modulate=4,Modulate 2X=5,Modulate 4X=6,Add=7,Add Signed=8,Add Signed 2X=9,Subtract=10,Add Smooth=11,"
                         "Blend Using Diffuse Alpha=12,Blend Using Texture Alpha=13,Blend Using Current Alpha=16,"
                         "Modulate Alpha Add Color=18,Modulate Color Add Alpha=19,Modulate InvAlpha Add Color=20,Modulate InvColor Add Alpha=21");
@@ -901,24 +899,24 @@ void RCKRenderManager::RegisterDefaultEffects() {
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register TexgenReferential structure: (TexGen, Referential)
-    pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, (CKSTRING) "TexgenReferential",
-                             (CKSTRING) "TexGen,Referential",
+    pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, "TexgenReferential",
+                             "TexGen,Referential",
                              CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register Combine2Textures structure: (Combine, TexGen, Referential)
-    pm->RegisterNewStructure(CKPGUID_COMBINE2TEX, (CKSTRING) "Combine 2 Textures",
-                             (CKSTRING) "Combine,TexGen,Referential",
+    pm->RegisterNewStructure(CKPGUID_COMBINE2TEX, "Combine 2 Textures",
+                             "Combine,TexGen,Referential",
                              CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register Combine3Textures structure: (Combine1, TexGen1, Ref1, Combine2, TexGen2, Ref2)
-    pm->RegisterNewStructure(CKPGUID_COMBINE3TEX, (CKSTRING) "Combine 3 Textures",
-                             (CKSTRING) "Combine1,TexGen1,Ref1,Combine2,TexGen2,Ref2",
+    pm->RegisterNewStructure(CKPGUID_COMBINE3TEX, "Combine 3 Textures",
+                             "Combine1,TexGen1,Ref1,Combine2,TexGen2,Ref2",
                              CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY,
                              CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 
     // Register BumpmapParameters structure: (Amplitude, EnvMap Combine, EnvMap TexGen, EnvMap Referential)
-    pm->RegisterNewStructure(CKPGUID_BUMPMAPPARAM, (CKSTRING) "Bumpmap Parameters",
-                             (CKSTRING) "Amplitude,EnvMap Combine,EnvMap TexGen,EnvMap Referential",
+    pm->RegisterNewStructure(CKPGUID_BUMPMAPPARAM, "Bumpmap Parameters",
+                             "Amplitude,EnvMap Combine,EnvMap TexGen,EnvMap Referential",
                              CKPGUID_FLOAT, CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
 }
 

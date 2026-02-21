@@ -2508,7 +2508,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_RenderManager = (RCKRenderManager *) Context->GetRenderManager();
     m_MaskFree = m_RenderManager->GetRenderContextMaskFree();
     if (!m_MaskFree) {
-        m_Context->OutputToConsole((CKSTRING) "Error: no more render context mask available", TRUE);
+        m_Context->OutputToConsole("Error: no more render context mask available", TRUE);
     }
     m_WinHandle = nullptr;
     m_AppHandle = nullptr;
@@ -3095,7 +3095,7 @@ CKObject *RCKRenderContext::CreateInstance(CKContext *Context) {
 }
 
 CKSTRING RCKRenderContext::GetClassName() {
-    return (CKSTRING) "Render Context";
+    return "Render Context";
 }
 
 int RCKRenderContext::GetDependenciesCount(int mode) {

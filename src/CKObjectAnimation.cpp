@@ -2216,7 +2216,7 @@ void RCKObjectAnimation::SetKeyframeLength(float length) {
 }
 
 CKSTRING RCKObjectAnimation::GetClassName() {
-    return (CKSTRING) "ObjectAnimation";
+    return "ObjectAnimation";
 }
 
 int RCKObjectAnimation::GetDependenciesCount(int mode) {

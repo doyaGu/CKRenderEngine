@@ -37,7 +37,7 @@ CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
     m_RootEntity->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
     AddObject(m_RootEntity);
 
-    m_BackgroundMaterial = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, (CKSTRING) "Background Material", CK_OBJECTCREATION_NONAMECHECK);
+    m_BackgroundMaterial = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, "Background Material", CK_OBJECTCREATION_NONAMECHECK);
     m_BackgroundMaterial->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
     m_BackgroundMaterial->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f));
     m_BackgroundMaterial->SetAmbient(VxColor(0.0f, 0.0f, 0.0f));

@@ -1019,7 +1019,7 @@ void RCKCurve::Update() {
 
 // Static class registration methods
 CKSTRING RCKCurve::GetClassName() {
-    return (CKSTRING) "Curve";
+    return "Curve";
 }
 
 int RCKCurve::GetDependenciesCount(int mode) {

@@ -2176,7 +2176,7 @@ void RCKMesh::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
 
 // Class Registering
 CKSTRING RCKMesh::GetClassName() {
-    return (CKSTRING) "Mesh";
+    return "Mesh";
 }
 
 int RCKMesh::GetDependenciesCount(int mode) {
@@ -2203,7 +2203,7 @@ int RCKMesh::GetDependenciesCount(int mode) {
 
 CKSTRING RCKMesh::GetDependencies(int i, int mode) {
     if (i == 0) {
-        return (CKSTRING) "Material";
+        return "Material";
     }
     return nullptr;
 }

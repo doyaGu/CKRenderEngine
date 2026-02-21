@@ -384,7 +384,7 @@ void RCKCurvePoint::NotifyUpdate() {
 
 // Static class registration methods
 CKSTRING RCKCurvePoint::GetClassName() {
-    return (CKSTRING) "Curve Point";
+    return "Curve Point";
 }
 
 int RCKCurvePoint::GetDependenciesCount(int mode) {
