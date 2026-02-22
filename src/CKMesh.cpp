@@ -28,13 +28,13 @@ extern void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 CKVBuffer *RCKMesh::GetVBuffer(CKMaterialGroup *group) const {
     if (!group || !group->m_RemapData)
         return nullptr;
-    return reinterpret_cast<CKVBuffer *>(static_cast<uintptr_t>(group->m_RemapData));
+    return reinterpret_cast<CKVBuffer *>(group->m_RemapData);
 }
 
 void RCKMesh::DeleteVBuffer(CKMaterialGroup *group) {
     if (!group || !group->m_RemapData)
         return;
-    delete reinterpret_cast<CKVBuffer *>(static_cast<uintptr_t>(group->m_RemapData));
+    delete reinterpret_cast<CKVBuffer *>(group->m_RemapData);
     group->m_RemapData = 0;
 }
 
@@ -2061,7 +2061,7 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
                         dstVb->m_Colors = srcVb->m_Colors;
                         dstVb->m_UVs = srcVb->m_UVs;
                         dstVb->m_VertexRemap = srcVb->m_VertexRemap;
-                        newGroup->m_RemapData = static_cast<CKDWORD>(reinterpret_cast<uintptr_t>(dstVb));
+                        newGroup->m_RemapData = reinterpret_cast<CKUINTPTR>(dstVb);
                     }
                 }
             }
@@ -4632,7 +4632,7 @@ int RCKMesh::CreateRenderGroups() {
 
             // Per-group remap buffer
             CKVBuffer *vb = new CKVBuffer(expectedLocalVertexCount);
-            group->m_RemapData = static_cast<CKDWORD>(reinterpret_cast<uintptr_t>(vb));
+            group->m_RemapData = reinterpret_cast<CKUINTPTR>(vb);
             group->m_VertexCount = 0;
 
             memset(vertexTracker, 0, vertexCount * sizeof(CKDWORD));

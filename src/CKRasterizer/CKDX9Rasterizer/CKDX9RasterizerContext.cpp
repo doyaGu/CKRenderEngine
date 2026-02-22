@@ -4883,10 +4883,10 @@ CKBOOL CKDX9RasterizerContext::CreateVertexDeclaration(CKDWORD VFormat, LPDIRECT
         declaration[elementIndex].Type = declType;
         declaration[elementIndex].Method = D3DDECLMETHOD_DEFAULT;
         declaration[elementIndex].Usage = usage;
-        declaration[elementIndex].UsageIndex = i;
+        declaration[elementIndex].UsageIndex = (BYTE)i;
 
         // Update offset for next element
-        offset += texDimension * sizeof(float);
+        offset += (WORD)(texDimension * sizeof(float));
         elementIndex++;
     }
 
