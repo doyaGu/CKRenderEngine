@@ -157,6 +157,10 @@ void CKVBuffer::Update(RCKMesh *mesh, int force) {
     }
 }
 
+static CKBOOL IsRenderableMaterialGroup(const CKMaterialGroup *group) {
+    return group && group->m_HasValidPrimitives && group->m_Primitives.Size() > 0;
+}
+
 /**
  * @brief Progressive mesh pre-render callback for LOD processing.
  *
@@ -2015,6 +2019,15 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
 
     RCKMesh *source = (RCKMesh *) &o;
 
+    // Copy starts from source state; clear target-only mutable runtime state first.
+    while (GetChannelCount() > 0)
+        RemoveChannel(0);
+    if (m_ProgressiveMesh) {
+        delete m_ProgressiveMesh;
+        m_ProgressiveMesh = nullptr;
+        RemovePreRenderCallBack((CK_MESHRENDERCALLBACK) ProgressiveMeshPreRenderCallback, this);
+    }
+
     // Get class dependencies flags
     CKDWORD classDeps = context.GetClassDependencies(CKCID_MESH);
 
@@ -2084,6 +2097,9 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
         }
     }
     SetFaceCount(faceCount);
+
+    // Copy line topology.
+    m_LineIndices = source->m_LineIndices;
 
     // Copy channels
     int channelCount = source->GetChannelCount();
@@ -2653,13 +2669,15 @@ void RCKMesh::BuildRenderMesh() {
             CKWORD v1 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[1], targetVertexCount);
             CKWORD v2 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[2], targetVertexCount);
 
+            // Skip degenerate faces (where two or more vertices collapsed together)
+            if (v0 == v1 || v1 == v2 || v2 == v0) {
+                faceIndices += 3;
+                continue;
+            }
+
             // Add face index to appropriate material group
             CKWORD faceIdxWord = (CKWORD) faceIdx;
             m_MaterialGroups[faces[faceIdx].m_MatIndex]->m_FaceIndices.PushBack(faceIdxWord);
-
-            // Skip degenerate faces (where two or more vertices collapsed together)
-            if (v0 == v1 || v1 == v2 || v2 == v0)
-                break;
 
             // Get vertex indices at current LOD for interpolation
             CKWORD c0 = (CKWORD) PMGetParentVertexEx(m_ProgressiveMesh, faceIndices[0], currentCount);
@@ -2722,8 +2740,10 @@ void RCKMesh::BuildRenderMesh() {
             CKWORD v2 = (CKWORD) PMGetParentVertex(m_ProgressiveMesh, faceIndices[2]);
 
             // Skip degenerate faces
-            if (v0 == v1 || v1 == v2 || v2 == v0)
-                break;
+            if (v0 == v1 || v1 == v2 || v2 == v0) {
+                faceIndices += 3;
+                continue;
+            }
 
             // Add face index to material group
             CKWORD faceIdxWord = (CKWORD) faceIdx;
@@ -4887,13 +4907,14 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
 
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
-        if (group && group->m_Material) {
-            if (group->m_RemapData) {
-                hasRemappedVertices = TRUE;
-                totalVertexCount += group->m_VertexCount;
-            } else {
-                hasDirectVertices = TRUE;
-            }
+        if (!IsRenderableMaterialGroup(group))
+            continue;
+
+        if (group->m_RemapData && group->m_VertexCount > 0) {
+            hasRemappedVertices = TRUE;
+            totalVertexCount += group->m_VertexCount;
+        } else {
+            hasDirectVertices = TRUE;
         }
     }
 
@@ -4960,57 +4981,58 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
 
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
-            if (group && group->m_Material) {
-                if (group->m_RemapData) {
-                    // This group has remapped vertices
-                    CKVBuffer *vb = GetVBuffer(group);
-                    if (!vb || group->m_VertexCount <= 0) {
-                        group->m_BaseVertex = 0;
-                        continue;
-                    }
+            if (!IsRenderableMaterialGroup(group))
+                continue;
 
-                    // Ensure remapped data is up to date before uploading to HW VB.
-                    vb->Update(this, 0);
-
-                    if (vb->m_Vertices.Size() < (int) group->m_VertexCount ||
-                        vb->m_Colors.Size() < (int) group->m_VertexCount) {
-                        group->m_BaseVertex = 0;
-                        continue;
-                    }
-
-                    VxVertex *remappedVerts = vb->m_Vertices.Begin();
-                    VxColors *remappedColors = vb->m_Colors.Begin();
-
-                    // Update local data for this group
-                    localData.VertexCount = group->m_VertexCount;
-                    localData.PositionPtr = &remappedVerts[0].m_Position;
-                    localData.NormalPtr = &remappedVerts[0].m_Normal;
-                    localData.TexCoordPtr = &remappedVerts[0].m_UV;
-                    localData.ColorPtr = &remappedColors[0].Color;
-                    localData.SpecularColorPtr = &remappedColors[0].Specular;
-
-                    // Set up extra tex coords from active channel list
-                    for (int t = 0; t < (int) m_ActiveTextureChannels.Size(); t++) {
-                        const int channelIdx = m_ActiveTextureChannels[t];
-                        Vx2DVector *channelUVs = nullptr;
-                        if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
-                            if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
-                                channelUVs = vb->m_UVs[channelIdx].Begin();
-                        }
-                        localData.TexCoordPtrs[t] = channelUVs;
-                        localData.TexCoordStrides[t] = 8;
-                    }
-
-                    // Set the start vertex offset for this group
-                    group->m_BaseVertex = currentOffset;
-                    currentOffset += group->m_VertexCount;
-
-                    // Load this group's vertices into the buffer
-                    vbData = CKRSTLoadVertexBuffer(vbData, vertexFormat, vertexSize, &localData);
-                } else {
-                    // No remapped vertices for this group
+            if (group->m_RemapData) {
+                // This group has remapped vertices
+                CKVBuffer *vb = GetVBuffer(group);
+                if (!vb || group->m_VertexCount <= 0) {
                     group->m_BaseVertex = 0;
+                    continue;
                 }
+
+                // Ensure remapped data is up to date before uploading to HW VB.
+                vb->Update(this, 0);
+
+                if (vb->m_Vertices.Size() < (int) group->m_VertexCount ||
+                    vb->m_Colors.Size() < (int) group->m_VertexCount) {
+                    group->m_BaseVertex = 0;
+                    continue;
+                }
+
+                VxVertex *remappedVerts = vb->m_Vertices.Begin();
+                VxColors *remappedColors = vb->m_Colors.Begin();
+
+                // Update local data for this group
+                localData.VertexCount = group->m_VertexCount;
+                localData.PositionPtr = &remappedVerts[0].m_Position;
+                localData.NormalPtr = &remappedVerts[0].m_Normal;
+                localData.TexCoordPtr = &remappedVerts[0].m_UV;
+                localData.ColorPtr = &remappedColors[0].Color;
+                localData.SpecularColorPtr = &remappedColors[0].Specular;
+
+                // Set up extra tex coords from active channel list
+                for (int t = 0; t < (int) m_ActiveTextureChannels.Size(); t++) {
+                    const int channelIdx = m_ActiveTextureChannels[t];
+                    Vx2DVector *channelUVs = nullptr;
+                    if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
+                        if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
+                            channelUVs = vb->m_UVs[channelIdx].Begin();
+                    }
+                    localData.TexCoordPtrs[t] = channelUVs;
+                    localData.TexCoordStrides[t] = 8;
+                }
+
+                // Set the start vertex offset for this group
+                group->m_BaseVertex = currentOffset;
+                currentOffset += group->m_VertexCount;
+
+                // Load this group's vertices into the buffer
+                vbData = CKRSTLoadVertexBuffer(vbData, vertexFormat, vertexSize, &localData);
+            } else {
+                // No remapped vertices for this group
+                group->m_BaseVertex = 0;
             }
         }
     }
@@ -5045,14 +5067,15 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     // Count total indices needed and check if any group needs update
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
-        if (group && group->m_Material) {
-            // Iterate through primitive entries
-            for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->m_Primitives[p];
-                totalIndexCount += prim->m_Indices.Size();
-                if (prim->m_IndexBufferOffset < 0) {
-                    needUpdate = TRUE;
-                }
+        if (!IsRenderableMaterialGroup(group))
+            continue;
+
+        // Iterate through primitive entries
+        for (int p = 0; p < group->m_Primitives.Size(); p++) {
+            CKPrimitiveEntry *prim = &group->m_Primitives[p];
+            totalIndexCount += prim->m_Indices.Size();
+            if (prim->m_IndexBufferOffset < 0) {
+                needUpdate = TRUE;
             }
         }
     }
@@ -5072,10 +5095,10 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
             // Failed to create index buffer - mark all primitives as software
             for (int i = 0; i < m_MaterialGroups.Size(); i++) {
                 CKMaterialGroup *group = m_MaterialGroups[i];
-                if (group && group->m_Material) {
-                    for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                        group->m_Primitives[p].m_IndexBufferOffset = -1;
-                    }
+                if (!IsRenderableMaterialGroup(group))
+                    continue;
+                for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                    group->m_Primitives[p].m_IndexBufferOffset = -1;
                 }
             }
             return FALSE;
@@ -5092,10 +5115,10 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         // Failed to lock - mark all primitives as software
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
-            if (group && group->m_Material) {
-                for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                    group->m_Primitives[p].m_IndexBufferOffset = -1;
-                }
+            if (!IsRenderableMaterialGroup(group))
+                continue;
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                group->m_Primitives[p].m_IndexBufferOffset = -1;
             }
         }
         return FALSE;
@@ -5106,20 +5129,20 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     // Copy indices for each material group
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
-        if (group && group->m_Material) {
-            for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->m_Primitives[p];
+        if (!IsRenderableMaterialGroup(group))
+            continue;
+        for (int p = 0; p < group->m_Primitives.Size(); p++) {
+            CKPrimitiveEntry *prim = &group->m_Primitives[p];
 
-                // Set the index buffer offset for this primitive
-                prim->m_IndexBufferOffset = currentOffset;
+            // Set the index buffer offset for this primitive
+            prim->m_IndexBufferOffset = currentOffset;
 
-                // Copy indices
-                CKDWORD indexCount = prim->m_Indices.Size();
-                if (indexCount > 0) {
-                    memcpy(ibData, prim->m_Indices.Begin(), indexCount * sizeof(CKWORD));
-                    ibData += indexCount;
-                    currentOffset += indexCount;
-                }
+            // Copy indices
+            CKDWORD indexCount = prim->m_Indices.Size();
+            if (indexCount > 0) {
+                memcpy(ibData, prim->m_Indices.Begin(), indexCount * sizeof(CKWORD));
+                ibData += indexCount;
+                currentOffset += indexCount;
             }
         }
     }
