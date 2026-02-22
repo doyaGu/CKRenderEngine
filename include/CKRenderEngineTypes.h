@@ -610,7 +610,7 @@ struct CKMaterialGroup {
     CKDWORD m_MaxVertexIndex;                   // 0x24 - Largest vertex index (exclusive) used by the group
     CKDWORD m_BaseVertex;                       // 0x28 - Base vertex offset in shared buffers
     CKDWORD m_VertexCount;                      // 0x2C - Vertex count for this group
-    CKDWORD m_RemapData;                        // 0x30 - Pointer to remap buffer / packed remapped vertices
+    CKUINTPTR m_RemapData;                        // 0x30 - Pointer to remap buffer / packed remapped vertices
 
     CKMaterialGroup()
         : m_Material(nullptr),

@@ -80,7 +80,7 @@ void VertexCacheOptimizer::ProcessFaces(const XArray<CKWORD> &indices) {
 
     while (m_ProcessedCount < m_FaceCount) {
         // Reserve active faces if needed
-        int activeCapacity = (m_ActiveFaces.End() - m_ActiveFaces.Begin()) / sizeof(CacheFaces);
+        int activeCapacity = (int)((m_ActiveFaces.End() - m_ActiveFaces.Begin()) / sizeof(CacheFaces));
         if (activeCapacity < 0)
             m_ActiveFaces.Reserve(0);
         m_ActiveFaces.Resize(0);

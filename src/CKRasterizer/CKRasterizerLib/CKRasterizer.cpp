@@ -151,7 +151,7 @@ CKBOOL CKRasterizer::LoadVideoCardFile(CKSTRING FileName) {
     XString error;
     int sectionCount;
     if (!config.BuildFromFile(FileName, cline, error) ||
-        (sectionCount = config.GetNumberOfSubSections()) == 0)
+        (sectionCount = (int)config.GetNumberOfSubSections()) == 0)
         return FALSE;
 
     ConstSectionIt sectionIt = config.BeginSections();
