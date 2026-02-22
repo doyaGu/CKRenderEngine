@@ -148,11 +148,6 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
                     IMPORTED_LOCATION "${VIRTOOLS_SDK_${_lib}_LIB}"
                     INTERFACE_INCLUDE_DIRECTORIES "${VIRTOOLS_SDK_INCLUDE_DIR}"
             )
-            target_compile_options(${_lib} INTERFACE
-                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:MSVC>:/Zc:strictStrings->>
-                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-fpermissive>>
-                    $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-Wno-write-strings>>
-            )
         endif ()
     endforeach ()
 endif ()
