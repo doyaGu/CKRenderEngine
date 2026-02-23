@@ -268,8 +268,8 @@ public:
     //-------------------------------------------------------------
     //--- Texture States control the texture and its aspects (filtering, etc.)
     //--- Set the current texture to be used for rendering (0 if no texturing)
-    virtual CKBOOL SetTexture(CKDWORD Texture, int Stage = 0) { return FALSE; }
-    virtual CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) { return FALSE; }
+    virtual CKBOOL SetTexture(CKDWORD Texture, CKDWORD Stage = 0) { return FALSE; }
+    virtual CKBOOL SetTextureStageState(CKDWORD Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) { return FALSE; }
 
     //-------------------------------------------------------------
     //--- Vertex & pixel shaders are created as textures and sprites
