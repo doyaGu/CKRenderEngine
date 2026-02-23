@@ -3,8 +3,9 @@
 
 #include "CKSkin.h"
 #include "XClassArray.h"
-#include "VxMatrix.h"
 #include "VxVector.h"
+#include "VxBbox.h"
+#include "VxMatrix.h"
 
 class CK3dEntity;
 class CKContext;
