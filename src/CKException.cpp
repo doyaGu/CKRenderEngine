@@ -4,8 +4,6 @@
 #include <cstdarg>
 #include <cstdio>
 
-#pragma comment(lib, "DbgHelp.lib")
-
 #include "CKDebugLogger.h"
 
 namespace {
