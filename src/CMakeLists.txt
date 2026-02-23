@@ -165,6 +165,7 @@ if (CKRE_BUILD_SHARED)
     )
 
     target_link_libraries(CK2_3D PRIVATE CKRasterizerLib)
+    target_link_libraries(CK2_3D PRIVATE dbghelp)
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
