@@ -1018,7 +1018,7 @@ CKBOOL CKDX9RasterizerContext::GetRenderState(VXRENDERSTATETYPE State, CKDWORD *
     return FALSE;
 }
 
-CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
+CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage)
 {
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
@@ -1026,7 +1026,7 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
 #if LOGGING && LOG_SETTEXTURE
     fprintf(stderr, "settexture %d %d\n", Texture, Stage);
 #endif
-    if (Stage < 0 || Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
+    if (Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
         return FALSE;
 
     if (!m_Device)
@@ -1115,12 +1115,12 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
     return TRUE;
 }
 
-CKBOOL CKDX9RasterizerContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value)
+CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value)
 {
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (!m_Device || Stage < 0 || Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
+    if (!m_Device || Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
         return FALSE;
 
     HRESULT hr = S_OK;

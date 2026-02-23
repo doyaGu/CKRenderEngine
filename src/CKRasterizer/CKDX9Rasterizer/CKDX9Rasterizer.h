@@ -322,8 +322,8 @@ public:
     virtual CKBOOL GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value);
 
     //--- Texture States
-    virtual CKBOOL SetTexture(CKDWORD Texture, int Stage = 0);
-    virtual CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value);
+    virtual CKBOOL SetTexture(CKDWORD Texture, CKDWORD Stage = 0);
+    virtual CKBOOL SetTextureStageState(CKDWORD Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value);
 
     //--- Vertex & Pixel shaders
     virtual CKBOOL SetVertexShader(CKDWORD VShaderIndex);
