@@ -201,22 +201,6 @@ if (CKRE_BUILD_TESTS)
 endif ()
 
 # =============================================================================
-# Installation
-# =============================================================================
-if (CKRE_INSTALL)
-    include(GNUInstallDirs)
-    include(CMakePackageConfigHelpers)
-
-    # Install public headers to include root
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-            DESTINATION include
-            FILES_MATCHING PATTERN "*.h"
-    )
-
-    # Render engines are runtime components, no CMake config needed
-endif ()
-
-# =============================================================================
 # Configuration summary
 # =============================================================================
 if (CKRE_IS_TOP_LEVEL)
