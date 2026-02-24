@@ -97,6 +97,12 @@ namespace {
         frame.AddrPC.Offset = context.Rip;
         frame.AddrFrame.Offset = context.Rbp;
         frame.AddrStack.Offset = context.Rsp;
+#elif defined(_M_ARM64)
+        const DWORD machineType = IMAGE_FILE_MACHINE_ARM64;
+        STACKFRAME64 frame{};
+        frame.AddrPC.Offset = context.Pc;
+        frame.AddrFrame.Offset = context.Fp;
+        frame.AddrStack.Offset = context.Sp;
 #else
         CKDebugLogger::Instance().Log("[CK2_3D] Stack trace not supported on this architecture");
         return;
