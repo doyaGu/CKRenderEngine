@@ -213,6 +213,7 @@ public:
 
 private:
     CK_RENDER_FLAGS ResolveRenderFlags(CK_RENDER_FLAGS Flags) const;
+    void RestoreStereoRenderState(CK3dEntity *rootEntity, const VxMatrix &originalWorldMat);
     void ExecutePreRenderCallbacks();
     void ExecutePostRenderCallbacks(CKBOOL beforeTransparent);
     void ExecutePostSpriteCallbacks();

@@ -227,6 +227,15 @@ CK_RENDER_FLAGS RCKRenderContext::ResolveRenderFlags(CK_RENDER_FLAGS Flags) cons
                : Flags;
 }
 
+void RCKRenderContext::RestoreStereoRenderState(CK3dEntity *rootEntity, const VxMatrix &originalWorldMat) {
+    if (rootEntity) {
+        rootEntity->SetWorldMatrix(originalWorldMat, FALSE);
+    }
+    m_ProjectionMatrix[2][0] = 0.0f;
+    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
+    m_RasterizerContext->SetDrawBuffer(CKRST_DRAWBOTH);
+}
+
 void RCKRenderContext::ExecutePreRenderCallbacks() {
     // IDA: CKRenderedScene::Draw at 0x100704ae line 146-158
     // Executes m_PreRenderCallBacks.m_PreCallBacks
@@ -805,9 +814,10 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     if (m_RasterizerContext->m_Driver && m_RasterizerContext->m_Driver->m_Stereo) {
         // Stereo rendering path
         VxMatrix originalWorldMat;
-        if (m_RenderedScene && m_RenderedScene->m_RootEntity) {
-            Vx3DMatrixIdentity(originalWorldMat);
-            const VxMatrix &wm = m_RenderedScene->m_RootEntity->GetWorldMatrix();
+        Vx3DMatrixIdentity(originalWorldMat);
+        CK3dEntity *rootEntity = m_RenderedScene ? m_RenderedScene->m_RootEntity : nullptr;
+        if (rootEntity) {
+            const VxMatrix &wm = rootEntity->GetWorldMatrix();
             memcpy(&originalWorldMat, &wm, sizeof(VxMatrix));
         }
 
@@ -835,37 +845,45 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         // Clear both buffers
         m_RasterizerContext->SetDrawBuffer(CKRST_DRAWBOTH);
         err = Clear(renderFlags);
-        if (err != CK_OK)
+        if (err != CK_OK) {
+            RestoreStereoRenderState(rootEntity, originalWorldMat);
             return err;
+        }
+
+        if (!rootEntity) {
+            RestoreStereoRenderState(rootEntity, originalWorldMat);
+            return CKERR_INVALIDRENDERCONTEXT;
+        }
 
         // Render right eye
         m_RasterizerContext->SetDrawBuffer(CKRST_DRAWRIGHT);
-        m_RenderedScene->m_RootEntity->SetWorldMatrix(rightWorldMat, FALSE);
+        rootEntity->SetWorldMatrix(rightWorldMat, FALSE);
         if (!m_Camera) {
             UpdateProjection(FALSE);
             m_ProjectionMatrix[2][0] = -0.5f * m_ProjectionMatrix[0][0] * projOffset;
             m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
         }
         err = DrawScene(renderFlags);
-        if (err != CK_OK)
+        if (err != CK_OK) {
+            RestoreStereoRenderState(rootEntity, originalWorldMat);
             return err;
+        }
 
         // Render left eye
         m_RasterizerContext->SetDrawBuffer(CKRST_DRAWLEFT);
-        m_RenderedScene->m_RootEntity->SetWorldMatrix(leftWorldMat, FALSE);
+        rootEntity->SetWorldMatrix(leftWorldMat, FALSE);
         if (!m_Camera) {
             m_ProjectionMatrix[2][0] = 0.5f * m_ProjectionMatrix[0][0] * projOffset;
             m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
         }
         err = DrawScene(renderFlags);
-        if (err != CK_OK)
+        if (err != CK_OK) {
+            RestoreStereoRenderState(rootEntity, originalWorldMat);
             return err;
+        }
 
         // Restore original state
-        m_RenderedScene->m_RootEntity->SetWorldMatrix(originalWorldMat, FALSE);
-        m_ProjectionMatrix[2][0] = 0.0f;
-        m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-        m_RasterizerContext->SetDrawBuffer(CKRST_DRAWBOTH);
+        RestoreStereoRenderState(rootEntity, originalWorldMat);
     } else {
         // Normal rendering (non-stereo)
         err = Clear(renderFlags);
@@ -1890,6 +1908,8 @@ CKRenderObject *RCKRenderContext::Pick(int x, int y, CKPICKRESULT *oRes, CKBOOL 
 CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iIgnoreUnpickable) {
     // IDA line 14: Initialize VxIntersectionDesc
     VxIntersectionDesc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.FaceIndex = -1;
 
     // IDA line 15-17: Convert screen point to local coordinates (relative to render context window)
     Vx2DVector localPt;
@@ -2410,6 +2430,9 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         return CKERR_INVALIDRENDERCONTEXT;
 
     m_WinHandle = Window;
+    WIN_HANDLE oldParent = nullptr;
+    CKRECT oldWindowRect = {0, 0, 0, 0};
+    CKBOOL restoreWindowOnFailure = FALSE;
 
     // Get rect from parameter or window client rect
     CKRECT localRect;
@@ -2428,9 +2451,21 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // For fullscreen, reparent window to desktop
     if (Fullscreen) {
-        m_AppHandle = VxGetParent(m_WinHandle);
+        oldParent = VxGetParent(m_WinHandle);
+        VxGetWindowRect(m_WinHandle, &oldWindowRect);
+        if (oldParent) {
+            VxScreenToClient(oldParent, (CKPOINT *) &oldWindowRect.left);
+            VxScreenToClient(oldParent, (CKPOINT *) &oldWindowRect.right);
+        }
+        restoreWindowOnFailure = TRUE;
+        m_AppHandle = oldParent;
         VxSetParent(m_WinHandle, nullptr);
         if (!VxMoveWindow(m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
+            if (restoreWindowOnFailure) {
+                VxSetParent(m_WinHandle, oldParent);
+                VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
+                             oldWindowRect.right - oldWindowRect.left, oldWindowRect.bottom - oldWindowRect.top, FALSE);
+            }
             m_DeviceDestroying = FALSE;
             return CKERR_INVALIDOPERATION;
         }
@@ -2454,6 +2489,11 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
                                      width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp)) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerContext = nullptr;
+        if (Fullscreen && restoreWindowOnFailure) {
+            VxSetParent(m_WinHandle, oldParent);
+            VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
+                         oldWindowRect.right - oldWindowRect.left, oldWindowRect.bottom - oldWindowRect.top, FALSE);
+        }
         m_DeviceDestroying = FALSE;
         return CKERR_CANCREATERENDERCONTEXT;
     }
@@ -2702,6 +2742,9 @@ void RCKRenderContext::SetFullViewport(CKViewportData *vp, int width, int height
 
 void RCKRenderContext::SetClipRect(VxRect *rect) {
     // IDA: 0x1006c808
+    if (!rect || !m_RasterizerContext)
+        return;
+
     int left = (int) rect->left;
     int top = (int) rect->top;
     int right = (int) rect->right;
@@ -2709,23 +2752,25 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
 
     const int clipWidth = right - left;
     const int clipHeight = bottom - top;
+    const int safeClipWidth = (clipWidth >= 1) ? clipWidth : 1;
+    const int safeClipHeight = (clipHeight >= 1) ? clipHeight : 1;
 
     m_RasterizerContext->m_ViewportData.ViewX = left;
     m_RasterizerContext->m_ViewportData.ViewY = top;
-    m_RasterizerContext->m_ViewportData.ViewWidth = (clipWidth >= 1) ? clipWidth : 1;
-    m_RasterizerContext->m_ViewportData.ViewHeight = (clipHeight >= 1) ? clipHeight : 1;
+    m_RasterizerContext->m_ViewportData.ViewWidth = safeClipWidth;
+    m_RasterizerContext->m_ViewportData.ViewHeight = safeClipHeight;
     m_RasterizerContext->SetViewport(&m_RasterizerContext->m_ViewportData);
 
-    const double invW = 1.0 / (double) clipWidth;
-    const double invH = 1.0 / (double) clipHeight;
+    const double invW = 1.0 / (double) safeClipWidth;
+    const double invH = 1.0 / (double) safeClipHeight;
     const float dx = (float) (right + left - (m_ViewportData.ViewWidth + 2 * m_ViewportData.ViewX));
     const float dy = (float) (top + bottom - (m_ViewportData.ViewHeight + 2 * m_ViewportData.ViewY));
 
     VxMatrix clipProj;
     clipProj.Clear();
 
-    clipProj[0][0] = (float) ((double) m_ViewportData.ViewWidth * (double) m_ProjectionMatrix[0][0] / (double)clipWidth);
-    clipProj[1][1] = (float) ((double) m_ViewportData.ViewHeight * (double) m_ProjectionMatrix[1][1] / (double)clipHeight);
+    clipProj[0][0] = (float) ((double) m_ViewportData.ViewWidth * (double) m_ProjectionMatrix[0][0] / (double) safeClipWidth);
+    clipProj[1][1] = (float) ((double) m_ViewportData.ViewHeight * (double) m_ProjectionMatrix[1][1] / (double) safeClipHeight);
     clipProj[2][0] = (float) (-dx * invW);
     clipProj[2][1] = (float) (dy * invH);
     clipProj[2][2] = m_FarPlane / (m_FarPlane - m_NearPlane);
