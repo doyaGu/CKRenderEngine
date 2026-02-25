@@ -266,29 +266,29 @@ void RCKRenderContext::LoadPVInformationTexture() {
 
 void RCKRenderContext::DrawPVInformationWatermark() {}
 
+void RCKRenderContext::AppendStateOnOffLine(CKBOOL on) {
+    m_StateString += on ? "On\n" : "Off\n";
+}
+
+void RCKRenderContext::AppendStateUIntLine(CKDWORD value) {
+    XString tmp;
+    tmp.Format("%u\n", (unsigned) value);
+    m_StateString += tmp;
+}
+
+void RCKRenderContext::AppendStateEnumLine(CKDWORD value, const char *const *table, int tableSize) {
+    if ((int) value >= 0 && (int) value < tableSize && table[value]) {
+        m_StateString += table[value];
+    } else {
+        AppendStateUIntLine(value);
+    }
+}
+
 void RCKRenderContext::FillStateString() {
     // IDA: 0x1006e40c
     m_StateString = "Render States\n\n";
     if (!m_RasterizerContext)
         return;
-
-    auto appendOnOff = [this](CKBOOL on) {
-        m_StateString += on ? "On\n" : "Off\n";
-    };
-
-    auto appendUIntLine = [this](CKDWORD value) {
-        XString tmp;
-        tmp.Format("%u\n", (unsigned) value);
-        m_StateString += tmp;
-    };
-
-    auto appendEnumLine = [this, &appendUIntLine](CKDWORD value, const char *const *table, int tableSize) {
-        if ((int) value >= 0 && (int) value < tableSize && table[value]) {
-            m_StateString += table[value];
-        } else {
-            appendUIntLine(value);
-        }
-    };
 
     static const char *const kFillMode[] = {"\n", "Point\n", "Wireframe\n", "Solid\n"};
     static const char *const kShadeMode[] = {"\n", "Flat\n", "Gouraud\n", "Phong\n"};
@@ -337,58 +337,58 @@ void RCKRenderContext::FillStateString() {
     };
 
     m_StateString += "Clipping : ";
-    appendOnOff(GetState(VXRENDERSTATE_CLIPPING) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_CLIPPING) != 0);
 
     m_StateString += "Lighting : ";
-    appendOnOff(GetState(VXRENDERSTATE_LIGHTING) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_LIGHTING) != 0);
 
     m_StateString += "Antialias : ";
-    appendOnOff(GetState(VXRENDERSTATE_ANTIALIAS) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_ANTIALIAS) != 0);
 
     m_StateString += "Perspective Tex : ";
-    appendOnOff(GetState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0);
 
     m_StateString += "Fill Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_FILLMODE), kFillMode, (int) (sizeof(kFillMode) / sizeof(kFillMode[0])));
+    AppendStateEnumLine(GetState(VXRENDERSTATE_FILLMODE), kFillMode, (int) (sizeof(kFillMode) / sizeof(kFillMode[0])));
 
     m_StateString += "Shade Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_SHADEMODE), kShadeMode, (int) (sizeof(kShadeMode) / sizeof(kShadeMode[0])));
+    AppendStateEnumLine(GetState(VXRENDERSTATE_SHADEMODE), kShadeMode, (int) (sizeof(kShadeMode) / sizeof(kShadeMode[0])));
 
     m_StateString += "Cull Mode : ";
-    appendEnumLine(GetState(VXRENDERSTATE_CULLMODE), kCullMode, (int) (sizeof(kCullMode) / sizeof(kCullMode[0])));
+    AppendStateEnumLine(GetState(VXRENDERSTATE_CULLMODE), kCullMode, (int) (sizeof(kCullMode) / sizeof(kCullMode[0])));
 
     if (GetState(VXRENDERSTATE_ZENABLE) != 0) {
         m_StateString += "ZWrite : ";
-        appendOnOff(GetState(VXRENDERSTATE_ZWRITEENABLE) != 0);
+        AppendStateOnOffLine(GetState(VXRENDERSTATE_ZWRITEENABLE) != 0);
 
         m_StateString += "Z Cmp Function : ";
-        appendEnumLine(GetState(VXRENDERSTATE_ZFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_ZFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Zbias : ";
-        appendUIntLine(GetState(VXRENDERSTATE_ZBIAS));
+        AppendStateUIntLine(GetState(VXRENDERSTATE_ZBIAS));
     }
 
     if (GetState(VXRENDERSTATE_ALPHATESTENABLE) != 0) {
         m_StateString += "Alpha Cmp Func : ";
-        appendEnumLine(GetState(VXRENDERSTATE_ALPHAFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_ALPHAFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Alpha Ref Value : ";
-        appendUIntLine(GetState(VXRENDERSTATE_ALPHAREF));
+        AppendStateUIntLine(GetState(VXRENDERSTATE_ALPHAREF));
     }
 
     m_StateString += "Dithering : ";
-    appendOnOff(GetState(VXRENDERSTATE_DITHERENABLE) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_DITHERENABLE) != 0);
 
     if (GetState(VXRENDERSTATE_ALPHABLENDENABLE) != 0) {
         m_StateString += "Alpha Blending : ";
-        appendEnumLine(GetState(VXRENDERSTATE_SRCBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_SRCBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
         m_StateString += "->";
-        appendEnumLine(GetState(VXRENDERSTATE_DESTBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_DESTBLEND), kBlendMode, (int) (sizeof(kBlendMode) / sizeof(kBlendMode[0])));
     }
 
     if (GetState(VXRENDERSTATE_FOGENABLE) != 0) {
         m_StateString += "Fog : ";
-        appendEnumLine(GetState(VXRENDERSTATE_FOGPIXELMODE), kFogMode, (int) (sizeof(kFogMode) / sizeof(kFogMode[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_FOGPIXELMODE), kFogMode, (int) (sizeof(kFogMode) / sizeof(kFogMode[0])));
     }
 
     if (GetState(VXRENDERSTATE_SPECULARENABLE) != 0) {
@@ -397,42 +397,42 @@ void RCKRenderContext::FillStateString() {
     }
 
     m_StateString += "Edge Antialias : ";
-    appendOnOff(GetState(VXRENDERSTATE_EDGEANTIALIAS) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_EDGEANTIALIAS) != 0);
 
     if (GetState(VXRENDERSTATE_STENCILENABLE) != 0) {
         m_StateString += "Stencil Fail : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_STENCILFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Zfail : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILZFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_STENCILZFAIL), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Pass : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILPASS), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_STENCILPASS), kStencilOp, (int) (sizeof(kStencilOp) / sizeof(kStencilOp[0])));
 
         m_StateString += "Stencil Cmp Func : ";
-        appendEnumLine(GetState(VXRENDERSTATE_STENCILFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
+        AppendStateEnumLine(GetState(VXRENDERSTATE_STENCILFUNC), kCmpFunc, (int) (sizeof(kCmpFunc) / sizeof(kCmpFunc[0])));
 
         m_StateString += "Stencil Ref Value : ";
-        appendUIntLine(GetState(VXRENDERSTATE_STENCILREF));
+        AppendStateUIntLine(GetState(VXRENDERSTATE_STENCILREF));
 
         m_StateString += "Stencil Mask : ";
-        appendUIntLine(GetState(VXRENDERSTATE_STENCILMASK));
+        AppendStateUIntLine(GetState(VXRENDERSTATE_STENCILMASK));
 
         m_StateString += "Stencil Write Mask : ";
-        appendUIntLine(GetState(VXRENDERSTATE_STENCILWRITEMASK));
+        AppendStateUIntLine(GetState(VXRENDERSTATE_STENCILWRITEMASK));
     }
 
     m_StateString += "Normal Normalize : ";
-    appendOnOff(GetState(VXRENDERSTATE_NORMALIZENORMALS) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_NORMALIZENORMALS) != 0);
 
     m_StateString += "Clip Planes Enable : ";
-    appendUIntLine(GetState(VXRENDERSTATE_CLIPPLANEENABLE));
+    AppendStateUIntLine(GetState(VXRENDERSTATE_CLIPPLANEENABLE));
 
     m_StateString += "Inverse Winding : ";
-    appendOnOff(GetState(VXRENDERSTATE_INVERSEWINDING) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_INVERSEWINDING) != 0);
 
     m_StateString += "Texture Target : ";
-    appendOnOff(GetState(VXRENDERSTATE_TEXTURETARGET) != 0);
+    AppendStateOnOffLine(GetState(VXRENDERSTATE_TEXTURETARGET) != 0);
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {

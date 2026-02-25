@@ -219,6 +219,9 @@ private:
     void ExecutePostSpriteCallbacks();
     void LoadPVInformationTexture();
     void DrawPVInformationWatermark();
+    void AppendStateOnOffLine(CKBOOL on);
+    void AppendStateUIntLine(CKDWORD value);
+    void AppendStateEnumLine(CKDWORD value, const char *const *table, int tableSize);
     void FillStateString();
 
     static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cam);
