@@ -148,8 +148,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     CKSpriteDesc *spriteDesc = rstCtx->GetSpriteData(m_ObjectIndex);
 
     if (spriteDesc) {
-        if (!spriteDesc->Format.AlphaMask && spriteDesc->Format.Flags < 0x13 && (m_BitmapData.m_BitmapFlags &
-            CKBITMAPDATA_TRANSPARENT)) {
+        if (!spriteDesc->Format.AlphaMask && spriteDesc->Format.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT)) {
             rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_SPRITE);
             reload = TRUE;
         }
@@ -189,8 +188,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     CKTextureDesc spriteDesc;
     spriteDesc.Format.Width = m_BitmapData.m_Width;
     spriteDesc.Format.Height = m_BitmapData.m_Height;
-    spriteDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_SPRITE | CKRST_TEXTURE_RGB |
-        CKRST_TEXTURE_ALPHA;
+    spriteDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_SPRITE | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     spriteDesc.MipMapCount = 0;
 
     VxPixelFormat2ImageDesc(m_VideoFormat, spriteDesc.Format);
@@ -209,8 +207,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     }
 
     if (m_RasterizerContext->CreateObject(m_ObjectIndex, CKRST_OBJ_SPRITE, &spriteDesc)) {
-        CKBOOL res = Restore(Clamping);
-        return res;
+        return Restore(Clamping);
     }
     return FALSE;
 }
@@ -337,17 +334,17 @@ CKStateChunk *RCKSprite::Save(CKFile *file, CKDWORD flags) {
     chunk->AddChunkAndDelete(baseChunk);
 
     if (file) {
-        CKDWORD bitmapFlags[] = {0x200000, 0x10000000, 0x800000, 0x400000};
-        m_BitmapData.DumpToChunk(chunk, m_Context, file, bitmapFlags);
+        CKDWORD identifiers[] = {0x200000, 0x10000000, 0x800000, 0x400000};
+        m_BitmapData.DumpToChunk(chunk, m_Context, file, identifiers);
 
-        chunk->WriteIdentifier(0x20000);
+        chunk->WriteIdentifier(CK_STATESAVE_SPRITETRANSPARENT);
         chunk->WriteDword(GetTransparentColor());
         chunk->WriteDword(IsTransparent());
 
-        chunk->WriteIdentifier(0x10000);
+        chunk->WriteIdentifier(CK_STATESAVE_SPRITECURRENTIMAGE);
         chunk->WriteInt(GetCurrentSlot());
 
-        chunk->WriteIdentifier(0x20000000);
+        chunk->WriteIdentifier(CK_STATESAVE_SPRITEFORMAT);
         chunk->WriteDword(m_BitmapData.m_SaveOptions);
 
         if (m_BitmapData.m_SaveProperties) {
@@ -357,12 +354,12 @@ CKStateChunk *RCKSprite::Save(CKFile *file, CKDWORD flags) {
         }
     } else {
         if (flags & 0x20000) {
-            chunk->WriteIdentifier(0x20000);
+            chunk->WriteIdentifier(CK_STATESAVE_SPRITETRANSPARENT);
             chunk->WriteDword(GetTransparentColor());
             chunk->WriteDword(IsTransparent());
         }
         if (flags & 0x10000) {
-            chunk->WriteIdentifier(0x10000);
+            chunk->WriteIdentifier(CK_STATESAVE_SPRITECURRENTIMAGE);
             chunk->WriteInt(GetCurrentSlot());
         }
     }
@@ -381,7 +378,7 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
     RCK2dEntity::Load(chunk, file);
 
     if (file) {
-        if (chunk->SeekIdentifier(0x80000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_SPRITESHARED)) {
             RCKSprite *src = (RCKSprite *) chunk->ReadObject(m_Context);
             CopySpriteData(src);
         } else {
@@ -390,14 +387,14 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
             m_BitmapData.ReadFromChunk(chunk, m_Context, file, identifiers);
             m_SourceRect = savedSrcRect;
 
-            if (chunk->SeekIdentifier(0x20000)) {
+            if (chunk->SeekIdentifier(CK_STATESAVE_SPRITETRANSPARENT)) {
                 SetTransparentColor(chunk->ReadDword());
                 SetTransparent(chunk->ReadDword());
             }
-            if (chunk->SeekIdentifier(0x10000)) {
+            if (chunk->SeekIdentifier(CK_STATESAVE_SPRITECURRENTIMAGE)) {
                 SetCurrentSlot(chunk->ReadInt());
             }
-            if (chunk->SeekIdentifier(0x20000000)) {
+            if (chunk->SeekIdentifier(CK_STATESAVE_SPRITEFORMAT)) {
                 m_BitmapData.m_SaveOptions = (CK_BITMAP_SAVEOPTIONS) chunk->ReadDword();
                 void *buf = nullptr;
                 int size = chunk->ReadBuffer(&buf);
@@ -410,14 +407,14 @@ CKERROR RCKSprite::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
     } else {
-        if (chunk->SeekIdentifier(0x20000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_SPRITETRANSPARENT)) {
             SetTransparentColor(chunk->ReadDword());
             SetTransparent(chunk->ReadDword());
         }
-        if (chunk->SeekIdentifier(0x10000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_SPRITECURRENTIMAGE)) {
             SetCurrentSlot(chunk->ReadInt());
         }
-        if (chunk->SeekIdentifier(0x80000)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_SPRITESHARED)) {
             RCKSprite *src = (RCKSprite *) chunk->ReadObject(m_Context);
             CopySpriteData(src);
         }
