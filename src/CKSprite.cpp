@@ -353,12 +353,12 @@ CKStateChunk *RCKSprite::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteBuffer(0, nullptr);
         }
     } else {
-        if (flags & 0x20000) {
+        if (flags & CK_STATESAVE_SPRITETRANSPARENT) {
             chunk->WriteIdentifier(CK_STATESAVE_SPRITETRANSPARENT);
             chunk->WriteDword(GetTransparentColor());
             chunk->WriteDword(IsTransparent());
         }
-        if (flags & 0x10000) {
+        if (flags & CK_STATESAVE_SPRITECURRENTIMAGE) {
             chunk->WriteIdentifier(CK_STATESAVE_SPRITECURRENTIMAGE);
             chunk->WriteInt(GetCurrentSlot());
         }
