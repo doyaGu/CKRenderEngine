@@ -70,6 +70,8 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
     m_SpriteVideoFormat.Set("SpriteVideoFormat", _16_ARGB1555);
+    m_Options.PushBack(&m_TextureVideoFormat);
+    m_Options.PushBack(&m_SpriteVideoFormat);
 
     m_EnableScreenDump.Set("EnableScreenDump", FALSE);
     m_Options.PushBack(&m_EnableScreenDump);
@@ -125,6 +127,8 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_DefaultMat = nullptr;
     m_2DRootFore = nullptr;
     m_2DRootBack = nullptr;
+    m_2DRootForeId = 0;
+    m_2DRootBackId = 0;
 
     // Get main window for rasterizer initialization
     WIN_HANDLE mainWindow = m_Context->GetMainWindow();
@@ -269,14 +273,16 @@ CKERROR RCKRenderManager::PreClearAll() {
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCK3dEntity *entity = (RCK3dEntity *) m_Context->GetObject(ids[j]);
-                entity->RemoveAllCallbacks();
+                if (entity)
+                    entity->RemoveAllCallbacks();
             }
         } else if (CKIsChildClassOf(i, CKCID_MESH)) {
             int count = m_Context->GetObjectsCountByClassID(i);
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCKMesh *mesh = (RCKMesh *) m_Context->GetObject(ids[j]);
-                mesh->RemoveAllCallbacks();
+                if (mesh)
+                    mesh->RemoveAllCallbacks();
             }
         }
     }
@@ -951,7 +957,7 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
 
 CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     // IDA: 0x1006f7f0
-    if (DriverIndex >= m_DriverCount)
+    if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
         return nullptr;
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
