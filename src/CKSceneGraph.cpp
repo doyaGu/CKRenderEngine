@@ -56,6 +56,119 @@ static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, 
     return (prod >= 0.0f) ? 1 : -1;
 }
 
+static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGraphRootNode *root, RCKRenderContext *rc, CKDWORD flags) {
+    if (!node || !root)
+        return;
+
+    rc->m_SceneTraversalCalls++;
+    node->SetAsPotentiallyVisible();
+
+    CKBOOL clipRectSet = FALSE;
+    CKBOOL hierarchyVisible = FALSE;
+
+    if (node->m_ChildToBeParsedCount != 0) {
+        if (node->NeedsSort())
+            node->SortNodes();
+
+        if (node->m_Entity) {
+            node->m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
+
+            if (!node->m_Entity->IsInViewFrustrumHierarchic((CKRenderContext *) rc)) {
+                if (node->m_Entity->GetClassID() == CKCID_CHARACTER) {
+                    VxBbox expanded = node->m_Bbox;
+                    expanded.Max *= 2.0f;
+                    expanded.Min *= 2.0f;
+
+                    if (rc->m_RasterizerContext->ComputeBoxVisibility(expanded, TRUE, nullptr))
+                        node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
+                }
+
+                node->ClearTransparentFlags();
+                return;
+            }
+
+            if (node->m_Entity->GetClassID() == CKCID_PLACE) {
+                RCKPlace *place = (RCKPlace *) node->m_Entity;
+                VxRect &clip = place->ViewportClip();
+                if (!clip.IsNull()) {
+                    VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
+                    if (clip.IsInside(unit)) {
+                        clipRectSet = TRUE;
+
+                        VxRect rect = clip;
+                        float right = (float) rc->m_ViewportData.ViewX + (float) rc->m_ViewportData.ViewWidth;
+                        float bottom = (float) rc->m_ViewportData.ViewY + (float) rc->m_ViewportData.ViewHeight;
+                        VxRect viewport((float) rc->m_ViewportData.ViewX, (float) rc->m_ViewportData.ViewY, right, bottom);
+                        rect.TransformFromHomogeneous(viewport);
+                        rc->SetClipRect(&rect);
+                    }
+                }
+            }
+
+            if (node->m_Entity->GetClassID() == CKCID_CHARACTER)
+                node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
+
+            hierarchyVisible = node->CheckHierarchyFrustum();
+
+            if ((rc->m_MaskFree & node->m_RenderContextMask) != 0 && node->m_Entity->IsToBeRendered()) {
+                if (node->m_Entity->IsToBeRenderedLast()) {
+                    if (hierarchyVisible || node->m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags)) {
+                        node->m_TimeFpsCalc = rc->m_TimeFpsCalc;
+                        root->AddTransparentObject(node);
+                    }
+                } else {
+                    rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+                    node->m_Entity->Render((CKRenderContext *) rc, flags);
+                    rc->m_SceneTraversalTimeProfiler.Reset();
+                }
+            }
+        }
+
+        if (hierarchyVisible) {
+            CKSceneGraphNode **it = node->m_Children.Begin();
+            for (int parsed = 0; parsed < node->m_ChildToBeParsedCount; ++parsed, ++it) {
+                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
+                    (*it)->NoTestsTraversal(rc, flags);
+            }
+        } else {
+            CKSceneGraphNode **it = node->m_Children.Begin();
+            for (int parsed = 0; parsed < node->m_ChildToBeParsedCount; ++parsed, ++it) {
+                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
+                    RenderTransparentObjectsRecursive(*it, root, rc, flags);
+            }
+        }
+
+        if (clipRectSet) {
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
+            rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+        }
+
+        return;
+    }
+
+    if (!node->m_Entity)
+        return;
+
+    if (!node->m_Entity->IsToBeRendered())
+        return;
+
+    if ((node->m_RenderContextMask & rc->m_MaskFree) == 0)
+        return;
+
+    if (!node->m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags))
+        return;
+
+    if (node->m_Entity->IsToBeRenderedLast()) {
+        node->m_TimeFpsCalc = rc->m_TimeFpsCalc;
+        root->AddTransparentObject(node);
+    } else {
+        rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
+        CKDWORD renderFlags = flags | CK_RENDER_CLEARVIEWPORT;
+        node->m_Entity->Render((CKRenderContext *) rc, renderFlags);
+        rc->m_SceneTraversalTimeProfiler.Reset();
+    }
+}
+
 // =====================================================
 // CKSceneGraphNode Constructor/Destructor
 // =====================================================
@@ -116,14 +229,29 @@ void CKSceneGraphNode::AddNode(CKSceneGraphNode *node) {
 
 void CKSceneGraphNode::RemoveNode(CKSceneGraphNode *node) {
     // IDA @ 0x1007715f
+    if (!node)
+        return;
+
+    int removeIndex = node->m_Index;
+    if (removeIndex < 0 || removeIndex >= m_Children.Size() || m_Children[removeIndex] != node) {
+        removeIndex = -1;
+        for (int i = 0; i < m_Children.Size(); ++i) {
+            if (m_Children[i] == node) {
+                removeIndex = i;
+                break;
+            }
+        }
+        if (removeIndex < 0)
+            return;
+    }
+
     node->m_Parent = nullptr;
 
     // Decrement child to be parsed count if node was in parsed section
-    if (node->m_Index < m_ChildToBeParsedCount)
+    if (removeIndex < m_ChildToBeParsedCount)
         --m_ChildToBeParsedCount;
 
     // Remove from children array using iterator-style removal
-    int removeIndex = node->m_Index;
     m_Children.RemoveAt(removeIndex);
 
     // Update indices of subsequent children
@@ -283,13 +411,21 @@ void CKSceneGraphNode::SetPriority(int priority, CKBOOL propagate) {
     // Store as offset (priority + 10000) so range becomes [0, 20000]
     int newMaxPriority = p + 10000;
 
-    if (m_MaxPriority == newMaxPriority || !m_Parent) {
-        // No change or no parent - just update
-        m_MaxPriority = newMaxPriority;
-    } else {
-        // Priority changed and has parent - mark parent for resort
-        m_Parent->MarkNeedSort();
-        m_MaxPriority = newMaxPriority;
+    const int oldMaxPriority = m_MaxPriority;
+    if (oldMaxPriority == newMaxPriority) {
+        return;
+    }
+
+    m_MaxPriority = newMaxPriority;
+    if (!m_Parent) {
+        return;
+    }
+
+    // Always mark parent sort as child key changed.
+    m_Parent->MarkNeedSort();
+
+    // Recompute parent priorities when explicitly requested or when this change can affect parent max.
+    if (propagate || newMaxPriority > m_Parent->m_Priority || oldMaxPriority == m_Parent->m_Priority) {
         m_Parent->PrioritiesChanged();
     }
 }
@@ -443,114 +579,7 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
 }
 
 void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWORD flags) {
-    rc->m_SceneTraversalCalls++;
-
-    SetAsPotentiallyVisible();
-
-    CKBOOL clipRectSet = FALSE;
-    CKBOOL hierarchyVisible = FALSE;
-
-    if (m_ChildToBeParsedCount != 0) {
-        if (NeedsSort())
-            SortNodes();
-
-        if (m_Entity) {
-            m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
-
-            if (!m_Entity->IsInViewFrustrumHierarchic((CKRenderContext *) rc)) {
-                if (m_Entity->GetClassID() == CKCID_CHARACTER) {
-                    VxBbox expanded = m_Bbox;
-                    expanded.Max *= 2.0f;
-                    expanded.Min *= 2.0f;
-
-                    if (rc->m_RasterizerContext->ComputeBoxVisibility(expanded, TRUE, nullptr))
-                        m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
-                }
-
-                ClearTransparentFlags();
-                return;
-            }
-
-            if (m_Entity->GetClassID() == CKCID_PLACE) {
-                RCKPlace *place = (RCKPlace *) m_Entity;
-                VxRect &clip = place->ViewportClip();
-                if (!clip.IsNull()) {
-                    VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
-                    if (clip.IsInside(unit)) {
-                        clipRectSet = TRUE;
-
-                        VxRect rect = clip;
-                        float right = (float) rc->m_ViewportData.ViewX + (float) rc->m_ViewportData.ViewWidth;
-                        float bottom = (float) rc->m_ViewportData.ViewY + (float) rc->m_ViewportData.ViewHeight;
-                        VxRect viewport((float) rc->m_ViewportData.ViewX, (float) rc->m_ViewportData.ViewY, right, bottom);
-                        rect.TransformFromHomogeneous(viewport);
-                        rc->SetClipRect(&rect);
-                    }
-                }
-            }
-
-            if (m_Entity->GetClassID() == CKCID_CHARACTER)
-                m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
-
-            hierarchyVisible = CheckHierarchyFrustum();
-
-            if ((rc->m_MaskFree & m_RenderContextMask) != 0 && m_Entity->IsToBeRendered()) {
-                if (m_Entity->IsToBeRenderedLast()) {
-                    if (hierarchyVisible || m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags)) {
-                        m_TimeFpsCalc = rc->m_TimeFpsCalc;
-                        rc->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
-                    }
-                } else {
-                    rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-                    m_Entity->Render((CKRenderContext *) rc, flags);
-                    rc->m_SceneTraversalTimeProfiler.Reset();
-                }
-            }
-        }
-
-        if (hierarchyVisible) {
-            CKSceneGraphNode **it = m_Children.Begin();
-            for (int parsed = 0; parsed < m_ChildToBeParsedCount; ++parsed, ++it) {
-                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
-                    (*it)->NoTestsTraversal(rc, flags);
-            }
-        } else {
-            CKSceneGraphRootNode **it = (CKSceneGraphRootNode **) m_Children.Begin();
-            for (int parsed = 0; parsed < m_ChildToBeParsedCount; ++parsed, ++it) {
-                if ((rc->m_MaskFree & (*it)->m_EntityMask) != 0)
-                    (*it)->RenderTransparentObjects(rc, flags);
-            }
-        }
-
-        if (clipRectSet) {
-            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
-            rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
-        }
-
-        return;
-    }
-
-    if (!m_Entity)
-        return;
-
-    if (!m_Entity->IsToBeRendered())
-        return;
-
-    if ((m_RenderContextMask & rc->m_MaskFree) == 0)
-        return;
-
-    if (!m_Entity->IsInViewFrustrum((CKRenderContext *) rc, flags))
-        return;
-
-    if (m_Entity->IsToBeRenderedLast()) {
-        m_TimeFpsCalc = rc->m_TimeFpsCalc;
-        rc->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
-    } else {
-        rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-        CKDWORD renderFlags = flags | CK_RENDER_CLEARVIEWPORT;
-        m_Entity->Render((CKRenderContext *) rc, renderFlags);
-        rc->m_SceneTraversalTimeProfiler.Reset();
-    }
+    RenderTransparentObjectsRecursive(this, this, rc, flags);
 }
 
 void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD flags) {
@@ -701,13 +730,29 @@ void CKSceneGraphRootNode::AddTransparentObject(CKSceneGraphNode *node) {
 }
 
 void CKSceneGraphRootNode::Clear() {
+    for (CKTransparentObject *it = m_TransparentObjects.Begin(); it != m_TransparentObjects.End(); ++it) {
+        CKSceneGraphNode *node = it->m_Node;
+        if (node)
+            node->ClearInTransparentList();
+    }
+    m_TransparentObjects.Resize(0);
+
+    for (CKSceneGraphNode **it = m_Children.Begin(); it != m_Children.End(); ++it) {
+        CKSceneGraphNode *child = *it;
+        if (child) {
+            child->m_Parent = nullptr;
+            child->ClearInTransparentList();
+        }
+    }
     m_Children.Clear();
     m_ChildToBeParsedCount = 0;
     m_Index = 0;
     m_Flags = 0;
     m_Priority = 10000;
     m_MaxPriority = 10000;
-    m_TransparentObjects.Resize(0);
+    m_RenderContextMask = 0;
+    m_EntityMask = 0;
+    m_TimeFpsCalc = 0;
 }
 
 void CKSceneGraphRootNode::Check() {
@@ -716,6 +761,7 @@ void CKSceneGraphRootNode::Check() {
         CKSceneGraphNode *node = it->m_Node;
         RCK3dEntity *entity = node->m_Entity;
         if (entity && entity->IsToBeDeleted()) {
+            node->ClearInTransparentList();
             it = m_TransparentObjects.Remove(it);
         } else {
             ++it;
