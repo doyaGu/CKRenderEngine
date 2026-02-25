@@ -168,17 +168,17 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
     CKBOOL result = FALSE;
 
     // Check for cube map case
-    if ((m_BitmapFlags & CKBITMAPDATA_CUBEMAP) != 0 && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
+    if (IsCubeMap() && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
         CKTextureDesc *texDesc = m_RasterizerContext->GetTextureData(m_ObjectIndex);
         if (texDesc && (texDesc->Flags & CKRST_TEXTURE_CUBEMAP) != 0) {
             VxImageDescEx desc;
             GetImageDesc(desc);
 
-            for (CKRST_CUBEFACE face = CKRST_CUBEFACE_XPOS; face <= CKRST_CUBEFACE_ZNEG; face = static_cast<CKRST_CUBEFACE>(face + 1)) {
-                CKBYTE *imageData = LockSurfacePtr(face);
+            for (int face = CKRST_CUBEFACE_XPOS; face < 6; ++face) {
+                CKBYTE *imageData = (CKBYTE *)m_Slots[face]->m_DataBuffer;
                 if (imageData) {
                     desc.Image = imageData;
-                    result |= m_RasterizerContext->LoadCubeMapTexture(m_ObjectIndex, desc, face, -1);
+                    result |= m_RasterizerContext->LoadCubeMapTexture(m_ObjectIndex, desc, static_cast<CKRST_CUBEFACE>(face), -1);
                 }
             }
             return result;
@@ -186,7 +186,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
     }
 
     // Standard texture case
-    CKBYTE *imageData = LockSurfacePtr(GetCurrentSlot());
+    CKBYTE *imageData = (CKBYTE *)m_Slots[m_CurrentSlot]->m_DataBuffer;
     if (imageData) {
         VxImageDescEx desc;
         GetImageDesc(desc);
@@ -213,7 +213,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
                 result = m_RasterizerContext->LoadTexture(m_ObjectIndex, *mipmap, i + 1);
             }
         } else {
-            result = m_RasterizerContext->LoadTexture(m_ObjectIndex, desc, -1);
+            return m_RasterizerContext->LoadTexture(m_ObjectIndex, desc, -1);
         }
     }
 
