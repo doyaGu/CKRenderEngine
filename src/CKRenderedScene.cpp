@@ -34,15 +34,19 @@ CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
     m_AttachedCamera = nullptr;
 
     m_RootEntity = (CK3dEntity *) m_Context->CreateObject(CKCID_3DENTITY, nullptr, CK_OBJECTCREATION_NONAMECHECK);
-    m_RootEntity->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-    AddObject(m_RootEntity);
+    if (m_RootEntity) {
+        m_RootEntity->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+        AddObject(m_RootEntity);
+    }
 
     m_BackgroundMaterial = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, "Background Material", CK_OBJECTCREATION_NONAMECHECK);
-    m_BackgroundMaterial->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
-    m_BackgroundMaterial->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f));
-    m_BackgroundMaterial->SetAmbient(VxColor(0.0f, 0.0f, 0.0f));
-    m_BackgroundMaterial->SetSpecular(VxColor(0.0f, 0.0f, 0.0f));
-    m_BackgroundMaterial->SetEmissive(VxColor(0.0f, 0.0f, 0.0f));
+    if (m_BackgroundMaterial) {
+        m_BackgroundMaterial->ModifyObjectFlags(CK_OBJECT_NOTTOBELISTEDANDSAVED, 0);
+        m_BackgroundMaterial->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f));
+        m_BackgroundMaterial->SetAmbient(VxColor(0.0f, 0.0f, 0.0f));
+        m_BackgroundMaterial->SetSpecular(VxColor(0.0f, 0.0f, 0.0f));
+        m_BackgroundMaterial->SetEmissive(VxColor(0.0f, 0.0f, 0.0f));
+    }
 }
 
 CKRenderedScene::~CKRenderedScene() {
@@ -151,6 +155,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     RCKRenderManager *rm = rc->m_RenderManager;
     CKRasterizerContext *rst = rc->m_RasterizerContext;
     RCK3dEntity *rootEntity = (RCK3dEntity *) m_RootEntity;
+    if (!rst || !rootEntity)
+        return CKERR_INVALIDRENDERCONTEXT;
 
     SetDefaultRenderStates(rst);
 
@@ -158,7 +164,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     // Render background 2D sprites
     if ((Flags & CK_RENDER_BACKGROUNDSPRITES) != 0 &&
-        rm->m_2DRootBack->GetChildrenCount() > 0) {
+        rm->m_2DRootBack && rm->m_2DRootBack->GetChildrenCount() > 0) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
 
@@ -191,7 +197,11 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             rootEntity->GetPosition(&rootPos, nullptr);
             camera->InverseTransform(&camPos, &rootPos, nullptr);
 
-            float z = rc->m_NearPlane / fabsf(camPos.z);
+            float absZ = fabsf(camPos.z);
+            if (absZ < EPSILON) {
+                absZ = EPSILON;
+            }
+            float z = rc->m_NearPlane / absZ;
             float right = (camera->m_LocalBoundingBox.Max.x - camPos.x) * z;
             float left = (camera->m_LocalBoundingBox.Min.x - camPos.x) * z;
             float top = (camera->m_LocalBoundingBox.Max.y - camPos.y) * z;
@@ -301,7 +311,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     rc->m_SpriteTimeProfiler.Reset();
 
     // Render foreground 2D sprites
-    if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 && rm->m_2DRootFore->GetChildrenCount() > 0) {
+    if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 &&
+        rm->m_2DRootFore && rm->m_2DRootFore->GetChildrenCount() > 0) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
 
@@ -372,22 +383,22 @@ void CKRenderedScene::ResizeViewport(const VxRect &rect) {
 void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
+    CKDWORD fogMode = m_FogMode;
+    if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {
+        fogMode = VXFOG_LINEAR;
+    }
 
     rst->InvalidateStateCache(VXRENDERSTATE_FOGVERTEXMODE);
     rst->InvalidateStateCache(VXRENDERSTATE_FOGENABLE);
     rst->InvalidateStateCache(VXRENDERSTATE_FOGPIXELMODE);
-    rst->SetRenderState(VXRENDERSTATE_FOGENABLE, m_FogMode != VXFOG_NONE);
+    rst->SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
 
-    if (m_FogMode) {
-        if (rm->m_ForceLinearFog.Value != 0) {
-            m_FogMode = VXFOG_LINEAR;
-        }
-
+    if (fogMode != VXFOG_NONE) {
         if ((rc->m_RasterizerDriver->m_3DCaps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) == (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
-            rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, m_FogMode);
+            rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
         } else {
-            m_FogMode = VXFOG_LINEAR;
-            rst->SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, m_FogMode);
+            fogMode = VXFOG_LINEAR;
+            rst->SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, fogMode);
         }
 
         const VxMatrix &projMat = rst->m_ProjectionMatrix;
@@ -540,9 +551,17 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
     if (m_AttachedCamera) {
         m_AttachedCamera->GetAspectRatio(width, height);
     }
+    if (width <= 0)
+        width = 1;
+    if (height <= 0)
+        height = 1;
 
     int right = rc->m_Settings.m_Rect.right;
     int bottom = rc->m_Settings.m_Rect.bottom;
+    if (right <= 0)
+        right = 1;
+    if (bottom <= 0)
+        bottom = 1;
 
     int viewX = 0;
     int viewY = 0;
@@ -570,7 +589,7 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
         viewHeight = bottom;
     }
 
-    if ((rc->m_RenderFlags & CK_RENDER_USECAMERARATIO) != 0) {
+    if ((Flags & CK_RENDER_USECAMERARATIO) != 0) {
         if (m_AttachedCamera) {
             if ((m_AttachedCamera->GetFlags() & CK_3DENTITY_CAMERAIGNOREASPECT) != 0) {
                 if (forceUpdate) {
