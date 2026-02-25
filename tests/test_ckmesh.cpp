@@ -542,10 +542,10 @@ int main() {
     g_testFramework.printSummary();
     
     if (g_testFramework.allTestsPassed()) {
-        std::cout << "\n🎉 All tests passed! CKMesh implementation is working correctly." << std::endl;
+        std::cout << "\n All tests passed! CKMesh implementation is working correctly." << std::endl;
         return 0;
     } else {
-        std::cout << "\n❌ Some tests failed. Please review the implementation." << std::endl;
+        std::cout << "\nx Some tests failed. Please review the implementation." << std::endl;
         return 1;
     }
 }

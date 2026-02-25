@@ -22,7 +22,7 @@ protected:
     int m_SizeX;             // Grid X dimension
     int m_SizeY;             // Grid Y dimension
     int m_SizeZ;             // Grid Z dimension
-    int m_SizeXY;            // SizeX × SizeY
+    int m_SizeXY;            // SizeX x SizeY
     int m_SizeXYZ;           // Total cell count
     float m_Threshold;       // Max distance for "near" points
     float m_Threshold2;      // Squared threshold
