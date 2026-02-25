@@ -178,9 +178,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
                 CKBYTE *imageData = LockSurfacePtr(face);
                 if (imageData) {
                     desc.Image = imageData;
-                    result |= m_RasterizerContext->LoadCubeMapTexture(
-                        m_ObjectIndex, desc, face, -1);
-                    ReleaseSurfacePtr(face);
+                    result |= m_RasterizerContext->LoadCubeMapTexture(m_ObjectIndex, desc, face, -1);
                 }
             }
             return result;
@@ -217,8 +215,6 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
         } else {
             result = m_RasterizerContext->LoadTexture(m_ObjectIndex, desc, -1);
         }
-
-        ReleaseSurfacePtr(GetCurrentSlot());
     }
 
     return result;
