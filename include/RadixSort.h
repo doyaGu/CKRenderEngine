@@ -28,7 +28,7 @@ public:
     RadixSorter &ResetIndices();
 
 private:
-    CKDWORD *m_Histogram;  // Byte frequency counters (4 passes × 256)
+    CKDWORD *m_Histogram;  // Byte frequency counters (4 passes x 256)
     CKDWORD *m_Offset;     // Cumulative distribution offsets (256 entries)
     CKDWORD m_CurrentSize; // Current capacity of indices arrays
     CKDWORD *m_Indices;    // Primary indices array (sorted result)
