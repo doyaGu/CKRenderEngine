@@ -164,7 +164,7 @@ void RCKSpriteText::Redraw() {
 // Save: 0x100621ff
 CKStateChunk *RCKSpriteText::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *chunk = CreateCKStateChunk(CKCID_SPRITETEXT, file);
-    CKStateChunk *parentChunk = RCK2dEntity::Save(file, flags);
+    CKStateChunk *parentChunk = RCKSprite::Save(file, flags);
 
     chunk->StartWrite();
     chunk->AddChunkAndDelete(parentChunk);
