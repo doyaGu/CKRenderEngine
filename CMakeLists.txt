@@ -7,6 +7,8 @@ endif ()
 
 project(CKRenderEngine VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 # =============================================================================
 # Determine if this is a top-level project
 # =============================================================================
@@ -28,11 +30,18 @@ option(CKRE_BUILD_STATIC "Build static library" OFF)
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
 
+if (CKRE_BUILD_TESTS AND NOT CKRE_BUILD_STATIC)
+    message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests link against CK2_3DStatic")
+    set(CKRE_BUILD_STATIC ON CACHE BOOL "Build static library" FORCE)
+endif ()
+
 # =============================================================================
 # Common paths
 # =============================================================================
 # Keep include directory in one place; subdirectories should reference this.
 set(CKRE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(CKRE_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+set(CKRE_VERSION_HEADER "${CKRE_GENERATED_INCLUDE_DIR}/Version.h")
 
 # =============================================================================
 # Platform check
@@ -91,21 +100,56 @@ if (MSVC)
 endif ()
 
 # =============================================================================
-# Virtools SDK
+# Virtools SDK fallback settings
 # =============================================================================
-if (NOT TARGET VxMath OR NOT TARGET CK2)
-    set(VIRTOOLS_SDK_PATH "" CACHE PATH "Path to the Virtools SDK")
-    option(VIRTOOLS_SDK_FETCH_FROM_GIT "Fetch Virtools SDK from git if not found" OFF)
-    set(VIRTOOLS_SDK_FETCH_FROM_GIT_PATH "" CACHE FILEPATH "Location to download SDK")
+set(VIRTOOLS_SDK_PATH "" CACHE PATH "Path to the Virtools SDK")
+option(VIRTOOLS_SDK_FETCH_FROM_GIT "Fetch Virtools SDK from git if local CK2/VxMath targets are not available" OFF)
+set(VIRTOOLS_SDK_FETCH_FROM_GIT_PATH "" CACHE FILEPATH "Location to download SDK")
 
-    if (NOT VIRTOOLS_SDK_PATH)
-        if (DEFINED ENV{VIRTOOLS_SDK_PATH})
-            set(VIRTOOLS_SDK_PATH "$ENV{VIRTOOLS_SDK_PATH}" CACHE PATH "Path to the Virtools SDK" FORCE)
-        elseif (DEFINED ENV{VIRTOOLS_SDK})
-            set(VIRTOOLS_SDK_PATH "$ENV{VIRTOOLS_SDK}" CACHE PATH "Path to the Virtools SDK" FORCE)
+if (NOT VIRTOOLS_SDK_PATH)
+    if (DEFINED ENV{VIRTOOLS_SDK_PATH})
+        set(VIRTOOLS_SDK_PATH "$ENV{VIRTOOLS_SDK_PATH}" CACHE PATH "Path to the Virtools SDK" FORCE)
+    elseif (DEFINED ENV{VIRTOOLS_SDK})
+        set(VIRTOOLS_SDK_PATH "$ENV{VIRTOOLS_SDK}" CACHE PATH "Path to the Virtools SDK" FORCE)
+    endif ()
+endif ()
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+# Prefer local sibling projects first, then installed packages, then SDK-imported targets.
+if (NOT TARGET VxMath)
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VxMath/CMakeLists.txt")
+        message(STATUS "[CKRenderEngine] Using sibling VxMath project")
+        if (CKRE_BUILD_STATIC)
+            set(VXMATH_BUILD_STATIC ON CACHE BOOL "" FORCE)
+        endif ()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../VxMath" "${CMAKE_BINARY_DIR}/VxMath")
+    else ()
+        find_package(VxMath QUIET)
+        if (NOT VxMath_FOUND)
+            message(STATUS "[CKRenderEngine] VxMath package not found; falling back to SDK-imported target if available")
         endif ()
     endif ()
+endif ()
 
+if (NOT TARGET CK2)
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CK2/CMakeLists.txt")
+        message(STATUS "[CKRenderEngine] Using sibling CK2 project")
+        if (CKRE_BUILD_STATIC)
+            set(CK2_BUILD_STATIC ON CACHE BOOL "" FORCE)
+        endif ()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../CK2" "${CMAKE_BINARY_DIR}/CK2")
+    else ()
+        find_package(CK2 QUIET)
+        if (NOT CK2_FOUND)
+            message(STATUS "[CKRenderEngine] CK2 package not found; falling back to SDK-imported target if available")
+        endif ()
+    endif ()
+endif ()
+
+# Fallback to SDK-imported targets only when local/project/package targets are unavailable.
+if (NOT TARGET VxMath OR NOT TARGET CK2)
     if (NOT VIRTOOLS_SDK_PATH)
         if (VIRTOOLS_SDK_FETCH_FROM_GIT)
             include(FetchContent)
@@ -121,7 +165,7 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
             FetchContent_MakeAvailable(virtools_sdk)
             set(VIRTOOLS_SDK_PATH "${virtools_sdk_SOURCE_DIR}" CACHE PATH "Path to the Virtools SDK" FORCE)
         else ()
-            message(FATAL_ERROR "[CKRenderEngine] VIRTOOLS_SDK_PATH not set. Please specify the path or enable VIRTOOLS_SDK_FETCH_FROM_GIT")
+            message(FATAL_ERROR "[CKRenderEngine] Neither local CK2/VxMath targets nor VIRTOOLS_SDK_PATH are available.")
         endif ()
     endif ()
 
@@ -134,6 +178,10 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
     endif ()
 
     foreach (_lib IN ITEMS CK2 VxMath)
+        if (TARGET ${_lib})
+            continue()
+        endif ()
+
         find_library(VIRTOOLS_SDK_${_lib}_LIB NAMES ${_lib}
                 HINTS $ENV{VIRTOOLS_SDK_PATH} ${VIRTOOLS_SDK_PATH}
                 PATH_SUFFIXES Lib lib
@@ -142,49 +190,12 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
             message(FATAL_ERROR "[CKRenderEngine] Virtools SDK library '${_lib}' not found under ${VIRTOOLS_SDK_PATH}.")
         endif ()
 
-        if (NOT TARGET ${_lib})
-            add_library(${_lib} UNKNOWN IMPORTED)
-            set_target_properties(${_lib} PROPERTIES
-                    IMPORTED_LOCATION "${VIRTOOLS_SDK_${_lib}_LIB}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${VIRTOOLS_SDK_INCLUDE_DIR}"
-            )
-        endif ()
+        add_library(${_lib} UNKNOWN IMPORTED)
+        set_target_properties(${_lib} PROPERTIES
+                IMPORTED_LOCATION "${VIRTOOLS_SDK_${_lib}_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${VIRTOOLS_SDK_INCLUDE_DIR}"
+        )
     endforeach ()
-endif ()
-
-# =============================================================================
-# Dependencies
-# =============================================================================
-# Find or fetch VxMath
-if (NOT TARGET VxMath)
-    find_package(VxMath QUIET)
-    if (NOT VxMath_FOUND)
-        message(STATUS "[CKRenderEngine] VxMath not found, fetching from parent directory...")
-        if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VxMath/CMakeLists.txt")
-            if (CKRE_BUILD_STATIC)
-                set(VXMATH_BUILD_STATIC ON CACHE BOOL "" FORCE)
-            endif ()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../VxMath" "${CMAKE_BINARY_DIR}/VxMath")
-        else ()
-            message(FATAL_ERROR "[CKRenderEngine] VxMath not found. Please install VxMath or place it in the parent directory")
-        endif ()
-    endif ()
-endif ()
-
-# Find or fetch CK2
-if (NOT TARGET CK2)
-    find_package(CK2 QUIET)
-    if (NOT CK2_FOUND)
-        message(STATUS "[CKRenderEngine] CK2 not found, fetching from parent directory...")
-        if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../CK2/CMakeLists.txt")
-            if (CKRE_BUILD_STATIC)
-                set(CK2_BUILD_STATIC ON CACHE BOOL "" FORCE)
-            endif ()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../CK2" "${CMAKE_BINARY_DIR}/CK2")
-        else ()
-            message(FATAL_ERROR "[CKRenderEngine] CK2 not found. Please install CK2 or place it in the parent directory")
-        endif ()
-    endif ()
 endif ()
 
 # =============================================================================
@@ -198,6 +209,33 @@ add_subdirectory(src)
 if (CKRE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif ()
+
+if (CKRE_INSTALL)
+    include(CMakePackageConfigHelpers)
+
+    set(CKRE_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/CKRenderEngine")
+    configure_package_config_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CKRenderEngineConfig.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfig.cmake"
+            INSTALL_DESTINATION "${CKRE_INSTALL_CMAKEDIR}"
+    )
+    write_basic_package_version_file(
+            "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfigVersion.cmake"
+            VERSION "${PROJECT_VERSION}"
+            COMPATIBILITY SameMajorVersion
+    )
+
+    install(EXPORT CKRenderEngineTargets
+            FILE CKRenderEngineTargets.cmake
+            NAMESPACE CKRenderEngine::
+            DESTINATION "${CKRE_INSTALL_CMAKEDIR}"
+    )
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfigVersion.cmake"
+            DESTINATION "${CKRE_INSTALL_CMAKEDIR}"
+    )
 endif ()
 
 # =============================================================================
