@@ -3,6 +3,7 @@
 #include "NvStripifier.h"
 #include "RadixSort.h"
 #include "TestTriangleMultiset.h"
+#include "VertexCacheOptimizer.h"
 
 namespace {
 
@@ -110,6 +111,30 @@ void Test_NvStripifier_HighIndexFallback_UsesJoinedStream() {
     NvStripifier::DestroyStrips(strips);
 }
 
+void Test_VertexCacheOptimizer_OutOfRangeIndex_DoesNotCrash() {
+    XArray<CKWORD> indices;
+    indices.PushBack(0);
+    indices.PushBack(1);
+    indices.PushBack(7);
+    indices.PushBack(7);
+    indices.PushBack(2);
+    indices.PushBack(3);
+
+    VertexCacheOptimizer optimizer;
+    optimizer.Initialize(/*vertexCount=*/4, /*faceCount=*/2, /*cacheSize=*/16);
+    optimizer.BuildVertexFaceLists(indices);
+    optimizer.ProcessFaces(indices);
+
+    XArray<CKWORD> &out = optimizer.GetOutputIndices();
+    TestCheck(out.Size() == indices.Size(), "Optimizer should preserve all triangle indices");
+
+    XArray<TestTriCount> expected;
+    XArray<TestTriCount> actual;
+    TestBuildTriangleMultisetFromTriList(indices, expected);
+    TestBuildTriangleMultisetFromTriList(out, actual);
+    TestCheck(TestSameTriangleMultiset(expected, actual), "Optimizer should preserve triangle coverage with out-of-range indices");
+}
+
 } // namespace
 
 int main() {
@@ -120,5 +145,6 @@ int main() {
     tests.Run("Nearest point rejects spherical miss", &Test_NearestPointGrid_RejectsOutsideEuclideanThreshold);
     tests.Run("Stripifier empty input", &Test_NvStripifier_EmptyInput_ReturnsEmptyOutput);
     tests.Run("Stripifier high-index fallback", &Test_NvStripifier_HighIndexFallback_UsesJoinedStream);
+    tests.Run("Vertex cache optimizer out-of-range index", &Test_VertexCacheOptimizer_OutOfRangeIndex_DoesNotCrash);
     return tests.ExitCode();
 }
