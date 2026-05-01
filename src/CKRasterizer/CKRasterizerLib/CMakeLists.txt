@@ -36,7 +36,7 @@ target_link_libraries(CKRasterizerLib PRIVATE ${_ckre_ck2_dep} ${_ckre_vxmath_de
 
 set_target_properties(CKRasterizerLib PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-        FOLDER "Rasterizer"
+        FOLDER "RenderEngines"
 )
 
 # =============================================================================
