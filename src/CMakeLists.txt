@@ -1,7 +1,8 @@
-configure_file(Version.h.in ${CKRE_INCLUDE_DIR}/Version.h)
+file(MAKE_DIRECTORY "${CKRE_GENERATED_INCLUDE_DIR}")
+configure_file(Version.h.in "${CKRE_VERSION_HEADER}" @ONLY)
 
 set(CKRE_PUBLIC_HEADERS
-        ${CKRE_INCLUDE_DIR}/Version.h
+        ${CKRE_VERSION_HEADER}
         ${CKRE_INCLUDE_DIR}/CKRenderEngineTypes.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineEnums.h
 
@@ -123,6 +124,7 @@ endif ()
 function(ckre_configure_target TARGET_NAME)
     target_include_directories(${TARGET_NAME}
             PUBLIC
+            $<BUILD_INTERFACE:${CKRE_GENERATED_INCLUDE_DIR}>
             $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
             PRIVATE
@@ -139,7 +141,7 @@ function(ckre_configure_target TARGET_NAME)
         if (TARGET VxMathStatic)
             set(_ckre_vxmath_dep VxMathStatic)
         endif ()
-        target_link_libraries(${TARGET_NAME} PRIVATE ${_ckre_ck2_dep} ${_ckre_vxmath_dep})
+        target_link_libraries(${TARGET_NAME} PUBLIC ${_ckre_ck2_dep} ${_ckre_vxmath_dep})
     else ()
         target_link_libraries(${TARGET_NAME} PRIVATE CK2 VxMath)
     endif ()
@@ -176,6 +178,7 @@ if (CKRE_BUILD_STATIC)
 
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
     ckre_configure_target(CK2_3DStatic)
+    target_link_libraries(CK2_3DStatic PUBLIC CKRasterizerLib dbghelp)
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
@@ -189,6 +192,10 @@ endif ()
 # Installation
 # =============================================================================
 if (CKRE_INSTALL)
+    install(FILES ${CKRE_PUBLIC_HEADERS}
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
     # Install CK2_3D to RenderEngines directory (shared) or lib directory (static)
     if (TARGET CK2_3D)
         install(TARGETS CK2_3D
