@@ -1,6 +1,5 @@
 #include "CKDX9Rasterizer.h"
-
-#include <algorithm>
+#include "XUtil.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -193,10 +192,20 @@ CKDX9RasterizerContext::~CKDX9RasterizerContext()
     ReleaseStateBlocks();
     ReleaseIndexBuffers();
 
-    // Release temporary and cached resources
+    // Release temporary and cached resources that do not depend on Create/Destroy guards.
     ReleaseTempZBuffers();
-    ReleaseScreenBackup();
-    ReleaseVertexDeclarations();
+    SAFERELEASE(m_ScreenBackup);
+    if (m_Device)
+    {
+        m_Device->SetVertexDeclaration(NULL);
+    }
+    for (XNHashTable<LPDIRECT3DVERTEXDECLARATION9, DWORD>::Iterator it = m_VertexDeclarations.Begin(); it != m_VertexDeclarations.End(); ++it)
+    {
+        LPDIRECT3DVERTEXDECLARATION9 decl = *it;
+        SAFERELEASE(decl);
+    }
+    m_VertexDeclarations.Clear();
+    m_CurrentVertexFormatCache = 0;
 
     // Release major objects
     FlushObjects(CKRST_OBJ_ALL);
@@ -3027,10 +3036,10 @@ int CKDX9RasterizerContext::CopyFromMemoryBuffer(CKRECT *rect, VXBUFFER_TYPE buf
     if (rect)
     {
         // Use provided rectangle, clamped to backbuffer bounds
-        left = (std::max)(0, rect->left);
-        top = (std::max)(0, rect->top);
-        right = (std::min)((int)desc.Width, rect->right);
-        bottom = (std::min)((int)desc.Height, rect->bottom);
+        left = XMax(0, rect->left);
+        top = XMax(0, rect->top);
+        right = XMin((int)desc.Width, rect->right);
+        bottom = XMin((int)desc.Height, rect->bottom);
     }
     else
     {
@@ -3087,7 +3096,7 @@ int CKDX9RasterizerContext::CopyFromMemoryBuffer(CKRECT *rect, VXBUFFER_TYPE buf
     BYTE *srcData = img_desc.Image;
 
     // Calculate proper row size (no partial copy needed)
-    UINT rowSize = (std::min)(static_cast<UINT>(img_desc.BytesPerLine), static_cast<UINT>(lockedRect.Pitch));
+    UINT rowSize = XMin(static_cast<UINT>(img_desc.BytesPerLine), static_cast<UINT>(lockedRect.Pitch));
 
     // Copy each row
     for (UINT y = 0; y < img_desc.Height; ++y)
@@ -3110,8 +3119,8 @@ int CKDX9RasterizerContext::CopyFromMemoryBuffer(CKRECT *rect, VXBUFFER_TYPE buf
     RECT srcRect = {
         0,
         0,
-        static_cast<LONG>((std::min)(static_cast<UINT>(img_desc.Width), static_cast<UINT>(destWidth))),
-        static_cast<LONG>((std::min)(static_cast<UINT>(img_desc.Height), static_cast<UINT>(destHeight))),
+        static_cast<LONG>(XMin(static_cast<UINT>(img_desc.Width), static_cast<UINT>(destWidth))),
+        static_cast<LONG>(XMin(static_cast<UINT>(img_desc.Height), static_cast<UINT>(destHeight))),
     };
     POINT destPoint = {left, top};
 
@@ -3765,12 +3774,14 @@ HRESULT CKDX9RasterizerContext::ResetDevice()
         return hr;
 
     // Update device properties
-    UpdateDeviceProperties();
+    if (!UpdateDeviceProperties())
+        return E_FAIL;
 
     // Restore device states
-    InitializeDeviceStates();
+    if (!InitializeDeviceStates())
+        return E_FAIL;
 
-    return hr;
+    return S_OK;
 }
 
 void CKDX9RasterizerContext::ConfigureMultisampling()
@@ -3985,14 +3996,14 @@ CKBOOL CKDX9RasterizerContext::InternalDrawPrimitiveVB(VXPRIMITIVETYPE pType, CK
             primitiveCount /= 2;
             break;
         case VX_LINESTRIP:
-            primitiveCount = (std::max)(0, primitiveCount - 1);
+            primitiveCount = XMax(0, primitiveCount - 1);
             break;
         case VX_TRIANGLELIST:
             primitiveCount /= 3;
             break;
         case VX_TRIANGLESTRIP:
         case VX_TRIANGLEFAN:
-            primitiveCount = (std::max)(0, primitiveCount - 2);
+            primitiveCount = XMax(0, primitiveCount - 2);
             break;
         // Point lists don't need adjustment
         case VX_POINTLIST:
@@ -4192,14 +4203,14 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
     if ((isCubeMap || (textureCaps & CKRST_TEXTURECAPS_SQUAREONLY) != 0) && width != height)
     {
         // Make dimensions square by taking the larger value
-        width = height = (std::max)(width, height);
+        width = height = XMax(width, height);
     }
 
     // Clamp dimensions to hardware limits
-    width = (std::max)(width, static_cast<int>(driver->m_3DCaps.MinTextureWidth));
-    width = (std::min)(width, static_cast<int>(driver->m_3DCaps.MaxTextureWidth));
-    height = (std::max)(height, static_cast<int>(driver->m_3DCaps.MinTextureHeight));
-    height = (std::min)(height, static_cast<int>(driver->m_3DCaps.MaxTextureHeight));
+    width = XMax(width, static_cast<int>(driver->m_3DCaps.MinTextureWidth));
+    width = XMin(width, static_cast<int>(driver->m_3DCaps.MaxTextureWidth));
+    height = XMax(height, static_cast<int>(driver->m_3DCaps.MinTextureHeight));
+    height = XMin(height, static_cast<int>(driver->m_3DCaps.MaxTextureHeight));
 
     // Determine mipmap levels and memory pool
     UINT levels = DesiredFormat->MipMapCount != 0 ? DesiredFormat->MipMapCount + 1 : 1;
@@ -5297,11 +5308,9 @@ CKBOOL CKDX9RasterizerContext::LoadSurface(const D3DSURFACE_DESC &ddsd, const D3
     // Check if we need format conversion
     if (vxpf != VxImageDesc2PixelFormat(SurfDesc) || desc.Width != SurfDesc.Width || desc.Height != SurfDesc.Height)
     {
-        // For DXT formats, use D3DX for conversion if available
-        if ((ddsd.Format >= D3DFMT_DXT1 && ddsd.Format <= D3DFMT_DXT5) && D3DXLoadSurfaceFromMemory && m_Device)
+        // Locked block-compressed surfaces can only be handled safely by the higher-level D3DX upload path.
+        if (ddsd.Format >= D3DFMT_DXT1 && ddsd.Format <= D3DFMT_DXT5)
         {
-            // Release current lock and use D3DX for conversion
-            // (This is a hook for implementation elsewhere)
             return FALSE;
         }
 

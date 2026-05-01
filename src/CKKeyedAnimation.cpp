@@ -505,7 +505,7 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *out, CKAnimation *in, CKD
     int outAnimCount = animOut->GetAnimationCount();
 
     // Build mapping arrays: outList[i] = animOut subanim, outToIn[i] = matching animIn subanim (by entity)
-    // Use CKMemoryPool (dword-sized) to avoid std::vector and match SDK conventions.
+    // Use CKMemoryPool (dword-sized) to match SDK conventions.
     const size_t ptrBytes = sizeof(RCKObjectAnimation *);
     const size_t mappingBytes = (size_t)outAnimCount * ptrBytes * 2;
     const int mappingDwords = (int)((mappingBytes + sizeof(XDWORD) - 1) / sizeof(XDWORD));

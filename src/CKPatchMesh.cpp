@@ -1706,23 +1706,23 @@ void RCKPatchMesh::EvaluateTriPatch(CKPatch *patch, float u, float v, float w, V
     *result = P;
 }
 
+static VxVector EvaluateCubicBezier(const VxVector &p0, const VxVector &p1, const VxVector &p2, const VxVector &p3, float t) {
+    float it = 1.0f - t;
+    float it2 = it * it;
+    float t2 = t * t;
+    float b0 = it2 * it;
+    float b1 = 3.0f * t * it2;
+    float b2 = 3.0f * t2 * it;
+    float b3 = t2 * t;
+    return p0 * b0 + p1 * b1 + p2 * b2 + p3 * b3;
+}
+
 /**
  * @brief Evaluate a quadrilateral Bezier patch at parametric coordinates
  */
 void RCKPatchMesh::EvaluateQuadPatch(CKPatch *patch, float u, float v, VxVector *result) {
     if (!patch || !result)
         return;
-
-    auto cubic = [](const VxVector &p0, const VxVector &p1, const VxVector &p2, const VxVector &p3, float t) -> VxVector {
-        float it = 1.0f - t;
-        float it2 = it * it;
-        float t2 = t * t;
-        float b0 = it2 * it;
-        float b1 = 3.0f * t * it2;
-        float b2 = 3.0f * t2 * it;
-        float b3 = t2 * t;
-        return p0 * b0 + p1 * b1 + p2 * b2 + p3 * b3;
-    };
 
     // Map Virtools quad patch control points to a 4x4 bicubic grid.
     const VxVector &P00 = m_Verts[patch->v[0]];
@@ -1744,11 +1744,11 @@ void RCKPatchMesh::EvaluateQuadPatch(CKPatch *patch, float u, float v, VxVector 
     const VxVector &P22 = m_Vecs[patch->interior[2]];
     const VxVector &P12 = m_Vecs[patch->interior[3]];
 
-    VxVector Q0 = cubic(P00, P10, P20, P30, u);
-    VxVector Q1 = cubic(P01, P11, P21, P31, u);
-    VxVector Q2 = cubic(P02, P12, P22, P32, u);
-    VxVector Q3 = cubic(P03, P13, P23, P33, u);
-    *result = cubic(Q0, Q1, Q2, Q3, v);
+    VxVector Q0 = EvaluateCubicBezier(P00, P10, P20, P30, u);
+    VxVector Q1 = EvaluateCubicBezier(P01, P11, P21, P31, u);
+    VxVector Q2 = EvaluateCubicBezier(P02, P12, P22, P32, u);
+    VxVector Q3 = EvaluateCubicBezier(P03, P13, P23, P33, u);
+    *result = EvaluateCubicBezier(Q0, Q1, Q2, Q3, v);
 }
 
 /**
