@@ -13,6 +13,13 @@ void RCKRenderObject::AddToRenderContext(CKRenderContext *context) {
     m_InRenderContext |= dev->m_MaskFree;
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
         RCK3dEntity *entity = (RCK3dEntity *) this;
+        if (!entity->m_SceneGraphNode) {
+            RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
+            if (rm)
+                entity->m_SceneGraphNode = rm->CreateNode(entity);
+            if (!entity->m_SceneGraphNode)
+                return;
+        }
         if (dev->m_Start) {
             entity->m_SceneGraphNode->m_RenderContextMask = m_InRenderContext;
         } else {
@@ -27,6 +34,8 @@ void RCKRenderObject::RemoveFromRenderContext(CKRenderContext *context) {
     m_InRenderContext &= ~dev->m_MaskFree;
     if (CKIsChildClassOf(this, CKCID_3DENTITY) && !m_Context->IsInClearAll()) {
         RCK3dEntity *entity = (RCK3dEntity *) this;
+        if (!entity->m_SceneGraphNode)
+            return;
         if (dev->m_Start)
             entity->m_SceneGraphNode->m_RenderContextMask = m_InRenderContext;
         else
