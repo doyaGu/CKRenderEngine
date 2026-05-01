@@ -92,6 +92,9 @@ void VertexCacheOptimizer::ProcessFaces(const XArray<CKWORD> &indices) {
 
         for (int *cacheIt = cacheBegin; cacheIt < cacheEnd; ++cacheIt) {
             int vertexIdx = *cacheIt;
+            if (vertexIdx < 0 || vertexIdx >= m_VertexFaceLists.Size())
+                continue;
+
             XArray<int> &faceList = m_VertexFaceLists[vertexIdx];
             int *faceBegin = faceList.Begin();
             int *faceEnd = faceList.End();
@@ -186,6 +189,9 @@ void VertexCacheOptimizer::TouchFace(int faceIndex, const XArray<CKWORD> &indice
         // Add to output
         m_OutputIndices.PushBack(vertexIdx);
 
+        if ((int)vertexIdx < 0 || (int)vertexIdx >= m_VertexFaceLists.Size())
+            continue;
+
         // Check if already in cache
         if (m_CacheSet.IsSet(vertexIdx))
             continue;
@@ -226,6 +232,9 @@ void VertexCacheOptimizer::TouchFaceUncached(int faceIndex, const XArray<CKWORD>
 
 // Binary: AddCacheEntry (0x109cc)
 void VertexCacheOptimizer::AddCacheEntry(int vertexIndex) {
+    if (vertexIndex < 0 || vertexIndex >= m_VertexFaceLists.Size())
+        return;
+
     // Check if already in cache
     if (m_CacheSet.IsSet(vertexIndex))
         return;
