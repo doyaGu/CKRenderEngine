@@ -15,7 +15,7 @@ namespace {
         char buffer[1024];
         va_list args;
         va_start(args, fmt);
-        std::vsnprintf(buffer, sizeof(buffer), fmt, args);
+        _vsnprintf_s(buffer, sizeof(buffer), _TRUNCATE, fmt, args);
         va_end(args);
         CKDebugLogger::Instance().Log(buffer);
     }
@@ -75,10 +75,17 @@ namespace {
         if (record->NumberParameters > 0) {
             const DWORD count = record->NumberParameters;
             char paramBuffer[512];
-            int offset = std::snprintf(paramBuffer, sizeof(paramBuffer), "[CK2_3D] Exception parameters (%lu):", count);
+            int offset = _snprintf_s(paramBuffer, sizeof(paramBuffer), _TRUNCATE, "[CK2_3D] Exception parameters (%lu):", count);
+            if (offset < 0)
+                offset = (int)sizeof(paramBuffer);
             for (DWORD i = 0; i < count && offset < static_cast<int>(sizeof(paramBuffer)); ++i) {
-                offset += std::snprintf(paramBuffer + offset, sizeof(paramBuffer) - offset, " [%lu]=0x%p", i,
-                                        reinterpret_cast<void *>(record->ExceptionInformation[i]));
+                int written = _snprintf_s(paramBuffer + offset, sizeof(paramBuffer) - offset, _TRUNCATE,
+                                          " [%lu]=0x%p", i,
+                                          reinterpret_cast<void *>(record->ExceptionInformation[i]));
+                if (written < 0)
+                    offset = (int)sizeof(paramBuffer);
+                else
+                    offset += written;
             }
             CKDebugLogger::Instance().Log(paramBuffer);
         }
@@ -156,17 +163,20 @@ namespace {
 
             char lineBuffer[512];
             if (fileName && fileName[0]) {
-                std::snprintf(lineBuffer, sizeof(lineBuffer), "[CK2_3D]   #%02d 0x%p %s + 0x%llX (%s:%lu)", i,
-                              reinterpret_cast<void *>(addr), symbolName,
-                              static_cast<unsigned long long>(displacement), fileName, lineInfo.LineNumber);
+                _snprintf_s(lineBuffer, sizeof(lineBuffer), _TRUNCATE,
+                            "[CK2_3D]   #%02d 0x%p %s + 0x%llX (%s:%lu)", i,
+                            reinterpret_cast<void *>(addr), symbolName,
+                            static_cast<unsigned long long>(displacement), fileName, lineInfo.LineNumber);
             } else if (moduleName[0] != '\0') {
-                std::snprintf(lineBuffer, sizeof(lineBuffer), "[CK2_3D]   #%02d 0x%p %s + 0x%llX (%s)", i,
-                              reinterpret_cast<void *>(addr), symbolName,
-                              static_cast<unsigned long long>(displacement), moduleName);
+                _snprintf_s(lineBuffer, sizeof(lineBuffer), _TRUNCATE,
+                            "[CK2_3D]   #%02d 0x%p %s + 0x%llX (%s)", i,
+                            reinterpret_cast<void *>(addr), symbolName,
+                            static_cast<unsigned long long>(displacement), moduleName);
             } else {
-                std::snprintf(lineBuffer, sizeof(lineBuffer), "[CK2_3D]   #%02d 0x%p %s + 0x%llX", i,
-                              reinterpret_cast<void *>(addr), symbolName,
-                              static_cast<unsigned long long>(displacement));
+                _snprintf_s(lineBuffer, sizeof(lineBuffer), _TRUNCATE,
+                            "[CK2_3D]   #%02d 0x%p %s + 0x%llX", i,
+                            reinterpret_cast<void *>(addr), symbolName,
+                            static_cast<unsigned long long>(displacement));
             }
 
             CKDebugLogger::Instance().Log(lineBuffer);

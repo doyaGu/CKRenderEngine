@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdlib>
+#include <cstring>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -14,7 +15,10 @@ CKDebugLogger &CKDebugLogger::Instance() {
 }
 
 CKDebugLogger::CKDebugLogger()
-    : m_LogFilePath(), m_DebuggerEnabled(true), m_FileEnabled(true), m_File(nullptr) {
+    : m_DebuggerEnabled(true), m_FileEnabled(true), m_File(nullptr) {
+    InitializeCriticalSection(&m_CriticalSection);
+    m_LogFilePath[0] = '\0';
+
     char modulePath[MAX_PATH] = {0};
     HMODULE module = nullptr;
 
@@ -26,42 +30,46 @@ CKDebugLogger::CKDebugLogger()
             _splitpath_s(modulePath, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
 
             char logPath[MAX_PATH] = {0};
-            _makepath_s(logPath, drive, dir, "CK2_3D_Debug", "log");
-            m_LogFilePath = logPath;
+            _makepath_s(logPath, MAX_PATH, drive, dir, "CK2_3D_Debug", "log");
+            strncpy_s(m_LogFilePath, MAX_PATH, logPath, _TRUNCATE);
         }
     }
 
-    if (m_LogFilePath.empty()) {
-        m_LogFilePath = "CK2_3D_Debug.log";
+    if (m_LogFilePath[0] == '\0') {
+        strncpy_s(m_LogFilePath, MAX_PATH, "CK2_3D_Debug.log", _TRUNCATE);
     }
 
     const char *envPath = getenv("CK2_3D_LOG");
     if (envPath && *envPath) {
-        m_LogFilePath = envPath;
+        strncpy_s(m_LogFilePath, MAX_PATH, envPath, _TRUNCATE);
     }
 }
 
 CKDebugLogger::~CKDebugLogger() {
-    std::lock_guard<std::mutex> lock(m_Mutex);
+    EnterCriticalSection(&m_CriticalSection);
     if (m_File) {
         fflush(m_File);
         fclose(m_File);
         m_File = nullptr;
     }
+    LeaveCriticalSection(&m_CriticalSection);
+    DeleteCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::EnableDebuggerOutput(bool enable) {
-    std::lock_guard<std::mutex> lock(m_Mutex);
+    EnterCriticalSection(&m_CriticalSection);
     m_DebuggerEnabled = enable;
+    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::EnableFileOutput(bool enable) {
-    std::lock_guard<std::mutex> lock(m_Mutex);
+    EnterCriticalSection(&m_CriticalSection);
     m_FileEnabled = enable;
     if (!m_FileEnabled && m_File) {
         fclose(m_File);
         m_File = nullptr;
     }
+    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::SetLogFilePath(const char *path) {
@@ -69,12 +77,13 @@ void CKDebugLogger::SetLogFilePath(const char *path) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    m_LogFilePath = path;
+    EnterCriticalSection(&m_CriticalSection);
+    strncpy_s(m_LogFilePath, MAX_PATH, path, _TRUNCATE);
     if (m_File) {
         fclose(m_File);
         m_File = nullptr;
     }
+    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::Log(const char *msg) {
@@ -82,7 +91,7 @@ void CKDebugLogger::Log(const char *msg) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(m_Mutex);
+    EnterCriticalSection(&m_CriticalSection);
 
     if (m_DebuggerEnabled) {
         OutputDebugStringA(msg);
@@ -96,6 +105,8 @@ void CKDebugLogger::Log(const char *msg) {
             fflush(m_File);
         }
     }
+
+    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::Logf(const char *fmt, ...) {
@@ -135,10 +146,11 @@ void CKDebugLogger::LogTaggedf(const char *tag, const char *fmt, ...) {
 }
 
 void CKDebugLogger::Flush() {
-    std::lock_guard<std::mutex> lock(m_Mutex);
+    EnterCriticalSection(&m_CriticalSection);
     if (m_File) {
         fflush(m_File);
     }
+    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::OpenFileIfNeeded() {
@@ -146,5 +158,5 @@ void CKDebugLogger::OpenFileIfNeeded() {
         return;
     }
 
-    fopen_s(&m_File, m_LogFilePath.c_str(), "w");
+    fopen_s(&m_File, m_LogFilePath, "w");
 }

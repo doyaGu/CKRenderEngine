@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdio>
-#include <mutex>
-#include <string>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
 
 class CKDebugLogger {
 public:
@@ -27,11 +30,11 @@ private:
 
     void OpenFileIfNeeded();
 
-    std::string m_LogFilePath;
+    char m_LogFilePath[MAX_PATH];
     bool m_DebuggerEnabled;
     bool m_FileEnabled;
     FILE *m_File;
-    std::mutex m_Mutex;
+    CRITICAL_SECTION m_CriticalSection;
 };
 
 #define CK_LOG_RAW(msg) CKDebugLogger::Instance().Log(msg)
