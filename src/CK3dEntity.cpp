@@ -697,11 +697,12 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 RCK3dEntity::RCK3dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Context, name) {
     m_Place = 0;
     m_Parent = nullptr;
-    m_3dEntityFlags = 0,
+    m_3dEntityFlags = 0;
     m_CurrentMesh = nullptr;
-    m_ObjectAnimations = nullptr,
-    m_Skin = nullptr,
-    m_LastFrameMatrix = nullptr,
+    m_ObjectAnimations = nullptr;
+    m_Skin = nullptr;
+    m_LastFrameMatrix = nullptr;
+    m_SceneGraphNode = nullptr;
 
     m_LocalMatrix = VxMatrix::Identity();
     m_WorldMatrix = VxMatrix::Identity();
@@ -735,6 +736,25 @@ RCK3dEntity::~RCK3dEntity() {
     // Destroy skin if present
     if (m_Skin) {
         RCK3dEntity::DestroySkin();
+    }
+
+    delete m_ObjectAnimations;
+    m_ObjectAnimations = nullptr;
+
+    delete m_LastFrameMatrix;
+    m_LastFrameMatrix = nullptr;
+
+    if (m_SceneGraphNode) {
+        RCKRenderManager *renderManager = (RCKRenderManager *) m_Context->GetRenderManager();
+        if (renderManager) {
+            renderManager->DeleteNode(m_SceneGraphNode);
+        } else {
+            if (m_SceneGraphNode->m_Parent) {
+                m_SceneGraphNode->m_Parent->RemoveNode(m_SceneGraphNode);
+            }
+            delete m_SceneGraphNode;
+        }
+        m_SceneGraphNode = nullptr;
     }
 }
 

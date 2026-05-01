@@ -189,7 +189,17 @@ CKSceneGraphNode::CKSceneGraphNode(RCK3dEntity *entity) {
 }
 
 CKSceneGraphNode::~CKSceneGraphNode() {
+    for (CKSceneGraphNode **it = m_Children.Begin(); it != m_Children.End(); ++it) {
+        CKSceneGraphNode *child = *it;
+        if (!child)
+            continue;
+
+        child->m_Parent = nullptr;
+        child->m_Index = 0;
+    }
+
     m_Children.Clear();
+    m_ChildToBeParsedCount = 0;
 }
 
 // =====================================================
