@@ -221,12 +221,14 @@ CKAnimation *RCKBodyPart::GetExclusiveAnimation() const {
 }
 
 void RCKBodyPart::GetRotationJoint(CKIkJoint *joint) const {
-    // IDA: 0x1000e857 - direct memcpy, no null check
+    if (!joint)
+        return;
     memcpy(joint, &m_RotationJoint, sizeof(CKIkJoint));
 }
 
 void RCKBodyPart::SetRotationJoint(const CKIkJoint *joint) {
-    // IDA: 0x1000e87b - direct memcpy, no null check or flag modification
+    if (!joint)
+        return;
     memcpy(&m_RotationJoint, joint, sizeof(CKIkJoint));
 }
 

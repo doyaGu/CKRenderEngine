@@ -1658,7 +1658,7 @@ void RCKCharacter::RemoveSecondaryAnimationAt(int index) {
 
     CKAnimation *anim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
     if (anim) {
-        PreDeleteBodyPartsForAnimation(nullptr); // Pass null to indicate no animation context
+        PreDeleteBodyPartsForAnimation(anim);
     }
 
     const int newCount = m_SecondaryAnimationsCount - 1;

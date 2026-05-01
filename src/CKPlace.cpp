@@ -12,6 +12,22 @@
 // Static class ID
 CK_CLASSID RCKPlace::m_ClassID = CKCID_PLACE;
 
+static bool HasPortalEntry(const XSArray<CKPortalEntry> &portals, CKPlace *place, CK3dEntity *portal) {
+    CKPortalEntry entry;
+    entry.place = place;
+    entry.portal = portal;
+    return portals.Find(entry) != portals.End();
+}
+
+static void AddPortalEntry(XSArray<CKPortalEntry> &portals, CKPlace *place, CK3dEntity *portal) {
+    if (!HasPortalEntry(portals, place, portal)) {
+        CKPortalEntry entry;
+        entry.place = place;
+        entry.portal = portal;
+        portals.PushBack(entry);
+    }
+}
+
 /**
  * @brief RCKPlace constructor
  * @param Context The CKContext instance
@@ -422,25 +438,22 @@ void RCKPlace::AddPortal(CKPlace *place, CK3dEntity *portal) {
         return;
     }
 
+    RCKPlace *otherPlace = reinterpret_cast<RCKPlace *>(place);
+    if (otherPlace == this)
+        return;
+
     // Portal must have VX_PORTAL flag if specified
     if (portal && (portal->GetFlags() & CK_3DENTITY_PORTAL) == 0) {
         return;
     }
 
-    CKPortalEntry entry;
-    entry.place = place;
-    entry.portal = nullptr;
+    if (HasPortalEntry(m_Portals, place, nullptr)) {
+        return;
+    }
 
-    CKPortalEntry *it = m_Portals.Find(entry);
-    if (it == m_Portals.End()) {
-        entry.portal = portal;
-        it = m_Portals.Find(entry);
-        if (it == m_Portals.End()) {
-            // Not found, add the portal entry
-            m_Portals.PushBack(entry);
-            entry.place = reinterpret_cast<CKPlace *>(this);
-            m_Portals.PushBack(entry);
-        }
+    if (!HasPortalEntry(m_Portals, place, portal)) {
+        AddPortalEntry(m_Portals, place, portal);
+        AddPortalEntry(otherPlace->m_Portals, reinterpret_cast<CKPlace *>(this), portal);
     }
 }
 
@@ -453,12 +466,20 @@ void RCKPlace::AddPortal(CKPlace *place, CK3dEntity *portal) {
  * Removes from both this place and the target place
  */
 void RCKPlace::RemovePortal(CKPlace *place, CK3dEntity *portal) {
+    if (!place) {
+        return;
+    }
+
+    RCKPlace *otherPlace = reinterpret_cast<RCKPlace *>(place);
+    if (otherPlace == this)
+        return;
+
     CKPortalEntry entry;
     entry.place = place;
     entry.portal = portal;
     m_Portals.Remove(entry);
     entry.place = reinterpret_cast<CKPlace *>(this);
-    m_Portals.Remove(entry);
+    otherPlace->m_Portals.Remove(entry);
 }
 
 /**

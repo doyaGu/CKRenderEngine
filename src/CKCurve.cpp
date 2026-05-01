@@ -738,16 +738,14 @@ int RCKCurve::GetStepCount() {
 
 CKERROR RCKCurve::CreateLineMesh() {
     // Based on decompilation at 0x10014F99
-    char buffer[256];
-    buffer[0] = '\0';
-
+    XString buffer;
     CKSTRING name = GetName();
     if (name && name[0]) {
-        strcpy(buffer, name);
+        buffer << name;
     }
-    strcat(buffer, "LineMesh");
+    buffer << "LineMesh";
 
-    RCKMesh *mesh = (RCKMesh *) m_Context->CreateObject(CKCID_MESH, buffer, CK_OBJECTCREATION_SameDynamic);
+    RCKMesh *mesh = (RCKMesh *) m_Context->CreateObject(CKCID_MESH, buffer.Str(), CK_OBJECTCREATION_SameDynamic);
     if (!mesh) {
         return CKERR_OUTOFMEMORY;
     }

@@ -149,6 +149,13 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
             m_Rasterizers.PushBack(rasterizer);
             ++rstInfo;
         } else {
+            if (rstInfo->DllInstance) {
+                VxSharedLibrary sl;
+                sl.Attach(rstInfo->DllInstance);
+                sl.ReleaseLibrary();
+                rstInfo->DllInstance = nullptr;
+            }
+
             // Remove failed rasterizer info - move to next without incrementing
             rstInfo = g_RasterizersInfo.Remove(rstInfo);
         }

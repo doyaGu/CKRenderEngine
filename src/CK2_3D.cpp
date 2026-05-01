@@ -53,6 +53,8 @@ CKPluginInfo g_PluginInfo;
 // Exported for use by RCKRenderManager
 XClassArray<CKRasterizerInfo> g_RasterizersInfo;
 
+void ReleaseRasterizers();
+
 void RegisterRasterizer(const char *dll) {
     if (!dll || *dll == '\0')
         return;
@@ -166,6 +168,11 @@ CKERROR InitInstanceFct(CKContext *context) {
     return CK_OK;
 }
 
+CKERROR ExitInstanceFct(CKContext *context) {
+    ReleaseRasterizers();
+    return CK_OK;
+}
+
 PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
     EnumerateRasterizers();
     InitializeCK2_3D();
@@ -177,7 +184,7 @@ PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
     g_PluginInfo.m_Type = CKPLUGIN_RENDERENGINE_DLL;
     g_PluginInfo.m_Version = 0x000001;
     g_PluginInfo.m_InitInstanceFct = InitInstanceFct;
-    g_PluginInfo.m_ExitInstanceFct = nullptr;
+    g_PluginInfo.m_ExitInstanceFct = ExitInstanceFct;
     g_PluginInfo.m_GUID = VIRTOOLS_RENDERENGIEN_GUID;
     g_PluginInfo.m_Summary = "Virtools Default Rendering Engine";
     return &g_PluginInfo;
@@ -186,8 +193,11 @@ PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
 void ReleaseRasterizers() {
     const int count = g_RasterizersInfo.Size();
     for (int i = 0; i < count; ++i) {
-        VxSharedLibrary sl;
         CKRasterizerInfo &info = g_RasterizersInfo[i];
+        if (!info.DllInstance)
+            continue;
+
+        VxSharedLibrary sl;
         sl.Attach(info.DllInstance);
         sl.ReleaseLibrary();
         info.DllInstance = nullptr;
@@ -204,7 +214,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
         break;
     case DLL_PROCESS_DETACH:
         CKRemoveExceptionHandler();
-        ReleaseRasterizers();
         break;
     default:
         break;

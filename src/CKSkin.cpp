@@ -184,7 +184,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
     if (!VertexPtr)
         return FALSE;
 
-    int skinVertexCount = m_VertexData.Size();
+    const int skinVertexCount = m_VertexData.Size();
     if (skinVertexCount == 0)
         return FALSE;
 
@@ -196,9 +196,11 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
         BuildBonePointLists();
 
     // Initialize output arrays
+    const int outputVertexCount = (VertexCount < skinVertexCount) ? VertexCount : skinVertexCount;
+
     if (m_Flags & 1) {
         // Weighted mode: handle vertices individually based on bone count
-        for (int i = 0; i < skinVertexCount; ++i) {
+        for (int i = 0; i < outputVertexCount; ++i) {
             VxVector *outPos = (VxVector *) (VertexPtr + i * VStride);
             RCKSkinVertexData &vd = m_VertexData[i];
             int boneCount = vd.GetBoneCount();
