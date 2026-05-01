@@ -30,6 +30,9 @@ RadixSorter::~RadixSorter() {
 /// Sorts 32-bit integers using 4-pass radix sort.
 /// Includes temporal coherence optimization and pass skipping.
 RadixSorter &RadixSorter::Sort(CKDWORD *input, CKDWORD nb, bool signedvalues) {
+    if (!input || nb == 0)
+        return *this;
+
     // Resize if needed
     if (nb > m_CurrentSize) {
         delete[] m_Indices2;
@@ -146,6 +149,9 @@ RadixSorter &RadixSorter::Sort(CKDWORD *input, CKDWORD nb, bool signedvalues) {
 /// Sorts floats using radix sort on their binary representation.
 /// Negative floats are sorted in reverse order.
 RadixSorter &RadixSorter::Sort(float *input2, CKDWORD nb) {
+    if (!input2 || nb == 0)
+        return *this;
+
     CKDWORD *input = (CKDWORD *) input2;
 
     // Resize if needed
