@@ -1,64 +1,13 @@
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <exception>
-#include <iostream>
-#include <map>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
 #include "MeshStriper.h"
+#include "TestTriangleMultiset.h"
 
 namespace {
 
-struct TriKey {
-    std::array<int, 3> v;
-
-    static TriKey From(int a, int b, int c) {
-        TriKey t{{a, b, c}};
-        std::sort(t.v.begin(), t.v.end());
-        return t;
-    }
-
-    bool operator<(const TriKey &o) const {
-        return v < o.v;
-    }
-
-    bool operator==(const TriKey &o) const {
-        return v == o.v;
-    }
-};
-
-[[noreturn]] void Fail(const std::string &msg) {
-    throw std::runtime_error(msg);
-}
-
-void Check(bool cond, const std::string &msg) {
-    if (!cond)
-        Fail(msg);
-}
-
-std::map<TriKey, int> BuildTriangleMultisetFromTriList(const XArray<CKWORD> &triIndices) {
-    std::map<TriKey, int> tris;
-    Check((triIndices.Size() % 3) == 0, "Input triangle index list must be multiple of 3");
-
-    for (int i = 0; i < triIndices.Size(); i += 3) {
-        const int a = (int)triIndices[i + 0];
-        const int b = (int)triIndices[i + 1];
-        const int c = (int)triIndices[i + 2];
-        tris[TriKey::From(a, b, c)]++;
-    }
-
-    return tris;
-}
-
 template <typename IndexT>
-std::map<TriKey, int> BuildTriangleMultisetFromStripSegments(const IndexT *indices, const CKDWORD *stripLens, CKDWORD stripCount) {
-    std::map<TriKey, int> tris;
+void BuildTriangleMultisetFromStripSegments(const IndexT *indices, const CKDWORD *stripLens, CKDWORD stripCount, XArray<TestTriCount> &tris) {
+    tris.Resize(0);
     if (!indices || !stripLens)
-        return tris;
+        return;
 
     const IndexT *cur = indices;
     for (CKDWORD s = 0; s < stripCount; s++) {
@@ -78,13 +27,11 @@ std::map<TriKey, int> BuildTriangleMultisetFromStripSegments(const IndexT *indic
             if (a == b || b == c || a == c)
                 continue;
 
-            tris[TriKey::From(a, b, c)]++;
+            TestAddTriangle(tris, TestMakeTriKey(a, b, c));
         }
 
         cur += len;
     }
-
-    return tris;
 }
 
 XArray<CKWORD> MakeTwoTrianglesSquare() {
@@ -161,77 +108,54 @@ XArray<CKWORD> MakeNonManifoldEdge() {
 
 void RunMeshStriperAndCheck(const XArray<CKWORD> &inTris, int triCount, CKDWORD flags) {
     MeshStriper ms;
-    Check(ms.Init((CKWORD *)inTris.Begin(), triCount, flags) == TRUE, "MeshStriper::Init failed");
+    TestCheck(ms.Init((CKWORD *)inTris.Begin(), triCount, flags) == TRUE, "MeshStriper::Init failed");
 
     MeshStriper::Result r{};
-    Check(ms.Compute(&r) == TRUE, "MeshStriper::Compute failed");
-    Check(r.NbStrips > 0, "NbStrips should be > 0");
-    Check(r.StripLengths != nullptr, "StripLengths is null");
-    Check(r.StripIndices != nullptr, "StripIndices is null");
+    TestCheck(ms.Compute(&r) == TRUE, "MeshStriper::Compute failed");
+    TestCheck(r.NbStrips > 0, "NbStrips should be > 0");
+    TestCheck(r.StripLengths != nullptr, "StripLengths is null");
+    TestCheck(r.StripIndices != nullptr, "StripIndices is null");
 
-    const auto expected = BuildTriangleMultisetFromTriList(inTris);
+    XArray<TestTriCount> expected;
+    XArray<TestTriCount> actual;
+    TestBuildTriangleMultisetFromTriList(inTris, expected);
 
     if ((flags & CKMESHSTRIPER_INDEX16) != 0) {
-        const auto actual = BuildTriangleMultisetFromStripSegments(
+        BuildTriangleMultisetFromStripSegments(
             (const CKWORD *)r.StripIndices,
             r.StripLengths,
-            r.NbStrips);
-        Check(expected == actual, "Triangle set mismatch (INDEX16)");
+            r.NbStrips,
+            actual);
+        TestCheck(TestSameTriangleMultiset(expected, actual), "Triangle set mismatch (INDEX16)");
     } else {
-        const auto actual = BuildTriangleMultisetFromStripSegments(
+        BuildTriangleMultisetFromStripSegments(
             (const CKDWORD *)r.StripIndices,
             r.StripLengths,
-            r.NbStrips);
-        Check(expected == actual, "Triangle set mismatch (INDEX32)");
+            r.NbStrips,
+            actual);
+        TestCheck(TestSameTriangleMultiset(expected, actual), "Triangle set mismatch (INDEX32)");
     }
 
     if ((flags & CKMESHSTRIPER_CONNECTALL) != 0) {
-        Check(r.NbStrips == 1, "CONNECTALL should produce exactly 1 strip");
-        Check(r.StripLengths[0] >= 3, "CONNECTALL strip length should be >= 3 for non-empty meshes");
+        TestCheck(r.NbStrips == 1, "CONNECTALL should produce exactly 1 strip");
+        TestCheck(r.StripLengths[0] >= 3, "CONNECTALL strip length should be >= 3 for non-empty meshes");
     }
 }
-
-struct TestFramework {
-    int total = 0;
-    int passed = 0;
-
-    void Run(const std::string &name, void (*fn)()) {
-        total++;
-        std::cout << "Running test: " << name << "... ";
-        try {
-            fn();
-            passed++;
-            std::cout << "PASSED\n";
-        } catch (const std::exception &e) {
-            std::cout << "FAILED: " << e.what() << "\n";
-        } catch (...) {
-            std::cout << "FAILED: unknown exception\n";
-        }
-    }
-
-    int ExitCode() const {
-        std::cout << "\n=== Test Summary ===\n";
-        std::cout << "Total tests: " << total << "\n";
-        std::cout << "Passed: " << passed << "\n";
-        std::cout << "Failed: " << (total - passed) << "\n";
-        return (passed == total) ? 0 : 1;
-    }
-};
 
 // -------------------- Tests --------------------
 
 void Test_InitRejectsInvalidInput() {
     MeshStriper ms;
-    Check(ms.Init(nullptr, 1, 0) == FALSE, "Init should fail with null triList");
+    TestCheck(ms.Init(nullptr, 1, 0) == FALSE, "Init should fail with null triList");
 
     XArray<CKWORD> empty;
-    Check(ms.Init((CKWORD *)empty.Begin(), 0, 0) == FALSE, "Init should fail with triCount<=0");
+    TestCheck(ms.Init((CKWORD *)empty.Begin(), 0, 0) == FALSE, "Init should fail with triCount<=0");
 }
 
 void Test_ComputeRejectsWithoutInit() {
     MeshStriper ms;
     MeshStriper::Result r{};
-    Check(ms.Compute(&r) == FALSE, "Compute should fail without Init");
+    TestCheck(ms.Compute(&r) == FALSE, "Compute should fail without Init");
 }
 
 void Test_SingleTriangle_Index16_NoConnect() {
@@ -271,7 +195,7 @@ void Test_DisconnectedSquares_ConnectAll() {
 void Test_NonManifoldEdge_InitFails() {
     XArray<CKWORD> in = MakeNonManifoldEdge();
     MeshStriper ms;
-    Check(ms.Init((CKWORD *)in.Begin(), /*triCount=*/3, CKMESHSTRIPER_INDEX16) == FALSE, "Init should fail for non-manifold edge input");
+    TestCheck(ms.Init((CKWORD *)in.Begin(), /*triCount=*/3, CKMESHSTRIPER_INDEX16) == FALSE, "Init should fail for non-manifold edge input");
 }
 
 } // namespace

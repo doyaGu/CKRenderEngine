@@ -1,94 +1,35 @@
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <exception>
-#include <iostream>
-#include <map>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
 #include "NvStripifier.h"
+#include "TestTriangleMultiset.h"
 
 namespace {
 
-struct TriKey {
-    std::array<int, 3> v;
-
-    static TriKey From(int a, int b, int c) {
-        TriKey t{{a, b, c}};
-        std::sort(t.v.begin(), t.v.end());
-        return t;
-    }
-
-    bool operator<(const TriKey &o) const {
-        return v < o.v;
-    }
-
-    bool operator==(const TriKey &o) const {
-        return v == o.v;
-    }
-};
-
-[[noreturn]] void Fail(const std::string &msg) {
-    throw std::runtime_error(msg);
-}
-
-void Check(bool cond, const std::string &msg) {
-    if (!cond)
-        Fail(msg);
-}
-
-std::map<TriKey, int> BuildTriangleMultisetFromTriList(const XArray<CKWORD> &triIndices) {
-    std::map<TriKey, int> tris;
-    Check((triIndices.Size() % 3) == 0, "Input triangle index list must be multiple of 3");
-
-    for (int i = 0; i < triIndices.Size(); i += 3) {
-        const int a = (int)triIndices[i + 0];
-        const int b = (int)triIndices[i + 1];
-        const int c = (int)triIndices[i + 2];
-        tris[TriKey::From(a, b, c)]++;
-    }
-
-    return tris;
-}
-
-std::map<TriKey, int> BuildTriangleMultisetFromStripStream(const XArray<CKWORD> &stripStream) {
-    std::map<TriKey, int> tris;
-
-    std::vector<CKWORD> cur;
-    cur.reserve(64);
-
-    auto flush = [&]() {
-        cur.clear();
-    };
-
+void BuildTriangleMultisetFromStripStream(const XArray<CKWORD> &stripStream, XArray<TestTriCount> &tris) {
+    tris.Resize(0);
+    XArray<CKWORD> cur;
+    cur.Reserve(64);
     const CKWORD RESTART = (CKWORD)0xFFFF;
 
     for (int i = 0; i < stripStream.Size(); i++) {
         const CKWORD idx = stripStream[i];
         if (idx == RESTART) {
-            flush();
+            cur.Resize(0);
             continue;
         }
 
-        cur.push_back(idx);
-        if (cur.size() < 3)
+        cur.PushBack(idx);
+        if (cur.Size() < 3)
             continue;
 
-        const int a = (int)cur[cur.size() - 3];
-        const int b = (int)cur[cur.size() - 2];
-        const int c = (int)cur[cur.size() - 1];
+        const int a = (int)cur[cur.Size() - 3];
+        const int b = (int)cur[cur.Size() - 2];
+        const int c = (int)cur[cur.Size() - 1];
 
         // Skip degenerates.
         if (a == b || b == c || a == c)
             continue;
 
-        tris[TriKey::From(a, b, c)]++;
+        TestAddTriangle(tris, TestMakeTriKey(a, b, c));
     }
-
-    return tris;
 }
 
 bool FaceSharesTwoVertices(const NvFaceInfo *a, const NvFaceInfo *b) {
@@ -115,9 +56,7 @@ void CheckStripFaceAdjacency(const XArray<NvStripInfo *> &strips) {
             const NvFaceInfo *prev = strip->Faces[i - 1];
             const NvFaceInfo *cur = strip->Faces[i];
             if (!FaceSharesTwoVertices(prev, cur)) {
-                std::ostringstream oss;
-                oss << "Strip " << s << " has non-adjacent consecutive faces at " << (i - 1) << " and " << i;
-                Fail(oss.str());
+                TestFail("Strip has non-adjacent consecutive faces");
             }
         }
     }
@@ -175,57 +114,27 @@ void RunStripifyAndCheck(
     CKDWORD outStripCount = 0;
     NvStripifier::CreateStrips(strips, out, joinStrips, outStripCount);
 
-    const auto expected = BuildTriangleMultisetFromTriList(inTris);
-    const auto actual = BuildTriangleMultisetFromStripStream(out);
+    XArray<TestTriCount> expected;
+    XArray<TestTriCount> actual;
+    TestBuildTriangleMultisetFromTriList(inTris, expected);
+    BuildTriangleMultisetFromStripStream(out, actual);
 
-    if (expected != actual) {
-        std::ostringstream oss;
-        oss << "Triangle sets differ (joinStrips=" << (joinStrips ? "true" : "false") << ")\n";
-        oss << "Expected unique tris: " << expected.size() << ", actual: " << actual.size() << "\n";
-        Fail(oss.str());
-    }
+    TestCheck(TestSameTriangleMultiset(expected, actual), "Triangle sets differ");
 
     // Basic stream invariants.
     if (joinStrips) {
         // Joined output should not contain restart markers.
         for (int i = 0; i < out.Size(); i++)
-            Check(out[i] != (CKWORD)0xFFFF, "joinStrips=true stream contains 0xFFFF restart");
-        Check(outStripCount == (out.Size() > 0 ? 1u : 0u), "joinStrips=true outStripCount unexpected");
+            TestCheck(out[i] != (CKWORD)0xFFFF, "joinStrips=true stream contains 0xFFFF restart");
+        TestCheck(outStripCount == (out.Size() > 0 ? 1u : 0u), "joinStrips=true outStripCount unexpected");
     } else {
         // Non-joined output stripCount must be >= 1 when non-empty.
         if (out.Size() > 0)
-            Check(outStripCount >= 1u, "joinStrips=false outStripCount should be >= 1 when output non-empty");
+            TestCheck(outStripCount >= 1u, "joinStrips=false outStripCount should be >= 1 when output non-empty");
     }
 
     NvStripifier::DestroyStrips(strips);
 }
-
-struct TestFramework {
-    int total = 0;
-    int passed = 0;
-
-    void Run(const std::string &name, void (*fn)()) {
-        total++;
-        std::cout << "Running test: " << name << "... ";
-        try {
-            fn();
-            passed++;
-            std::cout << "PASSED\n";
-        } catch (const std::exception &e) {
-            std::cout << "FAILED: " << e.what() << "\n";
-        } catch (...) {
-            std::cout << "FAILED: unknown exception\n";
-        }
-    }
-
-    int ExitCode() const {
-        std::cout << "\n=== Test Summary ===\n";
-        std::cout << "Total tests: " << total << "\n";
-        std::cout << "Passed: " << passed << "\n";
-        std::cout << "Failed: " << (total - passed) << "\n";
-        return (passed == total) ? 0 : 1;
-    }
-};
 
 // -------------------- Tests --------------------
 
@@ -256,11 +165,13 @@ void Test_TwoTriangles_MinLenTooHigh_ProducesTwoStrips() {
     NvStripifier::CreateStrips(strips, out, /*joinStrips=*/false, outStripCount);
 
     // With a very high min, we expect no committed multi-face strip; both faces should fall back to single-triangle strips.
-    Check(outStripCount == 2u, "Expected 2 strips for two triangles with very high minStripLen");
+    TestCheck(outStripCount == 2u, "Expected 2 strips for two triangles with very high minStripLen");
 
-    const auto expected = BuildTriangleMultisetFromTriList(in);
-    const auto actual = BuildTriangleMultisetFromStripStream(out);
-    Check(expected == actual, "Triangle set mismatch for high minStripLen case");
+    XArray<TestTriCount> expected;
+    XArray<TestTriCount> actual;
+    TestBuildTriangleMultisetFromTriList(in, expected);
+    BuildTriangleMultisetFromStripStream(out, actual);
+    TestCheck(TestSameTriangleMultiset(expected, actual), "Triangle set mismatch for high minStripLen case");
 
     NvStripifier::DestroyStrips(strips);
 }
