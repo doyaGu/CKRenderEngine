@@ -152,7 +152,8 @@ private:
         const XArray<CKWORD> &indices,
         CKWORD vertexCount,
         XArray<NvFaceInfo *> &outFaces,
-        XArray<NvEdgeInfo *> &outEdgeBuckets);
+        XArray<NvEdgeInfo *> &outEdgeBuckets,
+        XArray<NvEdgeInfo *> &outEdges);
 
     static bool FindAllStrips(
         XArray<NvStripInfo *> &outAllStrips,

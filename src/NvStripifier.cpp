@@ -628,10 +628,12 @@ void NvStripifier::BuildStripifyInfo(
     const XArray<CKWORD> &indices,
     CKWORD vertexCount,
     XArray<NvFaceInfo *> &outFaces,
-    XArray<NvEdgeInfo *> &outEdgeBuckets) {
+    XArray<NvEdgeInfo *> &outEdgeBuckets,
+    XArray<NvEdgeInfo *> &outEdges) {
 
     outFaces.Resize(0);
     outEdgeBuckets.Resize(0);
+    outEdges.Resize(0);
     if (indices.Size() < 3 || vertexCount == 0)
         return;
 
@@ -687,6 +689,7 @@ void NvStripifier::BuildStripifyInfo(
     for (int i = 0; i < adjEdges.Size(); i++) {
         const MeshAdjacency::Edge &e = adjEdges[i];
         NvEdgeInfo *edge = new NvEdgeInfo();
+        outEdges.PushBack(edge);
         edge->Vertex0 = (int)e.vertices[0];
         edge->Vertex1 = (int)e.vertices[1];
 
@@ -870,8 +873,23 @@ void NvStripifier::CreateStrips(
 // NvStripifier::DestroyStrips - Cleanup method
 // ============================================================================
 void NvStripifier::DestroyStrips(XArray<NvStripInfo *> &strips) {
+    XArray<NvFaceInfo *> deletedFaces;
     for (int i = 0; i < strips.Size(); i++) {
-        delete strips[i];
+        NvStripInfo *strip = strips[i];
+        if (!strip)
+            continue;
+
+        for (int j = 0; j < strip->Faces.Size(); ++j) {
+            NvFaceInfo *face = strip->Faces[j];
+            if (!face)
+                continue;
+            if (deletedFaces.Find(face) != deletedFaces.End())
+                continue;
+            deletedFaces.PushBack(face);
+            delete face;
+        }
+
+        delete strip;
     }
     strips.Resize(0);
 }
@@ -919,7 +937,8 @@ void NvStripifier::Stripify(
     // Build adjacency info
     XArray<NvFaceInfo *> faces;
     XArray<NvEdgeInfo *> edgeBuckets;
-    BuildStripifyInfo(m_Scratch, vertexCount, faces, edgeBuckets);
+    XArray<NvEdgeInfo *> edges;
+    BuildStripifyInfo(m_Scratch, vertexCount, faces, edgeBuckets, edges);
 
     // Find all strips (10 samples as in binary)
     FindAllStrips(outStrips, faces, edgeBuckets, 10, m_MinStripLength);
@@ -943,8 +962,8 @@ void NvStripifier::Stripify(
         }
     }
 
-    // Cleanup faces (edges are owned by faces via adjacency, let them leak for now)
-    // In a full implementation, we'd track ownership properly
+    for (int i = 0; i < edges.Size(); ++i)
+        delete edges[i];
 }
 
 // ============================================================================
