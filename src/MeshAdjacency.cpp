@@ -14,7 +14,11 @@ MeshAdjacency::~MeshAdjacency() {}
 // Init the class with extern data
 // the data are then copied inside and no more needed
 void MeshAdjacency::Init(CKWORD *iIndices, int iCount) {
-    XASSERT(iCount);
+    if (!iIndices || iCount <= 0) {
+        m_Faces.Resize(0);
+        m_Edges.Resize(0);
+        return;
+    }
 
     // allocating the arrays
     m_Faces.Resize(iCount);
@@ -31,7 +35,11 @@ void MeshAdjacency::Init(CKWORD *iIndices, int iCount) {
 
 // {secret}
 void MeshAdjacency::Init(CKDWORD *iIndices, int iCount) {
-    XASSERT(iCount);
+    if (!iIndices || iCount <= 0) {
+        m_Faces.Resize(0);
+        m_Edges.Resize(0);
+        return;
+    }
 
     // allocating the arrays
     m_Faces.Resize(iCount);
@@ -48,23 +56,29 @@ void MeshAdjacency::Init(CKDWORD *iIndices, int iCount) {
 
 bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
     RadixSorter Core;
+    const int edgesCount = m_Edges.Size();
+    if (edgesCount <= 0) {
+        if (!iEdges)
+            m_Edges.Resize(0);
+        return true;
+    }
 
     XArray<CKDWORD> tempFaces;
-    tempFaces.Resize(m_Edges.Size());
+    tempFaces.Resize(edgesCount);
     XArray<CKDWORD> tempV0;
-    tempV0.Resize(m_Edges.Size());
+    tempV0.Resize(edgesCount);
     XArray<CKDWORD> tempV1;
-    tempV1.Resize(m_Edges.Size());
+    tempV1.Resize(edgesCount);
 
-    for (int i = 0; i < m_Edges.Size(); i++) {
+    for (int i = 0; i < edgesCount; i++) {
         tempFaces[i] = m_Edges[i].faces[0];
         tempV0[i] = m_Edges[i].vertices[0];
         tempV1[i] = m_Edges[i].vertices[1];
     }
 
     // Multiple sort
-    CKDWORD *Sorted = Core.Sort(tempFaces.Begin(), m_Edges.Size()).Sort(tempV0.Begin(), m_Edges.Size()).Sort(
-        tempV1.Begin(), m_Edges.Size()).GetIndices();
+    CKDWORD *Sorted = Core.Sort(tempFaces.Begin(), edgesCount).Sort(tempV0.Begin(), edgesCount).Sort(
+        tempV1.Begin(), edgesCount).GetIndices();
 
     // Read the list in sorted order, look for similar edges
     CKDWORD LastRef0 = tempV0[Sorted[0]];
@@ -72,7 +86,6 @@ bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
     CKDWORD Count = 0;
     CKDWORD TmpBuffer[3];
 
-    int edgesCount = m_Edges.Size();
     for (int i = 0; i < edgesCount; i++) {
         CKDWORD Face = tempFaces[Sorted[i]]; // Owner face
         CKDWORD Ref0 = tempV0[Sorted[i]];    // Vertex ref #1
@@ -105,36 +118,27 @@ bool MeshAdjacency::Compute(bool iEdges, bool iFaces) {
     }
 
     bool Status = true;
-    if (Count == 2)
+    if (Count == 2) {
         Status = UpdateLink(TmpBuffer[0], TmpBuffer[1], LastRef0, LastRef1);
+        if (Status) {
+            m_Edges[Sorted[edgesCount - 2]].faces[1] = tempFaces[Sorted[edgesCount - 1]];
+            m_Edges[Sorted[edgesCount - 1]].faces[0] = 0xffffffff;
+        }
+    }
 
     // We don't need the edges anymore
     if (!iEdges) {
         m_Edges.Resize(0);
     } else {
-        // we have to "compress"
-        int i = 0;
-        int lastEdge = edgesCount - 1;
-        while (i != lastEdge) {
-            if (m_Edges[i++].faces[0] == 0xffffffff) {
-                // invalid edge
-                bool found = false;
-                while (i != lastEdge) {
-                    if (m_Edges[lastEdge].faces[0] != 0xffffffff) {
-                        found = true;
-                        break;
-                    }
-                    lastEdge--;
-                }
-                if (found) {
-                    // we found a replacement
-                    m_Edges[i - 1] = m_Edges[lastEdge];
-                    lastEdge--;
-                }
-            }
+        int writeIndex = 0;
+        for (int readIndex = 0; readIndex < edgesCount; ++readIndex) {
+            if (m_Edges[readIndex].faces[0] == 0xffffffff)
+                continue;
+            if (writeIndex != readIndex)
+                m_Edges[writeIndex] = m_Edges[readIndex];
+            ++writeIndex;
         }
-
-        m_Edges.Resize(i + 1);
+        m_Edges.Resize(writeIndex);
     }
 
     return Status;
