@@ -55,16 +55,10 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKVertexBuffer.h
 )
 
-set(CKRE_PRIVATE_HEADERS
-    CKDebugLogger.h
-    CKException.h
-)
+set(CKRE_PRIVATE_HEADERS)
 
 set(CKRE_SOURCES
         CK2_3D.cpp
-
-        CKDebugLogger.cpp
-        CKException.cpp
 
         CKRenderManager.cpp
         CKRenderContext.cpp
@@ -167,7 +161,6 @@ if (CKRE_BUILD_SHARED)
     )
 
     target_link_libraries(CK2_3D PRIVATE CKRasterizerLib)
-    target_link_libraries(CK2_3D PRIVATE dbghelp)
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
@@ -178,7 +171,7 @@ if (CKRE_BUILD_STATIC)
 
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
     ckre_configure_target(CK2_3DStatic)
-    target_link_libraries(CK2_3DStatic PUBLIC CKRasterizerLib dbghelp)
+    target_link_libraries(CK2_3DStatic PUBLIC CKRasterizerLib)
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
