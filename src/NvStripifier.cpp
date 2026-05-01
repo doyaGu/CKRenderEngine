@@ -385,6 +385,30 @@ static bool BuildStripIndexSequenceFromFaces(const XArray<NvFaceInfo *> &faces, 
     return true;
 }
 
+static bool SequenceContainsRestartValue(const XArray<CKWORD> &seq) {
+    for (int i = 0; i < seq.Size(); ++i) {
+        if (seq[i] == (CKWORD)0xFFFF)
+            return true;
+    }
+    return false;
+}
+
+static void AppendJoinedSequence(XArray<CKWORD> &outIndices, const XArray<CKWORD> &seq) {
+    if (seq.Size() == 0)
+        return;
+
+    if (outIndices.Size() > 0) {
+        const CKWORD last = outIndices[outIndices.Size() - 1];
+        if ((outIndices.Size() % 2) != 0)
+            outIndices.PushBack(last);
+        outIndices.PushBack(last);
+        outIndices.PushBack(seq[0]);
+    }
+
+    for (int i = 0; i < seq.Size(); ++i)
+        outIndices.PushBack(seq[i]);
+}
+
 // ============================================================================
 // NvStripInfo::Build (0x834) - Uses STATIC local variables!
 // ============================================================================
@@ -606,10 +630,14 @@ void NvStripifier::BuildStripifyInfo(
     XArray<NvFaceInfo *> &outFaces,
     XArray<NvEdgeInfo *> &outEdgeBuckets) {
 
+    outFaces.Resize(0);
+    outEdgeBuckets.Resize(0);
+    if (indices.Size() < 3 || vertexCount == 0)
+        return;
+
     int triCount = indices.Size() / 3;
 
     // Create face array
-    outFaces.Resize(0);
     outFaces.Reserve(triCount);
     for (int i = 0; i < triCount; i++) {
         NvFaceInfo *face = new NvFaceInfo();
@@ -620,7 +648,6 @@ void NvStripifier::BuildStripifyInfo(
     }
 
     // Create edge buckets
-    outEdgeBuckets.Resize(0);
     outEdgeBuckets.Resize(vertexCount + 1);
     for (int i = 0; i < outEdgeBuckets.Size(); i++)
         outEdgeBuckets[i] = nullptr;
@@ -628,8 +655,13 @@ void NvStripifier::BuildStripifyInfo(
     // Use MeshAdjacency to compute neighbors and edges
     MeshAdjacency adj;
     adj.Init((CKWORD *)indices.Begin(), triCount);
-    if (!adj.Compute(true, true))
+    if (!adj.Compute(true, true)) {
+        for (int i = 0; i < outFaces.Size(); ++i)
+            delete outFaces[i];
+        outFaces.Resize(0);
+        outEdgeBuckets.Resize(0);
         return;
+    }
 
     // Set neighbor links
     const XArray<MeshAdjacency::Face> &adjFaces = adj.GetFaces();
@@ -791,6 +823,9 @@ void NvStripifier::CreateStrips(
 
     outIndices.Resize(0);
     outStripCount = 0;
+    XArray<XArray<CKWORD> > sequences;
+    sequences.Reserve(strips.Size());
+    bool requiresJoinedFallback = false;
 
     for (int s = 0; s < strips.Size(); s++) {
         NvStripInfo *strip = strips[s];
@@ -805,30 +840,30 @@ void NvStripifier::CreateStrips(
         if (seq.Size() == 0)
             continue;
 
-        if (joinStrips) {
-            // Connect strips with degenerate triangles
-            if (outIndices.Size() > 0) {
-                CKWORD last = outIndices[outIndices.Size() - 1];
-                // Add parity-fixing degenerates if needed
-                if ((outIndices.Size() % 2) != 0)
-                    outIndices.PushBack(last);
-                outIndices.PushBack(last);
-                outIndices.PushBack(seq[0]);
-            }
-            for (int i = 0; i < seq.Size(); i++)
-                outIndices.PushBack(seq[i]);
-        } else {
-            // Separate strips with -1 (0xFFFF)
-            if (outIndices.Size() > 0)
-                outIndices.PushBack((CKWORD)0xFFFF);
-            for (int i = 0; i < seq.Size(); i++)
-                outIndices.PushBack(seq[i]);
+        if (!joinStrips && SequenceContainsRestartValue(seq))
+            requiresJoinedFallback = true;
+
+        sequences.PushBack(seq);
+    }
+
+    if (joinStrips || requiresJoinedFallback) {
+        for (int i = 0; i < sequences.Size(); ++i)
+            AppendJoinedSequence(outIndices, sequences[i]);
+        outStripCount = (outIndices.Size() > 0) ? 1 : 0;
+        return;
+    }
+
+    for (int i = 0; i < sequences.Size(); ++i) {
+        if (outIndices.Size() > 0)
+            outIndices.PushBack((CKWORD)0xFFFF);
+
+        const XArray<CKWORD> &seq = sequences[i];
+        for (int j = 0; j < seq.Size(); ++j)
+            outIndices.PushBack(seq[j]);
+        if (seq.Size() > 0) {
             outStripCount++;
         }
     }
-
-    if (joinStrips)
-        outStripCount = (outIndices.Size() > 0) ? 1 : 0;
 }
 
 // ============================================================================
@@ -862,6 +897,8 @@ void NvStripifier::Stripify(
     XArray<NvStripInfo *> &outStrips) {
 
     outStrips.Resize(0);
+    if (inIndices.Size() < 3 || vertexCount == 0)
+        return;
 
     // Binary: internalMin = max(1, minStripLength - 6)
     int internalMin = minStripLength - 6;

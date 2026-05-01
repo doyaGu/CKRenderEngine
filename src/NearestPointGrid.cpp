@@ -3,6 +3,8 @@
 
 #include "NearestPointGrid.h"
 
+#include <cmath>
+
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor
 ////////////////////////////////////////////////////////////////////////////////
@@ -23,6 +25,10 @@ NearestPointGrid::~NearestPointGrid() {
 // SetGridDimensions
 ////////////////////////////////////////////////////////////////////////////////
 void NearestPointGrid::SetGridDimensions(int sizeX, int sizeY, int sizeZ) {
+    for (int a = 0; a < m_SizeXYZ; ++a) {
+        delete m_Grid[a];
+    }
+
     m_SizeX = sizeX;
     m_SizeY = sizeY;
     m_SizeZ = sizeZ;
@@ -30,7 +36,7 @@ void NearestPointGrid::SetGridDimensions(int sizeX, int sizeY, int sizeZ) {
     m_SizeXYZ = m_SizeXY * m_SizeZ;
 
     m_Grid.Resize(m_SizeXYZ);
-    m_Grid.Memset(NULL);
+    m_Grid.Memset(0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,6 +57,9 @@ void NearestPointGrid::AddPoint(const VxVector &p, int index) {
 // FindNearPoint
 ////////////////////////////////////////////////////////////////////////////////
 int NearestPointGrid::FindNearPoint(const VxVector &p) {
+    if (m_SizeX <= 0 || m_SizeY <= 0 || m_SizeZ <= 0)
+        return -1;
+
     // Calculate search bounds
     int cellMinX = (int) (p.x - m_Threshold);
     if (cellMinX < 0) cellMinX = 0;
@@ -66,6 +75,9 @@ int NearestPointGrid::FindNearPoint(const VxVector &p) {
     int cellMaxZ = (int) (p.z + m_Threshold);
     if (cellMaxZ >= m_SizeZ) cellMaxZ = m_SizeZ - 1;
 
+    int bestIndex = -1;
+    float bestDistance2 = m_Threshold2;
+
     // Search cells in region
     for (int cellZ = cellMinZ; cellZ <= cellMaxZ; ++cellZ) {
         for (int cellY = cellMinY; cellY <= cellMaxY; ++cellY) {
@@ -74,16 +86,24 @@ int NearestPointGrid::FindNearPoint(const VxVector &p) {
                 if (cell) {
                     int cellPtCount = cell->Size();
                     for (int a = 0; a < cellPtCount; ++a) {
-                        VxVector &cellPt = (*cell)[a].pt;
-                        // Early rejection using Manhattan distance
-                        if (fabsf(cellPt.x - p.x) > m_Threshold) continue;
-                        if (fabsf(cellPt.y - p.y) > m_Threshold) continue;
-                        if (fabsf(cellPt.z - p.z) > m_Threshold) continue;
-                        return (*cell)[a].index;
+                        const VxVector &cellPt = (*cell)[a].pt;
+                        const float dx = cellPt.x - p.x;
+                        if (fabsf(dx) > m_Threshold) continue;
+                        const float dy = cellPt.y - p.y;
+                        if (fabsf(dy) > m_Threshold) continue;
+                        const float dz = cellPt.z - p.z;
+                        if (fabsf(dz) > m_Threshold) continue;
+
+                        const float distance2 = dx * dx + dy * dy + dz * dz;
+                        if (distance2 > bestDistance2)
+                            continue;
+
+                        bestDistance2 = distance2;
+                        bestIndex = (*cell)[a].index;
                     }
                 }
             }
         }
     }
-    return -1;
+    return bestIndex;
 }
