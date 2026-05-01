@@ -1,7 +1,67 @@
 #include "NvStripifier.h"
 #include "TestTriangleMultiset.h"
 
+#include <cstdlib>
+#include <new>
+
+static bool g_TrackAllocations = false;
+static int g_AllocationBalance = 0;
+
+void *operator new(std::size_t size) {
+    void *p = std::malloc(size ? size : 1);
+    if (!p)
+        throw std::bad_alloc();
+    if (g_TrackAllocations)
+        ++g_AllocationBalance;
+    return p;
+}
+
+void *operator new[](std::size_t size) {
+    void *p = std::malloc(size ? size : 1);
+    if (!p)
+        throw std::bad_alloc();
+    if (g_TrackAllocations)
+        ++g_AllocationBalance;
+    return p;
+}
+
+void operator delete(void *p) noexcept {
+    if (g_TrackAllocations && p)
+        --g_AllocationBalance;
+    std::free(p);
+}
+
+void operator delete[](void *p) noexcept {
+    if (g_TrackAllocations && p)
+        --g_AllocationBalance;
+    std::free(p);
+}
+
+void operator delete(void *p, std::size_t) noexcept {
+    if (g_TrackAllocations && p)
+        --g_AllocationBalance;
+    std::free(p);
+}
+
+void operator delete[](void *p, std::size_t) noexcept {
+    if (g_TrackAllocations && p)
+        --g_AllocationBalance;
+    std::free(p);
+}
+
 namespace {
+
+class AllocationTrackingScope {
+public:
+    AllocationTrackingScope() {
+        g_AllocationBalance = 0;
+        g_TrackAllocations = true;
+    }
+
+    ~AllocationTrackingScope() {
+        g_TrackAllocations = false;
+    }
+};
 
 void BuildTriangleMultisetFromStripStream(const XArray<CKWORD> &stripStream, XArray<TestTriCount> &tris) {
     tris.Resize(0);
@@ -98,6 +158,14 @@ XArray<CKWORD> MakeGridTris(int width, int height) {
     return tris;
 }
 
+void StripifyAndDestroyForLeakCheck() {
+    XArray<CKWORD> in = MakeGridTris(/*width=*/2, /*height=*/2);
+    NvStripifier stripifier;
+    XArray<NvStripInfo *> strips;
+    stripifier.Stripify(in, /*minStripLen=*/8, /*cacheSize=*/16, /*vertexCount=*/9, strips);
+    NvStripifier::DestroyStrips(strips);
+}
+
 void RunStripifyAndCheck(
     const XArray<CKWORD> &inTris,
     CKWORD vertexCount,
@@ -187,6 +255,18 @@ void Test_Grid_JoinFalse_PreservesTriangles() {
     RunStripifyAndCheck(in, /*vertexCount=*/9, /*minStripLen=*/8, /*joinStrips=*/false);
 }
 
+void Test_DestroyStrips_ReleasesStripifyAllocations() {
+    // Warm static scratch arrays so the tracked pass only counts per-call allocations.
+    StripifyAndDestroyForLeakCheck();
+
+    {
+        AllocationTrackingScope scope;
+        StripifyAndDestroyForLeakCheck();
+    }
+
+    TestCheck(g_AllocationBalance == 0, "Stripify/DestroyStrips should release per-call allocations");
+}
+
 } // namespace
 
 int main() {
@@ -197,6 +277,7 @@ int main() {
     tf.Run("Two triangles min too high", &Test_TwoTriangles_MinLenTooHigh_ProducesTwoStrips);
     tf.Run("2x2 grid join=true", &Test_Grid_JoinTrue_PreservesTriangles_NoRestartMarkers);
     tf.Run("2x2 grid join=false", &Test_Grid_JoinFalse_PreservesTriangles);
+    tf.Run("DestroyStrips releases stripify allocations", &Test_DestroyStrips_ReleasesStripifyAllocations);
 
     return tf.ExitCode();
 }
