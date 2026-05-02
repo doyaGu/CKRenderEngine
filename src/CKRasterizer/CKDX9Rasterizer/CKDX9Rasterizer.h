@@ -393,6 +393,7 @@ protected:
     CKBOOL UpdateDeviceProperties();
     CKBOOL InitializeDeviceStates();
     void DestroyDevice();
+    void PrepareDeviceReset();
     HRESULT ResetDevice();
     void ConfigureMultisampling();
 
