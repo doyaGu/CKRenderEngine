@@ -233,6 +233,12 @@ XBOOL CKDX9Rasterizer::Start(WIN_HANDLE AppWnd)
             m_Drivers.PushBack(driver);
     }
 
+    if (m_Drivers.Size() == 0)
+    {
+        Close();
+        return FALSE;
+    }
+
     return TRUE;
 }
 
