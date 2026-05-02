@@ -2173,7 +2173,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     CKBOOL surfaceSuccess = FALSE;
     IDirect3DSurface9 *surface = NULL;
     
-    if ((cubemap && desc->DxCubeTexture) || (!cubemap && desc->DxTexture))
+    if ((cubemap && (desc->Flags & CKRST_TEXTURE_CUBEMAP) && desc->DxCubeTexture) ||
+        (!cubemap && !(desc->Flags & CKRST_TEXTURE_CUBEMAP) && desc->DxTexture))
     {
         if (cubemap)
         {
@@ -2336,6 +2337,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     desc->Flags |= CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET;
     if (cubemap)
         desc->Flags |= CKRST_TEXTURE_CUBEMAP;
+    else
+        desc->Flags &= ~CKRST_TEXTURE_CUBEMAP;
         
     m_CurrentTextureIndex = TextureObject;
     return TRUE;
