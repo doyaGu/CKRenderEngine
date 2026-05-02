@@ -522,6 +522,9 @@ CKBOOL CKDX9RasterizerContext::Resize(int PosX, int PosY, int Width, int Height,
     m_PresentParams.BackBufferWidth = Width;
     m_PresentParams.BackBufferHeight = Height;
 
+    // Clean up resources that will be invalidated by Reset
+    PrepareDeviceReset();
+
     // Configure multisampling
     ConfigureMultisampling();
 
@@ -549,6 +552,10 @@ CKBOOL CKDX9RasterizerContext::Resize(int PosX, int PosY, int Width, int Height,
             return FALSE;
         }
     }
+
+    // Update DirectX data and state caches
+    UpdateDirectXData();
+    FlushCaches();
 
     return SUCCEEDED(hr);
 }
@@ -640,9 +647,14 @@ CKBOOL CKDX9RasterizerContext::BackToFront(CKBOOL vsync)
             if (hr == D3DERR_DEVICENOTRESET)
             {
                 // Device can be reset now
+                PrepareDeviceReset();
                 hr = ResetDevice();
                 if (SUCCEEDED(hr))
+                {
+                    UpdateDirectXData();
+                    FlushCaches();
                     return TRUE; // Successfully reset
+                }
             }
 
             // Device is lost and can't be reset yet
@@ -3756,15 +3768,16 @@ void CKDX9RasterizerContext::PrepareDeviceReset()
     if (!m_Device || m_InCreateDestroy)
         return;
 
-    ReleaseScreenBackup();
     ReleaseVertexDeclarations();
     ReleaseStateBlocks();
     FlushNonManagedObjects();
+    ClearStreamCache();
 }
 
 HRESULT CKDX9RasterizerContext::ResetDevice()
 {
-    PrepareDeviceReset();
+    // Prepare for reset by releasing resources
+    FlushNonManagedObjects();
 
     HRESULT hr = m_Device->Reset(&m_PresentParams);
     if (FAILED(hr))
@@ -3777,10 +3790,6 @@ HRESULT CKDX9RasterizerContext::ResetDevice()
     // Restore device states
     if (!InitializeDeviceStates())
         return E_FAIL;
-
-    UpdateDirectXData();
-    FlushCaches();
-    ClearStreamCache();
 
     return S_OK;
 }
