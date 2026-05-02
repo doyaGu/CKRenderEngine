@@ -3470,7 +3470,11 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
     }
 
     // Copy data to texture
-    LoadSurface(surfaceDesc, lockRect, src);
+    if (!LoadSurface(surfaceDesc, lockRect, src))
+    {
+        desc->DxCubeTexture->UnlockRect((D3DCUBEMAP_FACES)Face, actualMipLevel);
+        return FALSE;
+    }
 
     // Unlock base level
     hr = desc->DxCubeTexture->UnlockRect((D3DCUBEMAP_FACES)Face, actualMipLevel);
@@ -3511,7 +3515,11 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
                 return TRUE; // Return success for levels we managed to create
 
             // Copy data to mipmap level
-            LoadSurface(surfaceDesc, lockRect, dst);
+            if (!LoadSurface(surfaceDesc, lockRect, dst))
+            {
+                desc->DxCubeTexture->UnlockRect((D3DCUBEMAP_FACES)Face, i);
+                return TRUE; // Return success for levels we managed to create
+            }
 
             // Unlock the mipmap level
             hr = desc->DxCubeTexture->UnlockRect((D3DCUBEMAP_FACES)Face, i);
