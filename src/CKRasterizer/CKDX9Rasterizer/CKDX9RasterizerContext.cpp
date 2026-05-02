@@ -5161,26 +5161,38 @@ void CKDX9RasterizerContext::FlushNonManagedObjects()
 
                     if (currentRT)
                     {
-                        // Check if this is our texture's surface
-                        if (dx9Desc->DxTexture)
+                        CKBOOL textureIsCurrentRT = FALSE;
+
+                        if ((dx9Desc->Flags & CKRST_TEXTURE_CUBEMAP) != 0)
+                        {
+                            if (dx9Desc->DxCubeTexture)
+                            {
+                                for (int face = 0; face < 6 && !textureIsCurrentRT; ++face)
+                                {
+                                    LPDIRECT3DSURFACE9 texSurface = NULL;
+                                    dx9Desc->DxCubeTexture->GetCubeMapSurface((D3DCUBEMAP_FACES)face, 0, &texSurface);
+                                    textureIsCurrentRT = (texSurface == currentRT);
+                                    SAFERELEASE(texSurface);
+                                }
+                            }
+                        }
+                        else if (dx9Desc->DxTexture)
                         {
                             LPDIRECT3DSURFACE9 texSurface = NULL;
                             dx9Desc->DxTexture->GetSurfaceLevel(0, &texSurface);
+                            textureIsCurrentRT = (texSurface == currentRT);
+                            SAFERELEASE(texSurface);
+                        }
 
-                            if (texSurface)
+                        if (textureIsCurrentRT)
+                        {
+                            // Reset render target to back buffer
+                            LPDIRECT3DSURFACE9 backBuffer = NULL;
+                            m_Device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
+                            if (backBuffer)
                             {
-                                if (texSurface == currentRT)
-                                {
-                                    // Reset render target to back buffer
-                                    LPDIRECT3DSURFACE9 backBuffer = NULL;
-                                    m_Device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
-                                    if (backBuffer)
-                                    {
-                                        m_Device->SetRenderTarget(0, backBuffer);
-                                        SAFERELEASE(backBuffer);
-                                    }
-                                }
-                                SAFERELEASE(texSurface);
+                                m_Device->SetRenderTarget(0, backBuffer);
+                                SAFERELEASE(backBuffer);
                             }
                         }
                         SAFERELEASE(currentRT);
