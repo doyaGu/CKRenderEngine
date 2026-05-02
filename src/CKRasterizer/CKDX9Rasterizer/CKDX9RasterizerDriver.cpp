@@ -391,7 +391,9 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
     D3DFORMAT requestedFormat = TextureDescToD3DFormat(desc);
 
     // First, check if the requested format is directly supported
-    if (requestedFormat != D3DFMT_UNKNOWN && IsTextureFormatSupported(requestedFormat, AdapterFormat, Usage))
+    if ((desc->Flags & CKRST_TEXTURE_CUBEMAP) == 0 &&
+        requestedFormat != D3DFMT_UNKNOWN &&
+        IsTextureFormatSupported(requestedFormat, AdapterFormat, Usage))
     {
         return requestedFormat;
     }
@@ -422,7 +424,10 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
     if (desc->Flags & CKRST_TEXTURE_CUBEMAP)
     {
         // First check if the original format supports cube maps
-        if (IsTextureFormatSupported(requestedFormat, AdapterFormat, Usage | D3DUSAGE_DYNAMIC))
+        if (requestedFormat != D3DFMT_UNKNOWN &&
+            owner->m_D3D9->CheckDeviceFormat(
+                m_AdapterIndex, m_DevType, AdapterFormat,
+                Usage, D3DRTYPE_CUBETEXTURE, requestedFormat) == D3D_OK)
         {
             return requestedFormat;
         }
