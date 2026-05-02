@@ -1990,8 +1990,20 @@ CKBOOL CKDX9RasterizerContext::CopyToTexture(CKDWORD Texture, VxRect *Src, VxRec
         return FALSE;
 
     CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(m_Textures[Texture]);
-    if (!desc || !desc->DxTexture)
+    if (!desc)
         return FALSE;
+
+    CKBOOL cubemap = (desc->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
+    if (cubemap)
+    {
+        if (!desc->DxCubeTexture || Face > CKRST_CUBEFACE_ZNEG)
+            return FALSE;
+    }
+    else
+    {
+        if (!desc->DxTexture)
+            return FALSE;
+    }
 
     // Create destination rectangle
     RECT destRect;
@@ -2020,19 +2032,26 @@ CKBOOL CKDX9RasterizerContext::CopyToTexture(CKDWORD Texture, VxRect *Src, VxRec
     }
 
     // Get texture surface
-    hr = desc->DxTexture->GetSurfaceLevel(0, &textureSurface);
+    if (cubemap)
+        hr = desc->DxCubeTexture->GetCubeMapSurface((D3DCUBEMAP_FACES)Face, 0, &textureSurface);
+    else
+        hr = desc->DxTexture->GetSurfaceLevel(0, &textureSurface);
     if (FAILED(hr) || !textureSurface)
     {
         SAFERELEASE(backBuffer);
         return FALSE;
     }
 
-    // Define destination point
-    POINT pt = {destRect.left, destRect.top};
+    // Copy the source rectangle to the destination origin without scaling.
+    RECT copyDestRect;
+    SetRect(&copyDestRect,
+            destRect.left,
+            destRect.top,
+            destRect.left + (srcRect.right - srcRect.left),
+            destRect.top + (srcRect.bottom - srcRect.top));
 
     // Copy from back buffer to texture surface
-    // Note: UpdateSurface param order: source, source rect, destination, destination point
-    hr = m_Device->UpdateSurface(backBuffer, &srcRect, textureSurface, &pt);
+    hr = m_Device->StretchRect(backBuffer, &srcRect, textureSurface, &copyDestRect, D3DTEXF_NONE);
     if (SUCCEEDED(hr))
     {
         success = TRUE;
@@ -2042,34 +2061,67 @@ CKBOOL CKDX9RasterizerContext::CopyToTexture(CKDWORD Texture, VxRect *Src, VxRec
     {
         // Release current texture
         SAFERELEASE(textureSurface);
-        SAFERELEASE(desc->DxTexture);
+        int textureWidth = desc->Format.Width;
+        int textureHeight = desc->Format.Height;
 
-        // Create new texture as render target
-        hr = m_Device->CreateTexture(
-            desc->Format.Width,
-            desc->Format.Height,
-            1,
-            D3DUSAGE_RENDERTARGET,
-            m_PresentParams.BackBufferFormat,
-            D3DPOOL_DEFAULT,
-            &desc->DxTexture,
-            NULL
-        );
-        if (SUCCEEDED(hr) && desc->DxTexture)
+        if (cubemap)
         {
-            // Update texture format info
-            D3DFormatToTextureDesc(m_PresentParams.BackBufferFormat, desc);
-            desc->Flags &= ~CKRST_TEXTURE_MANAGED;
-            desc->Flags |= (CKRST_TEXTURE_RENDERTARGET | CKRST_TEXTURE_VALID);
+            SAFERELEASE(desc->DxCubeTexture);
 
-            // Get the new surface
-            hr = desc->DxTexture->GetSurfaceLevel(0, &textureSurface);
-            if (SUCCEEDED(hr) && textureSurface)
+            hr = m_Device->CreateCubeTexture(
+                textureWidth,
+                1,
+                D3DUSAGE_RENDERTARGET,
+                m_PresentParams.BackBufferFormat,
+                D3DPOOL_DEFAULT,
+                &desc->DxCubeTexture,
+                NULL
+            );
+            if (SUCCEEDED(hr) && desc->DxCubeTexture)
             {
-                // Try copy again
-                hr = m_Device->UpdateSurface(backBuffer, &srcRect, textureSurface, &pt);
-                success = SUCCEEDED(hr);
+                D3DFormatToTextureDesc(m_PresentParams.BackBufferFormat, desc);
+                desc->Format.Width = textureWidth;
+                desc->Format.Height = textureHeight;
+                desc->Flags &= ~CKRST_TEXTURE_MANAGED;
+                desc->Flags |= (CKRST_TEXTURE_RENDERTARGET | CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+
+                hr = desc->DxCubeTexture->GetCubeMapSurface((D3DCUBEMAP_FACES)Face, 0, &textureSurface);
             }
+        }
+        else
+        {
+            SAFERELEASE(desc->DxTexture);
+
+            // Create new texture as render target
+            hr = m_Device->CreateTexture(
+                textureWidth,
+                textureHeight,
+                1,
+                D3DUSAGE_RENDERTARGET,
+                m_PresentParams.BackBufferFormat,
+                D3DPOOL_DEFAULT,
+                &desc->DxTexture,
+                NULL
+            );
+            if (SUCCEEDED(hr) && desc->DxTexture)
+            {
+                // Update texture format info
+                D3DFormatToTextureDesc(m_PresentParams.BackBufferFormat, desc);
+                desc->Format.Width = textureWidth;
+                desc->Format.Height = textureHeight;
+                desc->Flags &= ~CKRST_TEXTURE_MANAGED;
+                desc->Flags |= (CKRST_TEXTURE_RENDERTARGET | CKRST_TEXTURE_VALID);
+
+                // Get the new surface
+                hr = desc->DxTexture->GetSurfaceLevel(0, &textureSurface);
+            }
+        }
+
+        if (SUCCEEDED(hr) && textureSurface)
+        {
+            // Try copy again
+            hr = m_Device->StretchRect(backBuffer, &srcRect, textureSurface, &copyDestRect, D3DTEXF_NONE);
+            success = SUCCEEDED(hr);
         }
     }
 
