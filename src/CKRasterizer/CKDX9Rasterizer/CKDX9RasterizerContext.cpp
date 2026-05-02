@@ -1799,7 +1799,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
         }
 
         // Prepare source rect
-        RECT srcRect{0, 0, SurfDesc.Height, SurfDesc.Width};
+        RECT srcRect{0, 0, (LONG)SurfDesc.Width, (LONG)SurfDesc.Height};
         D3DFORMAT format = VxPixelFormatToD3DFormat(VxImageDesc2PixelFormat(SurfDesc));
 
         // Load texture data
