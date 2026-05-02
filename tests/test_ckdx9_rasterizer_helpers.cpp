@@ -404,6 +404,69 @@ void RenderTargetTextureCanSwitchFromCubeTo2D()
 #endif
 }
 
+void RenderTargetTextureUsesRequestedSizeForExistingObject()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 render target size test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 render target size context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 32;
+    desired.Format.Height = 32;
+    desired.Format.BytesPerLine = 32 * 4;
+    desired.MipMapCount = 0;
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 size test should create the original texture");
+
+    TestCheck(context->SetTargetTexture(texture, 64, 48) == TRUE,
+              "SetTargetTexture should recreate an existing object with requested dimensions");
+    CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(context->m_Textures[texture]);
+    TestCheck(desc != NULL && desc->DxTexture != NULL,
+              "DX9 size test should keep a 2D render target texture");
+
+    IDirect3DSurface9 *surface = NULL;
+    HRESULT hr = desc->DxTexture->GetSurfaceLevel(0, &surface);
+    TestCheck(SUCCEEDED(hr) && surface != NULL, "DX9 size test should expose a render target surface");
+
+    D3DSURFACE_DESC surfaceDesc = {};
+    hr = surface->GetDesc(&surfaceDesc);
+    SAFERELEASE(surface);
+    TestCheck(SUCCEEDED(hr), "DX9 size test surface should have a description");
+    TestCheck(surfaceDesc.Width == 64 && surfaceDesc.Height == 48,
+              "SetTargetTexture should use the requested dimensions for an existing object");
+
+    TestCheck(context->SetTargetTexture(0) == TRUE,
+              "SetTargetTexture(0) should restore the default render target after size test");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -420,5 +483,6 @@ int main()
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Cubemap format search requires cube texture support", &CubeTextureFormatSearchRequiresCubeSupport);
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
+    tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     return tests.ExitCode();
 }

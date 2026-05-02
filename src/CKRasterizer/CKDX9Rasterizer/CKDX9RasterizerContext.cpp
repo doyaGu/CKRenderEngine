@@ -2143,6 +2143,15 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
         m_Textures[TextureObject] = desc;
     }
 
+    int targetWidth = (Width != 0) ? Width : desc->Format.Width;
+    int targetHeight = (Height != 0) ? Height : desc->Format.Height;
+    if (targetWidth <= 0)
+        targetWidth = 256;
+    if (targetHeight <= 0)
+        targetHeight = 256;
+    if (cubemap)
+        targetHeight = targetWidth;
+
     // Capture current render target and depth buffer
     HRESULT hr = m_Device->GetRenderTarget(0, &m_DefaultBackBuffer);
     if (FAILED(hr) || !m_DefaultBackBuffer)
@@ -2186,7 +2195,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
                 {
                     D3DSURFACE_DESC surfaceDesc;
                     hr = surface->GetDesc(&surfaceDesc);
-                    if (SUCCEEDED(hr) && (surfaceDesc.Usage & D3DUSAGE_RENDERTARGET))
+                    if (SUCCEEDED(hr) && (surfaceDesc.Usage & D3DUSAGE_RENDERTARGET) &&
+                        surfaceDesc.Width == (UINT)targetWidth && surfaceDesc.Height == (UINT)targetHeight)
                     {
                         surfaceSuccess = TRUE;
                     }
@@ -2204,7 +2214,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
             {
                 D3DSURFACE_DESC surfaceDesc;
                 hr = surface->GetDesc(&surfaceDesc);
-                if (SUCCEEDED(hr) && (surfaceDesc.Usage & D3DUSAGE_RENDERTARGET))
+                if (SUCCEEDED(hr) && (surfaceDesc.Usage & D3DUSAGE_RENDERTARGET) &&
+                    surfaceDesc.Width == (UINT)targetWidth && surfaceDesc.Height == (UINT)targetHeight)
                 {
                     surfaceSuccess = TRUE;
                 }
@@ -2229,6 +2240,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
         SAFERELEASE(desc->DxTexture);
         SAFERELEASE(desc->DxRenderTexture);
         desc->MipMapCount = 0;
+        desc->Format.Width = targetWidth;
+        desc->Format.Height = targetHeight;
         
         // Create appropriate texture type
         if (cubemap)
@@ -2333,6 +2346,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     
     // Update texture properties
     D3DFormatToTextureDesc(m_PresentParams.BackBufferFormat, desc);
+    desc->Format.Width = targetWidth;
+    desc->Format.Height = targetHeight;
     desc->Flags &= ~CKRST_TEXTURE_MANAGED;
     desc->Flags |= CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET;
     if (cubemap)
