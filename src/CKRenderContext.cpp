@@ -499,7 +499,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
             positions[2] = VxVector4(w, h, 0.0f, 1.0f);
             positions[3] = VxVector4(0.0f, h, 0.0f, 1.0f);
 
-            dp.Flags = CKRST_DP_TRANSFORM;
+            dp.Flags = CKRST_DP_STAGES0;
             dp.VertexCount = 4;
             dp.PositionPtr = positions;
             dp.PositionStride = sizeof(VxVector4);
