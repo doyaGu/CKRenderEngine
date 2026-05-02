@@ -2107,13 +2107,12 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
             m_Device->SetDepthStencilSurface(m_DefaultDepthBuffer);
         }
         
-        // Reset the current texture's flags
+        // Restore the default target without changing the texture descriptor.
         if (m_CurrentTextureIndex < m_Textures.Size())
         {
             CKTextureDesc *desc = m_Textures[m_CurrentTextureIndex];
             if (desc)
             {
-                desc->Flags &= ~CKRST_TEXTURE_RENDERTARGET;
                 m_CurrentTextureIndex = 0;
             }
         }
@@ -2174,11 +2173,11 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     CKBOOL surfaceSuccess = FALSE;
     IDirect3DSurface9 *surface = NULL;
     
-    if ((cubemap || desc->DxRenderTexture) && desc->DxTexture)
+    if ((cubemap && desc->DxCubeTexture) || (!cubemap && desc->DxTexture))
     {
         if (cubemap)
         {
-            D3DRESOURCETYPE type = desc->DxTexture->GetType();
+            D3DRESOURCETYPE type = desc->DxCubeTexture->GetType();
             if (type == D3DRTYPE_CUBETEXTURE)
             {
                 hr = desc->DxCubeTexture->GetCubeMapSurface((D3DCUBEMAP_FACES)Face, 0, &surface);
@@ -2199,7 +2198,6 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
         }
         else
         {
-            desc->DxRenderTexture = desc->DxTexture;
             hr = desc->DxTexture->GetSurfaceLevel(0, &surface);
             if (SUCCEEDED(hr) && surface)
             {
@@ -2225,6 +2223,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
         
         // Release previous texture resources
         desc->Flags &= ~CKRST_TEXTURE_VALID;
+        if (desc->DxRenderTexture == desc->DxTexture)
+            desc->DxRenderTexture = NULL;
         SAFERELEASE(desc->DxTexture);
         SAFERELEASE(desc->DxRenderTexture);
         desc->MipMapCount = 0;
@@ -2279,30 +2279,10 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
                 return FALSE;
             }
             
-            hr = m_Device->CreateTexture(
-                desc->Format.Width, 
-                desc->Format.Height, 
-                1, 
-                D3DUSAGE_RENDERTARGET,
-                m_PresentParams.BackBufferFormat, 
-                D3DPOOL_DEFAULT, 
-                &desc->DxRenderTexture, 
-                NULL
-            );
-            if (FAILED(hr))
-            {
-                SAFERELEASE(desc->DxTexture);
-                desc->Flags &= ~CKRST_TEXTURE_VALID;
-                SAFERELEASE(m_DefaultBackBuffer);
-                SAFERELEASE(m_DefaultDepthBuffer);
-                return FALSE;
-            }
-            
-            hr = desc->DxRenderTexture->GetSurfaceLevel(0, &surface);
+            hr = desc->DxTexture->GetSurfaceLevel(0, &surface);
             if (FAILED(hr) || !surface)
             {
                 SAFERELEASE(desc->DxTexture);
-                SAFERELEASE(desc->DxRenderTexture);
                 desc->Flags &= ~CKRST_TEXTURE_VALID;
                 SAFERELEASE(m_DefaultBackBuffer);
                 SAFERELEASE(m_DefaultDepthBuffer);
@@ -2330,6 +2310,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
             }
             else
             {
+                if (desc->DxRenderTexture == desc->DxTexture)
+                    desc->DxRenderTexture = NULL;
                 SAFERELEASE(desc->DxTexture);
                 SAFERELEASE(desc->DxRenderTexture);
             }
@@ -2345,6 +2327,8 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     {
         m_Device->SetDepthStencilSurface(zbuffer);
     }
+
+    SAFERELEASE(surface);
     
     // Update texture properties
     D3DFormatToTextureDesc(m_PresentParams.BackBufferFormat, desc);
@@ -4333,11 +4317,11 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
                 desc->Format.Height = surfaceDesc.Height;
 
                 D3DLOCKED_RECT lockedRect;
-                if (SUCCEEDED(desc->DxTexture->LockRect(0, &lockedRect, NULL, D3DLOCK_READONLY)))
+                if (SUCCEEDED(desc->DxCubeTexture->LockRect(D3DCUBEMAP_FACE_POSITIVE_X, 0, &lockedRect, NULL, D3DLOCK_READONLY)))
                 {
                     // Set BytesPerLine to the actual pitch from the driver
                     desc->Format.BytesPerLine = lockedRect.Pitch;
-                    desc->DxTexture->UnlockRect(0);
+                    desc->DxCubeTexture->UnlockRect(D3DCUBEMAP_FACE_POSITIVE_X, 0);
                 }
                 else
                 {
@@ -4361,12 +4345,7 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
     // Restore original render target if we're creating a render target
     if (isRenderTarget && success)
     {
-        // For render targets, set up the appropriate texture pointers
-        if (desc->DxTexture && !isCubeMap)
-        {
-            // Use the same texture for rendering to avoid resource conflicts
-            desc->DxRenderTexture = desc->DxTexture;
-        }
+        desc->DxRenderTexture = NULL;
         
         // Restore the original render target
         if (originalRenderTarget)

@@ -212,6 +212,8 @@ public:
     }
     ~CKDX9TextureDesc()
     {
+        if (DxRenderTexture == DxTexture)
+            DxRenderTexture = NULL;
         SAFERELEASE(DxTexture);
         SAFERELEASE(DxRenderTexture);
         SAFERELEASE(DxLockedSurface);
