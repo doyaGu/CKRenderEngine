@@ -510,7 +510,7 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
         wti[0].w = sw;
         wti[0].sw = sw;
         wc = 1;
-    } else if (widthMsb + 1 <= maxWidthMsb && (1 << (widthMsb + 1)) - width <= 32) {
+    } else if (widthMsb + 1 <= maxWidthMsb) {
         wti[0].x = 0;
         wti[0].w = (short) width;
         wti[0].sw = (short) (1 << (widthMsb + 1));
@@ -564,7 +564,7 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
         hti[0].h = sh;
         hti[0].sh = sh;
         hc = 1;
-    } else if (heightMsb + 1 <= maxHeightMsb && (1 << (heightMsb + 1)) - height <= 32) {
+    } else if (heightMsb + 1 <= maxHeightMsb) {
         hti[0].y = 0;
         hti[0].h = (short) height;
         hti[0].sh = (short) (1 << (heightMsb + 1));

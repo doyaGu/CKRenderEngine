@@ -420,6 +420,115 @@ void CubeRenderTargetFormatSearchRequiresCubeSupport()
 #endif
 }
 
+void Pow2TextureCapsUseNextPowerOfTwo()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 POW2 texture size test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 POW2 texture size test should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 POW2 texture size context should initialize");
+
+    driver->m_3DCaps.TextureCaps |= CKRST_TEXTURECAPS_POW2;
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 100;
+    desired.Format.Height = 80;
+    desired.Format.BytesPerLine = 100 * 4;
+    desired.MipMapCount = 0;
+
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 POW2 texture size test should create the texture");
+
+    CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(context->m_Textures[texture]);
+    TestCheck(desc != NULL && desc->DxTexture != NULL,
+              "DX9 POW2 texture size test should keep a 2D texture");
+
+    D3DSURFACE_DESC surfaceDesc = {};
+    HRESULT hr = desc->DxTexture->GetLevelDesc(0, &surfaceDesc);
+    TestCheck(SUCCEEDED(hr), "DX9 POW2 texture size test should read texture desc");
+    TestCheck(surfaceDesc.Width == 128 && surfaceDesc.Height == 128,
+              "DX9 POW2 texture sizing should use the next power-of-two");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
+void SpriteCreationUsesNextPowerOfTwoWhenItFits()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 sprite POW2 sizing test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 sprite POW2 sizing test should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 sprite POW2 sizing context should initialize");
+
+    CKDWORD sprite = rasterizer.CreateObjectIndex(CKRST_OBJ_SPRITE);
+    CKSpriteDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 100;
+    desired.Format.Height = 80;
+    desired.Format.BytesPerLine = 100 * 4;
+    desired.MipMapCount = 0;
+
+    TestCheck(context->CreateObject(sprite, CKRST_OBJ_SPRITE, &desired) == TRUE,
+              "DX9 sprite POW2 sizing test should create the sprite");
+
+    CKSpriteDesc *desc = context->GetSpriteData(sprite);
+    TestCheck(desc != NULL, "DX9 sprite POW2 sizing test should keep sprite data");
+    TestCheck(desc->Textures.Size() == 1,
+              "CKRasterizerLib sprite creation should use one next-POW2 texture when it fits");
+
+    CKSPRTextInfo *info = desc->Textures.Begin();
+    TestCheck(info != NULL && info->w == 100 && info->h == 80 && info->sw == 128 && info->sh == 128,
+              "CKRasterizerLib sprite storage should cover the full sprite with next POW2 dimensions");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 void RenderTargetTextureCanSwitchFromCubeTo2D()
 {
 #if !defined(_WIN32)
@@ -641,6 +750,8 @@ int main()
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Cubemap format search requires cube texture support", &CubeTextureFormatSearchRequiresCubeSupport);
     tests.Run("Cubemap render target format search requires cube texture support", &CubeRenderTargetFormatSearchRequiresCubeSupport);
+    tests.Run("POW2 texture caps use next power-of-two sizing", &Pow2TextureCapsUseNextPowerOfTwo);
+    tests.Run("Sprite creation uses next power-of-two sizing when it fits", &SpriteCreationUsesNextPowerOfTwoWhenItFits);
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);
