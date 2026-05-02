@@ -519,6 +519,45 @@ void CopyToTextureSupportsCubeFaces()
 #endif
 }
 
+void ResizeWithActiveCubemapRenderTargetDoesNotCrash()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 cubemap reset test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 cubemap reset context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    TestCheck(context->SetTargetTexture(texture, 64, -1, CKRST_CUBEFACE_YPOS) == TRUE,
+              "DX9 cubemap reset test should bind a cubemap render target");
+
+    TestCheck(context->Resize(0, 0, 80, 80, 0) == TRUE,
+              "Resize should reset safely with an active cubemap render target");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -537,5 +576,6 @@ int main()
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);
+    tests.Run("Resize handles active cubemap render targets", &ResizeWithActiveCubemapRenderTargetDoesNotCrash);
     return tests.ExitCode();
 }
