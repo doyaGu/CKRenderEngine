@@ -622,6 +622,60 @@ void SpriteCreationRespectsSquareOnlyTextureCaps()
 #endif
 }
 
+void CubeTextureUploadRejectsNullImage()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 cubemap null upload test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 cubemap null upload test should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 cubemap null upload context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
+                    CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_CUBEMAP;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 32;
+    desired.Format.Height = 32;
+    desired.Format.BytesPerLine = 32 * 4;
+    desired.MipMapCount = 0;
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 cubemap null upload test should create a cubemap texture");
+
+    VxImageDescEx source;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, source);
+    source.Width = 32;
+    source.Height = 32;
+    source.BytesPerLine = 32 * 4;
+    source.Image = NULL;
+
+    TestCheck(context->LoadCubeMapTexture(texture, source, CKRST_CUBEFACE_XPOS, 0) == FALSE,
+              "LoadCubeMapTexture should reject a null source image");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 void RenderTargetTextureCanSwitchFromCubeTo2D()
 {
 #if !defined(_WIN32)
@@ -919,6 +973,7 @@ int main()
     tests.Run("POW2 texture caps use next power-of-two sizing", &Pow2TextureCapsUseNextPowerOfTwo);
     tests.Run("Sprite creation uses next power-of-two sizing when it fits", &SpriteCreationUsesNextPowerOfTwoWhenItFits);
     tests.Run("Sprite creation respects square-only texture caps", &SpriteCreationRespectsSquareOnlyTextureCaps);
+    tests.Run("Cubemap upload rejects null source images", &CubeTextureUploadRejectsNullImage);
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);
