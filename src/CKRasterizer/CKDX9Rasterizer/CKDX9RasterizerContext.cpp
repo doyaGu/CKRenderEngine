@@ -1099,34 +1099,6 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage)
     if (FAILED(hr))
         return FALSE;
 
-    // Default stage setup for stage 0 (modulation which is most common)
-    if (Stage == 0)
-    {
-        // Default to modulation (texture * vertex color)
-        hr = m_Device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        if (FAILED(hr))
-            return FALSE;
-
-        hr = m_Device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        if (FAILED(hr))
-            return FALSE;
-
-        hr = m_Device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_CURRENT);
-        if (FAILED(hr))
-            return FALSE;
-
-        hr = m_Device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-        if (FAILED(hr))
-            return FALSE;
-
-        hr = m_Device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-        if (FAILED(hr))
-            return FALSE;
-
-        hr = m_Device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
-        if (FAILED(hr))
-            return FALSE;
-    }
 
     return TRUE;
 }
