@@ -55,7 +55,7 @@ VX_PIXELFORMAT D3DFormatToVxPixelFormat(D3DFORMAT ddpf)
         case D3DFMT_A1R5G5B5: return _16_ARGB1555; // 16-bit ARGB pixel format (5 bits per color + 1 bit for alpha)
         case D3DFMT_A4R4G4B4: return _16_ARGB4444; // 16-bit ARGB pixel format (4 bits per color)
         case D3DFMT_R3G3B2: return _8_RGB332; // 8-bit  RGB pixel format
-        case D3DFMT_UNKNOWN: return _8_ARGB2222; // 8-bit  ARGB pixel format
+        case D3DFMT_UNKNOWN: return UNKNOWN_PF;
         case D3DFMT_A8B8G8R8: return _32_ABGR8888; // 32-bit ABGR pixel format
         case D3DFMT_X8B8G8R8: return _32_BGR888; // 32-bit BGR pixel format
         case D3DFMT_DXT1: return _DXT1; // S3/DirectX Texture Compression 1
