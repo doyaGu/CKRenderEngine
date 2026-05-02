@@ -68,6 +68,48 @@ private:
     size_t m_GuardOffset;
     const size_t m_GuardSize;
 };
+
+class FakeFormatD3D9 : public IDirect3D9
+{
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void **) { return E_NOINTERFACE; }
+    ULONG STDMETHODCALLTYPE AddRef() { return 1; }
+    ULONG STDMETHODCALLTYPE Release() { return 1; }
+    HRESULT STDMETHODCALLTYPE RegisterSoftwareDevice(void *) { return D3DERR_INVALIDCALL; }
+    UINT STDMETHODCALLTYPE GetAdapterCount() { return 1; }
+    HRESULT STDMETHODCALLTYPE GetAdapterIdentifier(UINT, DWORD, D3DADAPTER_IDENTIFIER9 *) { return D3DERR_INVALIDCALL; }
+    UINT STDMETHODCALLTYPE GetAdapterModeCount(UINT, D3DFORMAT) { return 0; }
+    HRESULT STDMETHODCALLTYPE EnumAdapterModes(UINT, D3DFORMAT, UINT, D3DDISPLAYMODE *) { return D3DERR_INVALIDCALL; }
+    HRESULT STDMETHODCALLTYPE GetAdapterDisplayMode(UINT, D3DDISPLAYMODE *) { return D3DERR_INVALIDCALL; }
+    HRESULT STDMETHODCALLTYPE CheckDeviceType(UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT, BOOL) { return D3DERR_INVALIDCALL; }
+
+    HRESULT STDMETHODCALLTYPE CheckDeviceFormat(UINT, D3DDEVTYPE, D3DFORMAT, DWORD Usage,
+                                                D3DRESOURCETYPE RType, D3DFORMAT CheckFormat)
+    {
+        if ((Usage & D3DUSAGE_RENDERTARGET) == 0)
+            return D3DERR_NOTAVAILABLE;
+
+        if (RType == D3DRTYPE_TEXTURE && CheckFormat == D3DFMT_A8R8G8B8)
+            return D3D_OK;
+
+        if (RType == D3DRTYPE_TEXTURE && CheckFormat == D3DFMT_X8R8G8B8)
+            return D3D_OK;
+
+        if (RType == D3DRTYPE_CUBETEXTURE && CheckFormat == D3DFMT_X8R8G8B8)
+            return D3D_OK;
+
+        return D3DERR_NOTAVAILABLE;
+    }
+
+    HRESULT STDMETHODCALLTYPE CheckDeviceMultiSampleType(UINT, D3DDEVTYPE, D3DFORMAT, BOOL,
+                                                         D3DMULTISAMPLE_TYPE, DWORD *) { return D3DERR_INVALIDCALL; }
+    HRESULT STDMETHODCALLTYPE CheckDepthStencilMatch(UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT, D3DFORMAT) { return D3DERR_INVALIDCALL; }
+    HRESULT STDMETHODCALLTYPE CheckDeviceFormatConversion(UINT, D3DDEVTYPE, D3DFORMAT, D3DFORMAT) { return D3DERR_INVALIDCALL; }
+    HRESULT STDMETHODCALLTYPE GetDeviceCaps(UINT, D3DDEVTYPE, D3DCAPS9 *) { return D3DERR_INVALIDCALL; }
+    HMONITOR STDMETHODCALLTYPE GetAdapterMonitor(UINT) { return NULL; }
+    HRESULT STDMETHODCALLTYPE CreateDevice(UINT, D3DDEVTYPE, HWND, DWORD,
+                                           D3DPRESENT_PARAMETERS *, IDirect3DDevice9 **) { return D3DERR_INVALIDCALL; }
+};
 #endif
 
 void UnknownD3DFormatMapsToUnknownPixelFormat()
@@ -353,6 +395,31 @@ void CubeTextureFormatSearchRequiresCubeSupport()
 #endif
 }
 
+void CubeRenderTargetFormatSearchRequiresCubeSupport()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    FakeFormatD3D9 fakeD3D9;
+    CKDX9Rasterizer rasterizer;
+    rasterizer.m_D3D9 = &fakeD3D9;
+
+    CKDX9RasterizerDriver driver(&rasterizer);
+    driver.m_AdapterIndex = 0;
+    driver.m_DevType = D3DDEVTYPE_HAL;
+
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_RENDERTARGET;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+
+    D3DFORMAT selected = driver.FindNearestTextureFormat(&desired, D3DFMT_X8R8G8B8, D3DUSAGE_RENDERTARGET);
+    rasterizer.m_D3D9 = NULL;
+
+    TestCheck(selected == D3DFMT_X8R8G8B8,
+              "DX9 cubemap render target format search must require cube texture support");
+#endif
+}
+
 void RenderTargetTextureCanSwitchFromCubeTo2D()
 {
 #if !defined(_WIN32)
@@ -573,6 +640,7 @@ int main()
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Cubemap format search requires cube texture support", &CubeTextureFormatSearchRequiresCubeSupport);
+    tests.Run("Cubemap render target format search requires cube texture support", &CubeRenderTargetFormatSearchRequiresCubeSupport);
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);
