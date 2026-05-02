@@ -4,6 +4,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #endif
+#include <string.h>
 
 namespace {
 
@@ -23,6 +24,50 @@ HWND CreateTestWindow()
                            CW_USEDEFAULT, CW_USEDEFAULT, 64, 64,
                            NULL, NULL, instance, NULL);
 }
+
+class GuardedDX9Rasterizer : public CKDX9Rasterizer
+{
+public:
+    GuardedDX9Rasterizer()
+        : m_Buffer(NULL), m_BufferBytes(0), m_GuardOffset(0), m_GuardSize(64)
+    {
+    }
+
+    ~GuardedDX9Rasterizer()
+    {
+        delete[] m_Buffer;
+    }
+
+    CKBYTE *AllocateObjects(int size) override
+    {
+        delete[] m_Buffer;
+        m_GuardOffset = size * sizeof(XDWORD);
+        m_BufferBytes = m_GuardOffset + 128 * 128 * 4 + m_GuardSize;
+        m_Buffer = new CKBYTE[m_BufferBytes];
+        memset(m_Buffer, 0, m_BufferBytes);
+        memset(m_Buffer + m_GuardOffset, 0xA5, m_GuardSize);
+        return m_Buffer;
+    }
+
+    bool GuardIntact() const
+    {
+        if (!m_Buffer)
+            return false;
+
+        for (size_t i = 0; i < m_GuardSize; ++i)
+        {
+            if (m_Buffer[m_GuardOffset + i] != 0xA5)
+                return false;
+        }
+        return true;
+    }
+
+private:
+    CKBYTE *m_Buffer;
+    size_t m_BufferBytes;
+    size_t m_GuardOffset;
+    const size_t m_GuardSize;
+};
 #endif
 
 void UnknownD3DFormatMapsToUnknownPixelFormat()
@@ -143,6 +188,123 @@ void RenderTargetTextureUsesSingleSampleableResource()
 #endif
 }
 
+void ResizedTextureMipmapUploadStaysWithinTargetBuffer()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 mipmap upload test needs a hidden window");
+
+    GuardedDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 mipmap test context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 64;
+    desired.Format.Height = 64;
+    desired.Format.BytesPerLine = 64 * 4;
+    desired.MipMapCount = 2;
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 mipmap test texture should be created");
+
+    CKBYTE image[128 * 128 * 4];
+    memset(image, 0x7F, sizeof(image));
+
+    VxImageDescEx source;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, source);
+    source.Width = 128;
+    source.Height = 128;
+    source.BytesPerLine = 128 * 4;
+    source.Image = image;
+
+    TestCheck(context->LoadTexture(texture, source, -1) == TRUE,
+              "DX9 resized mipmap texture upload should succeed");
+    TestCheck(rasterizer.GuardIntact(),
+              "DX9 resized mipmap upload must not write past the target-sized temporary buffer");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
+void ResizedCubeMipmapUploadStaysWithinTargetBuffer()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 cube mipmap upload test needs a hidden window");
+
+    GuardedDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 cube mipmap test context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
+                    CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_CUBEMAP;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 64;
+    desired.Format.Height = 64;
+    desired.Format.BytesPerLine = 64 * 4;
+    desired.MipMapCount = 2;
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 cube mipmap test texture should be created");
+
+    CKBYTE image[128 * 128 * 4];
+    memset(image, 0x3F, sizeof(image));
+
+    VxImageDescEx source;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, source);
+    source.Width = 128;
+    source.Height = 128;
+    source.BytesPerLine = 128 * 4;
+    source.Image = image;
+
+    TestCheck(context->LoadCubeMapTexture(texture, source, CKRST_CUBEFACE_XPOS, -1) == TRUE,
+              "DX9 resized cube mipmap upload should succeed");
+    TestCheck(rasterizer.GuardIntact(),
+              "DX9 resized cube mipmap upload must not write past the target-sized temporary buffer");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -155,5 +317,7 @@ int main()
     tests.Run("SetLight rejects null data", &SetLightRejectsNullData);
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
     tests.Run("2D render target textures use one sampleable resource", &RenderTargetTextureUsesSingleSampleableResource);
+    tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
+    tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
     return tests.ExitCode();
 }
