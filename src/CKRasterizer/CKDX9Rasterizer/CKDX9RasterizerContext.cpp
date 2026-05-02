@@ -1876,8 +1876,8 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
         // If source size doesn't match texture size, we need to rescale
         if (surfaceDesc.Width != src.Width || surfaceDesc.Height != src.Height)
         {
-            dst.Width = src.Width;
-            dst.Height = src.Height;
+            dst.Width = surfaceDesc.Width;
+            dst.Height = surfaceDesc.Height;
             dst.BitsPerPixel = 32;
             dst.BytesPerLine = 4 * dst.Width;
             dst.AlphaMask = A_MASK;
@@ -3365,8 +3365,8 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
         // If source dimensions don't match texture dimensions, resize
         if (surfaceDesc.Width != src.Width || surfaceDesc.Height != src.Height)
         {
-            dst.Width = src.Width;
-            dst.Height = src.Height;
+            dst.Width = surfaceDesc.Width;
+            dst.Height = surfaceDesc.Height;
             dst.BitsPerPixel = 32;
             dst.BytesPerLine = 4 * surfaceDesc.Width;
             dst.AlphaMask = A_MASK;
