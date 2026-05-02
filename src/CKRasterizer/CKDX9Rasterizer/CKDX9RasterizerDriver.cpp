@@ -399,7 +399,7 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
     }
 
     // Special case for render targets - they have strict format requirements
-    if (Usage & D3DUSAGE_RENDERTARGET)
+    if ((desc->Flags & CKRST_TEXTURE_CUBEMAP) == 0 && (Usage & D3DUSAGE_RENDERTARGET))
     {
         // Start with common render target formats in preference order
         static const D3DFORMAT rtFormats[] = {
