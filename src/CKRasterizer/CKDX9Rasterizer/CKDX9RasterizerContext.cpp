@@ -970,22 +970,19 @@ CKBOOL CKDX9RasterizerContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD V
     m_StateCache[State].Value = Value;
     m_StateCache[State].Valid = TRUE;
 
-    // Check if this state is in the miss mask (states to ignore)
-    if (m_StateCacheMissMask.IsSet(State))
-        return FALSE;
-
-    // Check if this state is in the hit mask (states with special handling)
-    if (m_StateCacheHitMask.IsSet(State))
+    if (State == VXRENDERSTATE_CULLMODE)
     {
         static const D3DCULL VXCullModes[4] = {D3DCULL_NONE, D3DCULL_NONE, D3DCULL_CW, D3DCULL_CCW};
         static const D3DCULL VXCullModesInverted[4] = {D3DCULL_NONE, D3DCULL_NONE, D3DCULL_CCW, D3DCULL_CW};
 
-        if (State == VXRENDERSTATE_CULLMODE)
-        {
-            if (Value >= 4)
-                Value = 0; // Default to VXCULL_NONE
-            return SUCCEEDED(m_Device->SetRenderState(D3DRS_CULLMODE, m_InverseWinding ? VXCullModesInverted[Value] : VXCullModes[Value]));
-        }
+        if (Value >= 4)
+            Value = 0; // Default to VXCULL_NONE
+        return SUCCEEDED(m_Device->SetRenderState(D3DRS_CULLMODE, m_InverseWinding ? VXCullModesInverted[Value] : VXCullModes[Value]));
+    }
+
+    if (State == VXRENDERSTATE_INVERSEWINDING ||
+        State == VXRENDERSTATE_TEXTURETARGET)
+    {
         if (State == VXRENDERSTATE_INVERSEWINDING)
         {
             m_InverseWinding = Value != 0;
@@ -993,6 +990,14 @@ CKBOOL CKDX9RasterizerContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD V
         }
         return TRUE;
     }
+
+    // Check if this state is in the miss mask (states to ignore)
+    if (m_StateCacheMissMask.IsSet(State))
+        return FALSE;
+
+    // Check if this state is in the hit mask (states with special handling)
+    if (m_StateCacheHitMask.IsSet(State))
+        return TRUE;
 
     // Set the actual state in D3D (using translated values if needed)
     // CKDWORD translatedValue = Value;
@@ -1134,7 +1139,20 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURE
     if (!m_Device || Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
         return FALSE;
 
+    if (Tss >= CKRST_TSS_MAXSTATE)
+        return FALSE;
+
+    if ((Tss == CKRST_TSS_MAGFILTER || Tss == CKRST_TSS_MINFILTER) && Value > VXTEXTUREFILTER_ANISOTROPIC)
+        return FALSE;
+
+    if (Tss == CKRST_TSS_TEXTUREMAPBLEND && Value >= VXTEXTUREBLEND_MAX)
+        return FALSE;
+
     HRESULT hr = S_OK;
+    const CKDX9RasterizerDriver *dxDriver = static_cast<CKDX9RasterizerDriver *>(m_Driver);
+    CKDWORD maxAnisotropy = dxDriver ? dxDriver->m_D3DCaps.MaxAnisotropy : 1;
+    if (maxAnisotropy == 0)
+        maxAnisotropy = 1;
 
     switch (Tss)
     {
@@ -1180,7 +1198,7 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURE
                         m_Device->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
                         break;
                     case VXTEXTUREFILTER_ANISOTROPIC:
-                        m_Device->SetSamplerState(Stage, D3DSAMP_MAXANISOTROPY, D3DTEXF_LINEAR);
+                        m_Device->SetSamplerState(Stage, D3DSAMP_MAXANISOTROPY, maxAnisotropy);
                         m_Device->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC);
                         break;
                     default:
@@ -1259,7 +1277,7 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURE
                         m_Device->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC);
                     else
                         m_Device->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-                    m_Device->SetSamplerState(Stage, D3DSAMP_MAXANISOTROPY, D3DTEXF_LINEAR);
+                    m_Device->SetSamplerState(Stage, D3DSAMP_MAXANISOTROPY, maxAnisotropy);
                     break;
                 default:
                     break;
@@ -1344,7 +1362,9 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURE
                 m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, blend->Aarg1);
                 m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG2, blend->Aarg2);
 
-                if (FAILED(m_Device->ValidateDevice((DWORD *)&Stage)))
+                DWORD passes = 0;
+                HRESULT validateHr = m_Device->ValidateDevice(&passes);
+                if (FAILED(validateHr))
                 {
                     m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_DISABLE);
                     m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
