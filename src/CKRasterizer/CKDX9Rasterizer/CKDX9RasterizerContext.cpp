@@ -2042,13 +2042,22 @@ CKBOOL CKDX9RasterizerContext::CopyToTexture(CKDWORD Texture, VxRect *Src, VxRec
         return FALSE;
     }
 
-    // Copy the source rectangle to the destination origin without scaling.
+    int copyWidth = destRect.right - destRect.left;
+    int copyHeight = destRect.bottom - destRect.top;
+    int sourceWidth = srcRect.right - srcRect.left;
+    int sourceHeight = srcRect.bottom - srcRect.top;
+    if (sourceWidth < copyWidth && sourceHeight < copyHeight)
+    {
+        copyWidth = sourceWidth;
+        copyHeight = sourceHeight;
+    }
+
     RECT copyDestRect;
     SetRect(&copyDestRect,
             destRect.left,
             destRect.top,
-            destRect.left + (srcRect.right - srcRect.left),
-            destRect.top + (srcRect.bottom - srcRect.top));
+            destRect.left + copyWidth,
+            destRect.top + copyHeight);
 
     // Copy from back buffer to texture surface
     hr = m_Device->StretchRect(backBuffer, &srcRect, textureSurface, &copyDestRect, D3DTEXF_NONE);

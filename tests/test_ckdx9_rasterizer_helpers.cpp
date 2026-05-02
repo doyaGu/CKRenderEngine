@@ -110,6 +110,45 @@ public:
     HRESULT STDMETHODCALLTYPE CreateDevice(UINT, D3DDEVTYPE, HWND, DWORD,
                                            D3DPRESENT_PARAMETERS *, IDirect3DDevice9 **) { return D3DERR_INVALIDCALL; }
 };
+
+bool ReadRenderTargetPixel(CKDX9RasterizerContext *context, IDirect3DSurface9 *surface,
+                           UINT x, UINT y, CKDWORD *pixel)
+{
+    if (!context || !context->m_Device || !surface || !pixel)
+        return false;
+
+    D3DSURFACE_DESC desc = {};
+    if (FAILED(surface->GetDesc(&desc)))
+        return false;
+
+    IDirect3DSurface9 *systemSurface = NULL;
+    HRESULT hr = context->m_Device->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+                                                                D3DPOOL_SYSTEMMEM, &systemSurface, NULL);
+    if (FAILED(hr) || !systemSurface)
+        return false;
+
+    hr = context->m_Device->GetRenderTargetData(surface, systemSurface);
+    if (FAILED(hr))
+    {
+        SAFERELEASE(systemSurface);
+        return false;
+    }
+
+    D3DLOCKED_RECT locked = {};
+    hr = systemSurface->LockRect(&locked, NULL, D3DLOCK_READONLY);
+    if (FAILED(hr))
+    {
+        SAFERELEASE(systemSurface);
+        return false;
+    }
+
+    const CKBYTE *row = static_cast<const CKBYTE *>(locked.pBits) + y * locked.Pitch;
+    *pixel = *reinterpret_cast<const CKDWORD *>(row + x * 4);
+
+    systemSurface->UnlockRect();
+    SAFERELEASE(systemSurface);
+    return true;
+}
 #endif
 
 void UnknownD3DFormatMapsToUnknownPixelFormat()
@@ -749,6 +788,79 @@ void CopyToTextureSupportsCubeFaces()
 #endif
 }
 
+void CopyToTextureHonorsDestinationBounds()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 CopyToTexture bounds test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 CopyToTexture bounds test should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 CopyToTexture bounds context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_RENDERTARGET;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 64;
+    desired.Format.Height = 64;
+    desired.Format.BytesPerLine = 64 * 4;
+    desired.MipMapCount = 0;
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 CopyToTexture bounds test should create a render-target texture");
+
+    TestCheck(context->SetTargetTexture(texture, 64, 64) == TRUE,
+              "DX9 CopyToTexture bounds test should bind the texture target");
+    context->Clear(CKRST_CTXCLEAR_COLOR, 0x00000000);
+    TestCheck(context->SetTargetTexture(0) == TRUE,
+              "DX9 CopyToTexture bounds test should restore the back buffer");
+
+    context->Clear(CKRST_CTXCLEAR_COLOR, 0x00FF0000);
+    VxRect src(0.0f, 0.0f, 32.0f, 32.0f);
+    VxRect dest(0.0f, 0.0f, 16.0f, 16.0f);
+    TestCheck(context->CopyToTexture(texture, &src, &dest, CKRST_CUBEFACE_XPOS) == TRUE,
+              "CopyToTexture should copy into the destination rectangle");
+
+    CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(context->m_Textures[texture]);
+    IDirect3DSurface9 *surface = NULL;
+    HRESULT hr = desc && desc->DxTexture ? desc->DxTexture->GetSurfaceLevel(0, &surface) : E_FAIL;
+    TestCheck(SUCCEEDED(hr) && surface != NULL, "DX9 CopyToTexture bounds test should expose the texture surface");
+
+    CKDWORD insidePixel = 0;
+    CKDWORD outsidePixel = 0;
+    TestCheck(ReadRenderTargetPixel(context, surface, 8, 8, &insidePixel),
+              "DX9 CopyToTexture bounds test should read the copied pixel");
+    TestCheck(ReadRenderTargetPixel(context, surface, 24, 24, &outsidePixel),
+              "DX9 CopyToTexture bounds test should read the pixel outside Dest");
+    SAFERELEASE(surface);
+
+    TestCheck((insidePixel & 0x00FFFFFF) == 0x00FF0000,
+              "CopyToTexture should write pixels inside Dest");
+    TestCheck((outsidePixel & 0x00FFFFFF) == 0x00000000,
+              "CopyToTexture must not write outside the destination rectangle");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 void ResizeWithActiveCubemapRenderTargetDoesNotCrash()
 {
 #if !defined(_WIN32)
@@ -810,6 +922,7 @@ int main()
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);
+    tests.Run("CopyToTexture honors destination bounds", &CopyToTextureHonorsDestinationBounds);
     tests.Run("Resize handles active cubemap render targets", &ResizeWithActiveCubemapRenderTargetDoesNotCrash);
     return tests.ExitCode();
 }
