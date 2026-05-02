@@ -529,6 +529,60 @@ void SpriteCreationUsesNextPowerOfTwoWhenItFits()
 #endif
 }
 
+void SpriteCreationRespectsSquareOnlyTextureCaps()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 sprite square-only sizing test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 sprite square-only sizing test should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 sprite square-only sizing context should initialize");
+
+    driver->m_3DCaps.TextureCaps |= CKRST_TEXTURECAPS_SQUAREONLY;
+
+    CKDWORD sprite = rasterizer.CreateObjectIndex(CKRST_OBJ_SPRITE);
+    CKSpriteDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desired.Format);
+    desired.Format.Width = 100;
+    desired.Format.Height = 40;
+    desired.Format.BytesPerLine = 100 * 4;
+    desired.MipMapCount = 0;
+
+    TestCheck(context->CreateObject(sprite, CKRST_OBJ_SPRITE, &desired) == TRUE,
+              "DX9 sprite square-only sizing test should create the sprite");
+
+    CKSpriteDesc *desc = context->GetSpriteData(sprite);
+    TestCheck(desc != NULL && desc->Textures.Size() == 1,
+              "CKRasterizerLib square-only sprite creation should still use one texture when it fits");
+
+    CKSPRTextInfo *info = desc->Textures.Begin();
+    TestCheck(info != NULL && info->w == 100 && info->h == 40 && info->sw == 128 && info->sh == 128,
+              "CKRasterizerLib sprite storage should match square-only texture expansion");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 void RenderTargetTextureCanSwitchFromCubeTo2D()
 {
 #if !defined(_WIN32)
@@ -752,6 +806,7 @@ int main()
     tests.Run("Cubemap render target format search requires cube texture support", &CubeRenderTargetFormatSearchRequiresCubeSupport);
     tests.Run("POW2 texture caps use next power-of-two sizing", &Pow2TextureCapsUseNextPowerOfTwo);
     tests.Run("Sprite creation uses next power-of-two sizing when it fits", &SpriteCreationUsesNextPowerOfTwoWhenItFits);
+    tests.Run("Sprite creation respects square-only texture caps", &SpriteCreationRespectsSquareOnlyTextureCaps);
     tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     tests.Run("Render target texture uses requested size for existing object", &RenderTargetTextureUsesRequestedSizeForExistingObject);
     tests.Run("CopyToTexture supports cubemap faces", &CopyToTextureSupportsCubeFaces);

@@ -612,6 +612,11 @@ CKBOOL CKRasterizerContext::CreateSprite(CKDWORD Sprite, CKSpriteDesc *DesiredFo
             info->y = hti[j].y;
             info->h = hti[j].h;
             info->sh = hti[j].sh;
+            if ((m_Driver->m_3DCaps.TextureCaps & CKRST_TEXTURECAPS_SQUAREONLY) != 0) {
+                short s = XMax(info->sw, info->sh);
+                info->sw = s;
+                info->sh = s;
+            }
             info->IndexTexture = m_Driver->m_Owner->CreateObjectIndex(CKRST_OBJ_TEXTURE);
             DesiredFormat->Format.Width = info->sw;
             DesiredFormat->Format.Height = info->sh;
