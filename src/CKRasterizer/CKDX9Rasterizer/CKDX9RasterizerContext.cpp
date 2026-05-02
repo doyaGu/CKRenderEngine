@@ -743,8 +743,10 @@ CKBOOL CKDX9RasterizerContext::SetLight(CKDWORD Light, CKLightData *data)
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (data && Light < 128)
-        m_CurrentLightData[Light] = *data;
+    if (!m_Device || !data || Light >= RST_MAX_LIGHT)
+        return FALSE;
+
+    m_CurrentLightData[Light] = *data;
 
     D3DLIGHT9 light;
     light.Type = (D3DLIGHTTYPE)data->Type;
@@ -1873,7 +1875,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
 
     if (needMipmapGen)
     {
-        mipmapBuffer = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height);
+        mipmapBuffer = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height * 4);
         if (!mipmapBuffer)
             return FALSE;
 
@@ -3376,7 +3378,7 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
     if (generateMipmaps)
     {
         // Allocate memory for image processing
-        image = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height);
+        image = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height * 4);
         if (!image)
             return FALSE;
 
@@ -4194,9 +4196,15 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
     // Power of 2 adjustment if required
     if ((textureCaps & CKRST_TEXTURECAPS_POW2) != 0)
     {
-        // Find next power of 2 for dimensions
-        width = 1 << GetMsb(width, 15);
-        height = 1 << GetMsb(height, 15);
+        CKDWORD widthMsb = GetMsb(width, 15);
+        if ((1u << widthMsb) < static_cast<CKDWORD>(width) && widthMsb < 15)
+            ++widthMsb;
+        width = 1u << widthMsb;
+
+        CKDWORD heightMsb = GetMsb(height, 15);
+        if ((1u << heightMsb) < static_cast<CKDWORD>(height) && heightMsb < 15)
+            ++heightMsb;
+        height = 1u << heightMsb;
     }
 
     // Square texture adjustment if required
