@@ -83,6 +83,15 @@ void D3DFormatToTextureDesc(D3DFORMAT ddpf, CKTextureDesc *desc)
     if (!desc)
         return;
 
+    VX_PIXELFORMAT vxpf = D3DFormatToVxPixelFormat(ddpf);
+    if (vxpf == UNKNOWN_PF)
+    {
+        desc->Flags = 0;
+        desc->MipMapCount = 0;
+        desc->Format = VxImageDescEx();
+        return;
+    }
+
     // Set appropriate flags based on pixel format
     desc->Flags = CKRST_TEXTURE_VALID;
 
@@ -115,7 +124,6 @@ void D3DFormatToTextureDesc(D3DFORMAT ddpf, CKTextureDesc *desc)
         desc->Flags |= CKRST_TEXTURE_COMPRESSION;
     }
 
-    VX_PIXELFORMAT vxpf = D3DFormatToVxPixelFormat(ddpf);
     VxPixelFormat2ImageDesc(vxpf, desc->Format);
 }
 
