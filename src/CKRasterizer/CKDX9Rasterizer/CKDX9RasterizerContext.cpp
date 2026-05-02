@@ -1857,7 +1857,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
 
     if (needMipmapGen)
     {
-        mipmapBuffer = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height * 4);
+        mipmapBuffer = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height);
         if (!mipmapBuffer)
             return FALSE;
 
@@ -3360,7 +3360,7 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
     if (generateMipmaps)
     {
         // Allocate memory for image processing
-        image = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height * 4);
+        image = m_Owner->AllocateObjects(surfaceDesc.Width * surfaceDesc.Height);
         if (!image)
             return FALSE;
 
