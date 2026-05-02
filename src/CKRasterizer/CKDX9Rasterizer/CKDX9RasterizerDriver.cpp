@@ -135,8 +135,12 @@ CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevTyp
         D3DFMT_DXT1,      // Compressed formats
         D3DFMT_DXT3,
         D3DFMT_DXT5,
+        D3DFMT_A8,        // Alpha and luminance formats
+        D3DFMT_L8,
+        D3DFMT_A8L8,
         D3DFMT_V8U8,      // Bump mapping formats
         D3DFMT_V16U16,
+        D3DFMT_Q8W8V8U8,
         D3DFMT_X8L8V8U8,
         D3DFMT_L6V5U5,
         D3DFMT_R3G3B2     // Other less common formats
@@ -339,8 +343,10 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
             D3DFMT_A8R8G8B8, D3DFMT_X8R8G8B8, D3DFMT_A4R4G4B4, D3DFMT_R5G6B5, D3DFMT_X1R5G5B5, D3DFMT_A1R5G5B5,
             // Compressed formats
             D3DFMT_DXT1, D3DFMT_DXT3, D3DFMT_DXT5,
+            // Alpha formats
+            D3DFMT_A8, D3DFMT_A8L8, D3DFMT_A4L4,
             // Other formats
-            D3DFMT_R8G8B8, D3DFMT_R3G3B2};
+            D3DFMT_R8G8B8, D3DFMT_R3G3B2, D3DFMT_X4R4G4B4, D3DFMT_G16R16, D3DFMT_A16B16G16R16};
         const int formatCount = sizeof(commonFormats) / sizeof(commonFormats[0]);
 
         // Check each format for compatibility with the adapter
