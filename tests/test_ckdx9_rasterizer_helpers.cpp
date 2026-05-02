@@ -353,6 +353,57 @@ void CubeTextureFormatSearchRequiresCubeSupport()
 #endif
 }
 
+void RenderTargetTextureCanSwitchFromCubeTo2D()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 render target switch test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 render target switch context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    TestCheck(context->SetTargetTexture(texture, 64, -1, CKRST_CUBEFACE_XPOS) == TRUE,
+              "SetTargetTexture should create a cubemap render target");
+    TestCheck(context->SetTargetTexture(0) == TRUE,
+              "SetTargetTexture(0) should restore the default render target after cubemap");
+
+    TestCheck(context->SetTargetTexture(texture, 64, 64) == TRUE,
+              "SetTargetTexture should recreate the same object as a 2D render target");
+    CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(context->m_Textures[texture]);
+    TestCheck(desc != NULL, "Render target switch should keep a texture descriptor");
+    TestCheck((desc->Flags & CKRST_TEXTURE_CUBEMAP) == 0,
+              "2D render target recreation must clear cubemap identity");
+    TestCheck(desc->DxTexture != NULL, "2D render target recreation should keep a 2D texture");
+
+    TestCheck(context->SetTargetTexture(0) == TRUE,
+              "SetTargetTexture(0) should restore the default render target after 2D recreation");
+    TestCheck(context->SetTexture(texture, 0) == TRUE,
+              "Recreated 2D render target should bind as a 2D texture");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -368,5 +419,6 @@ int main()
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Cubemap format search requires cube texture support", &CubeTextureFormatSearchRequiresCubeSupport);
+    tests.Run("Render target texture can switch from cube to 2D", &RenderTargetTextureCanSwitchFromCubeTo2D);
     return tests.ExitCode();
 }
