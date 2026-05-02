@@ -305,6 +305,54 @@ void ResizedCubeMipmapUploadStaysWithinTargetBuffer()
 #endif
 }
 
+void CubeTextureFormatSearchRequiresCubeSupport()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    HWND window = CreateTestWindow();
+    TestCheck(window != NULL, "DX9 cube format test needs a hidden window");
+
+    CKDX9Rasterizer rasterizer;
+    if (!rasterizer.Start(window))
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    if (rasterizer.GetDriverCount() == 0)
+    {
+        DestroyWindow(window);
+        return;
+    }
+
+    CKDX9RasterizerDriver *driver = static_cast<CKDX9RasterizerDriver *>(rasterizer.GetDriver(0));
+    CKDX9RasterizerContext *context = static_cast<CKDX9RasterizerContext *>(driver->CreateContext());
+    TestCheck(context != NULL, "DX9 driver should create a context");
+    TestCheck(context->Create(window, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == TRUE,
+              "DX9 cube format test context should initialize");
+
+    CKDWORD texture = rasterizer.CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    CKTextureDesc desired;
+    desired.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_MANAGED;
+    VxPixelFormat2ImageDesc(_16_V8U8, desired.Format);
+    desired.Format.Width = 64;
+    desired.Format.Height = 64;
+    desired.Format.BytesPerLine = 64 * 2;
+    desired.MipMapCount = 0;
+
+    TestCheck(context->CreateObject(texture, CKRST_OBJ_TEXTURE, &desired) == TRUE,
+              "DX9 cubemap creation should fall back when the requested 2D format lacks cube support");
+
+    CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(context->m_Textures[texture]);
+    TestCheck(desc != NULL && desc->DxCubeTexture != NULL,
+              "DX9 cubemap fallback should create a cube texture");
+
+    driver->DestroyContext(context);
+    DestroyWindow(window);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -319,5 +367,6 @@ int main()
     tests.Run("2D render target textures use one sampleable resource", &RenderTargetTextureUsesSingleSampleableResource);
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);
+    tests.Run("Cubemap format search requires cube texture support", &CubeTextureFormatSearchRequiresCubeSupport);
     return tests.ExitCode();
 }
