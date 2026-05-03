@@ -1044,7 +1044,7 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
 #if LOGGING && LOG_SETTEXTURE
     fprintf(stderr, "settexture %d %d\n", Texture, Stage);
 #endif
-    if (Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
+    if (Stage < 0 || Stage >= (int)m_Driver->m_3DCaps.MaxNumberTextureStage)
         return FALSE;
 
     if (!m_Device)
@@ -1138,7 +1138,7 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAG
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (!m_Device || Stage >= m_Driver->m_3DCaps.MaxNumberTextureStage)
+    if (!m_Device || Stage < 0 || Stage >= (int)m_Driver->m_3DCaps.MaxNumberTextureStage)
         return FALSE;
 
     if (Tss >= CKRST_TSS_MAXSTATE)
