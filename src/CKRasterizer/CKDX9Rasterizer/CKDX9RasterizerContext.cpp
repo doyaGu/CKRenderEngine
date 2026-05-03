@@ -1036,7 +1036,7 @@ CKBOOL CKDX9RasterizerContext::GetRenderState(VXRENDERSTATETYPE State, CKDWORD *
     return FALSE;
 }
 
-CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage)
+CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
 {
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
@@ -1105,7 +1105,7 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, CKDWORD Stage)
     return TRUE;
 }
 
-CKBOOL CKDX9RasterizerContext::SetTextureStageState(CKDWORD Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value)
+CKBOOL CKDX9RasterizerContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value)
 {
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
