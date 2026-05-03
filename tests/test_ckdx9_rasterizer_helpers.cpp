@@ -5,6 +5,20 @@
 #include <windows.h>
 #endif
 #include <string.h>
+#include <type_traits>
+
+static_assert(std::is_same<decltype(&CKRasterizerContext::SetTexture),
+                           CKBOOL (CKRasterizerContext::*)(CKDWORD, int)>::value,
+              "CKRasterizerContext SetTexture must match the Virtools ABI");
+static_assert(std::is_same<decltype(&CKRasterizerContext::SetTextureStageState),
+                           CKBOOL (CKRasterizerContext::*)(int, CKRST_TEXTURESTAGESTATETYPE, CKDWORD)>::value,
+              "CKRasterizerContext SetTextureStageState must match the Virtools ABI");
+static_assert(std::is_same<decltype(&CKDX9RasterizerContext::SetTexture),
+                           CKBOOL (CKDX9RasterizerContext::*)(CKDWORD, int)>::value,
+              "CKDX9 SetTexture must exactly override CKRasterizerContext");
+static_assert(std::is_same<decltype(&CKDX9RasterizerContext::SetTextureStageState),
+                           CKBOOL (CKDX9RasterizerContext::*)(int, CKRST_TEXTURESTAGESTATETYPE, CKDWORD)>::value,
+              "CKDX9 SetTextureStageState must exactly override CKRasterizerContext");
 
 namespace {
 
