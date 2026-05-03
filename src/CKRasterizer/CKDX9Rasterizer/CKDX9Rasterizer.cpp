@@ -137,13 +137,17 @@ CKRasterizer *CKDX9RasterizerStart(WIN_HANDLE AppWnd)
     {
         CKRasterizer *rasterizer = new CKDX9Rasterizer;
         if (!rasterizer)
+        {
+            FreeLibrary(handle);
             return NULL;
+        }
         if (!rasterizer->Start(AppWnd))
         {
             delete rasterizer;
             FreeLibrary(handle);
             return NULL;
         }
+        FreeLibrary(handle);
         return rasterizer;
     }
     return NULL;
