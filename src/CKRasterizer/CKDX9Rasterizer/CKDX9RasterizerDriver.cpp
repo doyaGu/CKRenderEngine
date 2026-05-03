@@ -151,6 +151,10 @@ CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevTyp
     for (int i = 0; i < textureFormatArrayCount; ++i)
     {
         D3DFORMAT texFormat = textureFormatArray[i];
+        if ((texFormat == D3DFMT_DXT1 || texFormat == D3DFMT_DXT3 || texFormat == D3DFMT_DXT5) &&
+            (!D3DXLoadSurfaceFromSurface || !D3DXLoadSurfaceFromMemory))
+            continue;
+
         bool formatSupported = false;
 
         // Try each render format to see if any support this texture format
@@ -352,6 +356,10 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
         // Check each format for compatibility with the adapter
         for (int i = 0; i < formatCount; ++i)
         {
+            if ((commonFormats[i] == D3DFMT_DXT1 || commonFormats[i] == D3DFMT_DXT3 || commonFormats[i] == D3DFMT_DXT5) &&
+                (!D3DXLoadSurfaceFromSurface || !D3DXLoadSurfaceFromMemory))
+                continue;
+
             if (IsTextureFormatSupported(commonFormats[i], AdapterFormat, Usage))
             {
                 CKTextureDesc formatDesc;
@@ -389,10 +397,17 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
 
     // Get the D3D format corresponding to the requested texture description
     D3DFORMAT requestedFormat = TextureDescToD3DFormat(desc);
+    CKBOOL d3dxSurfaceLoadAvailable = D3DXLoadSurfaceFromSurface && D3DXLoadSurfaceFromMemory;
+    CKBOOL requestedIsDxt = requestedFormat == D3DFMT_DXT1 ||
+                            requestedFormat == D3DFMT_DXT2 ||
+                            requestedFormat == D3DFMT_DXT3 ||
+                            requestedFormat == D3DFMT_DXT4 ||
+                            requestedFormat == D3DFMT_DXT5;
 
     // First, check if the requested format is directly supported
     if ((desc->Flags & CKRST_TEXTURE_CUBEMAP) == 0 &&
         requestedFormat != D3DFMT_UNKNOWN &&
+        (!requestedIsDxt || d3dxSurfaceLoadAvailable) &&
         IsTextureFormatSupported(requestedFormat, AdapterFormat, Usage))
     {
         return requestedFormat;
@@ -425,6 +440,7 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
     {
         // First check if the original format supports cube maps
         if (requestedFormat != D3DFMT_UNKNOWN &&
+            (!requestedIsDxt || d3dxSurfaceLoadAvailable) &&
             owner->m_D3D9->CheckDeviceFormat(
                 m_AdapterIndex, m_DevType, AdapterFormat,
                 Usage, D3DRTYPE_CUBETEXTURE, requestedFormat) == D3D_OK)
@@ -441,6 +457,10 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestTextureFormat(CKTextureDesc *desc, D
 
         for (int i = 0; i < cubeFormatCount; i++)
         {
+            if ((cubeFormats[i] == D3DFMT_DXT1 || cubeFormats[i] == D3DFMT_DXT3) &&
+                !d3dxSurfaceLoadAvailable)
+                continue;
+
             if (owner->m_D3D9->CheckDeviceFormat(
                 m_AdapterIndex, m_DevType, AdapterFormat,
                 Usage, D3DRTYPE_CUBETEXTURE, cubeFormats[i]) == D3D_OK)

@@ -550,6 +550,7 @@ public:
 #else
     LPDIRECT3D9 m_D3D9;
 #endif
+    HMODULE m_D3DXModule;
 
     // Stage Blends
     void InitBlendStages();
