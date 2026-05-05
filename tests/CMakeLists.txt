@@ -38,12 +38,3 @@ ckre_add_test(simple_mesh_test
     simple_mesh_test.cpp
 )
 
-ckre_add_test(ckdx9_rasterizer_helper_tests
-    test_ckdx9_rasterizer_helpers.cpp
-)
-target_include_directories(ckdx9_rasterizer_helper_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKDX9Rasterizer
-)
-target_link_libraries(ckdx9_rasterizer_helper_tests PRIVATE
-    CKDX9RasterizerStatic
-)
