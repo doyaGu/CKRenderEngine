@@ -28,10 +28,11 @@ endif ()
 option(CKRE_BUILD_SHARED "Build shared library" ON)
 option(CKRE_BUILD_STATIC "Build static library" OFF)
 option(CKRE_BUILD_TESTS "Build tests" OFF)
+option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
 
-if (CKRE_BUILD_TESTS AND NOT CKRE_BUILD_STATIC)
-    message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests link against CK2_3DStatic")
+if ((CKRE_BUILD_TESTS OR CKRE_BUILD_EXAMPLES) AND NOT CKRE_BUILD_STATIC)
+    message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests/examples require static libraries")
     set(CKRE_BUILD_STATIC ON CACHE BOOL "Build static library" FORCE)
 endif ()
 
@@ -60,7 +61,7 @@ enable_language(RC)
 # When built standalone, default to C++17.
 if (CKRE_IS_TOP_LEVEL)
     if (NOT CMAKE_CXX_STANDARD)
-        set(CMAKE_CXX_STANDARD 17)
+        set(CMAKE_CXX_STANDARD 20)
     endif ()
     set(CMAKE_CXX_STANDARD_REQUIRED YES)
 endif ()
@@ -211,6 +212,13 @@ if (CKRE_BUILD_TESTS)
     add_subdirectory(tests)
 endif ()
 
+# =============================================================================
+# Examples
+# =============================================================================
+if (CKRE_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif ()
+
 if (CKRE_INSTALL)
     include(CMakePackageConfigHelpers)
 
@@ -251,6 +259,7 @@ if (CKRE_IS_TOP_LEVEL)
     message(STATUS "  Build Shared:         ${CKRE_BUILD_SHARED}")
     message(STATUS "  Build Static:         ${CKRE_BUILD_STATIC}")
     message(STATUS "  Build Tests:          ${CKRE_BUILD_TESTS}")
+    message(STATUS "  Build Examples:       ${CKRE_BUILD_EXAMPLES}")
     if (VIRTOOLS_SDK_PATH)
         message(STATUS "  Virtools SDK:         ${VIRTOOLS_SDK_PATH}")
     endif ()

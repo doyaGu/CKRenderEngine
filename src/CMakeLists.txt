@@ -160,7 +160,7 @@ if (CKRE_BUILD_SHARED)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     )
 
-    target_link_libraries(CK2_3D PRIVATE CKRasterizerLib)
+    # CK2_3D consumer code not yet rewritten for v2 API
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
@@ -171,7 +171,7 @@ if (CKRE_BUILD_STATIC)
 
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
     ckre_configure_target(CK2_3DStatic)
-    target_link_libraries(CK2_3DStatic PUBLIC CKRasterizerLib)
+    # CK2_3DStatic consumer code not yet rewritten for v2 API
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
