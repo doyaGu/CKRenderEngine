@@ -143,11 +143,25 @@ struct CKRenderStateData
 // Shader Descriptor
 // ===========================================================================
 
+struct CKShaderTargetDesc {
+    CK_SHADER_FORMAT Format;
+    CK_SHADER_PROFILE Profile;
+    CKDWORD Version;
+    CKDWORD Flags;
+
+    CKShaderTargetDesc()
+        : Format(CKRST_SHADER_FORMAT_UNKNOWN),
+          Profile(CKRST_SHADER_PROFILE_UNKNOWN),
+          Version(0),
+          Flags(0) {}
+};
+
 struct CKShaderDesc {
     CK_SHADER_STAGE Stage;
     // Opaque precompiled shader blob for the selected rasterizer backend.
     // Backend-specific payload selection happens above the rasterizer layer.
     CK_SHADER_FORMAT Format;
+    CK_SHADER_PROFILE Profile;
     CKBYTE *Code;
     CKDWORD CodeSize;
     CKSTRING EntryPoint;

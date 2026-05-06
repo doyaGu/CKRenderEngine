@@ -115,6 +115,18 @@ CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
     return FALSE;
 }
 
+CKERROR CKBgfxRasterizerDriver::GetShaderTarget(CKShaderTargetDesc *Target) const
+{
+    if (!Target)
+        return CKERR_INVALIDPARAMETER;
+
+    *Target = m_ShaderTarget;
+    return (Target->Format != CKRST_SHADER_FORMAT_UNKNOWN &&
+            Target->Profile != CKRST_SHADER_PROFILE_UNKNOWN)
+        ? CK_OK
+        : CKERR_NOTIMPLEMENTED;
+}
+
 CKERROR CKBgfxRasterizerDriver::GetProgrammableCaps(VxProgCapsDesc &Caps)
 {
     memset(&Caps, 0, sizeof(Caps));

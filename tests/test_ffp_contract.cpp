@@ -3,9 +3,8 @@
 #include "CKDrawStateCache.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFShaderCache.h"
+#include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
-
-#include <cstring>
 
 namespace {
 
@@ -145,17 +144,35 @@ void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
               "DECALALPHA alpha op must keep diffuse/current alpha");
 }
 
-void Test_ShaderBackendMapping_MatchesBgfxRendererFamilies() {
-    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_D3D11), "dx11") == 0,
-              "D3D11 renderer must select dx11 shader set");
-    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_D3D12), "dx12") == 0,
-              "D3D12 renderer must select dx12 shader set");
-    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_VULKAN), "spirv") == 0,
-              "Vulkan renderer must select SPIR-V shader set");
-    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_OPENGL), "glsl") == 0,
-              "OpenGL renderer must select GLSL shader set");
-    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_UNKNOWN), "unsupported") == 0,
-              "Unsupported renderer must not silently select a shader set");
+void Test_ShaderTarget_ProfilesAreExplicitAndDistinct() {
+    CKShaderTargetDesc target;
+    TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Default shader format must be unknown");
+    TestCheck(target.Profile == CKRST_SHADER_PROFILE_UNKNOWN, "Default shader profile must be unknown");
+    TestCheck(CKRST_SHADER_FORMAT_NATIVE != CKRST_SHADER_FORMAT_UNKNOWN,
+              "Native shader format must be explicit");
+    TestCheck(CKRST_SHADER_PROFILE_DX11 != CKRST_SHADER_PROFILE_UNKNOWN,
+              "DX11 shader profile must be explicit");
+    TestCheck(CKRST_SHADER_PROFILE_DX12 != CKRST_SHADER_PROFILE_DX11,
+              "DX12 shader profile must differ from DX11");
+    TestCheck(CKRST_SHADER_PROFILE_SPIRV != CKRST_SHADER_PROFILE_DX11 &&
+              CKRST_SHADER_PROFILE_SPIRV != CKRST_SHADER_PROFILE_DX12,
+              "SPIR-V shader profile must differ from D3D profiles");
+    TestCheck(CKRST_SHADER_PROFILE_GLSL != CKRST_SHADER_PROFILE_SPIRV,
+              "GLSL shader profile must differ from SPIR-V");
+}
+
+class TestRasterizerDriver : public CKRasterizerDriver {
+public:
+    CKERROR GetProgrammableCaps(VxProgCapsDesc &) override { return CK_OK; }
+};
+
+void Test_RasterizerDriver_DefaultShaderTargetIsUnknown() {
+    TestRasterizerDriver driver;
+    CKShaderTargetDesc target;
+    CKERROR err = driver.GetShaderTarget(&target);
+    TestCheck(err == CKERR_NOTIMPLEMENTED, "Default driver shader target must be unsupported");
+    TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Unsupported driver shader format must be unknown");
+    TestCheck(target.Profile == CKRST_SHADER_PROFILE_UNKNOWN, "Unsupported driver shader profile must be unknown");
 }
 
 } // namespace
@@ -172,6 +189,7 @@ int main() {
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
-    tests.Run("Shader backend mapping", &Test_ShaderBackendMapping_MatchesBgfxRendererFamilies);
+    tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
+    tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     return tests.ExitCode();
 }

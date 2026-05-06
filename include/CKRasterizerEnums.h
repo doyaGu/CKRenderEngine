@@ -130,24 +130,27 @@ typedef enum CK_OBJECT_INDEX {
 // Shader Stage and Format
 // ---------------------------------------------------------------------------
 
+#define CKRST_MAKEFOURCC(a, b, c, d) \
+    ((uint32_t)(uint8_t)(a) | ((uint32_t)(uint8_t)(b) << 8) | \
+     ((uint32_t)(uint8_t)(c) << 16) | ((uint32_t)(uint8_t)(d) << 24))
+
 typedef enum CK_SHADER_STAGE {
     CKRST_SHADER_VERTEX  = 0,
     CKRST_SHADER_PIXEL   = 1,
     CKRST_SHADER_COMPUTE = 2,
 } CK_SHADER_STAGE;
 
-typedef enum CK_SHADER_FORMAT {
-    CKRST_SHADER_NATIVE = 0,
-} CK_SHADER_FORMAT;
+typedef uint32_t CK_SHADER_FORMAT;
+typedef uint32_t CK_SHADER_PROFILE;
 
-typedef enum CK_RENDERER_BACKEND {
-    CKRST_RENDERER_AUTO     = 0,
-    CKRST_RENDERER_D3D11    = 1,
-    CKRST_RENDERER_D3D12    = 2,
-    CKRST_RENDERER_VULKAN   = 3,
-    CKRST_RENDERER_OPENGL   = 4,
-    CKRST_RENDERER_UNKNOWN  = 0xff,
-} CK_RENDERER_BACKEND;
+#define CKRST_SHADER_FORMAT_UNKNOWN 0u
+#define CKRST_SHADER_FORMAT_NATIVE  1u
+
+#define CKRST_SHADER_PROFILE_UNKNOWN 0u
+#define CKRST_SHADER_PROFILE_DX11    CKRST_MAKEFOURCC('D', 'X', '1', '1')
+#define CKRST_SHADER_PROFILE_DX12    CKRST_MAKEFOURCC('D', 'X', '1', '2')
+#define CKRST_SHADER_PROFILE_SPIRV   CKRST_MAKEFOURCC('S', 'P', 'V', ' ')
+#define CKRST_SHADER_PROFILE_GLSL    CKRST_MAKEFOURCC('G', 'L', 'S', 'L')
 
 // ---------------------------------------------------------------------------
 // Uniform Type

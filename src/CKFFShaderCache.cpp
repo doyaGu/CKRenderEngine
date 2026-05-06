@@ -20,7 +20,7 @@
 namespace {
 
 struct CKFFShaderBlobSet {
-    CK_RENDERER_BACKEND Backend;
+    CK_SHADER_PROFILE Profile;
     const char *Name;
     const unsigned char *VS3D;
     unsigned int VS3DSize;
@@ -31,28 +31,30 @@ struct CKFFShaderBlobSet {
 };
 
 static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
-    {CKRST_RENDERER_D3D11, "dx11",
+    {CKRST_SHADER_PROFILE_DX11, "dx11",
      s_dx11_vs_ff_3d, sizeof(s_dx11_vs_ff_3d),
      s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
      s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage)},
-    {CKRST_RENDERER_D3D12, "dx12",
+    {CKRST_SHADER_PROFILE_DX12, "dx12",
      s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
      s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
      s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage)},
-    {CKRST_RENDERER_VULKAN, "spirv",
+    {CKRST_SHADER_PROFILE_SPIRV, "spirv",
      s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
      s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
      s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage)},
-    {CKRST_RENDERER_OPENGL, "glsl",
+    {CKRST_SHADER_PROFILE_GLSL, "glsl",
      s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
      s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
      s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage)},
 };
 
-static const CKFFShaderBlobSet *FindShaderBlobSet(CK_RENDERER_BACKEND backend)
+static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
 {
+    if (profile == CKRST_SHADER_PROFILE_UNKNOWN)
+        return nullptr;
     for (const CKFFShaderBlobSet &set : g_ShaderBlobSets) {
-        if (set.Backend == backend)
+        if (set.Profile == profile)
             return &set;
     }
     return nullptr;
@@ -188,30 +190,36 @@ void CKFFShaderCache::CreateUniforms() {
 }
 
 void CKFFShaderCache::CreatePrograms() {
-    if (!m_Context) return;
+    if (!m_Context || !m_Context->m_Driver) return;
 
-    const CK_RENDERER_BACKEND backend = m_Context->GetRendererBackend();
-    const CKFFShaderBlobSet *set = FindShaderBlobSet(backend);
+    CKShaderTargetDesc target;
+    CKERROR targetErr = m_Context->m_Driver->GetShaderTarget(&target);
+    if (targetErr != CK_OK) {
+        CK_LOG_FMT("ShaderCache", "GetShaderTarget failed: err=%d", targetErr);
+        return;
+    }
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(target.Profile);
     if (!set) {
-        CK_LOG_FMT("ShaderCache", "No FFP shader set for renderer backend=%d (%s)",
-                   (int)backend, ShaderBackendName(backend));
+        CK_LOG_FMT("ShaderCache", "No FFP shader set for format=0x%08X profile=0x%08X",
+                   target.Format, target.Profile);
         return;
     }
 
     m_Stage3DProgram = CreateProgramFromBinary(
-        set->VS3D, set->VS3DSize,
+        target, set->VS3D, set->VS3DSize,
         set->FSStage, set->FSStageSize);
     CK_LOG_FMT("ShaderCache", "Stage3D program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
                m_Stage3DProgram, set->Name, set->VS3DSize, set->FSStageSize);
 
     m_PositionTProgram = CreateProgramFromBinary(
-        set->VSPositionT, set->VSPositionTSize,
+        target, set->VSPositionT, set->VSPositionTSize,
         set->FSStage, set->FSStageSize);
     CK_LOG_FMT("ShaderCache", "PositionT program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
                m_PositionTProgram, set->Name, set->VSPositionTSize, set->FSStageSize);
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
+    const CKShaderTargetDesc &target,
     const unsigned char *vsData, unsigned int vsSize,
     const unsigned char *fsData, unsigned int fsSize)
 {
@@ -220,7 +228,8 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     CKDWORD hVS = AllocShaderHandle();
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
-    vsDesc.Format = CKRST_SHADER_NATIVE;
+    vsDesc.Format = target.Format;
+    vsDesc.Profile = target.Profile;
     vsDesc.Code = (CKBYTE *)vsData;
     vsDesc.CodeSize = vsSize;
     CKERROR err = m_Context->CreateShader(hVS, &vsDesc);
@@ -232,7 +241,8 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     CKDWORD hFS = AllocShaderHandle();
     CKShaderDesc fsDesc = {};
     fsDesc.Stage = CKRST_SHADER_PIXEL;
-    fsDesc.Format = CKRST_SHADER_NATIVE;
+    fsDesc.Format = target.Format;
+    fsDesc.Profile = target.Profile;
     fsDesc.Code = (CKBYTE *)fsData;
     fsDesc.CodeSize = fsSize;
     err = m_Context->CreateShader(hFS, &fsDesc);
@@ -261,14 +271,4 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 
 CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     return key.VS.GetHasPositionT() ? m_PositionTProgram : m_Stage3DProgram;
-}
-
-const char *CKFFShaderCache::ShaderBackendName(CK_RENDERER_BACKEND backend)
-{
-    const CKFFShaderBlobSet *set = FindShaderBlobSet(backend);
-    if (set)
-        return set->Name;
-    if (backend == CKRST_RENDERER_AUTO)
-        return "auto";
-    return "unsupported";
 }
