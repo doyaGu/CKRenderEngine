@@ -31,6 +31,17 @@
 #include "RCKLight.h"
 #include "RCKSprite3D.h"
 
+static VX_EFFECTTEXGEN ReadTexGenParameter(CKParameter *parameter) {
+    if (!parameter)
+        return VXEFFECT_TGREFLECT;
+
+    CKDWORD value = VXEFFECT_TGREFLECT;
+    if (parameter->GetValue(&value, TRUE) != CK_OK)
+        return VXEFFECT_TGREFLECT;
+
+    return (VX_EFFECTTEXGEN)value;
+}
+
 // Static class ID (initialized during registration)
 CK_CLASSID RCKMaterial::m_ClassID = CKCID_MATERIAL;
 
@@ -1331,6 +1342,15 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         ffp.SetTexture(TextureStage, 0);
     }
 
+    ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                             CKFFPackTexcoordIndex((CKDWORD)TextureStage, CKFF_TEXGEN_NONE));
+    ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+
+    VX_EFFECT effect = GetEffect();
+    if (effect == VXEFFECT_TEXGEN) {
+        TexGenEffect(dev, ReadTexGenParameter(m_EffectParameter), nullptr, TextureStage);
+    }
+
     return TRUE;
 }
 
@@ -1351,12 +1371,39 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
  * @return Effect result flags (bit 0 = coords set, bit 1 = texture set)
  */
 CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen, RCK3dEntity *refEntity, int stage) {
-    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
-    (void) dev;
-    (void) texGen;
+    if (!dev || stage < 0)
+        return 0;
+
     (void) refEntity;
-    (void) stage;
-    return 0;
+
+    CKDWORD generation = CKFF_TEXGEN_NONE;
+    switch (texGen) {
+    case VXEFFECT_TGREFLECT:
+    case VXEFFECT_TGCUBEMAP_REFLECT:
+        generation = CKFF_TEXGEN_CAMERASPACEREFLECTION;
+        break;
+    case VXEFFECT_TGCHROME:
+    case VXEFFECT_TGCUBEMAP_NORMALS:
+        generation = CKFF_TEXGEN_CAMERASPACENORMAL;
+        break;
+    case VXEFFECT_TGPLANAR:
+    case VXEFFECT_TGCUBEMAP_SKYMAP:
+    case VXEFFECT_TGCUBEMAP_POSITIONS:
+        generation = CKFF_TEXGEN_CAMERASPACEPOSITION;
+        break;
+    case VXEFFECT_TGTRANSFORM:
+    case VXEFFECT_TGNONE:
+    default:
+        generation = CKFF_TEXGEN_NONE;
+        break;
+    }
+
+    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    ffp.SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
+                             CKFFPackTexcoordIndex((CKDWORD)stage, generation));
+    ffp.SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                             generation == CKFF_TEXGEN_NONE ? CKRST_TTF_NONE : CKRST_TTF_COUNT2);
+    return generation == CKFF_TEXGEN_NONE ? 0 : 1;
 }
 
 /**
@@ -1369,7 +1416,7 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
-    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
+    // TODO: Phase 2 - route through FFPipeline (SetTextureStageState, SetTransformMatrix)
     (void) dev;
     return 0;
 }
@@ -1385,7 +1432,7 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
-    // TODO: Phase 2 — route through FFPipeline (SetRenderState, SetTextureStageState, SetTransformMatrix)
+    // TODO: Phase 2 - route through FFPipeline (SetRenderState, SetTextureStageState, SetTransformMatrix)
     (void) dev;
     (void) stage;
     return 0;
@@ -1402,7 +1449,7 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
-    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
+    // TODO: Phase 2 - route through FFPipeline (SetTextureStageState, SetTransformMatrix)
     (void) dev;
     (void) stage;
     return 0;
