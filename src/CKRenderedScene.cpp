@@ -28,6 +28,16 @@ static bool EnvEnabled(const char *name) {
     return value && value[0] != '\0' && value[0] != '0';
 }
 
+static bool RenderedSceneFrameLogEnabled() {
+    static const bool enabled = EnvEnabled("CK2_3D_DEBUG_FRAME_LOG");
+    return enabled;
+}
+
+static bool RenderedSceneCameraLogEnabled() {
+    static const bool enabled = EnvEnabled("CK2_3D_DEBUG_LOG_RENDERED_SCENE_CAMERA");
+    return enabled;
+}
+
 CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
     // IDA: 0x1006f830
     m_RenderContext = rc;
@@ -161,7 +171,9 @@ void CKRenderedScene::DetachAll() {
 
 CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     // IDA: 0x100704ae
-    CK_LOG("RenderedScene", "Draw enter");
+    const bool frameLog = RenderedSceneFrameLogEnabled();
+    if (frameLog)
+        CK_LOG("RenderedScene", "Draw enter");
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
     RCK3dEntity *rootEntity = (RCK3dEntity *) m_RootEntity;
@@ -216,7 +228,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         static int s_camLogCount = 0;
         static int s_attachedCamLogCount = 0;
-        if (s_camLogCount < 60 && (s_camLogCount < 5 || s_camLogCount % 20 == 0)) {
+        const bool cameraLog = RenderedSceneCameraLogEnabled();
+        if (cameraLog && s_camLogCount < 60 && (s_camLogCount < 5 || s_camLogCount % 20 == 0)) {
             const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
             CK_LOG_FMT("RenderedScene", "Frame %d: camera=%p rootEntity worldMat row3: %.2f %.2f %.2f",
                        s_camLogCount, (void*)camera,
@@ -224,7 +237,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             CK_LOG_FMT("RenderedScene", "  InverseWorld row3: %.3f %.3f %.3f",
                        invW[3][0], invW[3][1], invW[3][2]);
         }
-        if (camera && s_attachedCamLogCount < 12) {
+        if (cameraLog && camera && s_attachedCamLogCount < 12) {
             const VxMatrix &camW = camera->GetWorldMatrix();
             const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
             CK3dEntity *target = camera->GetClassID() == CKCID_TARGETCAMERA ? camera->GetTarget() : nullptr;
@@ -256,7 +269,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     const VxMatrix &viewMat = rc->m_FFPipeline.GetViewMatrix();
     const VxMatrix &projMat = rc->m_FFPipeline.GetProjectionMatrix();
 
-    CK_LOG("RenderedScene", "Draw - calling BeginFrame");
+    if (frameLog)
+        CK_LOG("RenderedScene", "Draw - calling BeginFrame");
     rc->m_FFPipeline.BeginDebugFrame();
     rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearColor, 1.0f, viewMat, projMat);
 

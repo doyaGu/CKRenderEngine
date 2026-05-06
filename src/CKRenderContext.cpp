@@ -35,7 +35,24 @@
 #include "RCKSprite3D.h"
 #include "CKFixedFunctionPipeline.h"
 
+#include <cstdlib>
+
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
+
+static bool RenderDebugLogEnabled(const char *name) {
+    const char *value = std::getenv(name);
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+static bool RenderFrameLogEnabled() {
+    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_FRAME_LOG");
+    return enabled;
+}
+
+static bool CameraAttachLogEnabled() {
+    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_LOG_CAMERA_ATTACH");
+    return enabled;
+}
 
 CK_CLASSID RCKRenderContext::GetClassID() {
     return m_ClassID;
@@ -435,7 +452,9 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
-    CK_LOG("Clear", "enter");
+    const bool frameLog = RenderFrameLogEnabled();
+    if (frameLog)
+        CK_LOG("Clear", "enter");
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
@@ -453,7 +472,8 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     }
 
     CKDWORD clearColor = 0;
-    CK_LOG("Clear", "getting background material");
+    if (frameLog)
+        CK_LOG("Clear", "getting background material");
     if (!m_RenderedScene) {
         CK_LOG("Clear", "m_RenderedScene is NULL!");
         return CKERR_INVALIDRENDERCONTEXT;
@@ -469,16 +489,20 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     viewRect.top = m_ViewportData.ViewY;
     viewRect.right = m_ViewportData.ViewX + m_ViewportData.ViewWidth;
     viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
-    CK_LOG("Clear", "SetViewRect/SetViewClear");
+    if (frameLog)
+        CK_LOG("Clear", "SetViewRect/SetViewClear");
     m_RasterizerContext->SetViewRect(CKRP_VIEW_CLEAR, viewRect);
     m_RasterizerContext->SetViewClear(CKRP_VIEW_CLEAR, clearFlags, clearColor, 1.0f, Stencil);
 
-    CK_LOG("Clear", "done");
+    if (frameLog)
+        CK_LOG("Clear", "done");
     return CK_OK;
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
-    CK_LOG("DrawScene", "enter");
+    const bool frameLog = RenderFrameLogEnabled();
+    if (frameLog)
+        CK_LOG("DrawScene", "enter");
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
@@ -494,9 +518,11 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
         m_ObjectExtents.Resize(0);
     }
 
-    CK_LOG("DrawScene", "calling m_RenderedScene->Draw");
+    if (frameLog)
+        CK_LOG("DrawScene", "calling m_RenderedScene->Draw");
     CKERROR err = m_RenderedScene->Draw(renderFlags);
-    CK_LOG("DrawScene", "done");
+    if (frameLog)
+        CK_LOG("DrawScene", "done");
 
     --m_DrawSceneCalls;
 
@@ -813,16 +839,20 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         RestoreStereoRenderState(rootEntity, originalWorldMat);
     } else {
         // Normal rendering (non-stereo)
-        CK_LOG("Render", "about to Clear");
+        const bool frameLog = RenderFrameLogEnabled();
+        if (frameLog)
+            CK_LOG("Render", "about to Clear");
         err = Clear(renderFlags);
         if (err != CK_OK)
             return err;
 
-        CK_LOG("Render", "about to DrawScene");
+        if (frameLog)
+            CK_LOG("Render", "about to DrawScene");
         err = DrawScene(renderFlags);
         if (err != CK_OK)
             return err;
-        CK_LOG("Render", "DrawScene done");
+        if (frameLog)
+            CK_LOG("Render", "DrawScene done");
     }
 
     // FPS calculation
@@ -2028,7 +2058,7 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
 
         static int s_attachLogCount = 0;
-        if (s_attachLogCount < 16) {
+        if (CameraAttachLogEnabled() && s_attachLogCount < 16) {
             CK3dEntity *target = cam->GetClassID() == CKCID_TARGETCAMERA ? cam->GetTarget() : nullptr;
             int aspectWidth = 0;
             int aspectHeight = 0;

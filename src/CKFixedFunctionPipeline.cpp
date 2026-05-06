@@ -50,12 +50,12 @@ static CKDWORD BaseTextureArg(CKDWORD arg) {
     return arg & ~(CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE);
 }
 
-static bool EnvEnabled(const char *name) {
+static bool EnvEnabledRaw(const char *name) {
     const char *value = std::getenv(name);
     return value && value[0] != '\0' && value[0] != '0';
 }
 
-static int EnvInt(const char *name, int defaultValue) {
+static int EnvIntRaw(const char *name, int defaultValue) {
     const char *value = std::getenv(name);
     if (!value || value[0] == '\0')
         return defaultValue;
@@ -71,9 +71,80 @@ static int EnvInt(const char *name, int defaultValue) {
     return (int)parsed;
 }
 
+struct DebugDrawRange {
+    int Exact;
+    int Start;
+    int End;
+};
+
+static int DebugDrawLogLimit() {
+    static const int value = EnvIntRaw("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0);
+    return value;
+}
+
+static int DebugReal3DLogLimit() {
+    static const int value = EnvIntRaw("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0);
+    return value;
+}
+
+static int Debug3DContractLogLimit() {
+    static const int value = EnvIntRaw("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0);
+    return value;
+}
+
+static int DebugPositionTLogLimit() {
+    static const int value = EnvIntRaw("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0);
+    return value;
+}
+
+static bool DebugDrawSerialPerFrame() {
+    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME");
+    return enabled;
+}
+
+static bool DebugSkipPositionTDraws() {
+    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS");
+    return enabled;
+}
+
+static bool DebugSkip3DDraws() {
+    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_3D_DRAWS");
+    return enabled;
+}
+
+static bool DebugForceUnlit() {
+    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_FORCE_UNLIT");
+    return enabled;
+}
+
+static bool DebugDisableFog() {
+    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_DISABLE_FOG");
+    return enabled;
+}
+
+static const DebugDrawRange &Opaque3DDebugDrawRange() {
+    static const DebugDrawRange value = {
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_EXACT", -1),
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_START", 0),
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_END", INT_MAX)
+    };
+    return value;
+}
+
+static const DebugDrawRange &Transparent3DDebugDrawRange() {
+    static const DebugDrawRange value = {
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_EXACT", -1),
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START", 0),
+        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END", INT_MAX)
+    };
+    return value;
+}
+
 static bool ShouldSkipDebugView(CKRenderView view) {
-    return (view == CKRP_VIEW_OPAQUE3D && EnvEnabled("CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS")) ||
-           (view == CKRP_VIEW_TRANSPARENT && EnvEnabled("CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS"));
+    static const bool skipOpaque3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS");
+    static const bool skipTransparent3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS");
+    return (view == CKRP_VIEW_OPAQUE3D && skipOpaque3D) ||
+           (view == CKRP_VIEW_TRANSPARENT && skipTransparent3D);
 }
 
 static int NextDebugDrawSerial(CKRenderView view) {
@@ -88,28 +159,18 @@ static bool ShouldSkipDebugDrawSerial(CKRenderView view, int drawSerial) {
     if (drawSerial < 0)
         return false;
 
-    const char *prefix = nullptr;
+    const DebugDrawRange *range = nullptr;
     if (view == CKRP_VIEW_OPAQUE3D) {
-        prefix = "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW";
+        range = &Opaque3DDebugDrawRange();
     } else if (view == CKRP_VIEW_TRANSPARENT) {
-        prefix = "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW";
+        range = &Transparent3DDebugDrawRange();
     } else {
         return false;
     }
 
-    char exactName[96];
-    std::snprintf(exactName, sizeof(exactName), "%s_EXACT", prefix);
-    int exact = EnvInt(exactName, -1);
-    if (exact >= 0)
-        return drawSerial != exact;
-
-    char startName[96];
-    char endName[96];
-    std::snprintf(startName, sizeof(startName), "%s_START", prefix);
-    std::snprintf(endName, sizeof(endName), "%s_END", prefix);
-    int start = EnvInt(startName, 0);
-    int end = EnvInt(endName, INT_MAX);
-    return drawSerial < start || drawSerial > end;
+    if (range->Exact >= 0)
+        return drawSerial != range->Exact;
+    return drawSerial < range->Start || drawSerial > range->End;
 }
 
 static const char *PrimitiveName(VXPRIMITIVETYPE type) {
@@ -610,7 +671,7 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
-    if (!EnvEnabled("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME"))
+    if (!DebugDrawSerialPerFrame())
         return;
 
     g_Opaque3DDrawSerial = 0;
@@ -633,28 +694,31 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
     const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
     const int debugDrawSerial = NextDebugDrawSerial(view);
+    const int drawLogLimit = DebugDrawLogLimit();
 
-    if (g_DrawLogCount < 5) {
+    if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
         CK_LOG_FMT("FFPipeline", "DrawPrimitive: view=%d serial=%d verts=%d indices=%d flags=0x%X",
                    (int)view, debugDrawSerial, data->VertexCount, indexCount, data->Flags);
+        ++g_DrawLogCount;
     }
 
     if (ShouldSkipDebugView(view) ||
         ShouldSkipDebugDrawSerial(view, debugDrawSerial) ||
-        (positionT && EnvEnabled("CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS")) ||
-        (!positionT && EnvEnabled("CK2_3D_DEBUG_SKIP_3D_DRAWS"))) {
-        if (g_DrawLogCount < 16) {
+        (positionT && DebugSkipPositionTDraws()) ||
+        (!positionT && DebugSkip3DDraws())) {
+        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG_FMT("FFPipeline",
                        "DrawPrimitive skipped by env: view=%d serial=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X positionT=%d",
                        (int)view, debugDrawSerial, (int)type, data->VertexCount, indexCount,
                        data->Flags, formatFlags, positionT ? 1 : 0);
+            ++g_DrawLogCount;
         }
         return;
     }
 
     // Prepare transient geometry
     if (!m_TransientGeometry.Prepare(encoder, type, indices, indexCount, data)) {
-        if (g_DrawLogCount < 5) {
+        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG("FFPipeline", "DrawPrimitive: Prepare FAILED");
             g_DrawLogCount++;
         }
@@ -666,14 +730,16 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     CKFFShaderKey key = BuildCurrentKey(data->Flags, formatFlags);
     CKDWORD program = m_ShaderCache.GetProgram(key);
     if (program == 0) {
-        if (g_DrawLogCount < 5) {
+        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG("FFPipeline", "DrawPrimitive: program == 0!");
             g_DrawLogCount++;
         }
         return;
     }
 
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) && g_Real3DDrawLogCount < 8) {
+    const int real3DLogLimit = DebugReal3DLogLimit();
+    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+        real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
         CK_LOG_FMT("FFPipeline",
                    "Real3D DrawPrimitive #%d: serial=%d view=%d type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
@@ -693,7 +759,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         LogVertexClipSamples(m_World, m_View, m_Projection, data);
         g_Real3DDrawLogCount++;
     }
-    int contractLimit = EnvInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0);
+    const int contractLimit = Debug3DContractLogLimit();
     if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         contractLimit > 0 && g_3DContractLogCount < contractLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
@@ -723,7 +789,9 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         LogVertexClipSamples(m_World, m_View, m_Projection, data);
         ++g_3DContractLogCount;
     }
-    if ((formatFlags & CKFF_VF_POSITIONT) && g_PositionTDrawLogCount < 12) {
+    const int positionTLogLimit = DebugPositionTLogLimit();
+    if ((formatFlags & CKFF_VF_POSITIONT) &&
+        positionTLogLimit > 0 && g_PositionTDrawLogCount < positionTLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
         CK_LOG_FMT("FFPipeline",
                    "PositionT DrawPrimitive #%d: view=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u program=%u stage0=%u/%u/%u",
@@ -735,7 +803,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         g_PositionTDrawLogCount++;
     }
     if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        g_Real3DViewLogCount < 8 &&
+        real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
         (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
         CK_LOG_FMT("FFPipeline", "Real3D non-identity view #%d: view=%d verts=%d indices=%d flags=0x%X program=%u",
                    g_Real3DViewLogCount, (int)view, data->VertexCount, indexCount, data->Flags, program);
@@ -776,7 +844,8 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 {
     if (!encoder || !vb) return;
 
-    if (g_DrawLogCount < 5) {
+    const int drawLogLimit = DebugDrawLogLimit();
+    if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
         CK_LOG_FMT("FFPipeline", "DrawVertexBuffer: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u",
                    (int)view, vb, ib, vertexCount, indexCount, vertexLayout);
         CK_LOG_FMT("FFPipeline", "  World row0: %.3f %.3f %.3f %.3f",
@@ -795,13 +864,14 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     const int debugDrawSerial = NextDebugDrawSerial(view);
     if (ShouldSkipDebugView(view) ||
         ShouldSkipDebugDrawSerial(view, debugDrawSerial) ||
-        (positionT && EnvEnabled("CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS")) ||
-        (!positionT && EnvEnabled("CK2_3D_DEBUG_SKIP_3D_DRAWS"))) {
-        if (g_DrawLogCount < 16) {
+        (positionT && DebugSkipPositionTDraws()) ||
+        (!positionT && DebugSkip3DDraws())) {
+        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG_FMT("FFPipeline",
                        "DrawVertexBuffer skipped by env: view=%d serial=%d type=%d vb=%u ib=%u verts=%u indices=%u dp=0x%X fmt=0x%X positionT=%d",
                        (int)view, debugDrawSerial, (int)type, vb, ib, vertexCount, indexCount,
                        dpFlags, formatFlags, positionT ? 1 : 0);
+            ++g_DrawLogCount;
         }
         return;
     }
@@ -811,7 +881,9 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD program = m_ShaderCache.GetProgram(key);
     if (program == 0) return;
 
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) && g_Real3DDrawLogCount < 8) {
+    const int real3DLogLimit = DebugReal3DLogLimit();
+    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+        real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
         CK_LOG_FMT("FFPipeline",
                    "Real3D DrawVertexBuffer #%d: serial=%d view=%d type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
                    g_Real3DDrawLogCount, debugDrawSerial, (int)view, (int)type, PrimitiveName(type), vb, ib, baseVertex, vertexCount,
@@ -828,7 +900,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         LogMatrixRows("Proj", m_Projection);
         g_Real3DDrawLogCount++;
     }
-    int contractLimit = EnvInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0);
+    const int contractLimit = Debug3DContractLogLimit();
     if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         contractLimit > 0 && g_3DContractLogCount < contractLimit) {
         CK_LOG_FMT("FFPipeline",
@@ -859,7 +931,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         ++g_3DContractLogCount;
     }
     if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        g_Real3DViewLogCount < 8 &&
+        real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
         (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
         CK_LOG_FMT("FFPipeline", "Real3D VB non-identity view #%d: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u program=%u",
                    g_Real3DViewLogCount, (int)view, vb, ib, vertexCount, indexCount, vertexLayout, program);
@@ -921,7 +993,7 @@ CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentKey(CKDWORD dpFlags, CKDWORD 
     CKBOOL specular = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE);
     CKBOOL normalize = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS);
 
-    if (EnvEnabled("CK2_3D_DEBUG_FORCE_UNLIT"))
+    if (DebugForceUnlit())
         lighting = FALSE;
 
     key.VS.SetLightingEnabled(!positionT && lighting && key.VS.GetHasNormal());
@@ -959,7 +1031,7 @@ CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentKey(CKDWORD dpFlags, CKDWORD 
 
     // Fog
     CKBOOL fogEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE);
-    if (EnvEnabled("CK2_3D_DEBUG_DISABLE_FOG"))
+    if (DebugDisableFog())
         fogEnable = FALSE;
     if (fogEnable) {
         CKDWORD fogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE);
@@ -1069,7 +1141,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     memcpy(&fogParams[1], &fe, sizeof(float));
     memcpy(&fogParams[2], &fd, sizeof(float));
     fogParams[3] = (m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
-                    !EnvEnabled("CK2_3D_DEBUG_DISABLE_FOG"))
+                    !DebugDisableFog())
         ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE)
         : 0.0f;
     encoder->SetUniform(u.u_fogParams, fogParams, 1);
