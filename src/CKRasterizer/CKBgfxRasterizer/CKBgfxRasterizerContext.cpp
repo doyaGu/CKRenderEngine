@@ -6,6 +6,7 @@
 #include <Windows.h>
 
 #include <bgfx/platform.h>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -2008,13 +2009,20 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     if (!isCube && Face != 0)
         return CKERR_INVALIDPARAMETER;
 
-    uint16_t x = 0, y = 0, w = (uint16_t)rec->Width, h = (uint16_t)rec->Height;
+    uint16_t x = 0, y = 0;
+    uint16_t w = (uint16_t)std::max<CKDWORD>(1, rec->Width >> Mip);
+    uint16_t h = (uint16_t)std::max<CKDWORD>(1, rec->Height >> Mip);
     if (Region)
     {
         x = (uint16_t)Region->left;
         y = (uint16_t)Region->top;
         w = (uint16_t)(Region->right - Region->left);
         h = (uint16_t)(Region->bottom - Region->top);
+    }
+    else if (Data->Width > 0 && Data->Height > 0)
+    {
+        w = (uint16_t)Data->Width;
+        h = (uint16_t)Data->Height;
     }
 
     bool compressed = (rec->Format == bgfx::TextureFormat::BC1
