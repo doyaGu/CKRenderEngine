@@ -4329,8 +4329,20 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
+                        VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
+                        CKDWORD texBlend = 0;
+                        CKDWORD alphaBlend = 0;
+                        CKDWORD srcBlend = 0;
+                        CKDWORD dstBlend = 0;
+                        if (mat) {
+                            diffuse = mat->GetDiffuse();
+                            texBlend = (CKDWORD)mat->GetTextureBlendMode();
+                            alphaBlend = mat->AlphaBlendEnabled();
+                            srcBlend = (CKDWORD)mat->GetSourceBlend();
+                            dstBlend = (CKDWORD)mat->GetDestBlend();
+                        }
                         CK_LOG_FMT("Mesh",
-                                   "Mesh contract #%d: view=%d path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   "Mesh contract #%d: view=%d path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
                                    s_meshContractLogCount,
                                    view,
                                    prim->m_Type,
@@ -4340,6 +4352,12 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                    data->VertexCount,
                                    group->m_VertexCount,
                                    prim->m_Indices.Size(),
+                                   m_Flags,
+                                   diffuse.r, diffuse.g, diffuse.b, diffuse.a,
+                                   texBlend,
+                                   alphaBlend,
+                                   srcBlend,
+                                   dstBlend,
                                    world[3][0], world[3][1], world[3][2],
                                    box.Min.x, box.Min.y, box.Min.z,
                                    box.Max.x, box.Max.y, box.Max.z);
@@ -4369,8 +4387,20 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
+                        VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
+                        CKDWORD texBlend = 0;
+                        CKDWORD alphaBlend = 0;
+                        CKDWORD srcBlend = 0;
+                        CKDWORD dstBlend = 0;
+                        if (mat) {
+                            diffuse = mat->GetDiffuse();
+                            texBlend = (CKDWORD)mat->GetTextureBlendMode();
+                            alphaBlend = mat->AlphaBlendEnabled();
+                            srcBlend = (CKDWORD)mat->GetSourceBlend();
+                            dstBlend = (CKDWORD)mat->GetDestBlend();
+                        }
                         CK_LOG_FMT("Mesh",
-                                   "Mesh contract #%d: view=%d path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   "Mesh contract #%d: view=%d path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
                                    s_meshContractLogCount,
                                    view,
                                    prim->m_Type,
@@ -4381,6 +4411,12 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                    group->m_VertexCount,
                                    startIndex,
                                    indexCount,
+                                   m_Flags,
+                                   diffuse.r, diffuse.g, diffuse.b, diffuse.a,
+                                   texBlend,
+                                   alphaBlend,
+                                   srcBlend,
+                                   dstBlend,
                                    world[3][0], world[3][1], world[3][2],
                                    box.Min.x, box.Min.y, box.Min.z,
                                    box.Max.x, box.Max.y, box.Max.z);

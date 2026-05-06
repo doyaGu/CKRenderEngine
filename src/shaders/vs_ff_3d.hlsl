@@ -58,13 +58,7 @@ VSOutput main(VSInput input)
     float4 viewPos = mul(localPos, u_ckModelView);
     float3 viewNormal = normalize(mul(input.normal, (float3x3)u_ckModelView));
 
-    float4 materialDiffuse = u_material[0];
-    if ((int)(u_ffParams.x + 0.5) == 0 &&
-        max(max(materialDiffuse.r, materialDiffuse.g), materialDiffuse.b) < 0.0001) {
-        materialDiffuse.rgb = 1.0;
-    }
-
-    float4 matDiffuse  = selectMaterialSource(u_ffParams.x, materialDiffuse, input.color0, input.color1);
+    float4 matDiffuse  = selectMaterialSource(u_ffParams.x, u_material[0], input.color0, input.color1);
     float4 matAmbient  = selectMaterialSource(u_ffParams.y, u_material[1], input.color0, input.color1);
     float4 matSpecular = selectMaterialSource(u_ffParams.z, u_material[2], input.color0, input.color1);
     float4 matEmissive = selectMaterialSource(u_ffParams.w, u_material[3], input.color0, input.color1);
