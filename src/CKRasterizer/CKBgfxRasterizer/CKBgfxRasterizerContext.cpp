@@ -74,6 +74,52 @@ static CKBOOL GetEnvBool(const char *name, CKBOOL fallback)
     return fallback;
 }
 
+static const char *RendererTypeName(bgfx::RendererType::Enum type)
+{
+    switch (type)
+    {
+    case bgfx::RendererType::Direct3D11: return "Direct3D11";
+    case bgfx::RendererType::Direct3D12: return "Direct3D12";
+    case bgfx::RendererType::Vulkan:     return "Vulkan";
+    case bgfx::RendererType::OpenGL:     return "OpenGL";
+    case bgfx::RendererType::OpenGLES:   return "OpenGLES";
+    case bgfx::RendererType::Noop:       return "Noop";
+    default:                             return "Auto";
+    }
+}
+
+static CK_RENDERER_BACKEND ToCKRendererBackend(bgfx::RendererType::Enum type)
+{
+    switch (type)
+    {
+    case bgfx::RendererType::Direct3D11: return CKRST_RENDERER_D3D11;
+    case bgfx::RendererType::Direct3D12: return CKRST_RENDERER_D3D12;
+    case bgfx::RendererType::Vulkan:     return CKRST_RENDERER_VULKAN;
+    case bgfx::RendererType::OpenGL:
+    case bgfx::RendererType::OpenGLES:   return CKRST_RENDERER_OPENGL;
+    default:                             return CKRST_RENDERER_UNKNOWN;
+    }
+}
+
+static bgfx::RendererType::Enum ParseRequestedRenderer()
+{
+    char value[32] = {0};
+    DWORD n = GetEnvironmentVariableA("CK2_3D_BGFX_RENDERER", value, (DWORD)sizeof(value));
+    if (n == 0 || n >= sizeof(value) || _stricmp(value, "auto") == 0)
+        return bgfx::RendererType::Count;
+    if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
+        return bgfx::RendererType::Direct3D11;
+    if (_stricmp(value, "d3d12") == 0 || _stricmp(value, "direct3d12") == 0)
+        return bgfx::RendererType::Direct3D12;
+    if (_stricmp(value, "vulkan") == 0)
+        return bgfx::RendererType::Vulkan;
+    if (_stricmp(value, "opengl") == 0 || _stricmp(value, "gl") == 0)
+        return bgfx::RendererType::OpenGL;
+
+    BgfxLogf("Init", "unknown CK2_3D_BGFX_RENDERER='%s', falling back to auto", value);
+    return bgfx::RendererType::Count;
+}
+
 static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
 {
     if (!data || size == 0)
@@ -977,6 +1023,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
         return;
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
+    bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
     static const CKBOOL s_LogTextureBindings =
         GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURE_BINDINGS", FALSE);
     if (s_LogTextureBindings &&
@@ -984,20 +1031,20 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
         BgfxLogf("SetTexture",
                  "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
                  Stage, Uniform, Texture, (void *)uniRec, (void *)texRec,
-                 texRec ? texRec->Handle.idx : 0xffff,
+                 bgfx::isValid(textureHandle) ? textureHandle.idx : 0xffff,
                  texRec ? texRec->Width : 0,
                  texRec ? texRec->Height : 0,
                  texRec ? (int)texRec->Format : -1,
                  (void *)Sampler);
         s_SetTextureLogCount++;
     }
-    if (!uniRec || !texRec)
+    if (!uniRec || !bgfx::isValid(textureHandle))
         return;
     uint32_t flags = ToBgfxSamplerFlags(Sampler);
     if (m_Encoder)
-        m_Encoder->setTexture((uint8_t)Stage, uniRec->Handle, texRec->Handle, flags);
+        m_Encoder->setTexture((uint8_t)Stage, uniRec->Handle, textureHandle, flags);
     else
-        bgfx::setTexture((uint8_t)Stage, uniRec->Handle, texRec->Handle, flags);
+        bgfx::setTexture((uint8_t)Stage, uniRec->Handle, textureHandle, flags);
 }
 
 void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
@@ -1201,7 +1248,9 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 // ===========================================================================
 
 CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
-    : m_BgfxInitialized(FALSE), m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
+    : m_BgfxInitialized(FALSE), m_RendererBackend(CKRST_RENDERER_UNKNOWN),
+      m_RendererBackendName("Unknown"), m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
+      m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
       m_DebugFrameId(0), m_DebugCaptureFirstFrames(0), m_DebugCaptureInterval(0),
@@ -1228,6 +1277,11 @@ CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
                 m_Encoders[i].m_Encoder = NULL;
                 m_Encoders[i].m_Active.store(FALSE, std::memory_order_relaxed);
             }
+        }
+
+        if (bgfx::isValid(m_DefaultWhiteTexture)) {
+            bgfx::destroy(m_DefaultWhiteTexture);
+            m_DefaultWhiteTexture = BGFX_INVALID_HANDLE;
         }
 
         DestroyAllRecords(m_FrameBuffers);
@@ -1271,18 +1325,37 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_Fullscreen = Fullscreen;
     m_RefreshRate = RefreshRate;
 
+    const bgfx::RendererType::Enum requestedRenderer = ParseRequestedRenderer();
+
     bgfx::Init init;
-    init.type = bgfx::RendererType::Direct3D11;
+    init.type = requestedRenderer;
     init.platformData.nwh = (void *)Window;
     init.resolution.width = Width;
     init.resolution.height = Height;
     init.resolution.reset = m_ResetFlags;
     init.callback = &m_BgfxCallback;
 
-    if (!bgfx::init(init))
+    if (!bgfx::init(init)) {
+        BgfxLogf("Init", "bgfx init failed for requested renderer '%s'",
+                 RendererTypeName(requestedRenderer));
         return FALSE;
+    }
 
     m_BgfxInitialized = TRUE;
+    const bgfx::RendererType::Enum actualRenderer = bgfx::getRendererType();
+    m_RendererBackend = ToCKRendererBackend(actualRenderer);
+    m_RendererBackendName = RendererTypeName(actualRenderer);
+    if (m_Driver) {
+        m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererBackendName);
+    }
+
+    BgfxLogf("Init", "renderer requested=%s actual=%s",
+             RendererTypeName(requestedRenderer), m_RendererBackendName);
+
+    const uint32_t whitePixel = 0xffffffffu;
+    const bgfx::Memory *whiteMem = bgfx::copy(&whitePixel, sizeof(whitePixel));
+    m_DefaultWhiteTexture = bgfx::createTexture2D(
+        1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, whiteMem);
 
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
     bgfx::setViewClear(0,
@@ -1293,6 +1366,16 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     ConfigureDebugCapture();
 
     return TRUE;
+}
+
+CK_RENDERER_BACKEND CKBgfxRasterizerContext::GetRendererBackend() const
+{
+    return m_RendererBackend;
+}
+
+CKSTRING CKBgfxRasterizerContext::GetRendererBackendName() const
+{
+    return (CKSTRING)m_RendererBackendName;
 }
 
 CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
@@ -1630,6 +1713,8 @@ CKERROR CKBgfxRasterizerContext::CreateShader(CKDWORD Shader, CKShaderDesc *Desc
     if (!m_BgfxInitialized || !Desc || Shader == 0)
         return CKERR_INVALIDPARAMETER;
     if (!Desc->Code || Desc->CodeSize == 0)
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->Format != CKRST_SHADER_NATIVE)
         return CKERR_INVALIDPARAMETER;
 
     const bgfx::Memory *mem = bgfx::copy(Desc->Code, Desc->CodeSize);

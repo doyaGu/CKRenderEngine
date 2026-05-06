@@ -1195,11 +1195,10 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
     if (!encoder) return;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
 
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES && i < m_CurrentActiveTextureCount; i++) {
-        if (m_TextureHandles[i]) {
-            CKSamplerDesc sampler = BuildSamplerDesc(i);
-            encoder->SetTexture(i, u.s_texture[i], m_TextureHandles[i], &sampler);
-        }
+    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
+        CKSamplerDesc sampler = BuildSamplerDesc(i);
+        const CKDWORD texture = (i < m_CurrentActiveTextureCount) ? m_TextureHandles[i] : 0;
+        encoder->SetTexture(i, u.s_texture[i], texture, &sampler);
     }
 }
 
