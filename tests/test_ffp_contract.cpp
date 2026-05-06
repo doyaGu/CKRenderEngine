@@ -4,6 +4,9 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFShaderCache.h"
 #include "CKRasterizer.h"
+#include "CKRenderPipeline.h"
+#include "RCKRenderContext.h"
+#include "RCKMesh.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
@@ -46,6 +49,106 @@ void Test_DPFlags_UnlitColorTextured_IgnoresIncidentalNormalPointer() {
     TestCheck(CKVertexLayoutCache::ComputeStride(fmt) == 28, "Unlit POSITION + COLOR0 + COLOR1 + TEXCOORD0 stride must be 28 bytes");
 }
 
+void Test_DPFlags_TextureStageMaskCountsHighestEnabledStage() {
+    TestCheck(CKFFActiveTextureCountFromDPFlags(0) == 0,
+              "No CKRST_DP_STAGE flag must mean no active texture stages");
+    TestCheck(CKFFActiveTextureCountFromDPFlags(CKRST_DP_STAGE(0)) == 1,
+              "CKRST_DP_STAGE(0) must enable one texture stage");
+    TestCheck(CKFFActiveTextureCountFromDPFlags(CKRST_DP_STAGE(1)) == 2,
+              "CKRST_DP_STAGE(1) must enable two texture stages");
+    TestCheck(CKFFActiveTextureCountFromDPFlags(CKRST_DP_STAGE(2)) == 3,
+              "CKRST_DP_STAGE(2) must enable three texture stages");
+    TestCheck(CKFFActiveTextureCountFromDPFlags(CKRST_DP_STAGE(7)) == 8,
+              "CKRST_DP_STAGE(7) must enable all eight texture stages");
+}
+
+void Test_VertexLayout_EightTextureCoordinatesContributeToStride() {
+    const CKDWORD texFlags =
+        CKFF_VF_TEXCOORD0 | CKFF_VF_TEXCOORD1 | CKFF_VF_TEXCOORD2 | CKFF_VF_TEXCOORD3 |
+        CKFF_VF_TEXCOORD4 | CKFF_VF_TEXCOORD5 | CKFF_VF_TEXCOORD6 | CKFF_VF_TEXCOORD7;
+    const CKDWORD fmt = CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_COLOR0 | CKFF_VF_COLOR1 | texFlags;
+    TestCheck(CKVertexLayoutCache::ComputeStride(CKFF_VF_POSITION | CKFF_VF_COLOR0 | CKFF_VF_COLOR1 | CKFF_VF_TEXCOORD0) == 28,
+              "Single texcoord 3D unlit stride must remain 28 bytes");
+    TestCheck(CKVertexLayoutCache::ComputeStride(CKFF_VF_POSITION | CKFF_VF_COLOR0 | CKFF_VF_COLOR1 |
+                                                 CKFF_VF_TEXCOORD0 | CKFF_VF_TEXCOORD1 | CKFF_VF_TEXCOORD2) == 44,
+              "Three texcoord stride must include three float2 attributes");
+    TestCheck(CKVertexLayoutCache::ComputeStride(fmt) == 96,
+              "Eight texcoord lit stride must include position, normal, colors, and eight float2 attributes");
+}
+
+void Test_Interleave_CopiesIndependentTextureCoordinateStreams() {
+    float pos[3] = {1.0f, 2.0f, 3.0f};
+    float uv0[2] = {0.10f, 0.20f};
+    float uv1[2] = {0.30f, 0.40f};
+    float uv2[2] = {0.50f, 0.60f};
+
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_STAGE(2);
+    data.VertexCount = 1;
+    data.PositionPtr = pos;
+    data.PositionStride = sizeof(pos);
+    data.TexCoordPtr = uv0;
+    data.TexCoordStride = sizeof(uv0);
+    data.TexCoordPtrs[0] = uv1;
+    data.TexCoordStrides[0] = sizeof(uv1);
+    data.TexCoordPtrs[1] = uv2;
+    data.TexCoordStrides[1] = sizeof(uv2);
+
+    const CKDWORD fmt = CKFF_VF_POSITION | CKFF_VF_COLOR0 | CKFF_VF_COLOR1 |
+                        CKFF_VF_TEXCOORD0 | CKFF_VF_TEXCOORD1 | CKFF_VF_TEXCOORD2;
+    const CKDWORD stride = CKVertexLayoutCache::ComputeStride(fmt);
+    CKBYTE buffer[64] = {};
+    CKTransientGeometry::InterleaveVertices(buffer, stride, 1, fmt, &data);
+
+    float copied0[2] = {};
+    float copied1[2] = {};
+    float copied2[2] = {};
+    memcpy(copied0, buffer + 12, sizeof(copied0));
+    memcpy(copied1, buffer + 20, sizeof(copied1));
+    memcpy(copied2, buffer + 28, sizeof(copied2));
+
+    TestCheck(copied0[0] == uv0[0] && copied0[1] == uv0[1], "Stage 0 UV must come from TexCoordPtr");
+    TestCheck(copied1[0] == uv1[0] && copied1[1] == uv1[1], "Stage 1 UV must come from TexCoordPtrs[0]");
+    TestCheck(copied2[0] == uv2[0] && copied2[1] == uv2[1], "Stage 2 UV must come from TexCoordPtrs[1]");
+}
+
+void Test_SamplerDesc_MapsMinMagMipFiltersIndependently() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEARMIPNEAREST);
+    CKSamplerDesc sampler = ffp.BuildSamplerDesc(0);
+    TestCheck(sampler.MagFilter == CKRST_FILTER_NEAREST, "NEAREST mag filter must map to point magnification");
+    TestCheck(sampler.MinFilter == CKRST_FILTER_LINEAR, "LINEARMIPNEAREST min filter must use linear minification");
+    TestCheck(sampler.MipFilter == CKRST_FILTER_NEAREST, "LINEARMIPNEAREST mip filter must use nearest mip selection");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_ANISOTROPIC);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
+    sampler = ffp.BuildSamplerDesc(0);
+    TestCheck(sampler.MagFilter == CKRST_FILTER_ANISOTROPIC, "ANISOTROPIC mag filter must be preserved");
+    TestCheck(sampler.MinFilter == CKRST_FILTER_ANISOTROPIC, "ANISOTROPIC min filter must be preserved");
+    TestCheck(sampler.MipFilter == CKRST_FILTER_ANISOTROPIC, "ANISOTROPIC mip filter must be preserved");
+}
+
+void Test_SamplerDesc_MapsAddressWIndependently() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSWRAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESW, VXTEXTURE_ADDRESSCLAMP);
+
+    CKSamplerDesc sampler = ffp.BuildSamplerDesc(0);
+    TestCheck(sampler.AddressU == CKRST_ADDRESS_WRAP, "Default U address must come from CKRST_TSS_ADDRESS");
+    TestCheck(sampler.AddressV == CKRST_ADDRESS_WRAP, "Default V address must come from CKRST_TSS_ADDRESS");
+    TestCheck(sampler.AddressW == CKRST_ADDRESS_CLAMP, "W address must honor CKRST_TSS_ADDRESW");
+}
+
+void Test_TextureStageDefaults_UseMatchingTexcoordIndex() {
+    CKFixedFunctionPipeline ffp;
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        TestCheck(ffp.GetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX) == (CKDWORD)stage,
+                  "Texture stage default TEXCOORDINDEX must match the stage index");
+    }
+}
+
 void Test_PrimitiveFanConversion_ProducesTriangleList() {
     CKWORD src[] = {0, 1, 2, 3};
     CKWORD dst[6] = {};
@@ -62,6 +165,89 @@ void Test_PrimitiveStripConversion_AlternatesWinding() {
     TestCheck(out == 6, "Four-vertex strip must produce two triangles");
     TestCheck(dst[0] == 0 && dst[1] == 1 && dst[2] == 2, "Strip first triangle mismatch");
     TestCheck(dst[3] == 2 && dst[4] == 1 && dst[5] == 3, "Strip second triangle winding mismatch");
+}
+
+void Test_WrapTexcoords_ExpandsUAcrossSeam() {
+    float uv[3][2] = {
+        {0.98f, 0.25f},
+        {0.02f, 0.50f},
+        {0.99f, 0.75f},
+    };
+
+    CKTransientGeometry::AdjustTriangleWrapTexcoords(uv, VXWRAP_U);
+
+    TestCheck(uv[0][0] == 0.98f, "U wrap must keep the high endpoint unchanged");
+    TestCheck(uv[1][0] == 1.02f, "U wrap must lift the low endpoint across the seam");
+    TestCheck(uv[2][0] == 0.99f, "U wrap must keep the second high endpoint unchanged");
+    TestCheck((uv[1][0] - uv[0][0]) <= 0.5f && (uv[1][0] - uv[2][0]) <= 0.5f,
+              "U wrap expansion must remove long interpolation across the texture");
+}
+
+void Test_WrapTexcoords_ExpandsVAcrossSeam() {
+    float uv[3][2] = {
+        {0.25f, 0.98f},
+        {0.50f, 0.02f},
+        {0.75f, 0.99f},
+    };
+
+    CKTransientGeometry::AdjustTriangleWrapTexcoords(uv, VXWRAP_V);
+
+    TestCheck(uv[0][1] == 0.98f, "V wrap must keep the high endpoint unchanged");
+    TestCheck(uv[1][1] == 1.02f, "V wrap must lift the low endpoint across the seam");
+    TestCheck(uv[2][1] == 0.99f, "V wrap must keep the second high endpoint unchanged");
+    TestCheck((uv[1][1] - uv[0][1]) <= 0.5f && (uv[1][1] - uv[2][1]) <= 0.5f,
+              "V wrap expansion must remove long interpolation across the texture");
+}
+
+void Test_WrapTexcoords_NoWrapLeavesCoordinatesUnchanged() {
+    float uv[3][2] = {
+        {0.98f, 0.98f},
+        {0.02f, 0.02f},
+        {0.99f, 0.99f},
+    };
+
+    CKTransientGeometry::AdjustTriangleWrapTexcoords(uv, 0);
+
+    TestCheck(uv[0][0] == 0.98f && uv[0][1] == 0.98f, "No-wrap must keep vertex 0 UV unchanged");
+    TestCheck(uv[1][0] == 0.02f && uv[1][1] == 0.02f, "No-wrap must keep vertex 1 UV unchanged");
+    TestCheck(uv[2][0] == 0.99f && uv[2][1] == 0.99f, "No-wrap must keep vertex 2 UV unchanged");
+}
+
+void Test_WrapMesh_RequiresWrapAwareHardwareExpansion() {
+    TestCheck(!RCKMesh::RequiresWrapAwareHardwareVertexBuffer(0), "Non-wrap mesh may use the regular hardware VB layout");
+    TestCheck(RCKMesh::RequiresWrapAwareHardwareVertexBuffer(VXMESH_WRAPU), "U-wrap mesh must expand hardware VB vertices");
+    TestCheck(RCKMesh::RequiresWrapAwareHardwareVertexBuffer(VXMESH_WRAPV), "V-wrap mesh must expand hardware VB vertices");
+    TestCheck(RCKMesh::RequiresWrapAwareHardwareVertexBuffer(VXMESH_WRAPU | VXMESH_WRAPV), "UV-wrap mesh must expand hardware VB vertices");
+}
+
+void Test_WrapMesh_MapsMeshFlagsToRenderStateWrapMode() {
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(0) == 0, "Non-wrap mesh must clear WRAP0");
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(VXMESH_WRAPU) == (CKDWORD)VXWRAP_U, "VXMESH_WRAPU must set VXWRAP_U");
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(VXMESH_WRAPV) == (CKDWORD)VXWRAP_V, "VXMESH_WRAPV must set VXWRAP_V");
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(VXMESH_WRAPU | VXMESH_WRAPV) == (CKDWORD)(VXWRAP_U | VXWRAP_V),
+              "VXMESH_WRAPU/V must combine into WRAP0 flags");
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(0x00000100) == (CKDWORD)VXWRAP_U,
+              "Serialized mesh wrap bit 0x100 must set VXWRAP_U");
+    TestCheck(RCKMesh::TextureWrapModeFromMeshFlags(0x00000200) == (CKDWORD)VXWRAP_V,
+              "Serialized mesh wrap bit 0x200 must set VXWRAP_V");
+}
+
+void Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex() {
+    CKDWORD packed = CKFFPackTexcoordIndex(7, CKFF_TEXGEN_CAMERASPACEREFLECTION);
+    TestCheck(CKFFTexcoordIndex(packed) == 7, "Packed texcoord state must preserve the source coordinate index");
+    TestCheck(CKFFTexcoordGeneration(packed) == CKFF_TEXGEN_CAMERASPACEREFLECTION,
+              "Packed texcoord state must preserve camera-space reflection generation");
+}
+
+void Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene() {
+    TestCheck(CKRP_VIEW_BACKGROUND2D < CKRP_VIEW_RENDERFIRST3D,
+              "2D background must clear before render-first 3D objects");
+    TestCheck(CKRP_VIEW_RENDERFIRST3D < CKRP_VIEW_OPAQUE3D,
+              "Render-first 3D objects must submit before the regular opaque scene");
+    TestCheck(CKRP_VIEW_OPAQUE3D < CKRP_VIEW_TRANSPARENT,
+              "Opaque scene must submit before transparent scene objects");
+    TestCheck(CKRP_VIEW_TRANSPARENT < CKRP_VIEW_FOREGROUND2D,
+              "Foreground 2D must remain the final view");
 }
 
 void Test_Interleave_IgnoresColorPointersWithoutDPFlags() {
@@ -100,6 +286,45 @@ void Test_Interleave_IgnoresColorPointersWithoutDPFlags() {
     TestCheck(color1 == 0x00000000, "COLOR1 must default to black when CKRST_DP_SPECULAR is absent");
 }
 
+void Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque() {
+    float pos[4] = {1.0f, 2.0f, 0.5f, 1.0f};
+    float uv[2] = {0.25f, 0.75f};
+
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.Flags = CKRST_DP_CL_VCT;
+    data.VertexCount = 1;
+    data.PositionPtr = pos;
+    data.PositionStride = sizeof(pos);
+    data.TexCoordPtr = uv;
+    data.TexCoordStride = sizeof(uv);
+
+    const CKDWORD fmt = CKVertexLayoutCache::DPFlagsToFormatFlags(data.Flags, false, true);
+    const CKDWORD stride = CKVertexLayoutCache::ComputeStride(fmt);
+    CKBYTE buffer[64] = {};
+    CKTransientGeometry::InterleaveVertices(buffer, stride, 1, fmt, &data);
+
+    CKDWORD color1 = 0;
+    memcpy(&color1, buffer + 28, sizeof(color1));
+
+    TestCheck(color1 == 0xFF000000, "PositionT missing specular must default COLOR1 alpha to 1 for fog factor");
+}
+
+void Test_UserDrawPrimitive_PositionTSpecularDefaultsOpaqueOnReuse() {
+    UserDrawPrimitiveDataClass cache;
+    cache.GetStructure(CKRST_DP_CL_VCST, 4);
+
+    CKDWORD zeroSpecular = 0x00000000;
+    VxFillStructure(4, cache.SpecularColorPtr, cache.SpecularColorStride, sizeof(CKDWORD), &zeroSpecular);
+
+    VxDrawPrimitiveData *data = cache.GetStructure(CKRST_DP_CL_VCST, 4);
+    CKDWORD specular = 0;
+    memcpy(&specular, data->SpecularColorPtr, sizeof(specular));
+
+    TestCheck(specular == 0xFF000000,
+              "PositionT specular defaults must be reset to opaque black on reused draw primitive data");
+}
+
 void Test_DrawState_DefaultMaterialSourcesMatchFFP() {
     CKDrawStateCache cache;
 
@@ -129,6 +354,24 @@ void Test_DrawState_FixesBothSrcAlphaBlendPair() {
 
     TestCheck(src == VXBLEND_SRCALPHA, "BOTHSRCALPHA source must become SRCALPHA");
     TestCheck(dst == VXBLEND_INVSRCALPHA, "BOTHSRCALPHA destination must become INVSRCALPHA");
+}
+
+void Test_DrawState_InverseWindingSwapsCullDirection() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
+    CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
+    CKDWORD cull = (state.Lo >> 10) & 0x3;
+    TestCheck(cull == 2, "Default CCW cull must map to bgfx CCW culling");
+
+    cache.SetRenderState(VXRENDERSTATE_INVERSEWINDING, TRUE);
+    state = cache.BuildDrawState(VX_TRIANGLELIST);
+    cull = (state.Lo >> 10) & 0x3;
+    TestCheck(cull == 1, "Inverse winding must swap CCW culling to CW culling");
+
+    cache.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    state = cache.BuildDrawState(VX_TRIANGLELIST);
+    cull = (state.Lo >> 10) & 0x3;
+    TestCheck(cull == 0, "Inverse winding must not invent culling for VXCULL_NONE");
 }
 
 void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
@@ -183,11 +426,27 @@ int main() {
     tests.Run("DP flags transformed normal textured", &Test_DPFlags_TransformedNormalTextured_UsesPosition3);
     tests.Run("DP flags Sprite3D textured color", &Test_DPFlags_Sprite3DTexturedColor_DoesNotInventNormal);
     tests.Run("DP flags unlit color textured ignores incidental normal", &Test_DPFlags_UnlitColorTextured_IgnoresIncidentalNormalPointer);
+    tests.Run("DP flags texture stage mask counts highest stage", &Test_DPFlags_TextureStageMaskCountsHighestEnabledStage);
+    tests.Run("Vertex layout eight texture coordinates", &Test_VertexLayout_EightTextureCoordinatesContributeToStride);
+    tests.Run("Interleave independent texture coordinate streams", &Test_Interleave_CopiesIndependentTextureCoordinateStreams);
+    tests.Run("Sampler desc maps filters independently", &Test_SamplerDesc_MapsMinMagMipFiltersIndependently);
+    tests.Run("Sampler desc maps address W independently", &Test_SamplerDesc_MapsAddressWIndependently);
+    tests.Run("Texture stage defaults use matching texcoord index", &Test_TextureStageDefaults_UseMatchingTexcoordIndex);
     tests.Run("Primitive fan conversion", &Test_PrimitiveFanConversion_ProducesTriangleList);
     tests.Run("Primitive strip conversion", &Test_PrimitiveStripConversion_AlternatesWinding);
+    tests.Run("Wrap texcoords expands U seam", &Test_WrapTexcoords_ExpandsUAcrossSeam);
+    tests.Run("Wrap texcoords expands V seam", &Test_WrapTexcoords_ExpandsVAcrossSeam);
+    tests.Run("Wrap texcoords no-wrap unchanged", &Test_WrapTexcoords_NoWrapLeavesCoordinatesUnchanged);
+    tests.Run("Wrap mesh requires hardware expansion", &Test_WrapMesh_RequiresWrapAwareHardwareExpansion);
+    tests.Run("Wrap mesh maps flags to render state", &Test_WrapMesh_MapsMeshFlagsToRenderStateWrapMode);
+    tests.Run("TexGen packs texcoord generation", &Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex);
+    tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
+    tests.Run("Interleave PositionT missing specular fog factor", &Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque);
+    tests.Run("User draw primitive PositionT specular reset", &Test_UserDrawPrimitive_PositionTSpecularDefaultsOpaqueOnReuse);
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
+    tests.Run("Draw state inverse winding swaps cull", &Test_DrawState_InverseWindingSwapsCullDirection);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
