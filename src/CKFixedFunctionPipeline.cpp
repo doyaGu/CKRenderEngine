@@ -1043,7 +1043,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     // Light params: x=count, y/z/w = global ambient RGB
     CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
     float lightParams[4];
-    lightParams[0] = (float)packed;
+    lightParams[0] = m_CurrentLightingEnabled ? (float)packed : -1.0f;
     lightParams[1] = ((ambientColor >> 16) & 0xFF) / 255.0f;
     lightParams[2] = ((ambientColor >> 8) & 0xFF) / 255.0f;
     lightParams[3] = (ambientColor & 0xFF) / 255.0f;
@@ -1086,7 +1086,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     alphaParams[1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC)
         : 0.0f;
-    alphaParams[2] = 0.0f;
+    alphaParams[2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
     alphaParams[3] = 0.0f;
     encoder->SetUniform(u.u_alphaParams, alphaParams, 1);
 

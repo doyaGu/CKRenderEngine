@@ -124,7 +124,9 @@ float4 main(PSInput input) : SV_TARGET
         current.a = alphaResult.a;
     }
 
-    current.rgb += input.color1.rgb;
+    if (u_alphaParams.z > 0.5) {
+        current.rgb += input.color1.rgb;
+    }
     if (!alphaPass(current.a)) discard;
     current.rgb = lerp(u_fogColor.rgb, current.rgb, input.fogFactor);
     return saturate(current);

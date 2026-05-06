@@ -64,13 +64,15 @@ VSOutput main(VSInput input)
     float4 matEmissive = selectMaterialSource(u_ffParams.w, u_material[3], input.color0, input.color1);
     float  matPower    = u_material[4].x;
 
-    int lightCount = (int)u_lightParams.x;
+    int rawLightCount = (int)u_lightParams.x;
+    bool lightingEnabled = rawLightCount >= 0;
+    int lightCount = max(rawLightCount, 0);
     float3 globalAmbient = u_lightParams.yzw;
 
     float4 litDiffuse = matDiffuse;
     float3 litSpecular = input.color1.rgb;
 
-    if (lightCount > 0)
+    if (lightingEnabled)
     {
         float4 ambientAccum = 0.0;
         float4 diffuseAccum = 0.0;
@@ -128,7 +130,7 @@ VSOutput main(VSInput input)
                      matAmbient * float4(globalAmbient, 1.0) +
                      matAmbient * ambientAccum +
                      matDiffuse * diffuseAccum;
-        litSpecular += matSpecular.rgb * specularAccum;
+        litSpecular = matSpecular.rgb * specularAccum;
     }
 
     output.color0 = saturate(litDiffuse);
