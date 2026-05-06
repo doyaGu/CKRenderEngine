@@ -201,6 +201,8 @@ public:
     virtual CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc) = 0;
     virtual CKERROR DeleteObject(CKDWORD Object, CKDWORD Type) = 0;
     virtual void FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL) = 0;
+    virtual CK_RENDERER_BACKEND GetRendererBackend() const { return CKRST_RENDERER_UNKNOWN; }
+    virtual CKSTRING GetRendererBackendName() const { return (CKSTRING)"Unknown"; }
 
     // --- Resource update ---
     virtual CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,

@@ -2,7 +2,10 @@
 #include "CKVertexLayoutCache.h"
 #include "CKDrawStateCache.h"
 #include "CKFixedFunctionPipeline.h"
+#include "CKFFShaderCache.h"
 #include "TestTriangleMultiset.h"
+
+#include <cstring>
 
 namespace {
 
@@ -142,6 +145,19 @@ void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
               "DECALALPHA alpha op must keep diffuse/current alpha");
 }
 
+void Test_ShaderBackendMapping_MatchesBgfxRendererFamilies() {
+    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_D3D11), "dx11") == 0,
+              "D3D11 renderer must select dx11 shader set");
+    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_D3D12), "dx12") == 0,
+              "D3D12 renderer must select dx12 shader set");
+    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_VULKAN), "spirv") == 0,
+              "Vulkan renderer must select SPIR-V shader set");
+    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_OPENGL), "glsl") == 0,
+              "OpenGL renderer must select GLSL shader set");
+    TestCheck(strcmp(CKFFShaderCache::ShaderBackendName(CKRST_RENDERER_UNKNOWN), "unsupported") == 0,
+              "Unsupported renderer must not silently select a shader set");
+}
+
 } // namespace
 
 int main() {
@@ -156,5 +172,6 @@ int main() {
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
+    tests.Run("Shader backend mapping", &Test_ShaderBackendMapping_MatchesBgfxRendererFamilies);
     return tests.ExitCode();
 }

@@ -243,6 +243,8 @@ public:
     CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc) override;
     CKERROR DeleteObject(CKDWORD Object, CKDWORD Type) override;
     void FlushObjects(CKDWORD TypeMask) override;
+    CK_RENDERER_BACKEND GetRendererBackend() const override;
+    CKSTRING GetRendererBackendName() const override;
 
     // Resource update
     CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
@@ -356,6 +358,9 @@ private:
     friend class CKBgfxCallback;
 
     CKBOOL m_BgfxInitialized;
+    CK_RENDERER_BACKEND m_RendererBackend;
+    const char *m_RendererBackendName;
+    bgfx::TextureHandle m_DefaultWhiteTexture;
     CKBOOL m_VSync;
     uint32_t m_ResetFlags;
     CKBgfxCallback m_BgfxCallback;

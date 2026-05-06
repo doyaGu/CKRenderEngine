@@ -11,7 +11,7 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     m_Hardware = TRUE;
     m_CapsUpToDate = FALSE;
     m_DriverIndex = 0;
-    m_Desc = "bgfx D3D11 Driver";
+    m_Desc = "bgfx Driver";
 
     DEVMODEA dm;
     memset(&dm, 0, sizeof(dm));

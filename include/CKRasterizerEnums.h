@@ -137,9 +137,17 @@ typedef enum CK_SHADER_STAGE {
 } CK_SHADER_STAGE;
 
 typedef enum CK_SHADER_FORMAT {
-    CKRST_SHADER_DXBC  = 0,
-    CKRST_SHADER_SPIRV = 1,
+    CKRST_SHADER_NATIVE = 0,
 } CK_SHADER_FORMAT;
+
+typedef enum CK_RENDERER_BACKEND {
+    CKRST_RENDERER_AUTO     = 0,
+    CKRST_RENDERER_D3D11    = 1,
+    CKRST_RENDERER_D3D12    = 2,
+    CKRST_RENDERER_VULKAN   = 3,
+    CKRST_RENDERER_OPENGL   = 4,
+    CKRST_RENDERER_UNKNOWN  = 0xff,
+} CK_RENDERER_BACKEND;
 
 // ---------------------------------------------------------------------------
 // Uniform Type

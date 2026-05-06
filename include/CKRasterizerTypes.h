@@ -145,6 +145,8 @@ struct CKRenderStateData
 
 struct CKShaderDesc {
     CK_SHADER_STAGE Stage;
+    // Opaque precompiled shader blob for the selected rasterizer backend.
+    // Backend-specific payload selection happens above the rasterizer layer.
     CK_SHADER_FORMAT Format;
     CKBYTE *Code;
     CKDWORD CodeSize;

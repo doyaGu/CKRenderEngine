@@ -31,6 +31,8 @@ public:
     CKDWORD GetLitTexturedProgram() const { return m_Stage3DProgram; }
     CKDWORD GetUnlitColorProgram() const { return m_PositionTProgram; }
 
+    static const char *ShaderBackendName(CK_RENDERER_BACKEND backend);
+
 private:
     CKRasterizerContext *m_Context;
     CKFFUniformHandles m_Uniforms;

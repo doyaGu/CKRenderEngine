@@ -4,9 +4,61 @@
 
 #include <cstdio>
 
-#include "shaders/generated/vs_ff_3d.bin.h"
-#include "shaders/generated/vs_ff_positiont.bin.h"
-#include "shaders/generated/fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/vs_ff_positiont.bin.h"
+#include "shaders/generated/dx11/fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/vs_ff_positiont.bin.h"
+#include "shaders/generated/dx12/fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/vs_ff_positiont.bin.h"
+#include "shaders/generated/spirv/fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/vs_ff_positiont.bin.h"
+#include "shaders/generated/glsl/fs_ff_stage.bin.h"
+
+namespace {
+
+struct CKFFShaderBlobSet {
+    CK_RENDERER_BACKEND Backend;
+    const char *Name;
+    const unsigned char *VS3D;
+    unsigned int VS3DSize;
+    const unsigned char *VSPositionT;
+    unsigned int VSPositionTSize;
+    const unsigned char *FSStage;
+    unsigned int FSStageSize;
+};
+
+static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
+    {CKRST_RENDERER_D3D11, "dx11",
+     s_dx11_vs_ff_3d, sizeof(s_dx11_vs_ff_3d),
+     s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
+     s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage)},
+    {CKRST_RENDERER_D3D12, "dx12",
+     s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
+     s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
+     s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage)},
+    {CKRST_RENDERER_VULKAN, "spirv",
+     s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
+     s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
+     s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage)},
+    {CKRST_RENDERER_OPENGL, "glsl",
+     s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
+     s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
+     s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage)},
+};
+
+static const CKFFShaderBlobSet *FindShaderBlobSet(CK_RENDERER_BACKEND backend)
+{
+    for (const CKFFShaderBlobSet &set : g_ShaderBlobSets) {
+        if (set.Backend == backend)
+            return &set;
+    }
+    return nullptr;
+}
+
+} // namespace
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_FallbackProgram(0), m_Stage3DProgram(0), m_PositionTProgram(0),
@@ -138,17 +190,25 @@ void CKFFShaderCache::CreateUniforms() {
 void CKFFShaderCache::CreatePrograms() {
     if (!m_Context) return;
 
+    const CK_RENDERER_BACKEND backend = m_Context->GetRendererBackend();
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(backend);
+    if (!set) {
+        CK_LOG_FMT("ShaderCache", "No FFP shader set for renderer backend=%d (%s)",
+                   (int)backend, ShaderBackendName(backend));
+        return;
+    }
+
     m_Stage3DProgram = CreateProgramFromBinary(
-        s_vs_ff_3d, sizeof(s_vs_ff_3d),
-        s_fs_ff_stage, sizeof(s_fs_ff_stage));
-    CK_LOG_FMT("ShaderCache", "Stage3D program: %u (vs=%u bytes, fs=%u bytes)",
-               m_Stage3DProgram, (unsigned)sizeof(s_vs_ff_3d), (unsigned)sizeof(s_fs_ff_stage));
+        set->VS3D, set->VS3DSize,
+        set->FSStage, set->FSStageSize);
+    CK_LOG_FMT("ShaderCache", "Stage3D program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
+               m_Stage3DProgram, set->Name, set->VS3DSize, set->FSStageSize);
 
     m_PositionTProgram = CreateProgramFromBinary(
-        s_vs_ff_positiont, sizeof(s_vs_ff_positiont),
-        s_fs_ff_stage, sizeof(s_fs_ff_stage));
-    CK_LOG_FMT("ShaderCache", "PositionT program: %u (vs=%u bytes, fs=%u bytes)",
-               m_PositionTProgram, (unsigned)sizeof(s_vs_ff_positiont), (unsigned)sizeof(s_fs_ff_stage));
+        set->VSPositionT, set->VSPositionTSize,
+        set->FSStage, set->FSStageSize);
+    CK_LOG_FMT("ShaderCache", "PositionT program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
+               m_PositionTProgram, set->Name, set->VSPositionTSize, set->FSStageSize);
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
@@ -160,7 +220,7 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     CKDWORD hVS = AllocShaderHandle();
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
-    vsDesc.Format = CKRST_SHADER_DXBC;
+    vsDesc.Format = CKRST_SHADER_NATIVE;
     vsDesc.Code = (CKBYTE *)vsData;
     vsDesc.CodeSize = vsSize;
     CKERROR err = m_Context->CreateShader(hVS, &vsDesc);
@@ -172,7 +232,7 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     CKDWORD hFS = AllocShaderHandle();
     CKShaderDesc fsDesc = {};
     fsDesc.Stage = CKRST_SHADER_PIXEL;
-    fsDesc.Format = CKRST_SHADER_DXBC;
+    fsDesc.Format = CKRST_SHADER_NATIVE;
     fsDesc.Code = (CKBYTE *)fsData;
     fsDesc.CodeSize = fsSize;
     err = m_Context->CreateShader(hFS, &fsDesc);
@@ -201,4 +261,14 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 
 CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     return key.VS.GetHasPositionT() ? m_PositionTProgram : m_Stage3DProgram;
+}
+
+const char *CKFFShaderCache::ShaderBackendName(CK_RENDERER_BACKEND backend)
+{
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(backend);
+    if (set)
+        return set->Name;
+    if (backend == CKRST_RENDERER_AUTO)
+        return "auto";
+    return "unsupported";
 }
