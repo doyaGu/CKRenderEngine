@@ -9,8 +9,8 @@ set(CKBGFX_RASTERIZER_HEADERS
         CKBgfxRasterizer.h
 )
 
-# Build bgfx as a dependency (static only, no tools/examples)
-set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+# Build bgfx as a dependency. shaderc is required by the CK2_3D shader target.
+set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
 set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
