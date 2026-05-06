@@ -84,6 +84,7 @@ struct CKFFUniformHandles {
     CKDWORD u_lightParams;  // vec4: x=count, yzw=globalAmbient RGB
     CKDWORD u_material;     // vec4 array: 5 elements (diff, amb, spec, emis, power)
     CKDWORD u_ffParams;     // vec4: material source selectors diff/amb/spec/emis
+    CKDWORD u_lightModelParams; // vec4: x=localViewer, yzw=0
     CKDWORD u_fogParams;    // vec4: start, end, density, mode
     CKDWORD u_fogColor;     // vec4: RGBA
     CKDWORD u_texFactor;    // vec4: RGBA
