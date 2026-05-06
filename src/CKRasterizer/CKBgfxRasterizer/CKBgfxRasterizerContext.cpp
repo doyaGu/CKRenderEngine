@@ -2499,6 +2499,16 @@ CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync)
         bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
     }
 
+    static const CKBOOL s_LogPresentSync =
+        GetEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", FALSE);
+    static int s_PresentSyncLogCount = 0;
+    if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
+        BgfxLogf("PresentSync",
+                 "frame=%u requestedVSync=%d currentVSync=%d resetFlags=0x%X",
+                 m_DebugFrameId, VSync ? 1 : 0, m_VSync ? 1 : 0, m_ResetFlags);
+        ++s_PresentSyncLogCount;
+    }
+
     DrawDebugOverlay();
     RequestDebugFrameCapture();
 

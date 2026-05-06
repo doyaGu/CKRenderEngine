@@ -54,6 +54,11 @@ static bool CameraAttachLogEnabled() {
     return enabled;
 }
 
+static bool PresentSyncLogEnabled() {
+    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_LOG_PRESENT_SYNC");
+    return enabled;
+}
+
 CK_CLASSID RCKRenderContext::GetClassID() {
     return m_ClassID;
 }
@@ -249,11 +254,41 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
         return Flags;
 
     const CKDWORD frameRateMode = TimeManager->GetLimitOptions() & CK_FRAMERATE_MASK;
-    if (frameRateMode & CK_FRAMERATE_SYNC)
-        return static_cast<CK_RENDER_FLAGS>(Flags | CK_RENDER_WAITVBL);
-    if (frameRateMode & (CK_FRAMERATE_FREE | CK_FRAMERATE_LIMIT))
-        return static_cast<CK_RENDER_FLAGS>(Flags & ~CK_RENDER_WAITVBL);
-    return Flags;
+    CK_RENDER_FLAGS resolved = Flags;
+    if (frameRateMode & CK_FRAMERATE_SYNC) {
+        resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
+    } else if (frameRateMode & (CK_FRAMERATE_FREE | CK_FRAMERATE_LIMIT)) {
+        resolved = static_cast<CK_RENDER_FLAGS>(resolved & ~CK_RENDER_WAITVBL);
+    }
+
+    static int s_PresentSyncLogCount = 0;
+    if (PresentSyncLogEnabled() && s_PresentSyncLogCount < 64) {
+        CK_LOG_FMT("PresentSync",
+                   "limitOptions=0x%X frameRateMode=0x%X inputFlags=0x%X resolvedFlags=0x%X waitVbl=%d",
+                   TimeManager->GetLimitOptions(), frameRateMode, Flags, resolved,
+                   (resolved & CK_RENDER_WAITVBL) ? 1 : 0);
+        ++s_PresentSyncLogCount;
+    }
+    return resolved;
+}
+
+static void LogPresentFrameRateContract(const char *stage, CK_RENDER_FLAGS inputFlags, CK_RENDER_FLAGS resolvedFlags,
+                                        CKTimeManager *timeManager) {
+    if (!PresentSyncLogEnabled())
+        return;
+
+    static int s_PresentFrameLogCount = 0;
+    if (s_PresentFrameLogCount >= 64)
+        return;
+
+    const CKDWORD limitOptions = timeManager ? timeManager->GetLimitOptions() : 0;
+    const CKDWORD frameRateMode = limitOptions & CK_FRAMERATE_MASK;
+    const float frameRateLimit = timeManager ? timeManager->GetFrameRateLimit() : 0.0f;
+    CK_LOG_FMT("PresentSync",
+               "%s limitOptions=0x%X frameRateMode=0x%X frameRateLimit=%.3f inputFlags=0x%X resolvedFlags=0x%X waitVbl=%d",
+               stage ? stage : "?", limitOptions, frameRateMode, frameRateLimit, inputFlags, resolvedFlags,
+               (resolvedFlags & CK_RENDER_WAITVBL) ? 1 : 0);
+    ++s_PresentFrameLogCount;
 }
 
 void RCKRenderContext::RestoreStereoRenderState(CK3dEntity *rootEntity, const VxMatrix &originalWorldMat) {
@@ -470,8 +505,9 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
-        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
 
     if (!(renderFlags & (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL)))
         return CK_OK;
@@ -519,8 +555,9 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
-        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
     if ((renderFlags & CK_RENDER_SKIPDRAWSCENE) != 0)
         return CK_OK;
 
@@ -550,8 +587,9 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
-        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
 
     // Check if we need to do back-to-front or have render target
     if (!(renderFlags & CK_RENDER_DOBACKTOFRONT) && !m_TargetTexture)
@@ -622,6 +660,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 
         // End frame and present
         CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
+        LogPresentFrameRateContract("BackToFront/EndFrame", inputFlags, renderFlags, timeManager);
         m_FFPipeline.GetRenderPipeline().EndFrame(waitVbl);
     }
 
