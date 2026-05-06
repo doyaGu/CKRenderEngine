@@ -31,12 +31,79 @@ For samplers: type has bit 0x10 set (type=0x10|0=sampler)
 """
 
 import os
+import argparse
+from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
 import hashlib
 
-FXC_PATH = r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\fxc.exe"
+def _candidate_fxc_from_windows_kits():
+    """Yield installed Windows Kits fxc.exe candidates, newest SDK first."""
+    roots = []
+    for env_name in ("WindowsSdkDir", "ProgramFiles(x86)", "ProgramFiles"):
+        value = os.environ.get(env_name)
+        if value:
+            root = Path(value)
+            if env_name != "WindowsSdkDir":
+                root = root / "Windows Kits" / "10"
+            roots.append(root)
+
+    seen = set()
+    for root in roots:
+        bin_dir = root / "bin"
+        if not bin_dir.is_dir():
+            continue
+
+        version_dirs = []
+        for child in bin_dir.iterdir():
+            if child.is_dir():
+                version_dirs.append(child)
+        version_dirs.sort(key=lambda p: p.name, reverse=True)
+
+        for arch in ("x64", "x86"):
+            direct = bin_dir / arch / "fxc.exe"
+            key = str(direct).lower()
+            if key not in seen:
+                seen.add(key)
+                yield direct
+
+        for version_dir in version_dirs:
+            for arch in ("x64", "x86"):
+                candidate = version_dir / arch / "fxc.exe"
+                key = str(candidate).lower()
+                if key not in seen:
+                    seen.add(key)
+                    yield candidate
+
+
+def resolve_fxc_path(cli_path=None):
+    """Resolve fxc.exe from CLI, environment, PATH, or installed Windows Kits."""
+    candidates = []
+    if cli_path:
+        candidates.append(Path(cli_path))
+
+    for env_name in ("CK2_3D_FXC", "FXC"):
+        value = os.environ.get(env_name)
+        if value:
+            candidates.append(Path(value))
+
+    path_fxc = shutil.which("fxc.exe") or shutil.which("fxc")
+    if path_fxc:
+        candidates.append(Path(path_fxc))
+
+    candidates.extend(_candidate_fxc_from_windows_kits())
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    searched = "\n  ".join(str(p) for p in candidates) if candidates else "(no candidates)"
+    raise FileNotFoundError(
+        "Unable to find fxc.exe. Pass --fxc, set CK2_3D_FXC, or install the Windows SDK.\n"
+        f"Searched:\n  {searched}"
+    )
 
 # bgfx UniformType::Enum values (from bgfx.h)
 #   Sampler = 0, End = 1, Vec4 = 2, Mat3 = 3, Mat4 = 4
@@ -187,10 +254,10 @@ SHADERS = [
 ]
 
 
-def compile_hlsl(source_path, profile, entry, output_path):
+def compile_hlsl(fxc_path, source_path, profile, entry, output_path):
     """Compile HLSL to DXBC using fxc.exe."""
     cmd = [
-        FXC_PATH,
+        fxc_path,
         "/T", profile,
         "/E", entry,
         "/O2",
@@ -308,7 +375,26 @@ def write_c_header(output_path, var_name, data):
     print(f"  Generated: {os.path.basename(output_path)} ({len(data)} bytes)")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Compile CK2_3D fixed-function HLSL shaders and wrap them as bgfx binaries."
+    )
+    parser.add_argument(
+        "--fxc",
+        help="Path to fxc.exe. Overrides CK2_3D_FXC, FXC, PATH, and Windows SDK discovery.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    try:
+        fxc_path = resolve_fxc_path(args.fxc)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Using fxc: {fxc_path}")
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     generated_dir = os.path.join(script_dir, "generated")
     os.makedirs(generated_dir, exist_ok=True)
@@ -322,7 +408,7 @@ def main():
         dxbc_path = os.path.join(temp_dir, shader["source"].replace(".hlsl", ".dxbc"))
         output_path = os.path.join(generated_dir, shader["output"])
 
-        if not compile_hlsl(source_path, shader["profile"], shader["entry"], dxbc_path):
+        if not compile_hlsl(fxc_path, source_path, shader["profile"], shader["entry"], dxbc_path):
             success = False
             continue
 
