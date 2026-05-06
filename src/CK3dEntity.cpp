@@ -2588,9 +2588,8 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     // Handle indirect matrix (mirrored objects)
     CKDWORD savedInverseWinding = 0;
     if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        // TODO: Phase 2 — route winding state through FFPipeline
-        // dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &savedInverseWinding);
-        // dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding == 0 ? 1 : 0);
+        savedInverseWinding = dev->m_FFPipeline.GetRenderState(VXRENDERSTATE_INVERSEWINDING);
+        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding == 0 ? TRUE : FALSE);
     }
 
     // Handle skin update for non-PM meshes
@@ -2610,7 +2609,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute pre-render callbacks
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
@@ -2639,7 +2638,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute post-render callbacks
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
@@ -2659,10 +2658,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // Restore inverse winding if changed
     if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        // TODO: Phase 2 — route winding state restore through FFPipeline
-        // CKDWORD currentWinding = 0;
-        // dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &currentWinding);
-        // dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, currentWinding == 0 ? 1 : 0);
+        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding);
     }
 
     // Update render extents if requested
@@ -3270,7 +3266,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
         td.ScreenStride = 16;
         td.ClipFlags = &clip;
 
-        // TODO: Phase 2 — route world matrix and vertex transform through FFPipeline
+        // TODO: Phase 2 - route world matrix and vertex transform through FFPipeline
         // dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, m_WorldMatrix);
         // dev->m_RasterizerContext->TransformVertices(1, &td);
 

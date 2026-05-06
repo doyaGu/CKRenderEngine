@@ -19,6 +19,7 @@ void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
     if (m_Context) {
         m_Context->SetViewName(CKRP_VIEW_CLEAR, (CKSTRING)"clear");
         m_Context->SetViewName(CKRP_VIEW_BACKGROUND2D, (CKSTRING)"background2d");
+        m_Context->SetViewName(CKRP_VIEW_RENDERFIRST3D, (CKSTRING)"renderfirst3d");
         m_Context->SetViewName(CKRP_VIEW_OPAQUE3D, (CKSTRING)"opaque3d");
         m_Context->SetViewName(CKRP_VIEW_TRANSPARENT, (CKSTRING)"transparent3d");
         m_Context->SetViewName(CKRP_VIEW_FOREGROUND2D, (CKSTRING)"foreground2d");
@@ -28,6 +29,7 @@ void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
         // sorting, so keep bgfx from reordering submissions within a view.
         m_Context->SetViewMode(CKRP_VIEW_CLEAR, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_BACKGROUND2D, CKRST_VIEWMODE_SEQUENTIAL);
+        m_Context->SetViewMode(CKRP_VIEW_RENDERFIRST3D, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_OPAQUE3D, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_TRANSPARENT, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_FOREGROUND2D, CKRST_VIEWMODE_SEQUENTIAL);
@@ -93,15 +95,19 @@ void CKRenderPipeline::BeginFrame(
         s_logCount++;
     }
 
-    // View 2: Opaque 3D (front-to-back for early-Z)
+    // View 2: render-first 3D backgrounds/sky objects
+    m_Context->SetViewRect(CKRP_VIEW_RENDERFIRST3D, viewport);
+    m_Context->SetViewTransform(CKRP_VIEW_RENDERFIRST3D, &view, &proj);
+
+    // View 3: Opaque 3D
     m_Context->SetViewRect(CKRP_VIEW_OPAQUE3D, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_OPAQUE3D, &view, &proj);
 
-    // View 3: Transparent 3D (back-to-front for correct blending)
+    // View 4: Transparent 3D
     m_Context->SetViewRect(CKRP_VIEW_TRANSPARENT, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_TRANSPARENT, &view, &proj);
 
-    // View 4: Foreground 2D
+    // View 5: Foreground 2D
     m_Context->SetViewRect(CKRP_VIEW_FOREGROUND2D, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_FOREGROUND2D, &identity, &m_OrthoProj);
 
