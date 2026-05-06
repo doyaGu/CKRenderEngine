@@ -95,6 +95,20 @@ void Test_DrawState_DefaultMaterialSourcesMatchFFP() {
               "FFP default emissive source must be material emissive");
 }
 
+void Test_DrawState_FixesBothSrcAlphaBlendPair() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    cache.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_BOTHSRCALPHA);
+    cache.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_ZERO);
+
+    const CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
+    const CKDWORD src = (state.Lo >> 16) & 0xF;
+    const CKDWORD dst = (state.Lo >> 20) & 0xF;
+
+    TestCheck(src == VXBLEND_SRCALPHA, "BOTHSRCALPHA source must become SRCALPHA");
+    TestCheck(dst == VXBLEND_INVSRCALPHA, "BOTHSRCALPHA destination must become INVSRCALPHA");
+}
+
 } // namespace
 
 int main() {
@@ -105,5 +119,6 @@ int main() {
     tests.Run("Primitive strip conversion", &Test_PrimitiveStripConversion_AlternatesWinding);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
+    tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
     return tests.ExitCode();
 }

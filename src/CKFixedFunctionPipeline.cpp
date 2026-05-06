@@ -199,7 +199,8 @@ static int GetActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
 static CKDWORD ResolveMaterialSource(CKBOOL lighting, CKBOOL colorVertex, CKBOOL fromVertex,
                                      CKDWORD dpFlags, CKDWORD streamFlag,
                                      CKFFMaterialSource vertexSource) {
-    if (!lighting || !colorVertex || !fromVertex || ((dpFlags & streamFlag) == 0))
+    (void)lighting;
+    if (!colorVertex || !fromVertex || ((dpFlags & streamFlag) == 0))
         return CKFF_MS_MATERIAL;
     return vertexSource;
 }
