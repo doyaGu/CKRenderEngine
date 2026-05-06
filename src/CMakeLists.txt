@@ -136,6 +136,29 @@ if (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
     add_subdirectory(CKRasterizer)
 endif ()
 
+find_package(Python3 COMPONENTS Interpreter)
+set(CKRE_SHADER_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_3d.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+)
+
+if (Python3_Interpreter_FOUND AND TARGET shaderc)
+    add_custom_target(CK2_3D_shaders
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+                    --shaderc $<TARGET_FILE:shaderc>
+            DEPENDS shaderc ${CKRE_SHADER_SOURCES}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
+            SOURCES ${CKRE_SHADER_SOURCES}
+            COMMENT "Generating CK2_3D bgfx fixed-function shaders"
+    )
+else ()
+    message(WARNING "CK2_3D_shaders target disabled: Python3 or bgfx shaderc target not available")
+endif ()
+
 # Function to configure common target settings
 function(ckre_configure_target TARGET_NAME)
     target_include_directories(${TARGET_NAME}
@@ -187,6 +210,9 @@ if (CKRE_BUILD_SHARED)
     )
 
     # CK2_3D consumer code not yet rewritten for v2 API
+    if (TARGET CK2_3D_shaders)
+        add_dependencies(CK2_3D CK2_3D_shaders)
+    endif ()
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
@@ -198,6 +224,9 @@ if (CKRE_BUILD_STATIC)
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
     ckre_configure_target(CK2_3DStatic)
     # CK2_3DStatic consumer code not yet rewritten for v2 API
+    if (TARGET CK2_3D_shaders)
+        add_dependencies(CK2_3DStatic CK2_3D_shaders)
+    endif ()
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
