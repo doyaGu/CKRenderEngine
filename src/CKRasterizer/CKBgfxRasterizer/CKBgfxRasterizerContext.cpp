@@ -88,16 +88,16 @@ static const char *RendererTypeName(bgfx::RendererType::Enum type)
     }
 }
 
-static CK_RENDERER_BACKEND ToCKRendererBackend(bgfx::RendererType::Enum type)
+static CK_SHADER_PROFILE ShaderProfile(bgfx::RendererType::Enum type)
 {
     switch (type)
     {
-    case bgfx::RendererType::Direct3D11: return CKRST_RENDERER_D3D11;
-    case bgfx::RendererType::Direct3D12: return CKRST_RENDERER_D3D12;
-    case bgfx::RendererType::Vulkan:     return CKRST_RENDERER_VULKAN;
+    case bgfx::RendererType::Direct3D11: return CKRST_SHADER_PROFILE_DX11;
+    case bgfx::RendererType::Direct3D12: return CKRST_SHADER_PROFILE_DX12;
+    case bgfx::RendererType::Vulkan:     return CKRST_SHADER_PROFILE_SPIRV;
     case bgfx::RendererType::OpenGL:
-    case bgfx::RendererType::OpenGLES:   return CKRST_RENDERER_OPENGL;
-    default:                             return CKRST_RENDERER_UNKNOWN;
+    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_GLSL;
+    default:                             return CKRST_SHADER_PROFILE_UNKNOWN;
     }
 }
 
@@ -1248,8 +1248,8 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 // ===========================================================================
 
 CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
-    : m_BgfxInitialized(FALSE), m_RendererBackend(CKRST_RENDERER_UNKNOWN),
-      m_RendererBackendName("Unknown"), m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
+    : m_BgfxInitialized(FALSE), m_RendererName("Unknown"),
+      m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
@@ -1343,14 +1343,18 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     m_BgfxInitialized = TRUE;
     const bgfx::RendererType::Enum actualRenderer = bgfx::getRendererType();
-    m_RendererBackend = ToCKRendererBackend(actualRenderer);
-    m_RendererBackendName = RendererTypeName(actualRenderer);
+    m_RendererName = RendererTypeName(actualRenderer);
     if (m_Driver) {
-        m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererBackendName);
+        CKBgfxRasterizerDriver *driver = static_cast<CKBgfxRasterizerDriver *>(m_Driver);
+        driver->m_ShaderTarget.Format = CKRST_SHADER_FORMAT_NATIVE;
+        driver->m_ShaderTarget.Profile = ShaderProfile(actualRenderer);
+        driver->m_ShaderTarget.Version = 0;
+        driver->m_ShaderTarget.Flags = 0;
+        m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererName);
     }
 
     BgfxLogf("Init", "renderer requested=%s actual=%s",
-             RendererTypeName(requestedRenderer), m_RendererBackendName);
+             RendererTypeName(requestedRenderer), m_RendererName);
 
     const uint32_t whitePixel = 0xffffffffu;
     const bgfx::Memory *whiteMem = bgfx::copy(&whitePixel, sizeof(whitePixel));
@@ -1366,16 +1370,6 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     ConfigureDebugCapture();
 
     return TRUE;
-}
-
-CK_RENDERER_BACKEND CKBgfxRasterizerContext::GetRendererBackend() const
-{
-    return m_RendererBackend;
-}
-
-CKSTRING CKBgfxRasterizerContext::GetRendererBackendName() const
-{
-    return (CKSTRING)m_RendererBackendName;
 }
 
 CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
@@ -1714,7 +1708,11 @@ CKERROR CKBgfxRasterizerContext::CreateShader(CKDWORD Shader, CKShaderDesc *Desc
         return CKERR_INVALIDPARAMETER;
     if (!Desc->Code || Desc->CodeSize == 0)
         return CKERR_INVALIDPARAMETER;
-    if (Desc->Format != CKRST_SHADER_NATIVE)
+    CKShaderTargetDesc target;
+    if (!m_Driver ||
+        m_Driver->GetShaderTarget(&target) != CK_OK ||
+        Desc->Format != target.Format ||
+        Desc->Profile != target.Profile)
         return CKERR_INVALIDPARAMETER;
 
     const bgfx::Memory *mem = bgfx::copy(Desc->Code, Desc->CodeSize);

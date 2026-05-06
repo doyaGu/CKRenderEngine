@@ -4,6 +4,7 @@
 #include "CKFFShaderKey.h"
 #include "CKFFConstants.h"
 #include "CKRasterizerEnums.h"
+#include "CKRasterizerTypes.h"
 
 #include <unordered_map>
 
@@ -31,8 +32,6 @@ public:
     CKDWORD GetLitTexturedProgram() const { return m_Stage3DProgram; }
     CKDWORD GetUnlitColorProgram() const { return m_PositionTProgram; }
 
-    static const char *ShaderBackendName(CK_RENDERER_BACKEND backend);
-
 private:
     CKRasterizerContext *m_Context;
     CKFFUniformHandles m_Uniforms;
@@ -48,6 +47,7 @@ private:
     void CreateUniforms();
     void CreatePrograms();
     CKDWORD CreateProgramFromBinary(
+        const CKShaderTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,
         const unsigned char *fsData, unsigned int fsSize);
 
