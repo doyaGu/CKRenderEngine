@@ -107,6 +107,8 @@ void Test_DrawState_DefaultMaterialSourcesMatchFFP() {
               "FFP default diffuse source must be vertex diffuse");
     TestCheck(cache.GetRenderState(VXRENDERSTATE_SPECULARFROMVERTEX) == TRUE,
               "FFP default specular source must be vertex specular");
+    TestCheck(cache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) == FALSE,
+              "FFP default global specular add must be disabled");
     TestCheck(cache.GetRenderState(VXRENDERSTATE_AMBIENTFROMVERTEX) == FALSE,
               "FFP default ambient source must be material ambient");
     TestCheck(cache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX) == FALSE,

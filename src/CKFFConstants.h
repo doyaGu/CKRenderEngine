@@ -86,7 +86,7 @@ struct CKFFUniformHandles {
     CKDWORD u_fogParams;    // vec4: start, end, density, mode
     CKDWORD u_fogColor;     // vec4: RGBA
     CKDWORD u_texFactor;    // vec4: RGBA
-    CKDWORD u_alphaParams;  // vec4: ref, func, 0, 0
+    CKDWORD u_alphaParams;  // vec4: ref, func, specularEnable, 0
     CKDWORD u_bumpEnv;      // vec4 array: 2 elements (matrix, luminance)
     CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY
     CKDWORD u_stageParams;  // vec4 array: per-stage color/alpha ops and args
