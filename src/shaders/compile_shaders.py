@@ -74,10 +74,11 @@ SHADERS = [
             ("u_fogParams", BGFX_UNIFORM_VEC4, 1, 18, 1),
             ("u_viewport", BGFX_UNIFORM_VEC4, 1, 19, 1),
             ("u_ffParams", BGFX_UNIFORM_VEC4, 1, 20, 1),
-            ("u_lights", BGFX_UNIFORM_VEC4, 56, 21, 56),
+            ("u_lightModelParams", BGFX_UNIFORM_VEC4, 1, 21, 1),
+            ("u_lights", BGFX_UNIFORM_VEC4, 56, 22, 56),
         ],
         "attrs": [ATTRIB_POSITION, ATTRIB_NORMAL, ATTRIB_TEXCOORD0, ATTRIB_COLOR0, ATTRIB_COLOR1],
-        "cb_size": (21 + 56) * 16,
+        "cb_size": (22 + 56) * 16,
     },
     {
         "source": "vs_ff_positiont.hlsl",

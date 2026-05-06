@@ -1055,6 +1055,11 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     encoder->SetUniform(u.u_material, &m_Material, 5);
     encoder->SetUniform(u.u_ffParams, m_MaterialSource, 1);
+    float lightModelParams[4] = {
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f,
+        0.0f, 0.0f, 0.0f
+    };
+    encoder->SetUniform(u.u_lightModelParams, lightModelParams, 1);
 
     float fogParams[4];
     CKDWORD fs = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGSTART);

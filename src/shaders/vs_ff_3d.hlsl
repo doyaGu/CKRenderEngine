@@ -8,6 +8,7 @@ cbuffer Uniforms : register(b0)
     float4 u_fogParams;
     float4 u_viewport;
     float4 u_ffParams;
+    float4 u_lightModelParams;
     float4 u_lights[56];
 };
 
@@ -121,7 +122,13 @@ VSOutput main(VSInput input)
 
             if (nDotL > 0.0 && matPower > 0.0)
             {
-                float3 halfVec = normalize(normalize(toLight) + float3(0, 0, 1));
+                float3 halfVec;
+                if (u_lightModelParams.x > 0.5) {
+                    halfVec = toLight - normalize(viewPos.xyz);
+                } else {
+                    halfVec = toLight - float3(0.0, 0.0, 1.0);
+                }
+                halfVec = normalize(halfVec);
                 float nDotH = max(dot(viewNormal, halfVec), 0.0);
                 specularAccum += lSpec.rgb * pow(nDotH, matPower) * atten;
             }

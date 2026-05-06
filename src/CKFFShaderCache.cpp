@@ -84,6 +84,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_ffParams = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ffParams, &desc);
 
+    desc.Name = (char *)"u_lightModelParams";
+    desc.Count = 1;
+    m_Uniforms.u_lightModelParams = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_lightModelParams, &desc);
+
     desc.Name = (char *)"u_fogParams";
     desc.Count = 1;
     m_Uniforms.u_fogParams = AllocUniformHandle();
