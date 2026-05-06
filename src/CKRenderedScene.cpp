@@ -212,7 +212,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Frustum = frustum;
 
         rc->m_FFPipeline.SetTransform(VXMATRIX_WORLD, VxMatrix::Identity());
-        rc->m_FFPipeline.SetTransform(VXMATRIX_VIEW, rootEntity->GetInverseWorldMatrix());
+        rc->SetViewTransformationMatrix(rootEntity->GetInverseWorldMatrix());
 
         static int s_camLogCount = 0;
         static int s_attachedCamLogCount = 0;
@@ -308,6 +308,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Stats.SceneTraversalTime = 0.0f;
         rc->m_SceneTraversalTimeProfiler.Reset();
 
+        rc->m_Current3DView = CKRP_VIEW_OPAQUE3D;
         rm->m_SceneGraphRootNode.RenderTransparentObjects(rc, renderFlags);
 
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
@@ -327,9 +328,11 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         // Sort and render transparent objects
         rc->m_SortTransparentObjects = TRUE;
+        rc->m_Current3DView = CKRP_VIEW_TRANSPARENT;
         rm->m_SceneGraphRootNode.SortTransparentObjects(rc, renderFlags);
         rc->CallSprite3DBatches();
         rc->m_SortTransparentObjects = FALSE;
+        rc->m_Current3DView = CKRP_VIEW_OPAQUE3D;
 
         rc->m_Stats.ObjectsRenderTime = rc->m_ObjectsRenderTimeProfiler.Current();
 

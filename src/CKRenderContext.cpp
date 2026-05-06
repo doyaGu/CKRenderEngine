@@ -1490,7 +1490,11 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     CKRasterizerEncoder *encoder = m_FFPipeline.GetRenderPipeline().GetEncoder();
     CKRenderView view;
     if (data->Flags & CKRST_DP_TRANSFORM) {
-        view = m_FFPipeline.GetRenderPipeline().GetOpaqueView();
+        view = m_Current3DView;
+        if (m_FFPipeline.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE) ||
+            !m_FFPipeline.GetRenderState(VXRENDERSTATE_ZWRITEENABLE)) {
+            view = CKRP_VIEW_TRANSPARENT;
+        }
     } else {
         view = m_Current2DView;
     }
@@ -2526,6 +2530,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     Vx3DMatrixIdentity(m_WorldMatrix);
     Vx3DMatrixIdentity(m_ViewMatrix);
     m_Current2DView = CKRP_VIEW_FOREGROUND2D;
+    m_Current3DView = CKRP_VIEW_OPAQUE3D;
 }
 
 RCKRenderContext::~RCKRenderContext() {
@@ -2770,6 +2775,8 @@ void RCKRenderContext::CallSprite3DBatches() {
                 m_Stats.NbVerticesProcessed += 4 * spriteCount;
 
                 material->SetAsCurrent(this, FALSE, 0);
+                m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+                m_FFPipeline.SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
 
                 CKVertex *vertices = batch->m_Vertices.Begin();
                 VxFillStructure(4 * spriteCount, &vertices->Diffuse, sizeof(CKVertex), 8, colors);
@@ -2805,7 +2812,12 @@ void RCKRenderContext::CallSprite3DBatches() {
                 dpData.SpecularColorPtr = &vertices->Specular;
                 dpData.TexCoordPtr = &vertices->tu;
 
+                const CKRenderView saved3DView = m_Current3DView;
+                if (material->IsAlphaTransparent() || material->AlphaBlendEnabled() ||
+                    m_FFPipeline.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
+                    m_Current3DView = CKRP_VIEW_TRANSPARENT;
                 DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
+                m_Current3DView = saved3DView;
             }
         }
 

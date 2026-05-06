@@ -446,6 +446,28 @@ void RCKSprite3D::UpdateBox(CKBOOL World) {
 }
 
 CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
+    if (!BBox)
+        return RCK3dEntity::SetBoundingBox(nullptr, Local);
+
+    if (Local) {
+        m_LocalBoundingBox = *BBox;
+        m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
+    } else {
+        m_WorldBoundingBox = *BBox;
+        const VxMatrix &invWorld = GetInverseWorldMatrix();
+        m_LocalBoundingBox.TransformFrom(m_WorldBoundingBox, invWorld);
+    }
+
+    // Sprite3D geometry is always a camera-facing quad in its local XY plane.
+    // Keep the sprite box planar even when callers pass a generic 3D box.
+    m_LocalBoundingBox.Min.z = 0.0f;
+    m_LocalBoundingBox.Max.z = 0.0f;
+
+    if (m_SceneGraphNode)
+        m_SceneGraphNode->InvalidateBox(TRUE);
+
+    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
+    m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
     return TRUE;
 }
 

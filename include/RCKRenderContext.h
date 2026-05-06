@@ -316,6 +316,7 @@ public:
     VxMatrix m_WorldMatrix;
     VxMatrix m_ViewMatrix;
     CKRenderView m_Current2DView;
+    CKRenderView m_Current3DView;
 };
 
 #endif // RCKRENDERCONTEXT_H
