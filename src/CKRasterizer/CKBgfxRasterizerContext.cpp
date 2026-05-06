@@ -346,6 +346,10 @@ static bgfx::Attrib::Enum ToBgfxAttrib(CK_VERTEX_ATTRIB attrib)
     case CKRST_ATTRIB_TEXCOORD1: return bgfx::Attrib::TexCoord1;
     case CKRST_ATTRIB_TEXCOORD2: return bgfx::Attrib::TexCoord2;
     case CKRST_ATTRIB_TEXCOORD3: return bgfx::Attrib::TexCoord3;
+    case CKRST_ATTRIB_TEXCOORD4: return bgfx::Attrib::TexCoord4;
+    case CKRST_ATTRIB_TEXCOORD5: return bgfx::Attrib::TexCoord5;
+    case CKRST_ATTRIB_TEXCOORD6: return bgfx::Attrib::TexCoord6;
+    case CKRST_ATTRIB_TEXCOORD7: return bgfx::Attrib::TexCoord7;
     default:                     return bgfx::Attrib::Position;
     }
 }
@@ -2615,7 +2619,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync)
 }
 
 // ===========================================================================
-// Resource creation — occlusion queries, indirect buffers
+// Resource creation - occlusion queries, indirect buffers
 // ===========================================================================
 
 CKERROR CKBgfxRasterizerContext::CreateOcclusionQuery(CKDWORD Query,

@@ -1,5 +1,20 @@
 #include "CKVertexLayoutCache.h"
 #include "CKRasterizer.h"
+#include "CKFFConstants.h"
+
+static int ActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
+    CKDWORD mask = dpFlags & CKRST_DP_STAGESMASK;
+    int count = 0;
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (mask & CKRST_DP_STAGE(stage))
+            count = stage + 1;
+    }
+    return count;
+}
+
+static CK_VERTEX_ATTRIB TexCoordAttrib(int stage) {
+    return (CK_VERTEX_ATTRIB)(CKRST_ATTRIB_TEXCOORD0 + stage);
+}
 
 CKVertexLayoutCache::CKVertexLayoutCache()
     : m_Context(nullptr), m_NextHandle(1) {}
@@ -29,9 +44,10 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
     if (formatFlags & CKFF_VF_POSITION)  stride += 12; // float3
     if (formatFlags & CKFF_VF_POSITIONT) stride += 16; // float4 XYZRHW
     if (formatFlags & CKFF_VF_NORMAL)    stride += 12; // float3
-    if (formatFlags & CKFF_VF_TEXCOORD0) stride += 8;  // float2
-    if (formatFlags & CKFF_VF_TEXCOORD1) stride += 8;  // float2
-    if (formatFlags & CKFF_VF_TEXCOORD2) stride += 8;  // float2
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (formatFlags & CKFF_VF_TEXCOORD(stage))
+            stride += 8; // float2
+    }
     if (formatFlags & CKFF_VF_COLOR0)    stride += 4;  // uint8x4 normalized
     if (formatFlags & CKFF_VF_COLOR1)    stride += 4;  // uint8x4 normalized
     return stride;
@@ -49,12 +65,14 @@ CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNorma
         flags |= CKFF_VF_POSITIONT;
     }
 
-    // Canonical fixed-function shaders always consume diffuse/specular color
-    // and texcoord0. Interleave fills defaults when source data is absent.
+    // Canonical fixed-function shaders always consume diffuse/specular color.
     flags |= CKFF_VF_COLOR0 | CKFF_VF_COLOR1 | CKFF_VF_TEXCOORD0;
 
-    if (!hasUV && ((dpFlags & CKRST_DP_STAGESMASK) == 0)) {
-        flags |= CKFF_VF_TEXCOORD0;
+    int activeTextureCount = ActiveTextureCountFromDPFlags(dpFlags);
+    if (activeTextureCount == 0 && hasUV)
+        activeTextureCount = 1;
+    for (int stage = 1; stage < activeTextureCount; ++stage) {
+        flags |= CKFF_VF_TEXCOORD(stage);
     }
 
     return flags;
@@ -68,7 +86,7 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
     }
 
     // Build element array
-    CKVertexElementDesc elements[8];
+    CKVertexElementDesc elements[16];
     CKDWORD count = 0;
     CKWORD offset = 0;
 
@@ -102,35 +120,17 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         count++;
         offset += 12;
     }
-    if (formatFlags & CKFF_VF_TEXCOORD0) {
-        elements[count].Attrib = CKRST_ATTRIB_TEXCOORD0;
-        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-        elements[count].Count = 2;
-        elements[count].Normalized = FALSE;
-        elements[count].Offset = offset;
-        elements[count].Stream = 0;
-        count++;
-        offset += 8;
-    }
-    if (formatFlags & CKFF_VF_TEXCOORD1) {
-        elements[count].Attrib = CKRST_ATTRIB_TEXCOORD1;
-        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-        elements[count].Count = 2;
-        elements[count].Normalized = FALSE;
-        elements[count].Offset = offset;
-        elements[count].Stream = 0;
-        count++;
-        offset += 8;
-    }
-    if (formatFlags & CKFF_VF_TEXCOORD2) {
-        elements[count].Attrib = CKRST_ATTRIB_TEXCOORD2;
-        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-        elements[count].Count = 2;
-        elements[count].Normalized = FALSE;
-        elements[count].Offset = offset;
-        elements[count].Stream = 0;
-        count++;
-        offset += 8;
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (formatFlags & CKFF_VF_TEXCOORD(stage)) {
+            elements[count].Attrib = TexCoordAttrib(stage);
+            elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+            elements[count].Count = 2;
+            elements[count].Normalized = FALSE;
+            elements[count].Offset = offset;
+            elements[count].Stream = 0;
+            count++;
+            offset += 8;
+        }
     }
     if (formatFlags & CKFF_VF_COLOR0) {
         elements[count].Attrib = CKRST_ATTRIB_COLOR0;
