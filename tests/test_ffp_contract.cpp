@@ -1,6 +1,7 @@
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 #include "CKDrawStateCache.h"
+#include "CKFixedFunctionPipeline.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
@@ -126,6 +127,19 @@ void Test_DrawState_FixesBothSrcAlphaBlendPair() {
     TestCheck(dst == VXBLEND_INVSRCALPHA, "BOTHSRCALPHA destination must become INVSRCALPHA");
 }
 
+void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
+    TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
+              "MODULATEALPHA color op must modulate diffuse and texture color");
+    TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_BLENDTEXTUREALPHA,
+              "DECALALPHA color op must blend by texture alpha");
+    TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATE) == CKRST_TOP_MODULATE,
+              "MODULATE color op must remain multiplicative");
+    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
+              "MODULATEALPHA alpha op must multiply texture and diffuse alpha");
+    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_SELECTARG2,
+              "DECALALPHA alpha op must keep diffuse/current alpha");
+}
+
 } // namespace
 
 int main() {
@@ -139,5 +153,6 @@ int main() {
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
+    tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
     return tests.ExitCode();
 }

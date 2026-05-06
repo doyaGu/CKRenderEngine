@@ -29,6 +29,9 @@ class CKRasterizerEncoder;
 
 struct CKLightData;
 
+CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
+CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();

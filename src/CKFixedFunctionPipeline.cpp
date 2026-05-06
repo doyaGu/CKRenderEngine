@@ -124,13 +124,14 @@ static const char *PrimitiveName(VXPRIMITIVETYPE type) {
     }
 }
 
-static CKDWORD LegacyBlendToColorOp(CKDWORD blend) {
+CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend) {
     switch (blend & VXTEXTUREBLEND_MASK) {
     case VXTEXTUREBLEND_DECAL:
     case VXTEXTUREBLEND_COPY:
-    case VXTEXTUREBLEND_DECALALPHA:
     case VXTEXTUREBLEND_DECALMASK:
         return CKRST_TOP_SELECTARG1;
+    case VXTEXTUREBLEND_DECALALPHA:
+        return CKRST_TOP_BLENDTEXTUREALPHA;
     case VXTEXTUREBLEND_ADD:
         return CKRST_TOP_ADD;
     case VXTEXTUREBLEND_DOTPRODUCT3:
@@ -143,6 +144,24 @@ static CKDWORD LegacyBlendToColorOp(CKDWORD blend) {
     }
 }
 
+CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend) {
+    switch (blend & VXTEXTUREBLEND_MASK) {
+    case VXTEXTUREBLEND_DECALALPHA:
+        return CKRST_TOP_SELECTARG2;
+    case VXTEXTUREBLEND_MODULATEALPHA:
+        return CKRST_TOP_MODULATE;
+    case VXTEXTUREBLEND_DECAL:
+    case VXTEXTUREBLEND_COPY:
+    case VXTEXTUREBLEND_DECALMASK:
+    case VXTEXTUREBLEND_MODULATE:
+    case VXTEXTUREBLEND_MODULATEMASK:
+    case VXTEXTUREBLEND_ADD:
+    case VXTEXTUREBLEND_DOTPRODUCT3:
+    default:
+        return CKRST_TOP_SELECTARG1;
+    }
+}
+
 static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
     if (!stageActive)
         return CKRST_TOP_DISABLE;
@@ -152,7 +171,7 @@ static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasT
         return op;
     if (!hasTexture)
         return CKRST_TOP_DISABLE;
-    return LegacyBlendToColorOp(stage[CKRST_TSS_TEXTUREMAPBLEND]);
+    return CKFFLegacyTextureBlendToColorOp(stage[CKRST_TSS_TEXTUREMAPBLEND]);
 }
 
 static CKDWORD GetStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
@@ -162,7 +181,7 @@ static CKDWORD GetStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasT
     CKDWORD op = stage[CKRST_TSS_AOP];
     if (op != 0)
         return op;
-    return hasTexture ? CKRST_TOP_SELECTARG1 : CKRST_TOP_DISABLE;
+    return hasTexture ? CKFFLegacyTextureBlendToAlphaOp(stage[CKRST_TSS_TEXTUREMAPBLEND]) : CKRST_TOP_DISABLE;
 }
 
 static CKDWORD GetStageColorArg1(const CKDWORD *stage, bool hasTexture) {
