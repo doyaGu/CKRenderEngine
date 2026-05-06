@@ -11,10 +11,11 @@ class CKRasterizerEncoder;
 // Render view IDs
 #define CKRP_VIEW_CLEAR        0
 #define CKRP_VIEW_BACKGROUND2D 1
-#define CKRP_VIEW_OPAQUE3D     2
-#define CKRP_VIEW_TRANSPARENT  3
-#define CKRP_VIEW_FOREGROUND2D 4
-#define CKRP_VIEW_COUNT        5
+#define CKRP_VIEW_RENDERFIRST3D 2
+#define CKRP_VIEW_OPAQUE3D     3
+#define CKRP_VIEW_TRANSPARENT  4
+#define CKRP_VIEW_FOREGROUND2D 5
+#define CKRP_VIEW_COUNT        6
 
 class CKRenderPipeline {
 public:
@@ -37,6 +38,7 @@ public:
     // View accessors for draw routing
     CKRenderView GetClearView() const        { return CKRP_VIEW_CLEAR; }
     CKRenderView GetBackground2DView() const { return CKRP_VIEW_BACKGROUND2D; }
+    CKRenderView GetRenderFirst3DView() const { return CKRP_VIEW_RENDERFIRST3D; }
     CKRenderView GetOpaqueView() const       { return CKRP_VIEW_OPAQUE3D; }
     CKRenderView GetTransparentView() const  { return CKRP_VIEW_TRANSPARENT; }
     CKRenderView GetForeground2DView() const { return CKRP_VIEW_FOREGROUND2D; }

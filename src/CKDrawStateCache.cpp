@@ -96,6 +96,7 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
         break;
     case VXRENDERSTATE_CULLMODE:
     case VXRENDERSTATE_FILLMODE:
+    case VXRENDERSTATE_INVERSEWINDING:
         m_DirtyMask |= CKFF_DIRTY_RASTER;
         break;
     default:
@@ -131,6 +132,12 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
     CKDWORD cullMode = m_States[VXRENDERSTATE_CULLMODE];
     if (EnvEnabled("CK2_3D_DEBUG_NO_CULL"))
         cullMode = VXCULL_NONE;
+    if (m_States[VXRENDERSTATE_INVERSEWINDING]) {
+        if (cullMode == VXCULL_CW)
+            cullMode = VXCULL_CCW;
+        else if (cullMode == VXCULL_CCW)
+            cullMode = VXCULL_CW;
+    }
     lo |= CKRST_STATE_CULL(RemapCullMode(cullMode));
 
     // Fill mode
