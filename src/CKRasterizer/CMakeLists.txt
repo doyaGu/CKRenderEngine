@@ -9,20 +9,6 @@ set(CKBGFX_RASTERIZER_HEADERS
         CKBgfxRasterizer.h
 )
 
-# Build bgfx as a dependency. shaderc is required by the CK2_3D shader target.
-set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
-set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
-set(BGFX_CUSTOM_TARGETS OFF CACHE BOOL "" FORCE)
-set(BGFX_LIBRARY_TYPE "STATIC" CACHE STRING "" FORCE)
-set(BGFX_CONFIG_MULTITHREADED ON CACHE BOOL "" FORCE)
-
-set(BGFX_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../deps/bgfx")
-if (NOT TARGET bgfx)
-    add_subdirectory("${BGFX_DEPS_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/bgfx-build")
-endif ()
-
 set(_ckre_bgfx_targets)
 
 if (CKRE_BUILD_SHARED)
