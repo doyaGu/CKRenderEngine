@@ -26,6 +26,16 @@ static CKDWORD RemapFillMode(CKDWORD mode) {
     return 0;
 }
 
+static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
+    if (src == VXBLEND_BOTHSRCALPHA) {
+        src = VXBLEND_SRCALPHA;
+        dst = VXBLEND_INVSRCALPHA;
+    } else if (src == VXBLEND_BOTHINVSRCALPHA) {
+        src = VXBLEND_INVSRCALPHA;
+        dst = VXBLEND_SRCALPHA;
+    }
+}
+
 CKDrawStateCache::CKDrawStateCache() : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST) {
     m_CachedState = {0, 0, 0};
     SetDefaults();
@@ -128,8 +138,10 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Blend
     if (m_States[VXRENDERSTATE_ALPHABLENDENABLE]) {
-        lo |= CKRST_STATE_BLEND(m_States[VXRENDERSTATE_SRCBLEND],
-                                m_States[VXRENDERSTATE_DESTBLEND]);
+        CKDWORD srcBlend = m_States[VXRENDERSTATE_SRCBLEND];
+        CKDWORD dstBlend = m_States[VXRENDERSTATE_DESTBLEND];
+        FixupBlendPair(srcBlend, dstBlend);
+        lo |= CKRST_STATE_BLEND(srcBlend, dstBlend);
     }
 
     // Topology
