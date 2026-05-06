@@ -2,6 +2,8 @@
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
 
+#include <cstdlib>
+
 CKRenderPipeline::CKRenderPipeline()
     : m_Context(nullptr), m_Encoder(nullptr) {
     Vx3DMatrixIdentity(m_OrthoProj);
@@ -113,6 +115,16 @@ void CKRenderPipeline::BeginFrame(
 
 void CKRenderPipeline::EndFrame(CKBOOL vsync) {
     if (!m_Context) return;
+
+    static const bool s_LogPresentSync = []() {
+        const char *value = std::getenv("CK2_3D_DEBUG_LOG_PRESENT_SYNC");
+        return value && value[0] != '\0' && value[0] != '0';
+    }();
+    static int s_PresentSyncLogCount = 0;
+    if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
+        CK_LOG_FMT("PresentSync", "RenderPipeline/EndFrame vsync=%d", vsync ? 1 : 0);
+        ++s_PresentSyncLogCount;
+    }
 
     if (m_Encoder) {
         m_Context->EndEncoder(m_Encoder);
