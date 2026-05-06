@@ -131,8 +131,8 @@ set(CKRE_SOURCES
         CK2_3D.rc
 )
 
-# Add the CKRasterizer subdirectory (shared or static builds)
-if (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
+# Add the bgfx rasterizer plugin targets when requested.
+if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
     add_subdirectory(CKRasterizer)
 endif ()
 
