@@ -29,7 +29,7 @@ public:
                     const VxMatrix &view, const VxMatrix &proj);
 
     // End the frame: release encoder, call Frame()
-    void EndFrame(CKBOOL vsync = FALSE);
+    void EndFrame(CKBOOL vsync);
 
     // Access the current encoder (valid between BeginFrame/EndFrame)
     CKRasterizerEncoder *GetEncoder() const { return m_Encoder; }

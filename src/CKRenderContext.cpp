@@ -244,6 +244,18 @@ CK_RENDER_FLAGS RCKRenderContext::ResolveRenderFlags(CK_RENDER_FLAGS Flags) cons
                : Flags;
 }
 
+static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeManager *TimeManager) {
+    if (!TimeManager)
+        return Flags;
+
+    const CKDWORD frameRateMode = TimeManager->GetLimitOptions() & CK_FRAMERATE_MASK;
+    if (frameRateMode & CK_FRAMERATE_SYNC)
+        return static_cast<CK_RENDER_FLAGS>(Flags | CK_RENDER_WAITVBL);
+    if (frameRateMode & (CK_FRAMERATE_FREE | CK_FRAMERATE_LIMIT))
+        return static_cast<CK_RENDER_FLAGS>(Flags & ~CK_RENDER_WAITVBL);
+    return Flags;
+}
+
 void RCKRenderContext::RestoreStereoRenderState(CK3dEntity *rootEntity, const VxMatrix &originalWorldMat) {
     if (rootEntity) {
         rootEntity->SetWorldMatrix(originalWorldMat, FALSE);
@@ -458,7 +470,8 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
+        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
 
     if (!(renderFlags & (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL)))
         return CK_OK;
@@ -506,7 +519,8 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
+        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
     if ((renderFlags & CK_RENDER_SKIPDRAWSCENE) != 0)
         return CK_OK;
 
@@ -536,7 +550,8 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
+        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
 
     // Check if we need to do back-to-front or have render target
     if (!(renderFlags & CK_RENDER_DOBACKTOFRONT) && !m_TargetTexture)
@@ -729,17 +744,9 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    // Resolve flags - if zero, use current settings
-    CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
-
-    // IDA: Check TimeManager for VBL sync settings
-    CKTimeManager *timeManager = m_Context->GetTimeManager();
-    if (timeManager) {
-        CKDWORD limitOptions = timeManager->GetLimitOptions();
-        if (limitOptions & CK_FRAMERATE_SYNC) {
-            renderFlags = (CK_RENDER_FLAGS) (renderFlags | CK_RENDER_WAITVBL);
-        }
-    }
+    // Resolve flags and normalize present sync from CK_FRAMERATE_LIMITS.
+    CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
+        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
 
     // Prepare cameras for rendering
     PrepareCameras(renderFlags);
