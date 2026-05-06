@@ -54,7 +54,7 @@ float4 getArg(int arg, float4 textureColor, float4 current, PSInput input)
     return applyArgModifiers(value, arg);
 }
 
-float4 applyOp(int op, float4 a, float4 b, float4 current)
+float4 applyOp(int op, float4 a, float4 b, float4 current, float4 diffuse, float4 textureColor)
 {
     if (op == 1) return current;
     if (op == 2) return a;
@@ -67,10 +67,15 @@ float4 applyOp(int op, float4 a, float4 b, float4 current)
     if (op == 9) return saturate((a + b - 0.5) * 2.0);
     if (op == 10) return saturate(a - b);
     if (op == 11) return saturate(a + b - a * b);
-    if (op == 12) return lerp(b, a, a.a);
-    if (op == 13) return lerp(b, a, a.a);
+    if (op == 12) return lerp(b, a, diffuse.a);
+    if (op == 13) return lerp(b, a, textureColor.a);
     if (op == 14) return lerp(b, a, u_texFactor.a);
+    if (op == 15) return saturate(a + b * (1.0 - textureColor.a));
     if (op == 16) return lerp(b, a, current.a);
+    if (op == 18) return saturate(a + a.a * b);
+    if (op == 19) return saturate(a * b + a.a);
+    if (op == 20) return saturate(a + (1.0 - a.a) * b);
+    if (op == 21) return saturate((1.0 - a) * b + a.a);
     if (op == 24) {
         float v = dot(a.rgb * 2.0 - 1.0, b.rgb * 2.0 - 1.0);
         return float4(v, v, v, current.a);
@@ -113,8 +118,8 @@ float4 main(PSInput input) : SV_TARGET
         float4 alphaA = getArg((int)alphaParams.y, texColor, current, input);
         float4 alphaB = getArg((int)alphaParams.z, texColor, current, input);
 
-        float4 colorResult = applyOp(colorOp, colorA, colorB, current);
-        float4 alphaResult = applyOp(alphaOp, alphaA, alphaB, current);
+        float4 colorResult = applyOp(colorOp, colorA, colorB, current, input.color0, texColor);
+        float4 alphaResult = applyOp(alphaOp, alphaA, alphaB, current, input.color0, texColor);
         current.rgb = colorResult.rgb;
         current.a = alphaResult.a;
     }
