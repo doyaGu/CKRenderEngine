@@ -7,6 +7,7 @@
 #include "RCKRenderManager.h"
 #include "RCK3dEntity.h"
 #include "RCKPlace.h"
+#include "RCKSprite3D.h"
 
 static CKDWORD GetSceneGraphPriorityKey(const CKSceneGraphNode *n) {
     const CKWORD p = (CKWORD) n->m_Priority;
@@ -54,6 +55,13 @@ static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, 
     if (prod == 0.0f)
         return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
     return (prod >= 0.0f) ? 1 : -1;
+}
+
+static void UpdateCameraFacingEntity(RCKRenderContext *rc, RCK3dEntity *entity) {
+    if (!rc || !entity || !CKIsChildClassOf(entity, CKCID_SPRITE3D))
+        return;
+
+    ((RCKSprite3D *)entity)->UpdateCameraFacingOrientation((CKRenderContext *)rc);
 }
 
 static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGraphRootNode *root, RCKRenderContext *rc, CKDWORD flags) {
@@ -566,6 +574,8 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
         m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
 
     if ((m_EntityMask & dev->m_MaskFree) != 0 && m_Entity->IsToBeRendered()) {
+        UpdateCameraFacingEntity(dev, m_Entity);
+
         if (m_Entity->IsToBeRenderedLast()) {
             m_TimeFpsCalc = dev->m_TimeFpsCalc;
             dev->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
@@ -614,6 +624,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                 RCK3dEntity *entity = node->m_Entity;
 
                 if (CKIsChildClassOf(entity, CKCID_SPRITE3D)) {
+                    UpdateCameraFacingEntity(dev, entity);
                     entity->m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
                     entity->UpdateBox(TRUE);
                 }
