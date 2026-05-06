@@ -126,6 +126,7 @@ public:
     CK_ID m_2DRootBackId;
     CK_ID m_2DRootForeId;
     XClassArray<VxEffectDescription> m_Effects;
+    CKDWORD m_NextObjectIndex;
 };
 
 #endif // RCKRENDERMANAGER_H

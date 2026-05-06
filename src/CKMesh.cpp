@@ -15,8 +15,13 @@
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"
+#include "CKDebugLogger.h"
+#include "CKTransientGeometry.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
+
+#include <climits>
+#include <cstdlib>
 
 // External global for transparency update flag
 extern CKBOOL g_UpdateTransparency;
@@ -24,6 +29,40 @@ extern CKBOOL g_UpdateTransparency;
 // External VxMath normal building functions
 extern void (*g_BuildNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 extern void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
+
+static bool MeshDebugEnvEnabled(const char *name) {
+    const char *value = std::getenv(name);
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+static int MeshDebugEnvInt(const char *name, int defaultValue) {
+    const char *value = std::getenv(name);
+    if (!value || value[0] == '\0')
+        return defaultValue;
+    char *end = nullptr;
+    long parsed = std::strtol(value, &end, 10);
+    if (end == value)
+        return defaultValue;
+    if (parsed < INT_MIN)
+        return INT_MIN;
+    if (parsed > INT_MAX)
+        return INT_MAX;
+    return (int)parsed;
+}
+
+static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, RCKMaterial *mat) {
+    CKRenderPipeline &pipeline = dev->m_FFPipeline.GetRenderPipeline();
+
+    // Render-first entities are a Virtools contract used by sky/background
+    // objects. They may use alpha-blended materials, but must still render
+    // before the regular scene rather than in the transparent pass.
+    if (ent && (ent->m_MoveableFlags & VX_MOVEABLE_RENDERFIRST) != 0)
+        return pipeline.GetOpaqueView();
+
+    return (mat && mat->IsAlphaTransparent())
+        ? pipeline.GetTransparentView()
+        : pipeline.GetOpaqueView();
+}
 
 CKVBuffer *RCKMesh::GetVBuffer(CKMaterialGroup *group) const {
     if (!group || !group->m_RemapData)
@@ -273,6 +312,11 @@ RCKMesh::RCKMesh(CKContext *Context, CKSTRING name) : CKMesh(Context, name) {
     m_FaceChannelMask = 0;
     m_Valid = 0;
     m_VertexBufferReady = 0;
+    m_VertexLayout = 0;
+    m_VertexBufferDpFlags = 0;
+    m_VertexBufferFormatFlags = 0;
+    m_VertexBufferStride = 0;
+    m_VertexBufferVertexCount = 0;
 }
 
 // Destructor
@@ -3266,7 +3310,10 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
     if (ent != rc->m_Current3dEntity) {
         VxRect extents;
         const VxBbox &box = GetLocalBox();
-        rc->m_RasterizerContext->ComputeBoxVisibility(box, FALSE, &extents);
+        // Phase 1 stub: ComputeBoxVisibility removed in v2, always treat as visible (2)
+        (void) box;
+        int visibility = 2;
+        (void) visibility;
         rc->AddExtents2D(extents, nullptr);
     }
 
@@ -3276,7 +3323,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
         // sub_1002C220 returns (End - Begin) / 12, i.e. element count
         int preCount = m_RenderCallbacks->m_PreCallBacks.Size();
         if (preCount > 0) {
-            rc->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — rc->m_RasterizerContext->SetVertexShader(0);
             rc->m_ObjectsCallbacksTimeProfiler.Reset();
 
             // Iterate with 12-byte stride (sizeof VxCallBack)
@@ -3302,7 +3349,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
         // Post-render callbacks
         int postCount = m_RenderCallbacks->m_PostCallBacks.Size();
         if (postCount > 0) {
-            rc->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — rc->m_RasterizerContext->SetVertexShader(0);
             rc->m_ObjectsCallbacksTimeProfiler.Reset();
 
             for (VxCallBack *it = m_RenderCallbacks->m_PostCallBacks.Begin();
@@ -3911,7 +3958,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     if (faceCount) {
         // Wrap mode (matches IDA)
         const CKDWORD wrapMode = ((m_Flags & VXMESH_WRAPV) ? VXWRAP_V : 0) | ((m_Flags & VXMESH_WRAPU) ? VXWRAP_U : 0);
-        rstContext->SetRenderState(VXRENDERSTATE_WRAP0, wrapMode);
+        // TODO: Phase 2 — rstContext->SetRenderState(VXRENDERSTATE_WRAP0, wrapMode);
+        (void) wrapMode;
 
         // Ensure optimized render groups exist (VXMESH_OPTIMIZED)
         if (!(m_Flags & VXMESH_OPTIMIZED))
@@ -3937,38 +3985,21 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         // Z-buffer only rendering mode
         if (zbufOnly) {
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            rstContext->SetVertexShader(0);
-            rstContext->SetTexture(0, 0);
-            rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-            rstContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
-            rstContext->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
-            rstContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
-            rstContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-            rstContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_ZERO);
-            rstContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_ONE);
-
-            if (m_FaceVertexIndices.Size() > 0)
-                rstContext->DrawPrimitive(VX_TRIANGLELIST, m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
+            // TODO: Phase 2 — stub zbufOnly render states and DrawPrimitive
+            // rstContext->SetVertexShader(0);
+            // rstContext->SetTexture(0, 0);
+            // rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            // ... (remaining states) ...
+            // rstContext->DrawPrimitive(VX_TRIANGLELIST, ...);
         } else if (stencilOnly) {
             // Stencil only rendering mode
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            rstContext->SetVertexShader(0);
-            rstContext->SetTexture(0, 0);
-            rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-            rstContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
-            rstContext->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
-            rstContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
-            rstContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-            rstContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_ZERO);
-            rstContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_ONE);
-
-            if (m_FaceVertexIndices.Size() > 0)
-                rstContext->DrawPrimitive(VX_TRIANGLELIST, m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
+            // TODO: Phase 2 — stub stencilOnly render states and DrawPrimitive
+            // rstContext->SetVertexShader(0);
+            // rstContext->SetTexture(0, 0);
+            // rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            // ... (remaining states) ...
+            // rstContext->DrawPrimitive(VX_TRIANGLELIST, ...);
 
             // Match original: stencil-only disables channel passes.
             renderChannels = FALSE;
@@ -4027,7 +4058,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
                     // Try to set stage blend; if it fails, fall back to multi-pass rendering.
                     const int stage = usedStages + 1;
-                    if (!rstContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend))) {
+                    // TODO: Phase 2 — rstContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, ...); always multi-pass for now
+                    if (TRUE) {
                         needsMultiPass = TRUE;
                         lastMultiPass = &channel;
                         usedStages = maxAdditionalStages;
@@ -4038,7 +4070,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                     ++usedStages;
 
                     const int texCoordIndex = (int) m_ActiveTextureChannels.Size() + 1;
-                    rstContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, texCoordIndex);
+                    // TODO: Phase 2 — rstContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, texCoordIndex);
+                    (void) texCoordIndex;
 
                     channel.m_Material->SetAsCurrent((CKRenderContext *) rc, FALSE, stage);
 
@@ -4058,22 +4091,21 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
-                rstContext->SetTexture(0, 1);
-                rstContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(0, 0));
+                // TODO: Phase 2 — rstContext->SetTexture(0, 1);
+                // TODO: Phase 2 — rstContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(0, 0));
             }
 
             // Setup draw flags
             dpData.Flags = (CKRST_DP_STAGE(m_ActiveTextureChannels.Size()) | (m_DrawFlags | CKRST_DP_TRANSFORM));
-            rstContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
+            // TODO: Phase 2 — rstContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
 
             // Vertex color (prelit) vs lighting
             if ((m_Flags & VXMESH_PRELITMODE) != 0) {
                 dpData.Flags |= CKRST_DP_DIFFUSE | CKRST_DP_SPECULAR;
-                rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-                rstContext->SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+                rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             } else {
                 dpData.Flags |= CKRST_DP_LIGHT;
-                rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+                rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
             }
 
             // Check HW vertex buffer
@@ -4138,15 +4170,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 projMat[3][2] = origZ * 1.003f;
                 rc->SetProjectionTransformationMatrix(projMat);
 
-                rstContext->SetTexture(0, 0);
-                rstContext->SetVertexShader(0);
-                rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-                rstContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+                rc->m_FFPipeline.SetTexture(0, 0);
+                rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+                rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
 
                 VxDrawPrimitiveData wfDp = dpData;
                 wfDp.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-                if (m_FaceVertexIndices.Size() > 0)
-                    rstContext->DrawPrimitive(VX_TRIANGLELIST, m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &wfDp);
+                rc->DrawPrimitive(VX_TRIANGLELIST, m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &wfDp);
 
                 projMat[3][2] = origZ;
                 rc->SetProjectionTransformationMatrix(projMat);
@@ -4157,10 +4187,9 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
         // Render material channels if needed
         if (renderChannels) {
-            CKDWORD fogEnable = FALSE;
-            rstContext->GetRenderState(VXRENDERSTATE_FOGENABLE, &fogEnable);
+            CKDWORD fogEnable = rc->m_FFPipeline.GetRenderState(VXRENDERSTATE_FOGENABLE);
             RenderChannels(rc, ent, &dpData, fogEnable);
-            rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
+            rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         }
     }
 
@@ -4177,28 +4206,22 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         lineDp.ColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Color : nullptr;
         lineDp.SpecularColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Specular : nullptr;
 
-        rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-        rstContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
-        rstContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
-        rstContext->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
-        rstContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-        rstContext->SetTexture(0, 0);
-
+        rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+        rc->m_FFPipeline.SetTexture(0, 0);
         lineDp.Flags = (m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
-        if (m_LineIndices.Size() > 0)
-            rstContext->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
+        rc->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
 
         rc->m_Stats.NbLinesDrawn += lineCount;
     }
 
-    // Reset wrap state
-    rstContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
+    // TODO: Phase 2 — rstContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
 
     // Clear texture stages used for mono-pass (IDA)
-    if (hasAlphaMaterial || m_ActiveTextureChannels.Size() > 0) {
-        for (int i = 1; i < m_ActiveTextureChannels.Size() + 1; ++i)
-            rstContext->SetTextureStageState(i, CKRST_TSS_STAGEBLEND, 0);
-    }
+    // TODO: Phase 2 — route texture stage state through FFPipeline
+    // if (hasAlphaMaterial || m_ActiveTextureChannels.Size() > 0) {
+    //     for (int i = 1; i < m_ActiveTextureChannels.Size() + 1; ++i)
+    //         rstContext->SetTextureStageState(i, CKRST_TSS_STAGEBLEND, 0);
+    // }
 
     return 1;
 }
@@ -4216,7 +4239,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // Execute callbacks if there are any
         if (m_SubMeshCallbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
             // Iterate through callbacks (VxCallBack is 12 bytes: callback ptr, argument ptr, flags)
             for (VxCallBack *cb = m_SubMeshCallbacks->m_PreCallBacks.Begin();
@@ -4238,31 +4261,26 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
         // If material has no texture but we have texture stages, set up modulate
-        if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
-            rstContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-            rstContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
-            rstContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-            rstContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
-        }
+        // TODO: Phase 2 — route texture stage states through FFPipeline
+        // if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
+        //     rstContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+        //     ...
+        // }
     } else {
         // No material - use default
         mat = (RCKMaterial *) dev->m_RenderManager->GetDefaultMaterial();
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
         // Check for vertex color alpha blending (flags 0x80 and 0x1000)
-        if ((m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) == (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) {
-            rstContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
-            rstContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
-            rstContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-        }
+        // TODO: Phase 2 — route blend states through FFPipeline
+        // if ((m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) == ...) { ... }
     }
 
-    // Handle entity-specific render states (IDA)
     if (ent) {
         if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERTEST) != 0)
-            rstContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
         if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERWRITE) != 0)
-            rstContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
     }
 
     // Render primitives
@@ -4297,69 +4315,85 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             }
         }
 
-        // Two-sided alpha transparent materials need back-face pass first
-        if (mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW); // 2
+        // Submit draw via fixed-function pipeline (software vertex path)
+        CKRasterizerEncoder *encoder = dev->m_FFPipeline.GetRenderPipeline().GetEncoder();
+        if (encoder) {
+            CKRenderView view = GetMeshRenderView(dev, ent, mat);
 
-            for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
+            // Iterate through primitive entries and submit draws
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 if (prim->m_Indices.Size() > 0) {
-                    int indexCount = prim->m_Indices.Size();
-                    CKWORD *indices = prim->m_Indices.Begin();
-                    rstContext->DrawPrimitive(prim->m_Type, indices, indexCount, data);
+                    static int s_meshContractLogCount = 0;
+                    const int meshLogLimit = MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    if (s_meshContractLogCount < meshLogLimit) {
+                        const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
+                        const VxBbox &box = GetLocalBox();
+                        CK_LOG_FMT("Mesh",
+                                   "Mesh contract #%d: view=%d path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   s_meshContractLogCount,
+                                   view,
+                                   prim->m_Type,
+                                   ent && ent->GetName() ? ent->GetName() : "",
+                                   GetName() ? GetName() : "",
+                                   mat && mat->GetName() ? mat->GetName() : "",
+                                   data->VertexCount,
+                                   group->m_VertexCount,
+                                   prim->m_Indices.Size(),
+                                   world[3][0], world[3][1], world[3][2],
+                                   box.Min.x, box.Min.y, box.Min.z,
+                                   box.Max.x, box.Max.y, box.Max.z);
+                        ++s_meshContractLogCount;
+                    }
+                    dev->m_FFPipeline.DrawPrimitive(
+                        encoder, view, prim->m_Type,
+                        prim->m_Indices.Begin(), prim->m_Indices.Size(),
+                        data);
                 }
-            }
-
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
-        }
-
-        // Main render pass
-        for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
-            if (prim->m_Indices.Size() > 0) {
-                int indexCount = prim->m_Indices.Size();
-                CKWORD *indices = prim->m_Indices.Begin();
-                rstContext->DrawPrimitive(prim->m_Type, indices, indexCount, data);
             }
         }
     } else {
-        // Hardware vertex buffer path (data == null)
+        // Submit draw via fixed-function pipeline (hardware VB path)
+        CKRasterizerEncoder *encoder = dev->m_FFPipeline.GetRenderPipeline().GetEncoder();
+        if (encoder) {
+            CKRenderView view = GetMeshRenderView(dev, ent, mat);
 
-        // Two-sided alpha transparent materials need back-face pass first
-        if (mat->GetFillMode() == VXFILL_SOLID && mat->IsTwoSided() && mat->IsAlphaTransparent()) {
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);
-
-            for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
-                if (prim->m_Indices.Size() > 0) {
-                    int indexCount = prim->m_Indices.Size();
-                    CKWORD *indices = prim->m_Indices.Begin();
-                    rstContext->DrawPrimitiveVB(prim->m_Type, m_VertexBuffer,
-                                                group->m_BaseVertex, group->m_VertexCount,
-                                                indices, indexCount);
-                }
-            }
-
-            // Flush vertex buffer (Lock/Unlock with size 0)
-            rstContext->LockVertexBuffer(m_VertexBuffer, 0, 0, CKRST_LOCK_DEFAULT);
-            rstContext->UnlockVertexBuffer(m_VertexBuffer);
-
-            rstContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
-        }
-
-        // Main render pass - check for index buffer usage
-        for (CKPrimitiveEntry *prim = group->m_Primitives.Begin(); prim < group->m_Primitives.End(); ++prim) {
-            if (prim->m_Indices.Size() > 0) {
-                int indexCount = prim->m_Indices.Size();
-
-                if ((int) prim->m_IndexBufferOffset >= 0) {
-                    // Use hardware index buffer
-                    rstContext->DrawPrimitiveVBIB(prim->m_Type, m_VertexBuffer, m_IndexBuffer,
-                                                  group->m_BaseVertex, group->m_VertexCount,
-                                                  prim->m_IndexBufferOffset, indexCount);
-                } else {
-                    // Use software indices with hardware vertex buffer
-                    CKWORD *indices = prim->m_Indices.Begin();
-                    rstContext->DrawPrimitiveVB(prim->m_Type, m_VertexBuffer,
-                                                group->m_BaseVertex, group->m_VertexCount,
-                                                indices, indexCount);
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                CKPrimitiveEntry *prim = &group->m_Primitives[p];
+                CKDWORD indexCount = prim->m_Indices.Size();
+                if (indexCount > 0) {
+                    CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
+                    CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
+                    static int s_meshContractLogCount = 0;
+                    const int meshLogLimit = MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    if (s_meshContractLogCount < meshLogLimit) {
+                        const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
+                        const VxBbox &box = GetLocalBox();
+                        CK_LOG_FMT("Mesh",
+                                   "Mesh contract #%d: view=%d path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   s_meshContractLogCount,
+                                   view,
+                                   prim->m_Type,
+                                   ent && ent->GetName() ? ent->GetName() : "",
+                                   GetName() ? GetName() : "",
+                                   mat && mat->GetName() ? mat->GetName() : "",
+                                   group->m_BaseVertex,
+                                   group->m_VertexCount,
+                                   startIndex,
+                                   indexCount,
+                                   world[3][0], world[3][1], world[3][2],
+                                   box.Min.x, box.Min.y, box.Min.z,
+                                   box.Max.x, box.Max.y, box.Max.z);
+                        ++s_meshContractLogCount;
+                    }
+                    dev->m_FFPipeline.DrawVertexBuffer(
+                        encoder, view, prim->m_Type,
+                        m_VertexBuffer, ib,
+                        group->m_BaseVertex, group->m_VertexCount,
+                        startIndex, indexCount,
+                        m_VertexBufferDpFlags,
+                        m_VertexBufferFormatFlags,
+                        m_VertexLayout);
                 }
             }
         }
@@ -4368,7 +4402,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
     // Execute post-render submesh callbacks
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PostCallBacks.Size() > 0) {
         dev->m_ObjectsCallbacksTimeProfiler.Reset();
-        dev->m_RasterizerContext->SetVertexShader(0);
+        // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
         for (VxCallBack *cb = m_SubMeshCallbacks->m_PostCallBacks.Begin();
              cb < m_SubMeshCallbacks->m_PostCallBacks.End(); ++cb) {
@@ -4428,14 +4462,13 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         CKDWORD savedFlags = 0;
         mat->PatchForChannelRender(channel.m_SourceBlend, channel.m_DestBlend, savedSourceBlend, savedDestBlend, savedFlags);
 
-        // Set fog enable based on blend mode (SRCALPHA/INVSRCALPHA)
         if (channel.m_SourceBlend == VXBLEND_SRCALPHA && channel.m_DestBlend == VXBLEND_INVSRCALPHA) {
-            rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         } else {
-            rstContext->SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
         }
 
-        rstContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
+        dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
 
         // Check for additive blending (mark as unlit)
         if ((channel.m_SourceBlend == VXBLEND_ZERO && channel.m_DestBlend == VXBLEND_SRCCOLOR) ||
@@ -4446,9 +4479,8 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         // Determine if lighting should be used
         CKBOOL useLighting = (m_Flags & VXMESH_PRELITMODE) == 0 && (channelFlags & VXCHANNEL_NOTLIT) == 0;
 
-        // Call CKMaterial::SetAsCurrent(dev, useLighting, 0)
         mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
-        rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
+        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
 
         // Handle unlit channel - clear color pointers
         if ((channelFlags & VXCHANNEL_NOTLIT) != 0) {
@@ -4492,8 +4524,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
             indexCount = m_FaceVertexIndices.Size();
         }
 
-        // Draw the channel
-        rstContext->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
+        dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
 
         // Restore material state exactly
         mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
@@ -4894,11 +4925,14 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
     if (!rst || !data)
         return FALSE;
 
-    CKBOOL needNewBuffer = FALSE;
+    RCKRenderContext *rc = (RCKRenderContext *)m_Context->GetRenderManager()->GetRenderContext(0);
+    CKVertexLayoutCache &layoutCache = rc->m_FFPipeline.GetVertexLayoutCache();
 
-    // Calculate vertex format and size
-    CKDWORD vertexSize = 0;
-    CKDWORD vertexFormat = CKRSTGetVertexFormat((CKRST_DPFLAGS) data->Flags, vertexSize);
+    bool hasNormal = (data->NormalPtr != nullptr);
+    bool hasUV = (data->TexCoordPtr != nullptr);
+    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
+    CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
+    CKDWORD layoutHandle = layoutCache.GetLayout(formatFlags);
 
     // Count total vertices needed
     CKDWORD totalVertexCount = 0;
@@ -4909,7 +4943,6 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
         CKMaterialGroup *group = m_MaterialGroups[i];
         if (!IsRenderableMaterialGroup(group))
             continue;
-
         if (group->m_RemapData && group->m_VertexCount > 0) {
             hasRemappedVertices = TRUE;
             totalVertexCount += group->m_VertexCount;
@@ -4917,131 +4950,155 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
             hasDirectVertices = TRUE;
         }
     }
-
-    // If direct vertices, add base vertex count
-    if (hasDirectVertices) {
+    if (hasDirectVertices)
         totalVertexCount += data->VertexCount;
-    }
 
-    // Check if existing vertex buffer is sufficient
-    CKVertexBufferDesc *vbDesc = rst->GetVertexBufferData(m_VertexBuffer);
-    if (vbDesc) {
-        // Check if format or size changed
-        if (vbDesc->m_MaxVertexCount < totalVertexCount || vbDesc->m_VertexFormat != vertexFormat) {
-            rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-            rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
-            needNewBuffer = TRUE;
+    if (totalVertexCount == 0)
+        return FALSE;
+
+    CKBOOL needsIndexBuffer = FALSE;
+    for (int i = 0; i < m_MaterialGroups.Size() && !needsIndexBuffer; i++) {
+        CKMaterialGroup *group = m_MaterialGroups[i];
+        if (!IsRenderableMaterialGroup(group))
+            continue;
+        for (int p = 0; p < group->m_Primitives.Size(); p++) {
+            if (group->m_Primitives[p].m_Indices.Size() > 0) {
+                needsIndexBuffer = TRUE;
+                break;
+            }
         }
-    } else {
-        needNewBuffer = TRUE;
     }
 
-    // Create new vertex buffer if needed
-    if (needNewBuffer) {
-        CKVertexBufferDesc newDesc;
-        newDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY | CKRST_VB_SHARED;
-        newDesc.m_MaxVertexCount = totalVertexCount;
-        newDesc.m_VertexFormat = vertexFormat;
-        newDesc.m_VertexSize = vertexSize;
+    const CKDWORD geometryChangedFlags =
+        VXMESH_UV_CHANGED |
+        VXMESH_NORMAL_CHANGED |
+        VXMESH_COLOR_CHANGED |
+        VXMESH_POS_CHANGED;
+    const CKBOOL geometryChanged = (m_Flags & geometryChangedFlags) != 0;
 
-        if (!rst->CreateObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER, &newDesc)) {
-            return FALSE;
-        }
-        m_VertexBufferReady = 0; // Mark as needing update
-    }
-
-    // If buffer is up to date, just check index buffer and return
-    if (m_VertexBufferReady != 0) {
-        RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-        if (rm->m_UseIndexBuffers.Value) {
+    // If buffer is up to date for this exact format, just check index buffer and return.
+    if (m_VertexBufferReady != 0 &&
+        !geometryChanged &&
+        m_VertexBufferDpFlags == data->Flags &&
+        m_VertexBufferFormatFlags == formatFlags &&
+        m_VertexBufferStride == stride &&
+        m_VertexBufferVertexCount == totalVertexCount) {
+        m_VertexLayout = layoutHandle;
+        RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+        if (needsIndexBuffer) {
+            if (!CheckHWIndexBuffer(rst))
+                return FALSE;
+        } else if (rm->m_UseIndexBuffers.Value) {
             CheckHWIndexBuffer(rst);
         }
         return TRUE;
     }
 
-    // Lock and fill vertex buffer
-    CKBYTE *vbData = (CKBYTE *) rst->LockVertexBuffer(m_VertexBuffer, 0, totalVertexCount, (CKRST_LOCKFLAGS) 0);
-    if (!vbData) {
+    // Allocate CPU-side interleave buffer
+    CKDWORD totalSize = totalVertexCount * stride;
+    CKBYTE *vbData = (CKBYTE *)VxMalloc(totalSize);
+    if (!vbData)
         return FALSE;
-    }
 
     CKDWORD currentOffset = 0;
 
-    // Copy direct vertices first (if any)
+    // Copy direct vertices first (shared by non-remapped groups)
     if (hasDirectVertices) {
-        CKDWORD count = m_Vertices.Size();
-        vbData = CKRSTLoadVertexBuffer(vbData, vertexFormat, vertexSize, data);
+        CKDWORD count = data->VertexCount;
+        CKBYTE *dst = vbData + currentOffset * stride;
+        CKTransientGeometry::InterleaveVertices(dst, stride, count, formatFlags, data);
         currentOffset += count;
     }
 
     // Copy remapped vertices for each material group
     if (hasRemappedVertices) {
-        VxDrawPrimitiveData localData;
-        memcpy(&localData, data, sizeof(VxDrawPrimitiveData));
-
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (!IsRenderableMaterialGroup(group))
                 continue;
-
-            if (group->m_RemapData) {
-                // This group has remapped vertices
-                CKVBuffer *vb = GetVBuffer(group);
-                if (!vb || group->m_VertexCount <= 0) {
-                    group->m_BaseVertex = 0;
-                    continue;
-                }
-
-                // Ensure remapped data is up to date before uploading to HW VB.
-                vb->Update(this, 0);
-
-                if (vb->m_Vertices.Size() < (int) group->m_VertexCount ||
-                    vb->m_Colors.Size() < (int) group->m_VertexCount) {
-                    group->m_BaseVertex = 0;
-                    continue;
-                }
-
-                VxVertex *remappedVerts = vb->m_Vertices.Begin();
-                VxColors *remappedColors = vb->m_Colors.Begin();
-
-                // Update local data for this group
-                localData.VertexCount = group->m_VertexCount;
-                localData.PositionPtr = &remappedVerts[0].m_Position;
-                localData.NormalPtr = &remappedVerts[0].m_Normal;
-                localData.TexCoordPtr = &remappedVerts[0].m_UV;
-                localData.ColorPtr = &remappedColors[0].Color;
-                localData.SpecularColorPtr = &remappedColors[0].Specular;
-
-                // Set up extra tex coords from active channel list
-                for (int t = 0; t < (int) m_ActiveTextureChannels.Size(); t++) {
-                    const int channelIdx = m_ActiveTextureChannels[t];
-                    Vx2DVector *channelUVs = nullptr;
-                    if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
-                        if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
-                            channelUVs = vb->m_UVs[channelIdx].Begin();
-                    }
-                    localData.TexCoordPtrs[t] = channelUVs;
-                    localData.TexCoordStrides[t] = 8;
-                }
-
-                // Set the start vertex offset for this group
-                group->m_BaseVertex = currentOffset;
-                currentOffset += group->m_VertexCount;
-
-                // Load this group's vertices into the buffer
-                vbData = CKRSTLoadVertexBuffer(vbData, vertexFormat, vertexSize, &localData);
-            } else {
-                // No remapped vertices for this group
+            if (!group->m_RemapData) {
                 group->m_BaseVertex = 0;
+                continue;
             }
+
+            CKVBuffer *vb = GetVBuffer(group);
+            if (!vb || group->m_VertexCount <= 0) {
+                group->m_BaseVertex = 0;
+                continue;
+            }
+
+            vb->Update(this, 0);
+
+            if (vb->m_Vertices.Size() < (int)group->m_VertexCount ||
+                vb->m_Colors.Size() < (int)group->m_VertexCount) {
+                group->m_BaseVertex = 0;
+                continue;
+            }
+
+            VxVertex *remappedVerts = vb->m_Vertices.Begin();
+            VxColors *remappedColors = vb->m_Colors.Begin();
+
+            group->m_BaseVertex = currentOffset;
+            CKBYTE *dst = vbData + currentOffset * stride;
+
+            VxDrawPrimitiveData remapData = *data;
+            remapData.VertexCount = group->m_VertexCount;
+            remapData.PositionPtr = &remappedVerts[0].m_Position;
+            remapData.NormalPtr = &remappedVerts[0].m_Normal;
+            remapData.TexCoordPtr = &remappedVerts[0].m_UV;
+            remapData.ColorPtr = data->ColorPtr ? &remappedColors[0].Color : nullptr;
+            remapData.SpecularColorPtr = data->SpecularColorPtr ? &remappedColors[0].Specular : nullptr;
+
+            for (int j = 0; j < m_ActiveTextureChannels.Size(); ++j) {
+                const int channelIdx = m_ActiveTextureChannels[j];
+                Vx2DVector *channelUVs = nullptr;
+                if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size() &&
+                    vb->m_UVs[channelIdx].Size() == (int)group->m_VertexCount) {
+                    channelUVs = vb->m_UVs[channelIdx].Begin();
+                }
+                if (j < CKRST_MAX_STAGES - 1) {
+                    remapData.TexCoordPtrs[j] = channelUVs;
+                    remapData.TexCoordStrides[j] = sizeof(Vx2DVector);
+                }
+            }
+            CKTransientGeometry::InterleaveVertices(dst, stride, group->m_VertexCount, formatFlags, &remapData);
+            currentOffset += group->m_VertexCount;
         }
     }
 
-    rst->UnlockVertexBuffer(m_VertexBuffer);
+    // Delete old buffer if it exists, then create new one with data
+    rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
+
+    CKVertexBufferDesc newDesc;
+    newDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY;
+    newDesc.m_MaxVertexCount = totalVertexCount;
+    newDesc.m_VertexSize = stride;
+    newDesc.m_CurrentVCount = totalVertexCount;
+
+    if (rst->CreateVertexBuffer(m_VertexBuffer, &newDesc, vbData) != CK_OK) {
+        VxFree(vbData);
+        m_VertexBufferReady = 0;
+        m_VertexBufferDpFlags = 0;
+        m_VertexBufferFormatFlags = 0;
+        m_VertexBufferStride = 0;
+        m_VertexBufferVertexCount = 0;
+        return FALSE;
+    }
+
+    VxFree(vbData);
+    m_VertexLayout = layoutHandle;
+    m_VertexBufferDpFlags = data->Flags;
+    m_VertexBufferFormatFlags = formatFlags;
+    m_VertexBufferStride = stride;
+    m_VertexBufferVertexCount = totalVertexCount;
+    m_VertexBufferReady = 1;
 
     // Check if we should create index buffer
-    RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-    if (rm->m_UseIndexBuffers.Value) {
+    RCKRenderManager *rm = (RCKRenderManager *)m_Context->GetRenderManager();
+    if (needsIndexBuffer) {
+        if (!CheckHWIndexBuffer(rst))
+            return FALSE;
+    } else if (rm->m_UseIndexBuffers.Value) {
         CheckHWIndexBuffer(rst);
     }
 
@@ -5081,8 +5138,9 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     }
 
     // Check if existing index buffer is sufficient
-    CKIndexBufferDesc *ibDesc = rst->GetIndexBufferData(m_IndexBuffer);
-    CKBOOL needResize = !ibDesc || ibDesc->m_MaxIndexCount < totalIndexCount;
+    // Phase 1 stub: GetIndexBufferData removed in v2, always treat as needing creation
+    CKIndexBufferDesc *ibDesc = nullptr;
+    CKBOOL needResize = !ibDesc || (ibDesc && ibDesc->m_MaxIndexCount < totalIndexCount);
 
     if (needResize) {
         rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
@@ -5091,7 +5149,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         newDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY | CKRST_VB_SHARED; 
         newDesc.m_MaxIndexCount = totalIndexCount;
 
-        if (!rst->CreateObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER, &newDesc)) {
+        if (rst->CreateIndexBuffer(m_IndexBuffer, &newDesc, FALSE, nullptr) != CK_OK) {
             // Failed to create index buffer - mark all primitives as software
             for (int i = 0; i < m_MaterialGroups.Size(); i++) {
                 CKMaterialGroup *group = m_MaterialGroups[i];
@@ -5109,10 +5167,11 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     if (!needUpdate)
         return TRUE;
 
-    // Lock and fill index buffer
-    CKWORD *ibData = (CKWORD *) rst->LockIndexBuffer(m_IndexBuffer, 0, totalIndexCount, CKRST_LOCK_DISCARD);
-    if (!ibData) {
-        // Failed to lock - mark all primitives as software
+    // Build index data in a temporary buffer, then upload via UpdateIndexBuffer
+    CKDWORD totalSize = totalIndexCount * sizeof(CKWORD);
+    CKWORD *tempBuffer = (CKWORD *) VxMalloc(totalSize);
+    if (!tempBuffer) {
+        // Failed to allocate - mark all primitives as software
         for (int i = 0; i < m_MaterialGroups.Size(); i++) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (!IsRenderableMaterialGroup(group))
@@ -5124,7 +5183,9 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         return FALSE;
     }
 
+    CKWORD *ibData = tempBuffer;
     CKDWORD currentOffset = 0;
+    static int s_indexRangeLogCount = 0;
 
     // Copy indices for each material group
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
@@ -5140,6 +5201,20 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
             // Copy indices
             CKDWORD indexCount = prim->m_Indices.Size();
             if (indexCount > 0) {
+                CKWORD maxIndex = 0;
+                for (CKDWORD idx = 0; idx < indexCount; ++idx) {
+                    CKWORD value = prim->m_Indices[idx];
+                    if (value > maxIndex)
+                        maxIndex = value;
+                }
+                if (s_indexRangeLogCount < 16) {
+                    CK_LOG_FMT("Mesh",
+                               "HW IB range #%d: group=%d base=%u verts=%u start=%u count=%u maxIndex=%u remap=%u",
+                               s_indexRangeLogCount, i, group->m_BaseVertex, group->m_VertexCount,
+                               prim->m_IndexBufferOffset, indexCount, maxIndex,
+                               group->m_RemapData ? 1u : 0u);
+                    ++s_indexRangeLogCount;
+                }
                 memcpy(ibData, prim->m_Indices.Begin(), indexCount * sizeof(CKWORD));
                 ibData += indexCount;
                 currentOffset += indexCount;
@@ -5147,7 +5222,9 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         }
     }
 
-    rst->UnlockIndexBuffer(m_IndexBuffer);
+    // Upload all index data at once via v2 API
+    rst->UpdateIndexBuffer(m_IndexBuffer, 0, totalSize, tempBuffer);
+    VxFree(tempBuffer);
 
     return TRUE;
 }

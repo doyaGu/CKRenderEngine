@@ -6,6 +6,8 @@
 #include "RCK3dEntity.h"
 #include "CKLight.h"
 
+class CKFixedFunctionPipeline;
+
 class RCKLight : public RCK3dEntity {
 public:
 
@@ -32,7 +34,7 @@ public:
     static CKLight *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
 
-    CKBOOL Setup(CKRasterizerContext *rst, CKDWORD lightIndex);
+    CKBOOL Setup(CKFixedFunctionPipeline *ffPipeline, int lightIndex);
 
 protected:
     CKLightData m_LightData;

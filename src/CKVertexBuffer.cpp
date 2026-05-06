@@ -24,9 +24,10 @@ void RCKVertexBuffer::Destroy() {
 
 CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) {
     CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
-    CKVertexBufferDesc *vertexBuffer = rstCtx->GetVertexBufferData(m_ObjectIndex);
+    // Phase 1 stub: VB does not exist yet, treat as needing creation
+    CKVertexBufferDesc *vertexBuffer = nullptr;
     CKDWORD vertexSize = 0;
-    CKDWORD vertexFormat = CKRSTGetVertexFormat(Format, vertexSize);
+    CKDWORD vertexFormat = 0; // Phase 1 stub: CKRSTGetVertexFormat removed in v2
 
     bool incompatible = (Format != m_DpData.Flags || vertexFormat != m_Desc.m_VertexFormat || MaxVertexCount > m_Desc.m_MaxVertexCount);
     CKVB_STATE state = (incompatible) ? CK_VB_LOST : CK_VB_OK;
@@ -48,7 +49,7 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
         if (Dynamic) {
             m_Desc.m_Flags |= 0x8;
         }
-        if (rstCtx->CreateObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER, &m_Desc)) {
+        if (rstCtx->CreateVertexBuffer(m_ObjectIndex, &m_Desc, nullptr) == CK_OK) {
             m_Valid = TRUE;
             return CK_VB_LOST;
         }
@@ -61,23 +62,19 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
 }
 
 VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) {
-    CKBYTE *mem;
-    if (m_Valid) {
-        CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
-        mem = (CKBYTE *) rstCtx->LockVertexBuffer(m_ObjectIndex, StartVertex, VertexCount, static_cast<CKRST_LOCKFLAGS>(LockFlags));
-    } else {
-        mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
-    }
-
+    // TODO: Phase 2 — CKRSTSetupDPFromVertexBuffer removed in v2, need new path
+    (void) Ctx;
+    (void) StartVertex;
+    (void) VertexCount;
+    (void) LockFlags;
     m_DpData.VertexCount = (int) VertexCount;
-    CKRSTSetupDPFromVertexBuffer(mem, &m_Desc, m_DpData);
     return &m_DpData;
 }
 
 void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
+    (void) Ctx;
     if (m_Valid) {
-        CKRasterizerContext *rstCtx = Ctx->GetRasterizerContext();
-        rstCtx->UnlockVertexBuffer(m_ObjectIndex);
+        // TODO: Phase 2 — release transient buffer
     }
 }
 
@@ -87,11 +84,12 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     if (VertexCount == 0)
         return FALSE;
 
-    if ((m_DpData.Flags & CKRST_DP_LIGHT) != 0) {
-        rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
-    } else {
-        rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
-    }
+    // TODO: Phase 2 — route lighting state through FFPipeline
+    // if ((m_DpData.Flags & CKRST_DP_LIGHT) != 0) {
+    //     rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
+    // } else {
+    //     rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
+    // }
 
     if (!Indices)
         IndexCount = (int) VertexCount;
@@ -117,12 +115,15 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     }
     stats.NbVerticesProcessed += (int) VertexCount;
 
-    if (m_Valid) {
-        return rstCtx->DrawPrimitiveVB(pType, m_ObjectIndex, StartVertex, VertexCount, Indices, IndexCount);
-    } else {
-        CKBYTE *mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
-        m_DpData.VertexCount = (int) VertexCount;
-        CKRSTSetupDPFromVertexBuffer(mem, &m_Desc, m_DpData);
-        return rstCtx->DrawPrimitive(pType, Indices, IndexCount, &m_DpData);
-    }
+    // TODO: Phase 2 — submit draw call through v2 encoder
+    // if (m_Valid) {
+    //     return rstCtx->DrawPrimitiveVB(pType, m_ObjectIndex, StartVertex, VertexCount, Indices, IndexCount);
+    // } else {
+    //     CKBYTE *mem = (CKBYTE *) m_MemoryPool.Buffer() + (StartVertex * m_Desc.m_VertexSize);
+    //     m_DpData.VertexCount = (int) VertexCount;
+    //     CKRSTSetupDPFromVertexBuffer(mem, &m_Desc, m_DpData);
+    //     return rstCtx->DrawPrimitive(pType, Indices, IndexCount, &m_DpData);
+    // }
+    (void) rstCtx;
+    return FALSE;
 }

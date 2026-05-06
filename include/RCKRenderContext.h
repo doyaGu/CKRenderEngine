@@ -5,6 +5,7 @@
 #include "CKRenderContext.h"
 #include "CKRenderedScene.h"
 #include "CKRasterizerEnums.h"
+#include "CKFixedFunctionPipeline.h"
 
 // Forward declarations
 class RCKMaterial;
@@ -309,6 +310,12 @@ public:
     // Total: 956 bytes (0x3BC)
 
     void OnClearAll();
+
+    // Fixed-function pipeline (v2 rendering)
+    CKFixedFunctionPipeline m_FFPipeline;
+    VxMatrix m_WorldMatrix;
+    VxMatrix m_ViewMatrix;
+    CKRenderView m_Current2DView;
 };
 
 #endif // RCKRENDERCONTEXT_H

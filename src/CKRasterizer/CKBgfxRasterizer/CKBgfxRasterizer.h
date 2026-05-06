@@ -30,7 +30,8 @@ public:
     bool cacheRead(uint64_t, void *, uint32_t) override { return false; }
     void cacheWrite(uint64_t, const void *, uint32_t) override {}
     void screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
-                    uint32_t _pitch, const void *_data, uint32_t _size, bool _yflip) override;
+                    uint32_t _pitch, bgfx::TextureFormat::Enum _format,
+                    const void *_data, uint32_t _size, bool _yflip) override;
     void captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum, bool) override {}
     void captureEnd() override {}
     void captureFrame(const void *, uint32_t) override {}
@@ -56,6 +57,7 @@ struct CKBgfxUniformRecord {
     bgfx::UniformHandle Handle;
     CK_UNIFORM_TYPE Type;
     CKDWORD Count;
+    char Name[64];
 };
 
 struct CKBgfxVertexLayoutRecord {
@@ -364,6 +366,19 @@ private:
     CKDWORD m_PendingScreenShotFB;
     VxImageDescEx *m_BackbufferReadTarget;
     std::atomic<bool> m_BackbufferReadReady;
+
+    CKDWORD m_DebugFrameId;
+    CKDWORD m_DebugCaptureFirstFrames;
+    CKDWORD m_DebugCaptureInterval;
+    CKDWORD m_DebugCaptureLimit;
+    CKDWORD m_DebugCaptureSaved;
+    CKDWORD m_DebugBgfxFlags;
+    CKBOOL m_DebugOverlay;
+    char m_DebugCaptureDir[260];
+
+    void ConfigureDebugCapture();
+    void RequestDebugFrameCapture();
+    void DrawDebugOverlay();
 
     XArray<CKBgfxShaderRecord *> m_Shaders;
     XArray<CKBgfxProgramRecord *> m_Programs;

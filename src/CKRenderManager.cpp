@@ -119,6 +119,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_Options.PushBack(&m_DisablePerspectiveCorrection);
 
     m_RenderContextMaskFree = -1;
+    m_NextObjectIndex = 0;
     m_Context->RegisterNewManager(this);
 
     // Initialize driver-related fields
@@ -161,15 +162,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         }
     }
 
-    // Link rasterizers together
     int rasterizerCount = m_Rasterizers.Size();
-    for (int i = 0; i < rasterizerCount; ++i) {
-        for (int j = 0; j < rasterizerCount; ++j) {
-            if (i != j) {
-                m_Rasterizers[i]->LinkRasterizer(m_Rasterizers[j]);
-            }
-        }
-    }
 
     // Allocate driver description array
     if (m_DriverCount > 0) {
@@ -610,15 +603,13 @@ int RCKRenderManager::AddEffect(const VxEffectDescription &NewEffect) {
 }
 
 CKDWORD RCKRenderManager::CreateObjectIndex(CKRST_OBJECTTYPE type) {
-    if (m_DriverCount == 0)
-        return 0;
-    return m_Drivers->Rasterizer->CreateObjectIndex(type, TRUE);
+    (void)type;
+    return ++m_NextObjectIndex;
 }
 
 CKBOOL RCKRenderManager::ReleaseObjectIndex(CKDWORD index, CKRST_OBJECTTYPE type) {
-    if (m_DriverCount == 0)
-        return true;
-    return m_Drivers->Rasterizer->ReleaseObjectIndex(index, type, TRUE);
+    (void)index; (void)type;
+    return TRUE;
 }
 
 CKMaterial *RCKRenderManager::GetDefaultMaterial() {
@@ -970,11 +961,19 @@ CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
 }
 
 CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
-    // IDA: 0x10074f8a
+    // v2 API: fullscreen is just a context created with Fullscreen=TRUE
+    // Return the first fullscreen context found
     for (int i = 0; i < m_Rasterizers.Size(); ++i) {
         CKRasterizer *rasterizer = m_Rasterizers[i];
-        if (rasterizer && rasterizer->m_FullscreenContext) {
-            return rasterizer->m_FullscreenContext;
+        if (!rasterizer) continue;
+        for (int d = 0; d < rasterizer->GetDriverCount(); ++d) {
+            CKRasterizerDriver *driver = rasterizer->GetDriver(d);
+            if (!driver) continue;
+            for (int c = 0; c < driver->m_Contexts.Size(); ++c) {
+                CKRasterizerContext *ctx = driver->m_Contexts[c];
+                if (ctx && ctx->m_Fullscreen)
+                    return ctx;
+            }
         }
     }
     return nullptr;

@@ -40,6 +40,31 @@ static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx
     }
 }
 
+static CKBOOL SamePixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
+    return a.BitsPerPixel == b.BitsPerPixel &&
+           a.RedMask == b.RedMask &&
+           a.GreenMask == b.GreenMask &&
+           a.BlueMask == b.BlueMask &&
+           a.AlphaMask == b.AlphaMask;
+}
+
+static CKBYTE *ConvertTextureImage(const VxImageDescEx &src, const VxImageDescEx &videoFormat,
+                                   VxImageDescEx &uploadDesc) {
+    if (src.Width <= 0 || src.Height <= 0 || src.BitsPerPixel <= 0 || videoFormat.BitsPerPixel <= 0)
+        return nullptr;
+
+    uploadDesc = videoFormat;
+    uploadDesc.Width = src.Width;
+    uploadDesc.Height = src.Height;
+    uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
+    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+
+    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    uploadDesc.Image = converted;
+    VxDoBlit(src, uploadDesc);
+    return converted;
+}
+
 CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
     int oldWidth = GetWidth();
     int oldHeight = GetHeight();
@@ -96,9 +121,8 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(Dev);
     CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
 
-    // Check if texture is invalid
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0) {
-        rstCtx->SetTexture(0, TextureStage);
+        dev->m_FFPipeline.SetTexture(TextureStage, 0);
         return FALSE;
     }
 
@@ -112,15 +136,13 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     CKBOOL isRenderTarget = FALSE;
     int result = 1;
 
-    CKTextureDesc *texDesc = rstCtx->GetTextureData(m_ObjectIndex);
-    if (texDesc) {
-        isRenderTarget = (texDesc->Flags & CKRST_TEXTURE_RENDERTARGET) != 0;
-
-        // Check if texture needs to be recreated
+    if (m_InVideoMemory) {
+        isRenderTarget = (m_TextureFlags & CKRST_TEXTURE_RENDERTARGET) != 0;
         if (!isRenderTarget &&
-            ((!HasAlphaFormat(texDesc->Format) && needsAlpha) ||
-                texDesc->MipMapCount != m_MipMapLevel)) {
+            ((!HasAlphaFormat(m_VideoFormat) && needsAlpha) ||
+                m_CachedMipMapCount != m_MipMapLevel)) {
             rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+            m_InVideoMemory = FALSE;
             needsCreate = TRUE;
         }
     } else {
@@ -142,16 +164,15 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
 
     if (!isRenderTarget) {
         if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 || Clamping) {
-            rstCtx->SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
-            rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
-            rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
             result = 2;
         } else {
-            rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
         }
     }
-
-    rstCtx->SetTexture(m_ObjectIndex, TextureStage);
+    dev->m_FFPipeline.SetTexture(TextureStage, m_ObjectIndex);
     return result;
 }
 
@@ -169,8 +190,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
 
     // Check for cube map case
     if (IsCubeMap() && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
-        CKTextureDesc *texDesc = m_RasterizerContext->GetTextureData(m_ObjectIndex);
-        if (texDesc && (texDesc->Flags & CKRST_TEXTURE_CUBEMAP) != 0) {
+        if (m_InVideoMemory && (m_TextureFlags & CKRST_TEXTURE_CUBEMAP) != 0) {
             VxImageDescEx desc;
             GetImageDesc(desc);
 
@@ -178,7 +198,8 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
                 CKBYTE *imageData = (CKBYTE *)m_Slots[face]->m_DataBuffer;
                 if (imageData) {
                     desc.Image = imageData;
-                    result |= m_RasterizerContext->LoadCubeMapTexture(m_ObjectIndex, desc, static_cast<CKRST_CUBEFACE>(face), -1);
+                    m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, face, nullptr, &desc);
+                    result = TRUE;
                 }
             }
             return result;
@@ -204,17 +225,29 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             m_BitmapFlags |= CKBITMAPDATA_CLAMPUPTODATE;
         }
 
-        // Load mipmaps if present
+        VxImageDescEx uploadDesc = desc;
+        CKBYTE *converted = nullptr;
+        if (!SamePixelFormat(desc, m_VideoFormat)) {
+            converted = ConvertTextureImage(desc, m_VideoFormat, uploadDesc);
+            if (!converted)
+                return FALSE;
+        }
+
+        // Upload texture data via v2 API
         if (m_MipMaps && m_MipMapLevel) {
-            result = m_RasterizerContext->LoadTexture(m_ObjectIndex, desc, 0);
+            m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
             int mipCount = m_MipMaps->Size();
             for (int i = 0; i < mipCount; ++i) {
                 VxImageDescEx *mipmap = m_MipMaps->At(i);
-                result = m_RasterizerContext->LoadTexture(m_ObjectIndex, *mipmap, i + 1);
+                m_RasterizerContext->UpdateTexture(m_ObjectIndex, i + 1, 0, nullptr, mipmap);
             }
+            result = TRUE;
         } else {
-            return m_RasterizerContext->LoadTexture(m_ObjectIndex, desc, -1);
+            m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
+            delete[] converted;
+            return TRUE;
         }
+        delete[] converted;
     }
 
     return result;
@@ -226,6 +259,9 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0)
         return FALSE;
 
+    if (GetWidth() <= 0 || GetHeight() <= 0)
+        return FALSE;
+
     if (!dev->m_RasterizerContext)
         return FALSE;
 
@@ -235,6 +271,9 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     m_RasterizerContext = dev->m_RasterizerContext;
 
     CKTextureDesc desc;
+    VxImageDescEx systemDesc;
+    GetImageDesc(systemDesc);
+    desc.Format = systemDesc;
     desc.Format.Width = GetWidth();
     desc.Format.Height = GetHeight();
     desc.MipMapCount = m_MipMapLevel;
@@ -254,8 +293,10 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     if (m_DesiredVideoFormat >= _16_V8U8 && m_DesiredVideoFormat <= _32_X8L8V8U8)
         desc.Flags |= CKRST_TEXTURE_BUMPDUDV;
 
-    // Set format based on desired video format
-    if (m_DesiredVideoFormat != UNKNOWN_PF) {
+    // Set format based on desired video format. bgfx can sample the source
+    // texture formats directly, so only use the legacy requested format when
+    // the source does not describe a usable pixel layout.
+    if (desc.Format.BitsPerPixel <= 0 && m_DesiredVideoFormat != UNKNOWN_PF) {
         VxPixelFormat2ImageDesc(m_DesiredVideoFormat, desc.Format);
 
         // If no alpha format and we need alpha, find nearest format with alpha
@@ -268,7 +309,7 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
 
         if (HasAlphaFormat(desc.Format))
             desc.Flags |= CKRST_TEXTURE_ALPHA;
-    } else {
+    } else if (desc.Format.BitsPerPixel <= 0) {
         // Default format: 16-bit ARGB1555
         desc.Format.BitsPerPixel = 16;
         desc.Format.AlphaMask = 0x8000;
@@ -278,8 +319,12 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
         desc.Flags |= CKRST_TEXTURE_ALPHA;
     }
 
-    if (m_RasterizerContext->CreateObject(m_ObjectIndex, CKRST_OBJ_TEXTURE, &desc)) {
+    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) == CK_OK) {
         m_MipMapLevel = desc.MipMapCount;
+        m_InVideoMemory = TRUE;
+        m_TextureFlags = desc.Flags;
+        m_CachedMipMapCount = desc.MipMapCount;
+        m_VideoFormat = desc.Format;
         return Restore(Clamping);
     }
 
@@ -290,23 +335,24 @@ CKBOOL RCKTexture::FreeVideoMemory() {
     if (!m_RasterizerContext)
         return FALSE;
 
-    return m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+    m_InVideoMemory = FALSE;
+    return m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
 }
 
 CKBOOL RCKTexture::IsInVideoMemory() {
     if (!m_RasterizerContext)
         return FALSE;
 
-    return m_RasterizerContext->GetTextureData(m_ObjectIndex) != nullptr;
+    return m_InVideoMemory;
 }
 
 CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, int CubeMapFace) {
     if (!ctx)
         return FALSE;
 
-    RCKRenderContext *dev = static_cast<RCKRenderContext *>(ctx);
-    return dev->m_RasterizerContext->CopyToTexture(
-        m_ObjectIndex, Src, Dest, static_cast<CKRST_CUBEFACE>(CubeMapFace));
+    // TODO: Phase 2 — implement render-to-texture copy via ReadFrameBuffer + UpdateTexture
+    (void)ctx; (void)Src; (void)Dest; (void)CubeMapFace;
+    return FALSE;
 }
 
 CKBOOL RCKTexture::UseMipmap(int UseMipMap) {
@@ -326,26 +372,18 @@ int RCKTexture::GetMipmapCount() {
 }
 
 CKBOOL RCKTexture::GetVideoTextureDesc(VxImageDescEx &desc) {
-    if (!m_RasterizerContext)
+    if (!m_RasterizerContext || !m_InVideoMemory)
         return FALSE;
 
-    CKTextureDesc *texDesc = m_RasterizerContext->GetTextureData(m_ObjectIndex);
-    if (!texDesc)
-        return FALSE;
-
-    desc = texDesc->Format;
+    desc = m_VideoFormat;
     return TRUE;
 }
 
 VX_PIXELFORMAT RCKTexture::GetVideoPixelFormat() {
-    if (!m_RasterizerContext)
+    if (!m_RasterizerContext || !m_InVideoMemory)
         return UNKNOWN_PF;
 
-    CKTextureDesc *texDesc = m_RasterizerContext->GetTextureData(m_ObjectIndex);
-    if (!texDesc)
-        return UNKNOWN_PF;
-
-    return VxImageDesc2PixelFormat(texDesc->Format);
+    return VxImageDesc2PixelFormat(m_VideoFormat);
 }
 
 CKBOOL RCKTexture::GetSystemTextureDesc(VxImageDescEx &desc) {
@@ -447,6 +485,10 @@ RCKTexture::RCKTexture(CKContext *Context, CKSTRING name) : CKTexture(Context, n
     m_RasterizerContext = nullptr;
     m_MipMaps = nullptr;
     m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    m_InVideoMemory = FALSE;
+    m_TextureFlags = 0;
+    m_CachedMipMapCount = 0;
+    memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
 }
 
 RCKTexture::~RCKTexture() {

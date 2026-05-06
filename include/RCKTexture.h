@@ -51,6 +51,11 @@ protected:
     CKDWORD m_MipMapLevel;
     CKDWORD m_ObjectIndex;
     XClassArray<VxImageDescEx> *m_MipMaps;
+
+    CKBOOL m_InVideoMemory;
+    CKDWORD m_TextureFlags;
+    CKDWORD m_CachedMipMapCount;
+    VxImageDescEx m_VideoFormat;
 };
 
 #endif // RCKTEXTURE_H

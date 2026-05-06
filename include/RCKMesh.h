@@ -230,6 +230,11 @@ protected:
     CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
+    CKDWORD m_VertexLayout;     // HW vertex layout handle for DrawVertexBuffer
+    CKDWORD m_VertexBufferDpFlags;
+    CKDWORD m_VertexBufferFormatFlags;
+    CKDWORD m_VertexBufferStride;
+    CKDWORD m_VertexBufferVertexCount;
     CKProgressiveMesh *m_ProgressiveMesh;
     CKCallbacksContainer *m_RenderCallbacks;
     CKCallbacksContainer *m_SubMeshCallbacks;

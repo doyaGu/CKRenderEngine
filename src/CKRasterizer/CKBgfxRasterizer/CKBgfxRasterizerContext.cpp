@@ -1,24 +1,191 @@
 #include "CKBgfxRasterizer.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+
 #include <bgfx/platform.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 // ===========================================================================
 // CKBgfxCallback
 // ===========================================================================
 
-void CKBgfxCallback::fatal(const char *, uint16_t, bgfx::Fatal::Enum, const char *)
-{
+static FILE *g_BgfxLogFile = nullptr;
+static FILE *GetBgfxLogFile() {
+    if (!g_BgfxLogFile) {
+        char path[MAX_PATH] = {0};
+        HMODULE hMod = nullptr;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCSTR)&GetBgfxLogFile, &hMod)) {
+            GetModuleFileNameA(hMod, path, MAX_PATH);
+            char *last = strrchr(path, '\\');
+            if (last) { strcpy_s(last + 1, MAX_PATH - (last + 1 - path), "CKBgfx_Trace.log"); }
+        }
+        if (path[0] == '\0') strcpy_s(path, "CKBgfx_Trace.log");
+        g_BgfxLogFile = fopen(path, "w");
+    }
+    return g_BgfxLogFile;
 }
 
-void CKBgfxCallback::traceVargs(const char *, uint16_t, const char *, va_list)
+static void BgfxLogf(const char *tag, const char *fmt, ...)
 {
+    char msg[2048];
+    int n = _snprintf_s(msg, sizeof(msg), _TRUNCATE, "[CKBgfx] [%s] ", tag ? tag : "?");
+    if (n < 0) n = 0;
+    va_list args;
+    va_start(args, fmt);
+    _vsnprintf_s(msg + n, sizeof(msg) - n, _TRUNCATE, fmt, args);
+    va_end(args);
+    OutputDebugStringA(msg);
+    OutputDebugStringA("\n");
+    FILE *f = GetBgfxLogFile();
+    if (f) { fputs(msg, f); fputc('\n', f); fflush(f); }
+}
+
+static CKDWORD GetEnvDword(const char *name, CKDWORD fallback)
+{
+    char value[64] = {0};
+    DWORD n = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
+    if (n == 0 || n >= sizeof(value))
+        return fallback;
+    char *end = nullptr;
+    unsigned long parsed = strtoul(value, &end, 10);
+    return (end != value) ? (CKDWORD)parsed : fallback;
+}
+
+static CKBOOL GetEnvBool(const char *name, CKBOOL fallback)
+{
+    char value[32] = {0};
+    DWORD n = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
+    if (n == 0 || n >= sizeof(value))
+        return fallback;
+    if (_stricmp(value, "1") == 0 || _stricmp(value, "true") == 0 ||
+        _stricmp(value, "yes") == 0 || _stricmp(value, "on") == 0)
+        return TRUE;
+    if (_stricmp(value, "0") == 0 || _stricmp(value, "false") == 0 ||
+        _stricmp(value, "no") == 0 || _stricmp(value, "off") == 0)
+        return FALSE;
+    return fallback;
+}
+
+static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
+{
+    if (!data || size == 0)
+        return 0;
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    uint32_t hash = 2166136261u;
+    uint32_t step = size > 4096 ? (size / 4096) : 1;
+    for (uint32_t i = 0; i < size; i += step) {
+        hash ^= bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static uint32_t FirstDword(const void *data, uint32_t size)
+{
+    uint32_t value = 0;
+    if (data && size >= sizeof(value))
+        memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+static void GetDefaultCaptureDir(char *path, size_t pathSize)
+{
+    path[0] = '\0';
+    HMODULE hMod = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)&GetDefaultCaptureDir, &hMod)) {
+        GetModuleFileNameA(hMod, path, (DWORD)pathSize);
+        char *last = strrchr(path, '\\');
+        if (last)
+            strcpy_s(last + 1, pathSize - (last + 1 - path), "CK2_3D_Captures");
+    }
+    if (path[0] == '\0')
+        strcpy_s(path, pathSize, "CK2_3D_Captures");
+}
+
+static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
+                       uint32_t pitch, const void *data, bool yflip)
+{
+    if (!path || !data || width == 0 || height == 0 || pitch < width * 4)
+        return false;
+
+    FILE *f = nullptr;
+    if (fopen_s(&f, path, "wb") != 0 || !f)
+        return false;
+
+    const uint32_t outPitch = width * 4;
+    const uint32_t imageSize = outPitch * height;
+    const uint32_t fileSize = 14 + 40 + imageSize;
+
+    unsigned char fileHeader[14] = {
+        'B', 'M',
+        (unsigned char)(fileSize), (unsigned char)(fileSize >> 8),
+        (unsigned char)(fileSize >> 16), (unsigned char)(fileSize >> 24),
+        0, 0, 0, 0,
+        54, 0, 0, 0
+    };
+    unsigned char infoHeader[40] = {
+        40, 0, 0, 0,
+        (unsigned char)(width), (unsigned char)(width >> 8),
+        (unsigned char)(width >> 16), (unsigned char)(width >> 24),
+        (unsigned char)(height), (unsigned char)(height >> 8),
+        (unsigned char)(height >> 16), (unsigned char)(height >> 24),
+        1, 0,
+        32, 0,
+        0, 0, 0, 0,
+        (unsigned char)(imageSize), (unsigned char)(imageSize >> 8),
+        (unsigned char)(imageSize >> 16), (unsigned char)(imageSize >> 24),
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0
+    };
+
+    fwrite(fileHeader, 1, sizeof(fileHeader), f);
+    fwrite(infoHeader, 1, sizeof(infoHeader), f);
+
+    const unsigned char *src = (const unsigned char *)data;
+    for (uint32_t outY = 0; outY < height; ++outY) {
+        uint32_t srcY = yflip ? outY : (height - 1 - outY);
+        fwrite(src + srcY * pitch, 1, outPitch, f);
+    }
+
+    fclose(f);
+    return true;
+}
+
+void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enum code, const char *str)
+{
+    char buf[1024];
+    _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+                "FATAL(%d) at %s:%u: %s\n",
+                (int)code, filePath ? filePath : "?", (unsigned)line, str ? str : "");
+    OutputDebugStringA(buf);
+    FILE *f = GetBgfxLogFile();
+    if (f) { fputs(buf, f); fflush(f); }
+}
+
+void CKBgfxCallback::traceVargs(const char *filePath, uint16_t line, const char *format, va_list argList)
+{
+    char buf[2048];
+    int n = _snprintf_s(buf, sizeof(buf) - 1, _TRUNCATE, "%s(%u): ", filePath ? filePath : "?", (unsigned)line);
+    if (n < 0) n = 0;
+    _vsnprintf_s(buf + n, sizeof(buf) - n, _TRUNCATE, format, argList);
+    OutputDebugStringA(buf);
+    FILE *f = GetBgfxLogFile();
+    if (f) { fputs(buf, f); fflush(f); }
 }
 
 void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
-                                 uint32_t _pitch, const void *_data, uint32_t _size, bool _yflip)
+                                 uint32_t _pitch, bgfx::TextureFormat::Enum /*_format*/,
+                                 const void *_data, uint32_t _size, bool _yflip)
 {
     if (!m_Context)
         return;
@@ -46,6 +213,15 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
             (CKDWORD)_width, (CKDWORD)_height, (CKDWORD)_pitch,
             _data, (CKDWORD)_size, _yflip ? TRUE : FALSE);
         m_Context->m_PendingScreenShotCallback = NULL;
+        return;
+    }
+
+    if (_filePath && strstr(_filePath, ".bmp") != NULL)
+    {
+        bool ok = WriteBmp32(_filePath, _width, _height, _pitch, _data, _yflip);
+        BgfxLogf("Capture", "saved path=%s ok=%d size=%ux%u pitch=%u bytes=%u yflip=%d",
+                 _filePath, ok ? 1 : 0, (unsigned)_width, (unsigned)_height,
+                 (unsigned)_pitch, (unsigned)_size, _yflip ? 1 : 0);
     }
 }
 
@@ -741,9 +917,9 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
     if (!tvb)
         return;
     if (m_Encoder)
-        m_Encoder->setVertexBuffer((uint8_t)Stream, tvb, Buffer->StartVertex, Buffer->VertexCount);
+        m_Encoder->setVertexBuffer((uint8_t)Stream, tvb, 0, Buffer->VertexCount);
     else
-        bgfx::setVertexBuffer((uint8_t)Stream, tvb, Buffer->StartVertex, Buffer->VertexCount);
+        bgfx::setVertexBuffer((uint8_t)Stream, tvb, 0, Buffer->VertexCount);
 }
 
 void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
@@ -763,9 +939,9 @@ void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
     if (!tib)
         return;
     if (m_Encoder)
-        m_Encoder->setIndexBuffer(tib, Buffer->StartIndex, Buffer->IndexCount);
+        m_Encoder->setIndexBuffer(tib, 0, Buffer->IndexCount);
     else
-        bgfx::setIndexBuffer(tib, Buffer->StartIndex, Buffer->IndexCount);
+        bgfx::setIndexBuffer(tib, 0, Buffer->IndexCount);
 }
 
 void CKBgfxEncoder::SetTransientInstanceBuffer(CKDWORD Stream,
@@ -795,10 +971,22 @@ void CKBgfxEncoder::SetTransientInstanceBuffer(CKDWORD Stream,
 void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
                                 CKDWORD Texture, CKSamplerDesc *Sampler)
 {
+    static int s_SetTextureLogCount = 0;
     if (!m_Context)
         return;
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
+    if (s_SetTextureLogCount < 80) {
+        BgfxLogf("SetTexture",
+                 "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
+                 Stage, Uniform, Texture, (void *)uniRec, (void *)texRec,
+                 texRec ? texRec->Handle.idx : 0xffff,
+                 texRec ? texRec->Width : 0,
+                 texRec ? texRec->Height : 0,
+                 texRec ? (int)texRec->Format : -1,
+                 (void *)Sampler);
+        s_SetTextureLogCount++;
+    }
     if (!uniRec || !texRec)
         return;
     uint32_t flags = ToBgfxSamplerFlags(Sampler);
@@ -815,6 +1003,21 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
     CKBgfxUniformRecord *rec = m_Context->GetUniform(Uniform);
     if (!rec)
         return;
+    static int s_uniformLogCount = 0;
+    if (GetEnvBool("CK2_3D_DEBUG_LOG_UNIFORMS", FALSE) && s_uniformLogCount < 256) {
+        const float *f = static_cast<const float *>(Data);
+        if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
+            BgfxLogf("SetUniform",
+                     "uniform=%u name=%s handle=%u type=%u count=%u recCount=%u first=(%.3f %.3f %.3f %.3f)",
+                     Uniform, rec->Name, rec->Handle.idx, (unsigned)rec->Type, Count, rec->Count,
+                     f[0], f[1], f[2], f[3]);
+        } else {
+            BgfxLogf("SetUniform",
+                     "uniform=%u name=%s handle=%u type=%u count=%u recCount=%u data=%p",
+                     Uniform, rec->Name, rec->Handle.idx, (unsigned)rec->Type, Count, rec->Count, Data);
+        }
+        ++s_uniformLogCount;
+    }
     if (m_Encoder)
         m_Encoder->setUniform(rec->Handle, Data, (uint16_t)Count);
     else
@@ -997,11 +1200,15 @@ CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
     : m_BgfxInitialized(FALSE), m_VSync(TRUE), m_ResetFlags(BGFX_RESET_VSYNC),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
+      m_DebugFrameId(0), m_DebugCaptureFirstFrames(0), m_DebugCaptureInterval(0),
+      m_DebugCaptureLimit(0), m_DebugCaptureSaved(0), m_DebugBgfxFlags(0),
+      m_DebugOverlay(FALSE),
       m_TransformCount{0},
       m_TransientVBCount{0}, m_TransientIBCount{0}, m_TransientInstCount{0}
 {
     m_Driver = driver;
     m_BgfxCallback.SetContext(this);
+    m_DebugCaptureDir[0] = '\0';
 }
 
 CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
@@ -1077,6 +1284,9 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     bgfx::setViewClear(0,
                         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL,
                         0x000000ff, 1.0f, 0);
+    bgfx::touch(0);
+    bgfx::frame();
+    ConfigureDebugCapture();
 
     return TRUE;
 }
@@ -1098,6 +1308,85 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
 
     return TRUE;
+}
+
+void CKBgfxRasterizerContext::ConfigureDebugCapture()
+{
+    GetDefaultCaptureDir(m_DebugCaptureDir, sizeof(m_DebugCaptureDir));
+    GetEnvironmentVariableA("CK2_3D_DEBUG_CAPTURE_DIR", m_DebugCaptureDir, (DWORD)sizeof(m_DebugCaptureDir));
+    CreateDirectoryA(m_DebugCaptureDir, NULL);
+
+    m_DebugCaptureFirstFrames = GetEnvDword("CK2_3D_DEBUG_CAPTURE_FIRST", 0);
+    m_DebugCaptureInterval = GetEnvDword("CK2_3D_DEBUG_CAPTURE_INTERVAL", 0);
+    m_DebugCaptureLimit = GetEnvDword("CK2_3D_DEBUG_CAPTURE_LIMIT", 0);
+    m_DebugCaptureSaved = 0;
+
+    m_DebugBgfxFlags = BGFX_DEBUG_NONE;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_WIREFRAME", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_STATS", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_TEXT", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_PROFILER", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
+    if (GetEnvBool("CK2_3D_BGFX_DEBUG_ALL", FALSE))
+        m_DebugBgfxFlags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS | BGFX_DEBUG_PROFILER;
+
+    m_DebugOverlay = GetEnvBool("CK2_3D_DEBUG_OVERLAY",
+                                (m_DebugBgfxFlags & BGFX_DEBUG_TEXT) ? TRUE : FALSE);
+    if (m_DebugOverlay)
+        m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
+
+    if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
+        bgfx::setDebug(m_DebugBgfxFlags);
+
+    BgfxLogf("Debug", "configured captureDir=%s first=%u interval=%u limit=%u bgfxFlags=0x%X overlay=%d",
+             m_DebugCaptureDir, m_DebugCaptureFirstFrames, m_DebugCaptureInterval,
+             m_DebugCaptureLimit, m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
+}
+
+void CKBgfxRasterizerContext::DrawDebugOverlay()
+{
+    if (!m_DebugOverlay)
+        return;
+
+    const bgfx::Stats *s = bgfx::getStats();
+    bgfx::dbgTextClear(0, false);
+    bgfx::dbgTextPrintf(0, 0, 0x4f, "CK2_3D bgfx debug frame=%u size=%ux%u",
+                        m_DebugFrameId, (unsigned)m_Width, (unsigned)m_Height);
+    if (s) {
+        bgfx::dbgTextPrintf(0, 1, 0x2f, "bgfx gpuFrame=%u draws=%u blits=%u computes=%u views=%u",
+                            s->gpuFrameNum, s->numDraw, s->numBlit, s->numCompute, s->numViews);
+        bgfx::dbgTextPrintf(0, 2, 0x2f, "transient vb=%u ib=%u waitSubmit=%lld waitRender=%lld",
+                            s->transientVbUsed, s->transientIbUsed,
+                            (long long)s->waitSubmit, (long long)s->waitRender);
+    }
+    bgfx::dbgTextPrintf(0, 3, 0x1f, "views: 0 clear 1 bg2d 2 opaque3d 3 transparent 4 fg2d");
+}
+
+void CKBgfxRasterizerContext::RequestDebugFrameCapture()
+{
+    bool shouldCapture = false;
+    if (m_DebugFrameId < m_DebugCaptureFirstFrames)
+        shouldCapture = true;
+    if (m_DebugCaptureInterval != 0 && (m_DebugFrameId % m_DebugCaptureInterval) == 0)
+        shouldCapture = true;
+    if (!shouldCapture)
+        return;
+    if (m_DebugCaptureLimit != 0 && m_DebugCaptureSaved >= m_DebugCaptureLimit)
+        return;
+
+    char path[MAX_PATH] = {0};
+    _snprintf_s(path, sizeof(path), _TRUNCATE, "%s\\frame_%06u.bmp",
+                m_DebugCaptureDir, m_DebugFrameId);
+    bgfx::FrameBufferHandle invalid = BGFX_INVALID_HANDLE;
+    bgfx::requestScreenShot(invalid, path);
+    ++m_DebugCaptureSaved;
+
+    const bgfx::Stats *s = bgfx::getStats();
+    BgfxLogf("Capture",
+             "requested frame=%u bgfxGpuFrame=%u path=%s draws=%u blits=%u computes=%u views=%u",
+             m_DebugFrameId, s ? s->gpuFrameNum : 0, path,
+             s ? s->numDraw : 0, s ? s->numBlit : 0,
+             s ? s->numCompute : 0, s ? s->numViews : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,11 +1536,15 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
                                                 CKTextureDesc *Desc,
                                                 const VxImageDescEx *Data)
 {
+    static int s_CreateTextureLogCount = 0;
     if (!m_BgfxInitialized || !Desc || Texture == 0)
         return CKERR_INVALIDPARAMETER;
 
     uint16_t w = (uint16_t)Desc->Format.Width;
     uint16_t h = (uint16_t)Desc->Format.Height;
+    if (w == 0 || h == 0)
+        return CKERR_INVALIDPARAMETER;
+
     bool hasMips = Desc->MipMapCount > 1;
 
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
@@ -1266,6 +1559,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
         texFlags |= BGFX_TEXTURE_COMPUTE_WRITE;
 
     const bgfx::Memory *mem = NULL;
+    CKDWORD copiedBytes = 0;
     if (Data && Data->Image)
     {
         CKDWORD bpp = (Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32;
@@ -1273,6 +1567,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
         CKDWORD imgSize = rowBytes * Data->Height;
         if (pf == _DXT1 || pf == _DXT3 || pf == _DXT5)
             imgSize = Data->TotalImageSize;
+        copiedBytes = imgSize;
         mem = bgfx::copy(Data->Image, imgSize);
     }
 
@@ -1296,11 +1591,22 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     rec->Height = h;
     rec->IsDepth = FALSE;
     rec->Format = fmt;
-    rec->BitsPerPixel = (Data && Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32;
+    rec->BitsPerPixel = (Desc->Format.BitsPerPixel > 0) ? Desc->Format.BitsPerPixel :
+                         ((Data && Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32);
 
     CKBgfxTextureRecord *&slot = EnsureSlot(m_Textures, Texture);
     DestroyRecord(slot);
     slot = rec;
+
+    if (s_CreateTextureLogCount < 80) {
+        BgfxLogf("CreateTexture",
+                 "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u mips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
+                 Texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
+                 (int)pf, (int)fmt, rec->BitsPerPixel, Desc->MipMapCount, copiedBytes,
+                 FirstDword(Data ? Data->Image : nullptr, copiedBytes),
+                 SampleBytesChecksum(Data ? Data->Image : nullptr, copiedBytes));
+        s_CreateTextureLogCount++;
+    }
 
     return CK_OK;
 }
@@ -1352,12 +1658,20 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *D
     else
     {
         CKBgfxShaderRecord *ps = GetShader(Desc->PixelShader);
-        if (!vs || !ps)
+        if (!vs || !ps) {
+            FILE *lf = GetBgfxLogFile();
+            if (lf) fprintf(lf, "[CreateProgram] FAIL: vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d\n",
+                           vs, Desc->VertexShader, ps, Desc->PixelShader, m_Shaders.Size());
             return CKERR_INVALIDPARAMETER;
+        }
 
         handle = bgfx::createProgram(vs->Handle, ps->Handle, false);
-        if (!bgfx::isValid(handle))
+        if (!bgfx::isValid(handle)) {
+            FILE *lf = GetBgfxLogFile();
+            if (lf) fprintf(lf, "[CreateProgram] bgfx::createProgram INVALID: vs.idx=%u ps.idx=%u\n",
+                           vs->Handle.idx, ps->Handle.idx);
             return CKERR_INVALIDPARAMETER;
+        }
 
         if (Desc->ConsumeShaders)
         {
@@ -1395,6 +1709,8 @@ CKERROR CKBgfxRasterizerContext::CreateUniform(CKDWORD Uniform, CKUniformDesc *D
     rec->Handle = handle;
     rec->Type = Desc->Type;
     rec->Count = Desc->Count;
+    rec->Name[0] = '\0';
+    strncpy_s(rec->Name, Desc->Name, _TRUNCATE);
 
     CKBgfxUniformRecord *&slot = EnsureSlot(m_Uniforms, Uniform);
     DestroyRecord(slot);
@@ -1667,6 +1983,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                                 CKDWORD Face, const CKRECT *Region,
                                                 const VxImageDescEx *Data)
 {
+    static int s_UpdateTextureLogCount = 0;
     if (!m_BgfxInitialized || !Data || !Data->Image)
         return CKERR_INVALIDPARAMETER;
 
@@ -1709,6 +2026,18 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         CKDWORD bpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : 32;
         CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
         CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
+        if (s_UpdateTextureLogCount < 120) {
+            uint32_t sampleSize = pitch * h;
+            BgfxLogf("UpdateTexture",
+                     "id=%u handle=%u mip=%u face=%u region=%ux%u+%u,%u rec=%ux%u recBpp=%u data=%dx%d dataBpp=%d pitch=%u rowBytes=%u first=0x%08X hash=0x%08X",
+                     Texture, rec->Handle.idx, Mip, Face, w, h, x, y,
+                     rec->Width, rec->Height, rec->BitsPerPixel,
+                     Data->Width, Data->Height, Data->BitsPerPixel,
+                     pitch, rowBytes,
+                     FirstDword(Data->Image, sampleSize),
+                     SampleBytesChecksum(Data->Image, sampleSize));
+            s_UpdateTextureLogCount++;
+        }
         if (pitch == rowBytes)
         {
             mem = bgfx::copy(Data->Image, rowBytes * h);
@@ -2154,7 +2483,11 @@ CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync)
         bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
     }
 
+    DrawDebugOverlay();
+    RequestDebugFrameCapture();
+
     bgfx::frame();
+    ++m_DebugFrameId;
 
     m_TransformCount.store(0, std::memory_order_relaxed);
     m_TransientVBCount.store(0, std::memory_order_relaxed);

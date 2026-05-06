@@ -1267,170 +1267,68 @@ VXSHADE_MODE RCKMaterial::GetShadeMode() {
  */
 CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int TextureStage) {
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
-    CKRasterizerContext *rst = dev->m_RasterizerContext;
 
-    // Reset vertex shader on stage 0
-    if (!TextureStage) {
-        rst->SetVertexShader(0);
-    }
-
-    // Call user callback if set - callback can return non-zero to skip material application
     if (m_Callback) {
         if (m_Callback(dev, this, m_CallbackArgument)) {
             return TRUE;
         }
     }
 
-    // Apply material lighting data
+    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+
+    // --- Material data ---
     if (Lit) {
-        rst->SetMaterial(&m_MaterialData);
-        // Enable specular if power is above threshold
-        // IDA (0x10064be0): enabled only when SpecularPower > 0.05f (strict)
-        CKBOOL specularEnable = (m_MaterialData.SpecularPower > 0.05f) ? TRUE : FALSE;
-        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, specularEnable);
+        ffp.SetMaterial(&m_MaterialData);
     }
 
-    // Set cull mode based on two-sided flag
-    rst->SetRenderState(VXRENDERSTATE_CULLMODE, (m_Flags & 1) ? VXCULL_NONE : VXCULL_CCW);
-
-    int effectResult = 0;
-    CKBOOL alphaTestOk = TRUE;
-
-    // Handle texturing
-    if (m_Textures[0] && dev->m_TextureEnabled) {
-        VX_EFFECT effect = GetEffect();
-
-        if (effect != VXEFFECT_NONE) {
-            // Handle special effects
-            switch (effect) {
-            case VXEFFECT_TEXGEN: {
-                // Simple texture generation
-                VX_EFFECTTEXGEN texGen = VXEFFECT_TGNONE;
-                if (m_EffectParameter) {
-                    texGen = *static_cast<VX_EFFECTTEXGEN *>(m_EffectParameter->GetReadDataPtr(TRUE));
-                }
-                CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-                effectResult = TexGenEffect(dev, texGen, reinterpret_cast<RCK3dEntity *>(rootEntity), TextureStage);
-                break;
-            }
-            case VXEFFECT_TEXGENREF: {
-                // Texture generation with reference entity
-                CK3dEntity *entity = dev->m_RenderedScene->GetRootEntity();
-                VX_EFFECTTEXGEN texGen = VXEFFECT_TGNONE;
-                if (m_EffectParameter) {
-                    CKStructHelper helper(m_EffectParameter);
-                    CKParameter *texGenParam = helper[0];
-                    if (texGenParam) {
-                        texGen = *static_cast<VX_EFFECTTEXGEN *>(texGenParam->GetReadDataPtr(TRUE));
-                    }
-                    CKParameter *entityParam = helper[1];
-                    if (entityParam) {
-                        CK3dEntity *refEntity = reinterpret_cast<CK3dEntity *>(entityParam->GetValueObject(TRUE));
-                        if (refEntity) {
-                            entity = refEntity;
-                        }
-                    }
-                }
-                effectResult = TexGenEffect(dev, texGen, reinterpret_cast<RCK3dEntity *>(entity), TextureStage);
-                break;
-            }
-            case VXEFFECT_BUMPENV: {
-                effectResult = BumpMapEnvEffect(dev);
-                break;
-            }
-            case VXEFFECT_DP3: {
-                effectResult = DP3Effect(dev, TextureStage);
-                break;
-            }
-            case VXEFFECT_2TEXTURES:
-            case VXEFFECT_3TEXTURES: {
-                effectResult = BlendTexturesEffect(dev, TextureStage);
-                break;
-            }
-            default: {
-                // Custom effect - use effect description callback
-                RCKRenderManager *renderManager = dev->m_RenderManager;
-                if (renderManager) {
-                    const VxEffectDescription *effectDesc = &renderManager->GetEffectDescription(effect);
-                    if (effectDesc && effectDesc->SetCallback) {
-                        effectResult = effectDesc->SetCallback(dev, this, TextureStage, effectDesc->CallbackArg);
-                    }
-                }
-                break;
-            }
-            }
-        }
-
-        // Apply texture if effect didn't handle it (bit 1 clear means apply texture)
-        if ((effectResult & 2) == 0) {
-            const VXTEXTURE_ADDRESSMODE addressMode = static_cast<VXTEXTURE_ADDRESSMODE>(m_TextureAddressMode);
-            CKBOOL clampUV = (addressMode == VXTEXTURE_ADDRESSCLAMP) ? TRUE : FALSE;
-            CKBOOL texResult = m_Textures[0]->SetAsCurrent(dev, clampUV, TextureStage);
-
-            if (!TextureStage) {
-                rst->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-            }
-
-            // If effect didn't set texture coords (bit 0 clear), reset to identity
-            if ((effectResult & 1) == 0) {
-                rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-                rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + TextureStage),
-                                        VxMatrix::Identity());
-                rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX, TextureStage);
-            }
-
-            // Set texture sampling parameters
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-            // Perspective correction
-            rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, (m_Flags & 4) ? TRUE : FALSE);
-
-            // Check if texture is in a special format that requires disabling alpha test
-            if (texResult == 2) {
-                alphaTestOk = FALSE;
-            }
-        }
+    // --- Cull mode ---
+    if (IsTwoSided()) {
+        ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     } else {
-        // No texture - clear texture slot
-        rst->SetTexture(0, TextureStage);
+        ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
     }
 
-    // Set shade mode and fill mode
-    rst->SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode);
-    rst->SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode);
+    // --- Fill mode ---
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode);
 
-    // Set Z-write enable
-    rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled());
+    // --- Shade mode ---
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode);
 
-    // Set Z comparison function (bits 14-18)
-    rst->SetRenderState(VXRENDERSTATE_ZFUNC, GetZFunc());
-
-    // Handle alpha testing
-    if (alphaTestOk) {
-        if (m_Flags & 0x10) {
-            // Alpha test enabled
-            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
-            rst->SetRenderState(VXRENDERSTATE_ALPHAFUNC, GetAlphaFunc());
-            rst->SetRenderState(VXRENDERSTATE_ALPHAREF, GetAlphaRef());
-        } else {
-            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-        }
-    }
-
-    // Handle alpha blending
-    if (m_Flags & 8) {
-        rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-        if (!TextureStage) {
-            rst->SetRenderState(VXRENDERSTATE_SRCBLEND, m_SourceBlend);
-            rst->SetRenderState(VXRENDERSTATE_DESTBLEND, m_DestBlend);
-        }
+    // --- Alpha blending ---
+    if (AlphaBlendEnabled()) {
+        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_SRCBLEND, (CKDWORD)m_SourceBlend);
+        ffp.SetRenderState(VXRENDERSTATE_DESTBLEND, (CKDWORD)m_DestBlend);
     } else {
-        rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    }
+
+    // --- Depth ---
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled() ? TRUE : FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, (CKDWORD)GetZFunc());
+
+    // --- Alpha test ---
+    if (AlphaTestEnabled()) {
+        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, (CKDWORD)GetAlphaFunc());
+        ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, m_AlphaRef);
+    } else {
+        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+    }
+
+    // --- Texture ---
+    CKTexture *tex = m_Textures[TextureStage];
+    if (tex) {
+        CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
+        tex->SetAsCurrent(context, clamped, TextureStage);
+
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
+    } else {
+        ffp.SetTexture(TextureStage, 0);
     }
 
     return TRUE;
@@ -1453,206 +1351,12 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
  * @return Effect result flags (bit 0 = coords set, bit 1 = texture set)
  */
 CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen, RCK3dEntity *refEntity, int stage) {
-    CKRasterizerContext *rst = dev->m_RasterizerContext;
-    VxMatrix texMatrix;
-    Vx3DMatrixIdentity(texMatrix);
-
-    switch (texGen) {
-    case VXEFFECT_TGNONE: {
-        // No texture generation - use identity transform
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage);
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), VxMatrix::Identity());
-        return 1;
-    }
-
-    case VXEFFECT_TGTRANSFORM: {
-        // Simple texture transform
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage);
-
-        CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-        texMatrix = (refEntity == reinterpret_cast<RCK3dEntity *>(rootEntity))
-                        ? VxMatrix::Identity()
-                        : refEntity->m_WorldMatrix;
-
-        // IDA: Copy row 3 to row 2 and force [2][2] = 1.0f (even for root entity)
-        texMatrix[2][0] = texMatrix[3][0];
-        texMatrix[2][1] = texMatrix[3][1];
-        texMatrix[2][2] = 1.0f;
-        texMatrix[2][3] = texMatrix[3][3];
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGREFLECT:
-    case VXEFFECT_TGCHROME: {
-        // Reflection/Chrome texture generation
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
-        if (texGen == VXEFFECT_TGREFLECT) {
-            // Camera-space reflection vectors (D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR = 0x30000)
-            rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x30000);
-        } else {
-            // Camera-space normals (D3DTSS_TCI_CAMERASPACENORMAL = 0x10000)
-            rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x10000);
-        }
-
-        // IDA: Scale matrix for [-1,1] -> [0,1] UV mapping
-        VxMatrix scaleMatrix;
-        Vx3DMatrixIdentity(scaleMatrix);
-        scaleMatrix[0][0] = 0.4f;
-        scaleMatrix[1][1] = -0.4f;
-        scaleMatrix[2][2] = 0.4f;
-        scaleMatrix[3][3] = 0.4f;
-
-        CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-        if (refEntity == reinterpret_cast<RCK3dEntity *>(rootEntity)) {
-            Vx3DMatrixIdentity(texMatrix);
-        } else {
-            // IDA builds an orthonormal basis from (rst->m_WorldMatrix.translation - refEntity.translation)
-            // and converts it through rootEntity->GetWorldMatrix().
-            const VxVector dirRaw(
-                rst->m_WorldMatrix[3][0] - refEntity->m_WorldMatrix[3][0],
-                rst->m_WorldMatrix[3][1] - refEntity->m_WorldMatrix[3][1],
-                rst->m_WorldMatrix[3][2] - refEntity->m_WorldMatrix[3][2]);
-
-            VxVector dir = dirRaw;
-            dir.Normalize();
-
-            const VxVector axisY = VxVector::axisY();
-            const float dotY = DotProduct(axisY, dir);
-            VxVector up = axisY - (dir * dotY);
-            up.Normalize();
-
-            VxVector right = CrossProduct(up, dir);
-
-            VxMatrix basis;
-            Vx3DMatrixIdentity(basis);
-            basis[0][0] = right.x;
-            basis[0][1] = right.y;
-            basis[0][2] = right.z;
-            basis[1][0] = up.x;
-            basis[1][1] = up.y;
-            basis[1][2] = up.z;
-            basis[2][0] = dir.x;
-            basis[2][1] = dir.y;
-            basis[2][2] = dir.z;
-
-            VxMatrix invBasis;
-            Vx3DInverseMatrix(invBasis, basis);
-
-            const VxMatrix &rootWorld = dev->m_RenderedScene->GetRootEntity()->GetWorldMatrix();
-            Vx3DMultiplyMatrix(texMatrix, rootWorld, invBasis);
-        }
-
-        Vx3DMultiplyMatrix(texMatrix, scaleMatrix, texMatrix);
-        texMatrix[3][0] = 0.5f;
-        texMatrix[3][1] = 0.5f;
-        texMatrix[3][2] = 0.0f;
-        texMatrix[3][3] = 1.0f;
-
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGPLANAR: {
-        // Planar texture projection
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x20000); // Position-based
-
-        CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
-        if (refEntity == reinterpret_cast<RCK3dEntity *>(rootEntity)) {
-            Vx3DMatrixIdentity(texMatrix);
-            texMatrix[0][0] = 0.5f;
-            texMatrix[1][1] = -0.5f;
-            texMatrix[2][2] = 0.5f;
-            texMatrix[3][3] = 0.5f;
-        } else {
-            VxMatrix base;
-            Vx3DMatrixIdentity(base);
-            base[0][0] = 0.5f;
-            base[1][1] = -0.5f;
-            base[2][2] = 0.5f;
-            base[3][3] = 0.5f;
-
-            // IDA: tex = base * (inv(W_ref) * W_root)
-            VxMatrix invRefTimesRoot;
-            const VxMatrix &rootWorld = rootEntity->GetWorldMatrix();
-            Vx3DMultiplyMatrix(invRefTimesRoot, refEntity->GetInverseWorldMatrix(), rootWorld);
-            Vx3DMultiplyMatrix(texMatrix, base, invRefTimesRoot);
-        }
-
-        // Add offset (0.5, 0.5, 0.0)
-        texMatrix[3][0] += 0.5f;
-        texMatrix[3][1] += 0.5f;
-
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGCUBEMAP_REFLECT: {
-        // Cubemap reflection
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x30000);
-        texMatrix = refEntity->m_WorldMatrix;
-        texMatrix[3][0] = 0.0f;
-        texMatrix[3][1] = 0.0f;
-        texMatrix[3][2] = 0.0f;
-        texMatrix[3][3] = 1.0f;
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGCUBEMAP_NORMALS: {
-        // Cubemap normals
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x10000);
-        texMatrix = refEntity->m_WorldMatrix;
-        texMatrix[3][0] = 0.0f;
-        texMatrix[3][1] = 0.0f;
-        texMatrix[3][2] = 0.0f;
-        texMatrix[3][3] = 1.0f;
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGCUBEMAP_SKYMAP: {
-        // Cubemap skymap
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x20000);
-        texMatrix = refEntity->m_WorldMatrix;
-        texMatrix[3][0] = 0.0f;
-        texMatrix[3][1] = 0.0f;
-        texMatrix[3][2] = 0.0f;
-        texMatrix[3][3] = 1.0f;
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    case VXEFFECT_TGCUBEMAP_POSITIONS: {
-        // Cubemap positions
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
-        rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage | 0x20000);
-
-        // IDA: tex = inv(rst->m_WorldMatrix) * refEntity->GetWorldMatrix(); then clear translation.
-        VxMatrix invWorld;
-        Vx3DInverseMatrix(invWorld, rst->m_WorldMatrix);
-        Vx3DMultiplyMatrix(texMatrix, invWorld, refEntity->GetWorldMatrix());
-
-        texMatrix[3][0] = 0.0f;
-        texMatrix[3][1] = 0.0f;
-        texMatrix[3][2] = 0.0f;
-        texMatrix[3][3] = 1.0f;
-
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
-
-    default:
-        // Unknown texture generation mode - fall through to default transform
-        rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), texMatrix);
-        return 1;
-    }
+    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
+    (void) dev;
+    (void) texGen;
+    (void) refEntity;
+    (void) stage;
+    return 0;
 }
 
 /**
@@ -1665,129 +1369,9 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
-    CKRasterizerContext *rst = dev->m_RasterizerContext;
-    RCK3dEntity *entity = (RCK3dEntity *) dev->m_RenderedScene->GetRootEntity();
-
-    // Default parameters
-    int tssOp = CKRST_TOP_ADDSIGNED;
-    float bumpScale = 2.0f;
-    VX_EFFECTTEXGEN texGen = VXEFFECT_TGREFLECT;
-
-    // Read parameters from effect parameter if available
-    if (m_EffectParameter) {
-        CKStructHelper helper(m_EffectParameter);
-        if (helper.GetMemberCount() >= 4) {
-            // Parameter 0: Bump scale offset
-            CKParameter *scaleParam = helper[0];
-            if (scaleParam) {
-                float *scalePtr = (float *) scaleParam->GetReadDataPtr();
-                if (scalePtr)
-                    bumpScale += *scalePtr;
-            }
-
-            // Parameter 1: Texture operation
-            CKParameter *tssParam = helper[1];
-            if (tssParam) {
-                CKDWORD *tssPtr = (CKDWORD *) tssParam->GetReadDataPtr();
-                if (tssPtr)
-                    tssOp = *tssPtr;
-            }
-
-            // Parameter 2: Texture generation mode
-            CKParameter *texGenParam = helper[2];
-            if (texGenParam) {
-                CKDWORD *texGenPtr = (CKDWORD *) texGenParam->GetReadDataPtr();
-                if (texGenPtr)
-                    texGen = (VX_EFFECTTEXGEN) *texGenPtr;
-            }
-
-            // Parameter 3: Reference entity
-            CKParameter *entityParam = helper[3];
-            if (entityParam) {
-                CKObject *obj = entityParam->GetValueObject();
-                if (obj)
-                    entity = (RCK3dEntity *) obj;
-            }
-        }
-    }
-
-    // Setup stage 0 - base/diffuse texture
-    if (m_Textures[0]) {
-        m_Textures[0]->SetAsCurrent((CKRenderContext *) dev, m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP, 0);
-    }
-
-    rst->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
-    rst->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    rst->SetTransformMatrix(VXMATRIX_TEXTURE0, VxMatrix::Identity());
-    rst->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-    rst->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-    rst->SetTextureStageState(0, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(0, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-    int stage = 2;
-
-    // Setup stage 1 - bump map texture (if available)
-    if (m_Textures[1]) {
-        m_Textures[1]->SetAsCurrent((CKRenderContext *) dev, m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP, 1);
-
-        rst->SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX, 0);
-        rst->SetTextureStageState(1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        rst->SetTransformMatrix(VXMATRIX_TEXTURE1, VxMatrix::Identity());
-        rst->SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
-        rst->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
-
-        // Bump environment mapping operation
-        rst->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
-        rst->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-
-        // Bump environment matrix (scale values as CKDWORD via memcpy)
-        CKDWORD bumpValD;
-        memcpy(&bumpValD, &bumpScale, sizeof(CKDWORD));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT00, bumpValD);
-        float zeroVal = 0.0f;
-        memcpy(&bumpValD, &zeroVal, sizeof(CKDWORD));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT01, bumpValD);
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT10, bumpValD);
-        memcpy(&bumpValD, &bumpScale, sizeof(CKDWORD));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT11, bumpValD);
-        memcpy(&bumpValD, &zeroVal, sizeof(CKDWORD));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLSCALE, bumpValD);
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLOFFSET, bumpValD);
-
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-    } else {
-        stage = 1;
-    }
-
-    // Setup environment map texture (if available)
-    if (m_Textures[2]) {
-        m_Textures[2]->SetAsCurrent((CKRenderContext *) dev, FALSE, stage);
-        rst->SetTextureStageState(stage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-        rst->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(stage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(stage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-        rst->SetTextureStageState(stage, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-
-        // Apply texture generation effect for environment map
-        TexGenEffect(dev, texGen, entity, stage);
-
-        rst->SetTextureStageState(stage, CKRST_TSS_OP, tssOp);
-        rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-    } else {
-        rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DISABLE);
-    }
-
-    return 2; // Multi-texture effect
+    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
+    (void) dev;
+    return 0;
 }
 
 /**
@@ -1801,113 +1385,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
-    CKRasterizerContext *rst = dev->m_RasterizerContext;
-
-    // Setup normal map texture on stage
-    if (m_Textures[1]) {
-        m_Textures[1]->SetAsCurrent((CKRenderContext *) dev, FALSE, stage);
-    }
-
-    // Setup diffuse texture on stage+1
-    m_Textures[0]->SetAsCurrent((CKRenderContext *) dev, FALSE, stage + 1);
-
-    // Configure stage texture transform
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), VxMatrix::Identity());
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage);
-
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage + 1), VxMatrix::Identity());
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_TEXCOORDINDEX, stage);
-
-    // Get light source entity
-    CKObject *lightObj = nullptr;
-    if (m_EffectParameter) {
-        CK_ID *idPtr = (CK_ID *) m_EffectParameter->GetReadDataPtr();
-        if (idPtr) {
-            lightObj = m_Context->GetObject(*idPtr);
-        }
-    }
-
-    // Fall back to root entity if no light specified
-    if (!lightObj && dev && dev->m_RenderedScene) {
-        lightObj = dev->m_RenderedScene->GetRootEntity();
-    }
-
-    // Calculate light direction in object space
-    VxVector lightDir(0.0f, 0.0f, 1.0f);
-
-    if (lightObj && CKIsChildClassOf(lightObj, CKCID_LIGHT)) {
-        RCKLight *lightEntity = (RCKLight *) lightObj;
-        // It's a light - get direction based on type
-        if (lightEntity->GetType() == VX_LIGHTDIREC) {
-            // Directional light - use Z axis of light's world matrix
-            const VxMatrix &lightMatrix = lightEntity->GetWorldMatrix();
-            lightDir.x = lightMatrix[2][0];
-            lightDir.y = lightMatrix[2][1];
-            lightDir.z = lightMatrix[2][2];
-        } else {
-            // Point/spot light - compute direction from light position to object
-            const VxMatrix &lightMatrix = lightEntity->GetWorldMatrix();
-            VxVector lightPos(lightMatrix[3][0], lightMatrix[3][1], lightMatrix[3][2]);
-            VxVector objPos(rst->m_WorldMatrix[3][0], rst->m_WorldMatrix[3][1], rst->m_WorldMatrix[3][2]);
-            lightDir = objPos - lightPos;
-        }
-    } else if (lightObj && CKIsChildClassOf(lightObj, CKCID_3DENTITY)) {
-        // Not a light - use direction from entity to object
-        const VxMatrix &entityMatrix = ((RCK3dEntity *) lightObj)->GetWorldMatrix();
-        VxVector entityPos(entityMatrix[3][0], entityMatrix[3][1], entityMatrix[3][2]);
-        VxVector objPos(rst->m_WorldMatrix[3][0], rst->m_WorldMatrix[3][1], rst->m_WorldMatrix[3][2]);
-        lightDir = objPos - entityPos;
-    }
-
-    // Transform light direction to object space
-    VxMatrix invWorldMatrix;
-    Vx3DInverseMatrix(invWorldMatrix, rst->m_WorldMatrix);
-    Vx3DRotateVector(&lightDir, invWorldMatrix, &lightDir);
-
-    // Swap Y and Z, negate
-    float temp = lightDir.y;
-    lightDir.y = lightDir.z;
-    lightDir.z = temp;
-    lightDir.z = -lightDir.z;
-    lightDir.y = -lightDir.y;
-
-    lightDir.Normalize();
-
-    // Convert normalized vector to RGBA color
-    // Maps [-1,1] to [0,255] for each component
-    CKDWORD r = (CKDWORD) ((lightDir.x * 0.5f + 0.5f) * 255.0f);
-    CKDWORD g = (CKDWORD) ((lightDir.y * 0.5f + 0.5f) * 255.0f);
-    CKDWORD b = (CKDWORD) ((lightDir.z * 0.5f + 0.5f) * 255.0f);
-    CKDWORD textureFactor = 0xFF000000 | (r << 16) | (g << 8) | b;
-
-    rst->SetRenderState(VXRENDERSTATE_TEXTUREFACTOR, textureFactor);
-
-    // Stage: DOT3 operation (normal map dot light direction)
-    rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR);
-
-    // Stage+1: Modulate with diffuse texture
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_MODULATE);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-
-    // Set filter modes
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-    rst->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-    return 2; // Multi-texture effect
+    // TODO: Phase 2 — route through FFPipeline (SetRenderState, SetTextureStageState, SetTransformMatrix)
+    (void) dev;
+    (void) stage;
+    return 0;
 }
 
 /**
@@ -1921,140 +1402,10 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
-    CKRasterizerContext *rst = dev->m_RasterizerContext;
-    RCK3dEntity *entity = (RCK3dEntity *) dev->m_RenderedScene->GetRootEntity();
-
-    // Setup stage 0 - base texture
-    m_Textures[0]->SetAsCurrent((CKRenderContext *) dev,
-                                m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP, stage);
-
-    if (stage == 0) {
-        rst->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-    }
-
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, stage);
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    rst->SetTransformMatrix(static_cast<VXMATRIX_TYPE>(VXMATRIX_TEXTURE0 + stage), VxMatrix::Identity());
-    rst->SetTextureStageState(stage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-    rst->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(stage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-    // Read struct parameters for second texture blend
-    CKStructHelper helper(m_EffectParameter);
-
-    // Setup second texture if available and parameters exist
-    if (m_Textures[1] && helper.GetMemberCount() >= 2) {
-        // Parameter 0: Blend operation for texture 1
-        CKDWORD blendOp1 = 4; // D3DTOP_MODULATE default
-        CKParameter *op1Param = helper[0];
-        if (op1Param) {
-            CKDWORD *opPtr = (CKDWORD *) op1Param->GetReadDataPtr();
-            if (opPtr)
-                blendOp1 = *opPtr;
-        }
-
-        // Parameter 1: Texture generation mode for texture 1
-        VX_EFFECTTEXGEN texGen1 = VXEFFECT_TGNONE;
-        CKParameter *texGen1Param = helper[1];
-        if (texGen1Param) {
-            CKDWORD *tgPtr = (CKDWORD *) texGen1Param->GetReadDataPtr();
-            if (tgPtr)
-                texGen1 = (VX_EFFECTTEXGEN) *tgPtr;
-        }
-
-        // Parameter 2: Reference entity for texture 1
-        if (helper.GetMemberCount() >= 3) {
-            CKParameter *entity1Param = helper[2];
-            if (entity1Param) {
-                CKObject *obj = entity1Param->GetValueObject();
-                if (obj)
-                    entity = (RCK3dEntity *) obj;
-            }
-        }
-
-        // Setup texture 1
-        m_Textures[1]->SetAsCurrent((CKRenderContext *) dev,
-                                    m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP, stage + 1);
-
-        TexGenEffect(dev, texGen1, entity, stage + 1);
-
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-        // Set blend operation
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, blendOp1);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE); // D3DTA_TEXTURE
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT); // D3DTA_CURRENT
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_AOP, blendOp1);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
-    } else {
-        rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_DISABLE); // D3DTOP_DISABLE
-    }
-
-    // Setup third texture if available and parameters exist
-    if (m_Textures[2] && helper.GetMemberCount() >= 5) {
-        // Reset entity to root
-        entity = (RCK3dEntity *) dev->m_RenderedScene->GetRootEntity();
-
-        // Parameter 3: Blend operation for texture 2
-        CKDWORD blendOp2 = 4; // D3DTOP_MODULATE default
-        CKParameter *op2Param = helper[3];
-        if (op2Param) {
-            CKDWORD *opPtr = (CKDWORD *) op2Param->GetReadDataPtr();
-            if (opPtr)
-                blendOp2 = *opPtr;
-        }
-
-        // Parameter 4: Texture generation mode for texture 2
-        VX_EFFECTTEXGEN texGen2 = VXEFFECT_TGNONE;
-        CKParameter *texGen2Param = helper[4];
-        if (texGen2Param) {
-            CKDWORD *tgPtr = (CKDWORD *) texGen2Param->GetReadDataPtr();
-            if (tgPtr)
-                texGen2 = (VX_EFFECTTEXGEN) *tgPtr;
-        }
-
-        // Parameter 5: Reference entity for texture 2
-        if (helper.GetMemberCount() >= 6) {
-            CKParameter *entity2Param = helper[5];
-            if (entity2Param) {
-                CKObject *obj = entity2Param->GetValueObject();
-                if (obj)
-                    entity = (RCK3dEntity *) obj;
-            }
-        }
-
-        // Setup texture 2
-        m_Textures[2]->SetAsCurrent((CKRenderContext *) dev,
-                                    m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP, stage + 2);
-
-        TexGenEffect(dev, texGen2, entity, stage + 2);
-
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-
-        // Set blend operation
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_OP, blendOp2);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_ARG1, CKRST_TA_TEXTURE); // D3DTA_TEXTURE
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_ARG2, CKRST_TA_CURRENT); // D3DTA_CURRENT
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_AOP, blendOp2);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
-    } else {
-        rst->SetTextureStageState(stage + 2, CKRST_TSS_OP, CKRST_TOP_DISABLE); // D3DTOP_DISABLE
-    }
-
-    return 2; // Multi-texture effect
+    // TODO: Phase 2 — route through FFPipeline (SetTextureStageState, SetTransformMatrix)
+    (void) dev;
+    (void) stage;
+    return 0;
 }
 
 /**

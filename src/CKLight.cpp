@@ -5,6 +5,7 @@
 #include "CKFile.h"
 #include "CKRasterizer.h"
 #include "RCK3dEntity.h"
+#include "CKFixedFunctionPipeline.h"
 
 // Static class ID definition
 CK_CLASSID RCKLight::m_ClassID = CKCID_LIGHT;
@@ -576,20 +577,21 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
 //=============================================================================
 
 /*************************************************
-Summary: Sets up the light in the rasterizer.
-Purpose: Configures the light at the specified index in the rasterizer.
+Summary: Sets up the light in the fixed-function pipeline.
+Purpose: Configures the light at the specified index via CKFixedFunctionPipeline.
 Remarks:
 - Checks visibility first
 - For non-directional lights, checks if attenuation sum is sufficient
 - Checks if light is active (bit 8 / 0x100 in m_Flags)
-- Extracts position from world matrix row 3
-- Extracts direction from world matrix row 2
-- Handles specular flag (0x200) - scales diffuse by light power
+- Extracts world-space position from world matrix row 3
+- Extracts world-space direction from world matrix row 2
+- Handles specular flag (0x200) - scales diffuse by light power for specular
 - Applies light power scaling to diffuse color if != 1.0
+- The FFPipeline transforms position/direction to view space internally
 
 Implementation based on decompilation at 0x1001b0c2.
 *************************************************/
-CKBOOL RCKLight::Setup(CKRasterizerContext *rst, CKDWORD lightIndex) {
+CKBOOL RCKLight::Setup(CKFixedFunctionPipeline *ffPipeline, int lightIndex) {
     // Check visibility
     if (!IsVisible())
         return FALSE;
@@ -605,13 +607,13 @@ CKBOOL RCKLight::Setup(CKRasterizerContext *rst, CKDWORD lightIndex) {
     if (!(m_Flags & 0x100))
         return FALSE;
 
-    // Extract position from world matrix row 3
+    // Extract world-space position from world matrix row 3
     const VxMatrix &worldMat = GetWorldMatrix();
     m_LightData.Position.x = worldMat[3][0];
     m_LightData.Position.y = worldMat[3][1];
     m_LightData.Position.z = worldMat[3][2];
 
-    // Extract direction from world matrix row 2
+    // Extract world-space direction from world matrix row 2
     m_LightData.Direction.x = worldMat[2][0];
     m_LightData.Direction.y = worldMat[2][1];
     m_LightData.Direction.z = worldMat[2][2];
@@ -632,24 +634,23 @@ CKBOOL RCKLight::Setup(CKRasterizerContext *rst, CKDWORD lightIndex) {
         m_LightData.Specular.a = 1.0f;
     }
 
-    // Apply light power scaling
-    if (m_LightPower == 1.0f) {
-        // No scaling needed
-        rst->SetLight(lightIndex, &m_LightData);
-        rst->EnableLight(lightIndex, TRUE);
-    } else {
-        // Save original diffuse, scale it, set light, restore
+    // Apply light power scaling to diffuse, submit to pipeline, then restore.
+    // When power == 1.0 we skip the temporary copy entirely.
+    if (m_LightPower != 1.0f) {
+        // Save original diffuse, apply power scale, submit, restore
         VxColor originalDiffuse = m_LightData.Diffuse;
         m_LightData.Diffuse.r *= m_LightPower;
         m_LightData.Diffuse.g *= m_LightPower;
         m_LightData.Diffuse.b *= m_LightPower;
         m_LightData.Diffuse.a *= m_LightPower;
 
-        rst->SetLight(lightIndex, &m_LightData);
-        rst->EnableLight(lightIndex, TRUE);
+        ffPipeline->SetLight(lightIndex, &m_LightData);
+        ffPipeline->EnableLight(lightIndex, TRUE);
 
-        // Restore original diffuse
         m_LightData.Diffuse = originalDiffuse;
+    } else {
+        ffPipeline->SetLight(lightIndex, &m_LightData);
+        ffPipeline->EnableLight(lightIndex, TRUE);
     }
 
     return TRUE;

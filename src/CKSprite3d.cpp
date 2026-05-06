@@ -419,9 +419,9 @@ CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
     CKDWORD vis;
     if (flags & 0xFF) {
         m_RenderExtents = VxRect(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
-        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, &m_RenderExtents);
+        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
     } else {
-        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, nullptr);
+        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
     }
 
     if (!vis) {
@@ -712,7 +712,7 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
     if (m_Callbacks) {
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
@@ -730,7 +730,7 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];

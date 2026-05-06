@@ -10,8 +10,47 @@
 #include "XClassArray.h"
 #include "CKTypes.h"
 #include "CKRasterizerTypes.h"
+#include "CKRenderEngineEnums.h"
+
+typedef CKDWORD CKRST_OBJECTTYPE;
+
+struct CKViewportData {
+    CKDWORD ViewX;
+    CKDWORD ViewY;
+    CKDWORD ViewWidth;
+    CKDWORD ViewHeight;
+    float ViewZMin;
+    float ViewZMax;
+
+    CKViewportData() : ViewX(0), ViewY(0), ViewWidth(0), ViewHeight(0),
+                       ViewZMin(0.0f), ViewZMax(1.0f) {}
+};
 
 class CKRenderContext;
+
+struct CKMaterialData {
+    VxColor Diffuse;
+    VxColor Ambient;
+    VxColor Specular;
+    VxColor Emissive;
+    float SpecularPower;
+};
+
+struct CKLightData {
+    VXLIGHT_TYPE Type;
+    VxColor Diffuse;
+    VxColor Specular;
+    VxColor Ambient;
+    VxVector Position;
+    VxVector Direction;
+    float Range;
+    float Falloff;
+    float Attenuation0;
+    float Attenuation1;
+    float Attenuation2;
+    float InnerSpotCone;
+    float OuterSpotCone;
+};
 
 class RCKRenderManager;
 class RCKRenderContext;
@@ -583,7 +622,7 @@ struct VxMaterialChannel {
 struct CKPrimitiveEntry {
     VXPRIMITIVETYPE m_Type;
     XArray<CKWORD> m_Indices;
-    CKDWORD m_IndexBufferOffset;
+    int m_IndexBufferOffset;
 };
 
 // IDA: CKVBuffer (0x30 bytes)
@@ -631,8 +670,13 @@ struct CKMaterialGroup {
           m_RemapData(0) {}
 };
 
-// Note: CKVertex is already defined in CKRasterizerTypes.h (32 bytes)
-// It has: VxVector4 V, CKDWORD Diffuse, CKDWORD Specular, float tu, float tv
+struct CKVertex {
+    VxVector4 V;
+    CKDWORD Diffuse;
+    CKDWORD Specular;
+    float tu;
+    float tv;
+};
 
 class RCKMaterial; // Forward declaration
 

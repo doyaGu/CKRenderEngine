@@ -4,6 +4,9 @@
 #include "RCKRenderContext.h"
 #include "CKRasterizer.h"
 #include "CKSprite.h"
+#include "CKDebugLogger.h"
+
+#include <cstdlib>
 
 // External function from CKMeshUtils.cpp
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
@@ -770,7 +773,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // Execute pre-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PreCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
-        dev->m_RasterizerContext->SetVertexShader(0);
+        // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PreCallBacks.Begin(); it != m_Callbacks->m_PreCallBacks.End(); ++it) {
             ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
@@ -792,7 +795,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // Execute post-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PostCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
-        dev->m_RasterizerContext->SetVertexShader(0);
+        // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PostCallBacks.Begin(); it != m_Callbacks->m_PostCallBacks.End(); ++it) {
             ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
@@ -818,8 +821,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             float height = windowRect.GetHeight();
 
             // Set full viewport
-            dev->SetFullViewport(&dev->m_RasterizerContext->m_ViewportData, (int) width, (int) height);
-            dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
+            dev->SetFullViewport(&dev->m_ViewportData, (int) width, (int) height);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
         }
 
         // Set material
@@ -892,6 +895,33 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
 
+        static int s_BlackFullscreenLogCount = 0;
+        const bool isFullscreenBlack =
+            !m_Material->GetTexture(0) &&
+            colorValue == 0xFF000000 &&
+            (int)m_VtxPos.left == 0 && (int)m_VtxPos.top == 0 &&
+            (int)m_VtxPos.right == dev->m_ViewportData.ViewWidth &&
+            (int)m_VtxPos.bottom == dev->m_ViewportData.ViewHeight;
+
+        if (s_BlackFullscreenLogCount < 16 && isFullscreenBlack) {
+            CKObject *parentObj = GetParent();
+            CK_LOG_FMT("2DEntity",
+                       "Fullscreen black quad #%d: obj=%s id=%u class=%d parent=%s flags=0x%X isBackground=%d view=%d material=%s",
+                       s_BlackFullscreenLogCount,
+                       GetName() ? GetName() : "<unnamed>",
+                       GetID(),
+                       GetClassID(),
+                       parentObj && parentObj->GetName() ? parentObj->GetName() : "<none>",
+                       m_Flags,
+                       IsBackground() ? 1 : 0,
+                       (int)dev->m_Current2DView,
+                       m_Material->GetName() ? m_Material->GetName() : "<unnamed>");
+            s_BlackFullscreenLogCount++;
+        }
+        if (isFullscreenBlack && std::getenv("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D")) {
+            return CK_OK;
+        }
+
         // Draw quad as triangle fan
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 
@@ -900,11 +930,11 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 
         // Restore viewport if changed
         if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
-            dev->m_RasterizerContext->m_ViewportData.ViewX = (int) savedViewRect.left;
-            dev->m_RasterizerContext->m_ViewportData.ViewY = (int) savedViewRect.top;
-            dev->m_RasterizerContext->m_ViewportData.ViewWidth = (int) (savedViewRect.right - savedViewRect.left);
-            dev->m_RasterizerContext->m_ViewportData.ViewHeight = (int) (savedViewRect.bottom - savedViewRect.top);
-            dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
+            dev->m_ViewportData.ViewX = (int) savedViewRect.left;
+            dev->m_ViewportData.ViewY = (int) savedViewRect.top;
+            dev->m_ViewportData.ViewWidth = (int) (savedViewRect.right - savedViewRect.left);
+            dev->m_ViewportData.ViewHeight = (int) (savedViewRect.bottom - savedViewRect.top);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
         }
     } else {
         // No material - draw placeholder (editor mode only)
