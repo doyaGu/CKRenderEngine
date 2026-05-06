@@ -31,6 +31,17 @@ struct CKLightData;
 
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
+int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
+CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
+CKDWORD CKFFTexcoordIndex(CKDWORD packed);
+CKDWORD CKFFTexcoordGeneration(CKDWORD packed);
+
+enum CKFFTexcoordGenerationMode {
+    CKFF_TEXGEN_NONE = 0,
+    CKFF_TEXGEN_CAMERASPACENORMAL = 1,
+    CKFF_TEXGEN_CAMERASPACEPOSITION = 2,
+    CKFF_TEXGEN_CAMERASPACEREFLECTION = 3
+};
 
 class CKFixedFunctionPipeline {
 public:
@@ -79,6 +90,7 @@ public:
     const VxMatrix &GetWorldMatrix() const { return m_World; }
     const VxMatrix &GetViewMatrix() const { return m_View; }
     const VxMatrix &GetProjectionMatrix() const { return m_Projection; }
+    CKSamplerDesc BuildSamplerDesc(int stage) const;
 
 private:
     CKRasterizerContext *m_Context;
@@ -123,7 +135,6 @@ private:
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void BindTextures(CKRasterizerEncoder *encoder);
     float ComputeDepthKey() const;
-    CKSamplerDesc BuildSamplerDesc(int stage) const;
 };
 
 #endif // CKFIXEDFUNCTIONPIPELINE_H

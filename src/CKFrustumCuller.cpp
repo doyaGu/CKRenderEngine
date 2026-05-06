@@ -129,13 +129,13 @@ CKBOOL CKFrustumCuller::GetScreenExtents(
         float y = corners[i].y;
         float z = corners[i].z;
 
-        // Row vector × row-major matrix
+        // Row vector x row-major matrix
         float cx = x * m[0] + y * m[4] + z * m[8]  + m[12];
         float cy = x * m[1] + y * m[5] + z * m[9]  + m[13];
         float cw = x * m[3] + y * m[7] + z * m[11] + m[15];
 
         if (cw <= 0.0f) {
-            // Behind camera — box extends behind, fill entire screen
+            // Behind camera - box extends behind, fill entire screen
             screenRect->left = 0;
             screenRect->top = 0;
             screenRect->right = (int)viewportW;

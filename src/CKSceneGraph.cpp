@@ -147,8 +147,8 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
         }
 
         if (clipRectSet) {
-            // TODO: Phase 2 — rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
-            // TODO: Phase 2 — rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+            // TODO: Phase 2 - rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
+            // TODO: Phase 2 - rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
         }
 
         return;
@@ -593,8 +593,8 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     }
 
     if (clipRectSet) {
-        // TODO: Phase 2 — dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
-        // TODO: Phase 2 — dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, dev->m_ProjectionMatrix);
+        // TODO: Phase 2 - dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
+        // TODO: Phase 2 - dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, dev->m_ProjectionMatrix);
     }
 }
 

@@ -143,12 +143,12 @@ static const DebugDrawRange &Transparent3DDebugDrawRange() {
 static bool ShouldSkipDebugView(CKRenderView view) {
     static const bool skipOpaque3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS");
     static const bool skipTransparent3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS");
-    return (view == CKRP_VIEW_OPAQUE3D && skipOpaque3D) ||
+    return ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D) && skipOpaque3D) ||
            (view == CKRP_VIEW_TRANSPARENT && skipTransparent3D);
 }
 
 static int NextDebugDrawSerial(CKRenderView view) {
-    if (view == CKRP_VIEW_OPAQUE3D)
+    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D)
         return g_Opaque3DDrawSerial++;
     if (view == CKRP_VIEW_TRANSPARENT)
         return g_Transparent3DDrawSerial++;
@@ -160,7 +160,7 @@ static bool ShouldSkipDebugDrawSerial(CKRenderView view, int drawSerial) {
         return false;
 
     const DebugDrawRange *range = nullptr;
-    if (view == CKRP_VIEW_OPAQUE3D) {
+    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D) {
         range = &Opaque3DDebugDrawRange();
     } else if (view == CKRP_VIEW_TRANSPARENT) {
         range = &Transparent3DDebugDrawRange();
@@ -257,6 +257,11 @@ static CKDWORD GetStageColorArg2(const CKDWORD *stage) {
     return arg != 0 ? arg : CKRST_TA_CURRENT;
 }
 
+static CKDWORD GetStageColorArg0(const CKDWORD *stage) {
+    CKDWORD arg = stage[CKRST_TSS_COLORARG0];
+    return arg != 0 ? arg : CKRST_TA_CURRENT;
+}
+
 static CKDWORD GetStageAlphaArg1(const CKDWORD *stage, bool hasTexture) {
     CKDWORD arg = stage[CKRST_TSS_AARG1];
     if (arg != 0)
@@ -269,11 +274,36 @@ static CKDWORD GetStageAlphaArg2(const CKDWORD *stage) {
     return arg != 0 ? arg : CKRST_TA_CURRENT;
 }
 
-static int GetActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
-    int count = (int)CKRST_DP_STAGEFLAGS(dpFlags);
-    if (count < 0) count = 0;
-    if (count > CKFF_MAX_TEXTURE_STAGES) count = CKFF_MAX_TEXTURE_STAGES;
+static CKDWORD GetStageAlphaArg0(const CKDWORD *stage) {
+    CKDWORD arg = stage[CKRST_TSS_ALPHAARG0];
+    return arg != 0 ? arg : CKRST_TA_CURRENT;
+}
+
+static CKDWORD GetStageResultArg(const CKDWORD *stage) {
+    CKDWORD arg = stage[CKRST_TSS_RESULTARG0];
+    return arg != 0 ? arg : CKRST_TA_CURRENT;
+}
+
+int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
+    CKDWORD mask = dpFlags & CKRST_DP_STAGESMASK;
+    int count = 0;
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (mask & CKRST_DP_STAGE(stage))
+            count = stage + 1;
+    }
     return count;
+}
+
+CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation) {
+    return (index & 0xFFFFu) | ((generation & 0xFFFFu) << 16);
+}
+
+CKDWORD CKFFTexcoordIndex(CKDWORD packed) {
+    return packed & 0xFFFFu;
+}
+
+CKDWORD CKFFTexcoordGeneration(CKDWORD packed) {
+    return (packed >> 16) & 0xFFFFu;
 }
 
 static CKDWORD ResolveMaterialSource(CKBOOL lighting, CKBOOL colorVertex, CKBOOL fromVertex,
@@ -471,6 +501,8 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_LightEnabled, 0, sizeof(m_LightEnabled));
     memset(m_TextureHandles, 0, sizeof(m_TextureHandles));
     memset(m_StageStates, 0, sizeof(m_StageStates));
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_Viewport[0] = 2.0f / 800.0f;
     m_Viewport[1] = -2.0f / 600.0f;
     m_Viewport[2] = -1.0f;
@@ -717,7 +749,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
 
     // Prepare transient geometry
-    if (!m_TransientGeometry.Prepare(encoder, type, indices, indexCount, data)) {
+    const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
+    if (!m_TransientGeometry.Prepare(encoder, type, indices, indexCount, data, wrapMode)) {
         if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG("FFPipeline", "DrawPrimitive: Prepare FAILED");
             g_DrawLogCount++;
@@ -726,7 +759,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
 
     // Build shader key and get program
-    m_CurrentActiveTextureCount = GetActiveTextureCountFromDPFlags(data->Flags);
+    m_CurrentActiveTextureCount = CKFFActiveTextureCountFromDPFlags(data->Flags);
     CKFFShaderKey key = BuildCurrentKey(data->Flags, formatFlags);
     CKDWORD program = m_ShaderCache.GetProgram(key);
     if (program == 0) {
@@ -738,7 +771,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
 
     const int real3DLogLimit = DebugReal3DLogLimit();
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
         CK_LOG_FMT("FFPipeline",
@@ -760,7 +793,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         g_Real3DDrawLogCount++;
     }
     const int contractLimit = Debug3DContractLogLimit();
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         contractLimit > 0 && g_3DContractLogCount < contractLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
         CK_LOG_FMT("FFPipeline",
@@ -802,7 +835,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         LogPositionTSamples(m_Viewport, data);
         g_PositionTDrawLogCount++;
     }
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
         (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
         CK_LOG_FMT("FFPipeline", "Real3D non-identity view #%d: view=%d verts=%d indices=%d flags=0x%X program=%u",
@@ -876,13 +909,13 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         return;
     }
 
-    m_CurrentActiveTextureCount = GetActiveTextureCountFromDPFlags(dpFlags);
+    m_CurrentActiveTextureCount = CKFFActiveTextureCountFromDPFlags(dpFlags);
     CKFFShaderKey key = BuildCurrentKey(dpFlags, formatFlags);
     CKDWORD program = m_ShaderCache.GetProgram(key);
     if (program == 0) return;
 
     const int real3DLogLimit = DebugReal3DLogLimit();
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
         CK_LOG_FMT("FFPipeline",
                    "Real3D DrawVertexBuffer #%d: serial=%d view=%d type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
@@ -901,7 +934,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         g_Real3DDrawLogCount++;
     }
     const int contractLimit = Debug3DContractLogLimit();
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         contractLimit > 0 && g_3DContractLogCount < contractLimit) {
         CK_LOG_FMT("FFPipeline",
                    "3D contract #%d: serial=%d view=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u keyLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
@@ -930,7 +963,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         LogMatrixRows("Proj", m_Projection);
         ++g_3DContractLogCount;
     }
-    if ((view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
+    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
         real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
         (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
         CK_LOG_FMT("FFPipeline", "Real3D VB non-identity view #%d: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u program=%u",
@@ -1082,6 +1115,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     encoder->SetUniform(u.u_ckModelViewProj, &modelViewProj, 1);
     encoder->SetUniform(u.u_ckModelView, &modelView, 1);
     encoder->SetUniform(u.u_ckNormalMatrix, &normalMatrix, 1);
+    encoder->SetUniform(u.u_texMatrix, m_TexMatrix, CKFF_MAX_TEXTURE_STAGES);
 
     // bgfx uniform bindings are draw state. Since draws submit with
     // CKRST_DISCARD_ALL, upload the current fixed-function constants for every
@@ -1129,7 +1163,9 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     encoder->SetUniform(u.u_ffParams, m_MaterialSource, 1);
     float lightModelParams[4] = {
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f,
-        0.0f, 0.0f, 0.0f
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f,
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f,
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f
     };
     encoder->SetUniform(u.u_lightModelParams, lightModelParams, 1);
 
@@ -1173,20 +1209,28 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     encoder->SetUniform(u.u_viewport, m_Viewport, 1);
 
-    float stageParams[CKFF_MAX_TEXTURE_STAGES * 2][4];
+    float stageParams[CKFF_MAX_TEXTURE_STAGES * 4][4];
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < m_CurrentActiveTextureCount;
         const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
-        stageParams[stage * 2 + 0][0] = (float)GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 2 + 0][1] = (float)GetStageColorArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 2 + 0][2] = (float)GetStageColorArg2(m_StageStates[stage]);
-        stageParams[stage * 2 + 0][3] = hasTexture ? 1.0f : 0.0f;
-        stageParams[stage * 2 + 1][0] = (float)GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 2 + 1][1] = (float)GetStageAlphaArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 2 + 1][2] = (float)GetStageAlphaArg2(m_StageStates[stage]);
-        stageParams[stage * 2 + 1][3] = 0.0f;
+        stageParams[stage * 4 + 0][0] = (float)GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
+        stageParams[stage * 4 + 0][1] = (float)GetStageColorArg1(m_StageStates[stage], hasTexture);
+        stageParams[stage * 4 + 0][2] = (float)GetStageColorArg2(m_StageStates[stage]);
+        stageParams[stage * 4 + 0][3] = hasTexture ? 1.0f : 0.0f;
+        stageParams[stage * 4 + 1][0] = (float)GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
+        stageParams[stage * 4 + 1][1] = (float)GetStageAlphaArg1(m_StageStates[stage], hasTexture);
+        stageParams[stage * 4 + 1][2] = (float)GetStageAlphaArg2(m_StageStates[stage]);
+        stageParams[stage * 4 + 1][3] = (float)GetStageResultArg(m_StageStates[stage]);
+        stageParams[stage * 4 + 2][0] = (float)GetStageColorArg0(m_StageStates[stage]);
+        stageParams[stage * 4 + 2][1] = (float)m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
+        stageParams[stage * 4 + 2][2] = (float)m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
+        stageParams[stage * 4 + 2][3] = 0.0f;
+        stageParams[stage * 4 + 3][0] = (float)GetStageAlphaArg0(m_StageStates[stage]);
+        stageParams[stage * 4 + 3][1] = 0.0f;
+        stageParams[stage * 4 + 3][2] = 0.0f;
+        stageParams[stage * 4 + 3][3] = 0.0f;
     }
-    encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 2);
+    encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 4);
 
     m_DirtyFlags = 0;
 }
@@ -1205,28 +1249,77 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
     CKSamplerDesc desc;
     memset(&desc, 0, sizeof(desc));
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
+        return desc;
 
     CKDWORD mag = m_StageStates[stage][CKRST_TSS_MAGFILTER];
     CKDWORD min = m_StageStates[stage][CKRST_TSS_MINFILTER];
     CKDWORD addr = m_StageStates[stage][CKRST_TSS_ADDRESS];
     CKDWORD addrU = m_StageStates[stage][CKRST_TSS_ADDRESSU];
     CKDWORD addrV = m_StageStates[stage][CKRST_TSS_ADDRESSV];
+    CKDWORD addrW = m_StageStates[stage][CKRST_TSS_ADDRESW];
 
-    // Filter mode translation (VXTEXTUREFILTER → CK_FILTER_MODE)
+    // Filter mode translation (VXTEXTUREFILTER -> CK_FILTER_MODE)
     // VXTEXTUREFILTER: 1=NEAREST, 2=LINEAR, 3=MIPNEAREST, 4=MIPLINEAR, 5=LINEARMIPNEAREST, 6=LINEARMIPLINEAR
-    desc.MagFilter = (mag == VXTEXTUREFILTER_NEAREST) ? CKRST_FILTER_NEAREST : CKRST_FILTER_LINEAR;
-    desc.MinFilter = (min == VXTEXTUREFILTER_NEAREST) ? CKRST_FILTER_NEAREST : CKRST_FILTER_LINEAR;
-    desc.MipFilter = CKRST_FILTER_LINEAR; // Default mip
+    switch (mag) {
+    case VXTEXTUREFILTER_NEAREST:
+        desc.MagFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_ANISOTROPIC:
+        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
+        break;
+    default:
+        desc.MagFilter = CKRST_FILTER_LINEAR;
+        break;
+    }
 
-    // Address mode translation
-    CK_ADDRESS_MODE translateAddr = CKRST_ADDRESS_WRAP;
-    if (addr == VXTEXTURE_ADDRESSCLAMP) translateAddr = CKRST_ADDRESS_CLAMP;
-    else if (addr == VXTEXTURE_ADDRESSMIRROR) translateAddr = CKRST_ADDRESS_MIRROR;
-    else if (addr == VXTEXTURE_ADDRESSBORDER) translateAddr = CKRST_ADDRESS_BORDER;
+    switch (min) {
+    case VXTEXTUREFILTER_NEAREST:
+    case VXTEXTUREFILTER_MIPNEAREST:
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_MIPLINEAR:
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    case VXTEXTUREFILTER_LINEARMIPNEAREST:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_LINEARMIPLINEAR:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    case VXTEXTUREFILTER_ANISOTROPIC:
+        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
+        break;
+    case VXTEXTUREFILTER_LINEAR:
+    default:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    }
 
-    desc.AddressU = (addrU != 0) ? (CK_ADDRESS_MODE)addrU : translateAddr;
-    desc.AddressV = (addrV != 0) ? (CK_ADDRESS_MODE)addrV : translateAddr;
-    desc.AddressW = translateAddr;
+    auto translateAddress = [](CKDWORD mode) -> CK_ADDRESS_MODE {
+        switch (mode) {
+        case VXTEXTURE_ADDRESSMIRROR: return CKRST_ADDRESS_MIRROR;
+        case VXTEXTURE_ADDRESSCLAMP:  return CKRST_ADDRESS_CLAMP;
+        case VXTEXTURE_ADDRESSBORDER: return CKRST_ADDRESS_BORDER;
+        case VXTEXTURE_ADDRESSMIRRORONCE:
+            // MIRRORONCE is not directly expressible in the current bgfx sampler contract.
+            return CKRST_ADDRESS_CLAMP;
+        case VXTEXTURE_ADDRESSWRAP:
+        default:
+            return CKRST_ADDRESS_WRAP;
+        }
+    };
+
+    CK_ADDRESS_MODE translateAddr = translateAddress(addr);
+    desc.AddressU = (addrU != 0) ? translateAddress(addrU) : translateAddr;
+    desc.AddressV = (addrV != 0) ? translateAddress(addrV) : translateAddr;
+    desc.AddressW = (addrW != 0) ? translateAddress(addrW) : translateAddr;
 
     desc.BorderColor = m_StageStates[stage][CKRST_TSS_BORDERCOLOR];
     desc.CompareFunc = CKRST_COMPARE_NONE;

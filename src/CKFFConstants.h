@@ -6,8 +6,8 @@
 #include "CKRasterizerEnums.h"
 
 #define CKFF_MAX_LIGHTS         8
-#define CKFF_MAX_TEXTURE_STAGES 3
-#define CKFF_MAX_TEXTURE_STAGE_STATES 42
+#define CKFF_MAX_TEXTURE_STAGES 8
+#define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 
 // ============================================================================
 // Light data for shader upload (view-space)
@@ -37,7 +37,7 @@ struct CKFFMaterialData {
 };
 
 // ============================================================================
-// Vertex shader constants — uploaded via SetUniform per draw
+// Vertex shader constants - uploaded via SetUniform per draw
 // ============================================================================
 
 struct CKFFVertexConstants {
@@ -58,7 +58,7 @@ struct CKFFVertexConstants {
 };
 
 // ============================================================================
-// Fragment shader constants — uploaded via SetUniform per draw
+// Fragment shader constants - uploaded via SetUniform per draw
 // ============================================================================
 
 struct CKFFFragmentConstants {
@@ -70,17 +70,18 @@ struct CKFFFragmentConstants {
 };
 
 // ============================================================================
-// Uniform handle table — created once at init
+// Uniform handle table - created once at init
 // ============================================================================
 
 struct CKFFUniformHandles {
     // User uniforms (uploaded via SetUniform per draw)
-    // Transform uniforms are NOT here — bgfx handles u_model, u_modelView,
+    // Transform uniforms are NOT here: bgfx handles u_model, u_modelView,
     // u_modelViewProj, u_viewProj automatically via SetViewTransform/SetTransform.
-    CKDWORD u_lights;       // vec4 array: 8 lights × 7 vec4 = 56 elements
+    CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
     CKDWORD u_ckModelViewProj;
     CKDWORD u_ckModelView;
     CKDWORD u_ckNormalMatrix;
+    CKDWORD u_texMatrix;   // mat4 array: one texture matrix per stage
     CKDWORD u_lightParams;  // vec4: x=count, yzw=globalAmbient RGB
     CKDWORD u_material;     // vec4 array: 5 elements (diff, amb, spec, emis, power)
     CKDWORD u_ffParams;     // vec4: material source selectors diff/amb/spec/emis

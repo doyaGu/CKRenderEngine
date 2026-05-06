@@ -62,7 +62,7 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
 }
 
 VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) {
-    // TODO: Phase 2 — CKRSTSetupDPFromVertexBuffer removed in v2, need new path
+    // TODO: Phase 2 - CKRSTSetupDPFromVertexBuffer removed in v2, need new path
     (void) Ctx;
     (void) StartVertex;
     (void) VertexCount;
@@ -74,7 +74,7 @@ VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVe
 void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
     (void) Ctx;
     if (m_Valid) {
-        // TODO: Phase 2 — release transient buffer
+        // TODO: Phase 2 - release transient buffer
     }
 }
 
@@ -84,7 +84,7 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     if (VertexCount == 0)
         return FALSE;
 
-    // TODO: Phase 2 — route lighting state through FFPipeline
+    // TODO: Phase 2 - route lighting state through FFPipeline
     // if ((m_DpData.Flags & CKRST_DP_LIGHT) != 0) {
     //     rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
     // } else {
@@ -115,7 +115,7 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     }
     stats.NbVerticesProcessed += (int) VertexCount;
 
-    // TODO: Phase 2 — submit draw call through v2 encoder
+    // TODO: Phase 2 - submit draw call through v2 encoder
     // if (m_Valid) {
     //     return rstCtx->DrawPrimitiveVB(pType, m_ObjectIndex, StartVertex, VertexCount, Indices, IndexCount);
     // } else {

@@ -13,19 +13,23 @@
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;
 
 static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx *desc) {
-    CKTextureDesc *best = nullptr;
+    VxImageDescEx *best = nullptr;
     int minDiff = 64;
     for (auto it = driver->m_TextureFormats.Begin(); it != driver->m_TextureFormats.End(); ++it) {
         if (it->Format.AlphaMask) {
             int diff = abs(it->Format.BitsPerPixel - desc->BitsPerPixel);
             if (diff < minDiff) {
-                best = it;
+                best = &it->Format;
                 minDiff = diff;
             }
         }
     }
     if (best) {
-        *desc = best->Format;
+        desc->BitsPerPixel = best->BitsPerPixel;
+        desc->RedMask = best->RedMask;
+        desc->GreenMask = best->GreenMask;
+        desc->BlueMask = best->BlueMask;
+        desc->AlphaMask = best->AlphaMask;
     }
 }
 
@@ -230,11 +234,13 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     CKDWORD whiteColor = 0xFFFFFFFF;
     VxFillStructure(4, colorPtr, data->ColorStride, 4, &whiteColor);
 
-    // Source rect UVs (normalized 0..1)
-    float u0 = m_SrcRect.left;
-    float v0 = m_SrcRect.top;
-    float u1 = m_SrcRect.right;
-    float v1 = m_SrcRect.bottom;
+    // Sprite source rectangles are stored in bitmap pixels; bgfx samplers expect normalized UVs.
+    const float invBitmapWidth = m_BitmapData.m_Width > 0 ? 1.0f / (float)m_BitmapData.m_Width : 0.0f;
+    const float invBitmapHeight = m_BitmapData.m_Height > 0 ? 1.0f / (float)m_BitmapData.m_Height : 0.0f;
+    float u0 = m_SrcRect.left * invBitmapWidth;
+    float v0 = m_SrcRect.top * invBitmapHeight;
+    float u1 = m_SrcRect.right * invBitmapWidth;
+    float v1 = m_SrcRect.bottom * invBitmapHeight;
 
     texCoordPtr[0] = *(CKDWORD *) &u0;
     texCoordPtr[1] = *(CKDWORD *) &v0;
@@ -355,7 +361,7 @@ CKBOOL RCKSprite::IsInVideoMemory() {
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    // TODO: Phase 2 — implement via ReadFrameBuffer + UpdateTexture or Blit
+    // TODO: Phase 2 - implement via ReadFrameBuffer + UpdateTexture or Blit
     (void)ctx; (void)Src; (void)Dest;
     return FALSE;
 }

@@ -1,17 +1,19 @@
-$input a_position, a_normal, a_texcoord0, a_color0, a_color1
-$output v_color0, v_color1, v_texcoord0, v_fogFactor
+$input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
+$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog
 
 #include "bgfx_shader.sh"
 
 uniform mat4 u_ckModelViewProj;
 uniform mat4 u_ckModelView;
 uniform mat4 u_ckNormalMatrix;
+uniform mat4 u_texMatrix[8];
 uniform vec4 u_lightParams;
 uniform vec4 u_material[5];
 uniform vec4 u_fogParams;
 uniform vec4 u_ffParams;
 uniform vec4 u_lightModelParams;
 uniform vec4 u_lights[56];
+uniform vec4 u_stageParams[32];
 
 float computeFog(float depth, vec4 params)
 {
@@ -33,13 +35,55 @@ vec4 selectMaterialSource(float source, vec4 materialValue, vec4 color0, vec4 co
     return materialValue;
 }
 
+vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
+{
+    if (index == 1) return tc1;
+    if (index == 2) return tc2;
+    if (index == 3) return tc3;
+    if (index == 4) return tc4;
+    if (index == 5) return tc5;
+    if (index == 6) return tc6;
+    if (index == 7) return tc7;
+    return tc0;
+}
+
+vec2 generateTexcoord(int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
+{
+    int generation = packedIndex / 65536;
+    int index = packedIndex - generation * 65536;
+    if (generation == 1) return viewNormal.xy * 0.5 + 0.5;
+    if (generation == 2) return viewPos.xy;
+    if (generation == 3) {
+        vec3 eye = normalize(viewPos);
+        vec3 refl = reflect(eye, normalize(viewNormal));
+        return refl.xy * 0.5 + 0.5;
+    }
+    return selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7);
+}
+
+vec2 transformTexcoord(int stage, vec2 uv)
+{
+    vec4 params = u_stageParams[stage * 4 + 2];
+    int flags = int(params.z);
+    if (flags == 0) return uv;
+
+    vec4 transformed = mul(u_texMatrix[stage], vec4(uv, 0.0, 1.0));
+    if ((flags & 0x100) != 0) {
+        transformed.xy /= max(abs(transformed.w), 0.0001);
+    }
+    return transformed.xy;
+}
+
 void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
     gl_Position = mul(u_ckModelViewProj, localPos);
 
     vec4 viewPos = mul(u_ckModelView, localPos);
-    vec3 viewNormal = normalize(mul(u_ckNormalMatrix, vec4(a_normal, 0.0)).xyz);
+    vec3 viewNormal = mul(u_ckNormalMatrix, vec4(a_normal, 0.0)).xyz;
+    if (u_lightModelParams.y > 0.5) {
+        viewNormal = normalize(viewNormal);
+    }
 
     vec4 matDiffuse  = selectMaterialSource(u_ffParams.x, u_material[0], a_color0, a_color1);
     vec4 matAmbient  = selectMaterialSource(u_ffParams.y, u_material[1], a_color0, a_color1);
@@ -118,6 +162,20 @@ void main()
     v_color0 = clamp(litDiffuse, 0.0, 1.0);
     v_color0.a = matDiffuse.a;
     v_color1 = vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a);
-    v_texcoord0 = a_texcoord0;
-    v_fogFactor = computeFog(abs(viewPos.z), u_fogParams);
+    int tc0 = int(u_stageParams[0 * 4 + 2].y);
+    int tc1 = int(u_stageParams[1 * 4 + 2].y);
+    int tc2 = int(u_stageParams[2 * 4 + 2].y);
+    int tc3 = int(u_stageParams[3 * 4 + 2].y);
+    int tc4 = int(u_stageParams[4 * 4 + 2].y);
+    int tc5 = int(u_stageParams[5 * 4 + 2].y);
+    int tc6 = int(u_stageParams[6 * 4 + 2].y);
+    int tc7 = int(u_stageParams[7 * 4 + 2].y);
+    v_texcoord0 = transformTexcoord(0, generateTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord1 = transformTexcoord(1, generateTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord2 = transformTexcoord(2, generateTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord3 = transformTexcoord(3, generateTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord4 = transformTexcoord(4, generateTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord5 = transformTexcoord(5, generateTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord6 = transformTexcoord(6, generateTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord7Fog = vec3(transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal)), computeFog(abs(viewPos.z), u_fogParams));
 }

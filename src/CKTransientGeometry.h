@@ -27,7 +27,8 @@ public:
         VXPRIMITIVETYPE primType,
         CKWORD *indices,
         int indexCount,
-        VxDrawPrimitiveData *data);
+        VxDrawPrimitiveData *data,
+        CKDWORD wrapMode = 0);
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
@@ -38,11 +39,17 @@ public:
                                               CKWORD *srcIndices, int srcCount,
                                               CKWORD *dst);
 
+    static void AdjustTriangleWrapTexcoords(float uv[3][2], CKDWORD wrapMode);
+
     // Interleave canonical fixed-function vertex data. This is shared by
     // transient and hardware VB paths so both obey the same missing-attribute
     // default rules.
     static void InterleaveVertices(void *dst, CKDWORD stride, CKDWORD vertexCount,
                                    CKDWORD formatFlags, VxDrawPrimitiveData *data);
+    static void InterleaveVertex(void *dst, CKDWORD stride, CKDWORD dstIndex,
+                                 CKDWORD srcIndex, CKDWORD formatFlags,
+                                 VxDrawPrimitiveData *data,
+                                 const float *texcoord0Override = nullptr);
 
 private:
     CKRasterizerContext *m_Context;

@@ -972,7 +972,7 @@ void RCKRenderContext::RemovePostSpriteRenderCallBack(CK_RENDERCALLBACK Function
 
 VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS Flags, int VertexCount) {
     // IDA: 0x1006bc74
-    // TODO: Phase 2 — dynamic vertex buffers not supported in rasterizer v2
+    // TODO: Phase 2 - dynamic vertex buffers not supported in rasterizer v2
     if (FALSE) {
         (void)VertexCount;
     }
@@ -1580,7 +1580,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
 }
 
 void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data, CK3dEntity *Ref) {
-    // TODO: Phase 2 — software vertex transform for picking/projecting
+    // TODO: Phase 2 - software vertex transform for picking/projecting
     (void)VertexCount;
     (void)data;
     (void)Ref;
@@ -1614,12 +1614,12 @@ const VxMatrix &RCKRenderContext::GetViewTransformationMatrix() {
 }
 
 CKBOOL RCKRenderContext::SetUserClipPlane(CKDWORD ClipPlaneIndex, const VxPlane &PlaneEquation) {
-    // TODO: Phase 2 — user clip planes not supported in rasterizer v2
+    // TODO: Phase 2 - user clip planes not supported in rasterizer v2
     return FALSE;
 }
 
 CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &PlaneEquation) {
-    // TODO: Phase 2 — user clip planes not supported in rasterizer v2
+    // TODO: Phase 2 - user clip planes not supported in rasterizer v2
     return FALSE;
 }
 
@@ -2188,13 +2188,13 @@ void RCKRenderContext::Activate(CKBOOL active) {
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf25
-    // TODO: Phase 2 — CopyToMemoryBuffer not supported in rasterizer v2
+    // TODO: Phase 2 - CopyToMemoryBuffer not supported in rasterizer v2
     return FALSE;
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf5a
-    // TODO: Phase 2 — CopyFromMemoryBuffer not supported in rasterizer v2
+    // TODO: Phase 2 - CopyFromMemoryBuffer not supported in rasterizer v2
     return FALSE;
 }
 
@@ -2272,7 +2272,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         }
     }
 
-    // TODO: Phase 2 — SetTargetTexture (render-to-texture) not supported in rasterizer v2
+    // TODO: Phase 2 - SetTargetTexture (render-to-texture) not supported in rasterizer v2
     const CKBOOL rstOk = FALSE;
     if (!rstOk) {
         if (!(m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE))
@@ -2352,7 +2352,7 @@ int RCKRenderContext::GetFirstFreeStencilBits() {
 }
 
 VxDrawPrimitiveData *RCKRenderContext::LockCurrentVB(CKDWORD VertexCount) {
-    // TODO: Phase 2 — LockCurrentVB not supported in rasterizer v2
+    // TODO: Phase 2 - LockCurrentVB not supported in rasterizer v2
     return NULL;
 }
 
@@ -3189,6 +3189,16 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
         cached->ColorPtr = nullptr;
     if (!(DpFlags & CKRST_DP_LIGHT))
         cached->NormalPtr = nullptr;
+
+    if ((DpFlags & CKRST_DP_SPECULAR) && cached->SpecularColorPtr) {
+        const bool positionT = (DpFlags & CKRST_DP_TRANSFORM) == 0;
+        CKDWORD defaultSpecular = positionT ? 0xFF000000 : 0x00000000;
+        VxFillStructure(VertexCount,
+                        cached->SpecularColorPtr,
+                        cached->SpecularColorStride,
+                        sizeof(CKDWORD),
+                        &defaultSpecular);
+    }
 
     return cached;
 }

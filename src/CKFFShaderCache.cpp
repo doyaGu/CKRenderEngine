@@ -117,6 +117,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_ckNormalMatrix = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ckNormalMatrix, &desc);
 
+    desc.Name = (char *)"u_texMatrix";
+    desc.Count = CKFF_MAX_TEXTURE_STAGES;
+    m_Uniforms.u_texMatrix = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_texMatrix, &desc);
+
     desc.Type = CKRST_UNIFORM_FLOAT4;
     desc.Name = (char *)"u_lights";
     desc.Count = CKFF_MAX_LIGHTS * 7;
@@ -174,7 +179,7 @@ void CKFFShaderCache::CreateUniforms() {
     m_Context->CreateUniform(m_Uniforms.u_viewport, &desc);
 
     desc.Name = (char *)"u_stageParams";
-    desc.Count = CKFF_MAX_TEXTURE_STAGES * 2;
+    desc.Count = CKFF_MAX_TEXTURE_STAGES * 4;
     m_Uniforms.u_stageParams = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_stageParams, &desc);
 

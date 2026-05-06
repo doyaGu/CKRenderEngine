@@ -350,7 +350,7 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
     if (!ctx)
         return FALSE;
 
-    // TODO: Phase 2 — implement render-to-texture copy via ReadFrameBuffer + UpdateTexture
+    // TODO: Phase 2 - implement render-to-texture copy via ReadFrameBuffer + UpdateTexture
     (void)ctx; (void)Src; (void)Dest; (void)CubeMapFace;
     return FALSE;
 }

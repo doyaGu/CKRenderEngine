@@ -5,12 +5,12 @@
 #include <cstring>
 #include <functional>
 
-// Fixed-function shader variant key.
-// Encodes the current render state configuration into a compact bitfield
-// used to look up pre-compiled shader programs (following dxvk's pattern).
+// Fixed-function state contract key.
+// The renderer uses two uber-shader programs (3D and PositionT). This key is
+// kept for diagnostics/tests and must not be treated as a shader variant cache.
 
 // ============================================================================
-// Vertex Shader Key — 64 bits
+// Vertex Shader Key - 64 bits
 // ============================================================================
 
 struct CKFFVertexKey {
@@ -61,17 +61,20 @@ struct CKFFVertexKey {
     bool GetRangeFog() const       { return GetBit(18); }
     bool GetPixelFog() const       { return GetBit(19); }
 
-    // --- Texture coordinate generation (bits 20-31, 3 stages × 4 bits) ---
+    // --- Texture coordinate generation (bits 20-31, 3 stages x 4 bits) ---
     // TexGen mode per stage: 0=PASSTHRU, 1=CAMERANORMAL, 2=CAMERAPOSITION, 3=REFLECTION, 4=SPHEREMAP
     void SetTexGen(uint32_t stage, uint32_t mode, bool hasTransform) {
+        if (stage >= 3) return;
         uint32_t offset = 20 + stage * 4;
         SetField(offset, 3, mode);
         SetBit(offset + 3, hasTransform);
     }
     uint32_t GetTexGenMode(uint32_t stage) const {
+        if (stage >= 3) return 0;
         return GetField(20 + stage * 4, 3);
     }
     bool GetTexGenHasTransform(uint32_t stage) const {
+        if (stage >= 3) return false;
         return GetBit(20 + stage * 4 + 3);
     }
 
@@ -108,7 +111,7 @@ private:
 };
 
 // ============================================================================
-// Fragment Shader Key — 64 bits
+// Fragment Shader Key - 64 bits
 // ============================================================================
 
 struct CKFFFragmentKey {
@@ -116,7 +119,7 @@ struct CKFFFragmentKey {
 
     CKFFFragmentKey() : bits(0) {}
 
-    // --- Texture stage config (bits 0-47, 3 stages × 16 bits) ---
+    // --- Texture stage config (bits 0-47, 3 stages x 16 bits) ---
     // Per stage layout (16 bits):
     //   Bits 0-4:   ColorOp (5 bits, CKRST_TOP_* value, 0=DISABLE)
     //   Bits 5-7:   ColorArg1 (3 bits: TEXTURE=0, CURRENT=1, DIFFUSE=2, SPECULAR=3, TFACTOR=4)
@@ -125,34 +128,44 @@ struct CKFFFragmentKey {
     //   Bit 15:     ResultIsTemp
 
     void SetStageColorOp(uint32_t stage, uint32_t op) {
+        if (stage >= 3) return;
         SetField(stage * 16, 5, op);
     }
     void SetStageColorArg1(uint32_t stage, uint32_t arg) {
+        if (stage >= 3) return;
         SetField(stage * 16 + 5, 3, arg);
     }
     void SetStageColorArg2(uint32_t stage, uint32_t arg) {
+        if (stage >= 3) return;
         SetField(stage * 16 + 8, 3, arg);
     }
     void SetStageAlphaOp(uint32_t stage, uint32_t op) {
+        if (stage >= 3) return;
         SetField(stage * 16 + 11, 4, op);
     }
     void SetStageResultIsTemp(uint32_t stage, bool v) {
+        if (stage >= 3) return;
         SetBit(stage * 16 + 15, v);
     }
 
     uint32_t GetStageColorOp(uint32_t stage) const {
+        if (stage >= 3) return 0;
         return GetField(stage * 16, 5);
     }
     uint32_t GetStageColorArg1(uint32_t stage) const {
+        if (stage >= 3) return 0;
         return GetField(stage * 16 + 5, 3);
     }
     uint32_t GetStageColorArg2(uint32_t stage) const {
+        if (stage >= 3) return 0;
         return GetField(stage * 16 + 8, 3);
     }
     uint32_t GetStageAlphaOp(uint32_t stage) const {
+        if (stage >= 3) return 0;
         return GetField(stage * 16 + 11, 4);
     }
     bool GetStageResultIsTemp(uint32_t stage) const {
+        if (stage >= 3) return false;
         return GetBit(stage * 16 + 15);
     }
 
@@ -190,7 +203,7 @@ private:
 };
 
 // ============================================================================
-// Combined Shader Key — 128 bits
+// Combined Shader Key - 128 bits
 // ============================================================================
 
 struct CKFFShaderKey {
@@ -213,7 +226,10 @@ namespace std {
         size_t operator()(const CKFFShaderKey &k) const {
             size_t h1 = hash<uint64_t>()(k.VS.bits);
             size_t h2 = hash<uint64_t>()(k.FS.bits);
-            return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+            const size_t magic = sizeof(size_t) >= 8
+                ? static_cast<size_t>(0x9e3779b97f4a7c15ULL)
+                : static_cast<size_t>(0x9e3779b9U);
+            return h1 ^ (h2 + magic + (h1 << 6) + (h1 >> 2));
         }
     };
 }

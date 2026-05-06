@@ -435,7 +435,7 @@ void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
     // Update the viewport data stored on the render context.
     // The v2 API configures the viewport through BeginFrame/SetViewRect on the
-    // render pipeline — this local copy is kept for picks, frustum building,
+    // render pipeline - this local copy is kept for picks, frustum building,
     // and any code that reads rc->m_ViewportData directly.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     rc->m_ViewportData.ViewX = (int) rect.left;
