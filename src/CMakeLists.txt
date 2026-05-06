@@ -115,7 +115,7 @@ set(CKRE_SOURCES
         CKRenderedScene.cpp
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
-        CKNULLRasterizer.cpp
+        CKRasterizer/CKNULLRasterizer.cpp
 
         CKFixedFunctionPipeline.cpp
         CKFFShaderCache.cpp
