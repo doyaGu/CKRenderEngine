@@ -58,6 +58,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_ckModelView = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ckModelView, &desc);
 
+    desc.Name = (char *)"u_ckNormalMatrix";
+    desc.Count = 1;
+    m_Uniforms.u_ckNormalMatrix = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ckNormalMatrix, &desc);
+
     desc.Type = CKRST_UNIFORM_FLOAT4;
     desc.Name = (char *)"u_lights";
     desc.Count = CKFF_MAX_LIGHTS * 7;

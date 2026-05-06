@@ -80,6 +80,7 @@ struct CKFFUniformHandles {
     CKDWORD u_lights;       // vec4 array: 8 lights × 7 vec4 = 56 elements
     CKDWORD u_ckModelViewProj;
     CKDWORD u_ckModelView;
+    CKDWORD u_ckNormalMatrix;
     CKDWORD u_lightParams;  // vec4: x=count, yzw=globalAmbient RGB
     CKDWORD u_material;     // vec4 array: 5 elements (diff, amb, spec, emis, power)
     CKDWORD u_ffParams;     // vec4: material source selectors diff/amb/spec/emis

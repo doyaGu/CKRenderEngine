@@ -2,6 +2,7 @@ cbuffer Uniforms : register(b0)
 {
     row_major float4x4 u_ckModelViewProj;
     row_major float4x4 u_ckModelView;
+    row_major float4x4 u_ckNormalMatrix;
     float4 u_lightParams;
     float4 u_material[5];
     float4 u_fogParams;
@@ -56,7 +57,7 @@ VSOutput main(VSInput input)
     output.position = mul(localPos, u_ckModelViewProj);
 
     float4 viewPos = mul(localPos, u_ckModelView);
-    float3 viewNormal = normalize(mul(input.normal, (float3x3)u_ckModelView));
+    float3 viewNormal = normalize(mul(input.normal, (float3x3)u_ckNormalMatrix));
 
     float4 matDiffuse  = selectMaterialSource(u_ffParams.x, u_material[0], input.color0, input.color1);
     float4 matAmbient  = selectMaterialSource(u_ffParams.y, u_material[1], input.color0, input.color1);

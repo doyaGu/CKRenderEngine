@@ -999,13 +999,17 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
 
     VxMatrix modelView;
+    VxMatrix normalMatrix;
     VxMatrix viewProj;
     VxMatrix modelViewProj;
     MulMatrix(modelView, m_World, m_View);
+    Vx3DInverseMatrix(normalMatrix, modelView);
+    TransposeMatrix(normalMatrix, normalMatrix);
     MulMatrix(viewProj, m_View, m_Projection);
     MulMatrix(modelViewProj, m_World, viewProj);
     encoder->SetUniform(u.u_ckModelViewProj, &modelViewProj, 1);
     encoder->SetUniform(u.u_ckModelView, &modelView, 1);
+    encoder->SetUniform(u.u_ckNormalMatrix, &normalMatrix, 1);
 
     // bgfx uniform bindings are draw state. Since draws submit with
     // CKRST_DISCARD_ALL, upload the current fixed-function constants for every
