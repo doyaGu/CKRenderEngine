@@ -1200,7 +1200,7 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 // ===========================================================================
 
 CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
-    : m_BgfxInitialized(FALSE), m_VSync(TRUE), m_ResetFlags(BGFX_RESET_VSYNC),
+    : m_BgfxInitialized(FALSE), m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
       m_DebugFrameId(0), m_DebugCaptureFirstFrames(0), m_DebugCaptureInterval(0),
