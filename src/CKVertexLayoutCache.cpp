@@ -43,7 +43,7 @@ CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNorma
 
     if (transformed) {
         flags |= CKFF_VF_POSITION;
-        if (hasNormal || (dpFlags & CKRST_DP_LIGHT))
+        if (hasNormal && (dpFlags & CKRST_DP_LIGHT))
             flags |= CKFF_VF_NORMAL;
     } else {
         flags |= CKFF_VF_POSITIONT;

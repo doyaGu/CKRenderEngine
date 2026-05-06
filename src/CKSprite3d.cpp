@@ -449,19 +449,30 @@ CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
     if (!BBox)
         return RCK3dEntity::SetBoundingBox(nullptr, Local);
 
+    VxBbox localBox;
     if (Local) {
-        m_LocalBoundingBox = *BBox;
-        m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
+        localBox = *BBox;
     } else {
-        m_WorldBoundingBox = *BBox;
         const VxMatrix &invWorld = GetInverseWorldMatrix();
-        m_LocalBoundingBox.TransformFrom(m_WorldBoundingBox, invWorld);
+        localBox.TransformFrom(*BBox, invWorld);
     }
 
-    // Sprite3D geometry is always a camera-facing quad in its local XY plane.
-    // Keep the sprite box planar even when callers pass a generic 3D box.
+    const float dx = localBox.Max.x - localBox.Min.x;
+    const float dy = localBox.Max.y - localBox.Min.y;
+    const float dz = localBox.Max.z - localBox.Min.z;
+    const float height = (dy > 0.0001f) ? dy : dz;
+    const float centerX = (localBox.Min.x + localBox.Max.x) * 0.5f;
+    const float centerY = (dy > 0.0001f)
+        ? (localBox.Min.y + localBox.Max.y) * 0.5f
+        : (localBox.Min.z + localBox.Max.z) * 0.5f;
+
+    m_LocalBoundingBox.Min.x = centerX - dx * 0.5f;
+    m_LocalBoundingBox.Max.x = centerX + dx * 0.5f;
+    m_LocalBoundingBox.Min.y = centerY - height * 0.5f;
+    m_LocalBoundingBox.Max.y = centerY + height * 0.5f;
     m_LocalBoundingBox.Min.z = 0.0f;
     m_LocalBoundingBox.Max.z = 0.0f;
+    m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
 
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);

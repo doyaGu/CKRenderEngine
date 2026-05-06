@@ -3111,6 +3111,8 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
         cached->SpecularColorPtr = nullptr;
     if (!(DpFlags & CKRST_DP_DIFFUSE))
         cached->ColorPtr = nullptr;
+    if (!(DpFlags & CKRST_DP_LIGHT))
+        cached->NormalPtr = nullptr;
 
     return cached;
 }
