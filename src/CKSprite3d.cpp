@@ -438,6 +438,11 @@ CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
     return TRUE;
 }
 
+void RCKSprite3D::UpdateCameraFacingOrientation(CKRenderContext *rc) {
+    if (m_Mode != VXSPRITE3D_ORIENTABLE)
+        UpdateOrientation(rc);
+}
+
 void RCKSprite3D::UpdateBox(CKBOOL World) {
     if (!(m_MoveableFlags & VX_MOVEABLE_UPTODATE) && World) {
         m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
