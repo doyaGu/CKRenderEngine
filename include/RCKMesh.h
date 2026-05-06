@@ -164,6 +164,8 @@ public:
     int RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable);
     int CreateRenderGroups();
     void UpdateChannelIndices();
+    static CKDWORD TextureWrapModeFromMeshFlags(CKDWORD meshFlags);
+    static CKBOOL RequiresWrapAwareHardwareVertexBuffer(CKDWORD meshFlags);
     CKBOOL CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveData *data);
     CKBOOL CheckHWIndexBuffer(CKRasterizerContext *rst);
 
@@ -235,6 +237,7 @@ protected:
     CKDWORD m_VertexBufferFormatFlags;
     CKDWORD m_VertexBufferStride;
     CKDWORD m_VertexBufferVertexCount;
+    CKBOOL m_VertexBufferWrapAware;
     CKProgressiveMesh *m_ProgressiveMesh;
     CKCallbacksContainer *m_RenderCallbacks;
     CKCallbacksContainer *m_SubMeshCallbacks;
