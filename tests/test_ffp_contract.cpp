@@ -36,6 +36,13 @@ void Test_DPFlags_Sprite3DTexturedColor_DoesNotInventNormal() {
     TestCheck(CKVertexLayoutCache::ComputeStride(fmt) == 28, "Sprite3D POSITION + COLOR0 + COLOR1 + TEXCOORD0 stride must be 28 bytes");
 }
 
+void Test_DPFlags_UnlitColorTextured_IgnoresIncidentalNormalPointer() {
+    const CKDWORD fmt = CKVertexLayoutCache::DPFlagsToFormatFlags(CKRST_DP_TR_CL_VCST, true, true);
+    TestCheck((fmt & CKFF_VF_POSITION) != 0, "Unlit transformed color vertices must use 3D POSITION");
+    TestCheck((fmt & CKFF_VF_NORMAL) == 0, "Unlit transformed color vertices must ignore incidental NORMAL storage");
+    TestCheck(CKVertexLayoutCache::ComputeStride(fmt) == 28, "Unlit POSITION + COLOR0 + COLOR1 + TEXCOORD0 stride must be 28 bytes");
+}
+
 void Test_PrimitiveFanConversion_ProducesTriangleList() {
     CKWORD src[] = {0, 1, 2, 3};
     CKWORD dst[6] = {};
@@ -126,6 +133,7 @@ int main() {
     tests.Run("DP flags pre-transformed textured color", &Test_DPFlags_PretransformedTexturedColor_UsesPositionT);
     tests.Run("DP flags transformed normal textured", &Test_DPFlags_TransformedNormalTextured_UsesPosition3);
     tests.Run("DP flags Sprite3D textured color", &Test_DPFlags_Sprite3DTexturedColor_DoesNotInventNormal);
+    tests.Run("DP flags unlit color textured ignores incidental normal", &Test_DPFlags_UnlitColorTextured_IgnoresIncidentalNormalPointer);
     tests.Run("Primitive fan conversion", &Test_PrimitiveFanConversion_ProducesTriangleList);
     tests.Run("Primitive strip conversion", &Test_PrimitiveStripConversion_AlternatesWinding);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
