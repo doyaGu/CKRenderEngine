@@ -2577,11 +2577,20 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         }
     }
 
+    // A successful frustum test does not imply the current render context
+    // already carries this entity's world transform. The fixed-function path
+    // consumes the render-context world matrix on every draw, so sync it for
+    // both cached-visible and newly-visible objects.
+    if ((Flags & CK_RENDER_CLEARVIEWPORT) == 0) {
+        dev->SetWorldTransformationMatrix(m_WorldMatrix);
+    }
+
     // Handle indirect matrix (mirrored objects)
     CKDWORD savedInverseWinding = 0;
     if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &savedInverseWinding);
-        dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding == 0 ? 1 : 0);
+        // TODO: Phase 2 — route winding state through FFPipeline
+        // dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &savedInverseWinding);
+        // dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding == 0 ? 1 : 0);
     }
 
     // Handle skin update for non-PM meshes
@@ -2601,7 +2610,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute pre-render callbacks
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
@@ -2630,7 +2639,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute post-render callbacks
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            dev->m_RasterizerContext->SetVertexShader(0);
+            // TODO: Phase 2 — dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
@@ -2650,10 +2659,10 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // Restore inverse winding if changed
     if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        // IDA toggles again based on the current state (not restoring the saved value).
-        CKDWORD currentWinding = 0;
-        dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &currentWinding);
-        dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, currentWinding == 0 ? 1 : 0);
+        // TODO: Phase 2 — route winding state restore through FFPipeline
+        // CKDWORD currentWinding = 0;
+        // dev->m_RasterizerContext->GetRenderState(VXRENDERSTATE_INVERSEWINDING, &currentWinding);
+        // dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, currentWinding == 0 ? 1 : 0);
     }
 
     // Update render extents if requested
@@ -3219,7 +3228,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
             dev->SetWorldTransformationMatrix(m_WorldMatrix);
 
         VxRect *ext = updateExtents ? &m_RenderExtents : nullptr;
-        vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, ext);
+        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
     } else if (m_CurrentMesh) {
         // If the mesh has no vertices, consider it not visible
         if (m_CurrentMesh->GetVertexCount() <= 0)
@@ -3241,9 +3250,9 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
 
         if (m_Skin) {
             // With skin, IDA uses the entity cached local bbox
-            vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_LocalBoundingBox, FALSE, ext);
+            vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
         } else {
-            vis = dev->m_RasterizerContext->ComputeBoxVisibility(meshLocalBox, FALSE, ext);
+            vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
         }
     } else {
         // No mesh: transform the origin and treat as a 1x1 extent
@@ -3261,8 +3270,9 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
         td.ScreenStride = 16;
         td.ClipFlags = &clip;
 
-        dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, m_WorldMatrix);
-        dev->m_RasterizerContext->TransformVertices(1, &td);
+        // TODO: Phase 2 — route world matrix and vertex transform through FFPipeline
+        // dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, m_WorldMatrix);
+        // dev->m_RasterizerContext->TransformVertices(1, &td);
 
         if (updateExtents) {
             const float x = outS.x;
@@ -3306,7 +3316,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
     m_SceneGraphNode->SetAsPotentiallyVisible();
     m_SceneGraphNode->ComputeHierarchicalBox();
 
-    const CKDWORD vis = dev->m_RasterizerContext->ComputeBoxVisibility(m_SceneGraphNode->m_Bbox, TRUE, nullptr);
+    const CKDWORD vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
     if (vis) {
         if (vis == 2)
             m_SceneGraphNode->SetAsInsideFrustum();

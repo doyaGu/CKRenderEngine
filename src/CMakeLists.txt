@@ -55,7 +55,17 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/RCKVertexBuffer.h
 )
 
-set(CKRE_PRIVATE_HEADERS)
+set(CKRE_PRIVATE_HEADERS
+        CKFixedFunctionPipeline.h
+        CKFFShaderKey.h
+        CKFFShaderCache.h
+        CKFFConstants.h
+        CKDrawStateCache.h
+        CKVertexLayoutCache.h
+        CKTransientGeometry.h
+        CKRenderPipeline.h
+        CKFrustumCuller.h
+)
 
 set(CKRE_SOURCES
         CK2_3D.cpp
@@ -105,6 +115,18 @@ set(CKRE_SOURCES
         CKRenderedScene.cpp
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
+        CKNULLRasterizer.cpp
+
+        CKFixedFunctionPipeline.cpp
+        CKFFShaderCache.cpp
+        CKDrawStateCache.cpp
+        CKVertexLayoutCache.cpp
+        CKTransientGeometry.cpp
+        CKRenderPipeline.cpp
+        CKFrustumCuller.cpp
+
+        CKDebugLogger.cpp
+        CKException.cpp
 
         CK2_3D.rc
 )
@@ -138,6 +160,10 @@ function(ckre_configure_target TARGET_NAME)
         target_link_libraries(${TARGET_NAME} PUBLIC ${_ckre_ck2_dep} ${_ckre_vxmath_dep})
     else ()
         target_link_libraries(${TARGET_NAME} PRIVATE CK2 VxMath)
+    endif ()
+
+    if (WIN32)
+        target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
 
     set_target_properties(${TARGET_NAME} PROPERTIES

@@ -2,6 +2,7 @@ function(ckre_add_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CKRE_INCLUDE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
@@ -38,3 +39,6 @@ ckre_add_test(simple_mesh_test
     simple_mesh_test.cpp
 )
 
+ckre_add_test(ffp_contract_tests
+    test_ffp_contract.cpp
+)

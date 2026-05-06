@@ -79,8 +79,8 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
                     expanded.Max *= 2.0f;
                     expanded.Min *= 2.0f;
 
-                    if (rc->m_RasterizerContext->ComputeBoxVisibility(expanded, TRUE, nullptr))
-                        node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
+                    // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+                    node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
                 }
 
                 node->ClearTransparentFlags();
@@ -139,8 +139,8 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
         }
 
         if (clipRectSet) {
-            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
-            rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+            // TODO: Phase 2 — rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
+            // TODO: Phase 2 — rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
         }
 
         return;
@@ -583,8 +583,8 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     }
 
     if (clipRectSet) {
-        dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
-        dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, dev->m_ProjectionMatrix);
+        // TODO: Phase 2 — dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
+        // TODO: Phase 2 — dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, dev->m_ProjectionMatrix);
     }
 }
 
@@ -602,8 +602,9 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
     if (dev->m_RenderManager->m_SortTransparentObjects.Value && count > 1) {
         dev->m_TransparentObjectsSortTimeProfiler.Reset();
 
-        dev->m_RasterizerContext->UpdateMatrices(2);
-        VxMatrix viewProj = dev->m_RasterizerContext->m_ViewProjMatrix;
+        // Phase 1: compute viewProj from FF pipeline (v2 has no UpdateMatrices/m_ViewProjMatrix)
+        VxMatrix viewProj;
+        Vx3DMultiplyMatrix4(viewProj, dev->m_FFPipeline.GetProjectionMatrix(), dev->m_FFPipeline.GetViewMatrix());
 
         CKTransparentObject *it = m_TransparentObjects.Begin();
         while (it != m_TransparentObjects.End()) {

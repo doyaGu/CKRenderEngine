@@ -29,6 +29,31 @@ static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx
     }
 }
 
+static CKBOOL SamePixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
+    return a.BitsPerPixel == b.BitsPerPixel &&
+           a.RedMask == b.RedMask &&
+           a.GreenMask == b.GreenMask &&
+           a.BlueMask == b.BlueMask &&
+           a.AlphaMask == b.AlphaMask;
+}
+
+static CKBYTE *ConvertSpriteImage(const VxImageDescEx &src, const VxImageDescEx &videoFormat,
+                                  VxImageDescEx &uploadDesc) {
+    if (src.Width <= 0 || src.Height <= 0 || src.BitsPerPixel <= 0 || videoFormat.BitsPerPixel <= 0)
+        return nullptr;
+
+    uploadDesc = videoFormat;
+    uploadDesc.Width = src.Width;
+    uploadDesc.Height = src.Height;
+    uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
+    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+
+    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    uploadDesc.Image = converted;
+    VxDoBlit(src, uploadDesc);
+    return converted;
+}
+
 RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, name) {
     // CKBitmapData is initialized by its default constructor
     // Re-initialize m_SourceRect to (0,0,0,0) as per IDA decompilation
@@ -37,13 +62,14 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
     RCKRenderManager *rm = (RCKRenderManager *) Context->GetRenderManager();
     m_VideoFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
     m_RasterizerContext = nullptr;
-    m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_SPRITE);
+    m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    m_InVideoMemory = FALSE;
 }
 
 RCKSprite::~RCKSprite() {
     RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
     if (rm && m_ObjectIndex) {
-        rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_SPRITE);
+        rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_TEXTURE);
     }
 }
 
@@ -145,11 +171,11 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     m_RasterizerContext = rstCtx;
 
     CKBOOL reload = FALSE;
-    CKSpriteDesc *spriteDesc = rstCtx->GetSpriteData(m_ObjectIndex);
 
-    if (spriteDesc) {
-        if (!spriteDesc->Format.AlphaMask && spriteDesc->Format.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT)) {
-            rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_SPRITE);
+    if (m_InVideoMemory) {
+        if (!m_VideoFormatDesc.AlphaMask && m_VideoFormatDesc.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT)) {
+            rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+            m_InVideoMemory = FALSE;
             reload = TRUE;
         }
     } else {
@@ -166,15 +192,86 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         Restore(FALSE);
     }
 
+    CKFixedFunctionPipeline &ffp = rctx->m_FFPipeline;
+
+    // Set render states for 2D sprite rendering
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
-        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
-        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_NOTEQUAL);
-        rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
+        ffp.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
     } else {
-        rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
     }
 
-    return rstCtx->DrawSprite(m_ObjectIndex, &m_SrcRect, &m_VtxPos);
+    // Bind sprite texture
+    ffp.SetTexture(0, m_ObjectIndex);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+
+    // Build quad vertices
+    VxDrawPrimitiveData *data = rctx->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
+    float *positionPtr = (float *) data->PositionPtr;
+    CKDWORD *texCoordPtr = (CKDWORD *) data->TexCoordPtr;
+    void *colorPtr = data->ColorPtr;
+    int posStride = data->PositionStride;
+
+    // White color (texture provides all color)
+    CKDWORD whiteColor = 0xFFFFFFFF;
+    VxFillStructure(4, colorPtr, data->ColorStride, 4, &whiteColor);
+
+    // Source rect UVs (normalized 0..1)
+    float u0 = m_SrcRect.left;
+    float v0 = m_SrcRect.top;
+    float u1 = m_SrcRect.right;
+    float v1 = m_SrcRect.bottom;
+
+    texCoordPtr[0] = *(CKDWORD *) &u0;
+    texCoordPtr[1] = *(CKDWORD *) &v0;
+    texCoordPtr[2] = *(CKDWORD *) &u1;
+    texCoordPtr[3] = *(CKDWORD *) &v0;
+    texCoordPtr[4] = *(CKDWORD *) &u1;
+    texCoordPtr[5] = *(CKDWORD *) &v1;
+    texCoordPtr[6] = *(CKDWORD *) &u0;
+    texCoordPtr[7] = *(CKDWORD *) &v1;
+
+    // Vertex positions (screen-space quad)
+    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
+    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+    positionPtr[2] = 0.0f;
+    positionPtr[3] = 1.0f;
+    positionPtr = (float *) ((char *) positionPtr + posStride);
+
+    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
+    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+    positionPtr[2] = 0.0f;
+    positionPtr[3] = 1.0f;
+    positionPtr = (float *) ((char *) positionPtr + posStride);
+
+    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
+    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+    positionPtr[2] = 0.0f;
+    positionPtr[3] = 1.0f;
+    positionPtr = (float *) ((char *) positionPtr + posStride);
+
+    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
+    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+    positionPtr[2] = 0.0f;
+    positionPtr[3] = 1.0f;
+
+    rctx->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
+
+    return CK_OK;
 }
 
 CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
@@ -206,7 +303,9 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
         spriteDesc.Format.BlueMask = 0x1F;
     }
 
-    if (m_RasterizerContext->CreateObject(m_ObjectIndex, CKRST_OBJ_SPRITE, &spriteDesc)) {
+    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &spriteDesc, nullptr) == CK_OK) {
+        m_InVideoMemory = TRUE;
+        m_VideoFormatDesc = spriteDesc.Format;
         return Restore(Clamping);
     }
     return FALSE;
@@ -228,37 +327,48 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
             m_BitmapData.SetAlphaForTransparentColor(desc);
         }
 
-        return m_RasterizerContext->LoadSprite(m_ObjectIndex, desc);
+        VxImageDescEx uploadDesc = desc;
+        CKBYTE *converted = nullptr;
+        if (!SamePixelFormat(desc, m_VideoFormatDesc)) {
+            converted = ConvertSpriteImage(desc, m_VideoFormatDesc, uploadDesc);
+            if (!converted)
+                return FALSE;
+        }
+
+        const CKBOOL result = (m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc) == CK_OK);
+        delete[] converted;
+        return result;
     }
     return FALSE;
 }
 
 CKBOOL RCKSprite::FreeVideoMemory() {
-    return m_RasterizerContext && m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_SPRITE);
+    if (m_RasterizerContext && m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK) {
+        m_InVideoMemory = FALSE;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 CKBOOL RCKSprite::IsInVideoMemory() {
-    return m_RasterizerContext && m_RasterizerContext->GetSpriteData(m_ObjectIndex) != nullptr;
+    return m_RasterizerContext && m_InVideoMemory;
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    RCKRenderContext *rctx = (RCKRenderContext *) ctx;
-    return rctx && rctx->m_RasterizerContext->CopyToTexture(m_ObjectIndex, Src, Dest, CKRST_CUBEFACE_XPOS);
+    // TODO: Phase 2 — implement via ReadFrameBuffer + UpdateTexture or Blit
+    (void)ctx; (void)Src; (void)Dest;
+    return FALSE;
 }
 
 CKBOOL RCKSprite::GetVideoTextureDesc(VxImageDescEx &desc) {
-    if (!m_RasterizerContext) return FALSE;
-    CKSpriteDesc *spriteDesc = m_RasterizerContext->GetSpriteData(m_ObjectIndex);
-    if (!spriteDesc) return FALSE;
-    desc = spriteDesc->Format;
+    if (!m_RasterizerContext || !m_InVideoMemory) return FALSE;
+    desc = m_VideoFormatDesc;
     return TRUE;
 }
 
 VX_PIXELFORMAT RCKSprite::GetVideoPixelFormat() {
-    if (!m_RasterizerContext) return UNKNOWN_PF;
-    CKSpriteDesc *spriteDesc = m_RasterizerContext->GetSpriteData(m_ObjectIndex);
-    if (!spriteDesc) return UNKNOWN_PF;
-    return VxImageDesc2PixelFormat(spriteDesc->Format);
+    if (!m_RasterizerContext || !m_InVideoMemory) return UNKNOWN_PF;
+    return VxImageDesc2PixelFormat(m_VideoFormatDesc);
 }
 
 CKBOOL RCKSprite::GetSystemTextureDesc(VxImageDescEx &desc) {

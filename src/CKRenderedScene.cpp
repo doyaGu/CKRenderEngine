@@ -1,5 +1,7 @@
 #include "CKRenderedScene.h"
 
+#include "CKDebugLogger.h"
+
 #include "VxMatrix.h"
 #include "CKRenderContext.h"
 #include "CKRasterizer.h"
@@ -7,6 +9,7 @@
 #include "CKMaterial.h"
 #include "CKLight.h"
 #include "CKCamera.h"
+#include "CKScene.h"
 #include "CKSceneGraph.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
@@ -15,8 +18,15 @@
 #include "RCKCamera.h"
 #include "RCKLight.h"
 
+#include <cstdlib>
+
 extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
+
+static bool EnvEnabled(const char *name) {
+    const char *value = std::getenv(name);
+    return value && value[0] != '\0' && value[0] != '0';
+}
 
 CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {
     // IDA: 0x1006f830
@@ -151,74 +161,43 @@ void CKRenderedScene::DetachAll() {
 
 CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     // IDA: 0x100704ae
+    CK_LOG("RenderedScene", "Draw enter");
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
-    CKRasterizerContext *rst = rc->m_RasterizerContext;
     RCK3dEntity *rootEntity = (RCK3dEntity *) m_RootEntity;
-    if (!rst || !rootEntity)
+    if (!rootEntity) {
+        CK_LOG("RenderedScene", "Draw - no rootEntity!");
         return CKERR_INVALIDRENDERCONTEXT;
-
-    SetDefaultRenderStates(rst);
-
-    rc->m_SpriteTimeProfiler.Reset();
-
-    // Render background 2D sprites
-    if ((Flags & CK_RENDER_BACKGROUNDSPRITES) != 0 &&
-        rm->m_2DRootBack && rm->m_2DRootBack->GetChildrenCount() > 0) {
-        VxRect viewRect;
-        rc->GetViewRect(viewRect);
-
-        rc->SetFullViewport(&rst->m_ViewportData,
-                            rc->m_Settings.m_Rect.right,
-                            rc->m_Settings.m_Rect.bottom);
-        rst->SetViewport(&rst->m_ViewportData);
-
-        ((RCK2dEntity *) rm->m_2DRootBack)->Render((CKRenderContext *) rc);
-
-        ResizeViewport(viewRect);
     }
 
-    rc->m_Stats.SpriteTime += rc->m_SpriteTimeProfiler.Current();
+    // --- Phase 1: begin the frame via the FF pipeline ---
+    // Build a clear color from the background material diffuse.
+    CKDWORD clearColor = 0xFF000000;
+    if (m_BackgroundMaterial) {
+        VxColor diff = m_BackgroundMaterial->GetDiffuse();
+        CKDWORD r = (CKDWORD)(diff.r * 255.0f) & 0xFF;
+        CKDWORD g = (CKDWORD)(diff.g * 255.0f) & 0xFF;
+        CKDWORD b = (CKDWORD)(diff.b * 255.0f) & 0xFF;
+        clearColor = 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
 
-    // Render 3D scene
+    // Build a viewport CKRECT from current settings.
+    CKRECT viewport;
+    viewport.left   = 0;
+    viewport.top    = 0;
+    viewport.right  = rc->m_Settings.m_Rect.right;
+    viewport.bottom = rc->m_Settings.m_Rect.bottom;
+
+    RCKCamera *camera = nullptr;
     if (!(Flags & CK_RENDER_SKIP3D)) {
-        RCKCamera *camera = rc->m_Camera;
+        camera = rc->m_Camera;
+        if (!camera)
+            camera = (RCKCamera *)m_AttachedCamera;
 
         if (camera) {
-            // Copy camera world matrix to root entity (3x4 part = 0x30 bytes)
-            VxMatrix *camMatrix = (VxMatrix *) &camera->m_WorldMatrix;
-            VxMatrix *rootMatrix = (VxMatrix *) &rootEntity->m_WorldMatrix;
-            memcpy(rootMatrix, camMatrix, sizeof(VxMatrix) - sizeof(VxVector4));
-            rootEntity->WorldMatrixChanged(FALSE, TRUE);
-
-            // Compute perspective projection based on camera bounding box
-            VxVector camPos;
-            VxVector rootPos;
-            rootEntity->GetPosition(&rootPos, nullptr);
-            camera->InverseTransform(&camPos, &rootPos, nullptr);
-
-            float absZ = fabsf(camPos.z);
-            if (absZ < EPSILON) {
-                absZ = EPSILON;
-            }
-            float z = rc->m_NearPlane / absZ;
-            float right = (camera->m_LocalBoundingBox.Max.x - camPos.x) * z;
-            float left = (camera->m_LocalBoundingBox.Min.x - camPos.x) * z;
-            float top = (camera->m_LocalBoundingBox.Max.y - camPos.y) * z;
-            float bottom = (camera->m_LocalBoundingBox.Min.y - camPos.y) * z;
-
-            rc->m_ProjectionMatrix.PerspectiveRect(left, right, top, bottom, rc->m_NearPlane, rc->m_FarPlane);
-            rst->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
-            rst->SetViewport(&rc->m_ViewportData);
-
-            // Update 2D root rects
-            VxRect fullRect(0.0f, 0.0f,
-                            (float) rc->m_Settings.m_Rect.right,
-                            (float) rc->m_Settings.m_Rect.bottom);
-            CK2dEntity *root2DBack = rc->Get2dRoot(TRUE);
-            CK2dEntity *root2DFore = rc->Get2dRoot(FALSE);
-            if (root2DBack) root2DBack->SetRect(fullRect);
-            if (root2DFore) root2DFore->SetRect(fullRect);
+            rootEntity->SetWorldMatrix(camera->GetWorldMatrix(), FALSE);
+        } else {
+            rc->UpdateProjection(FALSE);
         }
 
         // Build view frustum
@@ -232,20 +211,83 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
                           rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
         rc->m_Frustum = frustum;
 
-        rst->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());
-        rst->SetTransformMatrix(VXMATRIX_VIEW, rootEntity->GetInverseWorldMatrix());
+        rc->m_FFPipeline.SetTransform(VXMATRIX_WORLD, VxMatrix::Identity());
+        rc->m_FFPipeline.SetTransform(VXMATRIX_VIEW, rootEntity->GetInverseWorldMatrix());
 
-        SetupLights(rst);
-
-        if (!camera) {
-            rc->UpdateProjection(FALSE);
+        static int s_camLogCount = 0;
+        static int s_attachedCamLogCount = 0;
+        if (s_camLogCount < 60 && (s_camLogCount < 5 || s_camLogCount % 20 == 0)) {
+            const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
+            CK_LOG_FMT("RenderedScene", "Frame %d: camera=%p rootEntity worldMat row3: %.2f %.2f %.2f",
+                       s_camLogCount, (void*)camera,
+                       rootEntity->m_WorldMatrix[3][0], rootEntity->m_WorldMatrix[3][1], rootEntity->m_WorldMatrix[3][2]);
+            CK_LOG_FMT("RenderedScene", "  InverseWorld row3: %.3f %.3f %.3f",
+                       invW[3][0], invW[3][1], invW[3][2]);
         }
+        if (camera && s_attachedCamLogCount < 12) {
+            const VxMatrix &camW = camera->GetWorldMatrix();
+            const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
+            CK3dEntity *target = camera->GetClassID() == CKCID_TARGETCAMERA ? camera->GetTarget() : nullptr;
+            int aspectWidth = 0;
+            int aspectHeight = 0;
+            camera->GetAspectRatio(aspectWidth, aspectHeight);
+            CK_LOG_FMT("RenderedScene", "Attached camera #%d: camera=%p name=%s class=%d target=%p targetName=%s fov=%.3f near=%.3f far=%.3f aspect=%d:%d root row3=(%.3f %.3f %.3f) cam row3=(%.3f %.3f %.3f) inv row3=(%.3f %.3f %.3f)",
+                       s_attachedCamLogCount, (void *)camera,
+                       camera->GetName() ? camera->GetName() : "",
+                       camera->GetClassID(),
+                       (void *)target,
+                       target && target->GetName() ? target->GetName() : "",
+                       camera->GetFov(), camera->GetFrontPlane(), camera->GetBackPlane(),
+                       aspectWidth, aspectHeight,
+                       rootEntity->m_WorldMatrix[3][0], rootEntity->m_WorldMatrix[3][1], rootEntity->m_WorldMatrix[3][2],
+                       camW[3][0], camW[3][1], camW[3][2],
+                       invW[3][0], invW[3][1], invW[3][2]);
+            CK_LOG_FMT("RenderedScene", "  cam row0=(%.3f %.3f %.3f %.3f) row1=(%.3f %.3f %.3f %.3f) row2=(%.3f %.3f %.3f %.3f)",
+                       camW[0][0], camW[0][1], camW[0][2], camW[0][3],
+                       camW[1][0], camW[1][1], camW[1][2], camW[1][3],
+                       camW[2][0], camW[2][1], camW[2][2], camW[2][3]);
+            s_attachedCamLogCount++;
+        }
+        s_camLogCount++;
+    }
+
+    // Obtain current view and projection matrices after camera setup so bgfx
+    // receives the same transforms used by draw submission in this frame.
+    const VxMatrix &viewMat = rc->m_FFPipeline.GetViewMatrix();
+    const VxMatrix &projMat = rc->m_FFPipeline.GetProjectionMatrix();
+
+    CK_LOG("RenderedScene", "Draw - calling BeginFrame");
+    rc->m_FFPipeline.BeginDebugFrame();
+    rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearColor, 1.0f, viewMat, projMat);
+
+    // --- Default render states via the FF pipeline ---
+    SetDefaultRenderStates(nullptr);
+
+    rc->m_SpriteTimeProfiler.Reset();
+
+    // Render background 2D sprites
+    if ((Flags & CK_RENDER_BACKGROUNDSPRITES) != 0 &&
+        rm->m_2DRootBack && rm->m_2DRootBack->GetChildrenCount() > 0) {
+        VxRect viewRect;
+        rc->GetViewRect(viewRect);
+
+        rc->m_Current2DView = CKRP_VIEW_BACKGROUND2D;
+        ((RCK2dEntity *) rm->m_2DRootBack)->Render((CKRenderContext *) rc);
+        rc->m_Current2DView = CKRP_VIEW_FOREGROUND2D;
+
+        ResizeViewport(viewRect);
+    }
+
+    rc->m_Stats.SpriteTime += rc->m_SpriteTimeProfiler.Current();
+
+    // Render 3D scene
+    if (!(Flags & CK_RENDER_SKIP3D)) {
+        SetupLights(nullptr);
 
         // Execute pre-render callbacks (m_PreCallBacks)
         rc->m_DevicePreCallbacksTimeProfiler.Reset();
         if (rc->m_PreRenderCallBacks.m_PreCallBacks.Size() > 0) {
             VxCallBack *it = rc->m_PreRenderCallBacks.m_PreCallBacks.Begin();
-            rst->SetVertexShader(0);
             while (it < rc->m_PreRenderCallBacks.m_PreCallBacks.End()) {
                 ((CK_RENDERCALLBACK) it->callback)((CKRenderContext *) rc, it->argument);
                 ++it;
@@ -253,7 +295,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         }
         rc->m_Stats.DevicePreCallbacks += rc->m_DevicePreCallbacksTimeProfiler.Current();
 
-        rst->SetVertexShader(0);
         m_Context->ExecuteManagersOnPreRender((CKRenderContext *) rc);
 
         // Compute render flags for scene traversal (matches original CK2_3D.dll behavior)
@@ -277,7 +318,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_DevicePostCallbacksTimeProfiler.Reset();
         if (rc->m_PostRenderCallBacks.m_PostCallBacks.Size() > 0) {
             VxCallBack *it = rc->m_PostRenderCallBacks.m_PostCallBacks.Begin();
-            rst->SetVertexShader(0);
             while (it < rc->m_PostRenderCallBacks.m_PostCallBacks.End()) {
                 ((CK_RENDERCALLBACK) it->callback)((CKRenderContext *) rc, it->argument);
                 ++it;
@@ -297,7 +337,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_DevicePostCallbacksTimeProfiler.Reset();
         if (rc->m_PreRenderCallBacks.m_PostCallBacks.Size() > 0) {
             VxCallBack *it = rc->m_PreRenderCallBacks.m_PostCallBacks.Begin();
-            rst->SetVertexShader(0);
             while (it < rc->m_PreRenderCallBacks.m_PostCallBacks.End()) {
                 ((CK_RENDERCALLBACK) it->callback)((CKRenderContext *) rc, it->argument);
                 ++it;
@@ -316,11 +355,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
 
-        rc->SetFullViewport(&rst->m_ViewportData,
-                            rc->m_Settings.m_Rect.right,
-                            rc->m_Settings.m_Rect.bottom);
-        rst->SetViewport(&rst->m_ViewportData);
-
         ((RCK2dEntity *) rm->m_2DRootFore)->Render(rc);
 
         ResizeViewport(viewRect);
@@ -328,14 +362,12 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     rc->m_Stats.SpriteTime += rc->m_SpriteTimeProfiler.Current();
 
-    rst->SetVertexShader(0);
     m_Context->ExecuteManagersOnPostSpriteRender(rc);
 
     // Execute final post-render callbacks (m_PostSpriteRenderCallBacks.m_PostCallBacks)
     rc->m_DevicePostCallbacksTimeProfiler.Reset();
     if (rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Size() > 0) {
         VxCallBack *it = rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Begin();
-        rst->SetVertexShader(0);
         while (it < rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.End()) {
             ((CK_RENDERCALLBACK) it->callback)((CKRenderContext *) rc, it->argument);
             ++it;
@@ -354,54 +386,69 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     return CK_OK;
 }
 
-void CKRenderedScene::SetupLights(CKRasterizerContext *rst) {
+void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
     // IDA: 0x1006fea0
+    // Phase 1: disable all lights that were active during the previous frame.
+    RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
+
     for (CKDWORD i = 0; i < m_LightCount; ++i) {
-        rst->EnableLight(i, FALSE);
+        rc->m_FFPipeline.EnableLight(i, FALSE);
     }
     m_LightCount = 0;
 
-    for (CKObject **it = m_Lights.Begin(); it < m_Lights.End(); ++it) {
-        RCKLight *light = (RCKLight *) *it;
-        if (light->Setup(rst, m_LightCount)) {
+    // Phase 2: iterate the scene light list and submit each active light to
+    // the FF pipeline.  RCKLight::Setup populates world-space position/direction
+    // from the entity's world matrix, applies power scaling to the diffuse color,
+    // and calls SetLight/EnableLight.  The pipeline transforms position and
+    // direction to view space internally during uniform upload.
+    for (CKObject **it = m_Lights.Begin(); it != m_Lights.End(); ++it) {
+        RCKLight *light = static_cast<RCKLight *>(*it);
+        if (!light)
+            continue;
+        if (m_LightCount >= CKFF_MAX_LIGHTS)
+            break;
+        if (light->Setup(&rc->m_FFPipeline, static_cast<int>(m_LightCount))) {
             ++m_LightCount;
         }
     }
 
-    rst->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
+    rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
 }
 
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
-    CKRasterizerContext *rst = ((RCKRenderContext *) m_RenderContext)->m_RasterizerContext;
-    rst->m_ViewportData.ViewX = (int) rect.left;
-    rst->m_ViewportData.ViewY = (int) rect.top;
-    rst->m_ViewportData.ViewWidth = (int) rect.GetWidth();
-    rst->m_ViewportData.ViewHeight = (int) rect.GetHeight();
-    rst->SetViewport(&rst->m_ViewportData);
+    // Update the viewport data stored on the render context.
+    // The v2 API configures the viewport through BeginFrame/SetViewRect on the
+    // render pipeline — this local copy is kept for picks, frustum building,
+    // and any code that reads rc->m_ViewportData directly.
+    RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
+    rc->m_ViewportData.ViewX = (int) rect.left;
+    rc->m_ViewportData.ViewY = (int) rect.top;
+    rc->m_ViewportData.ViewWidth  = (int) rect.GetWidth();
+    rc->m_ViewportData.ViewHeight = (int) rect.GetHeight();
 }
 
-void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
+void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
+    // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
+    CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
+
     CKDWORD fogMode = m_FogMode;
     if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {
         fogMode = VXFOG_LINEAR;
     }
 
-    rst->InvalidateStateCache(VXRENDERSTATE_FOGVERTEXMODE);
-    rst->InvalidateStateCache(VXRENDERSTATE_FOGENABLE);
-    rst->InvalidateStateCache(VXRENDERSTATE_FOGPIXELMODE);
-    rst->SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
 
     if (fogMode != VXFOG_NONE) {
         if ((rc->m_RasterizerDriver->m_3DCaps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) == (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
-            rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
+            ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
         } else {
             fogMode = VXFOG_LINEAR;
-            rst->SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, fogMode);
+            ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, fogMode);
         }
 
-        const VxMatrix &projMat = rst->m_ProjectionMatrix;
+        const VxMatrix &projMat = ffp.GetProjectionMatrix();
 
         float endZ = projMat[2][2] * m_FogEnd + projMat[3][2];
         float endW = projMat[2][3] * m_FogEnd + projMat[3][3];
@@ -414,83 +461,152 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
         float recipStartW = 1.0f / startW;
 
         if (g_FogProjectionMode == 0) {
-            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&m_FogEnd));
-            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&m_FogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&m_FogEnd));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&m_FogStart));
         } else if (g_FogProjectionMode == 1) {
-            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&projFogEnd));
-            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&projFogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&projFogEnd));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&projFogStart));
         } else if (g_FogProjectionMode == 2) {
-            rst->SetRenderState(VXRENDERSTATE_FOGEND, *reinterpret_cast<CKDWORD *>(&projFogStart));
-            rst->SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&recipStartW));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&projFogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&recipStartW));
         }
 
-        rst->SetRenderState(VXRENDERSTATE_FOGDENSITY, *reinterpret_cast<CKDWORD *>(&m_FogDensity));
-        rst->SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
+        ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, *reinterpret_cast<CKDWORD *>(&m_FogDensity));
+        ffp.SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
     }
 
     if (rm->m_DisableSpecular.Value != 0) {
-        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
-        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
     } else {
-        rst->SetRenderStateFlags(VXRENDERSTATE_SPECULARENABLE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     }
 
     if (rm->m_DisableDithering.Value != 0) {
-        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
-        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
     } else {
-        rst->SetRenderStateFlags(VXRENDERSTATE_DITHERENABLE, FALSE);
-        rst->InvalidateStateCache(VXRENDERSTATE_DITHERENABLE);
-        rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
     }
 
     if (rm->m_DisablePerspectiveCorrection.Value != 0) {
-        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
-        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
     } else {
-        rst->SetRenderStateFlags(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
-        rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
+        ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
     }
 
-    rst->m_PresentInterval = rm->m_DisableFilter.Value;
-    rst->m_CurrentPresentInterval = rm->m_DisableMipmap.Value;
-    rst->SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
-    rst->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
-    rst->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
-    rst->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+    // m_PresentInterval / m_CurrentPresentInterval were v1 fields on
+    // CKRasterizerContext; filter/mipmap modes are now managed by the
+    // sampler descriptors built inside CKFixedFunctionPipeline.
+
+    ffp.SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE,   TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE,  VXCULL_CCW);
+    ffp.SetRenderState(VXRENDERSTATE_ZFUNC,     VXCMP_LESSEQUAL);
 
     if (rc->m_Shading < 2) {
         if (rc->m_Shading) {
-            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
-            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
-            rst->SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
-            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
         } else {
-            rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
-            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
-            rst->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
-            rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
         }
-    } else {
-        rst->SetRenderStateFlags(VXRENDERSTATE_SHADEMODE, FALSE);
-        rst->SetRenderStateFlags(VXRENDERSTATE_FILLMODE, FALSE);
     }
+    // Shading == 2 (Gouraud solid) is the pipeline default; no override needed.
 }
 
 void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
+
+    if (!m_AttachedCamera) {
+        CKScene *currentScene = m_Context ? m_Context->GetCurrentScene() : nullptr;
+        CKCamera *fallbackCamera = currentScene ? currentScene->GetStartingCamera() : nullptr;
+        static int s_cameraListLogCount = 0;
+        if (s_cameraListLogCount < 3) {
+            CK_LOG_FMT("RenderedScene", "Camera list #%d: scene=%s starting=%p cameraCount=%d",
+                       s_cameraListLogCount,
+                       currentScene && currentScene->GetName() ? currentScene->GetName() : "",
+                       (void *)fallbackCamera,
+                       m_Cameras.Size());
+            int cameraIndex = 0;
+            for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it, ++cameraIndex) {
+                CKCamera *listedCamera = (CKCamera *) *it;
+                if (!listedCamera)
+                    continue;
+                const VxMatrix &camW = ((RCKCamera *)listedCamera)->GetWorldMatrix();
+                CK3dEntity *target = listedCamera->GetClassID() == CKCID_TARGETCAMERA ? listedCamera->GetTarget() : nullptr;
+                CK_LOG_FMT("RenderedScene",
+                           "  camera[%d]=%p name=%s class=%d target=%p targetName=%s pos=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f)",
+                           cameraIndex,
+                           (void *)listedCamera,
+                           listedCamera->GetName() ? listedCamera->GetName() : "",
+                           listedCamera->GetClassID(),
+                           (void *)target,
+                           target && target->GetName() ? target->GetName() : "",
+                           camW[3][0], camW[3][1], camW[3][2],
+                           camW[2][0], camW[2][1], camW[2][2]);
+            }
+            ++s_cameraListLogCount;
+        }
+        if (!fallbackCamera && EnvEnabled("CK2_3D_DEBUG_FALLBACK_FIRST_CAMERA")) {
+            for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it) {
+                fallbackCamera = (CKCamera *) *it;
+                if (fallbackCamera)
+                    break;
+            }
+        }
+        if (fallbackCamera) {
+            fallbackCamera->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
+            m_AttachedCamera = fallbackCamera;
+            static int s_fallbackCameraLogCount = 0;
+            if (s_fallbackCameraLogCount < 12) {
+                const VxMatrix &fallbackWorld = ((RCKCamera *)fallbackCamera)->GetWorldMatrix();
+                CK3dEntity *fallbackTarget = fallbackCamera->GetClassID() == CKCID_TARGETCAMERA ? fallbackCamera->GetTarget() : nullptr;
+                CK_LOG_FMT("RenderedScene",
+                           "Resolved fallback camera #%d: camera=%p name=%s class=%d target=%p targetName=%s targetPos=(%.3f %.3f %.3f) scene=%s cameraCount=%d pos=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f)",
+                           s_fallbackCameraLogCount,
+                           (void *)fallbackCamera,
+                           fallbackCamera->GetName() ? fallbackCamera->GetName() : "",
+                           fallbackCamera->GetClassID(),
+                           (void *)fallbackTarget,
+                           fallbackTarget && fallbackTarget->GetName() ? fallbackTarget->GetName() : "",
+                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][0] : 0.0f,
+                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][1] : 0.0f,
+                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][2] : 0.0f,
+                           currentScene && currentScene->GetName() ? currentScene->GetName() : "",
+                           m_Cameras.Size(),
+                           fallbackWorld[3][0], fallbackWorld[3][1], fallbackWorld[3][2],
+                           fallbackWorld[2][0], fallbackWorld[2][1], fallbackWorld[2][2]);
+                ++s_fallbackCameraLogCount;
+            }
+        }
+    }
 
     for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it) {
         CKCamera *camera = (CKCamera *) *it;
         if (camera && camera->GetClassID() == CKCID_TARGETCAMERA) {
             CK3dEntity *target = camera->GetTarget();
             if (target) {
+                static int s_targetCameraLogCount = 0;
+                if (s_targetCameraLogCount < 24 && (s_targetCameraLogCount < 8 || s_targetCameraLogCount % 4 == 0)) {
+                    const VxMatrix &camW = ((RCKCamera *)camera)->GetWorldMatrix();
+                    const VxMatrix &targetW = ((RCK3dEntity *)target)->GetWorldMatrix();
+                    CK_LOG_FMT("RenderedScene",
+                               "Target camera update #%d: camera=%s pos=(%.3f %.3f %.3f) target=%s targetPos=(%.3f %.3f %.3f) beforeDir=(%.3f %.3f %.3f)",
+                               s_targetCameraLogCount,
+                               camera->GetName() ? camera->GetName() : "",
+                               camW[3][0], camW[3][1], camW[3][2],
+                               target->GetName() ? target->GetName() : "",
+                               targetW[3][0], targetW[3][1], targetW[3][2],
+                               camW[2][0], camW[2][1], camW[2][2]);
+                }
                 VxVector origin(0.0f, 0.0f, 0.0f);
                 camera->LookAt(&origin, target, FALSE);
+                if (s_targetCameraLogCount < 24 && (s_targetCameraLogCount < 8 || s_targetCameraLogCount % 4 == 0)) {
+                    const VxMatrix &camW = ((RCKCamera *)camera)->GetWorldMatrix();
+                    CK_LOG_FMT("RenderedScene",
+                               "Target camera update #%d: afterDir=(%.3f %.3f %.3f)",
+                               s_targetCameraLogCount,
+                               camW[2][0], camW[2][1], camW[2][2]);
+                }
+                ++s_targetCameraLogCount;
             }
         }
     }

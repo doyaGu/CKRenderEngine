@@ -7,6 +7,8 @@
 #include <Windows.h>
 #endif
 
+#include "CKDebugLogger.h"
+
 #include "VxMath.h"
 #include "VxIntersect.h"
 #include "CKGlobals.h"
@@ -31,6 +33,7 @@
 #include "RCKTexture.h"
 #include "RCKMaterial.h"
 #include "RCKSprite3D.h"
+#include "CKFixedFunctionPipeline.h"
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
@@ -208,9 +211,6 @@ void RCKRenderContext::DetachAll() {
     // Based on IDA at 0x10067e01
     m_ObjectExtents.Resize(0);
 
-    if (m_RasterizerContext)
-        m_RasterizerContext->FlushRenderStateCache();
-
     m_RenderedScene->DetachAll();
 }
 
@@ -232,8 +232,7 @@ void RCKRenderContext::RestoreStereoRenderState(CK3dEntity *rootEntity, const Vx
         rootEntity->SetWorldMatrix(originalWorldMat, FALSE);
     }
     m_ProjectionMatrix[2][0] = 0.0f;
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-    m_RasterizerContext->SetDrawBuffer(CKRST_DRAWBOTH);
+    m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, m_ProjectionMatrix);
 }
 
 void RCKRenderContext::ExecutePreRenderCallbacks() {
@@ -436,115 +435,50 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
-    // IDA: 0x10069c72
+    CK_LOG("Clear", "enter");
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
     CK_RENDER_FLAGS renderFlags = ResolveRenderFlags(Flags);
 
-    // Check if any clear flags are set (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL = 0x70)
     if (!(renderFlags & (CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL)))
         return CK_OK;
 
-    CKMaterial *backgroundMaterial = m_RenderedScene->GetBackgroundMaterial();
-
-    // If not clearing viewport only, set full screen viewport temporarily
-    if (!(renderFlags & CK_RENDER_CLEARVIEWPORT)) {
-        CKViewportData fullVp;
-        fullVp.ViewX = 0;
-        fullVp.ViewY = 0;
-        fullVp.ViewWidth = m_Settings.m_Rect.right;
-        fullVp.ViewHeight = m_Settings.m_Rect.bottom;
-        fullVp.ViewZMin = 0.0f;
-        fullVp.ViewZMax = 1.0f;
-        m_RasterizerContext->SetViewport(&fullVp);
-    }
-
-    // Background clear path (matches original): if CLEARBACK is requested and a background material exists,
-    // the clear color is the material diffuse, and a background texture (if any) is rendered as a full-screen quad.
-    if (backgroundMaterial && (renderFlags & CK_RENDER_CLEARBACK) != 0) {
-        CKTexture *bgTexture = backgroundMaterial->GetTexture(0);
-        if (bgTexture) {
-            bgTexture->SetAsCurrent(this, FALSE, 0);
-            m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(0, 0));
-            m_RasterizerContext->SetVertexShader(0);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-            m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_DECAL);
-            m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
-            m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
-            m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-            m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
-
-            VxDrawPrimitiveData dp;
-            memset(&dp, 0, sizeof(dp));
-
-            float uvs[8] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
-            CKDWORD colors[4] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
-            VxVector4 positions[4];
-
-            float w = (float) m_Settings.m_Rect.right;
-            float h = (float) m_Settings.m_Rect.bottom;
-
-            positions[0] = VxVector4(0.0f, 0.0f, 0.0f, 1.0f);
-            positions[1] = VxVector4(w, 0.0f, 0.0f, 1.0f);
-            positions[2] = VxVector4(w, h, 0.0f, 1.0f);
-            positions[3] = VxVector4(0.0f, h, 0.0f, 1.0f);
-
-            dp.Flags = CKRST_DP_STAGES0;
-            dp.VertexCount = 4;
-            dp.PositionPtr = positions;
-            dp.PositionStride = sizeof(VxVector4);
-            dp.ColorPtr = colors;
-            dp.ColorStride = sizeof(CKDWORD);
-            dp.TexCoordPtr = uvs;
-            dp.TexCoordStride = sizeof(float) * 2;
-
-            m_RasterizerContext->DrawPrimitive(VX_TRIANGLEFAN, nullptr, 0, &dp);
-
-            // Background drawn: clear Z / stencil if requested, but do not clear back buffer.
-            renderFlags = (CK_RENDER_FLAGS) (renderFlags & ~CK_RENDER_CLEARBACK);
-
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
-            m_RasterizerContext->SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
-        }
-
-        if (renderFlags) {
-            if ((renderFlags & CK_RENDER_CLEARSTENCIL) != 0)
-                m_StencilFreeMask = Stencil;
-
-            CKDWORD clearColor = RGBAFTOCOLOR(&backgroundMaterial->GetDiffuse());
-            m_RasterizerContext->Clear(renderFlags, clearColor, 1.0f, Stencil, 0, nullptr);
-        }
-
-        if (!(renderFlags & CK_RENDER_CLEARVIEWPORT))
-            m_RasterizerContext->SetViewport(&m_ViewportData);
-
-        return CK_OK;
-    }
-
-    // Non-background clear path: clear color is always 0.
-    if ((renderFlags & CK_RENDER_CLEARSTENCIL) != 0)
+    CKDWORD clearFlags = 0;
+    if (renderFlags & CK_RENDER_CLEARBACK) clearFlags |= CKRST_CTXCLEAR_COLOR;
+    if (renderFlags & CK_RENDER_CLEARZ) clearFlags |= CKRST_CTXCLEAR_DEPTH;
+    if (renderFlags & CK_RENDER_CLEARSTENCIL) {
+        clearFlags |= CKRST_CTXCLEAR_STENCIL;
         m_StencilFreeMask = Stencil;
-    m_RasterizerContext->Clear(renderFlags, 0, 1.0f, Stencil, 0, nullptr);
+    }
 
-    if (!(renderFlags & CK_RENDER_CLEARVIEWPORT))
-        m_RasterizerContext->SetViewport(&m_ViewportData);
+    CKDWORD clearColor = 0;
+    CK_LOG("Clear", "getting background material");
+    if (!m_RenderedScene) {
+        CK_LOG("Clear", "m_RenderedScene is NULL!");
+        return CKERR_INVALIDRENDERCONTEXT;
+    }
+    CKMaterial *backgroundMaterial = m_RenderedScene->GetBackgroundMaterial();
+    if (backgroundMaterial && (renderFlags & CK_RENDER_CLEARBACK)) {
+        clearColor = RGBAFTOCOLOR(&backgroundMaterial->GetDiffuse());
+    }
 
+    // Configure the clear view in the render pipeline
+    CKRECT viewRect;
+    viewRect.left = m_ViewportData.ViewX;
+    viewRect.top = m_ViewportData.ViewY;
+    viewRect.right = m_ViewportData.ViewX + m_ViewportData.ViewWidth;
+    viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
+    CK_LOG("Clear", "SetViewRect/SetViewClear");
+    m_RasterizerContext->SetViewRect(CKRP_VIEW_CLEAR, viewRect);
+    m_RasterizerContext->SetViewClear(CKRP_VIEW_CLEAR, clearFlags, clearColor, 1.0f, Stencil);
+
+    CK_LOG("Clear", "done");
     return CK_OK;
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
-    // IDA: 0x1006a37d
+    CK_LOG("DrawScene", "enter");
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
@@ -555,19 +489,15 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     ++m_DrawSceneCalls;
     memset(&m_Stats, 0, sizeof(VxStats));
     m_Stats.SmoothedFps = m_SmoothedFps;
-    m_RasterizerContext->m_RenderStateCacheHit = 0;
-    m_RasterizerContext->m_RenderStateCacheMiss = 0;
 
     if (!(renderFlags & CK_RENDER_DONOTUPDATEEXTENTS)) {
         m_ObjectExtents.Resize(0);
     }
 
-    m_RasterizerContext->BeginScene();
+    CK_LOG("DrawScene", "calling m_RenderedScene->Draw");
     CKERROR err = m_RenderedScene->Draw(renderFlags);
-    m_RasterizerContext->EndScene();
+    CK_LOG("DrawScene", "done");
 
-    m_Stats.RenderStateCacheHit = m_RasterizerContext->m_RenderStateCacheHit;
-    m_Stats.RenderStateCacheMiss = m_RasterizerContext->m_RenderStateCacheMiss;
     --m_DrawSceneCalls;
 
     return err;
@@ -649,9 +579,9 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
             }
         }
 
-        // Call rasterizer BackToFront
+        // End frame and present
         CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
-        m_RasterizerContext->BackToFront(waitVbl);
+        m_FFPipeline.GetRenderPipeline().EndFrame(waitVbl);
     }
 
     // Debug mode handling (Ctrl+Alt+F11 to enter, various keys while in debug mode)
@@ -811,7 +741,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     CKERROR err = CK_OK;
 
     // Check for stereo rendering
-    if (m_RasterizerContext->m_Driver && m_RasterizerContext->m_Driver->m_Stereo) {
+    if (FALSE) {
         // Stereo rendering path
         VxMatrix originalWorldMat;
         Vx3DMatrixIdentity(originalWorldMat);
@@ -842,8 +772,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
 
         float projOffset = 2.0f * m_FocalLength * m_NearPlane / m_EyeSeparation;
 
-        // Clear both buffers
-        m_RasterizerContext->SetDrawBuffer(CKRST_DRAWBOTH);
+        // Clear both buffers (stereo not supported in v2)
         err = Clear(renderFlags);
         if (err != CK_OK) {
             RestoreStereoRenderState(rootEntity, originalWorldMat);
@@ -856,12 +785,11 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         }
 
         // Render right eye
-        m_RasterizerContext->SetDrawBuffer(CKRST_DRAWRIGHT);
         rootEntity->SetWorldMatrix(rightWorldMat, FALSE);
         if (!m_Camera) {
             UpdateProjection(FALSE);
             m_ProjectionMatrix[2][0] = -0.5f * m_ProjectionMatrix[0][0] * projOffset;
-            m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
+            m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, m_ProjectionMatrix);
         }
         err = DrawScene(renderFlags);
         if (err != CK_OK) {
@@ -870,11 +798,10 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         }
 
         // Render left eye
-        m_RasterizerContext->SetDrawBuffer(CKRST_DRAWLEFT);
         rootEntity->SetWorldMatrix(leftWorldMat, FALSE);
         if (!m_Camera) {
             m_ProjectionMatrix[2][0] = 0.5f * m_ProjectionMatrix[0][0] * projOffset;
-            m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
+            m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, m_ProjectionMatrix);
         }
         err = DrawScene(renderFlags);
         if (err != CK_OK) {
@@ -886,13 +813,16 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         RestoreStereoRenderState(rootEntity, originalWorldMat);
     } else {
         // Normal rendering (non-stereo)
+        CK_LOG("Render", "about to Clear");
         err = Clear(renderFlags);
         if (err != CK_OK)
             return err;
 
+        CK_LOG("Render", "about to DrawScene");
         err = DrawScene(renderFlags);
         if (err != CK_OK)
             return err;
+        CK_LOG("Render", "DrawScene done");
     }
 
     // FPS calculation
@@ -966,18 +896,9 @@ void RCKRenderContext::RemovePostSpriteRenderCallBack(CK_RENDERCALLBACK Function
 
 VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS Flags, int VertexCount) {
     // IDA: 0x1006bc74
-    if ((Flags & CKRST_DP_VBUFFER) != 0 && m_RasterizerContext &&
-        (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CANDOVERTEXBUFFER) != 0) {
-        CKDWORD vertexSize = 0;
-        CKDWORD vertexFormat = CKRSTGetVertexFormat(Flags, vertexSize);
-        CKDWORD index = m_RasterizerContext->GetDynamicVertexBuffer(vertexFormat, VertexCount, vertexSize, (Flags & CKRST_DP_DOCLIP) != 0);
-
-        if (m_RasterizerContext->GetVertexBufferData(index)) {
-            m_VertexBufferIndex = index;
-            m_StartIndex = -1;
-            m_DpFlags = Flags;
-            return LockCurrentVB(VertexCount);
-        }
+    // TODO: Phase 2 — dynamic vertex buffers not supported in rasterizer v2
+    if (FALSE) {
+        (void)VertexCount;
     }
 
     // Fall back to user draw primitive data
@@ -996,27 +917,30 @@ CKWORD *RCKRenderContext::GetDrawPrimitiveIndices(int IndicesCount) {
 }
 
 void RCKRenderContext::Transform(VxVector *Dest, VxVector *Src, CK3dEntity *Ref) {
-    // IDA: 0x1006bf71
-    if (!m_RasterizerContext)
-        return;
+    if (!Src || !Dest) return;
 
-    VxVector4 screenResult;
-    VxTransformData transformData;
-    memset(&transformData, 0, sizeof(transformData));
-    transformData.ClipFlags = 0;
-    transformData.InStride = sizeof(VxVector4);
-    transformData.InVertices = Src;
-    transformData.OutStride = 0;
-    transformData.OutVertices = NULL;
-    transformData.ScreenStride = sizeof(VxVector4);
-    transformData.ScreenVertices = &screenResult;
+    VxMatrix world = Ref ? Ref->GetWorldMatrix() : m_WorldMatrix;
+    VxMatrix wvp;
+    VxMatrix vp;
+    Vx3DMultiplyMatrix(vp, m_ViewMatrix, m_ProjectionMatrix);
+    Vx3DMultiplyMatrix(wvp, world, vp);
 
-    if (Ref) {
-        m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, Ref->GetWorldMatrix());
+    VxVector4 clip;
+    clip.x = Src->x * wvp[0][0] + Src->y * wvp[1][0] + Src->z * wvp[2][0] + wvp[3][0];
+    clip.y = Src->x * wvp[0][1] + Src->y * wvp[1][1] + Src->z * wvp[2][1] + wvp[3][1];
+    clip.z = Src->x * wvp[0][2] + Src->y * wvp[1][2] + Src->z * wvp[2][2] + wvp[3][2];
+    clip.w = Src->x * wvp[0][3] + Src->y * wvp[1][3] + Src->z * wvp[2][3] + wvp[3][3];
+
+    if (clip.w != 0.0f) {
+        float invW = 1.0f / clip.w;
+        float ndcX = clip.x * invW;
+        float ndcY = clip.y * invW;
+        Dest->x = (ndcX * 0.5f + 0.5f) * m_ViewportData.ViewWidth + m_ViewportData.ViewX;
+        Dest->y = (0.5f - ndcY * 0.5f) * m_ViewportData.ViewHeight + m_ViewportData.ViewY;
+        Dest->z = clip.z * invW;
+    } else {
+        Dest->x = Dest->y = Dest->z = 0.0f;
     }
-
-    m_RasterizerContext->TransformVertices(1, &transformData);
-    *Dest = screenResult;
 }
 
 CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Driver, int RefreshRate) {
@@ -1189,9 +1113,9 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_RasterizerDriver = newDriver;
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
 
-    // Copy settings
-    m_RasterizerContext->m_EnableScreenDump = m_RenderManager->m_EnableScreenDump.Value;
-    m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
+    // Settings moved out of rasterizer context in v2
+    // m_RasterizerContext->m_EnableScreenDump = m_RenderManager->m_EnableScreenDump.Value;
+    // m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
 
     // Try to create the context with current settings
     CKBOOL created = m_RasterizerContext->Create(
@@ -1212,9 +1136,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_Settings.m_Zbpp = m_RasterizerContext->m_ZBpp;
         m_Settings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
 
-        if (m_RasterizerContext)
-            m_RasterizerContext->SetTransparentMode(m_TransparentMode);
-
+        // SetTransparentMode removed in rasterizer v2
         m_DeviceDestroying = FALSE;
         return TRUE;
     } else {
@@ -1222,7 +1144,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerDriver = oldDriver;
         m_RasterizerContext = m_RasterizerDriver->CreateContext();
-        m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
+        // m_Antialias moved out of rasterizer context in v2
 
         CKBOOL restored = m_RasterizerContext->Create(
             m_WinHandle,
@@ -1371,33 +1293,29 @@ VX_PIXELFORMAT RCKRenderContext::GetPixelFormat(int *Bpp, int *Zbpp, int *Stenci
     if (Zbpp) *Zbpp = m_Settings.m_Zbpp;
     if (StencilBpp) *StencilBpp = m_Settings.m_StencilBpp;
 
-    return m_RasterizerContext->m_PixelFormat;
+    return _32_ARGB8888;
 }
 
 void RCKRenderContext::SetState(VXRENDERSTATETYPE State, CKDWORD Value) {
-    // IDA: 0x1006b68c
-    m_RasterizerContext->SetRenderState(State, Value);
+    m_FFPipeline.SetRenderState(State, Value);
 }
 
 CKDWORD RCKRenderContext::GetState(VXRENDERSTATETYPE State) {
-    // IDA: 0x1006b6b8
-    CKDWORD value = 0;
-    m_RasterizerContext->GetRenderState(State, &value);
-    return value;
+    return m_FFPipeline.GetRenderState(State);
 }
 
 CKBOOL RCKRenderContext::SetTexture(CKTexture *tex, CKBOOL Clamped, int Stage) {
     if (tex) {
         return tex->SetAsCurrent(this, Clamped, Stage);
     } else {
-        // IDA: 0x1006b738
-        return m_RasterizerContext->SetTexture(0, Stage);
+        m_FFPipeline.SetTexture(Stage, 0);
+        return TRUE;
     }
 }
 
 CKBOOL RCKRenderContext::SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage) {
-    // IDA: 0x1006b781
-    return m_RasterizerContext->SetTextureStageState(Stage, State, Value);
+    m_FFPipeline.SetTextureStageState(Stage, State, Value);
+    return TRUE;
 }
 
 CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
@@ -1527,7 +1445,6 @@ CKDWORD RCKRenderContext::GetFogColor() {
 }
 
 CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data) {
-    // IDA: 0x1006b314
     if (!data)
         return FALSE;
     if (data->VertexCount <= 0)
@@ -1535,21 +1452,19 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
 
     // Set lighting mode based on normals
     if ((data->Flags & CKRST_DP_LIGHT) != 0 && data->NormalPtr) {
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
+        m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, 1);
     } else {
-        // Enable diffuse color flag if color pointer exists
         if (data->SpecularColorPtr)
             data->Flags |= CKRST_DP_SPECULAR;
         if (data->ColorPtr)
             data->Flags |= CKRST_DP_DIFFUSE;
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
+        m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, 0);
     }
 
-    // If no indices, use vertex count
     if (!indices)
         indexcount = data->VertexCount;
 
-    // Update stats based on primitive type
+    // Update stats
     switch (pType) {
     case VX_POINTLIST:
         m_Stats.NbPointsDrawn += data->VertexCount;
@@ -1570,68 +1485,62 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     default:
         break;
     }
-
     m_Stats.NbVerticesProcessed += data->VertexCount;
 
-    // Check if using vertex buffer
-    if ((data->Flags & CKRST_DP_VBUFFER) == 0 || !m_VertexBufferIndex) {
-        return m_RasterizerContext->DrawPrimitive(pType, indices, indexcount, data);
+    CKRasterizerEncoder *encoder = m_FFPipeline.GetRenderPipeline().GetEncoder();
+    CKRenderView view;
+    if (data->Flags & CKRST_DP_TRANSFORM) {
+        view = m_FFPipeline.GetRenderPipeline().GetOpaqueView();
+    } else {
+        view = m_Current2DView;
     }
-
-    // Unlock any locked vertex buffers
-    while (m_VertexBufferCount) {
-        --m_VertexBufferCount;
-        m_RasterizerContext->UnlockVertexBuffer(m_VertexBufferIndex);
-    }
-
-    return m_RasterizerContext->DrawPrimitiveVB(pType, m_VertexBufferIndex, m_StartIndex, data->VertexCount, indices, indexcount);
+    m_FFPipeline.SetViewport(m_ViewportData);
+    m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, data);
+    return TRUE;
 }
 
 void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data, CK3dEntity *Ref) {
-    if (!data)
-        return;
-    if (Ref) {
-        m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, ((RCK3dEntity *) Ref)->m_WorldMatrix);
-    }
-    m_RasterizerContext->TransformVertices(VertexCount, data);
+    // TODO: Phase 2 — software vertex transform for picking/projecting
+    (void)VertexCount;
+    (void)data;
+    (void)Ref;
 }
 
 void RCKRenderContext::SetWorldTransformationMatrix(const VxMatrix &M) {
-    // IDA: 0x1006b598
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, M);
+    m_WorldMatrix = M;
+    m_FFPipeline.SetTransform(VXMATRIX_WORLD, M);
 }
 
 void RCKRenderContext::SetProjectionTransformationMatrix(const VxMatrix &M) {
-    // IDA: 0x1006b649
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, M);
+    m_ProjectionMatrix = M;
+    m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, M);
 }
 
 void RCKRenderContext::SetViewTransformationMatrix(const VxMatrix &M) {
-    // IDA: 0x1006b608
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_VIEW, M);
+    m_ViewMatrix = M;
+    m_FFPipeline.SetTransform(VXMATRIX_VIEW, M);
 }
 
 const VxMatrix &RCKRenderContext::GetWorldTransformationMatrix() {
-    // IDA: 0x1006b5c2
-    return m_RasterizerContext->m_WorldMatrix;
+    return m_WorldMatrix;
 }
 
 const VxMatrix &RCKRenderContext::GetProjectionTransformationMatrix() {
-    // IDA: 0x1006b673
-    return m_RasterizerContext->m_ProjectionMatrix;
+    return m_ProjectionMatrix;
 }
 
 const VxMatrix &RCKRenderContext::GetViewTransformationMatrix() {
-    // IDA: 0x1006b632
-    return m_RasterizerContext->m_ViewMatrix;
+    return m_ViewMatrix;
 }
 
 CKBOOL RCKRenderContext::SetUserClipPlane(CKDWORD ClipPlaneIndex, const VxPlane &PlaneEquation) {
-    return m_RasterizerContext->SetUserClipPlane(ClipPlaneIndex, PlaneEquation);
+    // TODO: Phase 2 — user clip planes not supported in rasterizer v2
+    return FALSE;
 }
 
 CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &PlaneEquation) {
-    return m_RasterizerContext->GetUserClipPlane(ClipPlaneIndex, PlaneEquation);
+    // TODO: Phase 2 — user clip planes not supported in rasterizer v2
+    return FALSE;
 }
 
 // IDA: 0x1006823b - Internal 2D picking method
@@ -2114,6 +2023,27 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
         const VxMatrix &worldMat = cam->GetWorldMatrix();
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
 
+        static int s_attachLogCount = 0;
+        if (s_attachLogCount < 16) {
+            CK3dEntity *target = cam->GetClassID() == CKCID_TARGETCAMERA ? cam->GetTarget() : nullptr;
+            int aspectWidth = 0;
+            int aspectHeight = 0;
+            cam->GetAspectRatio(aspectWidth, aspectHeight);
+            CK_LOG_FMT("RenderContext",
+                       "AttachViewpointToCamera #%d: camera=%p name=%s class=%d target=%p targetName=%s fov=%.3f near=%.3f far=%.3f aspect=%d:%d pos=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f)",
+                       s_attachLogCount,
+                       (void *)cam,
+                       cam->GetName() ? cam->GetName() : "",
+                       cam->GetClassID(),
+                       (void *)target,
+                       target && target->GetName() ? target->GetName() : "",
+                       cam->GetFov(), cam->GetFrontPlane(), cam->GetBackPlane(),
+                       aspectWidth, aspectHeight,
+                       worldMat[3][0], worldMat[3][1], worldMat[3][2],
+                       worldMat[2][0], worldMat[2][1], worldMat[2][2]);
+            ++s_attachLogCount;
+        }
+
         if (cam->GetFlags() & CK_3DENTITY_CAMERAIGNOREASPECT) {
             SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
         }
@@ -2165,11 +2095,10 @@ void RCKRenderContext::GetStats(VxStats *stats) {
 }
 
 void RCKRenderContext::SetCurrentMaterial(CKMaterial *mat, CKBOOL Lit) {
-    // IDA: 0x1006b6f0
     if (mat) {
         mat->SetAsCurrent(this, Lit, 0);
     } else {
-        m_RasterizerContext->SetTexture(0, 0);
+        m_FFPipeline.SetTexture(0, 0);
     }
 }
 
@@ -2179,12 +2108,14 @@ void RCKRenderContext::Activate(CKBOOL active) {
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf25
-    return m_RasterizerContext->CopyToMemoryBuffer((CKRECT *) iRect, buffer, desc);
+    // TODO: Phase 2 — CopyToMemoryBuffer not supported in rasterizer v2
+    return FALSE;
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
     // IDA: 0x1006cf5a
-    return m_RasterizerContext->CopyFromMemoryBuffer((CKRECT *) iRect, buffer, desc);
+    // TODO: Phase 2 — CopyFromMemoryBuffer not supported in rasterizer v2
+    return FALSE;
 }
 
 CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBUFFER_TYPE buffer) {
@@ -2218,19 +2149,17 @@ VxDirectXData *RCKRenderContext::GetDirectXInfo() {
     // IDA: 0x1006bb75
     // Only return DirectX info if Family is 0 (DirectX family)
     if (m_RasterizerContext && m_RasterizerContext->m_Driver->m_2DCaps.Family == 0) {
-        return (VxDirectXData *) m_RasterizerContext->GetImplementationSpecificData();
+        return (VxDirectXData *) nullptr;
     }
     return nullptr;
 }
 
 void RCKRenderContext::WarnEnterThread() {
-    if (m_RasterizerContext)
-        m_RasterizerContext->WarnThread(TRUE);
+    // WarnThread removed in rasterizer v2
 }
 
 void RCKRenderContext::WarnExitThread() {
-    if (m_RasterizerContext)
-        m_RasterizerContext->WarnThread(FALSE);
+    // WarnThread removed in rasterizer v2
 }
 
 // IDA: 0x10068220
@@ -2263,7 +2192,8 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         }
     }
 
-    const CKBOOL rstOk = m_RasterizerContext->SetTargetTexture(textureIndex, width, height, (CKRST_CUBEFACE) CubeMapFace);
+    // TODO: Phase 2 — SetTargetTexture (render-to-texture) not supported in rasterizer v2
+    const CKBOOL rstOk = FALSE;
     if (!rstOk) {
         if (!(m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE))
             return FALSE;
@@ -2282,7 +2212,6 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         m_ViewportData.ViewWidth = texture->GetWidth();
         m_ViewportData.ViewHeight = texture->GetHeight();
 
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_TEXTURETARGET, 1);
         UpdateProjection(TRUE);
         return TRUE;
     }
@@ -2300,7 +2229,6 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     m_Settings = savedSettings;
 
     SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
-    m_RasterizerContext->SetRenderState(VXRENDERSTATE_TEXTURETARGET, 0);
     UpdateProjection(TRUE);
     return TRUE;
 }
@@ -2314,18 +2242,15 @@ void RCKRenderContext::AddRemoveSequence(CKBOOL Start) {
 
 void RCKRenderContext::SetTransparentMode(CKBOOL Trans) {
     m_TransparentMode = Trans;
-    if (m_RasterizerContext)
-        m_RasterizerContext->SetTransparentMode(Trans);
+    // SetTransparentMode removed in rasterizer v2
 }
 
 void RCKRenderContext::AddDirtyRect(CKRECT *Rect) {
-    if (m_RasterizerContext)
-        m_RasterizerContext->AddDirtyRect(Rect);
+    // AddDirtyRect removed in rasterizer v2
 }
 
 void RCKRenderContext::RestoreScreenBackup() {
-    if (m_RasterizerContext)
-        m_RasterizerContext->RestoreScreenBackup();
+    // RestoreScreenBackup removed in rasterizer v2
 }
 
 CKDWORD RCKRenderContext::GetStencilFreeMask() {
@@ -2347,45 +2272,16 @@ int RCKRenderContext::GetFirstFreeStencilBits() {
 }
 
 VxDrawPrimitiveData *RCKRenderContext::LockCurrentVB(CKDWORD VertexCount) {
-    // IDA: 0x1006bdbc
-    CKVertexBufferDesc *vbDesc = m_RasterizerContext->GetVertexBufferData(m_VertexBufferIndex);
-    if (!vbDesc)
-        return NULL;
-    if (!m_DpFlags)
-        return NULL;
-
-    CKRST_LOCKFLAGS lockFlags;
-    if (vbDesc->m_CurrentVCount + VertexCount <= vbDesc->m_MaxVertexCount) {
-        lockFlags = CKRST_LOCK_NOOVERWRITE;
-        m_StartIndex = vbDesc->m_CurrentVCount;
-        vbDesc->m_CurrentVCount += VertexCount;
-    } else {
-        lockFlags = CKRST_LOCK_DISCARD;
-        vbDesc->m_CurrentVCount = VertexCount;
-        m_StartIndex = 0;
-    }
-
-    void *lockedPtr = m_RasterizerContext->LockVertexBuffer(m_VertexBufferIndex, m_StartIndex, VertexCount, lockFlags);
-
-    VxDrawPrimitiveData *dp = (VxDrawPrimitiveData *) m_UserDrawPrimitiveData->m_CachedDP;
-    dp->VertexCount = (int) VertexCount;
-    dp->Flags = (CKDWORD) m_DpFlags;
-    CKRSTSetupDPFromVertexBuffer((CKBYTE *) lockedPtr, vbDesc, *dp);
-
-    ++m_VertexBufferCount;
-    return dp;
+    // TODO: Phase 2 — LockCurrentVB not supported in rasterizer v2
+    return NULL;
 }
 
 CKBOOL RCKRenderContext::ReleaseCurrentVB() {
-    // IDA: 0x1006bf09
-    --m_VertexBufferCount;
-    m_RasterizerContext->UnlockVertexBuffer(m_VertexBufferIndex);
     return TRUE;
 }
 
 void RCKRenderContext::SetTextureMatrix(const VxMatrix &M, int Stage) {
-    // IDA: 0x1006b5d9
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_TEXTURE(Stage), M);
+    m_FFPipeline.SetTransform((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + Stage), M);
 }
 
 void RCKRenderContext::SetStereoParameters(float EyeSeparation, float FocalLength) {
@@ -2479,10 +2375,10 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     // Create rasterizer context
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
 
-    // Apply render manager settings
-    m_RasterizerContext->m_Antialias = (m_RenderManager->m_Antialias.Value != 0);
-    m_RasterizerContext->m_EnableScreenDump = (m_RenderManager->m_EnableScreenDump.Value != 0);
-    m_RasterizerContext->m_EnsureVertexShader = (m_RenderManager->m_EnsureVertexShader.Value != 0);
+    // Settings moved out of rasterizer context in v2
+    // m_RasterizerContext->m_Antialias = (m_RenderManager->m_Antialias.Value != 0);
+    // m_RasterizerContext->m_EnableScreenDump = (m_RenderManager->m_EnableScreenDump.Value != 0);
+    // m_RasterizerContext->m_EnsureVertexShader = (m_RenderManager->m_EnsureVertexShader.Value != 0);
 
     // Create the actual rasterizer context
     if (!m_RasterizerContext->Create(m_WinHandle, localRect.left, localRect.top,
@@ -2498,9 +2394,8 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         return CKERR_CANCREATERENDERCONTEXT;
     }
 
-    // Set transparent mode
-    if (m_RasterizerContext)
-        m_RasterizerContext->SetTransparentMode(m_TransparentMode);
+    // Initialize the fixed-function pipeline
+    m_FFPipeline.Init(m_RasterizerContext);
 
     m_Fullscreen = Fullscreen;
 
@@ -2628,6 +2523,9 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     memset(&m_Settings, 0, sizeof(m_Settings));
     memset(&m_FullscreenSettings, 0, sizeof(m_FullscreenSettings));
     m_ProjectionMatrix.Identity();
+    Vx3DMatrixIdentity(m_WorldMatrix);
+    Vx3DMatrixIdentity(m_ViewMatrix);
+    m_Current2DView = CKRP_VIEW_FOREGROUND2D;
 }
 
 RCKRenderContext::~RCKRenderContext() {
@@ -2678,6 +2576,8 @@ CKBOOL RCKRenderContext::DestroyDevice() {
     if (m_RenderManager)
         m_RenderManager->DestroyingDevice(this);
 
+    m_FFPipeline.Shutdown();
+
     // Destroy the rasterizer context
     if (m_RasterizerDriver)
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
@@ -2706,14 +2606,10 @@ void RCKRenderContext::ClearCallbacks() {
 }
 
 void RCKRenderContext::OnClearAll() {
-    // IDA: 0x1006709d
     ClearCallbacks();
     DetachAll();
     m_NCUTex = nullptr;
     SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
-    if (m_RasterizerContext) {
-        m_RasterizerContext->SetViewport(&m_ViewportData);
-    }
 }
 
 void RCKRenderContext::PreSave(CKFile *file, CKDWORD flags) {
@@ -2755,11 +2651,8 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
     const int safeClipWidth = (clipWidth >= 1) ? clipWidth : 1;
     const int safeClipHeight = (clipHeight >= 1) ? clipHeight : 1;
 
-    m_RasterizerContext->m_ViewportData.ViewX = left;
-    m_RasterizerContext->m_ViewportData.ViewY = top;
-    m_RasterizerContext->m_ViewportData.ViewWidth = safeClipWidth;
-    m_RasterizerContext->m_ViewportData.ViewHeight = safeClipHeight;
-    m_RasterizerContext->SetViewport(&m_RasterizerContext->m_ViewportData);
+    // Viewport clip rect applied per-view in v2
+    (void)left; (void)top; (void)safeClipWidth; (void)safeClipHeight;
 
     const double invW = 1.0 / (double) safeClipWidth;
     const double invH = 1.0 / (double) safeClipHeight;
@@ -2777,11 +2670,10 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
     clipProj[3][2] = -clipProj[2][2] * m_NearPlane;
     clipProj[2][3] = 1.0f;
 
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, clipProj);
+    m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, clipProj);
 }
 
 void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
-    // IDA: 0x1006c68d
     if (!forceUpdate && m_ProjectionUpdated)
         return;
 
@@ -2795,8 +2687,7 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     else
         m_ProjectionMatrix.Orthographic(m_Zoom, aspect, m_NearPlane, m_FarPlane);
 
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-    m_RasterizerContext->SetViewport(&m_ViewportData);
+    m_FFPipeline.SetTransform(VXMATRIX_PROJECTION, m_ProjectionMatrix);
     m_ProjectionUpdated = TRUE;
 
     const float right = (float) m_Settings.m_Rect.right;
@@ -2846,9 +2737,11 @@ void RCKRenderContext::CallSprite3DBatches() {
 
     // Use original literals (do not define new constants)
 
-    m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-    m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
-    m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());
+    m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    m_FFPipeline.SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+    m_FFPipeline.SetTransform(VXMATRIX_WORLD, identity);
 
     VxDrawPrimitiveData dpData{};
     dpData.TexCoordStride = sizeof(CKVertex);
@@ -2912,7 +2805,7 @@ void RCKRenderContext::CallSprite3DBatches() {
                 dpData.SpecularColorPtr = &vertices->Specular;
                 dpData.TexCoordPtr = &vertices->tu;
 
-                m_RasterizerContext->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
+                DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
             }
         }
 
@@ -2982,8 +2875,8 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
 
         m_TransparentObjectsSortTimeProfiler.Reset();
 
-        m_RasterizerContext->UpdateMatrices(2);
-        const VxMatrix viewProj = m_RasterizerContext->m_ViewProjMatrix;
+        VxMatrix viewProj;
+        Vx3DMultiplyMatrix(viewProj, m_ViewMatrix, m_ProjectionMatrix);
 
         struct TransparentItem {
             RCK3dEntity *entity;

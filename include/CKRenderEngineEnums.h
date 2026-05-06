@@ -4,4 +4,18 @@
 #include "CKEnums.h"
 #include "CKRasterizerEnums.h"
 
+enum VXMATRIX_TYPE {
+    VXMATRIX_WORLD       = 0,
+    VXMATRIX_VIEW        = 1,
+    VXMATRIX_PROJECTION  = 2,
+    VXMATRIX_TEXTURE0    = 3,
+    VXMATRIX_TEXTURE1    = 4,
+    VXMATRIX_TEXTURE2    = 5,
+    VXMATRIX_TEXTURE3    = 6,
+    VXMATRIX_TEXTURE4    = 7,
+    VXMATRIX_TEXTURE5    = 8,
+    VXMATRIX_TEXTURE6    = 9,
+    VXMATRIX_TEXTURE7    = 10,
+};
+
 #endif // CKRENDERENGINEENUMS_H

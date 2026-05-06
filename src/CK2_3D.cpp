@@ -9,6 +9,7 @@
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
 #include "CKRasterizer.h"
+#include "CKException.h"
 
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
@@ -117,6 +118,14 @@ void EnumerateRasterizers() {
             file = dpGL.GetNextFile();
         }
 
+        // Search for bgfx rasterizers
+        CKDirectoryParser dpBgfx(dir.Str(), "*BgfxRasterizer.dll", TRUE);
+        file = dpBgfx.GetNextFile();
+        while (file != nullptr) {
+            RegisterRasterizer(file);
+            file = dpBgfx.GetNextFile();
+        }
+
         if (g_RasterizersInfo.Size() == 0) {
             CKRasterizerInfo info;
             info.StartFct = CKNULLRasterizerStart;
@@ -209,8 +218,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
         g_DllHandle = hModule;
+        CKInstallExceptionHandler();
         break;
     case DLL_PROCESS_DETACH:
+        CKRemoveExceptionHandler();
         break;
     default:
         break;

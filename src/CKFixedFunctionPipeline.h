@@ -1,0 +1,126 @@
+#ifndef CKFIXEDFUNCTIONPIPELINE_H
+#define CKFIXEDFUNCTIONPIPELINE_H
+
+#include "VxMath.h"
+#include "CKRenderEngineTypes.h"
+#include "CKRenderEngineEnums.h"
+#include "CKRasterizerEnums.h"
+#include "CKRasterizerTypes.h"
+#include "CKFFShaderKey.h"
+#include "CKFFConstants.h"
+#include "CKFFShaderCache.h"
+#include "CKDrawStateCache.h"
+#include "CKVertexLayoutCache.h"
+#include "CKTransientGeometry.h"
+#include "CKRenderPipeline.h"
+#include "CKFrustumCuller.h"
+
+class CKRasterizerContext;
+class CKRasterizerEncoder;
+
+// Dirty flags for uniform upload
+#define CKFF_DIRTY_MATRICES   0x01
+#define CKFF_DIRTY_LIGHTS     0x02
+#define CKFF_DIRTY_MATERIAL   0x04
+#define CKFF_DIRTY_FOG        0x08
+#define CKFF_DIRTY_TEXFACTOR  0x10
+#define CKFF_DIRTY_ALPHATEST  0x20
+#define CKFF_DIRTY_ALL        0xFF
+
+struct CKLightData;
+
+class CKFixedFunctionPipeline {
+public:
+    CKFixedFunctionPipeline();
+    ~CKFixedFunctionPipeline();
+
+    void Init(CKRasterizerContext *ctx);
+    void Shutdown();
+
+    // === State tracking ===
+    void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
+    CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
+    void SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value);
+    CKDWORD GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
+    void SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix);
+    void SetMaterial(const CKMaterialData *mat);
+    void SetLight(int index, const CKLightData *light);
+    void EnableLight(int index, CKBOOL enable);
+    void SetTexture(int stage, CKDWORD textureHandle);
+    void SetViewport(const CKViewportData &viewport);
+    void BeginDebugFrame();
+
+    // === Drawing ===
+    // Draw using VxDrawPrimitiveData (software vertex path)
+    void DrawPrimitive(CKRasterizerEncoder *encoder, CKRenderView view,
+                       VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
+                       VxDrawPrimitiveData *data);
+
+    // Draw using persistent vertex/index buffer handles
+    void DrawVertexBuffer(CKRasterizerEncoder *encoder, CKRenderView view,
+                          VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                          CKDWORD baseVertex, CKDWORD vertexCount,
+                          CKDWORD startIndex, CKDWORD indexCount,
+                          CKDWORD dpFlags, CKDWORD formatFlags,
+                          CKDWORD vertexLayout);
+
+    // === Subsystem access ===
+    CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
+    CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
+    CKTransientGeometry &GetTransientGeometry() { return m_TransientGeometry; }
+    CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
+    CKRenderPipeline &GetRenderPipeline() { return m_RenderPipeline; }
+    CKFrustumCuller &GetFrustumCuller() { return m_FrustumCuller; }
+
+    // === Matrix access ===
+    const VxMatrix &GetWorldMatrix() const { return m_World; }
+    const VxMatrix &GetViewMatrix() const { return m_View; }
+    const VxMatrix &GetProjectionMatrix() const { return m_Projection; }
+
+private:
+    CKRasterizerContext *m_Context;
+
+    // Subsystems
+    CKFFShaderCache m_ShaderCache;
+    CKDrawStateCache m_DrawStateCache;
+    CKVertexLayoutCache m_VertexLayoutCache;
+    CKTransientGeometry m_TransientGeometry;
+    CKRenderPipeline m_RenderPipeline;
+    CKFrustumCuller m_FrustumCuller;
+
+    // Current transform state
+    VxMatrix m_World;
+    VxMatrix m_View;
+    VxMatrix m_Projection;
+    VxMatrix m_TexMatrix[CKFF_MAX_TEXTURE_STAGES];
+
+    // Current material
+    CKFFMaterialData m_Material;
+
+    // Current lights
+    CKFFLightData m_Lights[CKFF_MAX_LIGHTS];
+    CKBOOL m_LightEnabled[CKFF_MAX_LIGHTS];
+    int m_ActiveLightCount;
+
+    // Current textures
+    CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
+    int m_CurrentActiveTextureCount;
+    bool m_CurrentLightingEnabled;
+    float m_MaterialSource[4];
+
+    // Texture stage state
+    CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
+    float m_Viewport[4];
+
+    // Dirty tracking
+    CKDWORD m_DirtyFlags;
+
+    // Internal methods
+    CKFFShaderKey BuildCurrentKey(CKDWORD dpFlags, CKDWORD formatFlags = 0);
+    void UploadUniforms(CKRasterizerEncoder *encoder);
+    void BindTextures(CKRasterizerEncoder *encoder);
+    float ComputeDepthKey() const;
+    CKSamplerDesc BuildSamplerDesc(int stage) const;
+};
+
+#endif // CKFIXEDFUNCTIONPIPELINE_H
