@@ -67,6 +67,17 @@ public:
         return TRUE;
     }
 
+    CKBOOL Resize(int PosX, int PosY, int Width, int Height, CKDWORD) override
+    {
+        m_PosX = PosX;
+        m_PosY = PosY;
+        if (Width > 0)
+            m_Width = Width;
+        if (Height > 0)
+            m_Height = Height;
+        return TRUE;
+    }
+
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
     CKERROR CreateTexture(CKDWORD, CKTextureDesc *, const VxImageDescEx *) override { return CK_OK; }
@@ -154,6 +165,13 @@ public:
         mode.Width = 1024;
         mode.Height = 768;
         m_DisplayModes.PushBack(mode);
+    }
+
+    ~CKNULLRasterizerDriver() override
+    {
+        for (auto it = m_Contexts.Begin(); it != m_Contexts.End(); ++it)
+            delete *it;
+        m_Contexts.Clear();
     }
 
     CKRasterizerContext *CreateContext() override
