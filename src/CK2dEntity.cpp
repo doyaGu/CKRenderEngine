@@ -19,6 +19,21 @@ static int CompareByZOrder(const void *a, const void *b) {
     return ent1->GetZOrder() - ent2->GetZOrder();
 }
 
+static bool EnvFlagEnabled(const char *name) {
+    const char *value = std::getenv(name);
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+static bool LogFullscreenBlack2DEnabled() {
+    static const bool enabled = EnvFlagEnabled("CK2_3D_DEBUG_LOG_FULLSCREEN_BLACK_2D");
+    return enabled;
+}
+
+static bool SkipFullscreenBlack2DEnabled() {
+    static const bool enabled = EnvFlagEnabled("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D");
+    return enabled;
+}
+
 CK_CLASSID RCK2dEntity::m_ClassID = CKCID_2DENTITY;
 
 CK_CLASSID RCK2dEntity::GetClassID() {
@@ -903,7 +918,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             (int)m_VtxPos.right == dev->m_ViewportData.ViewWidth &&
             (int)m_VtxPos.bottom == dev->m_ViewportData.ViewHeight;
 
-        if (s_BlackFullscreenLogCount < 16 && isFullscreenBlack) {
+        if (LogFullscreenBlack2DEnabled() &&
+            s_BlackFullscreenLogCount < 16 && isFullscreenBlack) {
             CKObject *parentObj = GetParent();
             CK_LOG_FMT("2DEntity",
                        "Fullscreen black quad #%d: obj=%s id=%u class=%d parent=%s flags=0x%X isBackground=%d view=%d material=%s",
@@ -918,7 +934,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
                        m_Material->GetName() ? m_Material->GetName() : "<unnamed>");
             s_BlackFullscreenLogCount++;
         }
-        if (isFullscreenBlack && std::getenv("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D")) {
+        if (isFullscreenBlack && SkipFullscreenBlack2DEnabled()) {
             return CK_OK;
         }
 

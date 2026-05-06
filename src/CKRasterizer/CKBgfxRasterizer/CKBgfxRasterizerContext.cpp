@@ -976,7 +976,10 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
         return;
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
-    if (s_SetTextureLogCount < 80) {
+    static const CKBOOL s_LogTextureBindings =
+        GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURE_BINDINGS", FALSE);
+    if (s_LogTextureBindings &&
+        s_SetTextureLogCount < 80) {
         BgfxLogf("SetTexture",
                  "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
                  Stage, Uniform, Texture, (void *)uniRec, (void *)texRec,
@@ -1338,9 +1341,16 @@ void CKBgfxRasterizerContext::ConfigureDebugCapture()
     if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
         bgfx::setDebug(m_DebugBgfxFlags);
 
-    BgfxLogf("Debug", "configured captureDir=%s first=%u interval=%u limit=%u bgfxFlags=0x%X overlay=%d",
-             m_DebugCaptureDir, m_DebugCaptureFirstFrames, m_DebugCaptureInterval,
-             m_DebugCaptureLimit, m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
+    if (GetEnvBool("CK2_3D_DEBUG_LOG_CONFIG", FALSE) ||
+        m_DebugCaptureFirstFrames != 0 ||
+        m_DebugCaptureInterval != 0 ||
+        m_DebugCaptureLimit != 0 ||
+        m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
+        m_DebugOverlay) {
+        BgfxLogf("Debug", "configured captureDir=%s first=%u interval=%u limit=%u bgfxFlags=0x%X overlay=%d",
+                 m_DebugCaptureDir, m_DebugCaptureFirstFrames, m_DebugCaptureInterval,
+                 m_DebugCaptureLimit, m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
+    }
 }
 
 void CKBgfxRasterizerContext::DrawDebugOverlay()
@@ -1598,7 +1608,10 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     DestroyRecord(slot);
     slot = rec;
 
-    if (s_CreateTextureLogCount < 80) {
+    static const CKBOOL s_LogTextures =
+        GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+    if (s_LogTextures &&
+        s_CreateTextureLogCount < 80) {
         BgfxLogf("CreateTexture",
                  "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u mips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
                  Texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
@@ -2026,7 +2039,10 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         CKDWORD bpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : 32;
         CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
         CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
-        if (s_UpdateTextureLogCount < 120) {
+        static const CKBOOL s_LogTextures =
+            GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+        if (s_LogTextures &&
+            s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
             BgfxLogf("UpdateTexture",
                      "id=%u handle=%u mip=%u face=%u region=%ux%u+%u,%u rec=%ux%u recBpp=%u data=%dx%d dataBpp=%d pitch=%u rowBytes=%u first=0x%08X hash=0x%08X",

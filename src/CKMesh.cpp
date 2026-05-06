@@ -4325,7 +4325,9 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                 CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 if (prim->m_Indices.Size() > 0) {
                     static int s_meshContractLogCount = 0;
-                    const int meshLogLimit = MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    static const int s_MeshLogLimit =
+                        MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    const int meshLogLimit = s_MeshLogLimit;
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
@@ -4383,7 +4385,9 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
                     CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
                     static int s_meshContractLogCount = 0;
-                    const int meshLogLimit = MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    static const int s_MeshLogLimit =
+                        MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                    const int meshLogLimit = s_MeshLogLimit;
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
@@ -5243,7 +5247,10 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                     if (value > maxIndex)
                         maxIndex = value;
                 }
-                if (s_indexRangeLogCount < 16) {
+                static const bool s_LogHwIndexRanges =
+                    MeshDebugEnvEnabled("CK2_3D_DEBUG_LOG_HW_INDEX_RANGES");
+                if (s_LogHwIndexRanges &&
+                    s_indexRangeLogCount < 16) {
                     CK_LOG_FMT("Mesh",
                                "HW IB range #%d: group=%d base=%u verts=%u start=%u count=%u maxIndex=%u remap=%u",
                                s_indexRangeLogCount, i, group->m_BaseVertex, group->m_VertexCount,
