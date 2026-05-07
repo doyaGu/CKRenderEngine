@@ -2464,16 +2464,11 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     const CKDWORD oldZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
     const CKDWORD oldAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
     const CKDWORD oldAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
-    const CKDWORD oldTexture = ffp.GetTexture(0);
-    const CKDWORD oldOp = ffp.GetTextureStageState(0, CKRST_TSS_OP);
-    const CKDWORD oldAop = ffp.GetTextureStageState(0, CKRST_TSS_AOP);
-    const CKDWORD oldArg1 = ffp.GetTextureStageState(0, CKRST_TSS_ARG1);
-    const CKDWORD oldArg2 = ffp.GetTextureStageState(0, CKRST_TSS_ARG2);
-    const CKDWORD oldAarg1 = ffp.GetTextureStageState(0, CKRST_TSS_AARG1);
-    const CKDWORD oldAarg2 = ffp.GetTextureStageState(0, CKRST_TSS_AARG2);
-    const CKDWORD oldMag = ffp.GetTextureStageState(0, CKRST_TSS_MAGFILTER);
-    const CKDWORD oldMin = ffp.GetTextureStageState(0, CKRST_TSS_MINFILTER);
-    const CKDWORD oldAddress = ffp.GetTextureStageState(0, CKRST_TSS_ADDRESS);
+    const CKDWORD oldClipPlanes = ffp.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    const CKViewportData oldViewport = m_ViewportData;
+    CKFFTextureStageSnapshot oldStages[CKFF_MAX_TEXTURE_STAGES];
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        ffp.SaveTextureStage(stage, oldStages[stage]);
 
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
@@ -2483,6 +2478,7 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
     ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
     ffp.DisableTextureStagesFrom(0);
     ffp.SetTexture(0, m_CopyToVideoTexture);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -2492,6 +2488,12 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
     ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
     ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+
+    m_ViewportData.ViewX = 0;
+    m_ViewportData.ViewY = 0;
+    m_ViewportData.ViewWidth = fbWidth;
+    m_ViewportData.ViewHeight = fbHeight;
+    ffp.SetViewport(m_ViewportData);
 
     VxDrawPrimitiveData *data = GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
     if (data) {
@@ -2518,16 +2520,10 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
         DrawPrimitive(VX_TRIANGLEFAN, nullptr, 4, data);
     }
 
-    ffp.SetTexture(0, oldTexture);
-    ffp.SetTextureStageState(0, CKRST_TSS_OP, oldOp);
-    ffp.SetTextureStageState(0, CKRST_TSS_AOP, oldAop);
-    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, oldArg1);
-    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, oldArg2);
-    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, oldAarg1);
-    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, oldAarg2);
-    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, oldMag);
-    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, oldMin);
-    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, oldAddress);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        ffp.RestoreTextureStage(stage, oldStages[stage]);
+    m_ViewportData = oldViewport;
+    ffp.SetViewport(m_ViewportData);
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, oldCull);
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, oldLighting);
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, oldFog);
@@ -2536,6 +2532,7 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     ffp.SetRenderState(VXRENDERSTATE_ZFUNC, oldZFunc);
     ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, oldAlphaBlend);
     ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, oldAlphaTest);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, oldClipPlanes);
 
     return data ? videoFormat.TotalImageSize : FALSE;
 }

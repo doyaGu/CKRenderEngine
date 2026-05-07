@@ -353,6 +353,7 @@ RCKMesh::RCKMesh(CKContext *Context, CKSTRING name) : CKMesh(Context, name) {
     m_FaceChannelMask = 0;
     m_Valid = 0;
     m_VertexBufferReady = 0;
+    m_IndexBufferIndexCount = 0;
     m_VertexLayout = 0;
     m_VertexBufferDpFlags = 0;
     m_VertexBufferFormatFlags = 0;
@@ -5243,6 +5244,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveDat
             return FALSE;
         }
         rst->UpdateIndexBuffer(m_IndexBuffer, 0, totalVertexCount * sizeof(CKWORD), ibData);
+        m_IndexBufferIndexCount = totalVertexCount;
 
         VxFree(vbData);
         VxFree(ibData);
@@ -5461,10 +5463,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         }
     }
 
-    // Check if existing index buffer is sufficient
-    // Phase 1 stub: GetIndexBufferData removed in v2, always treat as needing creation
-    CKIndexBufferDesc *ibDesc = nullptr;
-    CKBOOL needResize = !ibDesc || (ibDesc && ibDesc->m_MaxIndexCount < totalIndexCount);
+    CKBOOL needResize = (m_IndexBufferIndexCount < totalIndexCount);
 
     if (needResize) {
         rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
@@ -5483,8 +5482,10 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                     group->m_Primitives[p].m_IndexBufferOffset = -1;
                 }
             }
+            m_IndexBufferIndexCount = 0;
             return FALSE;
         }
+        m_IndexBufferIndexCount = totalIndexCount;
         needUpdate = TRUE;
     }
 
@@ -5504,6 +5505,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                 group->m_Primitives[p].m_IndexBufferOffset = -1;
             }
         }
+        m_IndexBufferIndexCount = 0;
         return FALSE;
     }
 
@@ -5550,7 +5552,18 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     }
 
     // Upload all index data at once via v2 API
-    rst->UpdateIndexBuffer(m_IndexBuffer, 0, totalSize, tempBuffer);
+    if (rst->UpdateIndexBuffer(m_IndexBuffer, 0, totalSize, tempBuffer) != CK_OK) {
+        VxFree(tempBuffer);
+        for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+            CKMaterialGroup *group = m_MaterialGroups[i];
+            if (!IsRenderableMaterialGroup(group))
+                continue;
+            for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                group->m_Primitives[p].m_IndexBufferOffset = -1;
+            }
+        }
+        return FALSE;
+    }
     VxFree(tempBuffer);
 
     return TRUE;

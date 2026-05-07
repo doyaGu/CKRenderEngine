@@ -120,6 +120,9 @@ CKERROR CKBgfxRasterizerDriver::GetShaderTarget(CKShaderTargetDesc *Target) cons
     if (!Target)
         return CKERR_INVALIDPARAMETER;
 
+    // Public legacy shader compilation is intentionally unsupported by the
+    // bgfx rasterizer. Internal FFP programs use precompiled backend blobs
+    // after a context initializes m_ShaderTarget.
     *Target = m_ShaderTarget;
     return (Target->Format != CKRST_SHADER_FORMAT_UNKNOWN &&
             Target->Profile != CKRST_SHADER_PROFILE_UNKNOWN)
