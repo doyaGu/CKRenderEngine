@@ -352,6 +352,12 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
     if (!m_RasterizerContext || !m_InVideoMemory)
         return FALSE;
+    if (CubeMapFace < CKRST_CUBEFACE_XPOS || CubeMapFace > CKRST_CUBEFACE_ZNEG)
+        return FALSE;
+    if (!IsCubeMap() && CubeMapFace != CKRST_CUBEFACE_XPOS)
+        return FALSE;
+    if (IsCubeMap() && (GetSlotCount() != 6 || GetWidth() != GetHeight()))
+        return FALSE;
 
     VxImageDescEx srcDesc;
     const int requiredBytes = rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc);
@@ -523,8 +529,10 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
         return FALSE;
     if (GetWidth() <= 0 || GetHeight() <= 0)
         return FALSE;
+    const CKBOOL isCubeTarget = IsCubeMap() && GetSlotCount() == 6 && GetWidth() == GetHeight();
 
     const CKDWORD requiredFlags = CKRST_TEXTURE_RENDERTARGET |
+                                  (isCubeTarget ? CKRST_TEXTURE_CUBEMAP : 0) |
                                   (ReadBack ? CKRST_TEXTURE_READBACK : 0);
     if (m_InVideoMemory &&
         m_RasterizerContext == dev->m_RasterizerContext &&

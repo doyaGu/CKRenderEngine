@@ -320,6 +320,11 @@ void Test_TextureCopyContext_ConvertsReadbackToTextureFormat() {
               "Texture CopyContext must compare ARGB readback against the target texture format");
     TestCheck(copyBody.find("ConvertTextureImage(srcDesc, m_VideoFormat") != std::string::npos,
               "Texture CopyContext must convert ARGB readback before uploading non-ARGB8888 targets");
+    TestCheck(copyBody.find("CubeMapFace < CKRST_CUBEFACE_XPOS") != std::string::npos &&
+              copyBody.find("CubeMapFace > CKRST_CUBEFACE_ZNEG") != std::string::npos,
+              "Texture CopyContext must reject invalid cubemap face indices before upload");
+    TestCheck(copyBody.find("!IsCubeMap() && CubeMapFace != CKRST_CUBEFACE_XPOS") != std::string::npos,
+              "Texture CopyContext must reject nonzero cubemap faces for 2D texture targets");
 }
 
 void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
@@ -338,6 +343,32 @@ void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
               "CopyToVideo must create/update a scratch upload texture");
     TestCheck(body.find("DrawPrimitive(VX_TRIANGLEFAN") != std::string::npos,
               "CopyToVideo must draw the uploaded scratch texture into the backbuffer rectangle");
+}
+
+void Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth() {
+    std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    const size_t setPos = source.find("CKBOOL RCKRenderContext::SetRenderTarget");
+    TestCheck(setPos != std::string::npos, "SetRenderTarget implementation must be present");
+    const size_t nextPos = source.find("CKERROR RCKRenderContext::Create", setPos);
+    TestCheck(nextPos != std::string::npos, "SetRenderTarget source range must be bounded");
+    const std::string body = source.substr(setPos, nextPos - setPos);
+    TestCheck(body.find("CubeMapFace < CKRST_CUBEFACE_XPOS") != std::string::npos &&
+              body.find("CubeMapFace > CKRST_CUBEFACE_ZNEG") != std::string::npos,
+              "SetRenderTarget must reject invalid cubemap face indices");
+    TestCheck(body.find("!texture->IsCubeMap() && CubeMapFace != CKRST_CUBEFACE_XPOS") != std::string::npos,
+              "SetRenderTarget must reject nonzero cubemap faces for 2D targets");
+    TestCheck(body.find("CreateDepthTexture(m_TargetDepthTexture") != std::string::npos &&
+              body.find("desc.DepthStencil.Texture = m_TargetDepthTexture") != std::string::npos,
+              "Render-to-texture framebuffers must bind a depth-stencil attachment");
+
+    std::string texture = ReadRenderEngineSource("src/CKTexture.cpp");
+    const size_t ensurePos = texture.find("CKBOOL RCKTexture::EnsureRenderTarget");
+    TestCheck(ensurePos != std::string::npos, "EnsureRenderTarget implementation must be present");
+    const size_t ensureEnd = texture.find("RCKTexture::RCKTexture", ensurePos);
+    TestCheck(ensureEnd != std::string::npos, "EnsureRenderTarget source range must be bounded");
+    const std::string ensureBody = texture.substr(ensurePos, ensureEnd - ensurePos);
+    TestCheck(ensureBody.find("isCubeTarget ? CKRST_TEXTURE_CUBEMAP : 0") != std::string::npos,
+              "EnsureRenderTarget must create cubemap render targets for cubemap textures");
 }
 
 void Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene() {
@@ -843,6 +874,7 @@ int main() {
     tests.Run("User clip plane is consumed by FFP shader path", &Test_UserClipPlane_IsConsumedByFFPShaderPath);
     tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
     tests.Run("CopyToVideo uploads backbuffer through scratch texture", &Test_CopyToVideo_UploadsBackbufferThroughScratchTexture);
+    tests.Run("Render target validates cube faces and preserves depth", &Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth);
     tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
     tests.Run("Interleave PositionT missing specular fog factor", &Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque);
