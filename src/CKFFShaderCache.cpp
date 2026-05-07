@@ -212,6 +212,9 @@ void CKFFShaderCache::CreateUniforms() {
 void CKFFShaderCache::CreatePrograms() {
     if (!m_Context || !m_Context->m_Driver) return;
 
+    // This uses the driver backend selected by the active bgfx context. It is
+    // not the public Virtools legacy shader-target API, which remains
+    // unsupported when no bgfx context has supplied a concrete native target.
     CKShaderTargetDesc target;
     CKERROR targetErr = m_Context->m_Driver->GetShaderTarget(&target);
     if (targetErr != CK_OK) {

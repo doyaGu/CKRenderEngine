@@ -33,9 +33,11 @@ static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpr
         const VxVector viewPos = TransformPoint(worldPos, params.View);
         const float magnitude = viewPos.Magnitude();
         const float distance = magnitude > 0.0f ? magnitude : 0.0f;
-        const float denom = sqrtf(params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance);
-        if (denom > 0.000001f)
+        const float denomSq = params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance;
+        if (denomSq > 0.000001f) {
+            const float denom = sqrtf(denomSq);
             size /= denom;
+        }
     }
 
     const float minSize = params.MinSize > 0.0f ? params.MinSize : 1.0f;

@@ -298,6 +298,10 @@ void Test_UserClipPlane_IsConsumedByFFPShaderPath() {
     std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     TestCheck(ffp.find("VXRENDERSTATE_CLIPPLANEENABLE") != std::string::npos,
               "FFP uniform upload must consume VXRENDERSTATE_CLIPPLANEENABLE");
+    TestCheck(ffp.find("clipCount = 0") != std::string::npos &&
+              ffp.find("clipPlanes[clipCount][0]") != std::string::npos &&
+              ffp.find("float clipParams[4] = {(float)clipCount") != std::string::npos,
+              "FFP clip plane upload must compact the enabled render-state mask into packed uniforms");
     TestCheck(ffp.find("encoder->SetUniform(u.u_clipPlanes") != std::string::npos &&
               ffp.find("encoder->SetUniform(u.u_clipParams") != std::string::npos,
               "FFP uniform upload must bind clip plane uniforms");
@@ -325,6 +329,29 @@ void Test_TextureCopyContext_ConvertsReadbackToTextureFormat() {
               "Texture CopyContext must reject invalid cubemap face indices before upload");
     TestCheck(copyBody.find("!IsCubeMap() && CubeMapFace != CKRST_CUBEFACE_XPOS") != std::string::npos,
               "Texture CopyContext must reject nonzero cubemap faces for 2D texture targets");
+    TestCheck(source.find("BuildCopyUploadRegion") != std::string::npos &&
+              copyBody.find("BuildCopyUploadRegion(Dest, GetWidth(), GetHeight(), uploadDesc") != std::string::npos,
+              "Texture CopyContext must clamp destination upload regions before UpdateTexture");
+    TestCheck(source.find("skipX = -left") != std::string::npos &&
+              source.find("uploadDesc.Image = image") != std::string::npos &&
+              source.find("region.right = left + width") != std::string::npos,
+              "Texture CopyContext region clamping must crop source pixels when the destination rect is negative or oversized");
+}
+
+void Test_SpriteCopyContext_ClampsDestinationRegion() {
+    std::string source = ReadRenderEngineSource("src/CKSprite.cpp");
+    const size_t copyPos = source.find("CKBOOL RCKSprite::CopyContext");
+    TestCheck(copyPos != std::string::npos, "RCKSprite::CopyContext implementation must be present");
+    const size_t nextPos = source.find("CKBOOL RCKSprite::GetVideoTextureDesc", copyPos);
+    TestCheck(nextPos != std::string::npos, "RCKSprite::CopyContext source range must be bounded");
+    const std::string copyBody = source.substr(copyPos, nextPos - copyPos);
+    TestCheck(source.find("BuildSpriteCopyUploadRegion") != std::string::npos &&
+              copyBody.find("BuildSpriteCopyUploadRegion(Dest, m_VideoFormatDesc.Width, m_VideoFormatDesc.Height, uploadDesc") != std::string::npos,
+              "Sprite CopyContext must clamp destination upload regions before UpdateTexture");
+    TestCheck(source.find("skipX = -left") != std::string::npos &&
+              source.find("uploadDesc.Image = image") != std::string::npos &&
+              source.find("region.right = left + width") != std::string::npos,
+              "Sprite CopyContext region clamping must crop source pixels when the destination rect is negative or oversized");
 }
 
 void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
@@ -343,6 +370,15 @@ void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
               "CopyToVideo must create/update a scratch upload texture");
     TestCheck(body.find("DrawPrimitive(VX_TRIANGLEFAN") != std::string::npos,
               "CopyToVideo must draw the uploaded scratch texture into the backbuffer rectangle");
+    TestCheck(body.find("SaveTextureStage(stage, oldStages[stage])") != std::string::npos &&
+              body.find("RestoreTextureStage(stage, oldStages[stage])") != std::string::npos,
+              "CopyToVideo must restore all texture stages after its screen-space blit");
+    TestCheck(body.find("VXRENDERSTATE_CLIPPLANEENABLE, 0") != std::string::npos &&
+              body.find("VXRENDERSTATE_CLIPPLANEENABLE, oldClipPlanes") != std::string::npos,
+              "CopyToVideo must disable and restore clip planes so user clipping cannot affect the blit");
+    TestCheck(body.find("const CKViewportData oldViewport = m_ViewportData") != std::string::npos &&
+              body.find("m_ViewportData = oldViewport") != std::string::npos,
+              "CopyToVideo must restore the viewport used by normal rendering");
 }
 
 void Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth() {
@@ -777,6 +813,23 @@ void Test_ShaderEvaluator_Dot3MatchesD3DFFP() {
               "DOTPRODUCT3 must write the full result vector instead of preserving a separate alpha path");
 }
 
+void Test_ShaderEvaluator_CoversDxvkStageOps() {
+    std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
+    TestCheck(shader.find("else if (baseArg == 5) value = temp") != std::string::npos &&
+              shader.find("if (resultArg == 5)") != std::string::npos,
+              "Shader evaluator must support TEMP/RESULTARG stage routing");
+    TestCheck(shader.find("value.rgb = value.aaa") != std::string::npos &&
+              shader.find("value.rgb = 1.0 - value.rgb") != std::string::npos,
+              "Shader evaluator must support ALPHAREPLICATE and COMPLEMENT argument modifiers");
+    TestCheck(shader.find("previousColorOp == 22 || previousColorOp == 23") != std::string::npos &&
+              shader.find("stageUv.x += dot(u_bumpEnv[0].xy, bump)") != std::string::npos &&
+              shader.find("previousColorOp == 23") != std::string::npos,
+              "Shader evaluator must perturb the next stage for BUMPENVMAP and apply luminance for BUMPENVMAPLUMINANCE");
+    TestCheck(shader.find("if (op == 25) return clamp(a * b + c") != std::string::npos &&
+              shader.find("if (op == 26) return clamp(a * c + (1.0 - a) * b") != std::string::npos,
+              "Shader evaluator must implement MULTIPLYADD and LERP with ARG0 input");
+}
+
 void Test_PatchMesh_BasicMeshConversionIsImplemented() {
     std::string source = ReadRenderEngineSource("src/CKPatchMesh.cpp");
     const size_t fromPos = source.find("CKERROR RCKPatchMesh::FromMesh");
@@ -813,9 +866,31 @@ void Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe() {
               "CKVertexBuffer Lock must record the locked vertex range");
     TestCheck(source.find("UpdateVertexBuffer(m_ObjectIndex, updateStart * stride") != std::string::npos,
               "CKVertexBuffer Unlock must update dirty hardware VB byte ranges");
+    TestCheck(source.find("CK_LOCK_DISCARD") != std::string::npos &&
+              source.find("formatFlags != m_FormatFlags") != std::string::npos &&
+              source.find("layout != m_VertexLayout") != std::string::npos,
+              "CKVertexBuffer Unlock must rebuild only on discard or layout changes");
     TestCheck(source.find("DrawVertexBuffer(") != std::string::npos &&
               source.find("!Indices") != std::string::npos,
               "CKVertexBuffer Draw must use the hardware VB path for safe non-indexed draws");
+    TestCheck(source.find("VXRENDERSTATE_WRAP0") != std::string::npos &&
+              source.find("VXRENDERSTATE_POINTSPRITEENABLE") != std::string::npos,
+              "CKVertexBuffer Draw must fall back when per-triangle wrap or point-sprite expansion is required");
+}
+
+void Test_MeshIndexBuffer_ReusesKnownCapacity() {
+    std::string header = ReadRenderEngineSource("include/RCKMesh.h");
+    TestCheck(header.find("m_IndexBufferIndexCount") != std::string::npos,
+              "Mesh hardware index buffers must track capacity without relying on removed v1 readback APIs");
+
+    std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
+    TestCheck(source.find("Phase 1 stub: GetIndexBufferData removed") == std::string::npos,
+              "Mesh index buffer setup must not keep the v2 migration stub");
+    TestCheck(source.find("CKBOOL needResize = (m_IndexBufferIndexCount < totalIndexCount)") != std::string::npos,
+              "Mesh index buffer setup must resize only when the cached capacity is insufficient");
+    TestCheck(source.find("m_IndexBufferIndexCount = totalIndexCount") != std::string::npos &&
+              source.find("m_IndexBufferIndexCount = 0") != std::string::npos,
+              "Mesh index buffer setup must maintain capacity on create and clear it on failures");
 }
 
 void Test_PointSprite_PointListExpandsToTexturedQuads() {
@@ -846,12 +921,29 @@ void Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes() {
               "FFP draw must pass point size clamp and attenuation state to transient geometry");
 
     std::string transient = ReadRenderEngineSource("src/CKTransientGeometry.cpp");
-    TestCheck(transient.find("sqrtf(params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance)") != std::string::npos,
-              "Point sprite size must use the D3D distance attenuation formula");
+    TestCheck(transient.find("denomSq = params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance") != std::string::npos &&
+              transient.find("if (denomSq > 0.000001f)") != std::string::npos &&
+              transient.find("sqrtf(denomSq)") != std::string::npos,
+              "Point sprite size must use the D3D distance attenuation formula without producing NaN for invalid denominators");
     TestCheck(transient.find("Vx3DInverseMatrix(invWorld") != std::string::npos &&
               transient.find("cameraRightLocal") != std::string::npos &&
               transient.find("cameraUpLocal") != std::string::npos,
               "3D point sprites must expand using camera-facing axes transformed into local space");
+}
+
+void Test_CopyToVideo_TextureStageSnapshotsPreserveMatrices() {
+    std::string header = ReadRenderEngineSource("src/CKFixedFunctionPipeline.h");
+    TestCheck(header.find("struct CKFFTextureStageSnapshot") != std::string::npos &&
+              header.find("VxMatrix TextureMatrix") != std::string::npos,
+              "Texture stage snapshots must preserve texture matrices as well as stage states");
+
+    std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(ffp.find("void CKFixedFunctionPipeline::SaveTextureStage") != std::string::npos &&
+              ffp.find("snapshot.TextureMatrix = m_TexMatrix[stage]") != std::string::npos,
+              "SaveTextureStage must capture the complete stage contract");
+    TestCheck(ffp.find("void CKFixedFunctionPipeline::RestoreTextureStage") != std::string::npos &&
+              ffp.find("m_TexMatrix[stage] = snapshot.TextureMatrix") != std::string::npos,
+              "RestoreTextureStage must restore texture matrix state after temporary blits");
 }
 
 void Test_ViewportClip_RestoresFFPProjectionAndViewport() {
@@ -940,6 +1032,14 @@ void Test_RasterizerDriver_DefaultShaderTargetIsUnknown() {
     TestCheck(err == CKERR_NOTIMPLEMENTED, "Default driver shader target must be unsupported");
     TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Unsupported driver shader format must be unknown");
     TestCheck(target.Profile == CKRST_SHADER_PROFILE_UNKNOWN, "Unsupported driver shader profile must be unknown");
+
+    std::string driverSource = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerDriver.cpp");
+    TestCheck(driverSource.find("Public legacy shader compilation is intentionally unsupported") != std::string::npos,
+              "The bgfx driver must explicitly document public legacy shader target support as unsupported");
+
+    std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+    TestCheck(cacheSource.find("not the public Virtools legacy shader-target API") != std::string::npos,
+              "The FFP shader cache must document that internal shader blobs do not enable the public legacy shader API");
 }
 
 } // namespace
@@ -968,7 +1068,9 @@ int main() {
     tests.Run("Render target attaches depth-stencil texture", &Test_RenderTarget_AttachesDepthStencilTexture);
     tests.Run("User clip plane is consumed by FFP shader path", &Test_UserClipPlane_IsConsumedByFFPShaderPath);
     tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
+    tests.Run("Sprite CopyContext clamps destination region", &Test_SpriteCopyContext_ClampsDestinationRegion);
     tests.Run("CopyToVideo uploads backbuffer through scratch texture", &Test_CopyToVideo_UploadsBackbufferThroughScratchTexture);
+    tests.Run("CopyToVideo texture stage snapshots", &Test_CopyToVideo_TextureStageSnapshotsPreserveMatrices);
     tests.Run("Render target validates cube faces and preserves depth", &Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth);
     tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
@@ -990,9 +1092,11 @@ int main() {
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
+    tests.Run("Shader evaluator dxvk stage ops", &Test_ShaderEvaluator_CoversDxvkStageOps);
     tests.Run("PatchMesh basic mesh conversion implemented", &Test_PatchMesh_BasicMeshConversionIsImplemented);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
+    tests.Run("Mesh index buffer reuses capacity", &Test_MeshIndexBuffer_ReusesKnownCapacity);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
     tests.Run("Point sprite D3D point scale and camera-facing axes", &Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes);
     tests.Run("Viewport clip restores FFP projection and viewport", &Test_ViewportClip_RestoresFFPProjectionAndViewport);

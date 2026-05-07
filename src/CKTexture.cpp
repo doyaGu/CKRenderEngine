@@ -48,6 +48,67 @@ static CKBOOL SamePixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
            a.AlphaMask == b.AlphaMask;
 }
 
+static CKBOOL BuildCopyUploadRegion(const VxRect *dest, int targetWidth, int targetHeight,
+                                    VxImageDescEx &uploadDesc, CKRECT &region, CKRECT *&regionPtr) {
+    regionPtr = nullptr;
+    if (!dest)
+        return TRUE;
+    if (targetWidth <= 0 || targetHeight <= 0 || uploadDesc.Width <= 0 || uploadDesc.Height <= 0)
+        return FALSE;
+
+    int left = (int)dest->left;
+    int top = (int)dest->top;
+    int right = (int)dest->right;
+    int bottom = (int)dest->bottom;
+    if (right <= left || bottom <= top)
+        return FALSE;
+
+    int skipX = 0;
+    int skipY = 0;
+    if (left < 0) {
+        skipX = -left;
+        left = 0;
+    }
+    if (top < 0) {
+        skipY = -top;
+        top = 0;
+    }
+    if (left >= targetWidth || top >= targetHeight)
+        return FALSE;
+    if (right > targetWidth)
+        right = targetWidth;
+    if (bottom > targetHeight)
+        bottom = targetHeight;
+
+    int width = right - left;
+    int height = bottom - top;
+    if (width <= 0 || height <= 0)
+        return FALSE;
+    if (skipX >= uploadDesc.Width || skipY >= uploadDesc.Height)
+        return FALSE;
+    if (width > uploadDesc.Width - skipX)
+        width = uploadDesc.Width - skipX;
+    if (height > uploadDesc.Height - skipY)
+        height = uploadDesc.Height - skipY;
+    if (width <= 0 || height <= 0)
+        return FALSE;
+
+    const int bytesPerPixel = uploadDesc.BitsPerPixel > 0 ? uploadDesc.BitsPerPixel / 8 : 4;
+    CKBYTE *image = (CKBYTE *)uploadDesc.Image;
+    image += skipY * uploadDesc.BytesPerLine + skipX * bytesPerPixel;
+    uploadDesc.Image = image;
+    uploadDesc.Width = width;
+    uploadDesc.Height = height;
+    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * height;
+
+    region.left = left;
+    region.top = top;
+    region.right = left + width;
+    region.bottom = top + height;
+    regionPtr = &region;
+    return TRUE;
+}
+
 static CKBYTE *ConvertTextureImage(const VxImageDescEx &src, const VxImageDescEx &videoFormat,
                                    VxImageDescEx &uploadDesc) {
     if (src.Width <= 0 || src.Height <= 0 || src.BitsPerPixel <= 0 || videoFormat.BitsPerPixel <= 0)
@@ -383,12 +444,10 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
 
     CKRECT region;
     CKRECT *regionPtr = nullptr;
-    if (Dest) {
-        region.left = (int)Dest->left;
-        region.top = (int)Dest->top;
-        region.right = (int)Dest->right;
-        region.bottom = (int)Dest->bottom;
-        regionPtr = &region;
+    if (!BuildCopyUploadRegion(Dest, GetWidth(), GetHeight(), uploadDesc, region, regionPtr)) {
+        delete[] converted;
+        delete[] pixels;
+        return FALSE;
     }
 
     CKERROR err = m_RasterizerContext->UpdateTexture(

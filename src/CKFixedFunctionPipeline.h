@@ -41,6 +41,12 @@ struct CKFFTextureStageOps {
     CKDWORD ResultArg;
 };
 
+struct CKFFTextureStageSnapshot {
+    CKDWORD Texture;
+    CKDWORD States[CKFF_MAX_TEXTURE_STAGE_STATES];
+    VxMatrix TextureMatrix;
+};
+
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
@@ -75,6 +81,8 @@ public:
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
     void ResetTextureStage(int stage);
     void DisableTextureStagesFrom(int firstStage);
+    void SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const;
+    void RestoreTextureStage(int stage, const CKFFTextureStageSnapshot &snapshot);
     void SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value);
     CKDWORD GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
     void SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix);

@@ -678,6 +678,25 @@ void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
         ResetTextureStage(stage);
 }
 
+void CKFixedFunctionPipeline::SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const {
+    memset(&snapshot, 0, sizeof(snapshot));
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
+        return;
+
+    snapshot.Texture = m_TextureHandles[stage];
+    memcpy(snapshot.States, m_StageStates[stage], sizeof(snapshot.States));
+    snapshot.TextureMatrix = m_TexMatrix[stage];
+}
+
+void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureStageSnapshot &snapshot) {
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
+        return;
+
+    m_TextureHandles[stage] = snapshot.Texture;
+    memcpy(m_StageStates[stage], snapshot.States, sizeof(m_StageStates[stage]));
+    m_TexMatrix[stage] = snapshot.TextureMatrix;
+}
+
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
