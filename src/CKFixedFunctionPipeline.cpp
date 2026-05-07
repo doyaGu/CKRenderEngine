@@ -557,6 +557,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_LightEnabled, 0, sizeof(m_LightEnabled));
     memset(m_TextureHandles, 0, sizeof(m_TextureHandles));
     memset(m_StageStates, 0, sizeof(m_StageStates));
+    memset(m_UserClipPlanes, 0, sizeof(m_UserClipPlanes));
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
         m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_Viewport[0] = 2.0f / 800.0f;
@@ -672,6 +673,12 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     m_Viewport[1] = -2.0f / h;
     m_Viewport[2] = -1.0f - (2.0f * x / w);
     m_Viewport[3] = 1.0f + (2.0f * y / h);
+}
+
+void CKFixedFunctionPipeline::SetUserClipPlane(int index, const VxPlane &plane) {
+    if (index < 0 || index >= 6)
+        return;
+    m_UserClipPlanes[index] = plane;
 }
 
 void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix) {
@@ -791,6 +798,11 @@ void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     m_TextureHandles[stage] = textureHandle;
+}
+
+CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return 0;
+    return m_TextureHandles[stage];
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
@@ -1226,6 +1238,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     MulMatrix(viewProj, m_View, m_Projection);
     MulMatrix(modelViewProj, m_World, viewProj);
     encoder->SetUniform(u.u_ckModelViewProj, &modelViewProj, 1);
+    encoder->SetUniform(u.u_ckModel, &m_World, 1);
     encoder->SetUniform(u.u_ckModelView, &modelView, 1);
     encoder->SetUniform(u.u_ckNormalMatrix, &normalMatrix, 1);
     encoder->SetUniform(u.u_texMatrix, m_TexMatrix, CKFF_MAX_TEXTURE_STAGES);
@@ -1354,6 +1367,22 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         stageParams[stage * 4 + 3][3] = 0.0f;
     }
     encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 4);
+
+    float clipPlanes[6][4] = {};
+    int clipCount = 0;
+    CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    for (int i = 0; i < 6; ++i) {
+        if ((clipMask & (1u << i)) == 0)
+            continue;
+        clipPlanes[clipCount][0] = m_UserClipPlanes[i].m_Normal.x;
+        clipPlanes[clipCount][1] = m_UserClipPlanes[i].m_Normal.y;
+        clipPlanes[clipCount][2] = m_UserClipPlanes[i].m_Normal.z;
+        clipPlanes[clipCount][3] = m_UserClipPlanes[i].m_D;
+        ++clipCount;
+    }
+    float clipParams[4] = {(float)clipCount, 0.0f, 0.0f, 0.0f};
+    encoder->SetUniform(u.u_clipPlanes, clipPlanes, 6);
+    encoder->SetUniform(u.u_clipParams, clipParams, 1);
 
     m_DirtyFlags = 0;
 }

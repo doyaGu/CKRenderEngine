@@ -284,6 +284,9 @@ public:
     CKRST_CUBEFACE m_CubeMapFace;           // 0x318 (4 bytes) - changed type to match IDA
     CKDWORD m_TargetFrameBuffer;
     CKDWORD m_TargetDepthTexture;
+    CKDWORD m_CopyToVideoTexture;
+    int m_CopyToVideoWidth;
+    int m_CopyToVideoHeight;
     float m_FocalLength;                    // 0x31C (4 bytes)
     float m_EyeSeparation;                  // 0x320 (4 bytes)
     CKDWORD m_Flags;                        // 0x324 (4 bytes)

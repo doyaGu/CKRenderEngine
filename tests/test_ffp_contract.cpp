@@ -284,16 +284,29 @@ void Test_RenderTarget_AttachesDepthStencilTexture() {
               "Render-to-texture framebuffers must bind the depth-stencil attachment");
 }
 
-void Test_UserClipPlane_DoesNotClaimUnsupportedRendering() {
+void Test_UserClipPlane_IsConsumedByFFPShaderPath() {
     std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
     const size_t setPos = source.find("CKBOOL RCKRenderContext::SetUserClipPlane");
     TestCheck(setPos != std::string::npos, "SetUserClipPlane implementation must be present");
     const size_t getPos = source.find("CKBOOL RCKRenderContext::GetUserClipPlane");
     TestCheck(getPos != std::string::npos, "GetUserClipPlane implementation must be present");
     const std::string setBody = source.substr(setPos, getPos - setPos);
-    TestCheck(setBody.find("return FALSE;") != std::string::npos &&
-              setBody.find("return TRUE;") == std::string::npos,
-              "User clip planes must not report success until the FFP clip path consumes them");
+    TestCheck(setBody.find("m_FFPipeline.SetUserClipPlane") != std::string::npos &&
+              setBody.find("return TRUE;") != std::string::npos,
+              "SetUserClipPlane must store planes and forward them to the FFP path");
+
+    std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(ffp.find("VXRENDERSTATE_CLIPPLANEENABLE") != std::string::npos,
+              "FFP uniform upload must consume VXRENDERSTATE_CLIPPLANEENABLE");
+    TestCheck(ffp.find("encoder->SetUniform(u.u_clipPlanes") != std::string::npos &&
+              ffp.find("encoder->SetUniform(u.u_clipParams") != std::string::npos,
+              "FFP uniform upload must bind clip plane uniforms");
+
+    std::string fs = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
+    TestCheck(fs.find("uniform vec4 u_clipPlanes[6]") != std::string::npos &&
+              fs.find("dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0") != std::string::npos &&
+              fs.find("discard") != std::string::npos,
+              "Fragment shader must discard pixels behind enabled user clip planes");
 }
 
 void Test_TextureCopyContext_ConvertsReadbackToTextureFormat() {
@@ -307,6 +320,24 @@ void Test_TextureCopyContext_ConvertsReadbackToTextureFormat() {
               "Texture CopyContext must compare ARGB readback against the target texture format");
     TestCheck(copyBody.find("ConvertTextureImage(srcDesc, m_VideoFormat") != std::string::npos,
               "Texture CopyContext must convert ARGB readback before uploading non-ARGB8888 targets");
+}
+
+void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
+    std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    const size_t copyPos = source.find("int RCKRenderContext::CopyToVideo");
+    TestCheck(copyPos != std::string::npos, "CopyToVideo implementation must be present");
+    const size_t nextPos = source.find("CKERROR RCKRenderContext::DumpToFile", copyPos);
+    TestCheck(nextPos != std::string::npos, "CopyToVideo source range must be bounded");
+    const std::string body = source.substr(copyPos, nextPos - copyPos);
+    TestCheck(body.find("buffer != VXBUFFER_BACKBUFFER") != std::string::npos,
+              "CopyToVideo must explicitly reject unsupported video buffers");
+    TestCheck(body.find("ConvertCopyImage(desc, videoFormat") != std::string::npos,
+              "CopyToVideo must convert CPU image data to the upload texture format");
+    TestCheck(body.find("CreateTexture(m_CopyToVideoTexture") != std::string::npos &&
+              body.find("UpdateTexture(m_CopyToVideoTexture") != std::string::npos,
+              "CopyToVideo must create/update a scratch upload texture");
+    TestCheck(body.find("DrawPrimitive(VX_TRIANGLEFAN") != std::string::npos,
+              "CopyToVideo must draw the uploaded scratch texture into the backbuffer rectangle");
 }
 
 void Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene() {
@@ -739,8 +770,9 @@ int main() {
     tests.Run("TexGen packs texcoord generation", &Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex);
     tests.Run("TexGen texture matrix bgfx/VxMatrix semantics", &Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics);
     tests.Run("Render target attaches depth-stencil texture", &Test_RenderTarget_AttachesDepthStencilTexture);
-    tests.Run("User clip plane does not claim unsupported rendering", &Test_UserClipPlane_DoesNotClaimUnsupportedRendering);
+    tests.Run("User clip plane is consumed by FFP shader path", &Test_UserClipPlane_IsConsumedByFFPShaderPath);
     tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
+    tests.Run("CopyToVideo uploads backbuffer through scratch texture", &Test_CopyToVideo_UploadsBackbufferThroughScratchTexture);
     tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
     tests.Run("Interleave PositionT missing specular fog factor", &Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque);

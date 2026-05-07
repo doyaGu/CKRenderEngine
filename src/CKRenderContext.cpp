@@ -39,6 +39,31 @@
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
+static CKBOOL SameCopyPixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
+    return a.BitsPerPixel == b.BitsPerPixel &&
+           a.RedMask == b.RedMask &&
+           a.GreenMask == b.GreenMask &&
+           a.BlueMask == b.BlueMask &&
+           a.AlphaMask == b.AlphaMask;
+}
+
+static CKBYTE *ConvertCopyImage(const VxImageDescEx &src, const VxImageDescEx &videoFormat,
+                         VxImageDescEx &uploadDesc) {
+    if (src.Width <= 0 || src.Height <= 0 || src.BitsPerPixel <= 0 || videoFormat.BitsPerPixel <= 0)
+        return nullptr;
+
+    uploadDesc = videoFormat;
+    uploadDesc.Width = src.Width;
+    uploadDesc.Height = src.Height;
+    uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
+    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+
+    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    uploadDesc.Image = converted;
+    VxDoBlit(src, uploadDesc);
+    return converted;
+}
+
 static bool RenderDebugLogEnabled(const char *name) {
     const char *value = std::getenv(name);
     return value && value[0] != '\0' && value[0] != '0';
@@ -1668,18 +1693,20 @@ const VxMatrix &RCKRenderContext::GetViewTransformationMatrix() {
 }
 
 CKBOOL RCKRenderContext::SetUserClipPlane(CKDWORD ClipPlaneIndex, const VxPlane &PlaneEquation) {
-    (void)ClipPlaneIndex;
-    (void)PlaneEquation;
-    // User clip planes require either shader-side discard or CPU clipping. The
-    // v2 FFP path does not consume CLIPPLANEENABLE yet, so reporting success
-    // would make callers believe geometry is clipped when it is not.
-    return FALSE;
+    if (ClipPlaneIndex >= 6)
+        return FALSE;
+
+    m_UserClipPlanes[ClipPlaneIndex] = PlaneEquation;
+    m_FFPipeline.SetUserClipPlane((int)ClipPlaneIndex, PlaneEquation);
+    return TRUE;
 }
 
 CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &PlaneEquation) {
-    (void)ClipPlaneIndex;
-    (void)PlaneEquation;
-    return FALSE;
+    if (ClipPlaneIndex >= 6)
+        return FALSE;
+
+    PlaneEquation = m_UserClipPlanes[ClipPlaneIndex];
+    return TRUE;
 }
 
 // IDA: 0x1006823b - Internal 2D picking method
@@ -2311,9 +2338,172 @@ int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, Vx
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    // Backbuffer uploads are not expressible through the v2 bgfx abstraction.
-    // Texture uploads are handled by RCKTexture::CopyContext/UpdateTexture.
-    return FALSE;
+    if (!m_RasterizerContext || buffer != VXBUFFER_BACKBUFFER)
+        return FALSE;
+
+    int fbWidth = m_Settings.m_Rect.right;
+    int fbHeight = m_Settings.m_Rect.bottom;
+    if (fbWidth <= 0 || fbHeight <= 0)
+        return FALSE;
+
+    VxRect rect;
+    if (iRect) {
+        rect = *iRect;
+    } else {
+        rect.left = 0.0f;
+        rect.top = 0.0f;
+        rect.right = (float)fbWidth;
+        rect.bottom = (float)fbHeight;
+    }
+
+    int left = (int)rect.left;
+    int top = (int)rect.top;
+    int right = (int)rect.right;
+    int bottom = (int)rect.bottom;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > fbWidth) right = fbWidth;
+    if (bottom > fbHeight) bottom = fbHeight;
+    if (right <= left || bottom <= top)
+        return FALSE;
+
+    const int width = right - left;
+    const int height = bottom - top;
+    if (desc.Width != width || desc.Height != height || desc.BitsPerPixel <= 0)
+        return FALSE;
+
+    VxImageDescEx videoFormat;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, videoFormat);
+    videoFormat.Width = width;
+    videoFormat.Height = height;
+    videoFormat.BytesPerLine = width * videoFormat.BitsPerPixel / 8;
+    videoFormat.TotalImageSize = videoFormat.BytesPerLine * height;
+
+    if (!desc.Image)
+        return videoFormat.TotalImageSize;
+
+    VxImageDescEx uploadDesc = desc;
+    CKBYTE *converted = nullptr;
+    if (!SameCopyPixelFormat(desc, videoFormat)) {
+        converted = ConvertCopyImage(desc, videoFormat, uploadDesc);
+        if (!converted)
+            return FALSE;
+    } else {
+        if (uploadDesc.BytesPerLine <= 0)
+            uploadDesc.BytesPerLine = width * uploadDesc.BitsPerPixel / 8;
+        if (uploadDesc.TotalImageSize <= 0)
+            uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * height;
+    }
+
+    if (m_CopyToVideoTexture == 0) {
+        m_CopyToVideoTexture = m_RenderManager->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    }
+
+    CKERROR err = CK_OK;
+    if (m_CopyToVideoWidth != width || m_CopyToVideoHeight != height) {
+        if (m_CopyToVideoWidth > 0 && m_CopyToVideoHeight > 0)
+            m_RasterizerContext->DeleteObject(m_CopyToVideoTexture, CKRST_OBJ_TEXTURE);
+
+        CKTextureDesc texDesc;
+        texDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+        texDesc.Format = videoFormat;
+        texDesc.MipMapCount = 1;
+        err = m_RasterizerContext->CreateTexture(m_CopyToVideoTexture, &texDesc, &uploadDesc);
+        if (err == CK_OK) {
+            m_CopyToVideoWidth = width;
+            m_CopyToVideoHeight = height;
+        }
+    } else {
+        err = m_RasterizerContext->UpdateTexture(m_CopyToVideoTexture, 0, 0, nullptr, &uploadDesc);
+    }
+
+    delete[] converted;
+    if (err != CK_OK)
+        return FALSE;
+
+    CKFixedFunctionPipeline &ffp = m_FFPipeline;
+    const CKDWORD oldCull = ffp.GetRenderState(VXRENDERSTATE_CULLMODE);
+    const CKDWORD oldLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
+    const CKDWORD oldFog = ffp.GetRenderState(VXRENDERSTATE_FOGENABLE);
+    const CKDWORD oldZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
+    const CKDWORD oldZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
+    const CKDWORD oldZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
+    const CKDWORD oldAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
+    const CKDWORD oldAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
+    const CKDWORD oldTexture = ffp.GetTexture(0);
+    const CKDWORD oldOp = ffp.GetTextureStageState(0, CKRST_TSS_OP);
+    const CKDWORD oldAop = ffp.GetTextureStageState(0, CKRST_TSS_AOP);
+    const CKDWORD oldArg1 = ffp.GetTextureStageState(0, CKRST_TSS_ARG1);
+    const CKDWORD oldArg2 = ffp.GetTextureStageState(0, CKRST_TSS_ARG2);
+    const CKDWORD oldAarg1 = ffp.GetTextureStageState(0, CKRST_TSS_AARG1);
+    const CKDWORD oldAarg2 = ffp.GetTextureStageState(0, CKRST_TSS_AARG2);
+    const CKDWORD oldMag = ffp.GetTextureStageState(0, CKRST_TSS_MAGFILTER);
+    const CKDWORD oldMin = ffp.GetTextureStageState(0, CKRST_TSS_MINFILTER);
+    const CKDWORD oldAddress = ffp.GetTextureStageState(0, CKRST_TSS_ADDRESS);
+
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+    ffp.DisableTextureStagesFrom(0);
+    ffp.SetTexture(0, m_CopyToVideoTexture);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+
+    VxDrawPrimitiveData *data = GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
+    if (data) {
+        float *pos = (float *)data->PositionPtr;
+        float *uv = (float *)data->TexCoordPtr;
+        CKDWORD white = 0xFFFFFFFF;
+        VxFillStructure(4, data->ColorPtr, data->ColorStride, 4, &white);
+
+        const float x0 = (float)left;
+        const float y0 = (float)top;
+        const float x1 = (float)right;
+        const float y1 = (float)bottom;
+        const float coords[8] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
+        memcpy(uv, coords, sizeof(coords));
+
+        pos[0] = x0; pos[1] = y0; pos[2] = 0.0f; pos[3] = 1.0f;
+        pos = (float *)((CKBYTE *)pos + data->PositionStride);
+        pos[0] = x1; pos[1] = y0; pos[2] = 0.0f; pos[3] = 1.0f;
+        pos = (float *)((CKBYTE *)pos + data->PositionStride);
+        pos[0] = x1; pos[1] = y1; pos[2] = 0.0f; pos[3] = 1.0f;
+        pos = (float *)((CKBYTE *)pos + data->PositionStride);
+        pos[0] = x0; pos[1] = y1; pos[2] = 0.0f; pos[3] = 1.0f;
+
+        DrawPrimitive(VX_TRIANGLEFAN, nullptr, 4, data);
+    }
+
+    ffp.SetTexture(0, oldTexture);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, oldOp);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, oldAop);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, oldArg1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, oldArg2);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, oldAarg1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, oldAarg2);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, oldMag);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, oldMin);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, oldAddress);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, oldCull);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, oldLighting);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, oldFog);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, oldZEnable);
+    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, oldZWrite);
+    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, oldZFunc);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, oldAlphaBlend);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, oldAlphaTest);
+
+    return data ? videoFormat.TotalImageSize : FALSE;
 }
 
 CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBUFFER_TYPE buffer) {
@@ -2749,6 +2939,9 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_TargetTexture = nullptr;
     m_TargetFrameBuffer = 0;
     m_TargetDepthTexture = 0;
+    m_CopyToVideoTexture = 0;
+    m_CopyToVideoWidth = 0;
+    m_CopyToVideoHeight = 0;
     m_CubeMapFace = CKRST_CUBEFACE_XPOS;
     m_DrawSceneCalls = 0;
     m_SortTransparentObjects = 0;
@@ -2829,12 +3022,16 @@ CKBOOL RCKRenderContext::DestroyDevice() {
             m_RasterizerContext->DeleteObject(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
         if (m_TargetDepthTexture != 0)
             m_RasterizerContext->DeleteObject(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
+        if (m_CopyToVideoTexture != 0)
+            m_RasterizerContext->DeleteObject(m_CopyToVideoTexture, CKRST_OBJ_TEXTURE);
     }
     if (m_RenderManager) {
         if (m_TargetFrameBuffer != 0)
             m_RenderManager->ReleaseObjectIndex(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
         if (m_TargetDepthTexture != 0)
             m_RenderManager->ReleaseObjectIndex(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
+        if (m_CopyToVideoTexture != 0)
+            m_RenderManager->ReleaseObjectIndex(m_CopyToVideoTexture, CKRST_OBJ_TEXTURE);
     }
 
     // Destroy the rasterizer context
@@ -2846,6 +3043,9 @@ CKBOOL RCKRenderContext::DestroyDevice() {
     m_TargetTexture = nullptr;
     m_TargetFrameBuffer = 0;
     m_TargetDepthTexture = 0;
+    m_CopyToVideoTexture = 0;
+    m_CopyToVideoWidth = 0;
+    m_CopyToVideoHeight = 0;
     m_DeviceDestroying = FALSE;
     m_Fullscreen = FALSE;
 
