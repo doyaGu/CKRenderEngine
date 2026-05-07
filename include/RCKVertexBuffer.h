@@ -28,6 +28,7 @@ protected:
     VxMemoryPool m_MemoryPool;
     CKContext *m_CKContext;
     VxDrawPrimitiveData m_DpData;
+    VxDrawPrimitiveData m_LockedData;
 };
 
 

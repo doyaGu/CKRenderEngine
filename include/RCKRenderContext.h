@@ -282,6 +282,8 @@ public:
     RCK3dEntity *m_Current3dEntity;         // 0x310 (4 bytes)
     RCKTexture *m_TargetTexture;            // 0x314 (4 bytes)
     CKRST_CUBEFACE m_CubeMapFace;           // 0x318 (4 bytes) - changed type to match IDA
+    CKDWORD m_TargetFrameBuffer;
+    CKDWORD m_TargetDepthTexture;
     float m_FocalLength;                    // 0x31C (4 bytes)
     float m_EyeSeparation;                  // 0x320 (4 bytes)
     CKDWORD m_Flags;                        // 0x324 (4 bytes)
@@ -315,6 +317,7 @@ public:
     CKFixedFunctionPipeline m_FFPipeline;
     VxMatrix m_WorldMatrix;
     VxMatrix m_ViewMatrix;
+    VxPlane m_UserClipPlanes[6];
     CKRenderView m_Current2DView;
     CKRenderView m_Current3DView;
 };

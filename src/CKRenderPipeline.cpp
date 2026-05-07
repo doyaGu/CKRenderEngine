@@ -42,7 +42,7 @@ void CKRenderPipeline::Shutdown() {
 }
 
 void CKRenderPipeline::BeginFrame(
-    const CKRECT &viewport, CKDWORD clearColor, float clearZ,
+    const CKRECT &viewport, CKDWORD clearFlags, CKDWORD clearColor, float clearZ,
     const VxMatrix &view, const VxMatrix &proj)
 {
     if (!m_Context) return;
@@ -63,9 +63,7 @@ void CKRenderPipeline::BeginFrame(
 
     // View 0: Clear only
     m_Context->SetViewRect(CKRP_VIEW_CLEAR, viewport);
-    m_Context->SetViewClear(CKRP_VIEW_CLEAR,
-                            CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
-                            clearColor, clearZ, 0);
+    m_Context->SetViewClear(CKRP_VIEW_CLEAR, clearFlags, clearColor, clearZ, 0);
 
     // View 1: Background 2D
     m_Context->SetViewRect(CKRP_VIEW_BACKGROUND2D, viewport);
