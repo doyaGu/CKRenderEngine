@@ -419,9 +419,9 @@ CKBOOL RCKSprite3D::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
     CKDWORD vis;
     if (flags & 0xFF) {
         m_RenderExtents = VxRect(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
-        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+        vis = dev->ComputeBoxVisibility(m_LocalBoundingBox, m_WorldMatrix, &m_RenderExtents);
     } else {
-        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+        vis = dev->ComputeBoxVisibility(m_LocalBoundingBox, m_WorldMatrix, nullptr);
     }
 
     if (!vis) {

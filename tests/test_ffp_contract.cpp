@@ -791,6 +791,28 @@ void Test_PointSprite_PointListExpandsToTexturedQuads() {
               "Each point sprite must expand to four vertices and six indices");
 }
 
+void Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes() {
+    std::string drawState = ReadRenderEngineSource("src/CKDrawStateCache.cpp");
+    TestCheck(drawState.find("VXRENDERSTATE_POINTSCALE_A") != std::string::npos &&
+              drawState.find("VXRENDERSTATE_POINTSCALE_B") != std::string::npos &&
+              drawState.find("VXRENDERSTATE_POINTSCALE_C") != std::string::npos,
+              "Draw-state defaults must initialize D3D point-scale coefficients");
+
+    std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(ffp.find("VXRENDERSTATE_POINTSIZE_MIN") != std::string::npos &&
+              ffp.find("VXRENDERSTATE_POINTSIZE_MAX") != std::string::npos &&
+              ffp.find("VXRENDERSTATE_POINTSCALEENABLE") != std::string::npos,
+              "FFP draw must pass point size clamp and attenuation state to transient geometry");
+
+    std::string transient = ReadRenderEngineSource("src/CKTransientGeometry.cpp");
+    TestCheck(transient.find("sqrtf(params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance)") != std::string::npos,
+              "Point sprite size must use the D3D distance attenuation formula");
+    TestCheck(transient.find("Vx3DInverseMatrix(invWorld") != std::string::npos &&
+              transient.find("cameraRightLocal") != std::string::npos &&
+              transient.find("cameraUpLocal") != std::string::npos,
+              "3D point sprites must expand using camera-facing axes transformed into local space");
+}
+
 void Test_ViewportClip_RestoresFFPProjectionAndViewport() {
     std::string context = ReadRenderEngineSource("src/CKRenderContext.cpp");
     TestCheck(context.find("m_FFPipeline.SetViewport(m_ViewportData);") != std::string::npos,
@@ -800,6 +822,29 @@ void Test_ViewportClip_RestoresFFPProjectionAndViewport() {
     TestCheck(sceneGraph.find("SetProjectionTransformationMatrix(rc->m_ProjectionMatrix)") != std::string::npos &&
               sceneGraph.find("SetProjectionTransformationMatrix(dev->m_ProjectionMatrix)") != std::string::npos,
               "Scene graph viewport clipping must restore the render-context projection after clipped traversal");
+}
+
+void Test_FrustumVisibility_UsesProjectedBoundingBoxes() {
+    std::string header = ReadRenderEngineSource("include/RCKRenderContext.h");
+    TestCheck(header.find("ComputeBoxVisibility") != std::string::npos,
+              "RenderContext must expose a CPU box projection helper for frustum tests");
+
+    std::string context = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    TestCheck(context.find("VxTransformBox2D") != std::string::npos &&
+              context.find("allOr") != std::string::npos &&
+              context.find("allAnd") != std::string::npos,
+              "ComputeBoxVisibility must project bbox corners and classify inside/intersect/outside");
+
+    std::string entity = ReadRenderEngineSource("src/CK3dEntity.cpp");
+    TestCheck(entity.find("Phase 1 stub: always visible") == std::string::npos,
+              "3D entity frustum tests must not keep the always-visible stub");
+    TestCheck(entity.find("ComputeBoxVisibility(m_LocalBoundingBox") != std::string::npos &&
+              entity.find("m_SceneGraphNode->m_Bbox") != std::string::npos,
+              "3D entity and hierarchical visibility must use projected bbox visibility");
+
+    std::string sprite = ReadRenderEngineSource("src/CKSprite3D.cpp");
+    TestCheck(sprite.find("ComputeBoxVisibility(m_LocalBoundingBox") != std::string::npos,
+              "Sprite3D frustum tests must use the sprite local bbox projection");
 }
 
 void Test_LegacySetVertexShaderResetCommentsAreGone() {
@@ -896,7 +941,9 @@ int main() {
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
+    tests.Run("Point sprite D3D point scale and camera-facing axes", &Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes);
     tests.Run("Viewport clip restores FFP projection and viewport", &Test_ViewportClip_RestoresFFPProjectionAndViewport);
+    tests.Run("Frustum visibility uses projected bounding boxes", &Test_FrustumVisibility_UsesProjectedBoundingBoxes);
     tests.Run("Legacy SetVertexShader reset comments removed", &Test_LegacySetVertexShaderResetCommentsAreGone);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
