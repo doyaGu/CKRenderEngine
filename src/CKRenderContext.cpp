@@ -2564,12 +2564,20 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     if (!m_RasterizerContext)
         return FALSE;
 
-    m_CubeMapFace = static_cast<CKRST_CUBEFACE>(CubeMapFace);
-
     if (texture) {
+        if (CubeMapFace < CKRST_CUBEFACE_XPOS || CubeMapFace > CKRST_CUBEFACE_ZNEG)
+            return FALSE;
+        if (!texture->IsCubeMap() && CubeMapFace != CKRST_CUBEFACE_XPOS)
+            return FALSE;
+        if (texture->IsCubeMap() &&
+            (texture->GetSlotCount() != 6 || texture->GetWidth() != texture->GetHeight()))
+            return FALSE;
+
         RCKTexture *target = static_cast<RCKTexture *>(texture);
         if (!target->EnsureRenderTarget(this, FALSE))
             return FALSE;
+
+        m_CubeMapFace = static_cast<CKRST_CUBEFACE>(CubeMapFace);
 
         if (m_TargetFrameBuffer == 0) {
             RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
@@ -2637,6 +2645,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     }
 
     m_TargetTexture = nullptr;
+    m_CubeMapFace = CKRST_CUBEFACE_XPOS;
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, 0);
