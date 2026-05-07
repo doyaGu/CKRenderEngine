@@ -755,6 +755,17 @@ void Test_BumpEnv_StageStatesPackUniform() {
               "Bump env luminance stage states must pack into u_bumpEnv[1]");
 }
 
+void Test_MaterialEffects_UseEightStageFFPContract() {
+    std::string material = ReadRenderEngineSource("src/CKMaterial.cpp");
+    TestCheck(material.find("stage >= 4") == std::string::npos &&
+              material.find("currentStage >= 4") == std::string::npos,
+              "Material effect helpers must not keep the old four-stage limit");
+    TestCheck(material.find("DisableTextureStagesFrom(TextureStage + 1)") != std::string::npos,
+              "SetAsCurrent must clear stale higher effect stages before applying the current material");
+    TestCheck(material.find("CKRST_TOP_BUMPENVMAPLUMINANCE") != std::string::npos,
+              "BumpEnv effect mapping must expose the luminance bump op when requested by parameters");
+}
+
 void Test_UserDrawPrimitive_VBufferFlagIsObservable() {
     UserDrawPrimitiveDataClass dp;
     VxDrawPrimitiveData *data = dp.GetStructure((CKRST_DPFLAGS)(CKRST_DP_CL_VCT | CKRST_DP_VBUFFER), 4);
@@ -938,6 +949,7 @@ int main() {
     tests.Run("Material channels no base texture keeps stage chain", &Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive);
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
+    tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
