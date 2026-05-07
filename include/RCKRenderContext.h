@@ -174,6 +174,7 @@ public:
     void CallSprite3DBatches();
     void FlushSprite3DBatchesIfNeeded();  // IDA: sub_1000D2F0
     void AddExtents2D(const VxRect &rect, CKObject *obj);
+    CKDWORD ComputeBoxVisibility(const VxBbox &box, const VxMatrix &world, VxRect *extents);
     void CheckObjectExtents();
     void RenderTransparents(CKDWORD flags);
     

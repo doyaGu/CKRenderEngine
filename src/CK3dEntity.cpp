@@ -3222,7 +3222,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
             dev->SetWorldTransformationMatrix(m_WorldMatrix);
 
         VxRect *ext = updateExtents ? &m_RenderExtents : nullptr;
-        vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+        vis = dev->ComputeBoxVisibility(m_LocalBoundingBox, m_WorldMatrix, ext);
     } else if (m_CurrentMesh) {
         // If the mesh has no vertices, consider it not visible
         if (m_CurrentMesh->GetVertexCount() <= 0)
@@ -3235,18 +3235,15 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
                 m_SceneGraphNode->InvalidateBox(TRUE);
         }
 
-        const VxBbox &meshLocalBox = m_CurrentMesh->GetLocalBox();
-
         if (!(flags & CK_RENDER_CLEARVIEWPORT))
             dev->SetWorldTransformationMatrix(m_WorldMatrix);
 
         VxRect *ext = updateExtents ? &m_RenderExtents : nullptr;
 
         if (m_Skin) {
-            // With skin, IDA uses the entity cached local bbox
-            vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+            vis = dev->ComputeBoxVisibility(m_LocalBoundingBox, m_WorldMatrix, ext);
         } else {
-            vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+            vis = dev->ComputeBoxVisibility(m_CurrentMesh->GetLocalBox(), m_WorldMatrix, ext);
         }
     } else {
         // No mesh: transform the origin and treat as a 1x1 extent
@@ -3308,7 +3305,9 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
     m_SceneGraphNode->SetAsPotentiallyVisible();
     m_SceneGraphNode->ComputeHierarchicalBox();
 
-    const CKDWORD vis = 2; // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+    VxMatrix world = VxMatrix::Identity();
+    const VxBbox *box = m_SceneGraphNode->IsHierarchyBoxValid() ? &m_SceneGraphNode->m_Bbox : &m_HierarchicalBox;
+    const CKDWORD vis = dev->ComputeBoxVisibility(*box, world, nullptr);
     if (vis) {
         if (vis == 2)
             m_SceneGraphNode->SetAsInsideFrustum();

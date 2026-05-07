@@ -3352,7 +3352,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
     if (ent != rc->m_Current3dEntity) {
         VxRect extents;
         const VxBbox &box = GetLocalBox();
-        // Phase 1 stub: ComputeBoxVisibility removed in v2, always treat as visible (2)
+        // Mesh screen extents are computed by RCKRenderContext::ComputeBoxVisibility.
         (void) box;
         int visibility = 2;
         (void) visibility;

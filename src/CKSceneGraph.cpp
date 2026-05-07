@@ -87,7 +87,7 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
                     expanded.Max *= 2.0f;
                     expanded.Min *= 2.0f;
 
-                    // Phase 1 stub: always visible (was rst->ComputeBoxVisibility)
+                    // Character roots keep the legacy rendered marker even when expanded bounds miss.
                     node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
                 }
 

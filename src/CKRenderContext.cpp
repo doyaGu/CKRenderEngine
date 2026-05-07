@@ -1666,6 +1666,32 @@ void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data,
     }
 }
 
+CKDWORD RCKRenderContext::ComputeBoxVisibility(const VxBbox &box, const VxMatrix &world, VxRect *extents) {
+    if (!box.IsValid())
+        return 0;
+
+    VxMatrix vp;
+    VxMatrix wvp;
+    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
+    Vx3DMultiplyMatrix4(wvp, world, vp);
+
+    const float right = (float)m_ViewportData.ViewX + (float)m_ViewportData.ViewWidth;
+    const float bottom = (float)m_ViewportData.ViewY + (float)m_ViewportData.ViewHeight;
+    VxRect screen((float)m_ViewportData.ViewX, (float)m_ViewportData.ViewY, right, bottom);
+
+    VXCLIP_FLAGS allOr = (VXCLIP_FLAGS)0;
+    VXCLIP_FLAGS allAnd = (VXCLIP_FLAGS)VXCLIP_ALL;
+    VxRect projected(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
+    const XBOOL visible = VxTransformBox2D(wvp, box, &screen, &projected, allOr, allAnd);
+    if (!visible)
+        return 0;
+
+    if (extents)
+        *extents = projected;
+
+    return (allOr & VXCLIP_ALL) ? 1 : 2;
+}
+
 void RCKRenderContext::SetWorldTransformationMatrix(const VxMatrix &M) {
     m_WorldMatrix = M;
     m_FFPipeline.SetTransform(VXMATRIX_WORLD, M);
