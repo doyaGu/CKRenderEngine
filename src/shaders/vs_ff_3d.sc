@@ -47,31 +47,55 @@ vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4,
     return tc0;
 }
 
-vec2 generateTexcoord(int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
+vec4 generateTexcoord(int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
 {
     int generation = packedIndex / 65536;
     int index = packedIndex - generation * 65536;
-    if (generation == 1) return viewNormal.xy * 0.5 + 0.5;
-    if (generation == 2) return viewPos.xy;
+    if (generation == 1) return vec4(viewNormal, 1.0);
+    if (generation == 2) return vec4(viewPos, 1.0);
     if (generation == 3) {
         vec3 eye = normalize(viewPos);
-        vec3 refl = reflect(eye, normalize(viewNormal));
-        return refl.xy * 0.5 + 0.5;
+        vec3 refl = reflect(eye, viewNormal);
+        return vec4(refl, 1.0);
     }
-    return selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7);
+    if (generation == 4) {
+        vec3 eye = normalize(viewPos);
+        vec3 refl = reflect(eye, viewNormal);
+        float m = length(refl + vec3(0.0, 0.0, 1.0)) * 2.0;
+        return vec4(refl.xy / max(m, 0.0001) + 0.5, 0.0, 1.0);
+    }
+    return vec4(selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7), 0.0, 0.0);
 }
 
-vec2 transformTexcoord(int stage, vec2 uv)
+vec4 transformTexcoord(int stage, vec4 coord)
 {
     vec4 params = u_stageParams[stage * 4 + 2];
     int flags = int(params.z);
-    if (flags == 0) return uv;
+    if (flags == 0) return coord;
 
-    vec4 transformed = mul(u_texMatrix[stage], vec4(uv, 0.0, 1.0));
-    if ((flags & 0x100) != 0) {
-        transformed.xy /= max(abs(transformed.w), 0.0001);
+    int count = flags & 0xff;
+    bool applyTransform = count > 1 && count <= 4;
+
+    int packedIndex = int(params.y);
+    int generation = packedIndex / 65536;
+    if (generation == 0 && applyTransform) {
+        coord.z = 1.0;
     }
-    return transformed.xy;
+
+    vec4 transformed = applyTransform ? mul(u_texMatrix[stage], coord) : coord;
+    if ((flags & 0x100) != 0) {
+        float divisor = count == 1 ? transformed.x
+                      : count == 2 ? transformed.y
+                      : count == 3 ? transformed.z
+                      : transformed.w;
+        transformed.w = divisor;
+    }
+    if (count > 0 && count < 4) {
+        if (count <= 1) transformed.y = 0.0;
+        if (count <= 2) transformed.z = 0.0;
+        if (count <= 3 && (flags & 0x100) == 0) transformed.w = 0.0;
+    }
+    return transformed;
 }
 
 void main()
@@ -177,5 +201,6 @@ void main()
     v_texcoord4 = transformTexcoord(4, generateTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     v_texcoord5 = transformTexcoord(5, generateTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     v_texcoord6 = transformTexcoord(6, generateTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord7Fog = vec3(transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal)), computeFog(abs(viewPos.z), u_fogParams));
+    v_texcoord7Fog = transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_fogParams);
 }
