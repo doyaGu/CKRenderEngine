@@ -750,7 +750,6 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
     if (m_Callbacks) {
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
@@ -768,7 +767,6 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
 
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); ++i) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
