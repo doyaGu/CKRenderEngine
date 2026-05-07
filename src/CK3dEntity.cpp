@@ -3252,23 +3252,21 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
         }
     } else {
         // No mesh: transform the origin and treat as a 1x1 extent
-        VxVector4 in(0.0f, 0.0f, 0.0f, 1.0f);
+        VxVector in(0.0f, 0.0f, 0.0f);
         VxVector4 outH;
         VxVector4 outS;
         unsigned int clip = 0;
         VxTransformData td;
         memset(&td, 0, sizeof(td));
         td.InVertices = &in;
-        td.InStride = 16;
+        td.InStride = sizeof(VxVector);
         td.OutVertices = &outH;
-        td.OutStride = 16;
+        td.OutStride = sizeof(VxVector4);
         td.ScreenVertices = &outS;
-        td.ScreenStride = 16;
+        td.ScreenStride = sizeof(VxVector4);
         td.ClipFlags = &clip;
 
-        // TODO: Phase 2 - route world matrix and vertex transform through FFPipeline
-        // dev->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, m_WorldMatrix);
-        // dev->m_RasterizerContext->TransformVertices(1, &td);
+        dev->TransformVertices(1, &td, (CK3dEntity *)this);
 
         if (updateExtents) {
             const float x = outS.x;

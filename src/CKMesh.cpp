@@ -64,6 +64,46 @@ static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, R
         : pipeline.GetOpaqueView();
 }
 
+void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
+    if (!dev)
+        return;
+
+    for (int i = 0; i < m_ActiveTextureChannels.Size(); ++i) {
+        const int channelIndex = m_ActiveTextureChannels[i];
+        if (channelIndex < 0 || channelIndex >= m_MaterialChannels.Size())
+            continue;
+
+        VxMaterialChannel &channel = m_MaterialChannels[channelIndex];
+        RCKMaterial *channelMat = static_cast<RCKMaterial *>(channel.m_Material);
+        if (!channelMat || !(channel.m_Flags & VXCHANNEL_ACTIVE))
+            continue;
+
+        const int stage = i + 1;
+        CKDWORD colorOp = 0;
+        CKDWORD colorArg1 = 0;
+        CKDWORD colorArg2 = 0;
+        CKDWORD alphaOp = 0;
+        CKDWORD alphaArg1 = 0;
+        CKDWORD alphaArg2 = 0;
+        const CKDWORD stageBlend = STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend);
+        if (!CKFFStageBlendToTextureOps(stageBlend,
+                                        colorOp, colorArg1, colorArg2,
+                                        alphaOp, alphaArg1, alphaArg2))
+            continue;
+
+        channelMat->BindTextureSlotToStage(static_cast<CKRenderContext *>(dev), 0, stage);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_OP, colorOp);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_ARG1, colorArg1);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_ARG2, colorArg2);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_AOP, alphaOp);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_AARG1, alphaArg1);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_AARG2, alphaArg2);
+        dev->m_FFPipeline.SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
+                                              CKFFPackTexcoordIndex((CKDWORD)stage, CKFF_TEXGEN_NONE));
+    }
+}
+
 CKVBuffer *RCKMesh::GetVBuffer(CKMaterialGroup *group) const {
     if (!group || !group->m_RemapData)
         return nullptr;
@@ -3985,21 +4025,94 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         // Z-buffer only rendering mode
         if (zbufOnly) {
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            // TODO: Phase 2 - stub zbufOnly render states and DrawPrimitive
-            // rstContext->SetVertexShader(0);
-            // rstContext->SetTexture(0, 0);
-            // rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            // ... (remaining states) ...
-            // rstContext->DrawPrimitive(VX_TRIANGLELIST, ...);
+            CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
+            const CKDWORD savedLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
+            const CKDWORD savedAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
+            const CKDWORD savedAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
+            const CKDWORD savedZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
+            const CKDWORD savedZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
+            const CKDWORD savedZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
+            const CKDWORD savedStencilEnable = ffp.GetRenderState(VXRENDERSTATE_STENCILENABLE);
+
+            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+            ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+
+            rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            rc->m_FFPipeline.DrawPrimitive(
+                rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
+                rc->m_Current3DView, VX_TRIANGLELIST,
+                m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
+
+            ffp.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, savedLighting);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, savedAlphaBlend);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, savedAlphaTest);
+            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, savedZEnable);
+            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, savedZWrite);
+            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, savedZFunc);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, savedStencilEnable);
         } else if (stencilOnly) {
             // Stencil only rendering mode
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            // TODO: Phase 2 - stub stencilOnly render states and DrawPrimitive
-            // rstContext->SetVertexShader(0);
-            // rstContext->SetTexture(0, 0);
-            // rstContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            // ... (remaining states) ...
-            // rstContext->DrawPrimitive(VX_TRIANGLELIST, ...);
+            CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
+            const CKDWORD savedLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
+            const CKDWORD savedAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
+            const CKDWORD savedAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
+            const CKDWORD savedZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
+            const CKDWORD savedZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
+            const CKDWORD savedZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
+            const CKDWORD savedStencilEnable = ffp.GetRenderState(VXRENDERSTATE_STENCILENABLE);
+            const CKDWORD savedStencilFunc = ffp.GetRenderState(VXRENDERSTATE_STENCILFUNC);
+            const CKDWORD savedStencilFail = ffp.GetRenderState(VXRENDERSTATE_STENCILFAIL);
+            const CKDWORD savedStencilZFail = ffp.GetRenderState(VXRENDERSTATE_STENCILZFAIL);
+            const CKDWORD savedStencilPass = ffp.GetRenderState(VXRENDERSTATE_STENCILPASS);
+            const CKDWORD savedStencilRef = ffp.GetRenderState(VXRENDERSTATE_STENCILREF);
+            const CKDWORD savedStencilMask = ffp.GetRenderState(VXRENDERSTATE_STENCILMASK);
+            const CKDWORD savedStencilWriteMask = ffp.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+
+            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILREF, 1);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xFF);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+            ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+
+            rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            rc->m_FFPipeline.DrawPrimitive(
+                rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
+                rc->m_Current3DView, VX_TRIANGLELIST,
+                m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
+
+            ffp.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, savedLighting);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, savedAlphaBlend);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, savedAlphaTest);
+            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, savedZEnable);
+            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, savedZWrite);
+            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, savedZFunc);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, savedStencilEnable);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, savedStencilFunc);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILFAIL, savedStencilFail);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILZFAIL, savedStencilZFail);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, savedStencilPass);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILREF, savedStencilRef);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, savedStencilMask);
+            ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, savedStencilWriteMask);
 
             // Match original: stencil-only disables channel passes.
             renderChannels = FALSE;
@@ -4036,30 +4149,35 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         continue;
                     }
 
-                    if (!hasAlphaMaterial) {
-                        if (channel.m_FaceIndices || zbufOnly || IsTransparent() || !channel.m_Material->GetTexture(0)) {
-                            needsMultiPass = TRUE;
-                            lastMultiPass = &channel;
-                            usedStages = maxAdditionalStages;
-                            continue;
-                        }
-
-                        const bool allowedBlend =
-                            (channel.m_SourceBlend == VXBLEND_ZERO && channel.m_DestBlend == VXBLEND_SRCCOLOR) ||
-                            (channel.m_SourceBlend == VXBLEND_DESTCOLOR && channel.m_DestBlend == VXBLEND_ZERO);
-
-                        if ((m_Flags & VXMESH_PRELITMODE) != 0 || (channel.m_Flags & VXCHANNEL_NOTLIT) != 0 || !allowedBlend) {
-                            needsMultiPass = TRUE;
-                            lastMultiPass = &channel;
-                            usedStages = maxAdditionalStages;
-                            continue;
-                        }
+                    if (channel.m_FaceIndices || zbufOnly || IsTransparent() || hasAlphaMaterial ||
+                        !channel.m_Material->GetTexture(0)) {
+                        needsMultiPass = TRUE;
+                        lastMultiPass = &channel;
+                        usedStages = maxAdditionalStages;
+                        continue;
                     }
 
-                    // Try to set stage blend; if it fails, fall back to multi-pass rendering.
-                    const int stage = usedStages + 1;
-                    // TODO: Phase 2 - rstContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, ...); always multi-pass for now
-                    if (TRUE) {
+                    const bool allowedBlend =
+                        (channel.m_SourceBlend == VXBLEND_ZERO && channel.m_DestBlend == VXBLEND_SRCCOLOR) ||
+                        (channel.m_SourceBlend == VXBLEND_DESTCOLOR && channel.m_DestBlend == VXBLEND_ZERO);
+
+                    if ((m_Flags & VXMESH_PRELITMODE) != 0 || (channel.m_Flags & VXCHANNEL_NOTLIT) != 0 || !allowedBlend) {
+                        needsMultiPass = TRUE;
+                        lastMultiPass = &channel;
+                        usedStages = maxAdditionalStages;
+                        continue;
+                    }
+
+                    CKDWORD colorOp = 0;
+                    CKDWORD colorArg1 = 0;
+                    CKDWORD colorArg2 = 0;
+                    CKDWORD alphaOp = 0;
+                    CKDWORD alphaArg1 = 0;
+                    CKDWORD alphaArg2 = 0;
+                    const CKDWORD stageBlend = STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend);
+                    if (!CKFFStageBlendToTextureOps(stageBlend,
+                                                    colorOp, colorArg1, colorArg2,
+                                                    alphaOp, alphaArg1, alphaArg2)) {
                         needsMultiPass = TRUE;
                         lastMultiPass = &channel;
                         usedStages = maxAdditionalStages;
@@ -4070,10 +4188,6 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                     ++usedStages;
 
                     const int texCoordIndex = (int) m_ActiveTextureChannels.Size() + 1;
-                    // TODO: Phase 2 - rstContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, texCoordIndex);
-                    (void) texCoordIndex;
-
-                    channel.m_Material->SetAsCurrent((CKRenderContext *) rc, FALSE, stage);
 
                     const int slot = (int) m_ActiveTextureChannels.Size();
                     if (slot < 7) {
@@ -4091,13 +4205,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
-                // TODO: Phase 2 - rstContext->SetTexture(0, 1);
-                // TODO: Phase 2 - rstContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(0, 0));
+                rc->m_FFPipeline.SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
+                rc->m_FFPipeline.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+                rc->m_FFPipeline.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
             }
 
             // Setup draw flags
             dpData.Flags = (CKRST_DP_STAGE(m_ActiveTextureChannels.Size()) | (m_DrawFlags | CKRST_DP_TRANSFORM));
-            // TODO: Phase 2 - rstContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
 
             // Vertex color (prelit) vs lighting
             if ((m_Flags & VXMESH_PRELITMODE) != 0) {
@@ -4170,7 +4284,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 projMat[3][2] = origZ * 1.003f;
                 rc->SetProjectionTransformationMatrix(projMat);
 
-                rc->m_FFPipeline.SetTexture(0, 0);
+                rc->m_FFPipeline.DisableTextureStagesFrom(0);
                 rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
                 rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
 
@@ -4207,7 +4321,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         lineDp.SpecularColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Specular : nullptr;
 
         rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-        rc->m_FFPipeline.SetTexture(0, 0);
+        rc->m_FFPipeline.DisableTextureStagesFrom(0);
         lineDp.Flags = (m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
         rc->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
 
@@ -4275,6 +4389,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // TODO: Phase 2 - route blend states through FFPipeline
         // if ((m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) == ...) { ... }
     }
+
+    BindMonoPassTextureChannels(dev);
 
     dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
 

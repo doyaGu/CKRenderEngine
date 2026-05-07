@@ -227,6 +227,7 @@ public:
     // These helpers exist to mirror the original engine's behavior where
     // channel rendering temporarily patches blend/flags directly without
     // triggering side effects (e.g., transparency re-evaluation).
+    CKBOOL BindTextureSlotToStage(CKRenderContext *context, int TextureSlot, int TextureStage);
     void PatchForChannelRender(VXBLEND_MODE sourceBlend, VXBLEND_MODE destBlend,
                                VXBLEND_MODE &savedSourceBlend, VXBLEND_MODE &savedDestBlend, CKDWORD &savedFlags);
     void RestoreAfterChannelRender(VXBLEND_MODE savedSourceBlend, VXBLEND_MODE savedDestBlend, CKDWORD savedFlags);

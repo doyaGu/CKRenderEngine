@@ -192,6 +192,13 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         CKDWORD b = (CKDWORD)(diff.b * 255.0f) & 0xFF;
         clearColor = 0xFF000000 | (r << 16) | (g << 8) | b;
     }
+    CKDWORD clearFlags = 0;
+    if (Flags & CK_RENDER_CLEARBACK)
+        clearFlags |= CKRST_CTXCLEAR_COLOR;
+    if (Flags & CK_RENDER_CLEARZ)
+        clearFlags |= CKRST_CTXCLEAR_DEPTH;
+    if (Flags & CK_RENDER_CLEARSTENCIL)
+        clearFlags |= CKRST_CTXCLEAR_STENCIL;
 
     // Build a viewport CKRECT from current settings.
     CKRECT viewport;
@@ -272,7 +279,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     if (frameLog)
         CK_LOG("RenderedScene", "Draw - calling BeginFrame");
     rc->m_FFPipeline.BeginDebugFrame();
-    rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearColor, 1.0f, viewMat, projMat);
+    rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
 
     // --- Default render states via the FF pipeline ---
     SetDefaultRenderStates(nullptr);
