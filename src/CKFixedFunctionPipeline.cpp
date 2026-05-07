@@ -853,7 +853,13 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
-    if (!m_TransientGeometry.Prepare(encoder, type, indices, indexCount, data, wrapMode)) {
+    CKDWORD pointSizeBits = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSIZE);
+    float pointSize = 1.0f;
+    if (pointSizeBits != 0)
+        memcpy(&pointSize, &pointSizeBits, sizeof(pointSize));
+    if (!m_TransientGeometry.Prepare(
+            encoder, type, indices, indexCount, data, wrapMode,
+            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), pointSize)) {
         if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG("FFPipeline", "DrawPrimitive: Prepare FAILED");
             g_DrawLogCount++;
@@ -967,7 +973,10 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 
     // Set draw state
     CKDrawState drawState = m_DrawStateCache.BuildDrawState(
-        (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP) ? VX_TRIANGLELIST : type);
+        (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
+         (type == VX_POINTLIST && m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE)))
+            ? VX_TRIANGLELIST
+            : type);
     encoder->SetState(drawState);
     encoder->SetStencilRef(m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF));
     encoder->SetStencilMask(m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK),

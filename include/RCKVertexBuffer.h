@@ -29,6 +29,14 @@ protected:
     CKContext *m_CKContext;
     VxDrawPrimitiveData m_DpData;
     VxDrawPrimitiveData m_LockedData;
+    CKDWORD m_FormatFlags;
+    CKDWORD m_VertexLayout;
+    CKBOOL m_HardwareValid;
+    CKDWORD m_LockedStart;
+    CKDWORD m_LockedCount;
+    CKLOCKFLAGS m_LockFlags;
+    CKDWORD m_DirtyStart;
+    CKDWORD m_DirtyCount;
 };
 
 

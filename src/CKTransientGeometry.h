@@ -28,7 +28,9 @@ public:
         CKWORD *indices,
         int indexCount,
         VxDrawPrimitiveData *data,
-        CKDWORD wrapMode = 0);
+        CKDWORD wrapMode = 0,
+        CKBOOL pointSprites = FALSE,
+        float pointSize = 1.0f);
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
@@ -49,7 +51,8 @@ public:
     static void InterleaveVertex(void *dst, CKDWORD stride, CKDWORD dstIndex,
                                  CKDWORD srcIndex, CKDWORD formatFlags,
                                  VxDrawPrimitiveData *data,
-                                 const float *texcoord0Override = nullptr);
+                                 const float *texcoord0Override = nullptr,
+                                 const float *positionOverride = nullptr);
 
 private:
     CKRasterizerContext *m_Context;
