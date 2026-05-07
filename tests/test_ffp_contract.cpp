@@ -766,6 +766,17 @@ void Test_MaterialEffects_UseEightStageFFPContract() {
               "BumpEnv effect mapping must expose the luminance bump op when requested by parameters");
 }
 
+void Test_ShaderEvaluator_Dot3MatchesD3DFFP() {
+    std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
+    TestCheck(shader.find("clamp(dot(a.rgb - 0.5, b.rgb - 0.5) * 4.0, 0.0, 1.0)") != std::string::npos,
+              "DOTPRODUCT3 must use the D3D fixed-function dot formula and saturate the result");
+    TestCheck(shader.find("return vec4_splat(v);") != std::string::npos,
+              "DOTPRODUCT3 must replicate the dot result into all channels");
+    TestCheck(shader.find("if (colorOp == 24)") != std::string::npos &&
+              shader.find("stageResult = colorResult;") != std::string::npos,
+              "DOTPRODUCT3 must write the full result vector instead of preserving a separate alpha path");
+}
+
 void Test_UserDrawPrimitive_VBufferFlagIsObservable() {
     UserDrawPrimitiveDataClass dp;
     VxDrawPrimitiveData *data = dp.GetStructure((CKRST_DPFLAGS)(CKRST_DP_CL_VCT | CKRST_DP_VBUFFER), 4);
@@ -950,6 +961,7 @@ int main() {
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
+    tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);

@@ -87,8 +87,8 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 21) return clamp((vec4_splat(1.0) - a) * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 22 || op == 23) return current;
     if (op == 24) {
-        float v = dot(a.rgb * 2.0 - 1.0, b.rgb * 2.0 - 1.0);
-        return vec4(v, v, v, current.a);
+        float v = clamp(dot(a.rgb - 0.5, b.rgb - 0.5) * 4.0, 0.0, 1.0);
+        return vec4_splat(v);
     }
     if (op == 25) return clamp(a * b + c, 0.0, 1.0);
     if (op == 26) return clamp(a * c + (1.0 - a) * b, 0.0, 1.0);
@@ -168,6 +168,9 @@ void main()
         vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, v_color0, texColor);
         stageResult.rgb = colorResult.rgb;
         stageResult.a = alphaResult.a;
+        if (colorOp == 24) {
+            stageResult = colorResult;
+        }
 
         int resultArg = int(alphaParams.w);
         if (resultArg == 5) {
