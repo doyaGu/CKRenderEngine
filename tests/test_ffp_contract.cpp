@@ -777,6 +777,25 @@ void Test_ShaderEvaluator_Dot3MatchesD3DFFP() {
               "DOTPRODUCT3 must write the full result vector instead of preserving a separate alpha path");
 }
 
+void Test_PatchMesh_BasicMeshConversionIsImplemented() {
+    std::string source = ReadRenderEngineSource("src/CKPatchMesh.cpp");
+    const size_t fromPos = source.find("CKERROR RCKPatchMesh::FromMesh");
+    const size_t toPos = source.find("CKERROR RCKPatchMesh::ToMesh");
+    TestCheck(fromPos != std::string::npos && toPos != std::string::npos,
+              "PatchMesh conversion functions must be present");
+    const size_t nextPos = source.find("void RCKPatchMesh::SetIterationCount", toPos);
+    TestCheck(nextPos != std::string::npos, "PatchMesh conversion source range must be bounded");
+    std::string body = source.substr(fromPos, nextPos - fromPos);
+    TestCheck(body.find("CKERR_NOTIMPLEMENTED") == std::string::npos,
+              "PatchMesh FromMesh/ToMesh must no longer report NOTIMPLEMENTED for all calls");
+    TestCheck(body.find("SetVertVecCount(vertexCount, faceCount * 9)") != std::string::npos &&
+              body.find("CK_PATCH_TRI") != std::string::npos,
+              "FromMesh must build planar triangle patch control data from ordinary mesh faces");
+    TestCheck(body.find("BuildRenderMesh()") != std::string::npos &&
+              body.find("CopyMeshGeometry(m, this)") != std::string::npos,
+              "ToMesh must tessellate patch data and copy the generated mesh to the target");
+}
+
 void Test_UserDrawPrimitive_VBufferFlagIsObservable() {
     UserDrawPrimitiveDataClass dp;
     VxDrawPrimitiveData *data = dp.GetStructure((CKRST_DPFLAGS)(CKRST_DP_CL_VCT | CKRST_DP_VBUFFER), 4);
@@ -962,6 +981,7 @@ int main() {
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
+    tests.Run("PatchMesh basic mesh conversion implemented", &Test_PatchMesh_BasicMeshConversionIsImplemented);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
