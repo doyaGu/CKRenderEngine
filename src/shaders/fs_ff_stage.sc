@@ -91,7 +91,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
         return vec4_splat(v);
     }
     if (op == 25) return clamp(a * b + c, 0.0, 1.0);
-    if (op == 26) return clamp(a * c + (1.0 - a) * b, 0.0, 1.0);
+    if (op == 26) return clamp(c * a + (vec4_splat(1.0) - c) * b, 0.0, 1.0);
     return a * b;
 }
 

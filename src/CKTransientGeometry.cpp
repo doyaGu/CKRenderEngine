@@ -27,25 +27,41 @@ static VxVector TransformDirection(const VxVector &dir, const VxMatrix &matrix) 
 }
 
 static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpriteParams &params) {
-    float size = params.Size > 0.0f ? params.Size : 1.0f;
+    float distance = 0.0f;
     if (params.ScaleEnable) {
         const VxVector worldPos = TransformPoint(localPos, params.World);
         const VxVector viewPos = TransformPoint(worldPos, params.View);
         const float magnitude = viewPos.Magnitude();
-        const float distance = magnitude > 0.0f ? magnitude : 0.0f;
-        const float denomSq = params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance;
-        if (denomSq > 0.000001f) {
-            const float denom = sqrtf(denomSq);
-            size /= denom;
-        }
+        distance = magnitude > 0.0f ? magnitude : 0.0f;
     }
 
-    const float minSize = params.MinSize > 0.0f ? params.MinSize : 1.0f;
-    const float maxSize = params.MaxSize >= minSize ? params.MaxSize : minSize;
+    return CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        params.Size, params.MinSize, params.MaxSize, params.ScaleEnable,
+        params.ScaleA, params.ScaleB, params.ScaleC, distance);
+}
+
+float CKTransientGeometry::ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
+                                                             CKBOOL scaleEnable,
+                                                             float scaleA, float scaleB, float scaleC,
+                                                             float distance) {
+    if (size <= 0.0f)
+        size = 1.0f;
+    if (scaleEnable) {
+        if (distance < 0.0f)
+            distance = 0.0f;
+        const float denomSq = scaleA + scaleB * distance + scaleC * distance * distance;
+        if (denomSq > 0.000001f)
+            size /= sqrtf(denomSq);
+    }
+
+    if (minSize <= 0.0f)
+        minSize = 1.0f;
+    if (maxSize < minSize)
+        maxSize = minSize;
     if (size < minSize)
-        return minSize;
+        size = minSize;
     if (size > maxSize)
-        return maxSize;
+        size = maxSize;
     return size;
 }
 
@@ -151,17 +167,13 @@ void CKTransientGeometry::InterleaveVertex(
     }
 }
 
-namespace {
-
-void ReadTexcoord0(VxDrawPrimitiveData *data, CKDWORD srcIndex, float uv[2]) {
+static void ReadTexcoord0(VxDrawPrimitiveData *data, CKDWORD srcIndex, float uv[2]) {
     uv[0] = 0.0f;
     uv[1] = 0.0f;
     if (data->TexCoordPtr) {
         memcpy(uv, (CKBYTE *)data->TexCoordPtr + srcIndex * data->TexCoordStride, 8);
     }
 }
-
-} // namespace
 
 CKTransientGeometry::CKTransientGeometry()
     : m_Context(nullptr), m_LayoutCache(nullptr), m_LastLayout(0) {}

@@ -55,6 +55,10 @@ public:
                                               CKWORD *dst);
 
     static void AdjustTriangleWrapTexcoords(float uv[3][2], CKDWORD wrapMode);
+    static float ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
+                                                   CKBOOL scaleEnable,
+                                                   float scaleA, float scaleB, float scaleC,
+                                                   float distance);
 
     // Interleave canonical fixed-function vertex data. This is shared by
     // transient and hardware VB paths so both obey the same missing-attribute
