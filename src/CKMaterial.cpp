@@ -1466,6 +1466,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
                              CKFFPackTexcoordIndex((CKDWORD)TextureStage, CKFF_TEXGEN_NONE));
     ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+    ffp.DisableTextureStagesFrom(TextureStage + 1);
 
     VX_EFFECT effect = GetEffect();
     if (effect == VXEFFECT_TEXGEN) {
@@ -1651,7 +1652,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
         ffp.SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX,
                                  CKFFPackTexcoordIndex(0, CKFF_TEXGEN_NONE));
         ffp.SetTextureStageState(1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+        const CKDWORD bumpOp = (params.Combine == CKRST_TOP_BUMPENVMAPLUMINANCE)
+            ? CKRST_TOP_BUMPENVMAPLUMINANCE
+            : CKRST_TOP_BUMPENVMAP;
+        ffp.SetTextureStageState(1, CKRST_TSS_OP, bumpOp);
         ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
         ffp.SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
         ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2);
@@ -1708,7 +1712,7 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
-    if (!dev || stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || stage >= 4 || !m_Textures[stage])
+    if (!dev || stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || !m_Textures[stage])
         return 0;
 
     CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
@@ -1757,8 +1761,6 @@ CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
     CKDWORD result = 0;
     for (int i = 0; i < textureCount; ++i) {
         const int currentStage = stage + i;
-        if (currentStage >= 4)
-            return result;
         if (!m_Textures[currentStage])
             return result;
 

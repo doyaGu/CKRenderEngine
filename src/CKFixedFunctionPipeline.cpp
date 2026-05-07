@@ -122,6 +122,33 @@ static bool DebugDisableFog() {
     return enabled;
 }
 
+static float ReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback) {
+    CKDWORD bits = cache.GetRenderState(state);
+    if (bits == 0)
+        return fallback;
+
+    float value = fallback;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+static CK_ADDRESS_MODE TranslateAddressMode(CKDWORD mode) {
+    switch (mode) {
+    case VXTEXTURE_ADDRESSMIRROR:
+        return CKRST_ADDRESS_MIRROR;
+    case VXTEXTURE_ADDRESSCLAMP:
+        return CKRST_ADDRESS_CLAMP;
+    case VXTEXTURE_ADDRESSBORDER:
+        return CKRST_ADDRESS_BORDER;
+    case VXTEXTURE_ADDRESSMIRRORONCE:
+        // MIRRORONCE is not directly expressible in the current bgfx sampler contract.
+        return CKRST_ADDRESS_CLAMP;
+    case VXTEXTURE_ADDRESSWRAP:
+    default:
+        return CKRST_ADDRESS_WRAP;
+    }
+}
+
 static const DebugDrawRange &Opaque3DDebugDrawRange() {
     static const DebugDrawRange value = {
         EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_EXACT", -1),
@@ -853,22 +880,14 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
-    auto readFloatState = [this](VXRENDERSTATETYPE state, float fallback) {
-        CKDWORD bits = m_DrawStateCache.GetRenderState(state);
-        if (bits == 0)
-            return fallback;
-        float value = fallback;
-        memcpy(&value, &bits, sizeof(value));
-        return value;
-    };
     CKFFPointSpriteParams pointParams;
-    pointParams.Size = readFloatState(VXRENDERSTATE_POINTSIZE, 1.0f);
-    pointParams.MinSize = readFloatState(VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
-    pointParams.MaxSize = readFloatState(VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
+    pointParams.Size = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
+    pointParams.MinSize = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
+    pointParams.MaxSize = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
     pointParams.ScaleEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE);
-    pointParams.ScaleA = readFloatState(VXRENDERSTATE_POINTSCALE_A, 1.0f);
-    pointParams.ScaleB = readFloatState(VXRENDERSTATE_POINTSCALE_B, 0.0f);
-    pointParams.ScaleC = readFloatState(VXRENDERSTATE_POINTSCALE_C, 0.0f);
+    pointParams.ScaleA = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_A, 1.0f);
+    pointParams.ScaleB = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_B, 0.0f);
+    pointParams.ScaleC = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
     pointParams.World = m_World;
     pointParams.View = m_View;
     if (!m_TransientGeometry.Prepare(
@@ -1477,24 +1496,10 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
         break;
     }
 
-    auto translateAddress = [](CKDWORD mode) -> CK_ADDRESS_MODE {
-        switch (mode) {
-        case VXTEXTURE_ADDRESSMIRROR: return CKRST_ADDRESS_MIRROR;
-        case VXTEXTURE_ADDRESSCLAMP:  return CKRST_ADDRESS_CLAMP;
-        case VXTEXTURE_ADDRESSBORDER: return CKRST_ADDRESS_BORDER;
-        case VXTEXTURE_ADDRESSMIRRORONCE:
-            // MIRRORONCE is not directly expressible in the current bgfx sampler contract.
-            return CKRST_ADDRESS_CLAMP;
-        case VXTEXTURE_ADDRESSWRAP:
-        default:
-            return CKRST_ADDRESS_WRAP;
-        }
-    };
-
-    CK_ADDRESS_MODE translateAddr = translateAddress(addr);
-    desc.AddressU = (addrU != 0) ? translateAddress(addrU) : translateAddr;
-    desc.AddressV = (addrV != 0) ? translateAddress(addrV) : translateAddr;
-    desc.AddressW = (addrW != 0) ? translateAddress(addrW) : translateAddr;
+    CK_ADDRESS_MODE translateAddr = TranslateAddressMode(addr);
+    desc.AddressU = (addrU != 0) ? TranslateAddressMode(addrU) : translateAddr;
+    desc.AddressV = (addrV != 0) ? TranslateAddressMode(addrV) : translateAddr;
+    desc.AddressW = (addrW != 0) ? TranslateAddressMode(addrW) : translateAddr;
 
     desc.BorderColor = m_StageStates[stage][CKRST_TSS_BORDERCOLOR];
     desc.CompareFunc = CKRST_COMPARE_NONE;
