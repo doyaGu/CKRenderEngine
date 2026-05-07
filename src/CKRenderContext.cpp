@@ -1668,6 +1668,10 @@ void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data,
 
 CKDWORD RCKRenderContext::ComputeBoxVisibility(const VxBbox &box, const VxMatrix &world, VxRect *extents) {
     if (!box.IsValid())
+        return 1;
+
+    const float frustumClass = m_Frustum.Classify(box, world);
+    if (frustumClass > 0.0f)
         return 0;
 
     VxMatrix vp;
@@ -1683,13 +1687,16 @@ CKDWORD RCKRenderContext::ComputeBoxVisibility(const VxBbox &box, const VxMatrix
     VXCLIP_FLAGS allAnd = (VXCLIP_FLAGS)VXCLIP_ALL;
     VxRect projected(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
     const XBOOL visible = VxTransformBox2D(wvp, box, &screen, &projected, allOr, allAnd);
-    if (!visible)
-        return 0;
+    if (!visible) {
+        if (extents)
+            *extents = screen;
+        return 1;
+    }
 
     if (extents)
         *extents = projected;
 
-    return (allOr & VXCLIP_ALL) ? 1 : 2;
+    return (allOr & VXCLIP_ALL || frustumClass == 0.0f) ? 1 : 2;
 }
 
 void RCKRenderContext::SetWorldTransformationMatrix(const VxMatrix &M) {

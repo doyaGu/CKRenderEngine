@@ -3303,11 +3303,11 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
         return TRUE;
 
     m_SceneGraphNode->SetAsPotentiallyVisible();
-    m_SceneGraphNode->ComputeHierarchicalBox();
+    if (!m_SceneGraphNode->ComputeHierarchicalBox() || !m_SceneGraphNode->IsHierarchyBoxValid())
+        return TRUE;
 
     VxMatrix world = VxMatrix::Identity();
-    const VxBbox *box = m_SceneGraphNode->IsHierarchyBoxValid() ? &m_SceneGraphNode->m_Bbox : &m_HierarchicalBox;
-    const CKDWORD vis = dev->ComputeBoxVisibility(*box, world, nullptr);
+    const CKDWORD vis = dev->ComputeBoxVisibility(m_SceneGraphNode->m_Bbox, world, nullptr);
     if (vis) {
         if (vis == 2)
             m_SceneGraphNode->SetAsInsideFrustum();

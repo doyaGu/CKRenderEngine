@@ -875,14 +875,23 @@ void Test_FrustumVisibility_UsesProjectedBoundingBoxes() {
               context.find("allOr") != std::string::npos &&
               context.find("allAnd") != std::string::npos,
               "ComputeBoxVisibility must project bbox corners and classify inside/intersect/outside");
-
+    TestCheck(context.find("m_Frustum.Classify(box, world)") != std::string::npos &&
+              context.find("frustumClass > 0.0f") != std::string::npos,
+              "ComputeBoxVisibility must use 3D frustum plane classification for reject decisions");
+    TestCheck(context.find("if (!box.IsValid())\n        return 1;") != std::string::npos ||
+              context.find("if (!box.IsValid())\r\n        return 1;") != std::string::npos,
+              "Invalid or unknown bounds must remain potentially visible instead of culling objects");
+    TestCheck(context.find("if (!visible)") != std::string::npos &&
+              context.find("*extents = screen;") != std::string::npos,
+              "2D box projection failure must not override a positive 3D frustum classification");
     std::string entity = ReadRenderEngineSource("src/CK3dEntity.cpp");
     TestCheck(entity.find("Phase 1 stub: always visible") == std::string::npos,
               "3D entity frustum tests must not keep the always-visible stub");
     TestCheck(entity.find("ComputeBoxVisibility(m_LocalBoundingBox") != std::string::npos &&
               entity.find("m_SceneGraphNode->m_Bbox") != std::string::npos,
               "3D entity and hierarchical visibility must use projected bbox visibility");
-
+    TestCheck(entity.find("!m_SceneGraphNode->ComputeHierarchicalBox() || !m_SceneGraphNode->IsHierarchyBoxValid()") != std::string::npos,
+              "Hierarchy frustum tests must not reject subtrees when their bbox is unknown");
     std::string sprite = ReadRenderEngineSource("src/CKSprite3D.cpp");
     TestCheck(sprite.find("ComputeBoxVisibility(m_LocalBoundingBox") != std::string::npos,
               "Sprite3D frustum tests must use the sprite local bbox projection");
