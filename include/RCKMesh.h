@@ -162,6 +162,7 @@ public:
     int DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent);
     int RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data);
     int RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable);
+    void BindMonoPassTextureChannels(RCKRenderContext *dev);
     int CreateRenderGroups();
     void UpdateChannelIndices();
     static CKDWORD TextureWrapModeFromMeshFlags(CKDWORD meshFlags);

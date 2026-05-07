@@ -36,7 +36,8 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
     }
 }
 
-CKDrawStateCache::CKDrawStateCache() : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST) {
+CKDrawStateCache::CKDrawStateCache()
+    : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA) {
     m_CachedState = {0, 0, 0};
     SetDefaults();
 }
@@ -67,6 +68,15 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_FOGENABLE] = FALSE;
     m_States[VXRENDERSTATE_DITHERENABLE] = FALSE;
     m_States[VXRENDERSTATE_TEXTUREPERSPECTIVE] = TRUE;
+    m_States[VXRENDERSTATE_STENCILENABLE] = FALSE;
+    m_States[VXRENDERSTATE_STENCILFAIL] = VXSTENCILOP_KEEP;
+    m_States[VXRENDERSTATE_STENCILZFAIL] = VXSTENCILOP_KEEP;
+    m_States[VXRENDERSTATE_STENCILPASS] = VXSTENCILOP_KEEP;
+    m_States[VXRENDERSTATE_STENCILFUNC] = VXCMP_ALWAYS;
+    m_States[VXRENDERSTATE_STENCILREF] = 0;
+    m_States[VXRENDERSTATE_STENCILMASK] = 0xFF;
+    m_States[VXRENDERSTATE_STENCILWRITEMASK] = 0xFF;
+    m_ColorWriteMask = CKRST_STATE_WRITE_RGBA;
     m_DirtyMask = 0xFFFFFFFF;
 }
 
@@ -99,6 +109,16 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
     case VXRENDERSTATE_INVERSEWINDING:
         m_DirtyMask |= CKFF_DIRTY_RASTER;
         break;
+    case VXRENDERSTATE_STENCILENABLE:
+    case VXRENDERSTATE_STENCILFAIL:
+    case VXRENDERSTATE_STENCILZFAIL:
+    case VXRENDERSTATE_STENCILPASS:
+    case VXRENDERSTATE_STENCILFUNC:
+    case VXRENDERSTATE_STENCILREF:
+    case VXRENDERSTATE_STENCILMASK:
+    case VXRENDERSTATE_STENCILWRITEMASK:
+        m_DirtyMask |= CKFF_DIRTY_STENCIL;
+        break;
     default:
         break;
     }
@@ -110,13 +130,25 @@ CKDWORD CKDrawStateCache::GetRenderState(VXRENDERSTATETYPE state) const {
     return m_States[state];
 }
 
+void CKDrawStateCache::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
+    CKDWORD mask = 0;
+    if (r) mask |= CKRST_STATE_WRITE_R;
+    if (g) mask |= CKRST_STATE_WRITE_G;
+    if (b) mask |= CKRST_STATE_WRITE_B;
+    if (a) mask |= CKRST_STATE_WRITE_A;
+    if (m_ColorWriteMask == mask)
+        return;
+    m_ColorWriteMask = mask;
+    m_DirtyMask |= CKFF_DIRTY_COLORMASK;
+}
+
 CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
     if (m_DirtyMask == 0 && topology == m_LastTopology)
         return m_CachedState;
 
     m_LastTopology = topology;
 
-    uint32_t lo = CKRST_STATE_WRITE_RGBA;
+    uint32_t lo = m_ColorWriteMask;
     uint32_t mid = 0;
     uint32_t hi = 0;
 
@@ -153,6 +185,15 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Topology
     mid |= CKRST_STATE_PT(topology);
+
+    // Stencil
+    if (m_States[VXRENDERSTATE_STENCILENABLE]) {
+        mid |= CKRST_STENCIL_OPS(
+            m_States[VXRENDERSTATE_STENCILFUNC],
+            m_States[VXRENDERSTATE_STENCILFAIL],
+            m_States[VXRENDERSTATE_STENCILZFAIL],
+            m_States[VXRENDERSTATE_STENCILPASS]);
+    }
 
     // Match D3D/Virtools winding: clockwise is front-facing by default.
     // VXCULL_CCW maps to culling counter-clockwise back faces.

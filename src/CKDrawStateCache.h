@@ -21,6 +21,8 @@ public:
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
 
+    void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
+
     CKDrawState BuildDrawState(VXPRIMITIVETYPE topology);
 
     void Reset();
@@ -30,6 +32,7 @@ private:
     CKDWORD m_DirtyMask;
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;
+    CKDWORD m_ColorWriteMask;
 
     void SetDefaults();
 };
