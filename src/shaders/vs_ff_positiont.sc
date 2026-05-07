@@ -7,16 +7,17 @@ uniform vec4 u_viewport;
 uniform vec4 u_fogParams;
 uniform vec4 u_stageParams[32];
 
-vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
+vec4 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
 {
-    if (index == 1) return tc1;
-    if (index == 2) return tc2;
-    if (index == 3) return tc3;
-    if (index == 4) return tc4;
-    if (index == 5) return tc5;
-    if (index == 6) return tc6;
-    if (index == 7) return tc7;
-    return tc0;
+    vec2 uv = tc0;
+    if (index == 1) uv = tc1;
+    else if (index == 2) uv = tc2;
+    else if (index == 3) uv = tc3;
+    else if (index == 4) uv = tc4;
+    else if (index == 5) uv = tc5;
+    else if (index == 6) uv = tc6;
+    else if (index == 7) uv = tc7;
+    return vec4(uv, 0.0, 0.0);
 }
 
 void main()
@@ -45,5 +46,6 @@ void main()
     v_texcoord5 = selectTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord6 = selectTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     float fogFactor = u_fogParams.w > 0.5 ? a_color1.a : 1.0;
-    v_texcoord7Fog = vec3(selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7), fogFactor);
+    v_texcoord7Fog = selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
+    v_texcoord7Fog.z = fogFactor;
 }

@@ -31,6 +31,10 @@ struct CKLightData;
 
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
+CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
+                                  CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
+                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2);
+void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]);
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
 CKDWORD CKFFTexcoordIndex(CKDWORD packed);
@@ -40,7 +44,8 @@ enum CKFFTexcoordGenerationMode {
     CKFF_TEXGEN_NONE = 0,
     CKFF_TEXGEN_CAMERASPACENORMAL = 1,
     CKFF_TEXGEN_CAMERASPACEPOSITION = 2,
-    CKFF_TEXGEN_CAMERASPACEREFLECTION = 3
+    CKFF_TEXGEN_CAMERASPACEREFLECTION = 3,
+    CKFF_TEXGEN_SPHEREMAP = 4
 };
 
 class CKFixedFunctionPipeline {
@@ -54,9 +59,13 @@ public:
     // === State tracking ===
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
+    void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
+    void ResetTextureStage(int stage);
+    void DisableTextureStagesFrom(int firstStage);
     void SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value);
     CKDWORD GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
     void SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix);
+    void ResetMaterial();
     void SetMaterial(const CKMaterialData *mat);
     void SetLight(int index, const CKLightData *light);
     void EnableLight(int index, CKBOOL enable);

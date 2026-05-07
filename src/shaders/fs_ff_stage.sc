@@ -5,6 +5,7 @@ $input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v
 uniform vec4 u_fogColor;
 uniform vec4 u_alphaParams;
 uniform vec4 u_texFactor;
+uniform vec4 u_bumpEnv[2];
 uniform vec4 u_stageParams[32];
 
 SAMPLER2D(s_texture0, 0);
@@ -27,6 +28,12 @@ vec4 getTextureColor(int stage, vec2 uv, bool hasTexture)
     if (stage == 5) return texture2D(s_texture5, uv);
     if (stage == 6) return texture2D(s_texture6, uv);
     return texture2D(s_texture7, uv);
+}
+
+vec2 getSampleCoord(vec4 coord, int transformFlags)
+{
+    if ((transformFlags & 0x100) == 0) return coord.xy;
+    return coord.xy / max(abs(coord.w), 0.0001);
 }
 
 vec4 applyArgModifiers(vec4 value, int arg)
@@ -105,6 +112,8 @@ void main()
 {
     vec4 current = v_color0;
     vec4 temp = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
+    int previousColorOp = 0;
 
     for (int stage = 0; stage < 8; ++stage) {
         vec4 colorParams = u_stageParams[stage * 4 + 0];
@@ -117,15 +126,28 @@ void main()
 
         if (colorOp == 1) break;
 
-        vec2 stageUv = v_texcoord0;
-        if (stage == 1) stageUv = v_texcoord1;
-        else if (stage == 2) stageUv = v_texcoord2;
-        else if (stage == 3) stageUv = v_texcoord3;
-        else if (stage == 4) stageUv = v_texcoord4;
-        else if (stage == 5) stageUv = v_texcoord5;
-        else if (stage == 6) stageUv = v_texcoord6;
-        else if (stage == 7) stageUv = v_texcoord7Fog.xy;
+        vec4 stageCoord = v_texcoord0;
+        if (stage == 1) stageCoord = v_texcoord1;
+        else if (stage == 2) stageCoord = v_texcoord2;
+        else if (stage == 3) stageCoord = v_texcoord3;
+        else if (stage == 4) stageCoord = v_texcoord4;
+        else if (stage == 5) stageCoord = v_texcoord5;
+        else if (stage == 6) stageCoord = v_texcoord6;
+        else if (stage == 7) stageCoord = v_texcoord7Fog;
+
+        vec2 stageUv = getSampleCoord(stageCoord, int(colorExtra.z));
+
+        if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {
+            vec2 bump = previousTexture.xy;
+            stageUv.x += dot(u_bumpEnv[0].xy, bump);
+            stageUv.y += dot(u_bumpEnv[0].zw, bump);
+        }
+
         vec4 texColor = getTextureColor(stage, stageUv, hasTexture);
+        if (stage != 0 && previousColorOp == 23) {
+            float lum = clamp(texColor.z * u_bumpEnv[1].x + u_bumpEnv[1].y, 0.0, 1.0);
+            texColor *= lum;
+        }
         vec4 colorA = getArg(int(colorParams.y), texColor, current, v_color0, v_color1, temp);
         vec4 colorB = getArg(int(colorParams.z), texColor, current, v_color0, v_color1, temp);
         vec4 colorC = getArg(int(colorExtra.x), texColor, current, v_color0, v_color1, temp);
@@ -145,6 +167,9 @@ void main()
         } else {
             current = stageResult;
         }
+
+        previousTexture = texColor;
+        previousColorOp = colorOp;
     }
 
     if (u_alphaParams.z > 0.5) {
