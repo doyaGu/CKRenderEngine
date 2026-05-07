@@ -20,13 +20,16 @@ void CKTransientGeometry::InterleaveVertex(
     CKDWORD srcIndex,
     CKDWORD formatFlags,
     VxDrawPrimitiveData *data,
-    const float *texcoord0Override)
+    const float *texcoord0Override,
+    const float *positionOverride)
 {
     CKBYTE *out = (CKBYTE *)dst + dstIndex * stride;
     CKDWORD offset = 0;
 
     if (formatFlags & CKFF_VF_POSITION) {
-        if (data->PositionPtr) {
+        if (positionOverride) {
+            memcpy(out + offset, positionOverride, 12);
+        } else if (data->PositionPtr) {
             memcpy(out + offset,
                    (CKBYTE *)data->PositionPtr + srcIndex * data->PositionStride, 12);
         } else {
@@ -36,7 +39,9 @@ void CKTransientGeometry::InterleaveVertex(
     }
 
     if (formatFlags & CKFF_VF_POSITIONT) {
-        if (data->PositionPtr) {
+        if (positionOverride) {
+            memcpy(out + offset, positionOverride, 16);
+        } else if (data->PositionPtr) {
             memcpy(out + offset,
                    (CKBYTE *)data->PositionPtr + srcIndex * data->PositionStride, 16);
         } else {
@@ -145,7 +150,9 @@ CKBOOL CKTransientGeometry::Prepare(
     CKWORD *indices,
     int indexCount,
     VxDrawPrimitiveData *data,
-    CKDWORD wrapMode)
+    CKDWORD wrapMode,
+    CKBOOL pointSprites,
+    float pointSize)
 {
     if (!data || data->VertexCount == 0 || !m_Context || !encoder)
         return FALSE;
@@ -161,6 +168,72 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastLayout = layoutHandle;
 
     CKDWORD vertexCount = data->VertexCount;
+    if (pointSprites && primType == VX_POINTLIST && data->PositionPtr) {
+        if (pointSize <= 0.0f)
+            pointSize = 1.0f;
+        CKTransientVertexBuffer tvb;
+        memset(&tvb, 0, sizeof(tvb));
+        const CKDWORD spriteVertexCount = vertexCount * 4;
+        if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
+            return FALSE;
+
+        CKTransientIndexBuffer tib;
+        memset(&tib, 0, sizeof(tib));
+        const CKDWORD spriteIndexCount = vertexCount * 6;
+        if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, FALSE))
+            return FALSE;
+
+        const float half = pointSize * 0.5f;
+        const float uv[4][2] = {
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f}
+        };
+        for (CKDWORD i = 0; i < vertexCount; ++i) {
+            const CKBYTE *src = (const CKBYTE *)data->PositionPtr + i * data->PositionStride;
+            float pos3[4] = {};
+            if (formatFlags & CKFF_VF_POSITIONT) {
+                memcpy(pos3, src, 16);
+                const float x = pos3[0];
+                const float y = pos3[1];
+                float corners[4][4] = {
+                    {x - half, y - half, pos3[2], pos3[3]},
+                    {x + half, y - half, pos3[2], pos3[3]},
+                    {x + half, y + half, pos3[2], pos3[3]},
+                    {x - half, y + half, pos3[2], pos3[3]}
+                };
+                for (int j = 0; j < 4; ++j)
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
+            } else {
+                memcpy(pos3, src, 12);
+                const float x = pos3[0];
+                const float y = pos3[1];
+                const float z = pos3[2];
+                float corners[4][3] = {
+                    {x - half, y - half, z},
+                    {x + half, y - half, z},
+                    {x + half, y + half, z},
+                    {x - half, y + half, z}
+                };
+                for (int j = 0; j < 4; ++j)
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
+            }
+
+            CKWORD *out = (CKWORD *)tib.Data + i * 6;
+            const CKWORD base = (CKWORD)(i * 4);
+            out[0] = base;
+            out[1] = base + 1;
+            out[2] = base + 2;
+            out[3] = base;
+            out[4] = base + 2;
+            out[5] = base + 3;
+        }
+
+        encoder->SetTransientVertexBuffer(0, &tvb);
+        encoder->SetTransientIndexBuffer(&tib);
+        return TRUE;
+    }
 
     const bool wrapStage0 =
         (wrapMode & (VXWRAP_U | VXWRAP_V)) != 0 &&

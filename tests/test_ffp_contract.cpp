@@ -734,6 +734,32 @@ void Test_UserDrawPrimitive_VBufferFlagIsObservable() {
               "Regular draw primitive flags must be preserved with CKRST_DP_VBUFFER");
 }
 
+void Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe() {
+    std::string source = ReadRenderEngineSource("src/CKVertexBuffer.cpp");
+    TestCheck(source.find("m_LockedStart = StartVertex") != std::string::npos &&
+              source.find("m_LockedCount = VertexCount") != std::string::npos,
+              "CKVertexBuffer Lock must record the locked vertex range");
+    TestCheck(source.find("UpdateVertexBuffer(m_ObjectIndex, updateStart * stride") != std::string::npos,
+              "CKVertexBuffer Unlock must update dirty hardware VB byte ranges");
+    TestCheck(source.find("DrawVertexBuffer(") != std::string::npos &&
+              source.find("!Indices") != std::string::npos,
+              "CKVertexBuffer Draw must use the hardware VB path for safe non-indexed draws");
+}
+
+void Test_PointSprite_PointListExpandsToTexturedQuads() {
+    std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(ffp.find("VXRENDERSTATE_POINTSPRITEENABLE") != std::string::npos &&
+              ffp.find("VX_TRIANGLELIST") != std::string::npos,
+              "Point sprite draws must submit expanded quads as triangle lists");
+
+    std::string transient = ReadRenderEngineSource("src/CKTransientGeometry.cpp");
+    TestCheck(transient.find("pointSprites && primType == VX_POINTLIST") != std::string::npos,
+              "Transient geometry must detect point-list point sprites");
+    TestCheck(transient.find("spriteVertexCount = vertexCount * 4") != std::string::npos &&
+              transient.find("spriteIndexCount = vertexCount * 6") != std::string::npos,
+              "Each point sprite must expand to four vertices and six indices");
+}
+
 void Test_ShaderTarget_ProfilesAreExplicitAndDistinct() {
     CKShaderTargetDesc target;
     TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Default shader format must be unknown");
@@ -811,6 +837,8 @@ int main() {
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
+    tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
+    tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     return tests.ExitCode();

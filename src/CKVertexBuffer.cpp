@@ -3,6 +3,8 @@
 #include "CKRasterizer.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
+#include "CKTransientGeometry.h"
+#include "CKVertexLayoutCache.h"
 
 namespace {
 
@@ -28,6 +30,24 @@ void ClearVertexBufferStaging(VxDrawPrimitiveData &data) {
     for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i)
         VxDeleteAligned(data.TexCoordPtrs[i]);
     memset(&data, 0, sizeof(data));
+}
+
+void OffsetDrawPrimitiveData(VxDrawPrimitiveData &data, CKDWORD startVertex, CKDWORD vertexCount) {
+    data.VertexCount = (int)vertexCount;
+    if (data.PositionPtr)
+        data.PositionPtr = (CKBYTE *)data.PositionPtr + startVertex * data.PositionStride;
+    if (data.NormalPtr)
+        data.NormalPtr = (CKBYTE *)data.NormalPtr + startVertex * data.NormalStride;
+    if (data.ColorPtr)
+        data.ColorPtr = (CKBYTE *)data.ColorPtr + startVertex * data.ColorStride;
+    if (data.SpecularColorPtr)
+        data.SpecularColorPtr = (CKBYTE *)data.SpecularColorPtr + startVertex * data.SpecularColorStride;
+    if (data.TexCoordPtr)
+        data.TexCoordPtr = (CKBYTE *)data.TexCoordPtr + startVertex * data.TexCoordStride;
+    for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i) {
+        if (data.TexCoordPtrs[i])
+            data.TexCoordPtrs[i] = (CKBYTE *)data.TexCoordPtrs[i] + startVertex * data.TexCoordStrides[i];
+    }
 }
 
 CKDWORD ComputeVertexStagingSize(CKRST_DPFLAGS flags) {
@@ -100,6 +120,14 @@ RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(
     m_DpData.Flags = 0;
     memset(&m_LockedData, 0, sizeof(m_LockedData));
     m_Valid = FALSE;
+    m_FormatFlags = 0;
+    m_VertexLayout = 0;
+    m_HardwareValid = FALSE;
+    m_LockedStart = 0;
+    m_LockedCount = 0;
+    m_LockFlags = CK_LOCK_DEFAULT;
+    m_DirtyStart = 0;
+    m_DirtyCount = 0;
 }
 
 RCKVertexBuffer::~RCKVertexBuffer() {
@@ -111,6 +139,7 @@ RCKVertexBuffer::~RCKVertexBuffer() {
 void RCKVertexBuffer::Destroy() {
     ClearVertexBufferStaging(m_DpData);
     m_Valid = FALSE;
+    m_HardwareValid = FALSE;
     RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
     rm->DestroyVertexBuffer(this);
 }
@@ -142,12 +171,16 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
     }
 
     m_Valid = TRUE;
+    m_HardwareValid = FALSE;
+    m_FormatFlags = 0;
+    m_VertexLayout = 0;
+    m_DirtyStart = 0;
+    m_DirtyCount = 0;
     return CK_VB_LOST;
 }
 
 VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVertex, CKDWORD VertexCount, CKLOCKFLAGS LockFlags) {
     (void) Ctx;
-    (void) LockFlags;
 
     if (!m_Valid || StartVertex >= m_Desc.m_MaxVertexCount)
         return nullptr;
@@ -157,29 +190,69 @@ VxDrawPrimitiveData *RCKVertexBuffer::Lock(CKRenderContext *Ctx, CKDWORD StartVe
 
     m_Desc.m_CurrentVCount = StartVertex + VertexCount;
     m_LockedData = m_DpData;
-    m_LockedData.VertexCount = (int) VertexCount;
+    OffsetDrawPrimitiveData(m_LockedData, StartVertex, VertexCount);
+    m_LockedStart = StartVertex;
+    m_LockedCount = VertexCount;
+    m_LockFlags = LockFlags;
 
-    VxDrawPrimitiveData *locked = &m_LockedData;
-    if (locked->PositionPtr)
-        locked->PositionPtr = (CKBYTE *)locked->PositionPtr + StartVertex * locked->PositionStride;
-    if (locked->NormalPtr)
-        locked->NormalPtr = (CKBYTE *)locked->NormalPtr + StartVertex * locked->NormalStride;
-    if (locked->ColorPtr)
-        locked->ColorPtr = (CKBYTE *)locked->ColorPtr + StartVertex * locked->ColorStride;
-    if (locked->SpecularColorPtr)
-        locked->SpecularColorPtr = (CKBYTE *)locked->SpecularColorPtr + StartVertex * locked->SpecularColorStride;
-    if (locked->TexCoordPtr)
-        locked->TexCoordPtr = (CKBYTE *)locked->TexCoordPtr + StartVertex * locked->TexCoordStride;
-    for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i) {
-        if (locked->TexCoordPtrs[i])
-            locked->TexCoordPtrs[i] = (CKBYTE *)locked->TexCoordPtrs[i] + StartVertex * locked->TexCoordStrides[i];
-    }
-
-    return locked;
+    return &m_LockedData;
 }
 
 void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
-    (void) Ctx;
+    if (!Ctx || !m_Valid || m_LockedCount == 0)
+        return;
+
+    RCKRenderContext *rctx = static_cast<RCKRenderContext *>(Ctx);
+    if (!rctx->m_RasterizerContext)
+        return;
+
+    const bool hasNormal = m_DpData.NormalPtr != nullptr;
+    const bool hasUV = m_DpData.TexCoordPtr != nullptr;
+    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(m_DpData.Flags, hasNormal, hasUV);
+    CKDWORD stride = 0;
+    CKDWORD layout = rctx->m_FFPipeline.GetVertexLayoutCache().GetLayout(formatFlags, &stride);
+    if (stride == 0 || layout == 0)
+        return;
+
+    CKDWORD updateStart = m_LockedStart;
+    CKDWORD updateCount = m_LockedCount;
+    if ((m_LockFlags & CK_LOCK_DISCARD) != 0 || !m_HardwareValid ||
+        formatFlags != m_FormatFlags || layout != m_VertexLayout) {
+        updateStart = 0;
+        updateCount = m_Desc.m_CurrentVCount;
+    }
+
+    VxDrawPrimitiveData updateData = m_DpData;
+    OffsetDrawPrimitiveData(updateData, updateStart, updateCount);
+    const CKDWORD updateSize = updateCount * stride;
+    CKBYTE *interleaved = (CKBYTE *)VxMalloc(updateSize);
+    if (!interleaved)
+        return;
+    CKTransientGeometry::InterleaveVertices(interleaved, stride, updateCount, formatFlags, &updateData);
+
+    if (!m_HardwareValid || formatFlags != m_FormatFlags || layout != m_VertexLayout ||
+        (m_LockFlags & CK_LOCK_DISCARD) != 0) {
+        rctx->m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+        CKVertexBufferDesc desc = m_Desc;
+        desc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY;
+        desc.m_VertexSize = stride;
+        desc.m_CurrentVCount = m_Desc.m_CurrentVCount;
+        if (rctx->m_RasterizerContext->CreateVertexBuffer(m_ObjectIndex, &desc, interleaved) == CK_OK) {
+            m_HardwareValid = TRUE;
+            m_FormatFlags = formatFlags;
+            m_VertexLayout = layout;
+        } else {
+            m_HardwareValid = FALSE;
+        }
+    } else {
+        if (rctx->m_RasterizerContext->UpdateVertexBuffer(m_ObjectIndex, updateStart * stride, updateSize, interleaved) != CK_OK)
+            m_HardwareValid = FALSE;
+    }
+
+    VxFree(interleaved);
+    m_DirtyStart = updateStart;
+    m_DirtyCount = updateCount;
+    m_LockedCount = 0;
 }
 
 CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) {
@@ -192,22 +265,31 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     if (!Indices)
         IndexCount = (int) VertexCount;
 
-    VxDrawPrimitiveData drawData = m_DpData;
-    drawData.VertexCount = (int)VertexCount;
-    if (drawData.PositionPtr)
-        drawData.PositionPtr = (CKBYTE *)drawData.PositionPtr + StartVertex * drawData.PositionStride;
-    if (drawData.NormalPtr)
-        drawData.NormalPtr = (CKBYTE *)drawData.NormalPtr + StartVertex * drawData.NormalStride;
-    if (drawData.ColorPtr)
-        drawData.ColorPtr = (CKBYTE *)drawData.ColorPtr + StartVertex * drawData.ColorStride;
-    if (drawData.SpecularColorPtr)
-        drawData.SpecularColorPtr = (CKBYTE *)drawData.SpecularColorPtr + StartVertex * drawData.SpecularColorStride;
-    if (drawData.TexCoordPtr)
-        drawData.TexCoordPtr = (CKBYTE *)drawData.TexCoordPtr + StartVertex * drawData.TexCoordStride;
-    for (int i = 0; i < CKRST_MAX_STAGES - 1; ++i) {
-        if (drawData.TexCoordPtrs[i])
-            drawData.TexCoordPtrs[i] = (CKBYTE *)drawData.TexCoordPtrs[i] + StartVertex * drawData.TexCoordStrides[i];
+    RCKRenderContext *rctx = static_cast<RCKRenderContext *>(Ctx);
+    if (m_HardwareValid && !Indices &&
+        rctx && rctx->m_RasterizerContext &&
+        rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_WRAP0) == 0 &&
+        !(pType == VX_POINTLIST && rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
+        CKRenderView view = (m_DpData.Flags & CKRST_DP_TRANSFORM)
+            ? rctx->m_Current3DView
+            : rctx->m_Current2DView;
+        rctx->m_FFPipeline.DrawVertexBuffer(
+            rctx->m_FFPipeline.GetRenderPipeline().GetEncoder(),
+            view,
+            pType,
+            m_ObjectIndex,
+            0,
+            StartVertex,
+            VertexCount,
+            0,
+            VertexCount,
+            m_DpData.Flags,
+            m_FormatFlags,
+            m_VertexLayout);
+        return TRUE;
     }
 
+    VxDrawPrimitiveData drawData = m_DpData;
+    OffsetDrawPrimitiveData(drawData, StartVertex, VertexCount);
     return Ctx->DrawPrimitive(pType, Indices, IndexCount, &drawData);
 }
