@@ -3,15 +3,49 @@
 #include "CKFFConstants.h"
 #include "CKRasterizer.h"
 
-namespace {
+#include <algorithm>
+#include <cmath>
 
-bool IsTriangleTopology(VXPRIMITIVETYPE primType) {
+static bool IsTriangleTopology(VXPRIMITIVETYPE primType) {
     return primType == VX_TRIANGLELIST ||
            primType == VX_TRIANGLEFAN ||
            primType == VX_TRIANGLESTRIP;
 }
 
-} // namespace
+static VxVector TransformPoint(const VxVector &point, const VxMatrix &matrix) {
+    return VxVector(
+        point.x * matrix[0][0] + point.y * matrix[1][0] + point.z * matrix[2][0] + matrix[3][0],
+        point.x * matrix[0][1] + point.y * matrix[1][1] + point.z * matrix[2][1] + matrix[3][1],
+        point.x * matrix[0][2] + point.y * matrix[1][2] + point.z * matrix[2][2] + matrix[3][2]);
+}
+
+static VxVector TransformDirection(const VxVector &dir, const VxMatrix &matrix) {
+    return VxVector(
+        dir.x * matrix[0][0] + dir.y * matrix[1][0] + dir.z * matrix[2][0],
+        dir.x * matrix[0][1] + dir.y * matrix[1][1] + dir.z * matrix[2][1],
+        dir.x * matrix[0][2] + dir.y * matrix[1][2] + dir.z * matrix[2][2]);
+}
+
+static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpriteParams &params) {
+    float size = params.Size > 0.0f ? params.Size : 1.0f;
+    if (params.ScaleEnable) {
+        const VxVector worldPos = TransformPoint(localPos, params.World);
+        const VxVector viewPos = TransformPoint(worldPos, params.View);
+        const float magnitude = viewPos.Magnitude();
+        const float distance = magnitude > 0.0f ? magnitude : 0.0f;
+        const float denom = sqrtf(params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance);
+        if (denom > 0.000001f)
+            size /= denom;
+    }
+
+    const float minSize = params.MinSize > 0.0f ? params.MinSize : 1.0f;
+    const float maxSize = params.MaxSize >= minSize ? params.MaxSize : minSize;
+    if (size < minSize)
+        return minSize;
+    if (size > maxSize)
+        return maxSize;
+    return size;
+}
 
 void CKTransientGeometry::InterleaveVertex(
     void *dst,
@@ -152,7 +186,7 @@ CKBOOL CKTransientGeometry::Prepare(
     VxDrawPrimitiveData *data,
     CKDWORD wrapMode,
     CKBOOL pointSprites,
-    float pointSize)
+    const CKFFPointSpriteParams *pointParams)
 {
     if (!data || data->VertexCount == 0 || !m_Context || !encoder)
         return FALSE;
@@ -169,8 +203,20 @@ CKBOOL CKTransientGeometry::Prepare(
 
     CKDWORD vertexCount = data->VertexCount;
     if (pointSprites && primType == VX_POINTLIST && data->PositionPtr) {
-        if (pointSize <= 0.0f)
-            pointSize = 1.0f;
+        CKFFPointSpriteParams params;
+        if (pointParams) {
+            params = *pointParams;
+        } else {
+            params.Size = 1.0f;
+            params.MinSize = 1.0f;
+            params.MaxSize = 64.0f;
+            params.ScaleEnable = FALSE;
+            params.ScaleA = 1.0f;
+            params.ScaleB = 0.0f;
+            params.ScaleC = 0.0f;
+            params.World = VxMatrix::Identity();
+            params.View = VxMatrix::Identity();
+        }
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
         const CKDWORD spriteVertexCount = vertexCount * 4;
@@ -183,7 +229,17 @@ CKBOOL CKTransientGeometry::Prepare(
         if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, FALSE))
             return FALSE;
 
-        const float half = pointSize * 0.5f;
+        VxMatrix invWorld;
+        VxMatrix invView;
+        Vx3DInverseMatrix(invWorld, params.World);
+        Vx3DInverseMatrix(invView, params.View);
+        VxVector cameraRightWorld(invView[0][0], invView[0][1], invView[0][2]);
+        VxVector cameraUpWorld(invView[1][0], invView[1][1], invView[1][2]);
+        VxVector cameraRightLocal = TransformDirection(cameraRightWorld, invWorld);
+        VxVector cameraUpLocal = TransformDirection(cameraUpWorld, invWorld);
+        cameraRightLocal.Normalize();
+        cameraUpLocal.Normalize();
+
         const float uv[4][2] = {
             {0.0f, 0.0f},
             {1.0f, 0.0f},
@@ -197,6 +253,8 @@ CKBOOL CKTransientGeometry::Prepare(
                 memcpy(pos3, src, 16);
                 const float x = pos3[0];
                 const float y = pos3[1];
+                const VxVector center(x, y, pos3[2]);
+                const float half = ComputePointSpriteSize(center, params) * 0.5f;
                 float corners[4][4] = {
                     {x - half, y - half, pos3[2], pos3[3]},
                     {x + half, y - half, pos3[2], pos3[3]},
@@ -207,14 +265,21 @@ CKBOOL CKTransientGeometry::Prepare(
                     InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
             } else {
                 memcpy(pos3, src, 12);
-                const float x = pos3[0];
-                const float y = pos3[1];
-                const float z = pos3[2];
+                const VxVector center(pos3[0], pos3[1], pos3[2]);
+                const float half = ComputePointSpriteSize(center, params) * 0.5f;
+                const VxVector right = cameraRightLocal * half;
+                const VxVector up = cameraUpLocal * half;
+                VxVector cornerVecs[4] = {
+                    center - right - up,
+                    center + right - up,
+                    center + right + up,
+                    center - right + up
+                };
                 float corners[4][3] = {
-                    {x - half, y - half, z},
-                    {x + half, y - half, z},
-                    {x + half, y + half, z},
-                    {x - half, y + half, z}
+                    {cornerVecs[0].x, cornerVecs[0].y, cornerVecs[0].z},
+                    {cornerVecs[1].x, cornerVecs[1].y, cornerVecs[1].z},
+                    {cornerVecs[2].x, cornerVecs[2].y, cornerVecs[2].z},
+                    {cornerVecs[3].x, cornerVecs[3].y, cornerVecs[3].z}
                 };
                 for (int j = 0; j < 4; ++j)
                     InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
