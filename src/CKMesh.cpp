@@ -68,7 +68,8 @@ void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
     if (!dev)
         return;
 
-    for (int i = 0; i < m_ActiveTextureChannels.Size(); ++i) {
+    const int maxAdditionalStages = CKFF_MAX_TEXTURE_STAGES - 1;
+    for (int i = 0; i < m_ActiveTextureChannels.Size() && i < maxAdditionalStages; ++i) {
         const int channelIndex = m_ActiveTextureChannels[i];
         if (channelIndex < 0 || channelIndex >= m_MaterialChannels.Size())
             continue;
@@ -4128,6 +4129,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
             if (renderChannels && rstContext && rstContext->m_Driver) {
                 int maxAdditionalStages = (int) rstContext->m_Driver->m_3DCaps.MaxNumberTextureStage - 1;
+                if (maxAdditionalStages > CKFF_MAX_TEXTURE_STAGES - 1)
+                    maxAdditionalStages = CKFF_MAX_TEXTURE_STAGES - 1;
                 if (maxAdditionalStages < 0)
                     maxAdditionalStages = 0;
 
@@ -4149,8 +4152,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         continue;
                     }
 
-                    if (channel.m_FaceIndices || zbufOnly || IsTransparent() || hasAlphaMaterial ||
-                        !channel.m_Material->GetTexture(0)) {
+                    if (channel.m_FaceIndices || !channel.m_Material->GetTexture(0)) {
                         needsMultiPass = TRUE;
                         lastMultiPass = &channel;
                         usedStages = maxAdditionalStages;
@@ -4330,12 +4332,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
     rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_WRAP0, 0);
 
-    // Clear texture stages used for mono-pass (IDA)
-    // TODO: Phase 2 - route texture stage state through FFPipeline
-    // if (hasAlphaMaterial || m_ActiveTextureChannels.Size() > 0) {
-    //     for (int i = 1; i < m_ActiveTextureChannels.Size() + 1; ++i)
-    //         rstContext->SetTextureStageState(i, CKRST_TSS_STAGEBLEND, 0);
-    // }
+    if (m_ActiveTextureChannels.Size() > 0)
+        rc->m_FFPipeline.DisableTextureStagesFrom(1);
 
     return 1;
 }
@@ -4345,7 +4343,6 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 // IDA: 0x10022829 (1864 bytes)
 //--------------------------------------------
 int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
-    CKRasterizerContext *rstContext = dev->m_RasterizerContext;
     RCKMaterial *mat = group->m_Material;
 
     // Check for pre-render submesh callbacks - sub_1002C220 checks if Size() > 0
@@ -4374,20 +4371,23 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // Normal case - set material as current
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
-        // If material has no texture but we have texture stages, set up modulate
-        // TODO: Phase 2 - route texture stage states through FFPipeline
-        // if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
-        //     rstContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-        //     ...
-        // }
+        if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+        }
     } else {
         // No material - use default
         mat = (RCKMaterial *) dev->m_RenderManager->GetDefaultMaterial();
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
-        // Check for vertex color alpha blending (flags 0x80 and 0x1000)
-        // TODO: Phase 2 - route blend states through FFPipeline
-        // if ((m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) == ...) { ... }
+        if (m_ActiveTextureChannels.Size() > 0) {
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            dev->m_FFPipeline.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+        }
     }
 
     BindMonoPassTextureChannels(dev);

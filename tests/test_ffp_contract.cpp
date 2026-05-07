@@ -654,6 +654,25 @@ void Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass() {
               "Alpha-blended material channels must stay on the multipass path");
 }
 
+void Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw() {
+    std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
+    TestCheck(source.find("maxAdditionalStages > CKFF_MAX_TEXTURE_STAGES - 1") != std::string::npos,
+              "Material channel mono-pass selection must clamp to the eight-stage FFP capacity");
+    TestCheck(source.find("m_ActiveTextureChannels.Size() && i < maxAdditionalStages") != std::string::npos,
+              "Material channel binding must not address stages beyond the FFP stage array");
+    TestCheck(source.find("DisableTextureStagesFrom(1)") != std::string::npos,
+              "Mesh rendering must clear additional mono-pass texture stages after draw");
+}
+
+void Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive() {
+    std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
+    TestCheck(source.find("!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0") != std::string::npos,
+              "Meshes with channel textures but no base texture must explicitly configure stage 0");
+    TestCheck(source.find("SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1)") != std::string::npos &&
+              source.find("SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT)") != std::string::npos,
+              "No-base-texture channel draws must keep the FFP evaluator running by selecting CURRENT at stage 0");
+}
+
 void Test_TextureStage_ResetClearsLeakedEffectState() {
     CKFixedFunctionPipeline ffp;
     ffp.SetTexture(0, 1234);
@@ -787,6 +806,8 @@ int main() {
     tests.Run("Texture blend shader op formulas", &Test_TextureBlend_ShaderOpsMatchDxvkFormulas);
     tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
     tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
+    tests.Run("Material channels clamp and clear FFP stages", &Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw);
+    tests.Run("Material channels no base texture keeps stage chain", &Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive);
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
