@@ -853,13 +853,27 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
-    CKDWORD pointSizeBits = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSIZE);
-    float pointSize = 1.0f;
-    if (pointSizeBits != 0)
-        memcpy(&pointSize, &pointSizeBits, sizeof(pointSize));
+    auto readFloatState = [this](VXRENDERSTATETYPE state, float fallback) {
+        CKDWORD bits = m_DrawStateCache.GetRenderState(state);
+        if (bits == 0)
+            return fallback;
+        float value = fallback;
+        memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    CKFFPointSpriteParams pointParams;
+    pointParams.Size = readFloatState(VXRENDERSTATE_POINTSIZE, 1.0f);
+    pointParams.MinSize = readFloatState(VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
+    pointParams.MaxSize = readFloatState(VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
+    pointParams.ScaleEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE);
+    pointParams.ScaleA = readFloatState(VXRENDERSTATE_POINTSCALE_A, 1.0f);
+    pointParams.ScaleB = readFloatState(VXRENDERSTATE_POINTSCALE_B, 0.0f);
+    pointParams.ScaleC = readFloatState(VXRENDERSTATE_POINTSCALE_C, 0.0f);
+    pointParams.World = m_World;
+    pointParams.View = m_View;
     if (!m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapMode,
-            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), pointSize)) {
+            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams)) {
         if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
             CK_LOG("FFPipeline", "DrawPrimitive: Prepare FAILED");
             g_DrawLogCount++;

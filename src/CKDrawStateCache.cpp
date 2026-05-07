@@ -1,5 +1,12 @@
 #include "CKDrawStateCache.h"
 #include <cstdlib>
+#include <cstring>
+
+static CKDWORD FloatState(float value) {
+    CKDWORD bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
 
 static bool EnvEnabled(const char *name) {
     const char *value = std::getenv(name);
@@ -65,6 +72,14 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_EMISSIVEFROMVERTEX] = FALSE;
     m_States[VXRENDERSTATE_SPECULARENABLE] = FALSE;
     m_States[VXRENDERSTATE_NORMALIZENORMALS] = TRUE;
+    m_States[VXRENDERSTATE_POINTSIZE] = FloatState(1.0f);
+    m_States[VXRENDERSTATE_POINTSIZE_MIN] = FloatState(1.0f);
+    m_States[VXRENDERSTATE_POINTSIZE_MAX] = FloatState(64.0f);
+    m_States[VXRENDERSTATE_POINTSPRITEENABLE] = FALSE;
+    m_States[VXRENDERSTATE_POINTSCALEENABLE] = FALSE;
+    m_States[VXRENDERSTATE_POINTSCALE_A] = FloatState(1.0f);
+    m_States[VXRENDERSTATE_POINTSCALE_B] = FloatState(0.0f);
+    m_States[VXRENDERSTATE_POINTSCALE_C] = FloatState(0.0f);
     m_States[VXRENDERSTATE_FOGENABLE] = FALSE;
     m_States[VXRENDERSTATE_DITHERENABLE] = FALSE;
     m_States[VXRENDERSTATE_TEXTUREPERSPECTIVE] = TRUE;

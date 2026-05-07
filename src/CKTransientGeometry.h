@@ -2,6 +2,7 @@
 #define CKTRANSIENTGEOMETRY_H
 
 #include "VxDefines.h"
+#include "VxMatrix.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 
@@ -10,6 +11,18 @@
 class CKRasterizerContext;
 class CKRasterizerEncoder;
 class CKVertexLayoutCache;
+
+struct CKFFPointSpriteParams {
+    float Size;
+    float MinSize;
+    float MaxSize;
+    CKBOOL ScaleEnable;
+    float ScaleA;
+    float ScaleB;
+    float ScaleC;
+    VxMatrix World;
+    VxMatrix View;
+};
 
 class CKTransientGeometry {
 public:
@@ -30,7 +43,7 @@ public:
         VxDrawPrimitiveData *data,
         CKDWORD wrapMode = 0,
         CKBOOL pointSprites = FALSE,
-        float pointSize = 1.0f);
+        const CKFFPointSpriteParams *pointParams = nullptr);
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
