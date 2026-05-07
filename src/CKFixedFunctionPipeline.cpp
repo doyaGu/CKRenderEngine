@@ -50,6 +50,47 @@ static CKDWORD BaseTextureArg(CKDWORD arg) {
     return arg & ~(CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE);
 }
 
+static float SaturateFloat(float value) {
+    if (value < 0.0f)
+        return 0.0f;
+    if (value > 1.0f)
+        return 1.0f;
+    return value;
+}
+
+static VxColor SaturateColor(const VxColor &value) {
+    VxColor result = value;
+    result.r = SaturateFloat(result.r);
+    result.g = SaturateFloat(result.g);
+    result.b = SaturateFloat(result.b);
+    result.a = SaturateFloat(result.a);
+    return result;
+}
+
+static VxColor ColorSplat(float value) {
+    return VxColor(value, value, value, value);
+}
+
+static VxColor ColorMad(const VxColor &a, const VxColor &b, const VxColor &c) {
+    return VxColor(
+        a.r * b.r + c.r,
+        a.g * b.g + c.g,
+        a.b * b.b + c.b,
+        a.a * b.a + c.a);
+}
+
+static VxColor ColorComplement(const VxColor &value) {
+    return VxColor(1.0f - value.r, 1.0f - value.g, 1.0f - value.b, 1.0f - value.a);
+}
+
+static VxColor ColorMix(const VxColor &a, const VxColor &b, const VxColor &factor) {
+    return VxColor(
+        a.r * (1.0f - factor.r) + b.r * factor.r,
+        a.g * (1.0f - factor.g) + b.g * factor.g,
+        a.b * (1.0f - factor.b) + b.b * factor.b,
+        a.a * (1.0f - factor.a) + b.a * factor.a);
+}
+
 static bool EnvEnabledRaw(const char *name) {
     const char *value = std::getenv(name);
     return value && value[0] != '\0' && value[0] != '0';
@@ -257,6 +298,74 @@ CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend) {
     }
 
     return ops;
+}
+
+VxColor CKFFEvaluateTextureOp(CKDWORD op,
+                              const VxColor &arg0,
+                              const VxColor &arg1,
+                              const VxColor &arg2,
+                              const VxColor &current,
+                              const VxColor &diffuse,
+                              const VxColor &textureColor,
+                              const VxColor &textureFactor) {
+    switch (op) {
+    case CKRST_TOP_DISABLE:
+        return current;
+    case CKRST_TOP_SELECTARG1:
+        return arg1;
+    case CKRST_TOP_SELECTARG2:
+        return arg2;
+    case CKRST_TOP_MODULATE:
+        return arg1 * arg2;
+    case CKRST_TOP_MODULATE2X:
+        return SaturateColor(arg1 * arg2 * 2.0f);
+    case CKRST_TOP_MODULATE4X:
+        return SaturateColor(arg1 * arg2 * 4.0f);
+    case CKRST_TOP_ADD:
+        return SaturateColor(arg1 + arg2);
+    case CKRST_TOP_ADDSIGNED:
+        return SaturateColor(arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f)));
+    case CKRST_TOP_ADDSIGNED2X:
+        return SaturateColor((arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f))) * 2.0f);
+    case CKRST_TOP_SUBTRACT:
+        return SaturateColor(arg1 - arg2);
+    case CKRST_TOP_ADDSMOOTH:
+        return SaturateColor(ColorMad(ColorComplement(arg1), arg2, arg1));
+    case CKRST_TOP_BLENDDIFFUSEALPHA:
+        return ColorMix(arg2, arg1, ColorSplat(diffuse.a));
+    case CKRST_TOP_BLENDTEXTUREALPHA:
+        return ColorMix(arg2, arg1, ColorSplat(textureColor.a));
+    case CKRST_TOP_BLENDFACTORALPHA:
+        return ColorMix(arg2, arg1, ColorSplat(textureFactor.a));
+    case CKRST_TOP_BLENDTEXTUREALPHAPM:
+        return SaturateColor(ColorMad(arg2, ColorSplat(1.0f - textureColor.a), arg1));
+    case CKRST_TOP_BLENDCURRENTALPHA:
+        return ColorMix(arg2, arg1, ColorSplat(current.a));
+    case CKRST_TOP_MODULATEALPHA_ADDCOLOR:
+        return SaturateColor(ColorMad(ColorSplat(arg1.a), arg2, arg1));
+    case CKRST_TOP_MODULATECOLOR_ADDALPHA:
+        return SaturateColor(ColorMad(arg1, arg2, ColorSplat(arg1.a)));
+    case CKRST_TOP_MODULATEINVALPHA_ADDCOLOR:
+        return SaturateColor(ColorMad(ColorSplat(1.0f - arg1.a), arg2, arg1));
+    case CKRST_TOP_MODULATEINVCOLOR_ADDALPHA:
+        return SaturateColor(ColorMad(ColorComplement(arg1), arg2, ColorSplat(arg1.a)));
+    case CKRST_TOP_BUMPENVMAP:
+    case CKRST_TOP_BUMPENVMAPLUMINANCE:
+        return current;
+    case CKRST_TOP_DOTPRODUCT3: {
+        const float dot =
+            (arg1.r - 0.5f) * (arg2.r - 0.5f) +
+            (arg1.g - 0.5f) * (arg2.g - 0.5f) +
+            (arg1.b - 0.5f) * (arg2.b - 0.5f);
+        return ColorSplat(SaturateFloat(dot * 4.0f));
+    }
+    case CKRST_TOP_MULTIPLYADD:
+        return SaturateColor(ColorMad(arg1, arg2, arg0));
+    case CKRST_TOP_LERP:
+        return SaturateColor(ColorMix(arg2, arg1, arg0));
+    default:
+        return arg1 * arg2;
+    }
 }
 
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend) {

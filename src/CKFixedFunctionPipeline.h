@@ -48,6 +48,14 @@ struct CKFFTextureStageSnapshot {
 };
 
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
+VxColor CKFFEvaluateTextureOp(CKDWORD op,
+                              const VxColor &arg0,
+                              const VxColor &arg1,
+                              const VxColor &arg2,
+                              const VxColor &current,
+                              const VxColor &diffuse,
+                              const VxColor &textureColor,
+                              const VxColor &textureFactor = VxColor(0.0f, 0.0f, 0.0f, 0.0f));
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,

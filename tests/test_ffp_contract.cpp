@@ -33,6 +33,14 @@ std::string ReadRenderEngineSource(const char *relativePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
+void TestColorClose(const VxColor &actual, const VxColor &expected, const char *message) {
+    TestCheck(fabs(actual.r - expected.r) < 0.0001f &&
+              fabs(actual.g - expected.g) < 0.0001f &&
+              fabs(actual.b - expected.b) < 0.0001f &&
+              fabs(actual.a - expected.a) < 0.0001f,
+              message);
+}
+
 void Test_DPFlags_PretransformedTexturedColor_UsesPositionT() {
     const CKDWORD fmt = CKVertexLayoutCache::DPFlagsToFormatFlags(CKRST_DP_CL_VCT, false, true);
     TestCheck((fmt & CKFF_VF_POSITIONT) != 0, "Pre-transformed CL/VCT vertices must use POSITIONT");
@@ -830,6 +838,31 @@ void Test_ShaderEvaluator_CoversDxvkStageOps() {
               "Shader evaluator must implement MULTIPLYADD and LERP with ARG0 input");
 }
 
+void Test_TextureOpEvaluator_MatchesDxvkFormulas() {
+    const VxColor arg0(0.25f, 0.50f, 0.75f, 0.25f);
+    const VxColor arg1(0.20f, 0.40f, 0.60f, 0.25f);
+    const VxColor arg2(0.80f, 0.50f, 0.25f, 0.50f);
+    const VxColor current(0.10f, 0.10f, 0.10f, 0.10f);
+    const VxColor diffuse(0.60f, 0.60f, 0.60f, 0.50f);
+    const VxColor texture(0.70f, 0.70f, 0.70f, 0.25f);
+
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MULTIPLYADD, arg0, arg1, arg2, current, diffuse, texture),
+                   VxColor(0.41f, 0.70f, 0.90f, 0.375f),
+                   "MULTIPLYADD must evaluate arg1 * arg2 + arg0");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_LERP, arg0, arg1, arg2, current, diffuse, texture),
+                   VxColor(0.65f, 0.45f, 0.5125f, 0.4375f),
+                   "LERP must evaluate arg0 * arg1 + (1 - arg0) * arg2");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MODULATEALPHA_ADDCOLOR, arg0, arg1, arg2, current, diffuse, texture),
+                   VxColor(0.40f, 0.525f, 0.6625f, 0.375f),
+                   "MODULATEALPHA_ADDCOLOR must use arg1 alpha as the multiplier");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MODULATEINVCOLOR_ADDALPHA, arg0, arg1, arg2, current, diffuse, texture),
+                   VxColor(0.89f, 0.55f, 0.35f, 0.625f),
+                   "MODULATEINVCOLOR_ADDALPHA must complement arg1 color and add arg1 alpha");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_DOTPRODUCT3, arg0, arg1, arg2, current, diffuse, texture),
+                   VxColor(0.0f, 0.0f, 0.0f, 0.0f),
+                   "DOTPRODUCT3 must replicate the saturated signed dot product");
+}
+
 void Test_PatchMesh_BasicMeshConversionIsImplemented() {
     std::string source = ReadRenderEngineSource("src/CKPatchMesh.cpp");
     const size_t fromPos = source.find("CKERROR RCKPatchMesh::FromMesh");
@@ -1110,6 +1143,7 @@ int main() {
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
     tests.Run("Shader evaluator dxvk stage ops", &Test_ShaderEvaluator_CoversDxvkStageOps);
+    tests.Run("Texture op evaluator dxvk formulas", &Test_TextureOpEvaluator_MatchesDxvkFormulas);
     tests.Run("PatchMesh basic mesh conversion implemented", &Test_PatchMesh_BasicMeshConversionIsImplemented);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
