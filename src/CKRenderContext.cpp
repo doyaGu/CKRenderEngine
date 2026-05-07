@@ -613,38 +613,10 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 #endif
 
     if (m_TargetTexture) {
-        // Render-to-texture path
-        int height = m_TargetTexture->GetHeight();
-        int width = m_TargetTexture->GetWidth();
-        VxRect rect(0.0f, 0.0f, (float) width, (float) height);
-
-        // Get current pixel format and target's video format
-        VX_PIXELFORMAT srcFormat = GetPixelFormat(nullptr, nullptr, nullptr);
-        VX_PIXELFORMAT dstFormat = m_TargetTexture->GetVideoPixelFormat();
-
-        // Handle pixel format conversion
-        // _32_RGB888 -> _32_ARGB8888
-        if (srcFormat == _32_RGB888)
-            srcFormat = _32_ARGB8888;
-        if (dstFormat == _32_RGB888)
-            dstFormat = _32_ARGB8888;
-        // _16_RGB555 -> _16_ARGB1555
-        if (srcFormat == _16_RGB555)
-            srcFormat = _16_ARGB1555;
-        if (dstFormat == _16_RGB555)
-            dstFormat = _16_ARGB1555;
-
-        // If formats don't match, re-create texture with correct format
-        if (dstFormat != srcFormat) {
-            m_TargetTexture->SetDesiredVideoFormat(srcFormat);
-            m_TargetTexture->FreeVideoMemory();
-            m_TargetTexture->SystemToVideoMemory(this, FALSE);
-        }
-
-        // Copy render context to texture
-        if (!m_TargetTexture->CopyContext(this, &rect, &rect, m_CubeMapFace)) {
-            m_TargetTexture = nullptr;
-        }
+        // Direct render-target textures already own the drawn contents. Flush
+        // the RTT views so later scene draws in this Virtools frame can sample
+        // the updated texture, matching the old SetTargetTexture contract.
+        m_FFPipeline.GetRenderPipeline().EndFrame(FALSE);
     } else {
         // Normal back-to-front path
 
@@ -972,19 +944,20 @@ void RCKRenderContext::RemovePostSpriteRenderCallBack(CK_RENDERCALLBACK Function
 
 VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS Flags, int VertexCount) {
     // IDA: 0x1006bc74
-    // TODO: Phase 2 - dynamic vertex buffers not supported in rasterizer v2
-    if (FALSE) {
-        (void)VertexCount;
+    if (Flags & CKRST_DP_VBUFFER) {
+        m_DpFlags = Flags;
+        m_VertexBufferIndex = 0;
+        m_StartIndex = 0;
+        m_VertexBufferCount = VertexCount;
+    } else {
+        m_DpFlags = 0;
+        m_VertexBufferIndex = 0;
+        m_StartIndex = -1;
+        m_VertexBufferCount = 0;
     }
 
-    // Fall back to user draw primitive data
-    m_DpFlags = 0;
-    m_VertexBufferIndex = 0;
-    m_StartIndex = -1;
-    m_VertexBufferCount = 0;
-
     // IDA: 0x1006bdb1 - call UserDrawPrimitiveDataClass::GetStructure
-    return m_UserDrawPrimitiveData->GetStructure((CKRST_DPFLAGS) (Flags & ~CKRST_DP_VBUFFER), VertexCount);
+    return m_UserDrawPrimitiveData->GetStructure(Flags, VertexCount);
 }
 
 CKWORD *RCKRenderContext::GetDrawPrimitiveIndices(int IndicesCount) {
@@ -998,8 +971,8 @@ void RCKRenderContext::Transform(VxVector *Dest, VxVector *Src, CK3dEntity *Ref)
     VxMatrix world = Ref ? Ref->GetWorldMatrix() : m_WorldMatrix;
     VxMatrix wvp;
     VxMatrix vp;
-    Vx3DMultiplyMatrix(vp, m_ViewMatrix, m_ProjectionMatrix);
-    Vx3DMultiplyMatrix(wvp, world, vp);
+    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
+    Vx3DMultiplyMatrix4(wvp, world, vp);
 
     VxVector4 clip;
     clip.x = Src->x * wvp[0][0] + Src->y * wvp[1][0] + Src->z * wvp[2][0] + wvp[3][0];
@@ -1045,8 +1018,10 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     // Save window parent and position
     m_AppHandle = VxGetParent(m_WinHandle);
     VxGetWindowRect(m_WinHandle, &m_WinRect);
-    VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.left);
-    VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.right);
+    if (m_AppHandle) {
+        VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.left);
+        VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.right);
+    }
 
     // Destroy current device
     DestroyDevice();
@@ -1384,7 +1359,7 @@ CKBOOL RCKRenderContext::SetTexture(CKTexture *tex, CKBOOL Clamped, int Stage) {
     if (tex) {
         return tex->SetAsCurrent(this, Clamped, Stage);
     } else {
-        m_FFPipeline.SetTexture(Stage, 0);
+        m_FFPipeline.ResetTextureStage(Stage);
         return TRUE;
     }
 }
@@ -1575,15 +1550,94 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         view = m_Current2DView;
     }
     m_FFPipeline.SetViewport(m_ViewportData);
-    m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, data);
+    VxDrawPrimitiveData drawData = *data;
+    drawData.Flags &= ~CKRST_DP_VBUFFER;
+    m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
     return TRUE;
 }
 
 void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data, CK3dEntity *Ref) {
-    // TODO: Phase 2 - software vertex transform for picking/projecting
-    (void)VertexCount;
-    (void)data;
-    (void)Ref;
+    if (VertexCount <= 0 || !data || !data->InVertices)
+        return;
+
+    VxMatrix world = Ref ? Ref->GetWorldMatrix() : m_WorldMatrix;
+    VxMatrix vp;
+    VxMatrix wvp;
+    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
+    Vx3DMultiplyMatrix4(wvp, world, vp);
+
+    const unsigned int inStride = data->InStride ? data->InStride : sizeof(VxVector);
+    const unsigned int outStride = data->OutStride ? data->OutStride : sizeof(VxVector4);
+    const unsigned int screenStride = data->ScreenStride ? data->ScreenStride : sizeof(VxVector4);
+    CKBYTE *in = static_cast<CKBYTE *>(data->InVertices);
+    CKBYTE *out = static_cast<CKBYTE *>(data->OutVertices);
+    CKBYTE *screen = static_cast<CKBYTE *>(data->ScreenVertices);
+
+    CKDWORD allAnd = VXCLIP_ALL;
+    float minX = 0.0f;
+    float minY = 0.0f;
+    float maxX = 0.0f;
+    float maxY = 0.0f;
+    bool haveScreen = false;
+
+    for (int i = 0; i < VertexCount; ++i) {
+        const VxVector *src = reinterpret_cast<const VxVector *>(in + i * inStride);
+        VxVector4 clip;
+        clip.x = src->x * wvp[0][0] + src->y * wvp[1][0] + src->z * wvp[2][0] + wvp[3][0];
+        clip.y = src->x * wvp[0][1] + src->y * wvp[1][1] + src->z * wvp[2][1] + wvp[3][1];
+        clip.z = src->x * wvp[0][2] + src->y * wvp[1][2] + src->z * wvp[2][2] + wvp[3][2];
+        clip.w = src->x * wvp[0][3] + src->y * wvp[1][3] + src->z * wvp[2][3] + wvp[3][3];
+
+        if (out)
+            *reinterpret_cast<VxVector4 *>(out + i * outStride) = clip;
+
+        CKDWORD flags = 0;
+        if (clip.x < -clip.w) flags |= VXCLIP_LEFT;
+        if (clip.x >  clip.w) flags |= VXCLIP_RIGHT;
+        if (clip.y < -clip.w) flags |= VXCLIP_BOTTOM;
+        if (clip.y >  clip.w) flags |= VXCLIP_TOP;
+        if (clip.z < 0.0f)    flags |= VXCLIP_FRONT;
+        if (clip.z >  clip.w) flags |= VXCLIP_BACK;
+
+        if (data->ClipFlags)
+            data->ClipFlags[i] = flags;
+        allAnd &= flags;
+
+        if (screen) {
+            VxVector4 dst;
+            if (clip.w != 0.0f) {
+                const float rhw = 1.0f / clip.w;
+                const float ndcX = clip.x * rhw;
+                const float ndcY = clip.y * rhw;
+                dst.x = (ndcX * 0.5f + 0.5f) * m_ViewportData.ViewWidth + m_ViewportData.ViewX;
+                dst.y = (0.5f - ndcY * 0.5f) * m_ViewportData.ViewHeight + m_ViewportData.ViewY;
+                dst.z = clip.z * rhw;
+                dst.w = rhw;
+            } else {
+                dst.x = dst.y = dst.z = dst.w = 0.0f;
+            }
+            *reinterpret_cast<VxVector4 *>(screen + i * screenStride) = dst;
+
+            if (!haveScreen) {
+                minX = maxX = dst.x;
+                minY = maxY = dst.y;
+                haveScreen = true;
+            } else {
+                if (dst.x < minX) minX = dst.x;
+                if (dst.x > maxX) maxX = dst.x;
+                if (dst.y < minY) minY = dst.y;
+                if (dst.y > maxY) maxY = dst.y;
+            }
+        }
+    }
+
+    data->m_Offscreen = allAnd;
+    if (haveScreen) {
+        data->m_2dExtents.left = (int)minX;
+        data->m_2dExtents.top = (int)minY;
+        data->m_2dExtents.right = (int)maxX;
+        data->m_2dExtents.bottom = (int)maxY;
+    }
 }
 
 void RCKRenderContext::SetWorldTransformationMatrix(const VxMatrix &M) {
@@ -1614,12 +1668,17 @@ const VxMatrix &RCKRenderContext::GetViewTransformationMatrix() {
 }
 
 CKBOOL RCKRenderContext::SetUserClipPlane(CKDWORD ClipPlaneIndex, const VxPlane &PlaneEquation) {
-    // TODO: Phase 2 - user clip planes not supported in rasterizer v2
+    (void)ClipPlaneIndex;
+    (void)PlaneEquation;
+    // User clip planes require either shader-side discard or CPU clipping. The
+    // v2 FFP path does not consume CLIPPLANEENABLE yet, so reporting success
+    // would make callers believe geometry is clipped when it is not.
     return FALSE;
 }
 
 CKBOOL RCKRenderContext::GetUserClipPlane(CKDWORD ClipPlaneIndex, VxPlane &PlaneEquation) {
-    // TODO: Phase 2 - user clip planes not supported in rasterizer v2
+    (void)ClipPlaneIndex;
+    (void)PlaneEquation;
     return FALSE;
 }
 
@@ -2178,7 +2237,8 @@ void RCKRenderContext::SetCurrentMaterial(CKMaterial *mat, CKBOOL Lit) {
     if (mat) {
         mat->SetAsCurrent(this, Lit, 0);
     } else {
-        m_FFPipeline.SetTexture(0, 0);
+        m_FFPipeline.ResetMaterial();
+        m_FFPipeline.DisableTextureStagesFrom(0);
     }
 }
 
@@ -2187,14 +2247,72 @@ void RCKRenderContext::Activate(CKBOOL active) {
 }
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    // IDA: 0x1006cf25
-    // TODO: Phase 2 - CopyToMemoryBuffer not supported in rasterizer v2
-    return FALSE;
+    if (!m_RasterizerContext || buffer != VXBUFFER_BACKBUFFER)
+        return FALSE;
+
+    const int fbWidth = m_Settings.m_Rect.right > 0 ? m_Settings.m_Rect.right : m_RasterizerContext->m_Width;
+    const int fbHeight = m_Settings.m_Rect.bottom > 0 ? m_Settings.m_Rect.bottom : m_RasterizerContext->m_Height;
+    if (fbWidth <= 0 || fbHeight <= 0)
+        return FALSE;
+
+    VxRect rect = iRect ? *iRect : VxRect(0.0f, 0.0f, (float)fbWidth, (float)fbHeight);
+    int left = (int)rect.left;
+    int top = (int)rect.top;
+    int right = (int)rect.right;
+    int bottom = (int)rect.bottom;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > fbWidth) right = fbWidth;
+    if (bottom > fbHeight) bottom = fbHeight;
+    if (right <= left || bottom <= top)
+        return FALSE;
+
+    VxImageDescEx outDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, outDesc);
+    outDesc.Width = right - left;
+    outDesc.Height = bottom - top;
+    outDesc.BytesPerLine = outDesc.Width * 4;
+    outDesc.TotalImageSize = outDesc.BytesPerLine * outDesc.Height;
+    outDesc.Image = desc.Image;
+    desc.Set(outDesc);
+
+    if (!desc.Image)
+        return outDesc.TotalImageSize;
+
+    VxImageDescEx fullDesc = outDesc;
+    fullDesc.Width = fbWidth;
+    fullDesc.Height = fbHeight;
+    fullDesc.BytesPerLine = fbWidth * 4;
+    fullDesc.TotalImageSize = fullDesc.BytesPerLine * fbHeight;
+
+    XBYTE *fullImage = desc.Image;
+    if (left != 0 || top != 0 || right != fbWidth || bottom != fbHeight) {
+        fullImage = new XBYTE[fullDesc.TotalImageSize];
+    }
+    fullDesc.Image = fullImage;
+
+    CKERROR err = m_RasterizerContext->ReadFrameBuffer(0, &fullDesc);
+    if (err != CK_OK) {
+        if (fullImage != desc.Image)
+            delete[] fullImage;
+        return FALSE;
+    }
+
+    if (fullImage != desc.Image) {
+        for (int y = 0; y < outDesc.Height; ++y) {
+            memcpy(desc.Image + y * outDesc.BytesPerLine,
+                   fullImage + (top + y) * fullDesc.BytesPerLine + left * 4,
+                   outDesc.BytesPerLine);
+        }
+        delete[] fullImage;
+    }
+
+    return outDesc.TotalImageSize;
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    // IDA: 0x1006cf5a
-    // TODO: Phase 2 - CopyFromMemoryBuffer not supported in rasterizer v2
+    // Backbuffer uploads are not expressible through the v2 bgfx abstraction.
+    // Texture uploads are handled by RCKTexture::CopyContext/UpdateTexture.
     return FALSE;
 }
 
@@ -2257,26 +2375,57 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
 
     m_CubeMapFace = static_cast<CKRST_CUBEFACE>(CubeMapFace);
 
-    CKDWORD textureIndex = 0;
-    int width = 0;
-    int height = 0;
-
     if (texture) {
-        textureIndex = texture->GetRstTextureIndex();
-        width = texture->GetWidth();
-        height = texture->GetHeight();
-
-        // Movie textures can have a dynamic height in the original engine.
-        if (texture->GetMovieReader() != nullptr) {
-            height = -1;
-        }
-    }
-
-    // TODO: Phase 2 - SetTargetTexture (render-to-texture) not supported in rasterizer v2
-    const CKBOOL rstOk = FALSE;
-    if (!rstOk) {
-        if (!(m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_COPYTEXTURE))
+        RCKTexture *target = static_cast<RCKTexture *>(texture);
+        if (!target->EnsureRenderTarget(this, FALSE))
             return FALSE;
+
+        if (m_TargetFrameBuffer == 0) {
+            RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+            m_TargetFrameBuffer = rm->CreateObjectIndex(CKRST_OBJ_FRAMEBUFFER);
+        }
+        if (m_TargetDepthTexture == 0) {
+            RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+            m_TargetDepthTexture = rm->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+        }
+
+        CKDepthTextureDesc depthDesc = {};
+        depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
+        depthDesc.Width = (CKDWORD)texture->GetWidth();
+        depthDesc.Height = (CKDWORD)texture->GetHeight();
+        depthDesc.MipMapCount = 1;
+        const CKBOOL needsStencil = m_Settings.m_StencilBpp > 0;
+        depthDesc.DepthFormat = needsStencil ? CKRST_DEPTHFMT_D24S8 : CKRST_DEPTHFMT_D24;
+        CKERROR depthErr = m_RasterizerContext->CreateDepthTexture(m_TargetDepthTexture, &depthDesc);
+        if (depthErr != CK_OK && !needsStencil) {
+            depthDesc.DepthFormat = CKRST_DEPTHFMT_D16;
+            if (m_RasterizerContext->CreateDepthTexture(m_TargetDepthTexture, &depthDesc) != CK_OK)
+                return FALSE;
+        } else if (depthErr != CK_OK) {
+            return FALSE;
+        }
+
+        CKFrameBufferAttachmentDesc color;
+        color.Texture = target->GetRstTextureIndex();
+        color.Mip = 0;
+        color.Layer = (CKDWORD)CubeMapFace;
+
+        CKFrameBufferDesc desc;
+        desc.Color = &color;
+        desc.ColorCount = 1;
+        desc.DepthStencil.Texture = m_TargetDepthTexture;
+        desc.DepthStencil.Mip = 0;
+        desc.DepthStencil.Layer = 0;
+
+        if (m_RasterizerContext->CreateFrameBuffer(m_TargetFrameBuffer, &desc) != CK_OK)
+            return FALSE;
+
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, m_TargetFrameBuffer);
     }
 
     if (texture) {
@@ -2297,6 +2446,12 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     }
 
     m_TargetTexture = nullptr;
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
 
     CKRenderContextSettings savedSettings;
     savedSettings.m_Rect.left = m_RasterizerContext->m_PosX;
@@ -2352,11 +2507,18 @@ int RCKRenderContext::GetFirstFreeStencilBits() {
 }
 
 VxDrawPrimitiveData *RCKRenderContext::LockCurrentVB(CKDWORD VertexCount) {
-    // TODO: Phase 2 - LockCurrentVB not supported in rasterizer v2
-    return NULL;
+    if (!m_DpFlags || !(m_DpFlags & CKRST_DP_VBUFFER))
+        return nullptr;
+    if (VertexCount > m_VertexBufferCount)
+        m_VertexBufferCount = VertexCount;
+    return m_UserDrawPrimitiveData->GetStructure((CKRST_DPFLAGS)m_DpFlags, VertexCount);
 }
 
 CKBOOL RCKRenderContext::ReleaseCurrentVB() {
+    m_DpFlags = 0;
+    m_VertexBufferIndex = 0;
+    m_StartIndex = -1;
+    m_VertexBufferCount = 0;
     return TRUE;
 }
 
@@ -2425,7 +2587,9 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     m_DeviceDestroying = TRUE;
 
-    // For fullscreen, reparent window to desktop
+    // Fullscreen keeps child render windows attached to their owner.  The Player
+    // owns the top-level fullscreen transition; detaching a child render HWND
+    // leaves it outside that window and breaks focus, sizing, and restore.
     if (Fullscreen) {
         oldParent = VxGetParent(m_WinHandle);
         VxGetWindowRect(m_WinHandle, &oldWindowRect);
@@ -2435,7 +2599,6 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         }
         restoreWindowOnFailure = TRUE;
         m_AppHandle = oldParent;
-        VxSetParent(m_WinHandle, nullptr);
         if (!VxMoveWindow(m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {
             if (restoreWindowOnFailure) {
                 VxSetParent(m_WinHandle, oldParent);
@@ -2584,6 +2747,8 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_Flags = 0;
     m_SceneTraversalCalls = 0;
     m_TargetTexture = nullptr;
+    m_TargetFrameBuffer = 0;
+    m_TargetDepthTexture = 0;
     m_CubeMapFace = CKRST_CUBEFACE_XPOS;
     m_DrawSceneCalls = 0;
     m_SortTransparentObjects = 0;
@@ -2659,12 +2824,28 @@ CKBOOL RCKRenderContext::DestroyDevice() {
 
     m_FFPipeline.Shutdown();
 
+    if (m_RasterizerContext) {
+        if (m_TargetFrameBuffer != 0)
+            m_RasterizerContext->DeleteObject(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+        if (m_TargetDepthTexture != 0)
+            m_RasterizerContext->DeleteObject(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
+    }
+    if (m_RenderManager) {
+        if (m_TargetFrameBuffer != 0)
+            m_RenderManager->ReleaseObjectIndex(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+        if (m_TargetDepthTexture != 0)
+            m_RenderManager->ReleaseObjectIndex(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
+    }
+
     // Destroy the rasterizer context
     if (m_RasterizerDriver)
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
 
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
+    m_TargetTexture = nullptr;
+    m_TargetFrameBuffer = 0;
+    m_TargetDepthTexture = 0;
     m_DeviceDestroying = FALSE;
     m_Fullscreen = FALSE;
 
@@ -3180,7 +3361,7 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
     VxDrawPrimitiveData *cached = (VxDrawPrimitiveData *) m_CachedDP;
 
     cached->VertexCount = VertexCount;
-    cached->Flags = DpFlags & 0xEFFFFFFF; // Mask out CKRST_DP_VBUFFER flag
+    cached->Flags = DpFlags;
 
     // Match original behavior: null out optional pointers based on flags.
     if (!(DpFlags & CKRST_DP_SPECULAR))

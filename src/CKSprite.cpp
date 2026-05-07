@@ -218,6 +218,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     }
 
     // Bind sprite texture
+    ffp.DisableTextureStagesFrom(0);
     ffp.SetTexture(0, m_ObjectIndex);
     ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
     ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
@@ -361,9 +362,48 @@ CKBOOL RCKSprite::IsInVideoMemory() {
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    // TODO: Phase 2 - implement via ReadFrameBuffer + UpdateTexture or Blit
-    (void)ctx; (void)Src; (void)Dest;
-    return FALSE;
+    if (!ctx || !m_RasterizerContext || !m_InVideoMemory)
+        return FALSE;
+
+    RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
+
+    VxImageDescEx srcDesc;
+    const int requiredBytes = rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc);
+    if (!requiredBytes)
+        return FALSE;
+
+    CKBYTE *pixels = new CKBYTE[(size_t)requiredBytes];
+    srcDesc.Image = pixels;
+    if (!rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc)) {
+        delete[] pixels;
+        return FALSE;
+    }
+
+    VxImageDescEx uploadDesc = srcDesc;
+    CKBYTE *converted = nullptr;
+    if (!SamePixelFormat(srcDesc, m_VideoFormatDesc)) {
+        converted = ConvertSpriteImage(srcDesc, m_VideoFormatDesc, uploadDesc);
+        if (!converted) {
+            delete[] pixels;
+            return FALSE;
+        }
+    }
+
+    CKRECT region;
+    CKRECT *regionPtr = nullptr;
+    if (Dest) {
+        region.left = (int)Dest->left;
+        region.top = (int)Dest->top;
+        region.right = (int)Dest->right;
+        region.bottom = (int)Dest->bottom;
+        regionPtr = &region;
+    }
+
+    const CKBOOL result =
+        (m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, regionPtr, &uploadDesc) == CK_OK);
+    delete[] converted;
+    delete[] pixels;
+    return result;
 }
 
 CKBOOL RCKSprite::GetVideoTextureDesc(VxImageDescEx &desc) {

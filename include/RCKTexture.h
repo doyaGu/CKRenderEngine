@@ -26,6 +26,7 @@ public:
     CKBOOL SetUserMipMapMode(CKBOOL UserMipmap) override;
     CKBOOL GetUserMipMapLevel(int Level, VxImageDescEx &ResultImage) override;
     int GetRstTextureIndex() override;
+    CKBOOL EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack);
 
     explicit RCKTexture(CKContext *Context, CKSTRING name = nullptr);
     ~RCKTexture() override;

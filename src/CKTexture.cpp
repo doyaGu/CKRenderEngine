@@ -122,7 +122,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
 
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0) {
-        dev->m_FFPipeline.SetTexture(TextureStage, 0);
+        dev->m_FFPipeline.ResetTextureStage(TextureStage);
         return FALSE;
     }
 
@@ -232,7 +232,6 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             if (!converted)
                 return FALSE;
         }
-
         // Upload texture data via v2 API
         if (m_MipMaps && m_MipMapLevel) {
             m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
@@ -350,9 +349,47 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
     if (!ctx)
         return FALSE;
 
-    // TODO: Phase 2 - implement render-to-texture copy via ReadFrameBuffer + UpdateTexture
-    (void)ctx; (void)Src; (void)Dest; (void)CubeMapFace;
-    return FALSE;
+    RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
+    if (!m_RasterizerContext || !m_InVideoMemory)
+        return FALSE;
+
+    VxImageDescEx srcDesc;
+    const int requiredBytes = rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc);
+    if (!requiredBytes)
+        return FALSE;
+
+    XBYTE *pixels = new XBYTE[(size_t)requiredBytes];
+    srcDesc.Image = pixels;
+    if (!rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc)) {
+        delete[] pixels;
+        return FALSE;
+    }
+
+    VxImageDescEx uploadDesc = srcDesc;
+    CKBYTE *converted = nullptr;
+    if (!SamePixelFormat(srcDesc, m_VideoFormat)) {
+        converted = ConvertTextureImage(srcDesc, m_VideoFormat, uploadDesc);
+        if (!converted) {
+            delete[] pixels;
+            return FALSE;
+        }
+    }
+
+    CKRECT region;
+    CKRECT *regionPtr = nullptr;
+    if (Dest) {
+        region.left = (int)Dest->left;
+        region.top = (int)Dest->top;
+        region.right = (int)Dest->right;
+        region.bottom = (int)Dest->bottom;
+        regionPtr = &region;
+    }
+
+    CKERROR err = m_RasterizerContext->UpdateTexture(
+        m_ObjectIndex, 0, (CKDWORD)CubeMapFace, regionPtr, &uploadDesc);
+    delete[] converted;
+    delete[] pixels;
+    return err == CK_OK;
 }
 
 CKBOOL RCKTexture::UseMipmap(int UseMipMap) {
@@ -476,6 +513,57 @@ CKBOOL RCKTexture::GetUserMipMapLevel(int Level, VxImageDescEx &ResultImage) {
 
 int RCKTexture::GetRstTextureIndex() {
     return m_ObjectIndex;
+}
+
+CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
+    RCKRenderContext *dev = static_cast<RCKRenderContext *>(Dev);
+    if (!dev || !dev->m_RasterizerContext || !dev->m_RasterizerDriver)
+        return FALSE;
+    if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0)
+        return FALSE;
+    if (GetWidth() <= 0 || GetHeight() <= 0)
+        return FALSE;
+
+    const CKDWORD requiredFlags = CKRST_TEXTURE_RENDERTARGET |
+                                  (ReadBack ? CKRST_TEXTURE_READBACK : 0);
+    if (m_InVideoMemory &&
+        m_RasterizerContext == dev->m_RasterizerContext &&
+        (m_TextureFlags & requiredFlags) == requiredFlags) {
+        return TRUE;
+    }
+
+    if (m_InVideoMemory && m_RasterizerContext)
+        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+
+    m_RasterizerContext = dev->m_RasterizerContext;
+    m_InVideoMemory = FALSE;
+
+    CKTextureDesc desc;
+    VxImageDescEx imageDesc;
+    GetImageDesc(imageDesc);
+    desc.Format = imageDesc;
+    desc.Format.Width = GetWidth();
+    desc.Format.Height = GetHeight();
+    desc.MipMapCount = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | requiredFlags;
+
+    if (desc.Format.BitsPerPixel <= 0 && m_DesiredVideoFormat != UNKNOWN_PF)
+        VxPixelFormat2ImageDesc(m_DesiredVideoFormat, desc.Format);
+    if (desc.Format.BitsPerPixel <= 0) {
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    }
+    if (HasAlphaFormat(desc.Format))
+        desc.Flags |= CKRST_TEXTURE_ALPHA;
+
+    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) != CK_OK)
+        return FALSE;
+
+    m_MipMapLevel = desc.MipMapCount;
+    m_InVideoMemory = TRUE;
+    m_TextureFlags = desc.Flags;
+    m_CachedMipMapCount = desc.MipMapCount;
+    m_VideoFormat = desc.Format;
+    return TRUE;
 }
 
 RCKTexture::RCKTexture(CKContext *Context, CKSTRING name) : CKTexture(Context, name) {

@@ -26,7 +26,8 @@ public:
     void Shutdown();
 
     // Begin a new frame: configure views, acquire encoder
-    void BeginFrame(const CKRECT &viewport, CKDWORD clearColor, float clearZ,
+    void BeginFrame(const CKRECT &viewport, CKDWORD clearFlags,
+                    CKDWORD clearColor, float clearZ,
                     const VxMatrix &view, const VxMatrix &proj);
 
     // End the frame: release encoder, call Frame()
