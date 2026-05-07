@@ -185,42 +185,59 @@ static const char *PrimitiveName(VXPRIMITIVETYPE type) {
     }
 }
 
-CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend) {
+CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend) {
+    CKFFTextureStageOps ops;
+    ops.ColorOp = CKRST_TOP_MODULATE;
+    ops.ColorArg0 = CKRST_TA_CURRENT;
+    ops.ColorArg1 = CKRST_TA_TEXTURE;
+    ops.ColorArg2 = CKRST_TA_CURRENT;
+    ops.AlphaOp = CKRST_TOP_MODULATE;
+    ops.AlphaArg0 = CKRST_TA_CURRENT;
+    ops.AlphaArg1 = CKRST_TA_TEXTURE;
+    ops.AlphaArg2 = CKRST_TA_CURRENT;
+    ops.ResultArg = CKRST_TA_CURRENT;
+
     switch (blend & VXTEXTUREBLEND_MASK) {
     case VXTEXTUREBLEND_DECAL:
     case VXTEXTUREBLEND_COPY:
-    case VXTEXTUREBLEND_DECALMASK:
-        return CKRST_TOP_SELECTARG1;
+        ops.ColorOp = CKRST_TOP_SELECTARG1;
+        ops.AlphaOp = CKRST_TOP_SELECTARG1;
+        break;
     case VXTEXTUREBLEND_DECALALPHA:
-        return CKRST_TOP_BLENDTEXTUREALPHA;
-    case VXTEXTUREBLEND_ADD:
-        return CKRST_TOP_ADD;
-    case VXTEXTUREBLEND_DOTPRODUCT3:
-        return CKRST_TOP_DOTPRODUCT3;
-    case VXTEXTUREBLEND_MODULATE:
+    case VXTEXTUREBLEND_DECALMASK:
+        ops.ColorOp = CKRST_TOP_BLENDTEXTUREALPHA;
+        ops.AlphaOp = CKRST_TOP_SELECTARG1;
+        ops.AlphaArg1 = CKRST_TA_DIFFUSE;
+        break;
     case VXTEXTUREBLEND_MODULATEALPHA:
     case VXTEXTUREBLEND_MODULATEMASK:
+        ops.AlphaOp = CKRST_TOP_MODULATE;
+        break;
+    case VXTEXTUREBLEND_ADD:
+        ops.ColorOp = CKRST_TOP_ADD;
+        ops.AlphaOp = CKRST_TOP_SELECTARG1;
+        ops.AlphaArg1 = CKRST_TA_CURRENT;
+        break;
+    case VXTEXTUREBLEND_DOTPRODUCT3:
+        ops.ColorOp = CKRST_TOP_DOTPRODUCT3;
+        ops.ColorArg2 = CKRST_TA_TFACTOR;
+        ops.AlphaOp = CKRST_TOP_SELECTARG1;
+        ops.AlphaArg1 = CKRST_TA_CURRENT;
+        break;
+    case VXTEXTUREBLEND_MODULATE:
     default:
-        return CKRST_TOP_MODULATE;
+        break;
     }
+
+    return ops;
+}
+
+CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend) {
+    return CKFFLegacyTextureBlendToStageOps(blend).ColorOp;
 }
 
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend) {
-    switch (blend & VXTEXTUREBLEND_MASK) {
-    case VXTEXTUREBLEND_DECALALPHA:
-        return CKRST_TOP_SELECTARG2;
-    case VXTEXTUREBLEND_MODULATE:
-    case VXTEXTUREBLEND_MODULATEALPHA:
-    case VXTEXTUREBLEND_MODULATEMASK:
-        return CKRST_TOP_MODULATE;
-    case VXTEXTUREBLEND_DECAL:
-    case VXTEXTUREBLEND_COPY:
-    case VXTEXTUREBLEND_DECALMASK:
-    case VXTEXTUREBLEND_ADD:
-    case VXTEXTUREBLEND_DOTPRODUCT3:
-    default:
-        return CKRST_TOP_SELECTARG1;
-    }
+    return CKFFLegacyTextureBlendToStageOps(blend).AlphaOp;
 }
 
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
@@ -274,7 +291,7 @@ static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasT
         return op;
     if (!hasTexture)
         return CKRST_TOP_DISABLE;
-    return CKFFLegacyTextureBlendToColorOp(stage[CKRST_TSS_TEXTUREMAPBLEND]);
+    return CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorOp;
 }
 
 static CKDWORD GetStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
@@ -284,46 +301,46 @@ static CKDWORD GetStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasT
     CKDWORD op = stage[CKRST_TSS_AOP];
     if (op != 0)
         return op;
-    return hasTexture ? CKFFLegacyTextureBlendToAlphaOp(stage[CKRST_TSS_TEXTUREMAPBLEND]) : CKRST_TOP_DISABLE;
+    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaOp : CKRST_TOP_DISABLE;
 }
 
 static CKDWORD GetStageColorArg1(const CKDWORD *stage, bool hasTexture) {
     CKDWORD arg = stage[CKRST_TSS_ARG1];
     if (arg != 0)
         return arg;
-    return hasTexture ? CKRST_TA_TEXTURE : CKRST_TA_DIFFUSE;
+    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg1 : CKRST_TA_DIFFUSE;
 }
 
 static CKDWORD GetStageColorArg2(const CKDWORD *stage) {
     CKDWORD arg = stage[CKRST_TSS_ARG2];
-    return arg != 0 ? arg : CKRST_TA_CURRENT;
+    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg2;
 }
 
 static CKDWORD GetStageColorArg0(const CKDWORD *stage) {
     CKDWORD arg = stage[CKRST_TSS_COLORARG0];
-    return arg != 0 ? arg : CKRST_TA_CURRENT;
+    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg0;
 }
 
 static CKDWORD GetStageAlphaArg1(const CKDWORD *stage, bool hasTexture) {
     CKDWORD arg = stage[CKRST_TSS_AARG1];
     if (arg != 0)
         return arg;
-    return hasTexture ? CKRST_TA_TEXTURE : CKRST_TA_DIFFUSE;
+    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg1 : CKRST_TA_DIFFUSE;
 }
 
 static CKDWORD GetStageAlphaArg2(const CKDWORD *stage) {
     CKDWORD arg = stage[CKRST_TSS_AARG2];
-    return arg != 0 ? arg : CKRST_TA_CURRENT;
+    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg2;
 }
 
 static CKDWORD GetStageAlphaArg0(const CKDWORD *stage) {
     CKDWORD arg = stage[CKRST_TSS_ALPHAARG0];
-    return arg != 0 ? arg : CKRST_TA_CURRENT;
+    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg0;
 }
 
 static CKDWORD GetStageResultArg(const CKDWORD *stage) {
     CKDWORD arg = stage[CKRST_TSS_RESULTARG0];
-    return arg != 0 ? arg : CKRST_TA_CURRENT;
+    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ResultArg;
 }
 
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
