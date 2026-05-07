@@ -9,7 +9,28 @@
 #include "RCKMesh.h"
 #include "TestTriangleMultiset.h"
 
+#include <fstream>
+#include <iterator>
+#include <string>
+
 namespace {
+
+std::string ReadRenderEngineSource(const char *relativePath) {
+    std::string path = __FILE__;
+    const std::string suffix = "tests\\test_ffp_contract.cpp";
+    size_t pos = path.rfind(suffix);
+    if (pos == std::string::npos) {
+        const std::string altSuffix = "tests/test_ffp_contract.cpp";
+        pos = path.rfind(altSuffix);
+    }
+    TestCheck(pos != std::string::npos, "FFP contract test source path must resolve the RenderEngine source root");
+    path.erase(pos);
+    path += relativePath;
+
+    std::ifstream file(path.c_str());
+    TestCheck(file.good(), "RenderEngine source file must be readable for contract checks");
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
 
 void Test_DPFlags_PretransformedTexturedColor_UsesPositionT() {
     const CKDWORD fmt = CKVertexLayoutCache::DPFlagsToFormatFlags(CKRST_DP_CL_VCT, false, true);
@@ -237,6 +258,54 @@ void Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex() {
     TestCheck(CKFFTexcoordIndex(packed) == 7, "Packed texcoord state must preserve the source coordinate index");
     TestCheck(CKFFTexcoordGeneration(packed) == CKFF_TEXGEN_CAMERASPACEREFLECTION,
               "Packed texcoord state must preserve camera-space reflection generation");
+
+    packed = CKFFPackTexcoordIndex(0, CKFF_TEXGEN_SPHEREMAP);
+    TestCheck(CKFFTexcoordGeneration(packed) == CKFF_TEXGEN_SPHEREMAP,
+              "Packed texcoord state must preserve D3D sphere-map generation");
+}
+
+void Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics() {
+    std::string source = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    TestCheck(source.find("mul(u_texMatrix[stage], coord)") != std::string::npos,
+              "Texture matrix transform must use the bgfx/VxMatrix convention that preserves D3D row-vector translation");
+    TestCheck(source.find("vec3 refl = reflect(eye, viewNormal)") != std::string::npos,
+              "Camera-space reflection vector must follow dxvk/D3D FFP reflect(viewPosition, normal) semantics");
+    TestCheck(source.find("return vec4(selectTexcoord(index & 7") != std::string::npos &&
+              source.find(", 0.0, 0.0)") != std::string::npos,
+              "Pass-through texcoords must use D3D FFP padding before texture matrix transforms");
+}
+
+void Test_RenderTarget_AttachesDepthStencilTexture() {
+    std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    TestCheck(source.find("CreateDepthTexture(m_TargetDepthTexture") != std::string::npos,
+              "Render-to-texture framebuffers must create a depth-stencil attachment");
+    TestCheck(source.find("desc.DepthStencil.Texture = m_TargetDepthTexture") != std::string::npos,
+              "Render-to-texture framebuffers must bind the depth-stencil attachment");
+}
+
+void Test_UserClipPlane_DoesNotClaimUnsupportedRendering() {
+    std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    const size_t setPos = source.find("CKBOOL RCKRenderContext::SetUserClipPlane");
+    TestCheck(setPos != std::string::npos, "SetUserClipPlane implementation must be present");
+    const size_t getPos = source.find("CKBOOL RCKRenderContext::GetUserClipPlane");
+    TestCheck(getPos != std::string::npos, "GetUserClipPlane implementation must be present");
+    const std::string setBody = source.substr(setPos, getPos - setPos);
+    TestCheck(setBody.find("return FALSE;") != std::string::npos &&
+              setBody.find("return TRUE;") == std::string::npos,
+              "User clip planes must not report success until the FFP clip path consumes them");
+}
+
+void Test_TextureCopyContext_ConvertsReadbackToTextureFormat() {
+    std::string source = ReadRenderEngineSource("src/CKTexture.cpp");
+    const size_t copyPos = source.find("CKBOOL RCKTexture::CopyContext");
+    TestCheck(copyPos != std::string::npos, "RCKTexture::CopyContext implementation must be present");
+    const size_t nextPos = source.find("CKBOOL RCKTexture::UseMipmap", copyPos);
+    TestCheck(nextPos != std::string::npos, "RCKTexture::CopyContext source range must be bounded");
+    const std::string copyBody = source.substr(copyPos, nextPos - copyPos);
+    TestCheck(copyBody.find("SamePixelFormat(srcDesc, m_VideoFormat)") != std::string::npos,
+              "Texture CopyContext must compare ARGB readback against the target texture format");
+    TestCheck(copyBody.find("ConvertTextureImage(srcDesc, m_VideoFormat") != std::string::npos,
+              "Texture CopyContext must convert ARGB readback before uploading non-ARGB8888 targets");
 }
 
 void Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene() {
@@ -374,6 +443,39 @@ void Test_DrawState_InverseWindingSwapsCullDirection() {
     TestCheck(cull == 0, "Inverse winding must not invent culling for VXCULL_NONE");
 }
 
+void Test_DrawState_ColorWriteMaskCanDisableColorWrites() {
+    CKDrawStateCache cache;
+    cache.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+    CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
+
+    TestCheck((state.Lo & CKRST_STATE_WRITE_RGBA) == 0,
+              "Depth/stencil-only draws must be able to disable all color writes");
+
+    cache.SetColorWriteMask(TRUE, FALSE, TRUE, FALSE);
+    state = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((state.Lo & CKRST_STATE_WRITE_R) != 0, "Color mask must preserve R writes");
+    TestCheck((state.Lo & CKRST_STATE_WRITE_G) == 0, "Color mask must disable G writes");
+    TestCheck((state.Lo & CKRST_STATE_WRITE_B) != 0, "Color mask must preserve B writes");
+    TestCheck((state.Lo & CKRST_STATE_WRITE_A) == 0, "Color mask must disable A writes");
+}
+
+void Test_DrawState_StencilRenderStatesBuildStencilOps() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    cache.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+    cache.SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+    cache.SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+    cache.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+
+    CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((state.Mid & CKRST_STENCIL_ENABLE) != 0,
+              "Enabling VXRENDERSTATE_STENCILENABLE must enable draw-state stencil");
+    TestCheck(((state.Mid >> 10) & 0xF) == VXCMP_ALWAYS,
+              "Stencil function must be packed into draw-state stencil ops");
+    TestCheck(((state.Mid >> 22) & 0xF) == VXSTENCILOP_REPLACE,
+              "Stencil pass op must be packed into draw-state stencil ops");
+}
+
 void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
     TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
               "MODULATEALPHA color op must modulate diffuse and texture color");
@@ -387,6 +489,106 @@ void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
               "MODULATEALPHA alpha op must multiply texture and diffuse alpha");
     TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_SELECTARG2,
               "DECALALPHA alpha op must keep diffuse/current alpha");
+}
+
+void Test_TextureStageBlend_MultiplicativeChannelMapsToModulate() {
+    CKDWORD colorOp = 0;
+    CKDWORD colorArg1 = 0;
+    CKDWORD colorArg2 = 0;
+    CKDWORD alphaOp = 0;
+    CKDWORD alphaArg1 = 0;
+    CKDWORD alphaArg2 = 0;
+
+    TestCheck(CKFFStageBlendToTextureOps(STAGEBLEND(VXBLEND_ZERO, VXBLEND_SRCCOLOR),
+                                         colorOp, colorArg1, colorArg2,
+                                         alphaOp, alphaArg1, alphaArg2),
+              "ZERO/SRCCOLOR channel blend must be expressible as a texture stage");
+    TestCheck(colorOp == CKRST_TOP_MODULATE, "Multiplicative channel color op must be MODULATE");
+    TestCheck(colorArg1 == CKRST_TA_TEXTURE, "Multiplicative channel arg1 must be the channel texture");
+    TestCheck(colorArg2 == CKRST_TA_CURRENT, "Multiplicative channel arg2 must be the current accumulated color");
+    TestCheck(alphaOp == CKRST_TOP_SELECTARG2, "Multiplicative channel alpha must keep current alpha");
+    TestCheck(alphaArg2 == CKRST_TA_CURRENT, "Multiplicative channel alpha arg2 must be current");
+
+    TestCheck(CKFFStageBlendToTextureOps(STAGEBLEND(VXBLEND_DESTCOLOR, VXBLEND_ZERO),
+                                         colorOp, colorArg1, colorArg2,
+                                         alphaOp, alphaArg1, alphaArg2),
+              "DESTCOLOR/ZERO channel blend must be expressible as the same texture stage multiply");
+    TestCheck(colorOp == CKRST_TOP_MODULATE, "DESTCOLOR/ZERO channel color op must be MODULATE");
+}
+
+void Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass() {
+    CKDWORD colorOp = 0;
+    CKDWORD colorArg1 = 0;
+    CKDWORD colorArg2 = 0;
+    CKDWORD alphaOp = 0;
+    CKDWORD alphaArg1 = 0;
+    CKDWORD alphaArg2 = 0;
+
+    TestCheck(!CKFFStageBlendToTextureOps(STAGEBLEND(VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA),
+                                          colorOp, colorArg1, colorArg2,
+                                          alphaOp, alphaArg1, alphaArg2),
+              "Alpha-blended material channels must stay on the multipass path");
+}
+
+void Test_TextureStage_ResetClearsLeakedEffectState() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX,
+                             CKFFPackTexcoordIndex(3, CKFF_TEXGEN_CAMERASPACEREFLECTION));
+
+    ffp.ResetTextureStage(0);
+    TestCheck(ffp.GetTextureStageState(0, CKRST_TSS_OP) == 0,
+              "ResetTextureStage must clear explicit color op from previous effects");
+    TestCheck(ffp.GetTextureStageState(0, CKRST_TSS_ARG1) == 0,
+              "ResetTextureStage must clear explicit color arg from previous effects");
+    TestCheck(ffp.GetTextureStageState(0, CKRST_TSS_AOP) == 0,
+              "ResetTextureStage must clear explicit alpha op from previous effects");
+    TestCheck(ffp.GetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX) == 0,
+              "ResetTextureStage must restore stage texcoord index");
+
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.DisableTextureStagesFrom(1);
+    TestCheck(ffp.GetTextureStageState(1, CKRST_TSS_OP) == 0,
+              "DisableTextureStagesFrom must clear higher stage effect state");
+    TestCheck(ffp.GetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX) == 1,
+              "DisableTextureStagesFrom must restore each higher stage texcoord index");
+}
+
+void Test_BumpEnv_StageStatesPackUniform() {
+    CKDWORD stage[CKRST_TSS_MAXSTATE + 1] = {};
+    const float m00 = 0.25f;
+    const float m01 = -0.50f;
+    const float m10 = 0.75f;
+    const float m11 = -1.00f;
+    const float scale = 2.0f;
+    const float offset = 0.125f;
+    memcpy(&stage[CKRST_TSS_BUMPENVMAT00], &m00, sizeof(float));
+    memcpy(&stage[CKRST_TSS_BUMPENVMAT01], &m01, sizeof(float));
+    memcpy(&stage[CKRST_TSS_BUMPENVMAT10], &m10, sizeof(float));
+    memcpy(&stage[CKRST_TSS_BUMPENVMAT11], &m11, sizeof(float));
+    memcpy(&stage[CKRST_TSS_BUMPENVLSCALE], &scale, sizeof(float));
+    memcpy(&stage[CKRST_TSS_BUMPENVLOFFSET], &offset, sizeof(float));
+
+    float bumpEnv[2][4] = {};
+    CKFFPackBumpEnvUniform(stage, bumpEnv);
+    TestCheck(bumpEnv[0][0] == m00 && bumpEnv[0][1] == m01 &&
+              bumpEnv[0][2] == m10 && bumpEnv[0][3] == m11,
+              "Bump env matrix stage states must pack into u_bumpEnv[0]");
+    TestCheck(bumpEnv[1][0] == scale && bumpEnv[1][1] == offset,
+              "Bump env luminance stage states must pack into u_bumpEnv[1]");
+}
+
+void Test_UserDrawPrimitive_VBufferFlagIsObservable() {
+    UserDrawPrimitiveDataClass dp;
+    VxDrawPrimitiveData *data = dp.GetStructure((CKRST_DPFLAGS)(CKRST_DP_CL_VCT | CKRST_DP_VBUFFER), 4);
+    TestCheck(data != nullptr, "User draw primitive structure must be returned");
+    TestCheck((data->Flags & CKRST_DP_VBUFFER) != 0,
+              "CKRST_DP_VBUFFER must stay observable so callers know ReleaseCurrentVB is required");
+    TestCheck((data->Flags & CKRST_DP_CL_VCT) == CKRST_DP_CL_VCT,
+              "Regular draw primitive flags must be preserved with CKRST_DP_VBUFFER");
 }
 
 void Test_ShaderTarget_ProfilesAreExplicitAndDistinct() {
@@ -442,6 +644,10 @@ int main() {
     tests.Run("Wrap mesh requires hardware expansion", &Test_WrapMesh_RequiresWrapAwareHardwareExpansion);
     tests.Run("Wrap mesh maps flags to render state", &Test_WrapMesh_MapsMeshFlagsToRenderStateWrapMode);
     tests.Run("TexGen packs texcoord generation", &Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex);
+    tests.Run("TexGen texture matrix bgfx/VxMatrix semantics", &Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics);
+    tests.Run("Render target attaches depth-stencil texture", &Test_RenderTarget_AttachesDepthStencilTexture);
+    tests.Run("User clip plane does not claim unsupported rendering", &Test_UserClipPlane_DoesNotClaimUnsupportedRendering);
+    tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
     tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
     tests.Run("Interleave ignores undeclared color streams", &Test_Interleave_IgnoresColorPointersWithoutDPFlags);
     tests.Run("Interleave PositionT missing specular fog factor", &Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque);
@@ -449,7 +655,14 @@ int main() {
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
     tests.Run("Draw state inverse winding swaps cull", &Test_DrawState_InverseWindingSwapsCullDirection);
+    tests.Run("Draw state color write mask", &Test_DrawState_ColorWriteMaskCanDisableColorWrites);
+    tests.Run("Draw state stencil render states", &Test_DrawState_StencilRenderStatesBuildStencilOps);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
+    tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
+    tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
+    tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
+    tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
+    tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     return tests.ExitCode();
