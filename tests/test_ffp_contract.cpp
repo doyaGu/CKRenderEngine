@@ -760,6 +760,31 @@ void Test_PointSprite_PointListExpandsToTexturedQuads() {
               "Each point sprite must expand to four vertices and six indices");
 }
 
+void Test_ViewportClip_RestoresFFPProjectionAndViewport() {
+    std::string context = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    TestCheck(context.find("m_FFPipeline.SetViewport(m_ViewportData);") != std::string::npos,
+              "RenderContext viewport changes must update the FFP viewport uniform");
+
+    std::string sceneGraph = ReadRenderEngineSource("src/CKSceneGraph.cpp");
+    TestCheck(sceneGraph.find("SetProjectionTransformationMatrix(rc->m_ProjectionMatrix)") != std::string::npos &&
+              sceneGraph.find("SetProjectionTransformationMatrix(dev->m_ProjectionMatrix)") != std::string::npos,
+              "Scene graph viewport clipping must restore the render-context projection after clipped traversal");
+}
+
+void Test_LegacySetVertexShaderResetCommentsAreGone() {
+    const char *files[] = {
+        "src/CK2dEntity.cpp",
+        "src/CK3dEntity.cpp",
+        "src/CKMesh.cpp",
+        "src/CKSprite3D.cpp"
+    };
+    for (const char *file : files) {
+        std::string source = ReadRenderEngineSource(file);
+        TestCheck(source.find("SetVertexShader(0)") == std::string::npos,
+                  "Legacy SetVertexShader(0) migration comments must not remain as fake TODOs");
+    }
+}
+
 void Test_ShaderTarget_ProfilesAreExplicitAndDistinct() {
     CKShaderTargetDesc target;
     TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Default shader format must be unknown");
@@ -839,6 +864,8 @@ int main() {
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
     tests.Run("Point sprite point-list expansion", &Test_PointSprite_PointListExpandsToTexturedQuads);
+    tests.Run("Viewport clip restores FFP projection and viewport", &Test_ViewportClip_RestoresFFPProjectionAndViewport);
+    tests.Run("Legacy SetVertexShader reset comments removed", &Test_LegacySetVertexShaderResetCommentsAreGone);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     return tests.ExitCode();

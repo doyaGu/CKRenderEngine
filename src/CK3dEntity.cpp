@@ -2609,8 +2609,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute pre-render callbacks
         if (m_Callbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
-
+    
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
                 ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
@@ -2638,8 +2637,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         // Execute post-render callbacks
         if (m_Callbacks->m_PostCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
-
+    
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
                 ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);

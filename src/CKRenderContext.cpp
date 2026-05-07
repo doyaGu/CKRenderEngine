@@ -1352,6 +1352,7 @@ void RCKRenderContext::SetViewRect(VxRect &rect) {
     m_ViewportData.ViewY = (int) rect.top;
     m_ViewportData.ViewWidth = (int) rect.GetWidth();
     m_ViewportData.ViewHeight = (int) rect.GetHeight();
+    m_FFPipeline.SetViewport(m_ViewportData);
     UpdateProjection(TRUE);
 }
 
@@ -3096,6 +3097,8 @@ void RCKRenderContext::SetFullViewport(CKViewportData *vp, int width, int height
     vp->ViewY = 0;
     vp->ViewWidth = width;
     vp->ViewHeight = height;
+    if (vp == &m_ViewportData)
+        m_FFPipeline.SetViewport(m_ViewportData);
 }
 
 void RCKRenderContext::SetClipRect(VxRect *rect) {

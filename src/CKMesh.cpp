@@ -3365,7 +3365,6 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
         // sub_1002C220 returns (End - Begin) / 12, i.e. element count
         int preCount = m_RenderCallbacks->m_PreCallBacks.Size();
         if (preCount > 0) {
-            // TODO: Phase 2 - rc->m_RasterizerContext->SetVertexShader(0);
             rc->m_ObjectsCallbacksTimeProfiler.Reset();
 
             // Iterate with 12-byte stride (sizeof VxCallBack)
@@ -3391,7 +3390,6 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
         // Post-render callbacks
         int postCount = m_RenderCallbacks->m_PostCallBacks.Size();
         if (postCount > 0) {
-            // TODO: Phase 2 - rc->m_RasterizerContext->SetVertexShader(0);
             rc->m_ObjectsCallbacksTimeProfiler.Reset();
 
             for (VxCallBack *it = m_RenderCallbacks->m_PostCallBacks.Begin();
@@ -4350,8 +4348,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // Execute callbacks if there are any
         if (m_SubMeshCallbacks->m_PreCallBacks.Size() > 0) {
             dev->m_ObjectsCallbacksTimeProfiler.Reset();
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
-
+    
             // Iterate through callbacks (VxCallBack is 12 bytes: callback ptr, argument ptr, flags)
             for (VxCallBack *cb = m_SubMeshCallbacks->m_PreCallBacks.Begin();
                  cb < m_SubMeshCallbacks->m_PreCallBacks.End(); ++cb) {
@@ -4562,7 +4559,6 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
     // Execute post-render submesh callbacks
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PostCallBacks.Size() > 0) {
         dev->m_ObjectsCallbacksTimeProfiler.Reset();
-        // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
 
         for (VxCallBack *cb = m_SubMeshCallbacks->m_PostCallBacks.Begin();
              cb < m_SubMeshCallbacks->m_PostCallBacks.End(); ++cb) {

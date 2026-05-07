@@ -788,7 +788,6 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // Execute pre-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PreCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
-        // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PreCallBacks.Begin(); it != m_Callbacks->m_PreCallBacks.End(); ++it) {
             ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
@@ -810,7 +809,6 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // Execute post-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PostCallBacks.Size() > 0) {
         dev->m_SpriteCallbacksTimeProfiler.Reset();
-        // TODO: Phase 2 - dev->m_RasterizerContext->SetVertexShader(0);
         for (auto it = m_Callbacks->m_PostCallBacks.Begin(); it != m_Callbacks->m_PostCallBacks.End(); ++it) {
             ((CK_RENDEROBJECT_CALLBACK) it->callback)(dev, (CKRenderObject *) this, it->argument);
         }
@@ -837,7 +835,6 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 
             // Set full viewport
             dev->SetFullViewport(&dev->m_ViewportData, (int) width, (int) height);
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
         }
 
         // Set material
@@ -946,11 +943,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 
         // Restore viewport if changed
         if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
-            dev->m_ViewportData.ViewX = (int) savedViewRect.left;
-            dev->m_ViewportData.ViewY = (int) savedViewRect.top;
-            dev->m_ViewportData.ViewWidth = (int) (savedViewRect.right - savedViewRect.left);
-            dev->m_ViewportData.ViewHeight = (int) (savedViewRect.bottom - savedViewRect.top);
-            // TODO: Phase 2 - dev->m_RasterizerContext->SetViewport(&dev->m_RasterizerContext->m_ViewportData);
+            dev->SetViewRect(savedViewRect);
         }
     } else {
         // No material - draw placeholder (editor mode only)
