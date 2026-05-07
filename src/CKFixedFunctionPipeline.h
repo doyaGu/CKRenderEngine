@@ -29,6 +29,19 @@ class CKRasterizerEncoder;
 
 struct CKLightData;
 
+struct CKFFTextureStageOps {
+    CKDWORD ColorOp;
+    CKDWORD ColorArg0;
+    CKDWORD ColorArg1;
+    CKDWORD ColorArg2;
+    CKDWORD AlphaOp;
+    CKDWORD AlphaArg0;
+    CKDWORD AlphaArg1;
+    CKDWORD AlphaArg2;
+    CKDWORD ResultArg;
+};
+
+CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
