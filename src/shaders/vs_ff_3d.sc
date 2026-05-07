@@ -1,9 +1,10 @@
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog
+$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
 
 uniform mat4 u_ckModelViewProj;
+uniform mat4 u_ckModel;
 uniform mat4 u_ckModelView;
 uniform mat4 u_ckNormalMatrix;
 uniform mat4 u_texMatrix[8];
@@ -102,6 +103,7 @@ void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
     gl_Position = mul(u_ckModelViewProj, localPos);
+    v_clipPos = mul(u_ckModel, localPos);
 
     vec4 viewPos = mul(u_ckModelView, localPos);
     vec3 viewNormal = mul(u_ckNormalMatrix, vec4(a_normal, 0.0)).xyz;

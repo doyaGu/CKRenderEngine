@@ -107,6 +107,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_ckModelViewProj = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ckModelViewProj, &desc);
 
+    desc.Name = (char *)"u_ckModel";
+    desc.Count = 1;
+    m_Uniforms.u_ckModel = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ckModel, &desc);
+
     desc.Name = (char *)"u_ckModelView";
     desc.Count = 1;
     m_Uniforms.u_ckModelView = AllocUniformHandle();
@@ -182,6 +187,16 @@ void CKFFShaderCache::CreateUniforms() {
     desc.Count = CKFF_MAX_TEXTURE_STAGES * 4;
     m_Uniforms.u_stageParams = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_stageParams, &desc);
+
+    desc.Name = (char *)"u_clipPlanes";
+    desc.Count = 6;
+    m_Uniforms.u_clipPlanes = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_clipPlanes, &desc);
+
+    desc.Name = (char *)"u_clipParams";
+    desc.Count = 1;
+    m_Uniforms.u_clipParams = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_clipParams, &desc);
 
     desc.Type = CKRST_UNIFORM_SAMPLER;
     desc.Count = 1;

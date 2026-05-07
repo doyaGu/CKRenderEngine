@@ -1,5 +1,5 @@
 $input a_position, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog
+$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
 
@@ -27,6 +27,7 @@ void main()
     float clipX = a_position.x * u_viewport.x + u_viewport.z;
     float clipY = a_position.y * u_viewport.y + u_viewport.w;
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
+    v_clipPos = vec4(a_position.xyz, 1.0);
 
     v_color0 = a_color0;
     v_color1 = a_color1;

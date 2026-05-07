@@ -8,6 +8,7 @@ vec4 v_texcoord4  : TEXCOORD4 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_texcoord5  : TEXCOORD5 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_texcoord6  : TEXCOORD6 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_texcoord7Fog : TEXCOORD7 = vec4(0.0, 0.0, 1.0, 0.0);
+vec4 v_clipPos    : TEXCOORD8 = vec4(0.0, 0.0, 0.0, 1.0);
 
 vec4 a_position   : POSITION;
 vec3 a_normal     : NORMAL;

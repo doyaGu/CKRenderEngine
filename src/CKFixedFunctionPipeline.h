@@ -83,7 +83,9 @@ public:
     void SetLight(int index, const CKLightData *light);
     void EnableLight(int index, CKBOOL enable);
     void SetTexture(int stage, CKDWORD textureHandle);
+    CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
+    void SetUserClipPlane(int index, const VxPlane &plane);
     void BeginDebugFrame();
 
     // === Drawing ===
@@ -148,6 +150,7 @@ private:
     // Texture stage state
     CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     float m_Viewport[4];
+    VxPlane m_UserClipPlanes[6];
 
     // Dirty tracking
     CKDWORD m_DirtyFlags;

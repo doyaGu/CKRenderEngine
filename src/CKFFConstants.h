@@ -79,6 +79,7 @@ struct CKFFUniformHandles {
     // u_modelViewProj, u_viewProj automatically via SetViewTransform/SetTransform.
     CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
     CKDWORD u_ckModelViewProj;
+    CKDWORD u_ckModel;
     CKDWORD u_ckModelView;
     CKDWORD u_ckNormalMatrix;
     CKDWORD u_texMatrix;   // mat4 array: one texture matrix per stage
@@ -93,6 +94,8 @@ struct CKFFUniformHandles {
     CKDWORD u_bumpEnv;      // vec4 array: 2 elements (matrix, luminance)
     CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY
     CKDWORD u_stageParams;  // vec4 array: per-stage color/alpha ops and args
+    CKDWORD u_clipPlanes;   // vec4 array: compact enabled user clip planes
+    CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
     CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES]; // samplers
 
     CKFFUniformHandles() { memset(this, 0, sizeof(*this)); }

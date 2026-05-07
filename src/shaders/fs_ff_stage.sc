@@ -1,4 +1,4 @@
-$input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog
+$input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
 
@@ -7,6 +7,8 @@ uniform vec4 u_alphaParams;
 uniform vec4 u_texFactor;
 uniform vec4 u_bumpEnv[2];
 uniform vec4 u_stageParams[32];
+uniform vec4 u_clipPlanes[6];
+uniform vec4 u_clipParams;
 
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
@@ -110,6 +112,12 @@ bool alphaPass(float alpha)
 
 void main()
 {
+    int clipCount = int(u_clipParams.x);
+    for (int clipIndex = 0; clipIndex < 6; ++clipIndex) {
+        if (clipIndex >= clipCount) break;
+        if (dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0) discard;
+    }
+
     vec4 current = v_color0;
     vec4 temp = vec4(0.0, 0.0, 0.0, 1.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
