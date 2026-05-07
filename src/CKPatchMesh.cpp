@@ -641,20 +641,230 @@ CKERROR RCKPatchMesh::Copy(CKObject &o, CKDependenciesContext &context) {
     return CK_OK;
 }
 
-/**
- * @brief Convert from a regular CKMesh (not implemented)
- * Based on IDA analysis at 0x1003412a - returns CKERR_NOTIMPLEMENTED
- */
-CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
-    return CKERR_NOTIMPLEMENTED;
+static VxVector InterpolatePatchPoint(const VxVector &a, const VxVector &b, float t) {
+    return a + (b - a) * t;
+}
+
+static CKBOOL IsValidMeshVertexIndex(int index, int vertexCount) {
+    return index >= 0 && index < vertexCount && index <= 0x7FFF;
+}
+
+static void CopyMeshGeometry(CKMesh *dst, CKMesh *src) {
+    if (!dst || !src)
+        return;
+
+    dst->Clean(FALSE);
+
+    int vertexCount = src->GetVertexCount();
+    dst->SetVertexCount(vertexCount);
+    for (int i = 0; i < vertexCount; ++i) {
+        VxVector v;
+        src->GetVertexPosition(i, &v);
+        dst->SetVertexPosition(i, &v);
+
+        src->GetVertexNormal(i, &v);
+        dst->SetVertexNormal(i, &v);
+
+        dst->SetVertexColor(i, src->GetVertexColor(i));
+        dst->SetVertexSpecularColor(i, src->GetVertexSpecularColor(i));
+
+        float u = 0.0f;
+        float vv = 0.0f;
+        src->GetVertexTextureCoordinates(i, &u, &vv, -1);
+        dst->SetVertexTextureCoordinates(i, u, vv, -1);
+    }
+
+    int channelCount = src->GetChannelCount();
+    for (int channel = 0; channel < channelCount; ++channel) {
+        int dstChannel = dst->AddChannel(src->GetChannelMaterial(channel), FALSE);
+        if (dstChannel < 0)
+            continue;
+
+        dst->SetChannelSourceBlend(dstChannel, src->GetChannelSourceBlend(channel));
+        dst->SetChannelDestBlend(dstChannel, src->GetChannelDestBlend(channel));
+        dst->SetChannelFlags(dstChannel, src->GetChannelFlags(channel));
+
+        for (int i = 0; i < vertexCount; ++i) {
+            float u = 0.0f;
+            float vv = 0.0f;
+            src->GetVertexTextureCoordinates(i, &u, &vv, channel);
+            dst->SetVertexTextureCoordinates(i, u, vv, dstChannel);
+        }
+    }
+
+    int faceCount = src->GetFaceCount();
+    dst->SetFaceCount(faceCount);
+    for (int i = 0; i < faceCount; ++i) {
+        int v0 = 0;
+        int v1 = 0;
+        int v2 = 0;
+        src->GetFaceVertexIndex(i, v0, v1, v2);
+        dst->SetFaceVertexIndex(i, v0, v1, v2);
+        dst->SetFaceMaterial(i, src->GetFaceMaterial(i));
+        dst->SetFaceChannelMask(i, src->GetFaceChannelMask(i));
+    }
+
+    int weightCount = src->GetVertexWeightsCount();
+    dst->SetVertexWeightsCount(weightCount);
+    for (int i = 0; i < weightCount; ++i)
+        dst->SetVertexWeight(i, src->GetVertexWeight(i));
 }
 
 /**
- * @brief Convert to a regular CKMesh (not implemented)
- * Based on IDA analysis at 0x1003413c - returns CKERR_NOTIMPLEMENTED
+ * @brief Convert from a regular CKMesh
+ */
+CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
+    if (!m)
+        return CKERR_INVALIDPARAMETER;
+
+    const int vertexCount = m->GetVertexCount();
+    const int faceCount = m->GetFaceCount();
+    if (vertexCount < 0 || vertexCount > 0x7FFF || faceCount < 0)
+        return CKERR_INVALIDPARAMETER;
+    if (faceCount > 0x7FFF / 3)
+        return CKERR_INVALIDPARAMETER;
+
+    CopyMeshGeometry(this, m);
+    Clear();
+
+    if (vertexCount == 0 || faceCount == 0)
+        return CK_OK;
+
+    SetVertVecCount(vertexCount, faceCount * 9);
+    if (!m_Verts || !m_Vecs)
+        return CKERR_OUTOFMEMORY;
+
+    for (int i = 0; i < vertexCount; ++i) {
+        VxVector v;
+        m->GetVertexPosition(i, &v);
+        m_Verts[i] = v;
+    }
+
+    SetPatchCount(faceCount);
+    SetEdgeCount(faceCount * 3);
+    SetTVCount(vertexCount, -1);
+    SetTVPatchCount(faceCount, -1);
+
+    for (int i = 0; i < vertexCount; ++i) {
+        float u = 0.0f;
+        float v = 0.0f;
+        m->GetVertexTextureCoordinates(i, &u, &v, -1);
+        SetTV(i, u, v, -1);
+    }
+
+    for (int face = 0; face < faceCount; ++face) {
+        int v0 = 0;
+        int v1 = 0;
+        int v2 = 0;
+        m->GetFaceVertexIndex(face, v0, v1, v2);
+        if (!IsValidMeshVertexIndex(v0, vertexCount) ||
+            !IsValidMeshVertexIndex(v1, vertexCount) ||
+            !IsValidMeshVertexIndex(v2, vertexCount))
+            return CKERR_INVALIDPARAMETER;
+
+        const int vecBase = face * 9;
+        const int edgeBase = face * 3;
+
+        const VxVector &p0 = m_Verts[v0];
+        const VxVector &p1 = m_Verts[v1];
+        const VxVector &p2 = m_Verts[v2];
+
+        m_Vecs[vecBase + 0] = InterpolatePatchPoint(p0, p1, 1.0f / 3.0f);
+        m_Vecs[vecBase + 1] = InterpolatePatchPoint(p0, p1, 2.0f / 3.0f);
+        m_Vecs[vecBase + 2] = InterpolatePatchPoint(p1, p2, 1.0f / 3.0f);
+        m_Vecs[vecBase + 3] = InterpolatePatchPoint(p1, p2, 2.0f / 3.0f);
+        m_Vecs[vecBase + 4] = InterpolatePatchPoint(p2, p0, 1.0f / 3.0f);
+        m_Vecs[vecBase + 5] = InterpolatePatchPoint(p2, p0, 2.0f / 3.0f);
+
+        CKPatch patch;
+        patch.type = CK_PATCH_TRI;
+        patch.SmoothingGroup = 0xFFFFFFFF;
+        patch.Material = m->GetFaceMaterial(face) ? m->GetFaceMaterial(face)->GetID() : 0;
+        patch.auxs = nullptr;
+        for (int i = 0; i < 4; ++i) {
+            patch.v[i] = -1;
+            patch.interior[i] = -1;
+            patch.edge[i] = -1;
+        }
+        for (int i = 0; i < 8; ++i)
+            patch.vec[i] = -1;
+
+        patch.v[0] = (short)v0;
+        patch.v[1] = (short)v1;
+        patch.v[2] = (short)v2;
+        for (int i = 0; i < 6; ++i)
+            patch.vec[i] = (short)(vecBase + i);
+        patch.interior[0] = (short)(vecBase + 6);
+        patch.interior[1] = (short)(vecBase + 7);
+        patch.interior[2] = (short)(vecBase + 8);
+        patch.edge[0] = (short)(edgeBase + 0);
+        patch.edge[1] = (short)(edgeBase + 1);
+        patch.edge[2] = (short)(edgeBase + 2);
+
+        SetPatch(face, &patch);
+
+        CKPatchEdge edge;
+        edge.v1 = (short)v0;
+        edge.vec12 = (short)(vecBase + 0);
+        edge.vec21 = (short)(vecBase + 1);
+        edge.v2 = (short)v1;
+        edge.patch1 = (short)face;
+        edge.patch2 = -1;
+        SetEdge(edgeBase + 0, &edge);
+
+        edge.v1 = (short)v1;
+        edge.vec12 = (short)(vecBase + 2);
+        edge.vec21 = (short)(vecBase + 3);
+        edge.v2 = (short)v2;
+        SetEdge(edgeBase + 1, &edge);
+
+        edge.v1 = (short)v2;
+        edge.vec12 = (short)(vecBase + 4);
+        edge.vec21 = (short)(vecBase + 5);
+        edge.v2 = (short)v0;
+        SetEdge(edgeBase + 2, &edge);
+
+        CKTVPatch tvPatch;
+        tvPatch.tv[0] = (short)v0;
+        tvPatch.tv[1] = (short)v1;
+        tvPatch.tv[2] = (short)v2;
+        tvPatch.tv[3] = -1;
+        SetTVPatch(face, &tvPatch, -1);
+
+        ComputePatchInteriors(face);
+    }
+
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
+    m_PatchChanged = TRUE;
+
+    return CK_OK;
+}
+
+/**
+ * @brief Convert to a regular CKMesh
  */
 CKERROR RCKPatchMesh::ToMesh(CKMesh *m, int stepcount) {
-    return CKERR_NOTIMPLEMENTED;
+    if (!m)
+        return CKERR_INVALIDPARAMETER;
+    if (m == this)
+        return CK_OK;
+
+    const int oldIterationCount = m_IterationCount;
+    if (stepcount >= 0 && stepcount != m_IterationCount) {
+        m_IterationCount = stepcount;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    }
+
+    BuildRenderMesh();
+    CopyMeshGeometry(m, this);
+
+    if (stepcount >= 0 && stepcount != oldIterationCount) {
+        m_IterationCount = oldIterationCount;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    }
+
+    return CK_OK;
 }
 
 /**
