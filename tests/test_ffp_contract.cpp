@@ -381,6 +381,8 @@ void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
               "DECALALPHA color op must blend by texture alpha");
     TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATE) == CKRST_TOP_MODULATE,
               "MODULATE color op must remain multiplicative");
+    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_MODULATE) == CKRST_TOP_MODULATE,
+              "MODULATE alpha op must preserve runtime material alpha by multiplying texture and current alpha");
     TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
               "MODULATEALPHA alpha op must multiply texture and diffuse alpha");
     TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_SELECTARG2,
