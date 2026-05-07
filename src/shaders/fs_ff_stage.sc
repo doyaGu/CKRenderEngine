@@ -79,10 +79,10 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 14) return mix(b, a, u_texFactor.a);
     if (op == 15) return clamp(a + b * (1.0 - textureColor.a), 0.0, 1.0);
     if (op == 16) return mix(b, a, current.a);
-    if (op == 18) return clamp(a + a.a * b, 0.0, 1.0);
-    if (op == 19) return clamp(a * b + a.a, 0.0, 1.0);
+    if (op == 18) return clamp(a + vec4_splat(a.a) * b, 0.0, 1.0);
+    if (op == 19) return clamp(a * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 20) return clamp(a + (1.0 - a.a) * b, 0.0, 1.0);
-    if (op == 21) return clamp((1.0 - a) * b + a.a, 0.0, 1.0);
+    if (op == 21) return clamp((vec4_splat(1.0) - a) * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 22 || op == 23) return current;
     if (op == 24) {
         float v = dot(a.rgb * 2.0 - 1.0, b.rgb * 2.0 - 1.0);

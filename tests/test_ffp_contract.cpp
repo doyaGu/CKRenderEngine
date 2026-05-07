@@ -11,6 +11,7 @@
 
 #include <fstream>
 #include <iterator>
+#include <cmath>
 #include <string>
 
 namespace {
@@ -477,18 +478,110 @@ void Test_DrawState_StencilRenderStatesBuildStencilOps() {
 }
 
 void Test_TextureBlend_LegacyModesMapToFFPStageOps() {
+    CKFFTextureStageOps ops = CKFFLegacyTextureBlendToStageOps(VXTEXTUREBLEND_MODULATE);
+    TestCheck(ops.ColorOp == CKRST_TOP_MODULATE &&
+              ops.ColorArg1 == CKRST_TA_TEXTURE &&
+              ops.ColorArg2 == CKRST_TA_CURRENT &&
+              ops.AlphaOp == CKRST_TOP_MODULATE &&
+              ops.AlphaArg1 == CKRST_TA_TEXTURE &&
+              ops.AlphaArg2 == CKRST_TA_CURRENT &&
+              ops.ResultArg == CKRST_TA_CURRENT,
+              "MODULATE must map to texture/current color and alpha modulation");
+
+    ops = CKFFLegacyTextureBlendToStageOps(VXTEXTUREBLEND_MODULATEALPHA);
+    TestCheck(ops.ColorOp == CKRST_TOP_MODULATE &&
+              ops.ColorArg1 == CKRST_TA_TEXTURE &&
+              ops.ColorArg2 == CKRST_TA_CURRENT &&
+              ops.AlphaOp == CKRST_TOP_MODULATE,
+              "MODULATEALPHA must match Virtools DX9 texture/current color and alpha modulation");
+
+    ops = CKFFLegacyTextureBlendToStageOps(VXTEXTUREBLEND_DECALALPHA);
+    TestCheck(ops.ColorOp == CKRST_TOP_BLENDTEXTUREALPHA &&
+              ops.ColorArg1 == CKRST_TA_TEXTURE &&
+              ops.ColorArg2 == CKRST_TA_CURRENT &&
+              ops.AlphaOp == CKRST_TOP_SELECTARG1 &&
+              ops.AlphaArg1 == CKRST_TA_DIFFUSE,
+              "DECALALPHA must lerp color by texture alpha and select diffuse alpha like Virtools DX9");
+
+    ops = CKFFLegacyTextureBlendToStageOps(VXTEXTUREBLEND_ADD);
+    TestCheck(ops.ColorOp == CKRST_TOP_ADD &&
+              ops.AlphaOp == CKRST_TOP_SELECTARG1 &&
+              ops.AlphaArg1 == CKRST_TA_CURRENT,
+              "ADD must add colors and keep current alpha like Virtools DX9");
+
+    ops = CKFFLegacyTextureBlendToStageOps(VXTEXTUREBLEND_DOTPRODUCT3);
+    TestCheck(ops.ColorOp == CKRST_TOP_DOTPRODUCT3 &&
+              ops.ColorArg2 == CKRST_TA_TFACTOR &&
+              ops.AlphaOp == CKRST_TOP_SELECTARG1 &&
+              ops.AlphaArg1 == CKRST_TA_CURRENT,
+              "DOTPRODUCT3 must use texture/tfactor color args and keep current alpha like Virtools DX9");
+
     TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
-              "MODULATEALPHA color op must modulate diffuse and texture color");
+              "MODULATEALPHA color op must stay ordinary modulation for Virtools 2D atlas compatibility");
+    TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATEMASK) == CKRST_TOP_MODULATE,
+              "MODULATEMASK color op must stay ordinary modulation for Virtools 2D atlas compatibility");
     TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_BLENDTEXTUREALPHA,
               "DECALALPHA color op must blend by texture alpha");
+    TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_DECALMASK) == CKRST_TOP_BLENDTEXTUREALPHA,
+              "DECALMASK color op must blend by texture alpha");
     TestCheck(CKFFLegacyTextureBlendToColorOp(VXTEXTUREBLEND_MODULATE) == CKRST_TOP_MODULATE,
               "MODULATE color op must remain multiplicative");
     TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_MODULATE) == CKRST_TOP_MODULATE,
               "MODULATE alpha op must preserve runtime material alpha by multiplying texture and current alpha");
     TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_MODULATEALPHA) == CKRST_TOP_MODULATE,
               "MODULATEALPHA alpha op must multiply texture and diffuse alpha");
-    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_SELECTARG2,
-              "DECALALPHA alpha op must keep diffuse/current alpha");
+    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECAL) == CKRST_TOP_SELECTARG1,
+              "DECAL alpha op must keep texture alpha available for alpha test");
+    TestCheck(CKFFLegacyTextureBlendToAlphaOp(VXTEXTUREBLEND_DECALALPHA) == CKRST_TOP_SELECTARG1,
+              "DECALALPHA alpha op must select diffuse alpha");
+}
+
+struct TestColor {
+    float R;
+    float G;
+    float B;
+    float A;
+};
+
+static bool Near(float a, float b) {
+    return std::fabs(a - b) < 0.0001f;
+}
+
+void Test_TextureBlend_ModulateAlphaMatchesVirtoolsDx9Modulate() {
+    const TestColor current = { 0.8f, 0.6f, 0.4f, 0.5f };
+
+    TestColor transparentBlack = { 0.0f, 0.0f, 0.0f, 0.0f };
+    TestColor result;
+    result.R = transparentBlack.R * current.R;
+    result.G = transparentBlack.G * current.G;
+    result.B = transparentBlack.B * current.B;
+    result.A = transparentBlack.A * current.A;
+    TestCheck(Near(result.R, 0.0f) && Near(result.G, 0.0f) && Near(result.B, 0.0f),
+              "Virtools DX9 MODULATEALPHA color path must not brighten transparent atlas texels");
+    TestCheck(Near(result.A, 0.0f), "Transparent color-key texels must still output zero alpha");
+
+    TestColor opaqueTexture = { 0.5f, 0.25f, 0.75f, 1.0f };
+    result.R = opaqueTexture.R * current.R;
+    result.G = opaqueTexture.G * current.G;
+    result.B = opaqueTexture.B * current.B;
+    result.A = opaqueTexture.A * current.A;
+    TestCheck(Near(result.R, current.R * opaqueTexture.R) &&
+              Near(result.G, current.G * opaqueTexture.G) &&
+              Near(result.B, current.B * opaqueTexture.B),
+              "Opaque MODULATEALPHA texels must match regular texture/current modulation");
+    TestCheck(Near(result.A, current.A), "Opaque MODULATEALPHA texels must preserve current alpha");
+}
+
+void Test_TextureBlend_ShaderOpsMatchDxvkFormulas() {
+    const std::string source = ReadRenderEngineSource("src\\shaders\\fs_ff_stage.sc");
+    TestCheck(source.find("if (op == 18) return clamp(a + vec4_splat(a.a) * b") != std::string::npos,
+              "MODULATEALPHA_ADDCOLOR must use arg1 alpha replicated across all components");
+    TestCheck(source.find("if (op == 19) return clamp(a * b + vec4_splat(a.a)") != std::string::npos,
+              "MODULATECOLOR_ADDALPHA must add replicated arg1 alpha");
+    TestCheck(source.find("if (op == 21) return clamp((vec4_splat(1.0) - a) * b + vec4_splat(a.a)") != std::string::npos,
+              "MODULATEINVCOLOR_ADDALPHA must complement arg1 color and add replicated arg1 alpha");
+    TestCheck(source.find("op == 27") == std::string::npos,
+              "Legacy VXTEXTUREBLEND modes must not add non-D3D shader ops for 2D atlas compatibility");
 }
 
 void Test_TextureStageBlend_MultiplicativeChannelMapsToModulate() {
@@ -658,6 +751,8 @@ int main() {
     tests.Run("Draw state color write mask", &Test_DrawState_ColorWriteMaskCanDisableColorWrites);
     tests.Run("Draw state stencil render states", &Test_DrawState_StencilRenderStatesBuildStencilOps);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
+    tests.Run("Texture blend MODULATEALPHA Virtools DX9 contract", &Test_TextureBlend_ModulateAlphaMatchesVirtoolsDx9Modulate);
+    tests.Run("Texture blend shader op formulas", &Test_TextureBlend_ShaderOpsMatchDxvkFormulas);
     tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
     tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
