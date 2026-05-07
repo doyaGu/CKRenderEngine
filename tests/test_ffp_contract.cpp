@@ -826,7 +826,7 @@ void Test_ShaderEvaluator_CoversDxvkStageOps() {
               shader.find("previousColorOp == 23") != std::string::npos,
               "Shader evaluator must perturb the next stage for BUMPENVMAP and apply luminance for BUMPENVMAPLUMINANCE");
     TestCheck(shader.find("if (op == 25) return clamp(a * b + c") != std::string::npos &&
-              shader.find("if (op == 26) return clamp(a * c + (1.0 - a) * b") != std::string::npos,
+              shader.find("if (op == 26) return clamp(c * a + (vec4_splat(1.0) - c) * b") != std::string::npos,
               "Shader evaluator must implement MULTIPLYADD and LERP with ARG0 input");
 }
 
@@ -908,6 +908,23 @@ void Test_PointSprite_PointListExpandsToTexturedQuads() {
 }
 
 void Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes() {
+    float scaled = CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        8.0f, 1.0f, 64.0f, TRUE, 0.0f, 1.0f, 0.0f, 4.0f);
+    TestCheck(fabs(scaled - 4.0f) < 0.0001f,
+              "Point scale helper must use size / sqrt(A + B*d + C*d*d)");
+    scaled = CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        8.0f, 1.0f, 64.0f, TRUE, -1.0f, 0.0f, 0.0f, 4.0f);
+    TestCheck(fabs(scaled - 8.0f) < 0.0001f,
+              "Point scale helper must ignore invalid denominators instead of producing NaN");
+    scaled = CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        100.0f, 2.0f, 16.0f, FALSE, 1.0f, 0.0f, 0.0f, 0.0f);
+    TestCheck(fabs(scaled - 16.0f) < 0.0001f,
+              "Point scale helper must clamp to POINTSIZE_MAX");
+    scaled = CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        0.0f, 2.0f, 16.0f, FALSE, 1.0f, 0.0f, 0.0f, 0.0f);
+    TestCheck(fabs(scaled - 2.0f) < 0.0001f,
+              "Point scale helper must apply D3D-style default size before POINTSIZE_MIN clamp");
+
     std::string drawState = ReadRenderEngineSource("src/CKDrawStateCache.cpp");
     TestCheck(drawState.find("VXRENDERSTATE_POINTSCALE_A") != std::string::npos &&
               drawState.find("VXRENDERSTATE_POINTSCALE_B") != std::string::npos &&
@@ -921,7 +938,7 @@ void Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes() {
               "FFP draw must pass point size clamp and attenuation state to transient geometry");
 
     std::string transient = ReadRenderEngineSource("src/CKTransientGeometry.cpp");
-    TestCheck(transient.find("denomSq = params.ScaleA + params.ScaleB * distance + params.ScaleC * distance * distance") != std::string::npos &&
+    TestCheck(transient.find("denomSq = scaleA + scaleB * distance + scaleC * distance * distance") != std::string::npos &&
               transient.find("if (denomSq > 0.000001f)") != std::string::npos &&
               transient.find("sqrtf(denomSq)") != std::string::npos,
               "Point sprite size must use the D3D distance attenuation formula without producing NaN for invalid denominators");
