@@ -1376,14 +1376,10 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     TestCheck(ReadRenderEngineSource("src/CKFFSpecializationInfo.h").find("SetDwords") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFSpecializationInfo.cpp").find("memcpy(m_Data") != std::string::npos,
               "Generated full-specialized module entries must be able to preserve their exact 10-dword FFP specialization payload");
-    TestCheck(rootCmake.find("option(CKRE_FFP_VARIANTS") != std::string::npos &&
-              srcCmake.find("CKRE_FFP_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_VARIANTS}>,1,0>") != std::string::npos,
-              "RenderEngine CMake must expose and propagate the FFP variant clean-break option");
-    TestCheck(cacheSource.find("#ifndef CKRE_FFP_VARIANTS") != std::string::npos &&
-              cacheSource.find("#define CKRE_FFP_VARIANTS 1") != std::string::npos &&
-              cacheSource.find("#if !CKRE_FFP_VARIANTS") != std::string::npos &&
-              cacheSource.find("clean-break pure FFP variant pipeline") != std::string::npos,
-              "CKRE_FFP_VARIANTS must default on and OFF must fail explicitly instead of implying an old fixed-program fallback");
+    TestCheck(rootCmake.find("CKRE_FFP_VARIANTS") == std::string::npos &&
+              srcCmake.find("CKRE_FFP_VARIANTS") == std::string::npos &&
+              cacheSource.find("CKRE_FFP_VARIANTS") == std::string::npos,
+              "FFP variants are the only supported pipeline and must not expose an impossible disable option");
 }
 
 class ScopedEnvVar {

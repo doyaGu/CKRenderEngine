@@ -20,14 +20,6 @@
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 
-#ifndef CKRE_FFP_VARIANTS
-#define CKRE_FFP_VARIANTS 1
-#endif
-
-#if !CKRE_FFP_VARIANTS
-#error "CKRE_FFP_VARIANTS=OFF is unsupported by the clean-break pure FFP variant pipeline"
-#endif
-
 namespace {
 
 struct CKFFShaderBlobSet {
