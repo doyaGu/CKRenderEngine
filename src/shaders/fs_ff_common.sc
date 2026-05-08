@@ -20,13 +20,19 @@ bool ckffSpecIsOptimized()
 
 int ckffSpecDword(int index)
 {
-    return int(u_ffSpec[index].x);
+    vec4 b = u_ffSpec[index];
+    return int(b.x) | (int(b.y) << 8) | (int(b.z) << 16) | (int(b.w) << 24);
 }
 
 int ckffSpecBits(int word, int offset, int bits)
 {
     int mask = (1 << bits) - 1;
     return (word >> offset) & mask;
+}
+
+int ckffUnpackSpecArg(int arg)
+{
+    return (arg & 0x7) | ((arg & 0x18) << 1);
 }
 
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
@@ -47,11 +53,11 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     if (stage < 4 && ckffSpecIsOptimized()) {
         int word = ckffSpecDword(6 + stage);
         params.ColorOp = ckffSpecBits(word, 0, 5);
-        params.ColorArg1 = ckffSpecBits(word, 5, 5);
-        params.ColorArg2 = ckffSpecBits(word, 10, 5);
+        params.ColorArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 5, 5));
+        params.ColorArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 10, 5));
         params.AlphaOp = ckffSpecBits(word, 15, 5);
-        params.AlphaArg1 = ckffSpecBits(word, 20, 5);
-        params.AlphaArg2 = ckffSpecBits(word, 25, 5);
+        params.AlphaArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 20, 5));
+        params.AlphaArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 25, 5));
         params.ResultArg = ckffSpecBits(word, 30, 1) != 0 ? 5 : 1;
     }
 

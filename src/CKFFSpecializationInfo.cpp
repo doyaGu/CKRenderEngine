@@ -62,6 +62,14 @@ CKDWORD CKFFSpecializationInfo::Get(CKFFSpecConstantId id) const {
     return (m_Data[layout.DwordOffset] & mask) >> layout.BitOffset;
 }
 
+void CKFFSpecializationInfo::SetOptimized(bool optimized) {
+    m_Data[0] = optimized ? 1u : 0u;
+}
+
+bool CKFFSpecializationInfo::IsOptimized() const {
+    return m_Data[0] != 0;
+}
+
 CKDWORD CKFFSpecializationInfo::RepackArg(CKDWORD arg) {
     return (arg & 0b111u) | ((arg & 0b110000u) >> 1u);
 }

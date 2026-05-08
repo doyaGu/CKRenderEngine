@@ -160,6 +160,7 @@ CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBound
 
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     CKFFSpecializationInfo info;
+    info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
     info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
 

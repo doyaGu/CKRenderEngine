@@ -1246,8 +1246,12 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     float ffSpec[CKFFSpecializationInfo::MaxSpecDwords][4] = {};
     const CKDWORD *specDwords = m_CurrentSpecializationInfo.Data();
-    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i)
-        ffSpec[i][0] = (float)specDwords[i];
+    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
+        ffSpec[i][0] = (float)(specDwords[i] & 0xFFu);
+        ffSpec[i][1] = (float)((specDwords[i] >> 8) & 0xFFu);
+        ffSpec[i][2] = (float)((specDwords[i] >> 16) & 0xFFu);
+        ffSpec[i][3] = (float)((specDwords[i] >> 24) & 0xFFu);
+    }
     encoder->SetUniform(u.u_ffSpec, ffSpec, CKFFSpecializationInfo::MaxSpecDwords);
 
     float clipPlanes[6][4] = {};

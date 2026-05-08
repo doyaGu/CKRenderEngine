@@ -56,6 +56,8 @@ public:
 
     void Set(CKFFSpecConstantId id, CKDWORD value);
     CKDWORD Get(CKFFSpecConstantId id) const;
+    void SetOptimized(bool optimized);
+    bool IsOptimized() const;
 
     const CKDWORD *Data() const { return m_Data; }
     CKDWORD DwordCount() const { return MaxSpecDwords; }
