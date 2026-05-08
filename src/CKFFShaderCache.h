@@ -8,6 +8,10 @@
 
 #include <unordered_map>
 
+#ifndef CKRE_FFP_VARIANT_CAPTURE
+#define CKRE_FFP_VARIANT_CAPTURE 0
+#endif
+
 class CKRasterizerContext;
 
 enum CKFFShaderMode {
@@ -42,10 +46,14 @@ private:
     CKShaderTargetDesc m_Target;
     const void *m_BlobSet;
     bool m_UseUberShader;
+#if CKRE_FFP_VARIANT_CAPTURE
     CKDWORD m_VariantLogLimit;
     CKDWORD m_VariantLogCount;
+#endif
     std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_ProgramCache;
+#if CKRE_FFP_VARIANT_CAPTURE
     std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_VariantStats;
+#endif
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;

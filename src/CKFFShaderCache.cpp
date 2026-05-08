@@ -63,6 +63,7 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
+#if CKRE_FFP_VARIANT_CAPTURE
 CKDWORD ReadEnvDword(const char *name, CKDWORD fallback)
 {
     const char *value = std::getenv(name);
@@ -94,11 +95,51 @@ void LogVariantSpecDwords(const CKFFSpecializationInfo &spec)
                d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
 }
 
+void LogVariantManifestStage(CKDWORD stage, const CKFFShaderKeyFSStage &s)
+{
+    CK_LOG_RAW("          {");
+    CK_LOG_RAW_FMT("            \"colorOp\": %u,", s.ColorOp);
+    CK_LOG_RAW_FMT("            \"colorArg0\": %u,", s.ColorArg0);
+    CK_LOG_RAW_FMT("            \"colorArg1\": %u,", s.ColorArg1);
+    CK_LOG_RAW_FMT("            \"colorArg2\": %u,", s.ColorArg2);
+    CK_LOG_RAW_FMT("            \"alphaOp\": %u,", s.AlphaOp);
+    CK_LOG_RAW_FMT("            \"alphaArg0\": %u,", s.AlphaArg0);
+    CK_LOG_RAW_FMT("            \"alphaArg1\": %u,", s.AlphaArg1);
+    CK_LOG_RAW_FMT("            \"alphaArg2\": %u,", s.AlphaArg2);
+    CK_LOG_RAW_FMT("            \"resultIsTemp\": %s", s.ResultIsTemp ? "true" : "false");
+    CK_LOG_RAW_FMT("          }%s", stage + 1u < CKFF_STATE_DESC_TEXTURE_STAGES ? "," : "");
+}
+
+void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
+{
+    CK_LOG_RAW("FFP_VARIANT_MANIFEST_CANDIDATE_BEGIN");
+    CK_LOG_RAW("    {");
+    CK_LOG_RAW_FMT("      \"name\": \"captured_%u\",", index);
+    CK_LOG_RAW_FMT("      \"vs\": \"%s\",", key.VS.GetHasPositionT() ? "positiont" : "3d");
+    CK_LOG_RAW("      \"key\": {");
+    CK_LOG_RAW_FMT("        \"vsBits\": %llu,", (unsigned long long)key.VS.Bits);
+    CK_LOG_RAW_FMT("        \"vsTexGen\": [%u, %u, %u, %u, %u, %u, %u, %u],",
+                   key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
+                   key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
+    CK_LOG_RAW_FMT("        \"lastActiveTextureStage\": %u,", key.FS.LastActiveTextureStage);
+    CK_LOG_RAW_FMT("        \"globalSpecularEnable\": %s,", key.FS.GlobalSpecularEnable ? "true" : "false");
+    CK_LOG_RAW("        \"stages\": [");
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        LogVariantManifestStage(stage, key.FS.Stages[stage]);
+    CK_LOG_RAW("        ]");
+    CK_LOG_RAW("      }");
+    CK_LOG_RAW("    }");
+    CK_LOG_RAW("FFP_VARIANT_MANIFEST_CANDIDATE_END");
+}
+#endif
+
 } // namespace
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(true),
+#if CKRE_FFP_VARIANT_CAPTURE
       m_VariantLogLimit(0), m_VariantLogCount(0),
+#endif
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
@@ -112,9 +153,11 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
                                  _stricmp(uber, "false") == 0 ||
                                  _stricmp(uber, "off") == 0 ||
                                  _stricmp(uber, "no") == 0));
+#if CKRE_FFP_VARIANT_CAPTURE
     m_VariantLogLimit = ReadEnvDword("CK2_FFP_VARIANT_LOG_LIMIT", 0);
     m_VariantLogCount = 0;
     m_VariantStats.clear();
+#endif
     CreateUniforms();
     ResolveShaderTarget();
 }
@@ -127,7 +170,9 @@ void CKFFShaderCache::Shutdown() {
         }
         m_ProgramCache.clear();
     }
+#if CKRE_FFP_VARIANT_CAPTURE
     m_VariantStats.clear();
+#endif
     m_Context = nullptr;
     m_BlobSet = nullptr;
 }
@@ -280,6 +325,7 @@ CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
 }
 
 void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
+#if CKRE_FFP_VARIANT_CAPTURE
     CKDWORD &count = m_VariantStats[key];
     ++count;
 
@@ -300,6 +346,10 @@ void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         LogVariantStage(stage, key.FS.Stages[stage]);
     LogVariantSpecDwords(spec);
+    LogVariantManifestCandidate(m_VariantLogCount, key);
+#else
+    (void)key;
+#endif
 }
 
 CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
