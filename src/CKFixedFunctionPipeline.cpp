@@ -799,54 +799,18 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     encoder->SetUniform(u.u_viewport, m_Viewport, 1);
 
-    float stageParams[CKFF_MAX_TEXTURE_STAGES * 4][4];
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const bool stageActive = stage < m_CurrentActiveTextureCount;
-        const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
-        stageParams[stage * 4 + 0][0] = (float)CKFFResolveStageColorOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 4 + 0][1] = (float)CKFFResolveStageColorArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 4 + 0][2] = (float)CKFFResolveStageColorArg2(m_StageStates[stage]);
-        stageParams[stage * 4 + 0][3] = hasTexture ? 1.0f : 0.0f;
-        stageParams[stage * 4 + 1][0] = (float)CKFFResolveStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 4 + 1][1] = (float)CKFFResolveStageAlphaArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 4 + 1][2] = (float)CKFFResolveStageAlphaArg2(m_StageStates[stage]);
-        stageParams[stage * 4 + 1][3] = (float)CKFFResolveStageResultArg(m_StageStates[stage]);
-        stageParams[stage * 4 + 2][0] = (float)CKFFResolveStageColorArg0(m_StageStates[stage]);
-        stageParams[stage * 4 + 2][1] = (float)m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
-        stageParams[stage * 4 + 2][2] = (float)m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
-        stageParams[stage * 4 + 2][3] = 0.0f;
-        stageParams[stage * 4 + 3][0] = (float)CKFFResolveStageAlphaArg0(m_StageStates[stage]);
-        stageParams[stage * 4 + 3][1] = 0.0f;
-        stageParams[stage * 4 + 3][2] = 0.0f;
-        stageParams[stage * 4 + 3][3] = 0.0f;
-    }
-    encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 4);
+    CKFFStageParamsUniform stageParams;
+    CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
+    encoder->SetUniform(u.u_stageParams, stageParams.Values, CKFF_MAX_TEXTURE_STAGES * 4);
 
-    float ffSpec[CKFFSpecializationInfo::MaxSpecDwords][4] = {};
-    const CKDWORD *specDwords = m_CurrentSpecializationInfo.Data();
-    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
-        ffSpec[i][0] = (float)(specDwords[i] & 0xFFu);
-        ffSpec[i][1] = (float)((specDwords[i] >> 8) & 0xFFu);
-        ffSpec[i][2] = (float)((specDwords[i] >> 16) & 0xFFu);
-        ffSpec[i][3] = (float)((specDwords[i] >> 24) & 0xFFu);
-    }
-    encoder->SetUniform(u.u_ffSpec, ffSpec, CKFFSpecializationInfo::MaxSpecDwords);
+    CKFFSpecUniform ffSpec;
+    CKFFPackSpecializationDwords(m_CurrentSpecializationInfo, ffSpec);
+    encoder->SetUniform(u.u_ffSpec, ffSpec.Values, CKFFSpecializationInfo::MaxSpecDwords);
 
-    float clipPlanes[6][4] = {};
-    int clipCount = 0;
-    CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
-    for (int i = 0; i < 6; ++i) {
-        if ((clipMask & (1u << i)) == 0)
-            continue;
-        clipPlanes[clipCount][0] = m_UserClipPlanes[i].m_Normal.x;
-        clipPlanes[clipCount][1] = m_UserClipPlanes[i].m_Normal.y;
-        clipPlanes[clipCount][2] = m_UserClipPlanes[i].m_Normal.z;
-        clipPlanes[clipCount][3] = m_UserClipPlanes[i].m_D;
-        ++clipCount;
-    }
-    float clipParams[4] = {(float)clipCount, 0.0f, 0.0f, 0.0f};
-    encoder->SetUniform(u.u_clipPlanes, clipPlanes, 6);
-    encoder->SetUniform(u.u_clipParams, clipParams, 1);
+    CKFFClipPlaneUniform clip;
+    CKFFPackClipPlaneUniforms(m_UserClipPlanes, m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE), clip);
+    encoder->SetUniform(u.u_clipPlanes, clip.Planes, 6);
+    encoder->SetUniform(u.u_clipParams, clip.Params, 1);
 
     m_DirtyFlags = 0;
 }
