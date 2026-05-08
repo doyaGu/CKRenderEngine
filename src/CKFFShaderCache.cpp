@@ -1,4 +1,5 @@
 #include "CKFFShaderCache.h"
+#include "CKFFSpecializedModuleTable.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
 
@@ -243,7 +244,15 @@ CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
 }
 
 CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
-    (void)key;
+    CKFFSpecializedModule module;
+    if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
+        return CreateProgramFromBinary(
+            m_Target,
+            module.VSData, module.VSSize,
+            module.FSData, module.FSSize,
+            module.Specialization);
+    }
+
     CK_LOG_FMT("ShaderCache",
                "Full FFP specialized module cache miss: no generated module table is available for CK2_FFP_UBERSHADER=0");
     return 0;
