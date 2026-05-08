@@ -2853,6 +2853,30 @@ void Test_FFPUniformStateHelpers_AreCentralized() {
               "CKFFUniformState must be part of the RenderEngine internal build inputs");
 }
 
+void Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string stageHeader = ReadRenderEngineSource("src/CKFFStageState.h");
+    std::string stageSource = ReadRenderEngineSource("src/CKFFStageState.cpp");
+
+    TestCheck(stageHeader.find("CKFFResolveActiveTextureCount") != std::string::npos &&
+              stageHeader.find("CKFFBuildSamplerDesc") != std::string::npos,
+              "CKFFStageState must expose FFP active texture count and sampler descriptor helpers");
+    TestCheck(stageSource.find("CKFFResolveActiveTextureCount") != std::string::npos &&
+              stageSource.find("CKFFBuildSamplerDesc") != std::string::npos &&
+              stageSource.find("VXTEXTUREFILTER_MIPLINEAR") != std::string::npos &&
+              stageSource.find("CKFFTranslateAddressMode") != std::string::npos,
+              "CKFFStageState must own sampler filter and address mode translation");
+    TestCheck(pipeline.find("CKFFResolveActiveTextureCount(") != std::string::npos &&
+              pipeline.find("CKFFActiveTextureCountFromDPFlags(data->Flags);\n    for (int stage = 0;") == std::string::npos &&
+              pipeline.find("CKFFActiveTextureCountFromDPFlags(dpFlags);\n    for (int stage = 0;") == std::string::npos,
+              "FFP pipeline draw paths must not duplicate active texture count scanning");
+    TestCheck(pipeline.find("case VXTEXTUREFILTER_MIPLINEAR") == std::string::npos &&
+              pipeline.find("case VXTEXTUREFILTER_LINEARMIPNEAREST") == std::string::npos &&
+              pipeline.find("case VXTEXTUREFILTER_ANISOTROPIC") == std::string::npos &&
+              pipeline.find("CKFFBuildSamplerDesc(m_StageStates[stage])") != std::string::npos,
+              "FFP pipeline sampler method must delegate filter translation to CKFFStageState");
+}
+
 void Test_DebugLogger_HasGlobalOutputDisableOption() {
     std::string header = ReadRenderEngineSource("src/CKDebugLogger.h");
     std::string source = ReadRenderEngineSource("src/CKDebugLogger.cpp");
@@ -3019,6 +3043,7 @@ int main() {
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);
+    tests.Run("FFP stage state owns sampler and active texture helpers", &Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers);
     tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();
 }

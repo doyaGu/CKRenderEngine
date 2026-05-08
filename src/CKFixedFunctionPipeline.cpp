@@ -407,15 +407,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
 
     // Build the fixed-function state description and select the matching program.
-    m_CurrentActiveTextureCount = CKFFActiveTextureCountFromDPFlags(data->Flags);
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKDWORD op = m_StageStates[stage][CKRST_TSS_OP];
-        if (m_TextureHandles[stage] != 0 ||
-            (op != 0 && op != CKRST_TOP_DISABLE)) {
-            if (m_CurrentActiveTextureCount < stage + 1)
-                m_CurrentActiveTextureCount = stage + 1;
-        }
-    }
+    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(data->Flags, m_TextureHandles, m_StageStates);
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
     SetCurrentShaderKey(shaderKey);
@@ -501,15 +493,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         return;
     }
 
-    m_CurrentActiveTextureCount = CKFFActiveTextureCountFromDPFlags(dpFlags);
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKDWORD op = m_StageStates[stage][CKRST_TSS_OP];
-        if (m_TextureHandles[stage] != 0 ||
-            (op != 0 && op != CKRST_TOP_DISABLE)) {
-            if (m_CurrentActiveTextureCount < stage + 1)
-                m_CurrentActiveTextureCount = stage + 1;
-        }
-    }
+    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
     SetCurrentShaderKey(shaderKey);
@@ -879,70 +863,9 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
-    CKSamplerDesc desc;
-    memset(&desc, 0, sizeof(desc));
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
-        return desc;
-
-    CKDWORD mag = m_StageStates[stage][CKRST_TSS_MAGFILTER];
-    CKDWORD min = m_StageStates[stage][CKRST_TSS_MINFILTER];
-    CKDWORD addr = m_StageStates[stage][CKRST_TSS_ADDRESS];
-    CKDWORD addrU = m_StageStates[stage][CKRST_TSS_ADDRESSU];
-    CKDWORD addrV = m_StageStates[stage][CKRST_TSS_ADDRESSV];
-    CKDWORD addrW = m_StageStates[stage][CKRST_TSS_ADDRESW];
-
-    // Filter mode translation (VXTEXTUREFILTER -> CK_FILTER_MODE)
-    // VXTEXTUREFILTER: 1=NEAREST, 2=LINEAR, 3=MIPNEAREST, 4=MIPLINEAR, 5=LINEARMIPNEAREST, 6=LINEARMIPLINEAR
-    switch (mag) {
-    case VXTEXTUREFILTER_NEAREST:
-        desc.MagFilter = CKRST_FILTER_NEAREST;
-        break;
-    case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
-        break;
-    default:
-        desc.MagFilter = CKRST_FILTER_LINEAR;
-        break;
-    }
-
-    switch (min) {
-    case VXTEXTUREFILTER_NEAREST:
-    case VXTEXTUREFILTER_MIPNEAREST:
-        desc.MinFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = CKRST_FILTER_NEAREST;
-        break;
-    case VXTEXTUREFILTER_MIPLINEAR:
-        desc.MinFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = CKRST_FILTER_LINEAR;
-        break;
-    case VXTEXTUREFILTER_LINEARMIPNEAREST:
-        desc.MinFilter = CKRST_FILTER_LINEAR;
-        desc.MipFilter = CKRST_FILTER_NEAREST;
-        break;
-    case VXTEXTUREFILTER_LINEARMIPLINEAR:
-        desc.MinFilter = CKRST_FILTER_LINEAR;
-        desc.MipFilter = CKRST_FILTER_LINEAR;
-        break;
-    case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
-        break;
-    case VXTEXTUREFILTER_LINEAR:
-    default:
-        desc.MinFilter = CKRST_FILTER_LINEAR;
-        desc.MipFilter = CKRST_FILTER_LINEAR;
-        break;
-    }
-
-    CK_ADDRESS_MODE translateAddr = CKFFTranslateAddressMode(addr);
-    desc.AddressU = (addrU != 0) ? CKFFTranslateAddressMode(addrU) : translateAddr;
-    desc.AddressV = (addrV != 0) ? CKFFTranslateAddressMode(addrV) : translateAddr;
-    desc.AddressW = (addrW != 0) ? CKFFTranslateAddressMode(addrW) : translateAddr;
-
-    desc.BorderColor = m_StageStates[stage][CKRST_TSS_BORDERCOLOR];
-    desc.CompareFunc = CKRST_COMPARE_NONE;
-
-    return desc;
+        return CKFFBuildSamplerDesc(nullptr);
+    return CKFFBuildSamplerDesc(m_StageStates[stage]);
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
