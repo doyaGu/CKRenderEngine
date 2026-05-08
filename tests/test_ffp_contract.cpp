@@ -1248,15 +1248,17 @@ void Test_FFPShaderKey_UsesDxvkFFPStageRules() {
 
 void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
     CKFFSpecializationInfo info;
+    info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, 3);
     info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, 1);
     info.Set(CKFF_SPEC_STAGE0_COLOR_OP, CKRST_TOP_LERP);
     info.Set(CKFF_SPEC_STAGE0_COLOR_ARG1, CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE);
     info.Set(CKFF_SPEC_STAGE0_RESULT_IS_TEMP, 1);
 
-    TestCheck(info.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 3 &&
+    TestCheck(info.IsOptimized() &&
+              info.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 3 &&
               info.Data()[4] == (3u << 16),
-              "FFP specialization layout must pack LastActiveTextureStage into DXVK dword 4 bits 16..18");
+              "FFP specialization layout must mark optimized mode and pack LastActiveTextureStage into DXVK dword 4 bits 16..18");
     TestCheck(info.Get(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED) == 1 &&
               (info.Data()[6] & (1u << 31)) != 0,
               "FFP specialization layout must pack GlobalSpecularEnabled into DXVK dword 6 bit 31");
@@ -1266,6 +1268,19 @@ void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
     TestCheck(CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE) ==
               ((CKRST_TA_TEXTURE & 0b111u) | ((CKRST_TA_ALPHAREPLICATE & 0b110000u) >> 1u)),
               "FFP specialization arg packing must match DXVK repackArg");
+
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE);
+    desc.SetStageColorArg2(0, CKRST_TA_CURRENT | CKRST_TA_COMPLEMENT);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_DIFFUSE);
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1);
+    CKFFSpecializationInfo built = CKFFBuildSpecializationInfo(key);
+    TestCheck(built.IsOptimized() &&
+              built.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) == CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE) &&
+              built.Get(CKFF_SPEC_STAGE0_COLOR_ARG2) == CKFFSpecializationInfo::RepackArg(CKRST_TA_CURRENT | CKRST_TA_COMPLEMENT),
+              "Built FFP specialization info must enable optimized mode and pack modifier args for shader-side unpacking");
 }
 
 void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
@@ -1314,8 +1329,9 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
               "Fragment shader must split FFP stage decoding into a common DXVK-style helper");
     TestCheck(shader.find("uniform vec4 u_ffSpec[10]") != std::string::npos &&
               common.find("stage < 4 && ckffSpecIsOptimized()") != std::string::npos &&
-              common.find("ckffSpecDword(6 + stage)") != std::string::npos,
-              "Fragment shader must expose the DXVK-style first-four-stage specialization reader");
+              common.find("ckffSpecDword(6 + stage)") != std::string::npos &&
+              common.find("ckffUnpackSpecArg") != std::string::npos,
+              "Fragment shader must expose the DXVK-style first-four-stage specialization reader and unpack repacked args");
     TestCheck(shader.find("ckffReadStageParams(stage") != std::string::npos &&
               shader.find("stageParams.ResultArg") != std::string::npos,
               "Fragment shader main loop must consume decoded FFP stage params instead of raw uniform fields");
@@ -1323,8 +1339,9 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
               pipeline.find("m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS)") != std::string::npos &&
+              pipeline.find("specDwords[i] >> 24") != std::string::npos &&
               pipeline.find("encoder->SetUniform(u.u_ffSpec") != std::string::npos,
-              "FFP uniform table must bind the current draw's DXVK-style specialization mirror");
+              "FFP uniform table must bind the current draw's DXVK-style specialization mirror as byte-exact float lanes");
 }
 
 void Test_FFPStateDesc_FeedsExplicitVariantKey() {
