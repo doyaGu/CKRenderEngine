@@ -284,7 +284,7 @@ void Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics() {
     TestCheck(source.find("mul(u_texMatrix[stage], coord)") != std::string::npos,
               "Texture matrix transform must use the bgfx/VxMatrix convention that preserves D3D row-vector translation");
     TestCheck(source.find("vec3 refl = reflect(eye, viewNormal)") != std::string::npos,
-              "Camera-space reflection vector must follow dxvk/D3D FFP reflect(viewPosition, normal) semantics");
+              "Camera-space reflection vector must follow D3D FFP reflect(viewPosition, normal) semantics");
     TestCheck(source.find("return vec4(selectTexcoord(index & 7") != std::string::npos &&
               source.find(", 0.0, 0.0)") != std::string::npos,
               "Pass-through texcoords must use D3D FFP padding before texture matrix transforms");
@@ -711,7 +711,7 @@ void Test_TextureBlend_ModulateAlphaMatchesVirtoolsDx9Modulate() {
     TestCheck(Near(result.A, current.A), "Opaque MODULATEALPHA texels must preserve current alpha");
 }
 
-void Test_TextureBlend_ShaderOpsMatchDxvkFormulas() {
+void Test_TextureBlend_ShaderOpsMatchFFPFormulas() {
     const std::string source = ReadRenderEngineSource("src\\shaders\\fs_ff_stage.sc");
     TestCheck(source.find("if (op == 18) return clamp(a + vec4_splat(a.a) * b") != std::string::npos,
               "MODULATEALPHA_ADDCOLOR must use arg1 alpha replicated across all components");
@@ -1126,7 +1126,7 @@ void Test_ShaderEvaluator_Dot3MatchesD3DFFP() {
               "DOTPRODUCT3 must write the full result vector instead of preserving a separate alpha path");
 }
 
-void Test_ShaderEvaluator_CoversDxvkStageOps() {
+void Test_ShaderEvaluator_CoversFFPStageOps() {
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
     TestCheck(shader.find("else if (baseArg == 5) value = temp") != std::string::npos &&
               shader.find("if (resultArg == 5)") != std::string::npos,
@@ -1143,7 +1143,7 @@ void Test_ShaderEvaluator_CoversDxvkStageOps() {
               "Shader evaluator must implement MULTIPLYADD and LERP with ARG0 input");
 }
 
-void Test_TextureOpEvaluator_MatchesDxvkFormulas() {
+void Test_TextureOpEvaluator_MatchesFFPFormulas() {
     const VxColor arg0(0.25f, 0.50f, 0.75f, 0.25f);
     const VxColor arg1(0.20f, 0.40f, 0.60f, 0.25f);
     const VxColor arg2(0.80f, 0.50f, 0.25f, 0.50f);
@@ -1203,19 +1203,19 @@ void Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics() {
               "Unknown shader semantics must stay visibly untested");
 }
 
-void Test_FFPShaderKey_UsesDxvkFFPStageRules() {
+void Test_FFPShaderKey_UsesFixedFunctionStageRules() {
     TestCheck(CKFFShaderKeyArgsMask(CKRST_TOP_DISABLE) == 0b000u,
-              "DXVK FFP key ArgsMask must disable all args for DISABLE");
+              "FFP key ArgsMask must disable all args for DISABLE");
     TestCheck(CKFFShaderKeyArgsMask(CKRST_TOP_SELECTARG1) == 0b010u &&
               CKFFShaderKeyArgsMask(CKRST_TOP_PREMODULATE) == 0b010u,
-              "DXVK FFP key ArgsMask must read only arg1 for SELECTARG1/PREMODULATE");
+              "FFP key ArgsMask must read only arg1 for SELECTARG1/PREMODULATE");
     TestCheck(CKFFShaderKeyArgsMask(CKRST_TOP_SELECTARG2) == 0b100u,
-              "DXVK FFP key ArgsMask must read only arg2 for SELECTARG2");
+              "FFP key ArgsMask must read only arg2 for SELECTARG2");
     TestCheck(CKFFShaderKeyArgsMask(CKRST_TOP_MULTIPLYADD) == 0b111u &&
               CKFFShaderKeyArgsMask(CKRST_TOP_LERP) == 0b111u,
-              "DXVK FFP key ArgsMask must read arg0/arg1/arg2 for MULTIPLYADD/LERP");
+              "FFP key ArgsMask must read arg0/arg1/arg2 for MULTIPLYADD/LERP");
     TestCheck(CKFFShaderKeyArgsMask(CKRST_TOP_MODULATE) == 0b110u,
-              "DXVK FFP key ArgsMask default must read arg1/arg2");
+              "FFP key ArgsMask default must read arg1/arg2");
 
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_MODULATE);
@@ -1226,7 +1226,7 @@ void Test_FFPShaderKey_UsesDxvkFFPStageRules() {
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0);
     TestCheck(key.Stages[0].ColorOp == CKRST_TOP_DISABLE &&
               key.LastActiveTextureStage == 0,
-              "DXVK FFP key must truncate the stage chain when a used TEXTURE arg has no bound texture");
+              "FFP key must truncate the stage chain when a used TEXTURE arg has no bound texture");
 
     desc = CKFFFSStateDesc();
     desc.SetStageColorOp(0, CKRST_TOP_MODULATE);
@@ -1237,17 +1237,17 @@ void Test_FFPShaderKey_UsesDxvkFFPStageRules() {
     key = CKFFBuildShaderKeyFS(desc, 0);
     TestCheck(key.Stages[0].AlphaOp == CKRST_TOP_SELECTARG1 &&
               key.Stages[0].AlphaArg1 == CKRST_TA_DIFFUSE,
-              "DXVK FFP key must apply the stage0 TEMP color / disabled alpha fixup");
+              "FFP key must apply the stage0 TEMP color / disabled alpha fixup");
     TestCheck(!key.Stages[0].ResultIsTemp,
-              "DXVK FFP key must force the final active stage to write CURRENT");
+              "FFP key must force the final active stage to write CURRENT");
 
     desc.SetSpecularAdd(true);
     key = CKFFBuildShaderKeyFS(desc, 0);
     TestCheck(key.GlobalSpecularEnable,
-              "DXVK FFP key must preserve global specular add state");
+              "FFP key must preserve global specular add state");
 }
 
-void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
+void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
     CKFFSpecializationInfo info;
     info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, 3);
@@ -1259,16 +1259,16 @@ void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
     TestCheck(info.IsOptimized() &&
               info.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 3 &&
               info.Data()[4] == (3u << 16),
-              "FFP specialization layout must mark optimized mode and pack LastActiveTextureStage into DXVK dword 4 bits 16..18");
+              "FFP specialization layout must mark optimized mode and pack LastActiveTextureStage into specialization dword 4 bits 16..18");
     TestCheck(info.Get(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED) == 1 &&
               (info.Data()[6] & (1u << 31)) != 0,
-              "FFP specialization layout must pack GlobalSpecularEnabled into DXVK dword 6 bit 31");
+              "FFP specialization layout must pack GlobalSpecularEnabled into specialization dword 6 bit 31");
     TestCheck(info.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_LERP &&
               info.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
               "FFP specialization layout must round-trip stage 0 op/result fields");
     TestCheck(CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE) ==
               ((CKRST_TA_TEXTURE & 0b111u) | ((CKRST_TA_ALPHAREPLICATE & 0b110000u) >> 1u)),
-              "FFP specialization arg packing must match DXVK repackArg");
+              "FFP specialization arg packing must match FFP specialization repackArg");
 
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_MODULATE);
@@ -1284,7 +1284,7 @@ void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
               "Built FFP specialization info must enable optimized mode and pack modifier args for shader-side unpacking");
 }
 
-void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
+void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
     std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
     std::string moduleHeader = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.h");
@@ -1299,17 +1299,17 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
 
     TestCheck(cacheHeader.find("CKDWORD GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
               cacheHeader.find("unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash>") != std::string::npos,
-              "FFP shader cache must be keyed by explicit DXVK-style FFP shader keys");
+              "FFP shader cache must be keyed by explicit specialized FFP shader keys");
     TestCheck(cacheHeader.find("CKFF_SHADER_MODE_UBER_SPECIALIZED") != std::string::npos &&
               cacheHeader.find("CKFF_SHADER_MODE_FULL_SPECIALIZED") != std::string::npos,
-              "FFP shader cache must expose distinct DXVK-style uber and full specialized modes");
+              "FFP shader cache must expose distinct specialized uber and full specialized modes");
     TestCheck(cacheHeader.find("m_Stage3DProgram") == std::string::npos &&
               cacheHeader.find("m_PositionTProgram") == std::string::npos &&
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
               "Clean-break FFP shader cache must not keep the old fixed-program selection API");
     TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
-              "FFP shader cache must expose the DXVK-style ubershader/specialization mode switch");
+              "FFP shader cache must expose the specialized ubershader/specialization mode switch");
     TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
               cacheSource.find("CKFFFindSpecializedModule") != std::string::npos &&
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
@@ -1339,9 +1339,9 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     TestCheck(ReadRenderEngineSource("src/CKFFSpecializationInfo.h").find("SetDwords") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFSpecializationInfo.cpp").find("memcpy(m_Data") != std::string::npos,
               "Generated full-specialized module entries must be able to preserve their exact 10-dword FFP specialization payload");
-    TestCheck(rootCmake.find("option(CKRE_FFP_DXVK_VARIANTS") != std::string::npos &&
-              srcCmake.find("CKRE_FFP_DXVK_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_DXVK_VARIANTS}>,1,0>") != std::string::npos,
-              "RenderEngine CMake must expose and propagate the FFP DXVK variant clean-break option");
+    TestCheck(rootCmake.find("option(CKRE_FFP_VARIANTS") != std::string::npos &&
+              srcCmake.find("CKRE_FFP_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_VARIANTS}>,1,0>") != std::string::npos,
+              "RenderEngine CMake must expose and propagate the FFP variant clean-break option");
 }
 
 class ScopedEnvVar {
@@ -1452,7 +1452,7 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
     cache.Shutdown();
 }
 
-void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
+void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
     std::string common = ReadRenderEngineSource("src/shaders/fs_ff_common.sc");
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
@@ -1462,7 +1462,7 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
     TestCheck(shader.find("#include \"fs_ff_common.sc\"") != std::string::npos &&
               common.find("CKFFStageParams") != std::string::npos &&
               common.find("ckffReadStageParams") != std::string::npos,
-              "Fragment shader must split FFP stage decoding into a common DXVK-style helper");
+              "Fragment shader must split FFP stage decoding into a common variant helper");
     TestCheck(shader.find("uniform vec4 u_ffSpec[10]") != std::string::npos &&
               common.find("stage < 4 && ckffSpecIsOptimized()") != std::string::npos &&
               common.find("ckffSpecDword(6 + stage)") != std::string::npos &&
@@ -1471,19 +1471,19 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
               common.find("ckffSpecGlobalSpecularEnabled") != std::string::npos &&
               common.find("CKFF_FULL_SPECIALIZED") != std::string::npos &&
               common.find("CKFF_SPEC_DWORD0") != std::string::npos,
-              "Fragment shader must expose the DXVK-style specialization reader, global specular bit, and last active stage");
+              "Fragment shader must expose the variant specialization reader, global specular bit, and last active stage");
     TestCheck(shader.find("ckffReadStageParams(stage") != std::string::npos &&
               shader.find("stageParams.ResultArg") != std::string::npos &&
               shader.find("stage > ckffSpecLastActiveTextureStage()") != std::string::npos &&
               shader.find("ckffSpecGlobalSpecularEnabled()") != std::string::npos,
-              "Fragment shader main loop must consume decoded FFP stage params and DXVK-style spec global controls");
+              "Fragment shader main loop must consume decoded FFP stage params and variant spec global controls");
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
               pipeline.find("m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS)") != std::string::npos &&
               pipeline.find("specDwords[i] >> 24") != std::string::npos &&
               pipeline.find("encoder->SetUniform(u.u_ffSpec") != std::string::npos,
-              "FFP uniform table must bind the current draw's DXVK-style specialization mirror as byte-exact float lanes");
+              "FFP uniform table must bind the current draw's variant specialization mirror as byte-exact float lanes");
 }
 
 void Test_FFPStateDesc_FeedsExplicitVariantKey() {
@@ -1527,7 +1527,7 @@ void Test_FFPStateDesc_StoresFullTextureOpRange() {
               "Fragment state desc must preserve 5-bit alpha texture ops");
     TestCheck(desc.GetStageAlphaArg1(0) == CKRST_TA_TEXTURE &&
               desc.GetStageAlphaArg2(0) == CKRST_TA_CURRENT,
-              "Fragment state desc must preserve alpha args for DXVK-style FFP keying");
+              "Fragment state desc must preserve alpha args for specialized FFP keying");
     TestCheck(desc.GetStageResultIsTemp(0),
               "Fragment state desc must preserve per-stage TEMP routing");
     TestCheck(desc.GetStageColorArg1(7) == CKFF_TA_TEXTURE &&
@@ -1973,7 +1973,7 @@ int main() {
     tests.Run("Draw state stencil render states", &Test_DrawState_StencilRenderStatesBuildStencilOps);
     tests.Run("Texture blend legacy stage-op mapping", &Test_TextureBlend_LegacyModesMapToFFPStageOps);
     tests.Run("Texture blend MODULATEALPHA Virtools DX9 contract", &Test_TextureBlend_ModulateAlphaMatchesVirtoolsDx9Modulate);
-    tests.Run("Texture blend shader op formulas", &Test_TextureBlend_ShaderOpsMatchDxvkFormulas);
+    tests.Run("Texture blend shader op formulas", &Test_TextureBlend_ShaderOpsMatchFFPFormulas);
     tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
     tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
     tests.Run("Material channels clamp and clear FFP stages", &Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw);
@@ -1993,16 +1993,16 @@ int main() {
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
-    tests.Run("Shader evaluator dxvk stage ops", &Test_ShaderEvaluator_CoversDxvkStageOps);
-    tests.Run("Texture op evaluator dxvk formulas", &Test_TextureOpEvaluator_MatchesDxvkFormulas);
+    tests.Run("Shader evaluator FFP stage ops", &Test_ShaderEvaluator_CoversFFPStageOps);
+    tests.Run("Texture op evaluator FFP formulas", &Test_TextureOpEvaluator_MatchesFFPFormulas);
     tests.Run("Texture op coverage classifies known FFP ops", &Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp);
     tests.Run("Shader semantic coverage classifies known FFP semantics", &Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics);
-    tests.Run("FFP shader key dxvk stage rules", &Test_FFPShaderKey_UsesDxvkFFPStageRules);
-    tests.Run("FFP specialization info dxvk layout", &Test_FFPSpecializationInfo_MatchesDxvkFFPLayout);
-    tests.Run("FFP shader cache dxvk variant contract", &Test_FFPShaderCache_UsesKeyedDxvkVariantContract);
+    tests.Run("FFP shader key fixed-function stage rules", &Test_FFPShaderKey_UsesFixedFunctionStageRules);
+    tests.Run("FFP specialization info variant layout", &Test_FFPSpecializationInfo_MatchesFFPVariantLayout);
+    tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
     tests.Run("FFP shader cache full specialized variant hit", &Test_FFPShaderCache_FullSpecializedVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
-    tests.Run("FFP fragment shader dxvk common reader", &Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader);
+    tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);

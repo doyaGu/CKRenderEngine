@@ -233,7 +233,7 @@ void CKFFShaderCache::ResolveShaderTarget() {
     }
 
     m_BlobSet = set;
-    CK_LOG_FMT("ShaderCache", "FFP DXVK-style variants enabled: backend=%s ubershader=%u",
+    CK_LOG_FMT("ShaderCache", "FFP specialized variants enabled: backend=%s ubershader=%u",
                set->Name, m_UseUberShader ? 1u : 0u);
 }
 
