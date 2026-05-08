@@ -4,7 +4,7 @@
       "name": "3d_stage0_modulate",
       "vs": "3d",
       "key": {
-        "vsBits": 0,
+        "vsBits": 1,
         "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
         "lastActiveTextureStage": 0,
         "globalSpecularEnable": false,
@@ -19,82 +19,28 @@
             "alphaArg1": 2,
             "alphaArg2": 1,
             "resultIsTemp": false
-          },
+          }
+        ]
+      }
+    },
+    {
+      "name": "positiont_stage0_modulate",
+      "vs": "positiont",
+      "key": {
+        "vsBits": 4096,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "stages": [
           {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
-            "resultIsTemp": false
-          },
-          {
-            "colorOp": 0,
-            "colorArg0": 0,
-            "colorArg1": 0,
-            "colorArg2": 0,
-            "alphaOp": 0,
-            "alphaArg0": 0,
-            "alphaArg1": 0,
-            "alphaArg2": 0,
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
             "resultIsTemp": false
           }
         ]
