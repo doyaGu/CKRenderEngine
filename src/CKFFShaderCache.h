@@ -42,13 +42,17 @@ private:
     CKShaderTargetDesc m_Target;
     const void *m_BlobSet;
     bool m_UseUberShader;
+    CKDWORD m_VariantLogLimit;
+    CKDWORD m_VariantLogCount;
     std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_ProgramCache;
+    std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_VariantStats;
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;
 
     void CreateUniforms();
     void ResolveShaderTarget();
+    void RecordVariantKey(const CKFFShaderKey &key);
     CKDWORD CreateVariantProgram(const CKFFShaderKey &key);
     CKDWORD CreateUberSpecializedProgram(const CKFFShaderKey &key);
     CKDWORD CreateFullSpecializedProgram(const CKFFShaderKey &key);

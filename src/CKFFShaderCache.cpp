@@ -63,10 +63,42 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
+CKDWORD ReadEnvDword(const char *name, CKDWORD fallback)
+{
+    const char *value = std::getenv(name);
+    if (!value || !*value)
+        return fallback;
+
+    char *end = nullptr;
+    unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value)
+        return fallback;
+    return (CKDWORD)parsed;
+}
+
+void LogVariantStage(CKDWORD stage, const CKFFShaderKeyFSStage &s)
+{
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant stage[%u]: cop=%u carg0=%u carg1=%u carg2=%u aop=%u aarg0=%u aarg1=%u aarg2=%u temp=%u",
+               stage,
+               s.ColorOp, s.ColorArg0, s.ColorArg1, s.ColorArg2,
+               s.AlphaOp, s.AlphaArg0, s.AlphaArg1, s.AlphaArg2,
+               s.ResultIsTemp ? 1u : 0u);
+}
+
+void LogVariantSpecDwords(const CKFFSpecializationInfo &spec)
+{
+    const CKDWORD *d = spec.Data();
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant specDwords: [%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]",
+               d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
+}
+
 } // namespace
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(true),
+      m_VariantLogLimit(0), m_VariantLogCount(0),
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
@@ -80,6 +112,9 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
                                  _stricmp(uber, "false") == 0 ||
                                  _stricmp(uber, "off") == 0 ||
                                  _stricmp(uber, "no") == 0));
+    m_VariantLogLimit = ReadEnvDword("CK2_FFP_VARIANT_LOG_LIMIT", 0);
+    m_VariantLogCount = 0;
+    m_VariantStats.clear();
     CreateUniforms();
     ResolveShaderTarget();
 }
@@ -92,6 +127,7 @@ void CKFFShaderCache::Shutdown() {
         }
         m_ProgramCache.clear();
     }
+    m_VariantStats.clear();
     m_Context = nullptr;
     m_BlobSet = nullptr;
 }
@@ -243,6 +279,29 @@ CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
     return CreateUberSpecializedProgram(key);
 }
 
+void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
+    CKDWORD &count = m_VariantStats[key];
+    ++count;
+
+    if (count != 1 || m_VariantLogLimit == 0 || m_VariantLogCount >= m_VariantLogLimit)
+        return;
+    ++m_VariantLogCount;
+
+    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key.FS);
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant key[%u]: seen=%u positionT=%u vsBits=%llu lastStage=%u specular=%u",
+               m_VariantLogCount, count, key.VS.GetHasPositionT() ? 1u : 0u,
+               (unsigned long long)key.VS.Bits,
+               key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u);
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant texGen: [%u,%u,%u,%u,%u,%u,%u,%u]",
+               key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
+               key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        LogVariantStage(stage, key.FS.Stages[stage]);
+    LogVariantSpecDwords(spec);
+}
+
 CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
     CKFFSpecializedModule module;
     if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
@@ -331,6 +390,8 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 }
 
 CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
+    RecordVariantKey(key);
+
     auto it = m_ProgramCache.find(key);
     if (it != m_ProgramCache.end())
         return it->second;
