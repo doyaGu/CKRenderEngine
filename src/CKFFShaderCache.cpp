@@ -126,6 +126,7 @@ void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
     CK_LOG_RAW_FMT("        \"globalSpecularEnable\": %s,", key.FS.GlobalSpecularEnable ? "true" : "false");
     CK_LOG_RAW_FMT("        \"alphaTestEnable\": %s,", key.FS.AlphaTestEnable ? "true" : "false");
     CK_LOG_RAW_FMT("        \"alphaFunc\": %u,", key.FS.AlphaFunc);
+    CK_LOG_RAW_FMT("        \"fogEnable\": %s,", key.FS.FogEnable ? "true" : "false");
     CK_LOG_RAW("        \"stages\": [");
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         LogVariantManifestStage(stage, key.FS.Stages[stage]);
@@ -338,11 +339,12 @@ void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
 
     CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key.FS);
     CK_LOG_FMT("ShaderCache",
-               "FFP variant key[%u]: seen=%u positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u",
+               "FFP variant key[%u]: seen=%u positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
                m_VariantLogCount, count, key.VS.GetHasPositionT() ? 1u : 0u,
                (unsigned long long)key.VS.Bits,
                key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
-               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc);
+               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
+               key.FS.FogEnable ? 1u : 0u);
     CK_LOG_FMT("ShaderCache",
                "FFP variant texGen: [%u,%u,%u,%u,%u,%u,%u,%u]",
                key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
@@ -368,7 +370,7 @@ CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) 
 
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     CK_LOG_FMT("ShaderCache",
-               "Full FFP specialized module cache miss: backend=%s positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u projectedMask=%u specDword4=%u specDword5=%u specDword6=%u",
+               "Full FFP specialized module cache miss: backend=%s positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword4=%u specDword5=%u specDword6=%u",
                m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
                key.VS.GetHasPositionT() ? 1u : 0u,
                (unsigned long long)key.VS.Bits,
@@ -376,6 +378,7 @@ CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) 
                key.FS.GlobalSpecularEnable ? 1u : 0u,
                key.FS.AlphaTestEnable ? 1u : 0u,
                key.FS.AlphaFunc,
+               key.FS.FogEnable ? 1u : 0u,
                specInfo.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK),
                specInfo.Data()[4], specInfo.Data()[5], specInfo.Data()[6]);
     return 0;
@@ -393,10 +396,11 @@ CKDWORD CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) 
         m_Target, vsData, vsSize, set->FSStage, set->FSStageSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP variant program: %u backend=%s ubershader=%u positionT=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u",
+               "FFP variant program: %u backend=%s ubershader=%u positionT=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
                program, set->Name, m_UseUberShader ? 1u : 0u, key.VS.GetHasPositionT() ? 1u : 0u,
                key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
-               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc);
+               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
+               key.FS.FogEnable ? 1u : 0u);
     return program;
 }
 

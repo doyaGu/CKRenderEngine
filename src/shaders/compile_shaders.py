@@ -170,6 +170,7 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     set_spec_bits(dwords, 6, 31, 1, 1 if key["globalSpecularEnable"] else 0)
     set_spec_bits(dwords, 5, 4, 1, 1 if key["alphaTestEnable"] else 0)
     set_spec_bits(dwords, 5, 5, 4, key["alphaFunc"])
+    set_spec_bits(dwords, 5, 9, 1, 1 if key["fogEnable"] else 0)
     projected_sampler_mask = 0
 
     for stage_index, stage in enumerate(key["stages"][:4]):
@@ -254,6 +255,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
                                           f"{field}.globalSpecularEnable"),
         "alphaTestEnable": alpha_test_enable,
         "alphaFunc": alpha_func,
+        "fogEnable": read_bool(key.get("fogEnable", False), f"{field}.fogEnable"),
         "stages": normalized_stages,
     }
 
@@ -371,6 +373,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
     f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")
     f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
+    f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")

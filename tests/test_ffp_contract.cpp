@@ -1255,9 +1255,10 @@ void Test_FFPShaderKey_UsesFixedFunctionStageRules() {
 
     desc.SetAlphaTestEnabled(false);
     desc.SetAlphaFunc(VXCMP_LESS);
+    desc.SetFogEnabled(true);
     key = CKFFBuildShaderKeyFS(desc, 0);
-    TestCheck(!key.AlphaTestEnable && key.AlphaFunc == 0,
-              "FFP key must canonicalize disabled alpha test to func 0");
+    TestCheck(!key.AlphaTestEnable && key.AlphaFunc == 0 && key.FogEnable,
+              "FFP key must canonicalize disabled alpha test to func 0 and preserve fog state");
 }
 
 void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
@@ -1268,6 +1269,7 @@ void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
     info.Set(CKFF_SPEC_PROJECTED_SAMPLER_MASK, 0b1010);
     info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, 1);
     info.Set(CKFF_SPEC_ALPHA_FUNC, VXCMP_GREATER);
+    info.Set(CKFF_SPEC_FOG_ENABLED, 1);
     info.Set(CKFF_SPEC_STAGE0_COLOR_OP, CKRST_TOP_LERP);
     info.Set(CKFF_SPEC_STAGE0_COLOR_ARG1, CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE);
     info.Set(CKFF_SPEC_STAGE0_RESULT_IS_TEMP, 1);
@@ -1287,6 +1289,9 @@ void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
               ((info.Data()[5] >> 4) & 1u) == 1u &&
               ((info.Data()[5] >> 5) & 0xFu) == VXCMP_GREATER,
               "FFP specialization layout must pack alpha test enable and alpha func into specialization dword 5 bits 4..8");
+    TestCheck(info.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
+              ((info.Data()[5] >> 9) & 1u) == 1u,
+              "FFP specialization layout must pack fog enable into specialization dword 5 bit 9");
     TestCheck(info.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_LERP &&
               info.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
               "FFP specialization layout must round-trip stage 0 op/result fields");
@@ -1303,6 +1308,7 @@ void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
     desc.SetStageProjectedSampler(0, true);
     desc.SetAlphaTestEnabled(true);
     desc.SetAlphaFunc(VXCMP_GREATEREQUAL);
+    desc.SetFogEnabled(true);
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1);
     CKFFSpecializationInfo built = CKFFBuildSpecializationInfo(key);
     TestCheck(built.IsOptimized() &&
@@ -1313,6 +1319,8 @@ void Test_FFPSpecializationInfo_MatchesFFPVariantLayout() {
     TestCheck(built.Get(CKFF_SPEC_ALPHA_TEST_ENABLED) == 1 &&
               built.Get(CKFF_SPEC_ALPHA_FUNC) == VXCMP_GREATEREQUAL,
               "Built FFP specialization info must pack alpha test state for shader-side optimized alpha compare");
+    TestCheck(built.Get(CKFF_SPEC_FOG_ENABLED) == 1,
+              "Built FFP specialization info must pack fog state for shader-side optimized fog mix");
 }
 
 void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
@@ -1382,6 +1390,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("projectedSampler") != std::string::npos &&
               shaderCompiler.find("alphaTestEnable") != std::string::npos &&
               shaderCompiler.find("alphaFunc") != std::string::npos &&
+              shaderCompiler.find("fogEnable") != std::string::npos &&
               shaderCompiler.find("clean_stale_specialized_headers") != std::string::npos &&
               shaderCompiler.find("header.unlink()") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
@@ -1391,10 +1400,12 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"name\": \"positiont_stage0_modulate\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage1_add_specular\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_alpha_test\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage0_modulate_fog\"") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaTestEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaFunc\": 5") != std::string::npos &&
+              variantManifest.find("\"fogEnable\": true") != std::string::npos &&
               variantManifest.find("\"projectedSampler\": true") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
               "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary");
@@ -1592,6 +1603,44 @@ void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
     cache.Shutdown();
 }
 
+void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetFogEnabled(true);
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(true);
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+    CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must include a fog-enabled 3D variant");
+    TestCheck(expectedSpec.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
+              ctx.LastProgramSpecializationDwords[5] == expectedSpec.Data()[5],
+              "Fog full-specialized variant must preserve fog state in specialization dword 5");
+
+    cache.Shutdown();
+}
+
 void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
@@ -1620,6 +1669,7 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
               "Full-specialized cache miss must fail explicitly without falling back to the uber shader or caching a null variant");
     TestCheck(ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("projectedMask=%u") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("alphaTest=%u alphaFunc=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("fog=%u") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("specDword4=%u specDword5=%u specDword6=%u") != std::string::npos,
               "Full-specialized cache miss diagnostics must include compact key and specialization fields for manifest growth");
 
@@ -1640,6 +1690,7 @@ void Test_FFPShaderCache_VariantKeyDumpIsOptIn() {
               cacheSource.find("\\\"globalSpecularEnable\\\"") != std::string::npos &&
               cacheSource.find("\\\"alphaTestEnable\\\"") != std::string::npos &&
               cacheSource.find("\\\"alphaFunc\\\"") != std::string::npos &&
+              cacheSource.find("\\\"fogEnable\\\"") != std::string::npos &&
               cacheSource.find("\\\"resultIsTemp\\\"") != std::string::npos,
               "FFP variant key logging must emit manifest-ready JSON fields matching ffp_specialized_variants.json");
     TestCheck(cacheHeader.find("size_t CachedProgramCount()") != std::string::npos &&
@@ -1668,6 +1719,7 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
               common.find("ckffSpecProjectedSamplerMask") != std::string::npos &&
               common.find("ckffSpecAlphaTestEnabled") != std::string::npos &&
               common.find("ckffSpecAlphaFunc") != std::string::npos &&
+              common.find("ckffSpecFogEnabled") != std::string::npos &&
               common.find("params.TexcoordTransformFlags |= 0x100") != std::string::npos &&
               common.find("CKFF_FULL_SPECIALIZED") != std::string::npos &&
               common.find("CKFF_SPEC_DWORD0") != std::string::npos,
@@ -1677,7 +1729,8 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
               shader.find("stage > ckffSpecLastActiveTextureStage()") != std::string::npos &&
               shader.find("ckffSpecGlobalSpecularEnabled()") != std::string::npos &&
               shader.find("ckffSpecAlphaTestEnabled()") != std::string::npos &&
-              shader.find("alphaPass(current.a, ckffSpecAlphaFunc())") != std::string::npos,
+              shader.find("alphaPass(current.a, ckffSpecAlphaFunc())") != std::string::npos &&
+              shader.find("ckffSpecFogEnabled()") != std::string::npos,
               "Fragment shader main loop must consume decoded FFP stage params and variant spec global controls");
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
@@ -2206,6 +2259,7 @@ int main() {
     tests.Run("FFP shader cache full specialized PositionT variant hit", &Test_FFPShaderCache_FullSpecializedPositionTVariantHit);
     tests.Run("FFP shader cache full specialized two-stage specular variant hit", &Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit);
     tests.Run("FFP shader cache full specialized alpha-test variant hit", &Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit);
+    tests.Run("FFP shader cache full specialized fog variant hit", &Test_FFPShaderCache_FullSpecializedFogVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);

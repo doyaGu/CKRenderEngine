@@ -37,6 +37,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 4, 1};
     case CKFF_SPEC_ALPHA_FUNC:
         return {5, 5, 4};
+    case CKFF_SPEC_FOG_ENABLED:
+        return {5, 9, 1};
     default:
         break;
     }

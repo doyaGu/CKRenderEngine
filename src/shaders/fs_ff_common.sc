@@ -111,6 +111,11 @@ int ckffSpecAlphaFunc()
     return ckffSpecBits(ckffSpecDword(5), 5, 4);
 }
 
+bool ckffSpecFogEnabled()
+{
+    return ckffSpecBits(ckffSpecDword(5), 9, 1) != 0;
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
