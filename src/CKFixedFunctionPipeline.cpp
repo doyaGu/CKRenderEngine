@@ -1069,6 +1069,7 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         stateDesc.FS.SetStageAlphaArg1(stage, BaseTextureArg(GetStageAlphaArg1(m_StageStates[stage], hasTexture)));
         stateDesc.FS.SetStageAlphaArg2(stage, BaseTextureArg(GetStageAlphaArg2(m_StageStates[stage])));
         stateDesc.FS.SetStageResultIsTemp(stage, BaseTextureArg(GetStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
+        stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
 
         if (colorOp == CKRST_TOP_DISABLE)
             break;

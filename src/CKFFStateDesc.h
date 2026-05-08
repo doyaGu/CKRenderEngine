@@ -153,6 +153,7 @@ struct CKFFFSStateDesc {
         uint32_t AlphaArg1 = 0;
         uint32_t AlphaArg2 = 0;
         bool ResultIsTemp = false;
+        bool ProjectedSampler = false;
 
         bool operator==(const Stage &o) const {
             return ColorOp == o.ColorOp &&
@@ -163,7 +164,8 @@ struct CKFFFSStateDesc {
                    AlphaArg0 == o.AlphaArg0 &&
                    AlphaArg1 == o.AlphaArg1 &&
                    AlphaArg2 == o.AlphaArg2 &&
-                   ResultIsTemp == o.ResultIsTemp;
+                   ResultIsTemp == o.ResultIsTemp &&
+                   ProjectedSampler == o.ProjectedSampler;
         }
         bool operator!=(const Stage &o) const { return !(*this == o); }
     };
@@ -209,6 +211,10 @@ struct CKFFFSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].ResultIsTemp = v;
     }
+    void SetStageProjectedSampler(uint32_t stage, bool v) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].ProjectedSampler = v;
+    }
 
     uint32_t GetStageColorOp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
@@ -245,6 +251,10 @@ struct CKFFFSStateDesc {
     bool GetStageResultIsTemp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return false;
         return Stages[stage].ResultIsTemp;
+    }
+    bool GetStageProjectedSampler(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return false;
+        return Stages[stage].ProjectedSampler;
     }
 
     // --- Global flags (bits 0-2) ---

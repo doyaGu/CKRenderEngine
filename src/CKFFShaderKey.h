@@ -30,6 +30,7 @@ struct CKFFShaderKeyFSStage {
     CKDWORD AlphaArg1;
     CKDWORD AlphaArg2;
     bool ResultIsTemp;
+    bool ProjectedSampler;
 };
 
 struct CKFFShaderKeyFS {
