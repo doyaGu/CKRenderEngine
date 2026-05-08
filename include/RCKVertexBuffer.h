@@ -21,6 +21,8 @@ public:
 
     CKBOOL Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) override;
 
+    void InvalidateHardwareBuffer();
+
 protected:
     CKDWORD m_ObjectIndex;
     CKVertexBufferDesc m_Desc;

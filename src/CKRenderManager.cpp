@@ -647,6 +647,7 @@ void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
                 RCKTexture *tex = (RCKTexture *) m_Context->GetObject(ids[j]);
                 if (tex && tex->m_RasterizerContext == rstCtx) {
                     tex->m_RasterizerContext = nullptr;
+                    tex->m_InVideoMemory = FALSE;
                 }
             }
         } else if (CKIsChildClassOf(i, CKCID_SPRITE)) {
@@ -656,8 +657,26 @@ void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
                 RCKSprite *sprite = (RCKSprite *) m_Context->GetObject(ids[j]);
                 if (sprite && sprite->m_RasterizerContext == rstCtx) {
                     sprite->m_RasterizerContext = nullptr;
+                    sprite->m_InVideoMemory = FALSE;
                 }
             }
+        } else if (CKIsChildClassOf(i, CKCID_MESH)) {
+            int count = m_Context->GetObjectsCountByClassID(i);
+            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
+            for (int j = 0; j < count; ++j) {
+                RCKMesh *mesh = (RCKMesh *) m_Context->GetObject(ids[j]);
+                if (mesh) {
+                    mesh->InvalidateHardwareBuffers();
+                }
+            }
+        }
+    }
+
+    for (CKVertexBuffer **it = (CKVertexBuffer **) m_VertexBuffers.Begin();
+         it != (CKVertexBuffer **) m_VertexBuffers.End(); ++it) {
+        RCKVertexBuffer *vb = (RCKVertexBuffer *) *it;
+        if (vb) {
+            vb->InvalidateHardwareBuffer();
         }
     }
 }

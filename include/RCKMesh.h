@@ -179,6 +179,8 @@ public:
     void ResetMaterialGroup(CKMaterialGroup *group, int a2);
     void UpdateHasValidPrimitives(CKMaterialGroup *group);
 
+    void InvalidateHardwareBuffers();
+
     explicit RCKMesh(CKContext *Context, CKSTRING name = nullptr);
     ~RCKMesh() override;
     CK_CLASSID GetClassID() override;
