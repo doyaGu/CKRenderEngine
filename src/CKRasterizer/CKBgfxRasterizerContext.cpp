@@ -2580,10 +2580,10 @@ void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
 
 CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync)
 {
-    return Frame(VSync, TRUE);
+    return Frame(VSync ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE);
 }
 
-CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync, CKBOOL UpdatePresentSync)
+CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
 {
     if (!m_BgfxInitialized)
         return CKERR_INVALIDOPERATION;
@@ -2601,10 +2601,12 @@ CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync, CKBOOL UpdatePresentSync)
         }
     }
 
-    if (UpdatePresentSync && VSync != m_VSync)
+    const CKBOOL updatePresentSync = SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT;
+    const CKBOOL vsync = SyncMode == CKRST_FRAME_SYNC_VSYNC;
+    if (updatePresentSync && vsync != m_VSync)
     {
-        m_VSync = VSync;
-        m_ResetFlags = VSync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+        m_VSync = vsync;
+        m_ResetFlags = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
         bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
     }
 
@@ -2613,8 +2615,8 @@ CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync, CKBOOL UpdatePresentSync)
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
         BgfxLogf("PresentSync",
-                 "frame=%u requestedVSync=%d updatePresentSync=%d currentVSync=%d resetFlags=0x%X",
-                 m_DebugFrameId, VSync ? 1 : 0, UpdatePresentSync ? 1 : 0,
+                 "frame=%u syncMode=%d currentVSync=%d resetFlags=0x%X",
+                 m_DebugFrameId, SyncMode,
                  m_VSync ? 1 : 0, m_ResetFlags);
         ++s_PresentSyncLogCount;
     }

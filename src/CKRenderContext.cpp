@@ -641,7 +641,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         // Direct render-target textures already own the drawn contents. Flush
         // the RTT views so later scene draws in this Virtools frame can sample
         // the updated texture, matching the old SetTargetTexture contract.
-        m_FFPipeline.GetRenderPipeline().EndFrame(FALSE, FALSE);
+        m_FFPipeline.GetRenderPipeline().EndFrame(CKRST_FRAME_SYNC_PRESERVE_PRESENT);
     } else {
         // Normal back-to-front path
 
@@ -657,8 +657,9 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 
         // End frame and present
         CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
+        CKRST_FRAME_SYNC_MODE syncMode = waitVbl ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE;
         LogPresentFrameRateContract("BackToFront/EndFrame", inputFlags, renderFlags, timeManager);
-        m_FFPipeline.GetRenderPipeline().EndFrame(waitVbl);
+        m_FFPipeline.GetRenderPipeline().EndFrame(syncMode);
     }
 
     // Debug mode handling (Ctrl+Alt+F11 to enter, various keys while in debug mode)
