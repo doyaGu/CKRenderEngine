@@ -5,6 +5,7 @@
 #include "CKFFShaderKey.h"
 #include "CKFFSpecializationInfo.h"
 #include "CKFFShaderCache.h"
+#include "CKFFUniformState.h"
 #include "CKDebugLogger.h"
 #include "CKRasterizer.h"
 #include "CKRenderPipeline.h"
@@ -393,6 +394,30 @@ void Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics() {
               "Pass-through texcoords must use declared component-count padding before texture matrix transforms");
 }
 
+void Test_PositionT_TextureMatrixUsesFFPTransformState() {
+    std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_positiont.sc");
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+
+    TestCheck(shader.find("uniform mat4 u_texMatrix[8]") != std::string::npos &&
+              shader.find("ckffVsTexTransformFlags") != std::string::npos &&
+              shader.find("transformTexcoord(0") != std::string::npos &&
+              shader.find("mul(u_texMatrix[stage], coord)") != std::string::npos,
+              "PositionT vertex shader must apply texture matrix and texture-transform state");
+    const size_t flagsPos = pipeline.find("stateDesc.VS.SetTextureTransformFlags(stage, transformFlags)");
+    const size_t texGenPos = pipeline.find("const CKDWORD texgen = (packedTexcoord >> 16)");
+    TestCheck(flagsPos != std::string::npos && texGenPos != std::string::npos && flagsPos < texGenPos,
+              "FFP shader key construction must include texture transform flags for PositionT draws");
+}
+
+void Test_ProjectedTextureSampling_PreservesSignedProjector() {
+    std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
+
+    TestCheck(shader.find("return coord.xy / (abs(coord.w) < 0.0001 ?") != std::string::npos &&
+              shader.find("coord.w < 0.0 ? -0.0001 : 0.0001") != std::string::npos &&
+              shader.find("max(abs(coord.w)") == std::string::npos,
+              "Projected texture sampling must divide by signed q/w instead of losing the sign");
+}
+
 void Test_RenderTarget_AttachesDepthStencilTexture() {
     std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
     TestCheck(source.find("CreateDepthTexture(m_TargetDepthTexture") != std::string::npos,
@@ -638,6 +663,16 @@ void Test_DrawState_DefaultMaterialSourcesMatchFFP() {
               "FFP default ambient source must be material ambient");
     TestCheck(cache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX) == FALSE,
               "FFP default emissive source must be material emissive");
+}
+
+void Test_DrawState_FloatRenderStatesPreserveExplicitZero() {
+    CKDrawStateCache cache;
+
+    TestCheck(CKFFReadFloatRenderState(cache, VXRENDERSTATE_FOGDENSITY, 99.0f) == 1.0f,
+              "Default fog density must come from the draw-state default, not the caller fallback");
+    cache.SetRenderState(VXRENDERSTATE_FOGDENSITY, 0);
+    TestCheck(CKFFReadFloatRenderState(cache, VXRENDERSTATE_FOGDENSITY, 99.0f) == 0.0f,
+              "Explicit zero-valued float render states must not be replaced by fallback values");
 }
 
 void Test_DrawState_FixesBothSrcAlphaBlendPair() {
@@ -2196,6 +2231,7 @@ void Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey() {
 
 void Test_FFPVertexShader_UsesSpecializedLightingKey() {
     std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
 
     TestCheck(shader.find("CKFF_VS_BITS") != std::string::npos &&
               shader.find("ckffVsBit(13") != std::string::npos &&
@@ -2203,6 +2239,9 @@ void Test_FFPVertexShader_UsesSpecializedLightingKey() {
               shader.find("ckffVsBit(14") != std::string::npos &&
               shader.find("ckffVsBit(16") != std::string::npos,
               "3D vertex shader must consume specialized VS lighting bits for lighting, light count, normal normalization, and local viewer");
+    TestCheck(pipeline.find("stateDesc.VS.SetLocalViewer(") != std::string::npos &&
+              pipeline.find("VXRENDERSTATE_LOCALVIEWER") != std::string::npos,
+              "FFP shader key construction must copy LOCALVIEWER into specialized VS lighting bits");
 }
 
 void Test_FFPVertexShader_UsesSpecializedVertexBlendKey() {
@@ -2803,11 +2842,11 @@ void Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives() {
               pipeline.find("static float SaturateFloat") == std::string::npos &&
               pipeline.find("static VxColor SaturateColor") == std::string::npos,
               "FFP pipeline must use existing VxMath primitives instead of local matrix or clamp helpers");
-    TestCheck(pipeline.find("Vx3DMultiplyMatrix4(modelView") != std::string::npos &&
-              pipeline.find("Vx3DMultiplyMatrix4(viewProj") != std::string::npos &&
-              pipeline.find("Vx3DMultiplyMatrix4(modelViewProj") != std::string::npos &&
+    TestCheck(pipeline.find("Vx3DMultiplyMatrix4(modelView, m_View, m_World)") != std::string::npos &&
+              pipeline.find("Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View)") != std::string::npos &&
+              pipeline.find("Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World)") != std::string::npos &&
               pipeline.find("Vx3DTransposeMatrix(normalMatrix") != std::string::npos,
-              "FFP uniform upload must use VxMath full 4x4 multiply and transpose helpers");
+              "FFP uniform upload must use VxMath full 4x4 multiply with the argument order that preserves the old FFP matrix composition");
     TestCheck(pipeline.find("static CKDWORD GetStageColorOp") == std::string::npos &&
               pipeline.find("static CKDWORD GetStageAlphaOp") == std::string::npos &&
               pipeline.find("static CKDWORD GetStageColorArg1") == std::string::npos &&
@@ -2992,6 +3031,8 @@ int main() {
     tests.Run("Wrap mesh maps flags to render state", &Test_WrapMesh_MapsMeshFlagsToRenderStateWrapMode);
     tests.Run("TexGen packs texcoord generation", &Test_TexGen_PacksTexcoordGenerationWithoutLosingIndex);
     tests.Run("TexGen texture matrix bgfx/VxMatrix semantics", &Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics);
+    tests.Run("PositionT texture matrix uses FFP transform state", &Test_PositionT_TextureMatrixUsesFFPTransformState);
+    tests.Run("Projected texture sampling preserves signed projector", &Test_ProjectedTextureSampling_PreservesSignedProjector);
     tests.Run("Render target attaches depth-stencil texture", &Test_RenderTarget_AttachesDepthStencilTexture);
     tests.Run("User clip plane is consumed by FFP shader path", &Test_UserClipPlane_IsConsumedByFFPShaderPath);
     tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
@@ -3005,6 +3046,7 @@ int main() {
     tests.Run("Interleave PositionT missing specular fog factor", &Test_Interleave_PositionTMissingSpecularKeepsFogFactorOpaque);
     tests.Run("User draw primitive PositionT specular reset", &Test_UserDrawPrimitive_PositionTSpecularDefaultsOpaqueOnReuse);
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
+    tests.Run("Draw state float render states preserve explicit zero", &Test_DrawState_FloatRenderStatesPreserveExplicitZero);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
     tests.Run("Draw state fixes legacy screen blend pair", &Test_DrawState_FixesLegacyScreenBlendPair);
     tests.Run("Draw state inverse winding swaps cull", &Test_DrawState_InverseWindingSwapsCullDirection);

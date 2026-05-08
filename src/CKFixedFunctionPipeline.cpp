@@ -568,8 +568,8 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         const CKDWORD packedTexcoord = m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
+        stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
         if (!positionT) {
-            stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
             const CKDWORD texgen = (packedTexcoord >> 16) & 0xFFFFu;
             const bool hasTransform = transformFlags != 0;
             stateDesc.VS.SetTexGen(stage, texgen, hasTransform);
@@ -587,6 +587,7 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     m_CurrentLightingEnabled = stateDesc.VS.GetLightingEnabled();
     stateDesc.VS.SetSpecularEnabled(specular != 0);
     stateDesc.VS.SetNormalizeNormals(normalize != 0);
+    stateDesc.VS.SetLocalViewer(m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) != 0);
     stateDesc.VS.SetLightCount(stateDesc.VS.GetLightingEnabled() ? m_ActiveLightCount : 0);
 
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
@@ -693,11 +694,11 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     VxMatrix normalMatrix;
     VxMatrix viewProj;
     VxMatrix modelViewProj;
-    Vx3DMultiplyMatrix4(modelView, m_World, m_View);
+    Vx3DMultiplyMatrix4(modelView, m_View, m_World);
     Vx3DInverseMatrix(normalMatrix, modelView);
     Vx3DTransposeMatrix(normalMatrix, normalMatrix);
-    Vx3DMultiplyMatrix4(viewProj, m_View, m_Projection);
-    Vx3DMultiplyMatrix4(modelViewProj, m_World, viewProj);
+    Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
+    Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
     encoder->SetUniform(u.u_ckModelViewProj, &modelViewProj, 1);
     encoder->SetUniform(u.u_ckModel, &m_World, 1);
     encoder->SetUniform(u.u_ckModelView, &modelView, 1);
