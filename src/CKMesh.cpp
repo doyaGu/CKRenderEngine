@@ -162,6 +162,17 @@ void RCKMesh::UpdateHasValidPrimitives(CKMaterialGroup *group) {
     }
 }
 
+void RCKMesh::InvalidateHardwareBuffers() {
+    m_VertexBufferReady = 0;
+    m_IndexBufferIndexCount = 0;
+    m_VertexLayout = 0;
+    m_VertexBufferDpFlags = 0;
+    m_VertexBufferFormatFlags = 0;
+    m_VertexBufferStride = 0;
+    m_VertexBufferVertexCount = 0;
+    m_VertexBufferWrapAware = FALSE;
+}
+
 CKVBuffer::CKVBuffer(int vertexCount) : m_Vertices(0), m_Colors(0), m_UVs(0), m_VertexRemap(0) {
     if (vertexCount)
         Resize(vertexCount);

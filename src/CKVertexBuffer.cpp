@@ -144,6 +144,12 @@ void RCKVertexBuffer::Destroy() {
     rm->DestroyVertexBuffer(this);
 }
 
+void RCKVertexBuffer::InvalidateHardwareBuffer() {
+    m_HardwareValid = FALSE;
+    m_VertexLayout = 0;
+    m_FormatFlags = 0;
+}
+
 CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) {
     (void)Ctx;
 

@@ -2262,6 +2262,32 @@ void Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL() {
               "RenderEngine cache internals must use VxMath hash tables, not downgrade cache semantics to linear arrays");
 }
 
+void Test_FullscreenDeviceRecreation_InvalidatesHardwareGeometryCaches() {
+    std::string manager = ReadRenderEngineSource("src/CKRenderManager.cpp");
+    std::string meshHeader = ReadRenderEngineSource("include/RCKMesh.h");
+    std::string meshSource = ReadRenderEngineSource("src/CKMesh.cpp");
+    std::string vbHeader = ReadRenderEngineSource("include/RCKVertexBuffer.h");
+    std::string vbSource = ReadRenderEngineSource("src/CKVertexBuffer.cpp");
+
+    TestCheck(manager.find("CKCID_MESH") != std::string::npos &&
+              manager.find("InvalidateHardwareBuffers()") != std::string::npos,
+              "DestroyingDevice must invalidate mesh hardware vertex/index buffers before fullscreen recreates the bgfx context");
+    TestCheck(manager.find("m_VertexBuffers") != std::string::npos &&
+              manager.find("InvalidateHardwareBuffer()") != std::string::npos,
+              "DestroyingDevice must invalidate CKVertexBuffer hardware fast-path state before fullscreen recreates the bgfx context");
+    TestCheck(manager.find("tex->m_InVideoMemory = FALSE") != std::string::npos &&
+              manager.find("sprite->m_InVideoMemory = FALSE") != std::string::npos,
+              "DestroyingDevice must invalidate texture and sprite video-memory flags before fullscreen recreates the bgfx context");
+    TestCheck(meshHeader.find("void InvalidateHardwareBuffers()") != std::string::npos &&
+              meshSource.find("m_VertexBufferReady = 0") != std::string::npos &&
+              meshSource.find("m_IndexBufferIndexCount = 0") != std::string::npos &&
+              meshSource.find("m_VertexBufferWrapAware = FALSE") != std::string::npos,
+              "RCKMesh must expose an internal invalidation hook that clears stale hardware buffer cache flags");
+    TestCheck(vbHeader.find("void InvalidateHardwareBuffer()") != std::string::npos &&
+              vbSource.find("m_HardwareValid = FALSE") != std::string::npos,
+              "RCKVertexBuffer must expose an internal invalidation hook that clears stale hardware-valid state");
+}
+
 void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
     std::string common = ReadRenderEngineSource("src/shaders/fs_ff_common.sc");
@@ -3231,6 +3257,7 @@ int main() {
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache runtime variant key dump removed", &Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved);
     tests.Run("RenderEngine FFP internals use VxMath containers", &Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL);
+    tests.Run("Fullscreen device recreation invalidates hardware geometry caches", &Test_FullscreenDeviceRecreation_InvalidatesHardwareGeometryCaches);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
