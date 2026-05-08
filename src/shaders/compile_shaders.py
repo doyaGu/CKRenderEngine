@@ -129,6 +129,14 @@ def ffp_specialized_shader_defines(spec_dwords: list[int]) -> list[str]:
     return defines
 
 
+def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
+    key = variant["key"]
+    defines = ["CKFF_FULL_SPECIALIZED=1", f"CKFF_VS_BITS={key['vsBits']}"]
+    for index, value in enumerate(key["vsTexGen"]):
+        defines.append(f"CKFF_VS_TEXGEN{index}={value}")
+    return defines
+
+
 def sanitize_identifier(value: str) -> str:
     ident = re.sub(r"[^0-9A-Za-z_]", "_", value)
     if not ident or ident[0].isdigit():
@@ -139,6 +147,15 @@ def sanitize_identifier(value: str) -> str:
 def specialization_identifier(spec_dwords: list[int]) -> str:
     payload = ",".join(str(value) for value in spec_dwords).encode("ascii")
     return "spec_" + hashlib.sha1(payload).hexdigest()[:16]
+
+
+def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
+    payload = json.dumps({
+        "vs": vs,
+        "vsBits": key["vsBits"],
+        "vsTexGen": key["vsTexGen"],
+    }, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return "vsspec_" + hashlib.sha1(payload).hexdigest()[:16]
 
 
 def read_uint32(value: object, field: str) -> int:
@@ -287,6 +304,7 @@ def normalize_specialized_variant(variant: dict[str, object], index: int) -> dic
         "name": name,
         "identifier": sanitize_identifier(name),
         "vs": vs,
+        "vsIdentifier": vs_specialization_identifier(vs, key),
         "specDwords": spec_dwords,
         "fsIdentifier": specialization_identifier(spec_dwords),
         "defines": ffp_specialized_shader_defines(spec_dwords),
@@ -354,10 +372,22 @@ def specialized_fs_var_name(backend: dict[str, str], variant: dict[str, object])
     return f"s_{backend['name']}_ffp_{variant['fsIdentifier']}_fs_ff_stage"
 
 
+def specialized_vs_var_name(backend: dict[str, str], variant: dict[str, object]) -> str:
+    suffix = "positiont" if variant["vs"] == "positiont" else "3d"
+    return f"s_{backend['name']}_ffp_{variant['vsIdentifier']}_vs_ff_{suffix}"
+
+
 def unique_specialized_fs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
     unique: dict[str, dict[str, object]] = {}
     for variant in variants:
         unique.setdefault(variant["fsIdentifier"], variant)
+    return list(unique.values())
+
+
+def unique_specialized_vs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
+    unique: dict[str, dict[str, object]] = {}
+    for variant in variants:
+        unique.setdefault(variant["vsIdentifier"], variant)
     return list(unique.values())
 
 
@@ -404,7 +434,7 @@ def write_specialized_spec_function(f, variant: dict[str, object]) -> None:
 def write_specialized_module_function(f, backend: dict[str, str], variant: dict[str, object]) -> None:
     backend_name = backend["name"]
     ident = variant["identifier"]
-    vs_name = f"s_{backend_name}_vs_ff_{'positiont' if variant['vs'] == 'positiont' else '3d'}"
+    vs_name = specialized_vs_var_name(backend, variant)
     fs_name = specialized_fs_var_name(backend, variant)
     f.write(f"static CKFFSpecializedModule CKFFSpecializedModule_{backend_name}_{ident}() {{\n")
     f.write("    CKFFSpecializedModule module = {};\n")
@@ -431,8 +461,10 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
 
         for backend in backends:
             backend_name = backend["name"]
-            f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_3d.bin.h\"\n")
-            f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_positiont.bin.h\"\n")
+            for variant in unique_specialized_vs_variants(variants):
+                ident = variant["vsIdentifier"]
+                suffix = "positiont" if variant["vs"] == "positiont" else "3d"
+                f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_vs_ff_{suffix}.bin.h\"\n")
             for variant in unique_specialized_fs_variants(variants):
                 ident = variant["fsIdentifier"]
                 f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
@@ -505,9 +537,19 @@ def validate_specialized_variants(variants: list[dict[str, object]]) -> None:
 def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
                                  tmp_dir: Path, backends: list[dict[str, str]],
                                  variants: list[dict[str, object]]) -> None:
+    vs_variants = unique_specialized_vs_variants(variants)
     fs_variants = unique_specialized_fs_variants(variants)
-    clean_stale_specialized_headers(generated_dir, backends, fs_variants)
+    clean_stale_specialized_headers(generated_dir, backends, vs_variants, fs_variants)
     for backend in backends:
+        for variant in vs_variants:
+            ident = variant["vsIdentifier"]
+            suffix = "positiont" if variant["vs"] == "positiont" else "3d"
+            shader = SHADERS[1] if variant["vs"] == "positiont" else SHADERS[0]
+            bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_vs_ff_{suffix}.bin"
+            bin_path.parent.mkdir(parents=True, exist_ok=True)
+            run_shaderc(shaderc, script_dir, shader, backend, bin_path, ffp_specialized_vs_defines(variant))
+            header = generated_dir / backend["name"] / "specialized" / f"{ident}_vs_ff_{suffix}.bin.h"
+            write_header(header, specialized_vs_var_name(backend, variant), bin_path.read_bytes())
         for variant in fs_variants:
             ident = variant["fsIdentifier"]
             bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin"
@@ -518,13 +560,17 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
 
 
 def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str, str]],
+                                    vs_variants: list[dict[str, object]],
                                     fs_variants: list[dict[str, object]]) -> None:
     expected = {f"{variant['fsIdentifier']}_fs_ff_stage.bin.h" for variant in fs_variants}
+    expected.update(
+        f"{variant['vsIdentifier']}_vs_ff_{'positiont' if variant['vs'] == 'positiont' else '3d'}.bin.h"
+        for variant in vs_variants)
     for backend in backends:
         specialized_dir = generated_dir / backend["name"] / "specialized"
         if not specialized_dir.is_dir():
             continue
-        for header in specialized_dir.glob("*_fs_ff_stage.bin.h"):
+        for header in specialized_dir.glob("*.bin.h"):
             if header.name not in expected:
                 header.unlink()
 
