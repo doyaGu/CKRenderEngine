@@ -10,19 +10,28 @@
 
 static const uint32_t CKFF_STATE_DESC_TEXTURE_STAGES = 8;
 
+enum CKFFVertexBlendMode {
+    CKFF_VERTEX_BLEND_DISABLED = 0,
+    CKFF_VERTEX_BLEND_NORMAL = 1,
+    CKFF_VERTEX_BLEND_TWEEN = 2,
+};
+
 // ============================================================================
 // Vertex State Description
 // ============================================================================
 
 struct CKFFVSStateDesc {
     uint64_t bits;
+    uint32_t VertexTexcoordDeclMask;
     uint8_t TexGen[CKFF_STATE_DESC_TEXTURE_STAGES];
     uint8_t TexCoordIndex[CKFF_STATE_DESC_TEXTURE_STAGES];
     uint16_t TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES];
 
-    CKFFVSStateDesc() : bits(0), TexGen{}, TexCoordIndex{}, TexTransformFlags{} {
+    CKFFVSStateDesc() : bits(0), VertexTexcoordDeclMask(0), TexGen{}, TexCoordIndex{}, TexTransformFlags{} {
         for (uint32_t stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
             TexCoordIndex[stage] = (uint8_t)stage;
+        for (uint32_t stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+            SetTexcoordComponentCount(stage, 2);
     }
 
     // --- Vertex format ---
@@ -87,6 +96,8 @@ struct CKFFVSStateDesc {
     void SetPixelFog(bool v)       { SetBit(24, v); }
     bool GetRangeFog() const       { return GetBit(23); }
     bool GetPixelFog() const       { return GetBit(24); }
+    void SetVertexHasFog(bool v)   { SetBit(33, v); }
+    bool GetVertexHasFog() const   { return GetBit(33); }
 
     // --- Texture coordinate generation (8 stages x 4 bits) ---
     // TexGen mode per stage: 0=PASSTHRU, 1=CAMERANORMAL, 2=CAMERAPOSITION, 3=REFLECTION, 4=SPHEREMAP
@@ -118,6 +129,16 @@ struct CKFFVSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return TexTransformFlags[stage];
     }
+    void SetTexcoordComponentCount(uint32_t stage, uint32_t count) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        const uint32_t shift = stage * 3;
+        VertexTexcoordDeclMask &= ~(7u << shift);
+        VertexTexcoordDeclMask |= ((count & 7u) << shift);
+    }
+    uint32_t GetTexcoordComponentCount(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return (VertexTexcoordDeclMask >> (stage * 3)) & 7u;
+    }
 
     // --- Material source selection (bits 25-32) ---
     // Source: 0=MATERIAL, 1=COLOR0, 2=COLOR1
@@ -131,8 +152,20 @@ struct CKFFVSStateDesc {
     uint32_t GetSpecularSource() const { return GetField(29, 2); }
     uint32_t GetEmissiveSource() const { return GetField(31, 2); }
 
+    // --- Vertex clipping and blend config (bits 34-39) ---
+    void SetVertexClipping(bool v)          { SetBit(34, v); }
+    bool GetVertexClipping() const          { return GetBit(34); }
+    void SetVertexBlendMode(uint32_t mode)  { SetField(35, 2, mode); }
+    uint32_t GetVertexBlendMode() const     { return GetField(35, 2); }
+    void SetVertexBlendIndexed(bool v)      { SetBit(37, v); }
+    bool GetVertexBlendIndexed() const      { return GetBit(37); }
+    void SetVertexBlendCount(uint32_t count){ SetField(38, 2, count); }
+    uint32_t GetVertexBlendCount() const    { return GetField(38, 2); }
+
     bool operator==(const CKFFVSStateDesc &o) const {
         if (bits != o.bits)
+            return false;
+        if (VertexTexcoordDeclMask != o.VertexTexcoordDeclMask)
             return false;
         for (uint32_t stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
             if (TexGen[stage] != o.TexGen[stage])

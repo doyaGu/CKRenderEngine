@@ -166,6 +166,7 @@ def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
     payload = json.dumps({
         "vs": vs,
         "vsBits": key["vsBits"],
+        "vsTexcoordDeclMask": key["vsTexcoordDeclMask"],
         "vsTexGen": key["vsTexGen"],
         "vsTexCoordIndex": key["vsTexCoordIndex"],
         "vsTexTransformFlags": key["vsTexTransformFlags"],
@@ -269,6 +270,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     tex_transform_flags = key.get("vsTexTransformFlags", [0, 0, 0, 0, 0, 0, 0, 0])
     if not isinstance(tex_transform_flags, list) or len(tex_transform_flags) != 8:
         raise ValueError(f"{field}.vsTexTransformFlags must contain exactly 8 uint32 values")
+    default_texcoord_decl_mask = sum(2 << (index * 3) for index in range(8))
 
     stages = key.get("stages")
     if not isinstance(stages, list) or len(stages) > 8:
@@ -287,6 +289,8 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
 
     return {
         "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
+        "vsTexcoordDeclMask": read_uint32(key.get("vsTexcoordDeclMask", default_texcoord_decl_mask),
+                                          f"{field}.vsTexcoordDeclMask") & 0xffffff,
         "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
                      for index, value in enumerate(tex_gen)],
         "vsTexCoordIndex": [read_uint32(value, f"{field}.vsTexCoordIndex[{index}]") & 7
@@ -424,6 +428,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"static CKFFShaderKey CKFFSpecializedKey_{ident}() {{\n")
     f.write("    CKFFShaderKey key;\n")
     f.write(f"    key.VS.Bits = {key['vsBits']}ull;\n")
+    f.write(f"    key.VS.VertexTexcoordDeclMask = {key['vsTexcoordDeclMask']}u;\n")
     for index, value in enumerate(key["vsTexGen"]):
         f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
     for index, value in enumerate(key["vsTexCoordIndex"]):

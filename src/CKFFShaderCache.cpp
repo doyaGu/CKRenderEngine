@@ -119,6 +119,7 @@ void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
     CK_LOG_RAW_FMT("      \"vs\": \"%s\",", key.VS.GetHasPositionT() ? "positiont" : "3d");
     CK_LOG_RAW("      \"key\": {");
     CK_LOG_RAW_FMT("        \"vsBits\": %llu,", (unsigned long long)key.VS.Bits);
+    CK_LOG_RAW_FMT("        \"vsTexcoordDeclMask\": %u,", key.VS.VertexTexcoordDeclMask);
     CK_LOG_RAW_FMT("        \"vsTexGen\": [%u, %u, %u, %u, %u, %u, %u, %u],",
                    key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
                    key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);

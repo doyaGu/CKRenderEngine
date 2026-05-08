@@ -42,6 +42,12 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 5, 4};
     case CKFF_SPEC_FOG_ENABLED:
         return {5, 9, 1};
+    case CKFF_SPEC_VERTEX_FOG_MODE:
+        return {5, 10, 2};
+    case CKFF_SPEC_PIXEL_FOG_MODE:
+        return {5, 12, 2};
+    case CKFF_SPEC_RANGE_FOG:
+        return {5, 14, 1};
     default:
         break;
     }
