@@ -171,7 +171,7 @@ void main()
 
         vec4 texColor = getTextureColor(stage, stageUv, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
-            float lum = clamp(texColor.z * u_bumpEnv[1].x + u_bumpEnv[1].y, 0.0, 1.0);
+            float lum = clamp(previousTexture.z * u_bumpEnv[1].x + u_bumpEnv[1].y, 0.0, 1.0);
             texColor *= lum;
         }
         vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, v_color0, v_color1, temp);

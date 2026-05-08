@@ -1105,6 +1105,22 @@ void Test_BumpEnv_StageStatesPackUniform() {
               "Bump env luminance stage states must pack into u_bumpEnv[1]");
 }
 
+void Test_BumpEnv_EvaluationUsesPreviousStageOutput() {
+    float bumpEnv[2][4] = {
+        { 0.50f, -0.25f, 0.75f, 0.125f },
+        { 1.50f, -0.10f, 0.0f, 0.0f },
+    };
+    const Vx2DVector baseUv(0.20f, 0.30f);
+    const VxColor previousStage(0.40f, 0.80f, 0.60f, 1.0f);
+
+    const Vx2DVector bumped = CKFFEvaluateBumpEnvTexcoord(baseUv, previousStage, bumpEnv);
+    TestCheck(Near(bumped.x, 0.20f + 0.50f * 0.40f - 0.25f * 0.80f) &&
+              Near(bumped.y, 0.30f + 0.75f * 0.40f + 0.125f * 0.80f),
+              "Bump env must perturb the next stage texcoord from the previous stage output");
+    TestCheck(Near(CKFFEvaluateBumpEnvLuminance(previousStage, bumpEnv), 0.80f),
+              "Bump env luminance must use previous stage blue with scale/offset");
+}
+
 void Test_MaterialEffects_UseEightStageFFPContract() {
     std::string material = ReadRenderEngineSource("src/CKMaterial.cpp");
     TestCheck(material.find("stage >= 4") == std::string::npos &&
@@ -1137,7 +1153,8 @@ void Test_ShaderEvaluator_CoversFFPStageOps() {
               "Shader evaluator must support ALPHAREPLICATE and COMPLEMENT argument modifiers");
     TestCheck(shader.find("previousColorOp == 22 || previousColorOp == 23") != std::string::npos &&
               shader.find("stageUv.x += dot(u_bumpEnv[0].xy, bump)") != std::string::npos &&
-              shader.find("previousColorOp == 23") != std::string::npos,
+              shader.find("previousColorOp == 23") != std::string::npos &&
+              shader.find("previousTexture.z * u_bumpEnv[1].x + u_bumpEnv[1].y") != std::string::npos,
               "Shader evaluator must perturb the next stage for BUMPENVMAP and apply luminance for BUMPENVMAPLUMINANCE");
     TestCheck(shader.find("if (op == 25) return clamp(a * b + c") != std::string::npos &&
               shader.find("if (op == 26) return clamp(c * a + (vec4_splat(1.0) - c) * b") != std::string::npos,
@@ -1174,9 +1191,9 @@ void Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp() {
         TestCheck(CKFFClassifyTextureOpCoverage(op) != CKFF_COVERAGE_UNTESTED,
                   "Every known CKRST_TOP_* op must have an explicit coverage classification");
     }
-    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAP) == CKFF_COVERAGE_APPROXIMATE &&
-              CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_APPROXIMATE,
-              "Bump env ops must be documented as approximate shader coverage");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAP) == CKFF_COVERAGE_EXACT &&
+              CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_EXACT,
+              "Bump env ops must be locked as exact shader coverage");
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_FALLBACK,
               "PREMODULATE must be an explicit fallback instead of an accidental default path");
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_LERP + 1) == CKFF_COVERAGE_UNTESTED,
@@ -1197,9 +1214,9 @@ void Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics() {
               "Argument modifiers must be documented as exact shader coverage");
     TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING) == CKFF_COVERAGE_EXACT,
               "Projected sampling must be documented in the shader coverage table");
-    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAP) == CKFF_COVERAGE_APPROXIMATE &&
-              CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_APPROXIMATE,
-              "Bump env shader semantics must remain visibly approximate");
+    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAP) == CKFF_COVERAGE_EXACT &&
+              CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_EXACT,
+              "Bump env shader semantics must be locked as exact coverage");
     TestCheck(CKFFClassifyShaderSemanticCoverage((CKFFShaderSemantic)CKFF_SHADER_SEMANTIC_COUNT) == CKFF_COVERAGE_UNTESTED,
               "Unknown shader semantics must stay visibly untested");
 }
@@ -2709,6 +2726,7 @@ int main() {
     tests.Run("3D entity indirect matrix uses render state guard", &Test_3dEntity_IndirectMatrixUsesRenderStateGuard);
     tests.Run("Sprite3D batches use FFP state guard", &Test_Sprite3DBatches_UseFFPStateGuard);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
+    tests.Run("Bump env evaluation uses previous stage output", &Test_BumpEnv_EvaluationUsesPreviousStageOutput);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
     tests.Run("Shader evaluator FFP stage ops", &Test_ShaderEvaluator_CoversFFPStageOps);

@@ -239,10 +239,9 @@ CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op) {
     case CKRST_TOP_DOTPRODUCT3:
     case CKRST_TOP_MULTIPLYADD:
     case CKRST_TOP_LERP:
-        return CKFF_COVERAGE_EXACT;
     case CKRST_TOP_BUMPENVMAP:
     case CKRST_TOP_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_APPROXIMATE;
+        return CKFF_COVERAGE_EXACT;
     case CKRST_TOP_PREMODULATE:
         return CKFF_COVERAGE_FALLBACK;
     default:
@@ -267,10 +266,9 @@ CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic) {
     case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEPOSITION:
     case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION:
     case CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP:
-        return CKFF_COVERAGE_EXACT;
     case CKFF_SHADER_SEMANTIC_BUMPENVMAP:
     case CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_APPROXIMATE;
+        return CKFF_COVERAGE_EXACT;
     default:
         return CKFF_COVERAGE_UNTESTED;
     }
@@ -324,6 +322,19 @@ void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]) {
     outBumpEnv[0][3] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT11]);
     outBumpEnv[1][0] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLSCALE]);
     outBumpEnv[1][1] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLOFFSET]);
+}
+
+Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
+                                       const VxColor &bumpValue,
+                                       const float bumpEnv[2][4]) {
+    return Vx2DVector(
+        baseUv.x + bumpEnv[0][0] * bumpValue.r + bumpEnv[0][1] * bumpValue.g,
+        baseUv.y + bumpEnv[0][2] * bumpValue.r + bumpEnv[0][3] * bumpValue.g);
+}
+
+float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
+                                   const float bumpEnv[2][4]) {
+    return SaturateFloat(bumpValue.b * bumpEnv[1][0] + bumpEnv[1][1]);
 }
 
 static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
