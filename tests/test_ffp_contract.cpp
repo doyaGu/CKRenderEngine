@@ -18,6 +18,7 @@
 #include <cmath>
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -1343,6 +1344,84 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               "RenderEngine CMake must expose and propagate the FFP DXVK variant clean-break option");
 }
 
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char *name, const char *value) : m_Name(name) {
+        const char *existing = std::getenv(name);
+        if (existing) {
+            m_HadValue = true;
+            m_Previous = existing;
+        }
+        Set(value);
+    }
+
+    ~ScopedEnvVar() {
+        Set(m_HadValue ? m_Previous.c_str() : nullptr);
+    }
+
+private:
+    static void Set(const char *name, const char *value) {
+#if defined(_WIN32)
+        _putenv_s(name, value ? value : "");
+#else
+        if (value)
+            setenv(name, value, 1);
+        else
+            unsetenv(name);
+#endif
+    }
+
+    void Set(const char *value) {
+        Set(m_Name.c_str(), value);
+    }
+
+    std::string m_Name;
+    std::string m_Previous;
+    bool m_HadValue = false;
+};
+
+void Test_FFPShaderCache_FullSpecializedVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageResultIsTemp(0, false);
+
+    CKFFShaderKey key;
+    key.VS = CKFFShaderKeyVS();
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+    CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(!cache.UsesUberShader() &&
+              cache.GetShaderMode() == CKFF_SHADER_MODE_FULL_SPECIALIZED,
+              "CK2_FFP_UBERSHADER=0 must select full-specialized FFP shader mode");
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must create a program when the manifest table contains the exact FFP key");
+    TestCheck(ctx.LastProgramSpecializationDwords.size() == CKFFSpecializationInfo::MaxSpecDwords,
+              "Full-specialized program creation must preserve the manifest specialization payload");
+    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
+        TestCheck(ctx.LastProgramSpecializationDwords[i] == expectedSpec.Data()[i],
+                  "Full-specialized program payload must match the key-derived FFP specialization dwords");
+    }
+
+    cache.Shutdown();
+}
+
 void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
     std::string common = ReadRenderEngineSource("src/shaders/fs_ff_common.sc");
@@ -1891,6 +1970,7 @@ int main() {
     tests.Run("FFP shader key dxvk stage rules", &Test_FFPShaderKey_UsesDxvkFFPStageRules);
     tests.Run("FFP specialization info dxvk layout", &Test_FFPSpecializationInfo_MatchesDxvkFFPLayout);
     tests.Run("FFP shader cache dxvk variant contract", &Test_FFPShaderCache_UsesKeyedDxvkVariantContract);
+    tests.Run("FFP shader cache full specialized variant hit", &Test_FFPShaderCache_FullSpecializedVariantHit);
     tests.Run("FFP fragment shader dxvk common reader", &Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
