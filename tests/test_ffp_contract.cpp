@@ -1333,8 +1333,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_variant_3d_stage0_modulate") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_positiont_stage0_modulate") != std::string::npos &&
-              generatedTable.find("s_dx11_ffp_variant_3d_stage0_modulate_fs_ff_stage") != std::string::npos &&
-              generatedTable.find("s_dx11_ffp_positiont_stage0_modulate_fs_ff_stage") != std::string::npos &&
+              generatedTable.find("s_dx11_ffp_spec_") != std::string::npos &&
+              generatedTable.find("positiont_stage0_modulate_fs_ff_stage") == std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
               shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
@@ -1342,6 +1342,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("normalize_specialized_variant") != std::string::npos &&
               shaderCompiler.find("default_specialized_stage") != std::string::npos &&
               shaderCompiler.find("stages must contain up to 8 stage objects") != std::string::npos &&
+              shaderCompiler.find("specialization_identifier") != std::string::npos &&
+              shaderCompiler.find("unique_specialized_fs_variants") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
