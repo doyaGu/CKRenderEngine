@@ -139,7 +139,7 @@ public:
 
     CKRasterizerEncoder *BeginEncoder() override { return &m_Encoder; }
     void EndEncoder(CKRasterizerEncoder *) override {}
-    CKERROR Frame(CKBOOL) override { return CK_OK; }
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE) override { return CK_OK; }
 
 private:
     CKNULLRasterizerEncoder m_Encoder;
