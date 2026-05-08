@@ -59,6 +59,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFixedFunctionPipeline.h
         CKFFDebug.h
         CKFFStageState.h
+        CKFFUniformState.h
         CKFFShaderKey.h
         CKFFSpecializationInfo.h
         CKFFSpecializedModuleTable.h
@@ -125,6 +126,7 @@ set(CKRE_SOURCES
         CKFixedFunctionPipeline.cpp
         CKFFDebug.cpp
         CKFFStageState.cpp
+        CKFFUniformState.cpp
         CKFFShaderKey.cpp
         CKFFSpecializationInfo.cpp
         CKFFSpecializedModuleTable.cpp
