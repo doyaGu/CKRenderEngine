@@ -32,7 +32,6 @@ option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
 option(CKRE_DEBUG_OUTPUT "Enable CK2_3D debug logger output by default; CK2_3D_DEBUG_OUTPUT can override at runtime" ON)
-option(CKRE_FFP_VARIANT_CAPTURE "Enable temporary FFP variant key capture logging for manifest generation" OFF)
 
 if ((CKRE_BUILD_TESTS OR CKRE_BUILD_EXAMPLES) AND NOT CKRE_BUILD_STATIC)
     message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests/examples require static libraries")

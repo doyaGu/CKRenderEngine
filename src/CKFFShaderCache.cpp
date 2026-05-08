@@ -63,97 +63,10 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
-#if CKRE_FFP_VARIANT_CAPTURE
-CKDWORD ReadEnvDword(const char *name, CKDWORD fallback)
-{
-    const char *value = std::getenv(name);
-    if (!value || !*value)
-        return fallback;
-
-    char *end = nullptr;
-    unsigned long parsed = std::strtoul(value, &end, 10);
-    if (end == value)
-        return fallback;
-    return (CKDWORD)parsed;
-}
-
-void LogVariantStage(CKDWORD stage, const CKFFShaderKeyFSStage &s)
-{
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant stage[%u]: cop=%u carg0=%u carg1=%u carg2=%u aop=%u aarg0=%u aarg1=%u aarg2=%u temp=%u",
-               stage,
-               s.ColorOp, s.ColorArg0, s.ColorArg1, s.ColorArg2,
-               s.AlphaOp, s.AlphaArg0, s.AlphaArg1, s.AlphaArg2,
-               s.ResultIsTemp ? 1u : 0u);
-}
-
-void LogVariantSpecDwords(const CKFFSpecializationInfo &spec)
-{
-    const CKDWORD *d = spec.Data();
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant specDwords: [%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]",
-               d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9]);
-}
-
-void LogVariantManifestStage(CKDWORD stage, const CKFFShaderKeyFSStage &s)
-{
-    CK_LOG_RAW("          {");
-    CK_LOG_RAW_FMT("            \"colorOp\": %u,", s.ColorOp);
-    CK_LOG_RAW_FMT("            \"colorArg0\": %u,", s.ColorArg0);
-    CK_LOG_RAW_FMT("            \"colorArg1\": %u,", s.ColorArg1);
-    CK_LOG_RAW_FMT("            \"colorArg2\": %u,", s.ColorArg2);
-    CK_LOG_RAW_FMT("            \"alphaOp\": %u,", s.AlphaOp);
-    CK_LOG_RAW_FMT("            \"alphaArg0\": %u,", s.AlphaArg0);
-    CK_LOG_RAW_FMT("            \"alphaArg1\": %u,", s.AlphaArg1);
-    CK_LOG_RAW_FMT("            \"alphaArg2\": %u,", s.AlphaArg2);
-    CK_LOG_RAW_FMT("            \"resultIsTemp\": %s,", s.ResultIsTemp ? "true" : "false");
-    CK_LOG_RAW_FMT("            \"projectedSampler\": %s", s.ProjectedSampler ? "true" : "false");
-    CK_LOG_RAW_FMT("          }%s", stage + 1u < CKFF_STATE_DESC_TEXTURE_STAGES ? "," : "");
-}
-
-void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
-{
-    CK_LOG_RAW("FFP_VARIANT_MANIFEST_CANDIDATE_BEGIN");
-    CK_LOG_RAW("    {");
-    CK_LOG_RAW_FMT("      \"name\": \"captured_%u\",", index);
-    CK_LOG_RAW_FMT("      \"vs\": \"%s\",", key.VS.GetHasPositionT() ? "positiont" : "3d");
-    CK_LOG_RAW("      \"key\": {");
-    CK_LOG_RAW_FMT("        \"vsBits\": %llu,", (unsigned long long)key.VS.Bits);
-    CK_LOG_RAW_FMT("        \"vsTexcoordDeclMask\": %u,", key.VS.VertexTexcoordDeclMask);
-    CK_LOG_RAW_FMT("        \"vsTexGen\": [%u, %u, %u, %u, %u, %u, %u, %u],",
-                   key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
-                   key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
-    CK_LOG_RAW_FMT("        \"vsTexCoordIndex\": [%u, %u, %u, %u, %u, %u, %u, %u],",
-                   key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
-                   key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7]);
-    CK_LOG_RAW_FMT("        \"vsTexTransformFlags\": [%u, %u, %u, %u, %u, %u, %u, %u],",
-                   key.VS.TexTransformFlags[0], key.VS.TexTransformFlags[1], key.VS.TexTransformFlags[2], key.VS.TexTransformFlags[3],
-                   key.VS.TexTransformFlags[4], key.VS.TexTransformFlags[5], key.VS.TexTransformFlags[6], key.VS.TexTransformFlags[7]);
-    CK_LOG_RAW_FMT("        \"lastActiveTextureStage\": %u,", key.FS.LastActiveTextureStage);
-    CK_LOG_RAW_FMT("        \"globalSpecularEnable\": %s,", key.FS.GlobalSpecularEnable ? "true" : "false");
-    CK_LOG_RAW_FMT("        \"alphaTestEnable\": %s,", key.FS.AlphaTestEnable ? "true" : "false");
-    CK_LOG_RAW_FMT("        \"alphaFunc\": %u,", key.FS.AlphaFunc);
-    CK_LOG_RAW_FMT("        \"fogEnable\": %s,", key.FS.FogEnable ? "true" : "false");
-    CK_LOG_RAW_FMT("        \"vertexFogMode\": %u,", key.FS.VertexFogMode);
-    CK_LOG_RAW_FMT("        \"pixelFogMode\": %u,", key.FS.PixelFogMode);
-    CK_LOG_RAW_FMT("        \"rangeFog\": %s,", key.FS.RangeFog ? "true" : "false");
-    CK_LOG_RAW("        \"stages\": [");
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
-        LogVariantManifestStage(stage, key.FS.Stages[stage]);
-    CK_LOG_RAW("        ]");
-    CK_LOG_RAW("      }");
-    CK_LOG_RAW("    }");
-    CK_LOG_RAW("FFP_VARIANT_MANIFEST_CANDIDATE_END");
-}
-#endif
-
 } // namespace
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(true),
-#if CKRE_FFP_VARIANT_CAPTURE
-      m_VariantLogLimit(0), m_VariantLogCount(0),
-#endif
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
@@ -167,11 +80,6 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
                                  _stricmp(uber, "false") == 0 ||
                                  _stricmp(uber, "off") == 0 ||
                                  _stricmp(uber, "no") == 0));
-#if CKRE_FFP_VARIANT_CAPTURE
-    m_VariantLogLimit = ReadEnvDword("CK2_FFP_VARIANT_LOG_LIMIT", 0);
-    m_VariantLogCount = 0;
-    m_VariantStats.clear();
-#endif
     CreateUniforms();
     ResolveShaderTarget();
 }
@@ -184,9 +92,6 @@ void CKFFShaderCache::Shutdown() {
         }
         m_ProgramCache.clear();
     }
-#if CKRE_FFP_VARIANT_CAPTURE
-    m_VariantStats.clear();
-#endif
     m_Context = nullptr;
     m_BlobSet = nullptr;
 }
@@ -338,44 +243,6 @@ CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
     return CreateUberSpecializedProgram(key);
 }
 
-void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
-#if CKRE_FFP_VARIANT_CAPTURE
-    CKDWORD &count = m_VariantStats[key];
-    ++count;
-
-    if (count != 1 || m_VariantLogLimit == 0 || m_VariantLogCount >= m_VariantLogLimit)
-        return;
-    ++m_VariantLogCount;
-
-    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key.FS);
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant key[%u]: seen=%u positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
-               m_VariantLogCount, count, key.VS.GetHasPositionT() ? 1u : 0u,
-               (unsigned long long)key.VS.Bits,
-               key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
-               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
-               key.FS.FogEnable ? 1u : 0u);
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant texGen: [%u,%u,%u,%u,%u,%u,%u,%u]",
-               key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
-               key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant texCoordIndex: [%u,%u,%u,%u,%u,%u,%u,%u]",
-               key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
-               key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7]);
-    CK_LOG_FMT("ShaderCache",
-               "FFP variant texTransformFlags: [%u,%u,%u,%u,%u,%u,%u,%u]",
-               key.VS.TexTransformFlags[0], key.VS.TexTransformFlags[1], key.VS.TexTransformFlags[2], key.VS.TexTransformFlags[3],
-               key.VS.TexTransformFlags[4], key.VS.TexTransformFlags[5], key.VS.TexTransformFlags[6], key.VS.TexTransformFlags[7]);
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
-        LogVariantStage(stage, key.FS.Stages[stage]);
-    LogVariantSpecDwords(spec);
-    LogVariantManifestCandidate(m_VariantLogCount, key);
-#else
-    (void)key;
-#endif
-}
-
 CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
     CKFFSpecializedModule module;
     if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
@@ -477,8 +344,6 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 }
 
 CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    RecordVariantKey(key);
-
     auto it = m_ProgramCache.find(key);
     if (it != m_ProgramCache.end())
         return it->second;
