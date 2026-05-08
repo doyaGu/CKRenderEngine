@@ -4,9 +4,9 @@
 #include <cstdint>
 
 // Fixed-function state description.
-// The renderer uses two uber-shader programs (3D and PositionT). This state
-// description is kept for diagnostics/tests and must not be treated as a shader
-// variant cache.
+// This is a diagnostic/state snapshot. Shader variant lookup uses
+// CKFFShaderKeyVS/FS, which is derived from this snapshot and live texture
+// binding state.
 
 static const uint32_t CKFF_STATE_DESC_TEXTURE_STAGES = 8;
 
@@ -145,16 +145,24 @@ private:
 struct CKFFFSStateDesc {
     struct Stage {
         uint32_t ColorOp = 0;
+        uint32_t ColorArg0 = 0;
         uint32_t ColorArg1 = 0;
         uint32_t ColorArg2 = 0;
         uint32_t AlphaOp = 0;
+        uint32_t AlphaArg0 = 0;
+        uint32_t AlphaArg1 = 0;
+        uint32_t AlphaArg2 = 0;
         bool ResultIsTemp = false;
 
         bool operator==(const Stage &o) const {
             return ColorOp == o.ColorOp &&
+                   ColorArg0 == o.ColorArg0 &&
                    ColorArg1 == o.ColorArg1 &&
                    ColorArg2 == o.ColorArg2 &&
                    AlphaOp == o.AlphaOp &&
+                   AlphaArg0 == o.AlphaArg0 &&
+                   AlphaArg1 == o.AlphaArg1 &&
+                   AlphaArg2 == o.AlphaArg2 &&
                    ResultIsTemp == o.ResultIsTemp;
         }
         bool operator!=(const Stage &o) const { return !(*this == o); }
@@ -173,6 +181,10 @@ struct CKFFFSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].ColorArg1 = arg;
     }
+    void SetStageColorArg0(uint32_t stage, uint32_t arg) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].ColorArg0 = arg;
+    }
     void SetStageColorArg2(uint32_t stage, uint32_t arg) {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].ColorArg2 = arg;
@@ -180,6 +192,18 @@ struct CKFFFSStateDesc {
     void SetStageAlphaOp(uint32_t stage, uint32_t op) {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].AlphaOp = op;
+    }
+    void SetStageAlphaArg0(uint32_t stage, uint32_t arg) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].AlphaArg0 = arg;
+    }
+    void SetStageAlphaArg1(uint32_t stage, uint32_t arg) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].AlphaArg1 = arg;
+    }
+    void SetStageAlphaArg2(uint32_t stage, uint32_t arg) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].AlphaArg2 = arg;
     }
     void SetStageResultIsTemp(uint32_t stage, bool v) {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
@@ -194,6 +218,10 @@ struct CKFFFSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return Stages[stage].ColorArg1;
     }
+    uint32_t GetStageColorArg0(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return Stages[stage].ColorArg0;
+    }
     uint32_t GetStageColorArg2(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return Stages[stage].ColorArg2;
@@ -201,6 +229,18 @@ struct CKFFFSStateDesc {
     uint32_t GetStageAlphaOp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return Stages[stage].AlphaOp;
+    }
+    uint32_t GetStageAlphaArg0(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return Stages[stage].AlphaArg0;
+    }
+    uint32_t GetStageAlphaArg1(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return Stages[stage].AlphaArg1;
+    }
+    uint32_t GetStageAlphaArg2(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return Stages[stage].AlphaArg2;
     }
     bool GetStageResultIsTemp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return false;

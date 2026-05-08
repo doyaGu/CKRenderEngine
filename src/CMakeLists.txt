@@ -58,6 +58,8 @@ set(CKRE_PUBLIC_HEADERS
 set(CKRE_PRIVATE_HEADERS
         CKFixedFunctionPipeline.h
         CKFFDebug.h
+        CKFFShaderKey.h
+        CKFFSpecializationInfo.h
         CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
@@ -120,6 +122,8 @@ set(CKRE_SOURCES
 
         CKFixedFunctionPipeline.cpp
         CKFFDebug.cpp
+        CKFFShaderKey.cpp
+        CKFFSpecializationInfo.cpp
         CKFFShaderCache.cpp
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
@@ -144,6 +148,7 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_3d.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 
@@ -193,6 +198,7 @@ function(ckre_configure_target TARGET_NAME)
 
     target_compile_definitions(${TARGET_NAME} PRIVATE
             CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>
+            CKRE_FFP_DXVK_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_DXVK_VARIANTS}>,1,0>
     )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
