@@ -1333,6 +1333,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_variant_3d_stage0_modulate") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_positiont_stage0_modulate") != std::string::npos &&
+              generatedTable.find("CKFFSpecializedKey_variant_3d_stage1_add_specular") != std::string::npos &&
               generatedTable.find("s_dx11_ffp_spec_") != std::string::npos &&
               generatedTable.find("positiont_stage0_modulate_fs_ff_stage") == std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
@@ -1349,6 +1350,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("--define") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate\"") != std::string::npos &&
               variantManifest.find("\"name\": \"positiont_stage0_modulate\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage1_add_specular\"") != std::string::npos &&
+              variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
+              variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
               "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
@@ -1455,6 +1459,56 @@ void Test_FFPShaderCache_FullSpecialized3DVariantHit() {
 
 void Test_FFPShaderCache_FullSpecializedPositionTVariantHit() {
     Test_FFPShaderCache_FullSpecializedVariantHit(true);
+}
+
+void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetSpecularAdd(true);
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    fs.SetStageColorOp(1, CKRST_TOP_ADD);
+    fs.SetStageColorArg0(1, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(1, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(1, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(1, CKRST_TOP_SELECTARG2);
+    fs.SetStageAlphaArg0(1, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(1, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(1, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(true);
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 0b11u);
+    CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must include a two-stage 3D variant with global specular enabled");
+    TestCheck(expectedSpec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 1 &&
+              expectedSpec.Get(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED) == 1 &&
+              ctx.LastProgramSpecializationDwords[4] == expectedSpec.Data()[4] &&
+              ctx.LastProgramSpecializationDwords[6] == expectedSpec.Data()[6] &&
+              ctx.LastProgramSpecializationDwords[7] == expectedSpec.Data()[7],
+              "Two-stage full-specialized variant must preserve last-stage, specular, and stage1 specialization dwords");
+
+    cache.Shutdown();
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
@@ -2057,6 +2111,7 @@ int main() {
     tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
     tests.Run("FFP shader cache full specialized 3D variant hit", &Test_FFPShaderCache_FullSpecialized3DVariantHit);
     tests.Run("FFP shader cache full specialized PositionT variant hit", &Test_FFPShaderCache_FullSpecializedPositionTVariantHit);
+    tests.Run("FFP shader cache full specialized two-stage specular variant hit", &Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
