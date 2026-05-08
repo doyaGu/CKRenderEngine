@@ -1310,6 +1310,11 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
               "FFP shader cache must expose the specialized ubershader/specialization mode switch");
+    TestCheck(cacheHeader.find("m_VariantStats") != std::string::npos &&
+              cacheHeader.find("RecordVariantKey") != std::string::npos &&
+              cacheSource.find("CK2_FFP_VARIANT_LOG_LIMIT") != std::string::npos &&
+              cacheSource.find("FFP variant specDwords") != std::string::npos,
+              "FFP shader cache must provide an internal opt-in runtime key dump for manifest growth");
     TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
               cacheSource.find("CKFFFindSpecializedModule") != std::string::npos &&
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
@@ -1450,6 +1455,18 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
               "Full-specialized cache miss must fail explicitly without falling back to the uber shader or caching a null variant");
 
     cache.Shutdown();
+}
+
+void Test_FFPShaderCache_VariantKeyDumpIsOptIn() {
+    std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
+    std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+    TestCheck(cacheSource.find("ReadEnvDword(\"CK2_FFP_VARIANT_LOG_LIMIT\", 0)") != std::string::npos &&
+              cacheSource.find("m_VariantLogLimit == 0") != std::string::npos,
+              "FFP variant key logging must default to disabled unless CK2_FFP_VARIANT_LOG_LIMIT is set");
+    TestCheck(cacheHeader.find("size_t CachedProgramCount()") != std::string::npos &&
+              cacheHeader.find("VariantStats") != std::string::npos &&
+              cacheHeader.find("GetVariant") == std::string::npos,
+              "FFP variant key statistics must remain internal rather than becoming public RenderEngine API");
 }
 
 void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
@@ -2002,6 +2019,7 @@ int main() {
     tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
     tests.Run("FFP shader cache full specialized variant hit", &Test_FFPShaderCache_FullSpecializedVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
+    tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
