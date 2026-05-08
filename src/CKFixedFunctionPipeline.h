@@ -64,6 +64,11 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
                                   CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
                                   CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2);
 void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]);
+Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
+                                       const VxColor &bumpValue,
+                                       const float bumpEnv[2][4]);
+float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
+                                   const float bumpEnv[2][4]);
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
 CKDWORD CKFFTexcoordIndex(CKDWORD packed);
