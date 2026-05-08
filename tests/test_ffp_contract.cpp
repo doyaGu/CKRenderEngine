@@ -1933,6 +1933,7 @@ void Test_FFPShaderCache_VariantKeyDumpIsOptIn() {
               cacheSource.find("#else\n    (void)key;\n#endif") != std::string::npos,
               "FFP variant key logging must compile to a no-op when CKRE_FFP_VARIANT_CAPTURE is disabled");
     TestCheck(cacheSource.find("\\\"vsTexGen\\\"") != std::string::npos &&
+              cacheSource.find("\\\"vsTexcoordDeclMask\\\"") != std::string::npos &&
               cacheSource.find("\\\"lastActiveTextureStage\\\"") != std::string::npos &&
               cacheSource.find("\\\"globalSpecularEnable\\\"") != std::string::npos &&
               cacheSource.find("\\\"alphaTestEnable\\\"") != std::string::npos &&
@@ -2153,6 +2154,7 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
     desc.SetTexGen(7, CKFF_TG_REFLECTION, true);
     desc.SetTexCoordIndex(7, 3);
     desc.SetTextureTransformFlags(7, CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED);
+    desc.SetTexcoordComponentCount(7, 4);
 
     TestCheck(desc.GetHasPositionT(),
               "Vertex state desc PositionT flag must not alias high texture coordinate bits");
@@ -2166,9 +2168,63 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
               "Vertex state desc must preserve stage 7 source texture coordinate index");
     TestCheck(desc.GetTextureTransformFlags(7) == (CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED),
               "Vertex state desc must preserve stage 7 texture transform flags");
+    TestCheck(desc.GetTexcoordComponentCount(7) == 4,
+              "Vertex state desc must preserve stage 7 texture coordinate declaration component count");
     TestCheck(!desc.GetHasTexCoord(8) && desc.GetTexGenMode(8) == 0 && !desc.GetTexGenHasTransform(8) &&
-                  desc.GetTexCoordIndex(8) == 0 && desc.GetTextureTransformFlags(8) == 0,
+                  desc.GetTexCoordIndex(8) == 0 && desc.GetTextureTransformFlags(8) == 0 &&
+                  desc.GetTexcoordComponentCount(8) == 0,
               "Vertex state desc must reject out-of-range texture coordinate stages");
+}
+
+void Test_FFPShaderKeyVS_CapturesRemainingVariantState() {
+    CKFFVSStateDesc base;
+    CKFFShaderKeyVS baseKey(base);
+
+    CKFFVSStateDesc desc;
+    desc.SetVertexHasFog(true);
+    desc.SetRangeFog(true);
+    desc.SetVertexClipping(true);
+    desc.SetVertexBlendMode(CKFF_VERTEX_BLEND_NORMAL);
+    desc.SetVertexBlendIndexed(true);
+    desc.SetVertexBlendCount(3);
+    desc.SetTexcoordComponentCount(0, 1);
+    desc.SetTexcoordComponentCount(1, 3);
+    desc.SetTexcoordComponentCount(7, 4);
+    CKFFShaderKeyVS key(desc);
+
+    TestCheck(key != baseKey,
+              "VS shader key must distinguish fog, clipping, vertex blend, and texcoord declaration state");
+    TestCheck(key.VertexTexcoordDeclMask != baseKey.VertexTexcoordDeclMask &&
+              desc.GetTexcoordComponentCount(0) == 1 &&
+              desc.GetTexcoordComponentCount(1) == 3 &&
+              desc.GetTexcoordComponentCount(7) == 4,
+              "VS shader key must preserve the 8 stage x 3 bit texcoord declaration mask");
+
+    CKFFShaderKey wrapperA;
+    CKFFShaderKey wrapperB;
+    wrapperA.VS = baseKey;
+    wrapperB.VS = key;
+    CKFFShaderKeyHash hash;
+    TestCheck(hash(wrapperA) != hash(wrapperB),
+              "VS shader key hash must include remaining FFP variant state");
+}
+
+void Test_FFPSpecializationInfo_PacksFogModesAndRangeFog() {
+    CKFFSpecializationInfo info;
+    info.Set(CKFF_SPEC_FOG_ENABLED, 1);
+    info.Set(CKFF_SPEC_VERTEX_FOG_MODE, VXFOG_EXP);
+    info.Set(CKFF_SPEC_PIXEL_FOG_MODE, VXFOG_EXP2);
+    info.Set(CKFF_SPEC_RANGE_FOG, 1);
+
+    TestCheck(info.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
+              info.Get(CKFF_SPEC_VERTEX_FOG_MODE) == VXFOG_EXP &&
+              info.Get(CKFF_SPEC_PIXEL_FOG_MODE) == VXFOG_EXP2 &&
+              info.Get(CKFF_SPEC_RANGE_FOG) == 1,
+              "FFP specialization payload must pack fog enable, vertex fog mode, pixel fog mode, and range fog");
+    TestCheck(CKFFSpecializationInfo::Layout(CKFF_SPEC_VERTEX_FOG_MODE).DwordOffset == 5 &&
+              CKFFSpecializationInfo::Layout(CKFF_SPEC_PIXEL_FOG_MODE).DwordOffset == 5 &&
+              CKFFSpecializationInfo::Layout(CKFF_SPEC_RANGE_FOG).DwordOffset == 5,
+              "FFP fog specialization additions must stay inside the existing 10 dword payload");
 }
 
 void Test_FFPStateDesc_UsesD3DTextureArgBaseValues() {
@@ -2632,6 +2688,8 @@ int main() {
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
+    tests.Run("FFP VS key captures remaining variant state", &Test_FFPShaderKeyVS_CapturesRemainingVariantState);
+    tests.Run("FFP specialization packs fog modes", &Test_FFPSpecializationInfo_PacksFogModesAndRangeFog);
     tests.Run("FFP state desc uses D3D texture arg values", &Test_FFPStateDesc_UsesD3DTextureArgBaseValues);
     tests.Run("FFP state desc captures TEMP result routing", &Test_FFPStateDesc_BuildCapturesTempResultRouting);
     tests.Run("Texture op fallback evaluates as explicit modulate", &Test_TextureOpFallback_EvaluatesAsExplicitModulate);

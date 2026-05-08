@@ -10,6 +10,7 @@
 
 struct CKFFShaderKeyVS {
     uint64_t Bits;
+    uint32_t VertexTexcoordDeclMask;
     uint8_t TexGen[CKFF_STATE_DESC_TEXTURE_STAGES];
     uint8_t TexCoordIndex[CKFF_STATE_DESC_TEXTURE_STAGES];
     uint16_t TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES];
