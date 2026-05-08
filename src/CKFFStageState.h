@@ -97,6 +97,10 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
                                                  CKBOOL indexed,
                                                  CKDWORD formatFlags);
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
+int CKFFResolveActiveTextureCount(CKDWORD dpFlags,
+                                  const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
+                                  const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]);
+CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState);
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
 CKDWORD CKFFTexcoordIndex(CKDWORD packed);
 CKDWORD CKFFTexcoordGeneration(CKDWORD packed);

@@ -250,6 +250,86 @@ int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
     return count;
 }
 
+int CKFFResolveActiveTextureCount(CKDWORD dpFlags,
+                                  const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
+                                  const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]) {
+    int count = CKFFActiveTextureCountFromDPFlags(dpFlags);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        const CKDWORD op = stageStates[stage][CKRST_TSS_OP];
+        if (textureHandles[stage] != 0 ||
+            (op != 0 && op != CKRST_TOP_DISABLE)) {
+            if (count < stage + 1)
+                count = stage + 1;
+        }
+    }
+    return count;
+}
+
+CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
+    CKSamplerDesc desc;
+    memset(&desc, 0, sizeof(desc));
+    if (!stageState)
+        return desc;
+
+    const CKDWORD mag = stageState[CKRST_TSS_MAGFILTER];
+    const CKDWORD min = stageState[CKRST_TSS_MINFILTER];
+    const CKDWORD addr = stageState[CKRST_TSS_ADDRESS];
+    const CKDWORD addrU = stageState[CKRST_TSS_ADDRESSU];
+    const CKDWORD addrV = stageState[CKRST_TSS_ADDRESSV];
+    const CKDWORD addrW = stageState[CKRST_TSS_ADDRESW];
+
+    switch (mag) {
+    case VXTEXTUREFILTER_NEAREST:
+        desc.MagFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_ANISOTROPIC:
+        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
+        break;
+    default:
+        desc.MagFilter = CKRST_FILTER_LINEAR;
+        break;
+    }
+
+    switch (min) {
+    case VXTEXTUREFILTER_NEAREST:
+    case VXTEXTUREFILTER_MIPNEAREST:
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_MIPLINEAR:
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    case VXTEXTUREFILTER_LINEARMIPNEAREST:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+        break;
+    case VXTEXTUREFILTER_LINEARMIPLINEAR:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    case VXTEXTUREFILTER_ANISOTROPIC:
+        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
+        break;
+    case VXTEXTUREFILTER_LINEAR:
+    default:
+        desc.MinFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_LINEAR;
+        break;
+    }
+
+    CK_ADDRESS_MODE translateAddr = CKFFTranslateAddressMode(addr);
+    desc.AddressU = (addrU != 0) ? CKFFTranslateAddressMode(addrU) : translateAddr;
+    desc.AddressV = (addrV != 0) ? CKFFTranslateAddressMode(addrV) : translateAddr;
+    desc.AddressW = (addrW != 0) ? CKFFTranslateAddressMode(addrW) : translateAddr;
+
+    desc.BorderColor = stageState[CKRST_TSS_BORDERCOLOR];
+    desc.CompareFunc = CKRST_COMPARE_NONE;
+
+    return desc;
+}
+
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation) {
     return (index & 0xFFFFu) | ((generation & 0xFFFFu) << 16);
 }
