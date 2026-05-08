@@ -11,6 +11,7 @@ class CKDebugLogger {
 public:
     static CKDebugLogger &Instance();
 
+    void EnableOutput(bool enable);
     void EnableDebuggerOutput(bool enable);
     void EnableFileOutput(bool enable);
     void SetLogFilePath(const char *path);
@@ -31,6 +32,7 @@ private:
     void OpenFileIfNeeded();
 
     char m_LogFilePath[MAX_PATH];
+    bool m_OutputEnabled;
     bool m_DebuggerEnabled;
     bool m_FileEnabled;
     FILE *m_File;
