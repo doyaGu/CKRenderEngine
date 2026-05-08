@@ -147,6 +147,35 @@ def read_bool(value: object, field: str) -> bool:
     return value
 
 
+def repack_ffp_arg(arg: int) -> int:
+    return (arg & 0b111) | ((arg & 0b110000) >> 1)
+
+
+def set_spec_bits(dwords: list[int], word: int, offset: int, bits: int, value: int) -> None:
+    mask = ((1 << bits) - 1) << offset
+    dwords[word] &= ~mask
+    dwords[word] |= (value << offset) & mask
+
+
+def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
+    dwords = [0] * 10
+    dwords[0] = 1
+    set_spec_bits(dwords, 4, 16, 3, key["lastActiveTextureStage"])
+    set_spec_bits(dwords, 6, 31, 1, 1 if key["globalSpecularEnable"] else 0)
+
+    for stage_index, stage in enumerate(key["stages"][:4]):
+        word = 6 + stage_index
+        set_spec_bits(dwords, word, 0, 5, stage["colorOp"])
+        set_spec_bits(dwords, word, 5, 5, repack_ffp_arg(stage["colorArg1"]))
+        set_spec_bits(dwords, word, 10, 5, repack_ffp_arg(stage["colorArg2"]))
+        set_spec_bits(dwords, word, 15, 5, stage["alphaOp"])
+        set_spec_bits(dwords, word, 20, 5, repack_ffp_arg(stage["alphaArg1"]))
+        set_spec_bits(dwords, word, 25, 5, repack_ffp_arg(stage["alphaArg2"]))
+        set_spec_bits(dwords, word, 30, 1, 1 if stage["resultIsTemp"] else 0)
+
+    return dwords
+
+
 def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
     if not isinstance(stage, dict):
         raise ValueError(f"{field} must be an object")
@@ -198,11 +227,19 @@ def normalize_specialized_variant(variant: dict[str, object], index: int) -> dic
     if vs not in ("3d", "positiont"):
         raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].vs must be '3d' or 'positiont'")
 
-    spec_dwords = variant.get("specDwords")
-    if not isinstance(spec_dwords, list):
-        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords must be an array")
-    spec_dwords = [read_uint32(value, f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords[{dword_index}]")
-                   for dword_index, value in enumerate(spec_dwords)]
+    key = normalize_specialized_key(variant.get("key"),
+                                    f"{FFP_VARIANT_MANIFEST} variants[{index}].key")
+    spec_dwords = ffp_specialization_dwords_from_key(key)
+    explicit_spec_dwords = variant.get("specDwords")
+    if explicit_spec_dwords is not None:
+        if not isinstance(explicit_spec_dwords, list):
+            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords must be an array")
+        explicit_spec_dwords = [
+            read_uint32(value, f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords[{dword_index}]")
+            for dword_index, value in enumerate(explicit_spec_dwords)
+        ]
+        if explicit_spec_dwords != spec_dwords:
+            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords does not match key-derived FFP specialization payload")
 
     return {
         "name": name,
@@ -210,8 +247,7 @@ def normalize_specialized_variant(variant: dict[str, object], index: int) -> dic
         "vs": vs,
         "specDwords": spec_dwords,
         "defines": ffp_specialized_shader_defines(spec_dwords),
-        "key": normalize_specialized_key(variant.get("key"),
-                                         f"{FFP_VARIANT_MANIFEST} variants[{index}].key"),
+        "key": key,
     }
 
 

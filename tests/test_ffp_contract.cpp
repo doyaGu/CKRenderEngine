@@ -1321,6 +1321,8 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
+              shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
+              shaderCompiler.find("specDwords does not match key-derived FFP specialization payload") != std::string::npos &&
               shaderCompiler.find("normalize_specialized_variant") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
