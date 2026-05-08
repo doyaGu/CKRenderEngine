@@ -6,11 +6,9 @@
 #include <cstring>
 
 float CKFFReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback) {
+    (void)fallback;
     CKDWORD bits = cache.GetRenderState(state);
-    if (bits == 0)
-        return fallback;
-
-    float value = fallback;
+    float value = 0.0f;
     memcpy(&value, &bits, sizeof(value));
     return value;
 }

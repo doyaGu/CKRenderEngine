@@ -39,7 +39,7 @@ vec4 getTextureColor(int stage, vec2 uv, bool hasTexture)
 vec2 getSampleCoord(vec4 coord, int transformFlags)
 {
     if ((transformFlags & 0x100) == 0) return coord.xy;
-    return coord.xy / max(abs(coord.w), 0.0001);
+    return coord.xy / (abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w);
 }
 
 float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
