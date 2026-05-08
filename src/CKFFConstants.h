@@ -94,6 +94,7 @@ struct CKFFUniformHandles {
     CKDWORD u_bumpEnv;      // vec4 array: 2 elements (matrix, luminance)
     CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY
     CKDWORD u_stageParams;  // vec4 array: per-stage color/alpha ops and args
+    CKDWORD u_ffSpec;       // vec4 array: DXVK-style FFP specialization dwords mirror
     CKDWORD u_clipPlanes;   // vec4 array: compact enabled user clip planes
     CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
     CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES]; // samplers

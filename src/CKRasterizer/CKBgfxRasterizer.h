@@ -51,6 +51,8 @@ struct CKBgfxShaderRecord {
 
 struct CKBgfxProgramRecord {
     bgfx::ProgramHandle Handle;
+    CKDWORD SpecializationDwords[10];
+    CKDWORD SpecializationDwordCount;
 };
 
 struct CKBgfxUniformRecord {

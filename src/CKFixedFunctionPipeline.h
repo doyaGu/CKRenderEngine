@@ -7,6 +7,7 @@
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKFFStateDesc.h"
+#include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderCache.h"
@@ -208,6 +209,7 @@ private:
 
     // Internal methods
     CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
+    CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void BindTextures(CKRasterizerEncoder *encoder);
     float ComputeDepthKey() const;

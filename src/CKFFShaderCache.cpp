@@ -3,6 +3,8 @@
 #include "CKDebugLogger.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
@@ -63,7 +65,7 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
 } // namespace
 
 CKFFShaderCache::CKFFShaderCache()
-    : m_Context(nullptr), m_FallbackProgram(0), m_Stage3DProgram(0), m_PositionTProgram(0),
+    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(true),
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
@@ -72,24 +74,25 @@ CKFFShaderCache::~CKFFShaderCache() {
 
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
+    const char *uber = std::getenv("CK2_FFP_UBERSHADER");
+    m_UseUberShader = !(uber && (std::strcmp(uber, "0") == 0 ||
+                                 _stricmp(uber, "false") == 0 ||
+                                 _stricmp(uber, "off") == 0 ||
+                                 _stricmp(uber, "no") == 0));
     CreateUniforms();
-    CreatePrograms();
-    m_FallbackProgram = m_Stage3DProgram;
+    ResolveShaderTarget();
 }
 
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
-        if (m_Stage3DProgram) {
-            m_Context->DeleteObject(m_Stage3DProgram, CKRST_OBJ_PROGRAM);
-            m_Stage3DProgram = 0;
+        for (auto &entry : m_ProgramCache) {
+            if (entry.second)
+                m_Context->DeleteObject(entry.second, CKRST_OBJ_PROGRAM);
         }
-        if (m_PositionTProgram) {
-            m_Context->DeleteObject(m_PositionTProgram, CKRST_OBJ_PROGRAM);
-            m_PositionTProgram = 0;
-        }
-        m_FallbackProgram = 0;
+        m_ProgramCache.clear();
     }
     m_Context = nullptr;
+    m_BlobSet = nullptr;
 }
 
 void CKFFShaderCache::CreateUniforms() {
@@ -184,6 +187,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_stageParams = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_stageParams, &desc);
 
+    desc.Name = (char *)"u_ffSpec";
+    desc.Count = CKFFSpecializationInfo::MaxSpecDwords;
+    m_Uniforms.u_ffSpec = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ffSpec, &desc);
+
     desc.Name = (char *)"u_clipPlanes";
     desc.Count = 6;
     m_Uniforms.u_clipPlanes = AllocUniformHandle();
@@ -205,42 +213,52 @@ void CKFFShaderCache::CreateUniforms() {
     }
 }
 
-void CKFFShaderCache::CreatePrograms() {
+void CKFFShaderCache::ResolveShaderTarget() {
     if (!m_Context || !m_Context->m_Driver) return;
 
     // This uses the driver backend selected by the active bgfx context. It is
     // not the public Virtools legacy shader-target API, which remains
     // unsupported when no bgfx context has supplied a concrete native target.
-    CKShaderTargetDesc target;
-    CKERROR targetErr = m_Context->m_Driver->GetShaderTarget(&target);
+    CKERROR targetErr = m_Context->m_Driver->GetShaderTarget(&m_Target);
     if (targetErr != CK_OK) {
         CK_LOG_FMT("ShaderCache", "GetShaderTarget failed: err=%d", targetErr);
         return;
     }
-    const CKFFShaderBlobSet *set = FindShaderBlobSet(target.Profile);
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.Profile);
     if (!set) {
         CK_LOG_FMT("ShaderCache", "No FFP shader set for format=0x%08X profile=0x%08X",
-                   target.Format, target.Profile);
+                   m_Target.Format, m_Target.Profile);
         return;
     }
 
-    m_Stage3DProgram = CreateProgramFromBinary(
-        target, set->VS3D, set->VS3DSize,
-        set->FSStage, set->FSStageSize);
-    CK_LOG_FMT("ShaderCache", "Stage3D program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
-               m_Stage3DProgram, set->Name, set->VS3DSize, set->FSStageSize);
+    m_BlobSet = set;
+    CK_LOG_FMT("ShaderCache", "FFP DXVK-style variants enabled: backend=%s ubershader=%u",
+               set->Name, m_UseUberShader ? 1u : 0u);
+}
 
-    m_PositionTProgram = CreateProgramFromBinary(
-        target, set->VSPositionT, set->VSPositionTSize,
-        set->FSStage, set->FSStageSize);
-    CK_LOG_FMT("ShaderCache", "PositionT program: %u backend=%s (vs=%u bytes, fs=%u bytes)",
-               m_PositionTProgram, set->Name, set->VSPositionTSize, set->FSStageSize);
+CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
+    const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
+    if (!set)
+        return 0;
+
+    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
+    const unsigned char *vsData = key.VS.GetHasPositionT() ? set->VSPositionT : set->VS3D;
+    const unsigned int vsSize = key.VS.GetHasPositionT() ? set->VSPositionTSize : set->VS3DSize;
+    CKDWORD program = CreateProgramFromBinary(
+        m_Target, vsData, vsSize, set->FSStage, set->FSStageSize, specInfo);
+
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant program: %u backend=%s ubershader=%u positionT=%u lastStage=%u specular=%u",
+               program, set->Name, m_UseUberShader ? 1u : 0u, key.VS.GetHasPositionT() ? 1u : 0u,
+               key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u);
+    return program;
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     const CKShaderTargetDesc &target,
     const unsigned char *vsData, unsigned int vsSize,
-    const unsigned char *fsData, unsigned int fsSize)
+    const unsigned char *fsData, unsigned int fsSize,
+    const CKFFSpecializationInfo &specInfo)
 {
     if (!m_Context) return 0;
 
@@ -276,6 +294,8 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     progDesc.VertexShader = hVS;
     progDesc.PixelShader = hFS;
     progDesc.ConsumeShaders = TRUE;
+    progDesc.SpecializationDwords = specInfo.Data();
+    progDesc.SpecializationDwordCount = specInfo.DwordCount();
     err = m_Context->CreateProgram(hProgram, &progDesc);
     if (err != CK_OK) {
         CK_LOG_FMT("ShaderCache", "CreateProgram FAILED: err=%d vs=%u fs=%u", err, hVS, hFS);
@@ -288,6 +308,13 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     return hProgram;
 }
 
-CKDWORD CKFFShaderCache::GetProgram(const CKFFStateDesc &stateDesc) {
-    return stateDesc.VS.GetHasPositionT() ? m_PositionTProgram : m_Stage3DProgram;
+CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
+    auto it = m_ProgramCache.find(key);
+    if (it != m_ProgramCache.end())
+        return it->second;
+
+    CKDWORD program = CreateVariantProgram(key);
+    if (program)
+        m_ProgramCache.emplace(key, program);
+    return program;
 }

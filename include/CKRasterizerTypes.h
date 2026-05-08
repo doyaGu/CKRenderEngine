@@ -175,6 +175,8 @@ struct CKProgramDesc {
     CKDWORD VertexShader;
     CKDWORD PixelShader;
     CKBOOL ConsumeShaders;
+    const CKDWORD *SpecializationDwords;
+    CKDWORD SpecializationDwordCount;
 };
 
 // ===========================================================================
