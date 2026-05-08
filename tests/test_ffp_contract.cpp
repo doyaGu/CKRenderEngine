@@ -1318,7 +1318,8 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               moduleHeader.find("CKFFFindSpecializedModule") != std::string::npos &&
               moduleSource.find("CKFFSpecializedModuleTable.generated.h") != std::string::npos &&
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
-              generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
+              generatedTable.find("CKFFSpecializedKey_variant_3d_stage0_modulate") != std::string::npos &&
+              generatedTable.find("s_dx11_ffp_variant_3d_stage0_modulate_fs_ff_stage") != std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
               shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
@@ -1327,9 +1328,9 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
-              variantManifest.find("\"variants\": []") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage0_modulate\"") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
-              "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary, even while the table is empty");
+              "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,
