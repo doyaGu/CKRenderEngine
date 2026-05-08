@@ -641,7 +641,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         // Direct render-target textures already own the drawn contents. Flush
         // the RTT views so later scene draws in this Virtools frame can sample
         // the updated texture, matching the old SetTargetTexture contract.
-        m_FFPipeline.GetRenderPipeline().EndFrame(FALSE);
+        m_FFPipeline.GetRenderPipeline().EndFrame(FALSE, FALSE);
     } else {
         // Normal back-to-front path
 
