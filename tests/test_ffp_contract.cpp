@@ -1521,18 +1521,17 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
               "FFP shader cache must expose the specialized ubershader/specialization mode switch");
-    TestCheck(cacheHeader.find("m_VariantStats") != std::string::npos &&
-              cacheHeader.find("RecordVariantKey") != std::string::npos &&
-              cacheSource.find("CK2_FFP_VARIANT_LOG_LIMIT") != std::string::npos &&
-              cacheSource.find("FFP variant specDwords") != std::string::npos &&
-              cacheSource.find("FFP_VARIANT_MANIFEST_CANDIDATE_BEGIN") != std::string::npos,
-              "FFP shader cache must provide an internal opt-in runtime key dump and manifest candidate for variant growth");
-    TestCheck(rootCmake.find("option(CKRE_FFP_VARIANT_CAPTURE") != std::string::npos &&
-              rootCmake.find("variant key capture logging") != std::string::npos &&
-              srcCmake.find("CKRE_FFP_VARIANT_CAPTURE=$<IF:$<BOOL:${CKRE_FFP_VARIANT_CAPTURE}>,1,0>") != std::string::npos &&
-              cacheHeader.find("#if CKRE_FFP_VARIANT_CAPTURE") != std::string::npos &&
-              cacheSource.find("#if CKRE_FFP_VARIANT_CAPTURE") != std::string::npos,
-              "FFP variant key dump must remain a temporary build-gated capture facility, not always-on runtime infrastructure");
+    TestCheck(cacheHeader.find("m_VariantStats") == std::string::npos &&
+              cacheHeader.find("RecordVariantKey") == std::string::npos &&
+              cacheSource.find("CK2_FFP_VARIANT_LOG_LIMIT") == std::string::npos &&
+              cacheSource.find("FFP_VARIANT_MANIFEST_CANDIDATE_BEGIN") == std::string::npos &&
+              cacheSource.find("LogVariantManifestCandidate") == std::string::npos,
+              "FFP shader cache must not keep temporary runtime variant key dump infrastructure");
+    TestCheck(rootCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
+              srcCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
+              cacheHeader.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
+              cacheSource.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos,
+              "FFP variant capture must not remain as a CMake option or compile-time feature flag");
     TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
               cacheSource.find("CKFFFindSpecializedModule") != std::string::npos &&
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
@@ -2214,31 +2213,26 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
     cache.Shutdown();
 }
 
-void Test_FFPShaderCache_VariantKeyDumpIsOptIn() {
+void Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved() {
     std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
     std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
-    TestCheck(cacheSource.find("ReadEnvDword(\"CK2_FFP_VARIANT_LOG_LIMIT\", 0)") != std::string::npos &&
-              cacheSource.find("m_VariantLogLimit == 0") != std::string::npos,
-              "FFP variant key logging must default to disabled unless CK2_FFP_VARIANT_LOG_LIMIT is set");
-    TestCheck(cacheSource.find("#else\r\n    (void)key;\r\n#endif") != std::string::npos ||
-              cacheSource.find("#else\n    (void)key;\n#endif") != std::string::npos,
-              "FFP variant key logging must compile to a no-op when CKRE_FFP_VARIANT_CAPTURE is disabled");
-    TestCheck(cacheSource.find("\\\"vsTexGen\\\"") != std::string::npos &&
-              cacheSource.find("\\\"vsTexcoordDeclMask\\\"") != std::string::npos &&
-              cacheSource.find("\\\"lastActiveTextureStage\\\"") != std::string::npos &&
-              cacheSource.find("\\\"globalSpecularEnable\\\"") != std::string::npos &&
-              cacheSource.find("\\\"alphaTestEnable\\\"") != std::string::npos &&
-              cacheSource.find("\\\"alphaFunc\\\"") != std::string::npos &&
-              cacheSource.find("\\\"fogEnable\\\"") != std::string::npos &&
-              cacheSource.find("\\\"vertexFogMode\\\"") != std::string::npos &&
-              cacheSource.find("\\\"pixelFogMode\\\"") != std::string::npos &&
-              cacheSource.find("\\\"rangeFog\\\"") != std::string::npos &&
-              cacheSource.find("\\\"resultIsTemp\\\"") != std::string::npos,
-              "FFP variant key logging must emit manifest-ready JSON fields matching ffp_specialized_variants.json");
+    std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
+    std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
+    TestCheck(cacheSource.find("ReadEnvDword") == std::string::npos &&
+              cacheSource.find("CK2_FFP_VARIANT_LOG_LIMIT") == std::string::npos &&
+              cacheSource.find("FFP variant key[") == std::string::npos &&
+              cacheSource.find("FFP variant specDwords") == std::string::npos &&
+              cacheSource.find("FFP_VARIANT_MANIFEST_CANDIDATE") == std::string::npos,
+              "Temporary FFP variant key logging and manifest-ready dump code must be removed");
     TestCheck(cacheHeader.find("size_t CachedProgramCount()") != std::string::npos &&
-              cacheHeader.find("VariantStats") != std::string::npos &&
+              cacheHeader.find("VariantStats") == std::string::npos &&
+              cacheHeader.find("RecordVariantKey") == std::string::npos &&
+              cacheHeader.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
               cacheHeader.find("GetVariant") == std::string::npos,
-              "FFP variant key statistics must remain internal rather than becoming public RenderEngine API");
+              "FFP shader cache must keep only program cache inspection, not runtime variant capture API or state");
+    TestCheck(rootCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
+              srcCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos,
+              "FFP variant capture CMake option and compile definition must be removed");
 }
 
 void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
@@ -3208,7 +3202,7 @@ int main() {
     tests.Run("FFP shader cache full specialized lit variant hit", &Test_FFPShaderCache_FullSpecializedLitVariantHit);
     tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
-    tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
+    tests.Run("FFP shader cache runtime variant key dump removed", &Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
