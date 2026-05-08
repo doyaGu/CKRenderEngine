@@ -1288,6 +1288,8 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
     std::string moduleHeader = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.h");
     std::string moduleSource = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.cpp");
+    std::string generatedTable = ReadRenderEngineSource("src/shaders/generated/CKFFSpecializedModuleTable.generated.h");
+    std::string shaderCompiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
     std::string rasterTypes = ReadRenderEngineSource("include/CKRasterizerTypes.h");
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
@@ -1311,8 +1313,12 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
               "CK2_FFP_UBERSHADER=0 must use an explicit full-specialized module lookup path, not silently reuse the uber blob");
     TestCheck(moduleHeader.find("struct CKFFSpecializedModule") != std::string::npos &&
+              moduleHeader.find("struct CKFFSpecializedModuleEntry") != std::string::npos &&
               moduleHeader.find("CKFFFindSpecializedModule") != std::string::npos &&
-              moduleSource.find("return false;") != std::string::npos,
+              moduleSource.find("CKFFSpecializedModuleTable.generated.h") != std::string::npos &&
+              moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
+              generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
+              shaderCompiler.find("write_specialized_module_table") != std::string::npos,
               "Full specialized FFP modules must have an explicit generated-table boundary, even while the table is empty");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&

@@ -4,12 +4,20 @@
 #include "CKFFShaderKey.h"
 #include "CKRasterizerTypes.h"
 
+#include <cstddef>
+
 struct CKFFSpecializedModule {
     const unsigned char *VSData;
     unsigned int VSSize;
     const unsigned char *FSData;
     unsigned int FSSize;
     CKFFSpecializationInfo Specialization;
+};
+
+struct CKFFSpecializedModuleEntry {
+    CK_SHADER_PROFILE Profile;
+    CKFFShaderKey Key;
+    CKFFSpecializedModule Module;
 };
 
 bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
