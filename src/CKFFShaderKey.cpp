@@ -40,11 +40,14 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 }
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
-    : Stages{}, LastActiveTextureStage(0), GlobalSpecularEnable(false) {}
+    : Stages{}, LastActiveTextureStage(0), AlphaFunc(0),
+      GlobalSpecularEnable(false), AlphaTestEnable(false) {}
 
 bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
     if (LastActiveTextureStage != other.LastActiveTextureStage ||
-        GlobalSpecularEnable != other.GlobalSpecularEnable)
+        AlphaFunc != other.AlphaFunc ||
+        GlobalSpecularEnable != other.GlobalSpecularEnable ||
+        AlphaTestEnable != other.AlphaTestEnable)
         return false;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &a = Stages[stage];
@@ -69,7 +72,9 @@ std::size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
     for (uint8_t texGen : key.VS.TexGen)
         seed = HashCombine(seed, texGen);
     seed = HashCombine(seed, key.FS.LastActiveTextureStage);
+    seed = HashCombine(seed, key.FS.AlphaFunc);
     seed = HashCombine(seed, key.FS.GlobalSpecularEnable ? 1u : 0u);
+    seed = HashCombine(seed, key.FS.AlphaTestEnable ? 1u : 0u);
     for (const CKFFShaderKeyFSStage &stage : key.FS.Stages) {
         seed = HashCombine(seed, stage.ColorOp);
         seed = HashCombine(seed, stage.ColorArg0);
@@ -109,6 +114,8 @@ bool CKFFShaderKeyArgUsesTexture(CKDWORD arg) {
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask) {
     CKFFShaderKeyFS key;
     key.GlobalSpecularEnable = desc.GetSpecularAdd();
+    key.AlphaTestEnable = desc.GetAlphaTestEnabled();
+    key.AlphaFunc = key.AlphaTestEnable ? desc.GetAlphaFunc() : 0;
 
     CKDWORD activeCount = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
@@ -167,6 +174,8 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
     info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
+    info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, key.AlphaTestEnable ? 1u : 0u);
+    info.Set(CKFF_SPEC_ALPHA_FUNC, key.AlphaFunc);
     CKDWORD projectedSamplerMask = 0;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         if (key.Stages[stage].ProjectedSampler)

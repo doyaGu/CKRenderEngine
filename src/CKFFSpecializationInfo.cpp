@@ -33,6 +33,10 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {6, 31, 1};
     case CKFF_SPEC_PROJECTED_SAMPLER_MASK:
         return {5, 0, 4};
+    case CKFF_SPEC_ALPHA_TEST_ENABLED:
+        return {5, 4, 1};
+    case CKFF_SPEC_ALPHA_FUNC:
+        return {5, 5, 4};
     default:
         break;
     }

@@ -98,10 +98,9 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     return a * b;
 }
 
-bool alphaPass(float alpha)
+bool alphaPass(float alpha, int func)
 {
     float ref = u_alphaParams.x;
-    int func = int(u_alphaParams.y);
     if (func == 0 || func == 8) return true;
     if (func == 1) return false;
     if (func == 2) return alpha < ref;
@@ -193,7 +192,11 @@ void main()
     if (specularEnabled) {
         current.rgb += v_color1.rgb;
     }
-    if (!alphaPass(current.a)) discard;
+    if (ckffSpecIsOptimized()) {
+        if (ckffSpecAlphaTestEnabled() && !alphaPass(current.a, ckffSpecAlphaFunc())) discard;
+    } else {
+        if (!alphaPass(current.a, int(u_alphaParams.y))) discard;
+    }
     current.rgb = mix(u_fogColor.rgb, current.rgb, v_texcoord7Fog.z);
     gl_FragColor = clamp(current, 0.0, 1.0);
 }
