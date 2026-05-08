@@ -1443,7 +1443,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"name\": \"3d_stage0_modulate_lit_one_light\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_diffuse_color0\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_texcoord_count3_projected\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage0_modulate_texcoord_count4_projected\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage1_bump_luminance\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage1_temp_result_routing\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_vertex_blend_normal_key\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_vertex_blend_tween_key\"") != std::string::npos &&
               variantManifest.find("\"vsBits\": 6291457") != std::string::npos &&
@@ -1451,7 +1453,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"vsBits\": 996432412673") != std::string::npos &&
               variantManifest.find("\"vsBits\": 68719476737") != std::string::npos &&
               variantManifest.find("\"vsTexcoordDeclMask\": 4793491") != std::string::npos &&
+              variantManifest.find("\"vsTexcoordDeclMask\": 4793492") != std::string::npos &&
               variantManifest.find("\"vsTexTransformFlags\": [2, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
+              variantManifest.find("\"vsTexTransformFlags\": [260, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
               variantManifest.find("\"vsTexTransformFlags\": [259, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
@@ -1461,6 +1465,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"colorOp\": 26") != std::string::npos &&
               variantManifest.find("\"colorOp\": 23") != std::string::npos &&
               variantManifest.find("\"alphaOp\": 25") != std::string::npos &&
+              variantManifest.find("\"resultIsTemp\": true") != std::string::npos &&
+              variantManifest.find("\"colorArg2\": 5") != std::string::npos &&
               variantManifest.find("\"projectedSampler\": true") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
               "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary");
@@ -2379,10 +2385,15 @@ void Test_TextureOpFallback_EvaluatesAsExplicitModulate() {
     TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_PREMODULATE, arg0, arg1, arg2, current, diffuse, texture),
                    arg1 * arg2,
                    "PREMODULATE fallback must be the explicit arg1 * arg2 compatibility path");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_LERP + 1, arg0, arg1, arg2, current, diffuse, texture),
+                   current,
+                   "Unknown texture ops must preserve current instead of silently using the PREMODULATE fallback");
 
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
-    TestCheck(shader.find("return a * b;") != std::string::npos,
-              "Fragment shader fallback must remain an explicit arg1 * arg2 compatibility path");
+    TestCheck(shader.find("if (op == 17) return a * b;") != std::string::npos &&
+              shader.find("return current;") != std::string::npos &&
+              shader.find("return a * b;\n}") == std::string::npos,
+              "Fragment shader fallback must be explicit for PREMODULATE and unknown ops must preserve CURRENT");
 }
 
 void Test_PatchMesh_BasicMeshConversionIsImplemented() {

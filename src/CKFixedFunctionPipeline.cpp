@@ -198,6 +198,8 @@ VxColor CKFFEvaluateTextureOp(CKDWORD op,
     case CKRST_TOP_BUMPENVMAP:
     case CKRST_TOP_BUMPENVMAPLUMINANCE:
         return current;
+    case CKRST_TOP_PREMODULATE:
+        return arg1 * arg2;
     case CKRST_TOP_DOTPRODUCT3: {
         const float dot =
             (arg1.r - 0.5f) * (arg2.r - 0.5f) +
@@ -210,7 +212,7 @@ VxColor CKFFEvaluateTextureOp(CKDWORD op,
     case CKRST_TOP_LERP:
         return SaturateColor(ColorMix(arg2, arg1, arg0));
     default:
-        return arg1 * arg2;
+        return current;
     }
 }
 
