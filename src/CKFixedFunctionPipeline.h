@@ -49,6 +49,13 @@ struct CKFFTextureStageSnapshot {
     VxMatrix TextureMatrix;
 };
 
+struct CKFFVertexBlendState {
+    CKDWORD Mode;
+    CKDWORD Count;
+    CKBOOL Indexed;
+    CKBOOL Supported;
+};
+
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 VxColor CKFFEvaluateTextureOp(CKDWORD op,
                               const VxColor &arg0,
@@ -69,6 +76,9 @@ Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
                                        const float bumpEnv[2][4]);
 float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
                                    const float bumpEnv[2][4]);
+CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
+                                                 CKBOOL indexed,
+                                                 CKDWORD formatFlags);
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
 CKDWORD CKFFTexcoordIndex(CKDWORD packed);

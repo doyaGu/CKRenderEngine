@@ -2078,6 +2078,26 @@ void Test_FFPVertexShader_UsesSpecializedLightingKey() {
               "3D vertex shader must consume specialized VS lighting bits for lighting, light count, normal normalization, and local viewer");
 }
 
+void Test_FFPVertexShader_UsesSpecializedVertexBlendKey() {
+    std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+
+    TestCheck(shader.find("CKFF_VS_VERTEX_BLEND_MODE") != std::string::npos &&
+              shader.find("CKFF_VS_VERTEX_BLEND_INDEXED") != std::string::npos &&
+              shader.find("CKFF_VS_VERTEX_BLEND_COUNT") != std::string::npos &&
+              shader.find("ckffVsVertexBlendMode") != std::string::npos,
+              "3D vertex shader must consume specialized VS vertex blend fields");
+    TestCheck(compiler.find("CKFF_VS_VERTEX_BLEND_MODE") != std::string::npos &&
+              compiler.find("(vs_bits >> 35) & 3") != std::string::npos &&
+              compiler.find("(vs_bits >> 38) & 3") != std::string::npos,
+              "Shader compiler must pass vertex blend key fields into specialized VS compilation");
+    TestCheck(pipeline.find("VXRENDERSTATE_VERTEXBLEND") != std::string::npos &&
+              pipeline.find("VXRENDERSTATE_INDEXVBLENDENABLE") != std::string::npos &&
+              pipeline.find("CKFFResolveVertexBlendState") != std::string::npos,
+              "BuildCurrentStateDesc must resolve vertex blend render state into the VS key");
+}
+
 void Test_FFPVertexShader_UsesSpecializedMaterialSourceKey() {
     std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
     std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
@@ -2214,6 +2234,29 @@ void Test_FFPBuildCurrentStateDesc_FeedsFogModeSplit() {
               pipeline.find("stateDesc.FS.SetPixelFogMode") != std::string::npos &&
               pipeline.find("stateDesc.FS.SetRangeFog") != std::string::npos,
               "BuildCurrentStateDesc must feed split fog modes and range fog into FFP specialization state");
+}
+
+void Test_FFPVertexBlendState_ResolvesMissingInputsAsDisabled() {
+    CKFFVertexBlendState disabled = CKFFResolveVertexBlendState(VXVBLEND_DISABLE, FALSE, CKFF_VF_POSITION);
+    TestCheck(disabled.Mode == CKFF_VERTEX_BLEND_DISABLED && disabled.Supported,
+              "Disabled vertex blend must preserve the old VS key path");
+
+    CKFFVertexBlendState missingWeights = CKFFResolveVertexBlendState(VXVBLEND_2WEIGHTS, FALSE, CKFF_VF_POSITION);
+    TestCheck(missingWeights.Mode == CKFF_VERTEX_BLEND_DISABLED && !missingWeights.Supported,
+              "Normal vertex blend without weight input must explicitly fall back to disabled");
+
+    CKFFVertexBlendState missingIndices = CKFFResolveVertexBlendState(VXVBLEND_2WEIGHTS, TRUE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
+    TestCheck(missingIndices.Mode == CKFF_VERTEX_BLEND_DISABLED && !missingIndices.Supported,
+              "Indexed vertex blend without index input must explicitly fall back to disabled");
+
+    CKFFVertexBlendState normal = CKFFResolveVertexBlendState(
+        VXVBLEND_3WEIGHTS, TRUE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX);
+    TestCheck(normal.Mode == CKFF_VERTEX_BLEND_NORMAL && normal.Count == 3 && normal.Indexed,
+              "Normal vertex blend state must enter the VS key when inputs are declared");
+
+    CKFFVertexBlendState tween = CKFFResolveVertexBlendState(VXVBLEND_TWEENING, FALSE, CKFF_VF_POSITION | CKFF_VF_TWEENPOSITION);
+    TestCheck(tween.Mode == CKFF_VERTEX_BLEND_TWEEN && tween.Supported,
+              "Tween vertex blend state must enter the VS key when tween input is declared");
 }
 
 void Test_FFPStateDesc_CoversEightTextureCoordinates() {
@@ -2753,12 +2796,14 @@ int main() {
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
     tests.Run("FFP vertex shader specialized lighting key", &Test_FFPVertexShader_UsesSpecializedLightingKey);
+    tests.Run("FFP vertex shader specialized vertex blend key", &Test_FFPVertexShader_UsesSpecializedVertexBlendKey);
     tests.Run("FFP vertex shader specialized material source key", &Test_FFPVertexShader_UsesSpecializedMaterialSourceKey);
     tests.Run("FFP vertex shader specialized fog mode key", &Test_FFPVertexShader_UsesSpecializedFogModeKey);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
     tests.Run("FFP FS key captures fog mode split", &Test_FFPShaderKeyFS_CapturesFogModeSplit);
     tests.Run("FFP current state feeds fog mode split", &Test_FFPBuildCurrentStateDesc_FeedsFogModeSplit);
+    tests.Run("FFP vertex blend state resolves missing inputs", &Test_FFPVertexBlendState_ResolvesMissingInputsAsDisabled);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
     tests.Run("FFP VS key captures remaining variant state", &Test_FFPShaderKeyVS_CapturesRemainingVariantState);
     tests.Run("FFP specialization packs fog modes", &Test_FFPSpecializationInfo_PacksFogModesAndRangeFog);

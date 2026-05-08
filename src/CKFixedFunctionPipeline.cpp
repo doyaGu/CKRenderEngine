@@ -337,6 +337,48 @@ float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
     return SaturateFloat(bumpValue.b * bumpEnv[1][0] + bumpEnv[1][1]);
 }
 
+CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
+                                                 CKBOOL indexed,
+                                                 CKDWORD formatFlags) {
+    CKFFVertexBlendState state = {};
+    state.Mode = CKFF_VERTEX_BLEND_DISABLED;
+    state.Count = 0;
+    state.Indexed = FALSE;
+    state.Supported = TRUE;
+
+    if (vertexBlend == VXVBLEND_DISABLE)
+        return state;
+
+    if (vertexBlend == VXVBLEND_TWEENING) {
+        const bool hasTweenInput = (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        state.Supported = hasTweenInput ? TRUE : FALSE;
+        if (hasTweenInput)
+            state.Mode = CKFF_VERTEX_BLEND_TWEEN;
+        return state;
+    }
+
+    CKDWORD count = 0;
+    if (vertexBlend == VXVBLEND_0WEIGHTS || vertexBlend == VXVBLEND_1WEIGHTS)
+        count = 1;
+    else if (vertexBlend == VXVBLEND_2WEIGHTS)
+        count = 2;
+    else if (vertexBlend == VXVBLEND_3WEIGHTS)
+        count = 3;
+
+    if (count == 0)
+        return state;
+
+    const bool hasBlendInput = (formatFlags & CKFF_VF_BLENDWEIGHT) != 0;
+    const bool hasIndexInput = !indexed || ((formatFlags & CKFF_VF_BLENDINDEX) != 0);
+    state.Supported = (hasBlendInput && hasIndexInput) ? TRUE : FALSE;
+    if (state.Supported) {
+        state.Mode = CKFF_VERTEX_BLEND_NORMAL;
+        state.Count = count;
+        state.Indexed = indexed ? TRUE : FALSE;
+    }
+    return state;
+}
+
 static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
     if (!stageActive)
         return CKRST_TOP_DISABLE;
@@ -1037,6 +1079,14 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     stateDesc.VS.SetSpecularEnabled(specular != 0);
     stateDesc.VS.SetNormalizeNormals(normalize != 0);
     stateDesc.VS.SetLightCount(stateDesc.VS.GetLightingEnabled() ? m_ActiveLightCount : 0);
+
+    const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        positionT ? 0 : formatFlags);
+    stateDesc.VS.SetVertexBlendMode(vertexBlend.Mode);
+    stateDesc.VS.SetVertexBlendIndexed(vertexBlend.Indexed != 0);
+    stateDesc.VS.SetVertexBlendCount(vertexBlend.Count);
 
     const CKBOOL colorVertex = m_DrawStateCache.GetRenderState(VXRENDERSTATE_COLORVERTEX);
     const CKDWORD diffuseSource = ResolveMaterialSource(

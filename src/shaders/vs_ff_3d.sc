@@ -35,6 +35,15 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_FOG_MODE
 #define CKFF_VS_FOG_MODE 0
 #endif
+#ifndef CKFF_VS_VERTEX_BLEND_MODE
+#define CKFF_VS_VERTEX_BLEND_MODE 0
+#endif
+#ifndef CKFF_VS_VERTEX_BLEND_INDEXED
+#define CKFF_VS_VERTEX_BLEND_INDEXED 0
+#endif
+#ifndef CKFF_VS_VERTEX_BLEND_COUNT
+#define CKFF_VS_VERTEX_BLEND_COUNT 0
+#endif
 #ifndef CKFF_VS_TEXCOORD_DECL_MASK
 #define CKFF_VS_TEXCOORD_DECL_MASK 4793490
 #endif
@@ -217,6 +226,24 @@ int ckffVsFogMode(float runtimeMode)
 #endif
 }
 
+int ckffVsVertexBlendMode()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return CKFF_VS_VERTEX_BLEND_MODE;
+#else
+    return 0;
+#endif
+}
+
+int ckffVsVertexBlendCount()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return CKFF_VS_VERTEX_BLEND_COUNT;
+#else
+    return 0;
+#endif
+}
+
 float computeFog(float depth, vec4 params)
 {
     int mode = ckffVsFogMode(params.w);
@@ -309,6 +336,11 @@ vec4 transformTexcoord(int stage, vec4 coord)
 void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
+    int vertexBlendMode = ckffVsVertexBlendMode();
+    int vertexBlendCount = ckffVsVertexBlendCount();
+    if (vertexBlendMode != 0 && vertexBlendCount > 0) {
+        localPos = localPos;
+    }
     gl_Position = mul(u_ckModelViewProj, localPos);
     v_clipPos = mul(u_ckModel, localPos);
 
