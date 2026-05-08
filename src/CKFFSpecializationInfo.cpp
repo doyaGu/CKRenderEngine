@@ -1,0 +1,67 @@
+#include "CKFFSpecializationInfo.h"
+
+#include <cstring>
+
+namespace {
+
+CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
+    static const CKFFSpecBitfield fields[] = {
+        {0, 0, 5},  // color op
+        {0, 5, 5},  // color arg1
+        {0, 10, 5}, // color arg2
+        {0, 15, 5}, // alpha op
+        {0, 20, 5}, // alpha arg1
+        {0, 25, 5}, // alpha arg2
+        {0, 30, 1}, // result is temp
+    };
+    CKFFSpecBitfield layout = fields[field];
+    layout.DwordOffset = 6 + stage;
+    return layout;
+}
+
+} // namespace
+
+CKFFSpecializationInfo::CKFFSpecializationInfo() {
+    memset(m_Data, 0, sizeof(m_Data));
+}
+
+CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
+    switch (id) {
+    case CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE:
+        return {4, 16, 3};
+    case CKFF_SPEC_GLOBAL_SPECULAR_ENABLED:
+        return {6, 31, 1};
+    default:
+        break;
+    }
+
+    const CKDWORD index = (CKDWORD)id - (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP;
+    const CKDWORD stage = index / 7;
+    const CKDWORD field = index % 7;
+    if (stage < 4)
+        return StageLayout(stage, field);
+    return {0, 0, 0};
+}
+
+void CKFFSpecializationInfo::Set(CKFFSpecConstantId id, CKDWORD value) {
+    const CKFFSpecBitfield layout = Layout(id);
+    if (layout.BitCount == 0 || layout.DwordOffset >= MaxSpecDwords)
+        return;
+
+    const CKDWORD mask = ((1u << layout.BitCount) - 1u) << layout.BitOffset;
+    m_Data[layout.DwordOffset] &= ~mask;
+    m_Data[layout.DwordOffset] |= (value << layout.BitOffset) & mask;
+}
+
+CKDWORD CKFFSpecializationInfo::Get(CKFFSpecConstantId id) const {
+    const CKFFSpecBitfield layout = Layout(id);
+    if (layout.BitCount == 0 || layout.DwordOffset >= MaxSpecDwords)
+        return 0;
+
+    const CKDWORD mask = ((1u << layout.BitCount) - 1u) << layout.BitOffset;
+    return (m_Data[layout.DwordOffset] & mask) >> layout.BitOffset;
+}
+
+CKDWORD CKFFSpecializationInfo::RepackArg(CKDWORD arg) {
+    return (arg & 0b111u) | ((arg & 0b110000u) >> 1u);
+}
