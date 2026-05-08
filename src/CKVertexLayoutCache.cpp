@@ -25,17 +25,17 @@ CKVertexLayoutCache::~CKVertexLayoutCache() {
 
 void CKVertexLayoutCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
-    m_Cache.clear();
+    m_Cache.Clear();
     m_NextHandle = 1;
 }
 
 void CKVertexLayoutCache::Shutdown() {
     if (m_Context) {
-        for (auto &pair : m_Cache) {
-            m_Context->DeleteObject(pair.second, CKRST_OBJ_VERTEXLAYOUT);
+        for (XHashTable<CKDWORD, CKDWORD>::Iterator it = m_Cache.Begin(); it != m_Cache.End(); ++it) {
+            m_Context->DeleteObject(*it, CKRST_OBJ_VERTEXLAYOUT);
         }
     }
-    m_Cache.clear();
+    m_Cache.Clear();
     m_Context = nullptr;
 }
 
@@ -79,10 +79,10 @@ CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNorma
 }
 
 CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) {
-    auto it = m_Cache.find(formatFlags);
-    if (it != m_Cache.end()) {
+    CKDWORD layout = 0;
+    if (m_Cache.LookUp(formatFlags, layout)) {
         if (outStride) *outStride = ComputeStride(formatFlags);
-        return it->second;
+        return layout;
     }
 
     // Build element array
@@ -161,7 +161,7 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
 
     CKDWORD handle = m_NextHandle++;
     m_Context->CreateVertexLayout(handle, &desc);
-    m_Cache[formatFlags] = handle;
+    m_Cache.Insert(formatFlags, handle);
 
     if (outStride) *outStride = offset;
     return handle;

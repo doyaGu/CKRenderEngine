@@ -5,8 +5,7 @@
 #include "VxMatrix.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-
-#include <vector>
+#include "XArray.h"
 
 class CKRasterizerContext;
 class CKRasterizerEncoder;
@@ -75,7 +74,7 @@ private:
     CKRasterizerContext *m_Context;
     CKVertexLayoutCache *m_LayoutCache;
     CKDWORD m_LastLayout;
-    std::vector<CKWORD> m_TempIndices;
+    XArray<CKWORD> m_TempIndices;
 
     int ConvertToTriangleList(VXPRIMITIVETYPE srcType,
                               CKWORD *srcIndices, int srcCount,

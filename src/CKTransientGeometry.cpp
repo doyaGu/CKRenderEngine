@@ -325,40 +325,44 @@ CKBOOL CKTransientGeometry::Prepare(
         if (srcCount < 3)
             return FALSE;
 
-        std::vector<CKWORD> sourceIndices;
+        XArray<CKWORD> sourceIndices;
         if (indices && indexCount > 0) {
-            sourceIndices.assign(indices, indices + indexCount);
+            sourceIndices.Resize(indexCount);
+            for (int i = 0; i < indexCount; ++i)
+                sourceIndices[i] = indices[i];
         } else {
-            sourceIndices.resize(srcCount);
+            sourceIndices.Resize(srcCount);
             for (int i = 0; i < srcCount; ++i)
                 sourceIndices[i] = (CKWORD)i;
         }
 
-        std::vector<CKWORD> triangleIndices;
+        XArray<CKWORD> triangleIndices;
         if (primType == VX_TRIANGLELIST) {
             const int triIndexCount = (srcCount / 3) * 3;
             if (triIndexCount <= 0)
                 return FALSE;
-            triangleIndices.assign(sourceIndices.begin(), sourceIndices.begin() + triIndexCount);
+            triangleIndices.Resize(triIndexCount);
+            for (int i = 0; i < triIndexCount; ++i)
+                triangleIndices[i] = sourceIndices[i];
         } else {
             const int maxTriListIndices = (srcCount - 2) * 3;
             if (maxTriListIndices <= 0)
                 return FALSE;
-            triangleIndices.resize(maxTriListIndices);
+            triangleIndices.Resize(maxTriListIndices);
             const int outCount = ConvertPrimitiveToTriangleList(
-                primType, sourceIndices.data(), srcCount, triangleIndices.data());
-            triangleIndices.resize(outCount);
+                primType, sourceIndices.Begin(), srcCount, triangleIndices.Begin());
+            triangleIndices.Resize(outCount);
         }
 
-        if (triangleIndices.empty())
+        if (triangleIndices.IsEmpty())
             return FALSE;
 
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
-        if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)triangleIndices.size(), layoutHandle))
+        if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)triangleIndices.Size(), layoutHandle))
             return FALSE;
 
-        for (size_t i = 0; i < triangleIndices.size(); i += 3) {
+        for (int i = 0; i < triangleIndices.Size(); i += 3) {
             float uv[3][2];
             for (int j = 0; j < 3; ++j)
                 ReadTexcoord0(data, triangleIndices[i + j], uv[j]);
@@ -403,10 +407,10 @@ CKBOOL CKTransientGeometry::Prepare(
             ConvertPrimitiveToTriangleList(primType, indices, srcCount, (CKWORD *)tib.Data);
         } else {
             // Generate sequential indices for non-indexed fan/strip
-            m_TempIndices.resize(srcCount);
+            m_TempIndices.Resize(srcCount);
             for (int i = 0; i < srcCount; i++)
                 m_TempIndices[i] = (CKWORD)i;
-            ConvertPrimitiveToTriangleList(primType, m_TempIndices.data(), srcCount, (CKWORD *)tib.Data);
+            ConvertPrimitiveToTriangleList(primType, m_TempIndices.Begin(), srcCount, (CKWORD *)tib.Data);
         }
         encoder->SetTransientIndexBuffer(&tib);
     } else if (indices && indexCount > 0) {

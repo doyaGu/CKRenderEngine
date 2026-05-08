@@ -4,8 +4,7 @@
 #include "VxDefines.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-
-#include <unordered_map>
+#include "XHashTable.h"
 
 class CKRasterizerContext;
 
@@ -50,7 +49,7 @@ public:
 
 private:
     CKRasterizerContext *m_Context;
-    std::unordered_map<CKDWORD, CKDWORD> m_Cache; // formatFlags -> layout handle
+    XHashTable<CKDWORD, CKDWORD> m_Cache; // formatFlags -> layout handle
     CKDWORD m_NextHandle;
 };
 

@@ -5,8 +5,7 @@
 #include "CKFFConstants.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-
-#include <unordered_map>
+#include "XHashTable.h"
 
 class CKRasterizerContext;
 
@@ -14,6 +13,15 @@ enum CKFFShaderMode {
     CKFF_SHADER_MODE_UBER_SPECIALIZED = 0,
     CKFF_SHADER_MODE_FULL_SPECIALIZED = 1
 };
+
+struct CKFFShaderKeyXHash {
+    int operator()(const CKFFShaderKey &key) const {
+        CKFFShaderKeyHash hash;
+        return (int)hash(key);
+    }
+};
+
+typedef XHashTable<CKDWORD, CKFFShaderKey, CKFFShaderKeyXHash> CKFFProgramCacheTable;
 
 class CKFFShaderCache {
 public:
@@ -34,7 +42,7 @@ public:
     CKFFShaderMode GetShaderMode() const {
         return m_UseUberShader ? CKFF_SHADER_MODE_UBER_SPECIALIZED : CKFF_SHADER_MODE_FULL_SPECIALIZED;
     }
-    size_t CachedProgramCount() const { return m_ProgramCache.size(); }
+    size_t CachedProgramCount() const { return (size_t)m_ProgramCache.Size(); }
 
 private:
     CKRasterizerContext *m_Context;
@@ -42,7 +50,7 @@ private:
     CKShaderTargetDesc m_Target;
     const void *m_BlobSet;
     bool m_UseUberShader;
-    std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_ProgramCache;
+    CKFFProgramCacheTable m_ProgramCache;
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;

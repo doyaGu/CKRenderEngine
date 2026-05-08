@@ -1509,8 +1509,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
     TestCheck(cacheHeader.find("CKDWORD GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
-              cacheHeader.find("unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash>") != std::string::npos,
-              "FFP shader cache must be keyed by explicit specialized FFP shader keys");
+              cacheHeader.find("XHashTable<CKDWORD, CKFFShaderKey") != std::string::npos &&
+              cacheHeader.find("std::unordered_map") == std::string::npos,
+              "FFP shader cache must be keyed by explicit specialized FFP shader keys using VxMath hash table containers");
     TestCheck(cacheHeader.find("CKFF_SHADER_MODE_UBER_SPECIALIZED") != std::string::npos &&
               cacheHeader.find("CKFF_SHADER_MODE_FULL_SPECIALIZED") != std::string::npos,
               "FFP shader cache must expose distinct specialized uber and full specialized modes");
@@ -2233,6 +2234,32 @@ void Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved() {
     TestCheck(rootCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos &&
               srcCmake.find("CKRE_FFP_VARIANT_CAPTURE") == std::string::npos,
               "FFP variant capture CMake option and compile definition must be removed");
+}
+
+void Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL() {
+    const char *paths[] = {
+        "src/CKFFShaderCache.h",
+        "src/CKFFShaderCache.cpp",
+        "src/CKVertexLayoutCache.h",
+        "src/CKVertexLayoutCache.cpp",
+        "src/CKTransientGeometry.h",
+        "src/CKTransientGeometry.cpp"
+    };
+
+    for (const char *path : paths) {
+        std::string source = ReadRenderEngineSource(path);
+        TestCheck(source.find("#include <vector>") == std::string::npos &&
+                  source.find("#include <unordered_map>") == std::string::npos &&
+                  source.find("std::vector") == std::string::npos &&
+                  source.find("std::unordered_map") == std::string::npos,
+                  "RenderEngine FFP production internals must use VxMath containers instead of STL containers");
+    }
+
+    std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
+    std::string layoutHeader = ReadRenderEngineSource("src/CKVertexLayoutCache.h");
+    TestCheck(cacheHeader.find("XHashTable<CKDWORD, CKFFShaderKey") != std::string::npos &&
+              layoutHeader.find("XHashTable<CKDWORD, CKDWORD>") != std::string::npos,
+              "RenderEngine cache internals must use VxMath hash tables, not downgrade cache semantics to linear arrays");
 }
 
 void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
@@ -3203,6 +3230,7 @@ int main() {
     tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache runtime variant key dump removed", &Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved);
+    tests.Run("RenderEngine FFP internals use VxMath containers", &Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
