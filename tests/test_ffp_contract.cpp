@@ -1374,16 +1374,21 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               generatedTable.find("CKFFSpecializedKey_positiont_stage0_modulate") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_variant_3d_stage1_add_specular") != std::string::npos &&
               generatedTable.find("s_dx11_ffp_spec_") != std::string::npos &&
+              generatedTable.find("s_dx11_ffp_vsspec_") != std::string::npos &&
+              generatedTable.find("module.VSData = s_dx11_vs_ff_3d") == std::string::npos &&
               generatedTable.find("positiont_stage0_modulate_fs_ff_stage") == std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
+              shaderCompiler.find("ffp_specialized_vs_defines") != std::string::npos &&
               shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
               shaderCompiler.find("specDwords does not match key-derived FFP specialization payload") != std::string::npos &&
               shaderCompiler.find("normalize_specialized_variant") != std::string::npos &&
               shaderCompiler.find("default_specialized_stage") != std::string::npos &&
               shaderCompiler.find("stages must contain up to 8 stage objects") != std::string::npos &&
               shaderCompiler.find("specialization_identifier") != std::string::npos &&
+              shaderCompiler.find("vs_specialization_identifier") != std::string::npos &&
               shaderCompiler.find("unique_specialized_fs_variants") != std::string::npos &&
+              shaderCompiler.find("unique_specialized_vs_variants") != std::string::npos &&
               shaderCompiler.find("validate_specialized_variants") != std::string::npos &&
               shaderCompiler.find("duplicate FFP shader key") != std::string::npos &&
               shaderCompiler.find("duplicate identifier") != std::string::npos &&
