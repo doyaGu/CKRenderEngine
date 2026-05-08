@@ -201,7 +201,6 @@ function(ckre_configure_target TARGET_NAME)
 
     target_compile_definitions(${TARGET_NAME} PRIVATE
             CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>
-            CKRE_FFP_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_VARIANTS}>,1,0>
             CKRE_FFP_VARIANT_CAPTURE=$<IF:$<BOOL:${CKRE_FFP_VARIANT_CAPTURE}>,1,0>
     )
 
