@@ -28,21 +28,23 @@ bool StageOpUsesTexture(const CKFFShaderKeyFSStage &stage, bool color) {
 
 } // namespace
 
-CKFFShaderKeyVS::CKFFShaderKeyVS() : Bits(0), TexGen{}, TexCoordIndex{} {
+CKFFShaderKeyVS::CKFFShaderKeyVS() : Bits(0), TexGen{}, TexCoordIndex{}, TexTransformFlags{} {
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         TexCoordIndex[stage] = (uint8_t)stage;
 }
 
 CKFFShaderKeyVS::CKFFShaderKeyVS(const CKFFVSStateDesc &desc)
-    : Bits(desc.bits), TexGen{}, TexCoordIndex{} {
+    : Bits(desc.bits), TexGen{}, TexCoordIndex{}, TexTransformFlags{} {
     memcpy(TexGen, desc.TexGen, sizeof(TexGen));
     memcpy(TexCoordIndex, desc.TexCoordIndex, sizeof(TexCoordIndex));
+    memcpy(TexTransformFlags, desc.TexTransformFlags, sizeof(TexTransformFlags));
 }
 
 bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
     return Bits == other.Bits &&
            memcmp(TexGen, other.TexGen, sizeof(TexGen)) == 0 &&
-           memcmp(TexCoordIndex, other.TexCoordIndex, sizeof(TexCoordIndex)) == 0;
+           memcmp(TexCoordIndex, other.TexCoordIndex, sizeof(TexCoordIndex)) == 0 &&
+           memcmp(TexTransformFlags, other.TexTransformFlags, sizeof(TexTransformFlags)) == 0;
 }
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
@@ -80,6 +82,8 @@ std::size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, texGen);
     for (uint8_t texCoordIndex : key.VS.TexCoordIndex)
         seed = HashCombine(seed, texCoordIndex);
+    for (uint16_t texTransformFlags : key.VS.TexTransformFlags)
+        seed = HashCombine(seed, texTransformFlags);
     seed = HashCombine(seed, key.FS.LastActiveTextureStage);
     seed = HashCombine(seed, key.FS.AlphaFunc);
     seed = HashCombine(seed, key.FS.GlobalSpecularEnable ? 1u : 0u);

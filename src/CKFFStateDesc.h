@@ -18,8 +18,9 @@ struct CKFFVSStateDesc {
     uint64_t bits;
     uint8_t TexGen[CKFF_STATE_DESC_TEXTURE_STAGES];
     uint8_t TexCoordIndex[CKFF_STATE_DESC_TEXTURE_STAGES];
+    uint16_t TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES];
 
-    CKFFVSStateDesc() : bits(0), TexGen{}, TexCoordIndex{} {
+    CKFFVSStateDesc() : bits(0), TexGen{}, TexCoordIndex{}, TexTransformFlags{} {
         for (uint32_t stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
             TexCoordIndex[stage] = (uint8_t)stage;
     }
@@ -109,6 +110,14 @@ struct CKFFVSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return TexCoordIndex[stage] & 7u;
     }
+    void SetTextureTransformFlags(uint32_t stage, uint32_t flags) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        TexTransformFlags[stage] = (uint16_t)(flags & 0x1ffu);
+    }
+    uint32_t GetTextureTransformFlags(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return TexTransformFlags[stage];
+    }
 
     // --- Material source selection (bits 25-32) ---
     // Source: 0=MATERIAL, 1=COLOR0, 2=COLOR1
@@ -129,6 +138,8 @@ struct CKFFVSStateDesc {
             if (TexGen[stage] != o.TexGen[stage])
                 return false;
             if (TexCoordIndex[stage] != o.TexCoordIndex[stage])
+                return false;
+            if (TexTransformFlags[stage] != o.TexTransformFlags[stage])
                 return false;
         }
         return true;

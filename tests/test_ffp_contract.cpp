@@ -1390,7 +1390,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("unique_specialized_fs_variants") != std::string::npos &&
               shaderCompiler.find("unique_specialized_vs_variants") != std::string::npos &&
               shaderCompiler.find("\"vsTexCoordIndex\"") != std::string::npos &&
+              shaderCompiler.find("\"vsTexTransformFlags\"") != std::string::npos &&
               generatedTable.find("key.VS.TexCoordIndex[0]") != std::string::npos &&
+              generatedTable.find("key.VS.TexTransformFlags[0]") != std::string::npos &&
               shaderCompiler.find("validate_specialized_variants") != std::string::npos &&
               shaderCompiler.find("duplicate FFP shader key") != std::string::npos &&
               shaderCompiler.find("duplicate identifier") != std::string::npos &&
@@ -1409,11 +1411,13 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"name\": \"3d_stage0_modulate_alpha_test\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_fog\"") != std::string::npos &&
               variantManifest.find("\"name\": \"positiont_stage0_modulate_fog\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage0_modulate_texcoord_transform\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_texgen_reflection\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_lit_one_light\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_diffuse_color0\"") != std::string::npos &&
               variantManifest.find("\"vsBits\": 6291457") != std::string::npos &&
               variantManifest.find("\"vsBits\": 6295552") != std::string::npos &&
+              variantManifest.find("\"vsTexTransformFlags\": [2, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaTestEnable\": true") != std::string::npos &&
@@ -1729,6 +1733,40 @@ void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
     cache.Shutdown();
 }
 
+void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(true);
+    vs.SetTextureTransformFlags(0, CKRST_TTF_COUNT2);
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must include a 3D variant keyed by texture transform flags");
+
+    cache.Shutdown();
+}
+
 void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
@@ -1924,6 +1962,27 @@ void Test_FFPVertexShader_UsesSpecializedTexGenKey() {
               "Shader compiler must pass VS texgen and texcoord-index key fields into specialized VS compilation");
 }
 
+void Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey() {
+    std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+    std::string keyHeader = ReadRenderEngineSource("src/CKFFShaderKey.h");
+
+    TestCheck(shader.find("CKFF_VS_TEXFLAGS0") != std::string::npos &&
+              shader.find("ckffVsTexTransformFlags") != std::string::npos &&
+              shader.find("int flags = ckffVsTexTransformFlags(stage, params.z)") != std::string::npos,
+              "3D vertex shader must consume specialized VS texture transform flags");
+    TestCheck(pipeline.find("stateDesc.VS.SetTextureTransformFlags(stage, transformFlags)") != std::string::npos &&
+              pipeline.find("const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS]") != std::string::npos,
+              "FFP shader key construction must copy texture transform flags into the VS key");
+    TestCheck(compiler.find("CKFF_VS_TEXFLAGS{index}") != std::string::npos &&
+              compiler.find("\"vsTexTransformFlags\"") != std::string::npos &&
+              compiler.find("key.VS.TexTransformFlags[{index}]") != std::string::npos,
+              "Shader compiler must pass VS texture transform flags into specialized VS compilation");
+    TestCheck(keyHeader.find("TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES]") != std::string::npos,
+              "FFP VS shader key must include texture transform flags");
+}
+
 void Test_FFPVertexShader_UsesSpecializedLightingKey() {
     std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
 
@@ -2039,6 +2098,7 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
     desc.SetHasTexCoord(7, true);
     desc.SetTexGen(7, CKFF_TG_REFLECTION, true);
     desc.SetTexCoordIndex(7, 3);
+    desc.SetTextureTransformFlags(7, CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED);
 
     TestCheck(desc.GetHasPositionT(),
               "Vertex state desc PositionT flag must not alias high texture coordinate bits");
@@ -2050,8 +2110,10 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
               "Vertex state desc must preserve stage 7 texgen and texture transform state");
     TestCheck(desc.GetTexCoordIndex(7) == 3,
               "Vertex state desc must preserve stage 7 source texture coordinate index");
+    TestCheck(desc.GetTextureTransformFlags(7) == (CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED),
+              "Vertex state desc must preserve stage 7 texture transform flags");
     TestCheck(!desc.GetHasTexCoord(8) && desc.GetTexGenMode(8) == 0 && !desc.GetTexGenHasTransform(8) &&
-                  desc.GetTexCoordIndex(8) == 0,
+                  desc.GetTexCoordIndex(8) == 0 && desc.GetTextureTransformFlags(8) == 0,
               "Vertex state desc must reject out-of-range texture coordinate stages");
 }
 
@@ -2501,12 +2563,14 @@ int main() {
     tests.Run("FFP shader cache full specialized fog variant hit", &Test_FFPShaderCache_FullSpecializedFogVariantHit);
     tests.Run("FFP shader cache full specialized PositionT fog variant hit", &Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit);
     tests.Run("FFP shader cache full specialized texgen variant hit", &Test_FFPShaderCache_FullSpecializedTexGenVariantHit);
+    tests.Run("FFP shader cache full specialized texcoord transform variant hit", &Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit);
     tests.Run("FFP shader cache full specialized lit variant hit", &Test_FFPShaderCache_FullSpecializedLitVariantHit);
     tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
+    tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
     tests.Run("FFP vertex shader specialized lighting key", &Test_FFPVertexShader_UsesSpecializedLightingKey);
     tests.Run("FFP vertex shader specialized material source key", &Test_FFPVertexShader_UsesSpecializedMaterialSourceKey);
     tests.Run("FFP vertex shader specialized fog mode key", &Test_FFPVertexShader_UsesSpecializedFogModeKey);

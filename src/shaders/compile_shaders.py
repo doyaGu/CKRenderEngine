@@ -145,6 +145,8 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
         defines.append(f"CKFF_VS_TEXGEN{index}={value}")
     for index, value in enumerate(key["vsTexCoordIndex"]):
         defines.append(f"CKFF_VS_TEXCOORD{index}={value}")
+    for index, value in enumerate(key["vsTexTransformFlags"]):
+        defines.append(f"CKFF_VS_TEXFLAGS{index}={value}")
     return defines
 
 
@@ -166,6 +168,7 @@ def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
         "vsBits": key["vsBits"],
         "vsTexGen": key["vsTexGen"],
         "vsTexCoordIndex": key["vsTexCoordIndex"],
+        "vsTexTransformFlags": key["vsTexTransformFlags"],
     }, sort_keys=True, separators=(",", ":")).encode("ascii")
     return "vsspec_" + hashlib.sha1(payload).hexdigest()[:16]
 
@@ -261,6 +264,9 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     tex_coord_index = key.get("vsTexCoordIndex", [0, 1, 2, 3, 4, 5, 6, 7])
     if not isinstance(tex_coord_index, list) or len(tex_coord_index) != 8:
         raise ValueError(f"{field}.vsTexCoordIndex must contain exactly 8 uint32 values")
+    tex_transform_flags = key.get("vsTexTransformFlags", [0, 0, 0, 0, 0, 0, 0, 0])
+    if not isinstance(tex_transform_flags, list) or len(tex_transform_flags) != 8:
+        raise ValueError(f"{field}.vsTexTransformFlags must contain exactly 8 uint32 values")
 
     stages = key.get("stages")
     if not isinstance(stages, list) or len(stages) > 8:
@@ -283,6 +289,8 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
                      for index, value in enumerate(tex_gen)],
         "vsTexCoordIndex": [read_uint32(value, f"{field}.vsTexCoordIndex[{index}]") & 7
                             for index, value in enumerate(tex_coord_index)],
+        "vsTexTransformFlags": [read_uint32(value, f"{field}.vsTexTransformFlags[{index}]") & 0x1ff
+                                for index, value in enumerate(tex_transform_flags)],
         "lastActiveTextureStage": read_uint32(key.get("lastActiveTextureStage"),
                                               f"{field}.lastActiveTextureStage"),
         "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
@@ -418,6 +426,8 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
     for index, value in enumerate(key["vsTexCoordIndex"]):
         f.write(f"    key.VS.TexCoordIndex[{index}] = {value}u;\n")
+    for index, value in enumerate(key["vsTexTransformFlags"]):
+        f.write(f"    key.VS.TexTransformFlags[{index}] = {value}u;\n")
     f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
     f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
     f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")

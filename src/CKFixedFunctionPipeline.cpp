@@ -1004,10 +1004,12 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
             stage,
             hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (m_CurrentActiveTextureCount > stage));
         const CKDWORD packedTexcoord = m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
+        const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
         if (!positionT) {
+            stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
             const CKDWORD texgen = (packedTexcoord >> 16) & 0xFFFFu;
-            const bool hasTransform = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] != 0;
+            const bool hasTransform = transformFlags != 0;
             stateDesc.VS.SetTexGen(stage, texgen, hasTransform);
         }
     }

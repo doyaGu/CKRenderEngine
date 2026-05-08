@@ -83,6 +83,30 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_TEXCOORD7
 #define CKFF_VS_TEXCOORD7 7
 #endif
+#ifndef CKFF_VS_TEXFLAGS0
+#define CKFF_VS_TEXFLAGS0 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS1
+#define CKFF_VS_TEXFLAGS1 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS2
+#define CKFF_VS_TEXFLAGS2 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS3
+#define CKFF_VS_TEXFLAGS3 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS4
+#define CKFF_VS_TEXFLAGS4 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS5
+#define CKFF_VS_TEXFLAGS5 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS6
+#define CKFF_VS_TEXFLAGS6 0
+#endif
+#ifndef CKFF_VS_TEXFLAGS7
+#define CKFF_VS_TEXFLAGS7 0
+#endif
 #endif
 
 int ckffVsTexGenMode(int stage, int packedIndex)
@@ -115,6 +139,22 @@ int ckffVsTexcoordIndex(int stage, int packedIndex)
     return CKFF_VS_TEXCOORD7;
 #else
     return packedIndex & 7;
+#endif
+}
+
+int ckffVsTexTransformFlags(int stage, float runtimeFlags)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return CKFF_VS_TEXFLAGS0;
+    if (stage == 1) return CKFF_VS_TEXFLAGS1;
+    if (stage == 2) return CKFF_VS_TEXFLAGS2;
+    if (stage == 3) return CKFF_VS_TEXFLAGS3;
+    if (stage == 4) return CKFF_VS_TEXFLAGS4;
+    if (stage == 5) return CKFF_VS_TEXFLAGS5;
+    if (stage == 6) return CKFF_VS_TEXFLAGS6;
+    return CKFF_VS_TEXFLAGS7;
+#else
+    return int(runtimeFlags);
 #endif
 }
 
@@ -213,7 +253,7 @@ vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, 
 vec4 transformTexcoord(int stage, vec4 coord)
 {
     vec4 params = u_stageParams[stage * 4 + 2];
-    int flags = int(params.z);
+    int flags = ckffVsTexTransformFlags(stage, params.z);
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
