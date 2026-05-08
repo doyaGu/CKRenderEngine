@@ -1290,6 +1290,7 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     std::string moduleSource = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.cpp");
     std::string generatedTable = ReadRenderEngineSource("src/shaders/generated/CKFFSpecializedModuleTable.generated.h");
     std::string shaderCompiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+    std::string variantManifest = ReadRenderEngineSource("src/shaders/ffp_specialized_variants.json");
     std::string rasterTypes = ReadRenderEngineSource("include/CKRasterizerTypes.h");
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
@@ -1318,8 +1319,11 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               moduleSource.find("CKFFSpecializedModuleTable.generated.h") != std::string::npos &&
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
               generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
-              shaderCompiler.find("write_specialized_module_table") != std::string::npos,
-              "Full specialized FFP modules must have an explicit generated-table boundary, even while the table is empty");
+              shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
+              shaderCompiler.find("FFP specialized variant manifest entries are declared") != std::string::npos &&
+              variantManifest.find("\"variants\": []") != std::string::npos &&
+              srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
+              "Full specialized FFP modules must have an explicit manifest-generated table boundary, even while the table is empty");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,

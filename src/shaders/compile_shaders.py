@@ -8,6 +8,7 @@ renderer backend. Runtime code selects the matching set after bgfx initializes.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,8 @@ BACKENDS = [
     {"name": "spirv", "platform": "linux", "profile": "spirv"},
     {"name": "glsl", "platform": "linux", "profile": "150"},
 ]
+
+FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
 
 
 def _exe_name(name: str) -> str:
@@ -168,6 +171,31 @@ def write_specialized_module_table(generated_dir: Path) -> None:
         f.write("static const std::size_t g_CKFFSpecializedModuleCount = 0;\n")
 
 
+def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object]]:
+    manifest_path = script_dir / FFP_VARIANT_MANIFEST
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    if not isinstance(manifest, dict):
+        raise ValueError(f"{FFP_VARIANT_MANIFEST} must contain a JSON object")
+
+    variants = manifest.get("variants")
+    if not isinstance(variants, list):
+        raise ValueError(f"{FFP_VARIANT_MANIFEST} must contain a 'variants' array")
+
+    for index, variant in enumerate(variants):
+        if not isinstance(variant, dict):
+            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}] must be an object")
+
+    if variants:
+        raise NotImplementedError(
+            "FFP specialized variant manifest entries are declared, but module generation "
+            "is not implemented yet."
+        )
+
+    return variants
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compile CK2_3D fixed-function shaders with bgfx shaderc."
@@ -181,8 +209,10 @@ def main() -> int:
     generated_dir = script_dir / "generated"
     shaderc = find_shaderc(args.shaderc)
     selected = [b for b in BACKENDS if not args.backend or b["name"] in args.backend]
+    specialized_variants = load_specialized_variant_manifest(script_dir)
 
     print(f"Using shaderc: {shaderc}")
+    print(f"FFP specialized variants: {len(specialized_variants)}")
     with tempfile.TemporaryDirectory(prefix="ck2_3d_shaders_") as tmp:
         tmp_dir = Path(tmp)
         for backend in selected:
