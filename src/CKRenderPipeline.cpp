@@ -117,7 +117,7 @@ void CKRenderPipeline::BeginFrame(
         m_Encoder->Touch(CKRP_VIEW_CLEAR);
 }
 
-void CKRenderPipeline::EndFrame(CKBOOL vsync) {
+void CKRenderPipeline::EndFrame(CKBOOL vsync, CKBOOL updatePresentSync) {
     if (!m_Context) return;
 
     static const bool s_LogPresentSync = []() {
@@ -126,7 +126,8 @@ void CKRenderPipeline::EndFrame(CKBOOL vsync) {
     }();
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
-        CK_LOG_FMT("PresentSync", "RenderPipeline/EndFrame vsync=%d", vsync ? 1 : 0);
+        CK_LOG_FMT("PresentSync", "RenderPipeline/EndFrame vsync=%d updatePresentSync=%d",
+                   vsync ? 1 : 0, updatePresentSync ? 1 : 0);
         ++s_PresentSyncLogCount;
     }
 
@@ -135,5 +136,5 @@ void CKRenderPipeline::EndFrame(CKBOOL vsync) {
         m_Encoder = nullptr;
     }
 
-    m_Context->Frame(vsync);
+    m_Context->Frame(vsync, updatePresentSync);
 }

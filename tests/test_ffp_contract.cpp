@@ -2933,6 +2933,25 @@ void Test_RasterizerDriver_DefaultShaderTargetIsUnknown() {
               "The FFP shader cache must document that internal shader blobs do not enable the public legacy shader API");
 }
 
+void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
+    std::string renderContext = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    std::string pipelineHeader = ReadRenderEngineSource("src/CKRenderPipeline.h");
+    std::string pipelineSource = ReadRenderEngineSource("src/CKRenderPipeline.cpp");
+    std::string rasterizerHeader = ReadRenderEngineSource("include/CKRasterizer.h");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+
+    TestCheck(renderContext.find("EndFrame(FALSE, FALSE)") != std::string::npos,
+              "Render-to-texture bgfx flushes must not overwrite the backbuffer present-vsync state");
+    TestCheck(pipelineHeader.find("void EndFrame(CKBOOL vsync, CKBOOL updatePresentSync = TRUE)") != std::string::npos,
+              "Render pipeline must distinguish frame submission from present-vsync updates");
+    TestCheck(pipelineSource.find("m_Context->Frame(vsync, updatePresentSync)") != std::string::npos,
+              "Render pipeline must pass the present-sync update flag to the rasterizer context");
+    TestCheck(rasterizerHeader.find("virtual CKERROR Frame(CKBOOL VSync, CKBOOL UpdatePresentSync)") != std::string::npos,
+              "Rasterizer context must expose a frame submission path that can preserve present-vsync state");
+    TestCheck(bgfxContext.find("if (UpdatePresentSync && VSync != m_VSync)") != std::string::npos,
+              "bgfx rasterizer must only reset swapchain vsync when a backbuffer present updates it");
+}
+
 void Test_FFPDebugLogging_IsCentralized() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
@@ -3287,6 +3306,7 @@ int main() {
     tests.Run("Legacy SetVertexShader reset comments removed", &Test_LegacySetVertexShaderResetCommentsAreGone);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
+    tests.Run("bgfx RTT flush preserves present vsync", &Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);

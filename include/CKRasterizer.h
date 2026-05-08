@@ -311,6 +311,7 @@ public:
     virtual CKRasterizerEncoder *BeginEncoder() = 0;
     virtual void EndEncoder(CKRasterizerEncoder *Encoder) = 0;
     virtual CKERROR Frame(CKBOOL VSync) = 0;
+    virtual CKERROR Frame(CKBOOL VSync, CKBOOL UpdatePresentSync) { return Frame(VSync); }
 
 public:
     CKRasterizerDriver *m_Driver;
