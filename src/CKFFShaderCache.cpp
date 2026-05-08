@@ -86,11 +86,11 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
 
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
-        for (auto &entry : m_ProgramCache) {
-            if (entry.second)
-                m_Context->DeleteObject(entry.second, CKRST_OBJ_PROGRAM);
+        for (CKFFProgramCacheTable::Iterator it = m_ProgramCache.Begin(); it != m_ProgramCache.End(); ++it) {
+            if (*it)
+                m_Context->DeleteObject(*it, CKRST_OBJ_PROGRAM);
         }
-        m_ProgramCache.clear();
+        m_ProgramCache.Clear();
     }
     m_Context = nullptr;
     m_BlobSet = nullptr;
@@ -344,12 +344,13 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 }
 
 CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    auto it = m_ProgramCache.find(key);
-    if (it != m_ProgramCache.end())
-        return it->second;
+    CKDWORD program = 0;
+    if (m_ProgramCache.LookUp(key, program))
+        return program;
 
-    CKDWORD program = CreateVariantProgram(key);
-    if (program)
-        m_ProgramCache.emplace(key, program);
+    program = CreateVariantProgram(key);
+    if (program) {
+        m_ProgramCache.Insert(key, program);
+    }
     return program;
 }
