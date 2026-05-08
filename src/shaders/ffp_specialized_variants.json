@@ -298,6 +298,124 @@
           }
         ]
       }
+    },
+    {
+      "name": "3d_stage0_modulate_texcoord_count3_projected",
+      "vs": "3d",
+      "key": {
+        "vsBits": 1,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "vsTexcoordDeclMask": 4793491,
+        "vsTexTransformFlags": [259, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "3d_stage1_bump_luminance",
+      "vs": "3d",
+      "key": {
+        "vsBits": 1,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 1,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 23,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 3,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          },
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "3d_stage0_vertex_blend_normal_key",
+      "vs": "3d",
+      "key": {
+        "vsBits": 996432412673,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "3d_stage0_vertex_blend_tween_key",
+      "vs": "3d",
+      "key": {
+        "vsBits": 68719476737,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
     }
   ]
 }
