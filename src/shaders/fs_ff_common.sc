@@ -13,15 +13,66 @@ struct CKFFStageParams
     bool HasTexture;
 };
 
+#if defined(CKFF_FULL_SPECIALIZED)
+#ifndef CKFF_SPEC_DWORD0
+#define CKFF_SPEC_DWORD0 0
+#endif
+#ifndef CKFF_SPEC_DWORD1
+#define CKFF_SPEC_DWORD1 0
+#endif
+#ifndef CKFF_SPEC_DWORD2
+#define CKFF_SPEC_DWORD2 0
+#endif
+#ifndef CKFF_SPEC_DWORD3
+#define CKFF_SPEC_DWORD3 0
+#endif
+#ifndef CKFF_SPEC_DWORD4
+#define CKFF_SPEC_DWORD4 0
+#endif
+#ifndef CKFF_SPEC_DWORD5
+#define CKFF_SPEC_DWORD5 0
+#endif
+#ifndef CKFF_SPEC_DWORD6
+#define CKFF_SPEC_DWORD6 0
+#endif
+#ifndef CKFF_SPEC_DWORD7
+#define CKFF_SPEC_DWORD7 0
+#endif
+#ifndef CKFF_SPEC_DWORD8
+#define CKFF_SPEC_DWORD8 0
+#endif
+#ifndef CKFF_SPEC_DWORD9
+#define CKFF_SPEC_DWORD9 0
+#endif
+#endif
+
 bool ckffSpecIsOptimized()
 {
+#if defined(CKFF_FULL_SPECIALIZED)
+    return true;
+#else
     return int(u_ffSpec[0].x) != 0;
+#endif
 }
 
 int ckffSpecDword(int index)
 {
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (index == 0) return CKFF_SPEC_DWORD0;
+    if (index == 1) return CKFF_SPEC_DWORD1;
+    if (index == 2) return CKFF_SPEC_DWORD2;
+    if (index == 3) return CKFF_SPEC_DWORD3;
+    if (index == 4) return CKFF_SPEC_DWORD4;
+    if (index == 5) return CKFF_SPEC_DWORD5;
+    if (index == 6) return CKFF_SPEC_DWORD6;
+    if (index == 7) return CKFF_SPEC_DWORD7;
+    if (index == 8) return CKFF_SPEC_DWORD8;
+    if (index == 9) return CKFF_SPEC_DWORD9;
+    return 0;
+#else
     vec4 b = u_ffSpec[index];
     return int(b.x) | (int(b.y) << 8) | (int(b.z) << 16) | (int(b.w) << 24);
+#endif
 }
 
 int ckffSpecBits(int word, int offset, int bits)

@@ -78,7 +78,8 @@ def include_dirs(script_dir: Path) -> list[Path]:
 
 
 def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
-                backend: dict[str, str], output: Path) -> None:
+                backend: dict[str, str], output: Path,
+                defines: list[str] | None = None) -> None:
     cmd = [
         str(shaderc),
         "-f", str(script_dir / shader["source"]),
@@ -88,6 +89,8 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         "-p", backend["profile"],
         "--varyingdef", str(script_dir / "varying.def.sc"),
     ]
+    if defines:
+        cmd.extend(["--define", ";".join(defines)])
     for inc in include_dirs(script_dir):
         cmd.extend(["-i", str(inc)])
 
@@ -103,6 +106,18 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         raise RuntimeError("shaderc failed:\n" + " ".join(cmd) + "\n" + result.stdout)
     if result.stdout.strip():
         print(result.stdout.strip())
+
+
+def ffp_specialized_shader_defines(spec_dwords: list[int]) -> list[str]:
+    if len(spec_dwords) != 10:
+        raise ValueError("FFP specialized shader payload must contain exactly 10 dwords")
+
+    defines = ["CKFF_FULL_SPECIALIZED=1"]
+    for index, dword in enumerate(spec_dwords):
+        if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
+            raise ValueError(f"FFP specialization dword {index} must be a uint32")
+        defines.append(f"CKFF_SPEC_DWORD{index}={dword}")
+    return defines
 
 
 def ensure_dxc_runtime(script_dir: Path, shaderc: Path) -> None:
