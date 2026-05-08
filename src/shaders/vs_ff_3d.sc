@@ -16,6 +16,50 @@ uniform vec4 u_lightModelParams;
 uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[32];
 
+#if defined(CKFF_FULL_SPECIALIZED)
+#ifndef CKFF_VS_TEXGEN0
+#define CKFF_VS_TEXGEN0 0
+#endif
+#ifndef CKFF_VS_TEXGEN1
+#define CKFF_VS_TEXGEN1 0
+#endif
+#ifndef CKFF_VS_TEXGEN2
+#define CKFF_VS_TEXGEN2 0
+#endif
+#ifndef CKFF_VS_TEXGEN3
+#define CKFF_VS_TEXGEN3 0
+#endif
+#ifndef CKFF_VS_TEXGEN4
+#define CKFF_VS_TEXGEN4 0
+#endif
+#ifndef CKFF_VS_TEXGEN5
+#define CKFF_VS_TEXGEN5 0
+#endif
+#ifndef CKFF_VS_TEXGEN6
+#define CKFF_VS_TEXGEN6 0
+#endif
+#ifndef CKFF_VS_TEXGEN7
+#define CKFF_VS_TEXGEN7 0
+#endif
+#endif
+
+int ckffVsTexGenMode(int stage, int packedIndex)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return CKFF_VS_TEXGEN0 & 7;
+    if (stage == 1) return CKFF_VS_TEXGEN1 & 7;
+    if (stage == 2) return CKFF_VS_TEXGEN2 & 7;
+    if (stage == 3) return CKFF_VS_TEXGEN3 & 7;
+    if (stage == 4) return CKFF_VS_TEXGEN4 & 7;
+    if (stage == 5) return CKFF_VS_TEXGEN5 & 7;
+    if (stage == 6) return CKFF_VS_TEXGEN6 & 7;
+    if (stage == 7) return CKFF_VS_TEXGEN7 & 7;
+    return 0;
+#else
+    return packedIndex / 65536;
+#endif
+}
+
 float computeFog(float depth, vec4 params)
 {
     float mode = params.w;
@@ -48,10 +92,10 @@ vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4,
     return tc0;
 }
 
-vec4 generateTexcoord(int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
+vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
 {
-    int generation = packedIndex / 65536;
-    int index = packedIndex - generation * 65536;
+    int generation = ckffVsTexGenMode(stage, packedIndex);
+    int index = packedIndex & 65535;
     if (generation == 1) return vec4(viewNormal, 1.0);
     if (generation == 2) return vec4(viewPos, 1.0);
     if (generation == 3) {
@@ -78,7 +122,7 @@ vec4 transformTexcoord(int stage, vec4 coord)
     bool applyTransform = count > 1 && count <= 4;
 
     int packedIndex = int(params.y);
-    int generation = packedIndex / 65536;
+    int generation = ckffVsTexGenMode(stage, packedIndex);
     if (generation == 0 && applyTransform) {
         coord.z = 1.0;
     }
@@ -196,13 +240,13 @@ void main()
     int tc5 = int(u_stageParams[5 * 4 + 2].y);
     int tc6 = int(u_stageParams[6 * 4 + 2].y);
     int tc7 = int(u_stageParams[7 * 4 + 2].y);
-    v_texcoord0 = transformTexcoord(0, generateTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord1 = transformTexcoord(1, generateTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord2 = transformTexcoord(2, generateTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord3 = transformTexcoord(3, generateTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord4 = transformTexcoord(4, generateTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord5 = transformTexcoord(5, generateTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord6 = transformTexcoord(6, generateTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord7Fog = transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord0 = transformTexcoord(0, generateTexcoord(0, tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord1 = transformTexcoord(1, generateTexcoord(1, tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord2 = transformTexcoord(2, generateTexcoord(2, tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord3 = transformTexcoord(3, generateTexcoord(3, tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord4 = transformTexcoord(4, generateTexcoord(4, tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord5 = transformTexcoord(5, generateTexcoord(5, tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord6 = transformTexcoord(6, generateTexcoord(6, tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord7Fog = transformTexcoord(7, generateTexcoord(7, tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_fogParams);
 }
