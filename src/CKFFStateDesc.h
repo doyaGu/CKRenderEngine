@@ -319,14 +319,22 @@ struct CKFFFSStateDesc {
     void SetSpecularAdd(bool v)     { SetBit(0, v); }
     void SetAlphaTestEnabled(bool v){ SetBit(1, v); }
     void SetFogEnabled(bool v)      { SetBit(2, v); }
+    void SetRangeFog(bool v)        { SetBit(11, v); }
 
     bool GetSpecularAdd() const      { return GetBit(0); }
     bool GetAlphaTestEnabled() const { return GetBit(1); }
     bool GetFogEnabled() const       { return GetBit(2); }
+    bool GetRangeFog() const         { return GetBit(11); }
 
     // --- Alpha func (bits 3-6) ---
     void SetAlphaFunc(uint32_t func) { SetField(3, 4, func); }
     uint32_t GetAlphaFunc() const    { return GetField(3, 4); }
+
+    // --- Fog modes (bits 7-10) ---
+    void SetVertexFogMode(uint32_t mode) { SetField(7, 2, mode); }
+    uint32_t GetVertexFogMode() const    { return GetField(7, 2); }
+    void SetPixelFogMode(uint32_t mode)  { SetField(9, 2, mode); }
+    uint32_t GetPixelFogMode() const     { return GetField(9, 2); }
 
     bool operator==(const CKFFFSStateDesc &o) const {
         if (bits != o.bits)

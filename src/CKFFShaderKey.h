@@ -40,9 +40,12 @@ struct CKFFShaderKeyFS {
     CKFFShaderKeyFSStage Stages[CKFF_STATE_DESC_TEXTURE_STAGES];
     CKDWORD LastActiveTextureStage;
     CKDWORD AlphaFunc;
+    CKDWORD VertexFogMode;
+    CKDWORD PixelFogMode;
     bool GlobalSpecularEnable;
     bool AlphaTestEnable;
     bool FogEnable;
+    bool RangeFog;
 
     CKFFShaderKeyFS();
 

@@ -116,6 +116,21 @@ bool ckffSpecFogEnabled()
     return ckffSpecBits(ckffSpecDword(5), 9, 1) != 0;
 }
 
+int ckffSpecVertexFogMode()
+{
+    return ckffSpecBits(ckffSpecDword(5), 10, 2);
+}
+
+int ckffSpecPixelFogMode()
+{
+    return ckffSpecBits(ckffSpecDword(5), 12, 2);
+}
+
+bool ckffSpecRangeFog()
+{
+    return ckffSpecBits(ckffSpecDword(5), 14, 1) != 0;
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;

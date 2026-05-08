@@ -204,6 +204,9 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     set_spec_bits(dwords, 5, 4, 1, 1 if key["alphaTestEnable"] else 0)
     set_spec_bits(dwords, 5, 5, 4, key["alphaFunc"])
     set_spec_bits(dwords, 5, 9, 1, 1 if key["fogEnable"] else 0)
+    set_spec_bits(dwords, 5, 10, 2, key["vertexFogMode"])
+    set_spec_bits(dwords, 5, 12, 2, key["pixelFogMode"])
+    set_spec_bits(dwords, 5, 14, 1, 1 if key["rangeFog"] else 0)
     projected_sampler_mask = 0
 
     for stage_index, stage in enumerate(key["stages"][:4]):
@@ -287,8 +290,18 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     if not alpha_test_enable and alpha_func != 0:
         raise ValueError(f"{field}.alphaFunc must be 0 when alphaTestEnable is false")
 
+    vs_bits = read_uint32(key.get("vsBits"), f"{field}.vsBits")
+    fog_enable = read_bool(key.get("fogEnable", False), f"{field}.fogEnable")
+    vertex_fog_mode = read_uint32(key.get("vertexFogMode", (vs_bits >> 21) & 3 if fog_enable else 0),
+                                  f"{field}.vertexFogMode")
+    pixel_fog_mode = read_uint32(key.get("pixelFogMode", 0), f"{field}.pixelFogMode")
+    if vertex_fog_mode > 3:
+        raise ValueError(f"{field}.vertexFogMode must fit in 2 bits")
+    if pixel_fog_mode > 3:
+        raise ValueError(f"{field}.pixelFogMode must fit in 2 bits")
+
     return {
-        "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
+        "vsBits": vs_bits,
         "vsTexcoordDeclMask": read_uint32(key.get("vsTexcoordDeclMask", default_texcoord_decl_mask),
                                           f"{field}.vsTexcoordDeclMask") & 0xffffff,
         "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
@@ -303,7 +316,10 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
                                           f"{field}.globalSpecularEnable"),
         "alphaTestEnable": alpha_test_enable,
         "alphaFunc": alpha_func,
-        "fogEnable": read_bool(key.get("fogEnable", False), f"{field}.fogEnable"),
+        "fogEnable": fog_enable,
+        "vertexFogMode": vertex_fog_mode if fog_enable else 0,
+        "pixelFogMode": pixel_fog_mode if fog_enable else 0,
+        "rangeFog": read_bool(key.get("rangeFog", False), f"{field}.rangeFog") if fog_enable else False,
         "stages": normalized_stages,
     }
 
@@ -437,9 +453,12 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"    key.VS.TexTransformFlags[{index}] = {value}u;\n")
     f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
     f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
+    f.write(f"    key.FS.VertexFogMode = {key['vertexFogMode']}u;\n")
+    f.write(f"    key.FS.PixelFogMode = {key['pixelFogMode']}u;\n")
     f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")
     f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
     f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
+    f.write(f"    key.FS.RangeFog = {'true' if key['rangeFog'] else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")

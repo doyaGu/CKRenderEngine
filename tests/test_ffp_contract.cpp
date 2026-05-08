@@ -1640,6 +1640,7 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
 
     CKFFFSStateDesc fs;
     fs.SetFogEnabled(true);
+    fs.SetVertexFogMode(VXFOG_LINEAR);
     fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
     fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
     fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
@@ -1679,6 +1680,7 @@ void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
 
     CKFFFSStateDesc fs;
     fs.SetFogEnabled(true);
+    fs.SetVertexFogMode(VXFOG_LINEAR);
     fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
     fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
     fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
@@ -1939,6 +1941,9 @@ void Test_FFPShaderCache_VariantKeyDumpIsOptIn() {
               cacheSource.find("\\\"alphaTestEnable\\\"") != std::string::npos &&
               cacheSource.find("\\\"alphaFunc\\\"") != std::string::npos &&
               cacheSource.find("\\\"fogEnable\\\"") != std::string::npos &&
+              cacheSource.find("\\\"vertexFogMode\\\"") != std::string::npos &&
+              cacheSource.find("\\\"pixelFogMode\\\"") != std::string::npos &&
+              cacheSource.find("\\\"rangeFog\\\"") != std::string::npos &&
               cacheSource.find("\\\"resultIsTemp\\\"") != std::string::npos,
               "FFP variant key logging must emit manifest-ready JSON fields matching ffp_specialized_variants.json");
     TestCheck(cacheHeader.find("size_t CachedProgramCount()") != std::string::npos &&
@@ -1982,7 +1987,9 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
               shader.find("ckffSpecGlobalSpecularEnabled()") != std::string::npos &&
               shader.find("ckffSpecAlphaTestEnabled()") != std::string::npos &&
               shader.find("alphaPass(current.a, ckffSpecAlphaFunc())") != std::string::npos &&
-              shader.find("ckffSpecFogEnabled()") != std::string::npos,
+              shader.find("ckffSpecFogEnabled()") != std::string::npos &&
+              shader.find("ckffSpecPixelFogMode()") != std::string::npos &&
+              shader.find("computePixelFogFactor") != std::string::npos,
               "Fragment shader main loop must consume decoded FFP stage params and variant spec global controls");
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
@@ -2121,6 +2128,9 @@ void Test_FFPStateDesc_StoresFullTextureOpRange() {
     desc.SetSpecularAdd(true);
     desc.SetAlphaTestEnabled(true);
     desc.SetFogEnabled(true);
+    desc.SetVertexFogMode(VXFOG_LINEAR);
+    desc.SetPixelFogMode(VXFOG_EXP2);
+    desc.SetRangeFog(true);
     desc.SetAlphaFunc(VXCMP_GREATEREQUAL);
 
     TestCheck(desc.GetStageColorOp(0) == CKRST_TOP_LERP,
@@ -2143,8 +2153,45 @@ void Test_FFPStateDesc_StoresFullTextureOpRange() {
               "Fragment state desc stage storage must not bleed into inactive later stages");
     TestCheck(desc.GetSpecularAdd() && desc.GetAlphaTestEnabled() && desc.GetFogEnabled(),
               "Fragment state desc must preserve global FFP flags alongside stage storage");
+    TestCheck(desc.GetVertexFogMode() == VXFOG_LINEAR &&
+              desc.GetPixelFogMode() == VXFOG_EXP2 &&
+              desc.GetRangeFog(),
+              "Fragment state desc must preserve fog mode split and range fog state");
     TestCheck(desc.GetAlphaFunc() == VXCMP_GREATEREQUAL,
               "Fragment state desc must preserve alpha func alongside stage storage");
+}
+
+void Test_FFPShaderKeyFS_CapturesFogModeSplit() {
+    CKFFFSStateDesc desc;
+    desc.SetFogEnabled(true);
+    desc.SetVertexFogMode(VXFOG_LINEAR);
+    desc.SetPixelFogMode(VXFOG_EXP);
+    desc.SetRangeFog(true);
+
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0);
+    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+
+    TestCheck(key.FogEnable &&
+              key.VertexFogMode == VXFOG_LINEAR &&
+              key.PixelFogMode == VXFOG_EXP &&
+              key.RangeFog,
+              "FS shader key must capture vertex fog mode, pixel fog mode, and range fog");
+    TestCheck(spec.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
+              spec.Get(CKFF_SPEC_VERTEX_FOG_MODE) == VXFOG_LINEAR &&
+              spec.Get(CKFF_SPEC_PIXEL_FOG_MODE) == VXFOG_EXP &&
+              spec.Get(CKFF_SPEC_RANGE_FOG) == 1,
+              "FFP specialization build must copy fog mode split and range fog from the shader key");
+}
+
+void Test_FFPBuildCurrentStateDesc_FeedsFogModeSplit() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(pipeline.find("VXRENDERSTATE_FOGVERTEXMODE") != std::string::npos &&
+              pipeline.find("VXRENDERSTATE_FOGPIXELMODE") != std::string::npos &&
+              pipeline.find("VXRENDERSTATE_RANGEFOGENABLE") != std::string::npos &&
+              pipeline.find("stateDesc.FS.SetVertexFogMode") != std::string::npos &&
+              pipeline.find("stateDesc.FS.SetPixelFogMode") != std::string::npos &&
+              pipeline.find("stateDesc.FS.SetRangeFog") != std::string::npos,
+              "BuildCurrentStateDesc must feed split fog modes and range fog into FFP specialization state");
 }
 
 void Test_FFPStateDesc_CoversEightTextureCoordinates() {
@@ -2687,6 +2734,8 @@ int main() {
     tests.Run("FFP vertex shader specialized fog mode key", &Test_FFPVertexShader_UsesSpecializedFogModeKey);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
+    tests.Run("FFP FS key captures fog mode split", &Test_FFPShaderKeyFS_CapturesFogModeSplit);
+    tests.Run("FFP current state feeds fog mode split", &Test_FFPBuildCurrentStateDesc_FeedsFogModeSplit);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
     tests.Run("FFP VS key captures remaining variant state", &Test_FFPShaderKeyVS_CapturesRemainingVariantState);
     tests.Run("FFP specialization packs fog modes", &Test_FFPSpecializationInfo_PacksFogModesAndRangeFog);
