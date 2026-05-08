@@ -35,6 +35,16 @@ int ckffUnpackSpecArg(int arg)
     return (arg & 0x7) | ((arg & 0x18) << 1);
 }
 
+int ckffSpecLastActiveTextureStage()
+{
+    return ckffSpecBits(ckffSpecDword(4), 16, 3);
+}
+
+bool ckffSpecGlobalSpecularEnabled()
+{
+    return ckffSpecBits(ckffSpecDword(6), 31, 1) != 0;
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;

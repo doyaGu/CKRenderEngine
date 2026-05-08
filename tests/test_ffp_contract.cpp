@@ -1330,11 +1330,15 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
     TestCheck(shader.find("uniform vec4 u_ffSpec[10]") != std::string::npos &&
               common.find("stage < 4 && ckffSpecIsOptimized()") != std::string::npos &&
               common.find("ckffSpecDword(6 + stage)") != std::string::npos &&
-              common.find("ckffUnpackSpecArg") != std::string::npos,
-              "Fragment shader must expose the DXVK-style first-four-stage specialization reader and unpack repacked args");
+              common.find("ckffUnpackSpecArg") != std::string::npos &&
+              common.find("ckffSpecLastActiveTextureStage") != std::string::npos &&
+              common.find("ckffSpecGlobalSpecularEnabled") != std::string::npos,
+              "Fragment shader must expose the DXVK-style specialization reader, global specular bit, and last active stage");
     TestCheck(shader.find("ckffReadStageParams(stage") != std::string::npos &&
-              shader.find("stageParams.ResultArg") != std::string::npos,
-              "Fragment shader main loop must consume decoded FFP stage params instead of raw uniform fields");
+              shader.find("stageParams.ResultArg") != std::string::npos &&
+              shader.find("stage > ckffSpecLastActiveTextureStage()") != std::string::npos &&
+              shader.find("ckffSpecGlobalSpecularEnabled()") != std::string::npos,
+              "Fragment shader main loop must consume decoded FFP stage params and DXVK-style spec global controls");
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
