@@ -1389,6 +1389,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("vs_specialization_identifier") != std::string::npos &&
               shaderCompiler.find("unique_specialized_fs_variants") != std::string::npos &&
               shaderCompiler.find("unique_specialized_vs_variants") != std::string::npos &&
+              shaderCompiler.find("\"vsTexCoordIndex\"") != std::string::npos &&
+              generatedTable.find("key.VS.TexCoordIndex[0]") != std::string::npos &&
               shaderCompiler.find("validate_specialized_variants") != std::string::npos &&
               shaderCompiler.find("duplicate FFP shader key") != std::string::npos &&
               shaderCompiler.find("duplicate identifier") != std::string::npos &&
@@ -1906,14 +1908,20 @@ void Test_FFPVertexShader_UsesSpecializedTexGenKey() {
     TestCheck(shader.find("CKFF_VS_TEXGEN0") != std::string::npos &&
               shader.find("ckffVsTexGenMode") != std::string::npos &&
               shader.find("int generation = ckffVsTexGenMode(stage, packedIndex)") != std::string::npos &&
-              shader.find("int index = packedIndex & 65535") != std::string::npos,
-              "3D vertex shader must consume specialized VS texgen mode while preserving the runtime texcoord index");
-    TestCheck(pipeline.find("stateDesc.VS.SetTexGen(stage, texgen, hasTransform)") != std::string::npos &&
+              shader.find("CKFF_VS_TEXCOORD0") != std::string::npos &&
+              shader.find("ckffVsTexcoordIndex") != std::string::npos &&
+              shader.find("int index = ckffVsTexcoordIndex(stage, packedIndex)") != std::string::npos,
+              "3D vertex shader must consume specialized VS texgen mode and texcoord index");
+    TestCheck(pipeline.find("stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord))") != std::string::npos &&
+              pipeline.find("stateDesc.VS.SetTexGen(stage, texgen, hasTransform)") != std::string::npos &&
               pipeline.find("const CKDWORD texgen = (packedTexcoord >> 16)") != std::string::npos,
-              "FFP shader key construction must copy runtime texgen state into the VS key");
+              "FFP shader key construction must copy runtime texgen and texcoord-index state into the VS key");
     TestCheck(compiler.find("CKFF_VS_TEXGEN{index}") != std::string::npos &&
+              compiler.find("CKFF_VS_TEXCOORD{index}") != std::string::npos &&
+              compiler.find("\"vsTexCoordIndex\"") != std::string::npos &&
+              compiler.find("key.VS.TexCoordIndex[{index}]") != std::string::npos &&
               compiler.find("ffp_specialized_vs_defines") != std::string::npos,
-              "Shader compiler must pass VS texgen key fields into specialized VS compilation");
+              "Shader compiler must pass VS texgen and texcoord-index key fields into specialized VS compilation");
 }
 
 void Test_FFPVertexShader_UsesSpecializedLightingKey() {
@@ -2030,6 +2038,7 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
     desc.SetHasPositionT(true);
     desc.SetHasTexCoord(7, true);
     desc.SetTexGen(7, CKFF_TG_REFLECTION, true);
+    desc.SetTexCoordIndex(7, 3);
 
     TestCheck(desc.GetHasPositionT(),
               "Vertex state desc PositionT flag must not alias high texture coordinate bits");
@@ -2039,7 +2048,10 @@ void Test_FFPStateDesc_CoversEightTextureCoordinates() {
               "Vertex state desc must preserve generic stage 7 texture coordinate state");
     TestCheck(desc.GetTexGenMode(7) == CKFF_TG_REFLECTION && desc.GetTexGenHasTransform(7),
               "Vertex state desc must preserve stage 7 texgen and texture transform state");
-    TestCheck(!desc.GetHasTexCoord(8) && desc.GetTexGenMode(8) == 0 && !desc.GetTexGenHasTransform(8),
+    TestCheck(desc.GetTexCoordIndex(7) == 3,
+              "Vertex state desc must preserve stage 7 source texture coordinate index");
+    TestCheck(!desc.GetHasTexCoord(8) && desc.GetTexGenMode(8) == 0 && !desc.GetTexGenHasTransform(8) &&
+                  desc.GetTexCoordIndex(8) == 0,
               "Vertex state desc must reject out-of-range texture coordinate stages");
 }
 

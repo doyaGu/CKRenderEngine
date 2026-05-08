@@ -11,6 +11,7 @@
 struct CKFFShaderKeyVS {
     uint64_t Bits;
     uint8_t TexGen[CKFF_STATE_DESC_TEXTURE_STAGES];
+    uint8_t TexCoordIndex[CKFF_STATE_DESC_TEXTURE_STAGES];
 
     CKFFShaderKeyVS();
     explicit CKFFShaderKeyVS(const CKFFVSStateDesc &desc);

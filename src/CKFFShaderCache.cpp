@@ -122,6 +122,9 @@ void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
     CK_LOG_RAW_FMT("        \"vsTexGen\": [%u, %u, %u, %u, %u, %u, %u, %u],",
                    key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
                    key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
+    CK_LOG_RAW_FMT("        \"vsTexCoordIndex\": [%u, %u, %u, %u, %u, %u, %u, %u],",
+                   key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
+                   key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7]);
     CK_LOG_RAW_FMT("        \"lastActiveTextureStage\": %u,", key.FS.LastActiveTextureStage);
     CK_LOG_RAW_FMT("        \"globalSpecularEnable\": %s,", key.FS.GlobalSpecularEnable ? "true" : "false");
     CK_LOG_RAW_FMT("        \"alphaTestEnable\": %s,", key.FS.AlphaTestEnable ? "true" : "false");
@@ -349,6 +352,10 @@ void CKFFShaderCache::RecordVariantKey(const CKFFShaderKey &key) {
                "FFP variant texGen: [%u,%u,%u,%u,%u,%u,%u,%u]",
                key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
                key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7]);
+    CK_LOG_FMT("ShaderCache",
+               "FFP variant texCoordIndex: [%u,%u,%u,%u,%u,%u,%u,%u]",
+               key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
+               key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7]);
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         LogVariantStage(stage, key.FS.Stages[stage]);
     LogVariantSpecDwords(spec);
