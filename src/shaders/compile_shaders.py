@@ -134,7 +134,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
     vs_bits = key["vsBits"]
     defines = [
         "CKFF_FULL_SPECIALIZED=1",
-        f"CKFF_VS_BITS={vs_bits}",
+        f"CKFF_VS_BITS={vs_bits & 0xffffffff}",
         f"CKFF_VS_DIFFUSE_SOURCE={(vs_bits >> 25) & 3}",
         f"CKFF_VS_AMBIENT_SOURCE={(vs_bits >> 27) & 3}",
         f"CKFF_VS_SPECULAR_SOURCE={(vs_bits >> 29) & 3}",
@@ -181,6 +181,12 @@ def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
 def read_uint32(value: object, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 0xffffffff:
         raise ValueError(f"{field} must be a uint32")
+    return value
+
+
+def read_uint64(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 0xffffffffffffffff:
+        raise ValueError(f"{field} must be a uint64")
     return value
 
 
@@ -294,7 +300,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     if not alpha_test_enable and alpha_func != 0:
         raise ValueError(f"{field}.alphaFunc must be 0 when alphaTestEnable is false")
 
-    vs_bits = read_uint32(key.get("vsBits"), f"{field}.vsBits")
+    vs_bits = read_uint64(key.get("vsBits"), f"{field}.vsBits")
     fog_enable = read_bool(key.get("fogEnable", False), f"{field}.fogEnable")
     vertex_fog_mode = read_uint32(key.get("vertexFogMode", (vs_bits >> 21) & 3 if fog_enable else 0),
                                   f"{field}.vertexFogMode")
