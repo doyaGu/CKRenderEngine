@@ -21,6 +21,16 @@ typedef enum CKRST_CTXCLEAR_FLAGS
     CKRST_CTXCLEAR_ALL		= 0xFFFFFFFF,
 } CKRST_CTXCLEAR_FLAGS;
 
+/******************************************************************************
+// CKRasterizerContext::Frame sync handling
+*******************************************************************************/
+typedef enum CKRST_FRAME_SYNC_MODE
+{
+    CKRST_FRAME_SYNC_IMMEDIATE        = 0,
+    CKRST_FRAME_SYNC_VSYNC            = 1,
+    CKRST_FRAME_SYNC_PRESERVE_PRESENT = 2,
+} CKRST_FRAME_SYNC_MODE;
+
 /****************************************************************
 // Cube Map Face Index
 *****************************************************************/

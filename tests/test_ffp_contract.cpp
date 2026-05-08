@@ -2940,15 +2940,17 @@ void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
     std::string rasterizerHeader = ReadRenderEngineSource("include/CKRasterizer.h");
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
 
-    TestCheck(renderContext.find("EndFrame(FALSE, FALSE)") != std::string::npos,
+    TestCheck(renderContext.find("EndFrame(CKRST_FRAME_SYNC_PRESERVE_PRESENT)") != std::string::npos,
               "Render-to-texture bgfx flushes must not overwrite the backbuffer present-vsync state");
-    TestCheck(pipelineHeader.find("void EndFrame(CKBOOL vsync, CKBOOL updatePresentSync = TRUE)") != std::string::npos,
+    TestCheck(pipelineHeader.find("void EndFrame(CKRST_FRAME_SYNC_MODE syncMode)") != std::string::npos,
               "Render pipeline must distinguish frame submission from present-vsync updates");
-    TestCheck(pipelineSource.find("m_Context->Frame(vsync, updatePresentSync)") != std::string::npos,
+    TestCheck(pipelineSource.find("m_Context->Frame(syncMode)") != std::string::npos,
               "Render pipeline must pass the present-sync update flag to the rasterizer context");
-    TestCheck(rasterizerHeader.find("virtual CKERROR Frame(CKBOOL VSync, CKBOOL UpdatePresentSync)") != std::string::npos,
+    TestCheck(rasterizerHeader.find("virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode)") != std::string::npos,
               "Rasterizer context must expose a frame submission path that can preserve present-vsync state");
-    TestCheck(bgfxContext.find("if (UpdatePresentSync && VSync != m_VSync)") != std::string::npos,
+    TestCheck(bgfxContext.find("SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT") != std::string::npos &&
+              bgfxContext.find("SyncMode == CKRST_FRAME_SYNC_VSYNC") != std::string::npos &&
+              bgfxContext.find("if (updatePresentSync && vsync != m_VSync)") != std::string::npos,
               "bgfx rasterizer must only reset swapchain vsync when a backbuffer present updates it");
 }
 
