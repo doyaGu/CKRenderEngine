@@ -20,6 +20,18 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_BITS
 #define CKFF_VS_BITS 0
 #endif
+#ifndef CKFF_VS_DIFFUSE_SOURCE
+#define CKFF_VS_DIFFUSE_SOURCE 0
+#endif
+#ifndef CKFF_VS_AMBIENT_SOURCE
+#define CKFF_VS_AMBIENT_SOURCE 0
+#endif
+#ifndef CKFF_VS_SPECULAR_SOURCE
+#define CKFF_VS_SPECULAR_SOURCE 0
+#endif
+#ifndef CKFF_VS_EMISSIVE_SOURCE
+#define CKFF_VS_EMISSIVE_SOURCE 0
+#endif
 #ifndef CKFF_VS_TEXGEN0
 #define CKFF_VS_TEXGEN0 0
 #endif
@@ -81,6 +93,19 @@ int ckffVsBits(int shift, int mask, int runtimeValue)
 #endif
 }
 
+int ckffVsMaterialSource(int slot, float runtimeSource)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (slot == 0) return CKFF_VS_DIFFUSE_SOURCE;
+    if (slot == 1) return CKFF_VS_AMBIENT_SOURCE;
+    if (slot == 2) return CKFF_VS_SPECULAR_SOURCE;
+    if (slot == 3) return CKFF_VS_EMISSIVE_SOURCE;
+    return 0;
+#else
+    return int(runtimeSource + 0.5);
+#endif
+}
+
 float computeFog(float depth, vec4 params)
 {
     float mode = params.w;
@@ -93,9 +118,9 @@ float computeFog(float depth, vec4 params)
     return clamp((params.y - depth) / max(params.y - params.x, 0.0001), 0.0, 1.0);
 }
 
-vec4 selectMaterialSource(float source, vec4 materialValue, vec4 color0, vec4 color1)
+vec4 selectMaterialSource(int slot, float source, vec4 materialValue, vec4 color0, vec4 color1)
 {
-    int src = int(source + 0.5);
+    int src = ckffVsMaterialSource(slot, source);
     if (src == 1) return color0;
     if (src == 2) return color1;
     return materialValue;
@@ -176,10 +201,10 @@ void main()
         viewNormal = normalize(viewNormal);
     }
 
-    vec4 matDiffuse  = selectMaterialSource(u_ffParams.x, u_material[0], a_color0, a_color1);
-    vec4 matAmbient  = selectMaterialSource(u_ffParams.y, u_material[1], a_color0, a_color1);
-    vec4 matSpecular = selectMaterialSource(u_ffParams.z, u_material[2], a_color0, a_color1);
-    vec4 matEmissive = selectMaterialSource(u_ffParams.w, u_material[3], a_color0, a_color1);
+    vec4 matDiffuse  = selectMaterialSource(0, u_ffParams.x, u_material[0], a_color0, a_color1);
+    vec4 matAmbient  = selectMaterialSource(1, u_ffParams.y, u_material[1], a_color0, a_color1);
+    vec4 matSpecular = selectMaterialSource(2, u_ffParams.z, u_material[2], a_color0, a_color1);
+    vec4 matEmissive = selectMaterialSource(3, u_ffParams.w, u_material[3], a_color0, a_color1);
     float matPower   = u_material[4].x;
 
     int rawLightCount = int(u_lightParams.x);

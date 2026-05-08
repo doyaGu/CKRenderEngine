@@ -1408,6 +1408,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"name\": \"3d_stage0_modulate_fog\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_texgen_reflection\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_lit_one_light\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"3d_stage0_modulate_diffuse_color0\"") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaTestEnable\": true") != std::string::npos &&
@@ -1719,6 +1720,41 @@ void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
     cache.Shutdown();
 }
 
+void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(true);
+    vs.SetHasColor0(true);
+    vs.SetDiffuseSource(CKFF_MS_COLOR0);
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must include a diffuse-from-color0 3D VS variant");
+
+    cache.Shutdown();
+}
+
 void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
@@ -1846,6 +1882,23 @@ void Test_FFPVertexShader_UsesSpecializedLightingKey() {
               shader.find("ckffVsBit(14") != std::string::npos &&
               shader.find("ckffVsBit(16") != std::string::npos,
               "3D vertex shader must consume specialized VS lighting bits for lighting, light count, normal normalization, and local viewer");
+}
+
+void Test_FFPVertexShader_UsesSpecializedMaterialSourceKey() {
+    std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+
+    TestCheck(shader.find("CKFF_VS_DIFFUSE_SOURCE") != std::string::npos &&
+              shader.find("CKFF_VS_AMBIENT_SOURCE") != std::string::npos &&
+              shader.find("CKFF_VS_SPECULAR_SOURCE") != std::string::npos &&
+              shader.find("CKFF_VS_EMISSIVE_SOURCE") != std::string::npos &&
+              shader.find("ckffVsMaterialSource") != std::string::npos &&
+              shader.find("selectMaterialSource(0, u_ffParams.x") != std::string::npos,
+              "3D vertex shader must consume specialized VS material source fields");
+    TestCheck(compiler.find("CKFF_VS_DIFFUSE_SOURCE") != std::string::npos &&
+              compiler.find("(vs_bits >> 25) & 3") != std::string::npos &&
+              compiler.find("(vs_bits >> 31) & 3") != std::string::npos,
+              "Shader compiler must pass VS material source key fields without relying on high shader bit shifts");
 }
 
 void Test_FFPStateDesc_FeedsExplicitVariantKey() {
@@ -2369,11 +2422,13 @@ int main() {
     tests.Run("FFP shader cache full specialized fog variant hit", &Test_FFPShaderCache_FullSpecializedFogVariantHit);
     tests.Run("FFP shader cache full specialized texgen variant hit", &Test_FFPShaderCache_FullSpecializedTexGenVariantHit);
     tests.Run("FFP shader cache full specialized lit variant hit", &Test_FFPShaderCache_FullSpecializedLitVariantHit);
+    tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized lighting key", &Test_FFPVertexShader_UsesSpecializedLightingKey);
+    tests.Run("FFP vertex shader specialized material source key", &Test_FFPVertexShader_UsesSpecializedMaterialSourceKey);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
