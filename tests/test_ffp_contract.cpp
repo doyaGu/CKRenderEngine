@@ -1718,6 +1718,116 @@ void Test_FFPShaderCache_FullSpecializedPositionTVariantHit() {
     Test_FFPShaderCache_FullSpecializedVariantHit(true);
 }
 
+CKFFShaderKey MakeUncataloguedFFPUberKey() {
+    CKFFFSStateDesc fs;
+    fs.SetStageColorOp(0, CKRST_TOP_DOTPRODUCT3);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_DIFFUSE);
+    fs.SetStageAlphaOp(0, CKRST_TOP_SELECTARG2);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_TFACTOR);
+    fs.SetAlphaTestEnabled(true);
+    fs.SetAlphaFunc(VXCMP_NOTEQUAL);
+    fs.SetFogEnabled(true);
+    fs.SetVertexFogMode(VXFOG_EXP2);
+    fs.SetPixelFogMode(VXFOG_EXP);
+    fs.SetStageProjectedSampler(0, true);
+
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(true);
+    vs.SetHasNormal(true);
+    vs.SetHasTexCoord(0, true);
+    vs.SetLightingEnabled(true);
+    vs.SetNormalizeNormals(true);
+    vs.SetLocalViewer(true);
+    vs.SetLightCount(2);
+    vs.SetTexcoordComponentCount(0, 4);
+    vs.SetTextureTransformFlags(0, CKRST_TTF_COUNT4 | CKRST_TTF_PROJECTED);
+
+    CKFFShaderKey key;
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+    return key;
+}
+
+void Test_FFPShaderCache_DefaultUberModeCreatesAndCachesProgram() {
+    ScopedEnvVar unsetUber("CK2_FFP_UBERSHADER", nullptr);
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFShaderKey key = MakeUncataloguedFFPUberKey();
+    CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
+    CKDWORD firstProgram = cache.GetProgram(key);
+    CKDWORD secondProgram = cache.GetProgram(key);
+
+    TestCheck(cache.UsesUberShader() &&
+              cache.GetShaderMode() == CKFF_SHADER_MODE_UBER_SPECIALIZED,
+              "Unset CK2_FFP_UBERSHADER must select the uber shader specialization path");
+    TestCheck(firstProgram != 0 &&
+              secondProgram == firstProgram &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Default uber shader path must create and cache a program even for keys outside the offline catalog");
+    TestCheck(ctx.LastProgramSpecializationDwords.size() == CKFFSpecializationInfo::MaxSpecDwords,
+              "Default uber shader path must pass the FFP specialization payload to the rasterizer program descriptor");
+    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
+        TestCheck(ctx.LastProgramSpecializationDwords[i] == expectedSpec.Data()[i],
+                  "Default uber shader path specialization payload must match the key-derived FFP dwords");
+    }
+
+    cache.Shutdown();
+}
+
+void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
+    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKDWORD program = cache.GetProgram(MakeUncataloguedFFPUberKey());
+
+    TestCheck(cache.UsesUberShader() &&
+              cache.GetShaderMode() == CKFF_SHADER_MODE_UBER_SPECIALIZED &&
+              program != 0 &&
+              ctx.CreatedProgramCount == 1,
+              "CK2_FFP_UBERSHADER=1 must force the uber shader specialization path");
+
+    cache.Shutdown();
+}
+
+void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
+    std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+
+    const size_t uberFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateUberSpecializedProgram");
+    const size_t programFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateProgramFromBinary");
+    const std::string uberBody = (uberFn != std::string::npos && programFn != std::string::npos && uberFn < programFn)
+        ? cacheSource.substr(uberFn, programFn - uberFn)
+        : std::string();
+
+    const size_t fullFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateFullSpecializedProgram");
+    const std::string fullBody = (fullFn != std::string::npos && uberFn != std::string::npos && fullFn < uberFn)
+        ? cacheSource.substr(fullFn, uberFn - fullFn)
+        : std::string();
+
+    TestCheck(cacheSource.find("FFP shader mode: backend=%s mode=%s") != std::string::npos,
+              "FFP shader cache startup log must report the selected uber/full-specialized shader mode clearly");
+    TestCheck(uberBody.find("CKFFFindSpecializedModule") == std::string::npos &&
+              uberBody.find("set->VS3D") != std::string::npos &&
+              uberBody.find("set->VSPositionT") != std::string::npos &&
+              uberBody.find("set->FSStage") != std::string::npos &&
+              uberBody.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
+              "Uber shader path must use the generic uber shader blobs and key-derived specialization payload, not the offline catalog");
+    TestCheck(fullBody.find("CKFFFindSpecializedModule") != std::string::npos &&
+              fullBody.find("CreateUberSpecializedProgram") == std::string::npos,
+              "Full-specialized path is the only path that may query the offline catalog and it must not fallback to uber on miss");
+}
+
 void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
@@ -3083,6 +3193,9 @@ int main() {
     tests.Run("FFP shader key fixed-function stage rules", &Test_FFPShaderKey_UsesFixedFunctionStageRules);
     tests.Run("FFP specialization info variant layout", &Test_FFPSpecializationInfo_MatchesFFPVariantLayout);
     tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
+    tests.Run("FFP shader cache default uber mode creates and caches program", &Test_FFPShaderCache_DefaultUberModeCreatesAndCachesProgram);
+    tests.Run("FFP shader cache explicit uber mode creates program", &Test_FFPShaderCache_ExplicitUberModeCreatesProgram);
+    tests.Run("FFP shader cache uber and catalog boundaries explicit", &Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit);
     tests.Run("FFP shader cache full specialized 3D variant hit", &Test_FFPShaderCache_FullSpecialized3DVariantHit);
     tests.Run("FFP shader cache full specialized PositionT variant hit", &Test_FFPShaderCache_FullSpecializedPositionTVariantHit);
     tests.Run("FFP shader cache full specialized two-stage specular variant hit", &Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit);

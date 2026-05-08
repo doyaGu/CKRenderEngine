@@ -328,8 +328,8 @@ void CKFFShaderCache::ResolveShaderTarget() {
     }
 
     m_BlobSet = set;
-    CK_LOG_FMT("ShaderCache", "FFP specialized variants enabled: backend=%s ubershader=%u",
-               set->Name, m_UseUberShader ? 1u : 0u);
+    CK_LOG_FMT("ShaderCache", "FFP shader mode: backend=%s mode=%s",
+               set->Name, m_UseUberShader ? "uber" : "full-specialized");
 }
 
 CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
