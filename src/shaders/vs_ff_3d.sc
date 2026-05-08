@@ -17,6 +17,9 @@ uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[32];
 
 #if defined(CKFF_FULL_SPECIALIZED)
+#ifndef CKFF_VS_BITS
+#define CKFF_VS_BITS 0
+#endif
 #ifndef CKFF_VS_TEXGEN0
 #define CKFF_VS_TEXGEN0 0
 #endif
@@ -57,6 +60,24 @@ int ckffVsTexGenMode(int stage, int packedIndex)
     return 0;
 #else
     return packedIndex / 65536;
+#endif
+}
+
+bool ckffVsBit(int bit, bool runtimeValue)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS & (1 << bit)) != 0;
+#else
+    return runtimeValue;
+#endif
+}
+
+int ckffVsBits(int shift, int mask, int runtimeValue)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS >> shift) & mask;
+#else
+    return runtimeValue;
 #endif
 }
 
@@ -151,7 +172,7 @@ void main()
 
     vec4 viewPos = mul(u_ckModelView, localPos);
     vec3 viewNormal = mul(u_ckNormalMatrix, vec4(a_normal, 0.0)).xyz;
-    if (u_lightModelParams.y > 0.5) {
+    if (ckffVsBit(14, u_lightModelParams.y > 0.5)) {
         viewNormal = normalize(viewNormal);
     }
 
@@ -162,8 +183,8 @@ void main()
     float matPower   = u_material[4].x;
 
     int rawLightCount = int(u_lightParams.x);
-    bool lightingEnabled = rawLightCount >= 0;
-    int lightCount = rawLightCount < 0 ? 0 : rawLightCount;
+    bool lightingEnabled = ckffVsBit(13, rawLightCount >= 0);
+    int lightCount = ckffVsBits(17, 15, rawLightCount < 0 ? 0 : rawLightCount);
     vec3 globalAmbient = u_lightParams.yzw;
 
     vec4 litDiffuse = matDiffuse;
@@ -211,7 +232,7 @@ void main()
 
             if (nDotL > 0.0 && matPower > 0.0) {
                 vec3 halfVec;
-                if (u_lightModelParams.x > 0.5) {
+                if (ckffVsBit(16, u_lightModelParams.x > 0.5)) {
                     halfVec = toLight - normalize(viewPos.xyz);
                 } else {
                     halfVec = toLight - vec3(0.0, 0.0, 1.0);
