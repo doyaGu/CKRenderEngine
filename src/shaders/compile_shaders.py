@@ -193,6 +193,20 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
     }
 
 
+def default_specialized_stage() -> dict[str, object]:
+    return {
+        "colorOp": 0,
+        "colorArg0": 0,
+        "colorArg1": 0,
+        "colorArg2": 0,
+        "alphaOp": 0,
+        "alphaArg0": 0,
+        "alphaArg1": 0,
+        "alphaArg2": 0,
+        "resultIsTemp": False,
+    }
+
+
 def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     if not isinstance(key, dict):
         raise ValueError(f"{field} must be an object")
@@ -202,8 +216,12 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
         raise ValueError(f"{field}.vsTexGen must contain exactly 8 uint32 values")
 
     stages = key.get("stages")
-    if not isinstance(stages, list) or len(stages) != 8:
-        raise ValueError(f"{field}.stages must contain exactly 8 stage objects")
+    if not isinstance(stages, list) or len(stages) > 8:
+        raise ValueError(f"{field}.stages must contain up to 8 stage objects")
+    normalized_stages = [normalize_specialized_stage(stage, f"{field}.stages[{index}]")
+                         for index, stage in enumerate(stages)]
+    while len(normalized_stages) < 8:
+        normalized_stages.append(default_specialized_stage())
 
     return {
         "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
@@ -213,8 +231,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
                                               f"{field}.lastActiveTextureStage"),
         "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
                                           f"{field}.globalSpecularEnable"),
-        "stages": [normalize_specialized_stage(stage, f"{field}.stages[{index}]")
-                   for index, stage in enumerate(stages)],
+        "stages": normalized_stages,
     }
 
 

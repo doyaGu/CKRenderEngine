@@ -1338,6 +1338,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
               shaderCompiler.find("specDwords does not match key-derived FFP specialization payload") != std::string::npos &&
               shaderCompiler.find("normalize_specialized_variant") != std::string::npos &&
+              shaderCompiler.find("default_specialized_stage") != std::string::npos &&
+              shaderCompiler.find("stages must contain up to 8 stage objects") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
