@@ -57,7 +57,8 @@ set(CKRE_PUBLIC_HEADERS
 
 set(CKRE_PRIVATE_HEADERS
         CKFixedFunctionPipeline.h
-        CKFFShaderKey.h
+        CKFFDebug.h
+        CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
         CKDrawStateCache.h
@@ -118,6 +119,7 @@ set(CKRE_SOURCES
         CKRasterizer/CKNULLRasterizer.cpp
 
         CKFixedFunctionPipeline.cpp
+        CKFFDebug.cpp
         CKFFShaderCache.cpp
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
@@ -188,6 +190,10 @@ function(ckre_configure_target TARGET_NAME)
     if (WIN32)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
+
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+            CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>
+    )
 
     set_target_properties(${TARGET_NAME} PROPERTIES
             VERSION ${PROJECT_VERSION}
