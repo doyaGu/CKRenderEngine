@@ -209,6 +209,8 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
         if stage["projectedSampler"]:
             projected_sampler_mask |= (1 << stage_index)
         word = 6 + stage_index
+        set_spec_bits(dwords, 1, stage_index * 5, 5, repack_ffp_arg(stage["colorArg0"]))
+        set_spec_bits(dwords, 2, stage_index * 5, 5, repack_ffp_arg(stage["alphaArg0"]))
         set_spec_bits(dwords, word, 0, 5, stage["colorOp"])
         set_spec_bits(dwords, word, 5, 5, repack_ffp_arg(stage["colorArg1"]))
         set_spec_bits(dwords, word, 10, 5, repack_ffp_arg(stage["colorArg2"]))

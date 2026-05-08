@@ -134,9 +134,11 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     if (stage < 4 && ckffSpecIsOptimized()) {
         int word = ckffSpecDword(6 + stage);
         params.ColorOp = ckffSpecBits(word, 0, 5);
+        params.ColorArg0 = ckffUnpackSpecArg(ckffSpecBits(ckffSpecDword(1), stage * 5, 5));
         params.ColorArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 5, 5));
         params.ColorArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 10, 5));
         params.AlphaOp = ckffSpecBits(word, 15, 5);
+        params.AlphaArg0 = ckffUnpackSpecArg(ckffSpecBits(ckffSpecDword(2), stage * 5, 5));
         params.AlphaArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 20, 5));
         params.AlphaArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 25, 5));
         params.ResultArg = ckffSpecBits(word, 30, 1) != 0 ? 5 : 1;

@@ -201,14 +201,16 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
 
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
-        const CKDWORD base = (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP + stage * 7;
+        const CKDWORD base = (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP + stage * 9;
         info.Set((CKFFSpecConstantId)(base + 0), src.ColorOp);
-        info.Set((CKFFSpecConstantId)(base + 1), CKFFSpecializationInfo::RepackArg(src.ColorArg1));
-        info.Set((CKFFSpecConstantId)(base + 2), CKFFSpecializationInfo::RepackArg(src.ColorArg2));
-        info.Set((CKFFSpecConstantId)(base + 3), src.AlphaOp);
-        info.Set((CKFFSpecConstantId)(base + 4), CKFFSpecializationInfo::RepackArg(src.AlphaArg1));
-        info.Set((CKFFSpecConstantId)(base + 5), CKFFSpecializationInfo::RepackArg(src.AlphaArg2));
-        info.Set((CKFFSpecConstantId)(base + 6), src.ResultIsTemp ? 1u : 0u);
+        info.Set((CKFFSpecConstantId)(base + 1), CKFFSpecializationInfo::RepackArg(src.ColorArg0));
+        info.Set((CKFFSpecConstantId)(base + 2), CKFFSpecializationInfo::RepackArg(src.ColorArg1));
+        info.Set((CKFFSpecConstantId)(base + 3), CKFFSpecializationInfo::RepackArg(src.ColorArg2));
+        info.Set((CKFFSpecConstantId)(base + 4), src.AlphaOp);
+        info.Set((CKFFSpecConstantId)(base + 5), CKFFSpecializationInfo::RepackArg(src.AlphaArg0));
+        info.Set((CKFFSpecConstantId)(base + 6), CKFFSpecializationInfo::RepackArg(src.AlphaArg1));
+        info.Set((CKFFSpecConstantId)(base + 7), CKFFSpecializationInfo::RepackArg(src.AlphaArg2));
+        info.Set((CKFFSpecConstantId)(base + 8), src.ResultIsTemp ? 1u : 0u);
     }
 
     return info;
