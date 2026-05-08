@@ -193,6 +193,32 @@
           }
         ]
       }
+    },
+    {
+      "name": "3d_stage0_modulate_diffuse_color0",
+      "vs": "3d",
+      "key": {
+        "vsBits": 33554437,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
     }
   ]
 }

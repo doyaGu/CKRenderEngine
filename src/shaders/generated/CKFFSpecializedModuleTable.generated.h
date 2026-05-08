@@ -5,6 +5,7 @@
 #include "shaders/generated/dx11/specialized/vsspec_e0f37ecf8377251d_vs_ff_positiont.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_53ee0c9686960e20_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_e89795365b858b4e_vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_8d39c334022326c1_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
@@ -13,6 +14,7 @@
 #include "shaders/generated/dx12/specialized/vsspec_e0f37ecf8377251d_vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_53ee0c9686960e20_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_e89795365b858b4e_vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_8d39c334022326c1_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
@@ -21,6 +23,7 @@
 #include "shaders/generated/spirv/specialized/vsspec_e0f37ecf8377251d_vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_53ee0c9686960e20_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_e89795365b858b4e_vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_8d39c334022326c1_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
@@ -29,6 +32,7 @@
 #include "shaders/generated/glsl/specialized/vsspec_e0f37ecf8377251d_vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_53ee0c9686960e20_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_e89795365b858b4e_vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_8d39c334022326c1_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
@@ -776,6 +780,112 @@ static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_lit
     return info;
 }
 
+static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33554437ull;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[1].ColorOp = 0u;
+    key.FS.Stages[1].ColorArg0 = 0u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 0u;
+    key.FS.Stages[1].AlphaOp = 0u;
+    key.FS.Stages[1].AlphaArg0 = 0u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 0u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
 static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modulate() {
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_c545120028a20ff3_vs_ff_3d;
@@ -843,6 +953,16 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
     module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_8d39c334022326c1_vs_ff_3d;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_8d39c334022326c1_vs_ff_3d);
+    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
 
@@ -916,6 +1036,16 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_8d39c334022326c1_vs_ff_3d;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_8d39c334022326c1_vs_ff_3d);
+    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
+    return module;
+}
+
 static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modulate() {
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_c545120028a20ff3_vs_ff_3d;
@@ -983,6 +1113,16 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
     module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_8d39c334022326c1_vs_ff_3d;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_8d39c334022326c1_vs_ff_3d);
+    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
 
@@ -1056,6 +1196,16 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_8d39c334022326c1_vs_ff_3d;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_8d39c334022326c1_vs_ff_3d);
+    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
+    return module;
+}
+
 static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_positiont_stage0_modulate(), CKFFSpecializedModule_dx11_positiont_stage0_modulate() },
@@ -1064,6 +1214,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_lit_one_light() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_diffuse_color0() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_positiont_stage0_modulate(), CKFFSpecializedModule_dx12_positiont_stage0_modulate() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage1_add_specular(), CKFFSpecializedModule_dx12_variant_3d_stage1_add_specular() },
@@ -1071,6 +1222,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_lit_one_light() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_diffuse_color0() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_positiont_stage0_modulate(), CKFFSpecializedModule_spirv_positiont_stage0_modulate() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage1_add_specular(), CKFFSpecializedModule_spirv_variant_3d_stage1_add_specular() },
@@ -1078,6 +1230,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_lit_one_light() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_diffuse_color0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_positiont_stage0_modulate(), CKFFSpecializedModule_glsl_positiont_stage0_modulate() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage1_add_specular(), CKFFSpecializedModule_glsl_variant_3d_stage1_add_specular() },
@@ -1085,6 +1238,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_lit_one_light() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_diffuse_color0() },
 };
 
 static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;

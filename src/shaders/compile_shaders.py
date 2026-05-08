@@ -131,7 +131,15 @@ def ffp_specialized_shader_defines(spec_dwords: list[int]) -> list[str]:
 
 def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
     key = variant["key"]
-    defines = ["CKFF_FULL_SPECIALIZED=1", f"CKFF_VS_BITS={key['vsBits']}"]
+    vs_bits = key["vsBits"]
+    defines = [
+        "CKFF_FULL_SPECIALIZED=1",
+        f"CKFF_VS_BITS={vs_bits}",
+        f"CKFF_VS_DIFFUSE_SOURCE={(vs_bits >> 25) & 3}",
+        f"CKFF_VS_AMBIENT_SOURCE={(vs_bits >> 27) & 3}",
+        f"CKFF_VS_SPECULAR_SOURCE={(vs_bits >> 29) & 3}",
+        f"CKFF_VS_EMISSIVE_SOURCE={(vs_bits >> 31) & 3}",
+    ]
     for index, value in enumerate(key["vsTexGen"]):
         defines.append(f"CKFF_VS_TEXGEN{index}={value}")
     return defines
