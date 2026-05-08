@@ -45,6 +45,40 @@
           }
         ]
       }
+    },
+    {
+      "name": "3d_stage1_add_specular",
+      "vs": "3d",
+      "key": {
+        "vsBits": 1,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 1,
+        "globalSpecularEnable": true,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          },
+          {
+            "colorOp": 7,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 3,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
     }
   ]
 }
