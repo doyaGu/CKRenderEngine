@@ -1,12 +1,10 @@
 #ifndef CKFFSHADERCACHE_H
 #define CKFFSHADERCACHE_H
 
-#include "CKFFShaderKey.h"
+#include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-
-#include <unordered_map>
 
 class CKRasterizerContext;
 
@@ -18,9 +16,9 @@ public:
     void Init(CKRasterizerContext *ctx);
     void Shutdown();
 
-    // Look up or create a program for the given shader key.
+    // Select the fixed-function program for the given FFP state description.
     // Returns the program handle (0 if unavailable).
-    CKDWORD GetProgram(const CKFFShaderKey &key);
+    CKDWORD GetProgram(const CKFFStateDesc &stateDesc);
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
@@ -41,8 +39,6 @@ private:
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;
-
-    std::unordered_map<CKFFShaderKey, CKDWORD> m_ProgramCache;
 
     void CreateUniforms();
     void CreatePrograms();

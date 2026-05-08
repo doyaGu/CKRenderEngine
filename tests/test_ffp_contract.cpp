@@ -3,16 +3,19 @@
 #include "CKDrawStateCache.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFShaderCache.h"
+#include "CKDebugLogger.h"
 #include "CKRasterizer.h"
 #include "CKRenderPipeline.h"
 #include "RCKRenderContext.h"
 #include "RCKMesh.h"
+#include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
 #include <fstream>
 #include <iterator>
 #include <cmath>
 #include <string>
+#include <cstdio>
 
 namespace {
 
@@ -378,15 +381,27 @@ void Test_CopyToVideo_UploadsBackbufferThroughScratchTexture() {
               "CopyToVideo must create/update a scratch upload texture");
     TestCheck(body.find("DrawPrimitive(VX_TRIANGLEFAN") != std::string::npos,
               "CopyToVideo must draw the uploaded scratch texture into the backbuffer rectangle");
-    TestCheck(body.find("SaveTextureStage(stage, oldStages[stage])") != std::string::npos &&
-              body.find("RestoreTextureStage(stage, oldStages[stage])") != std::string::npos,
-              "CopyToVideo must restore all texture stages after its screen-space blit");
-    TestCheck(body.find("VXRENDERSTATE_CLIPPLANEENABLE, 0") != std::string::npos &&
-              body.find("VXRENDERSTATE_CLIPPLANEENABLE, oldClipPlanes") != std::string::npos,
-              "CopyToVideo must disable and restore clip planes so user clipping cannot affect the blit");
+    TestCheck(body.find("CKFFStateGuard ffpState(ffp)") != std::string::npos,
+              "CopyToVideo must use the FFP state guard around its screen-space blit");
+    TestCheck(body.find("VXRENDERSTATE_CLIPPLANEENABLE, 0") != std::string::npos,
+              "CopyToVideo must disable clip planes so user clipping cannot affect the blit");
     TestCheck(body.find("const CKViewportData oldViewport = m_ViewportData") != std::string::npos &&
               body.find("m_ViewportData = oldViewport") != std::string::npos,
               "CopyToVideo must restore the viewport used by normal rendering");
+}
+
+void Test_2dEntity_DrawUsesFFPStateGuard() {
+    std::string source = ReadRenderEngineSource("src/CK2dEntity.cpp");
+    const size_t drawPos = source.find("CKERROR RCK2dEntity::Draw");
+    TestCheck(drawPos != std::string::npos, "2D entity Draw implementation must be present");
+    const size_t nextPos = source.find("void RCK2dEntity::GetExtents", drawPos);
+    TestCheck(nextPos != std::string::npos, "2D entity Draw source range must be bounded");
+    const std::string body = source.substr(drawPos, nextPos - drawPos);
+    TestCheck(body.find("CKFFStateGuard ffpState(dev->m_FFPipeline)") != std::string::npos,
+              "2D entity Draw must guard its temporary FFP render and texture state");
+    TestCheck(body.find("SkipFullscreenBlack2DEnabled()") != std::string::npos &&
+              body.find("dev->SetViewRect(savedViewRect)") != std::string::npos,
+              "2D entity debug skip must restore the viewport before returning");
 }
 
 void Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth() {
@@ -754,6 +769,18 @@ void Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw() {
               "Mesh rendering must clear additional mono-pass texture stages after draw");
 }
 
+void Test_Mesh_DepthStencilOnlyDrawsUseFFPStateGuard() {
+    std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
+    TestCheck(source.find("CKFFStateGuard ffpState(ffp)") != std::string::npos,
+              "Depth/stencil-only mesh paths must guard temporary FFP state");
+    TestCheck(source.find("savedLighting") == std::string::npos &&
+              source.find("savedAlphaBlend") == std::string::npos &&
+              source.find("savedStencil") == std::string::npos,
+              "Depth/stencil-only mesh paths must not keep duplicate manual FFP restore variables");
+    TestCheck(source.find("SetColorWriteMask(TRUE, TRUE, TRUE, TRUE)") == std::string::npos,
+              "Depth/stencil-only mesh paths must restore color writes through the FFP state guard");
+}
+
 void Test_Mesh_DefaultRenderRestoresSceneSpecularState() {
     std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
     TestCheck(source.find("RestoreSceneSpecularState(rc)") != std::string::npos,
@@ -794,6 +821,260 @@ void Test_TextureStage_ResetClearsLeakedEffectState() {
               "DisableTextureStagesFrom must clear higher stage effect state");
     TestCheck(ffp.GetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX) == 1,
               "DisableTextureStagesFrom must restore each higher stage texcoord index");
+}
+
+void DrawDiagnosticPositionTTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnosticContext &ctx) {
+    float positions[3][4] = {
+        {0.0f, 0.0f, 0.5f, 1.0f},
+        {1.0f, 0.0f, 0.5f, 1.0f},
+        {0.0f, 1.0f, 0.5f, 1.0f},
+    };
+    float uv[3][2] = {
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {0.0f, 1.0f},
+    };
+    CKDWORD diffuse[3] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.Flags = CKRST_DP_CL_VCT;
+    data.VertexCount = 3;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(positions[0]);
+    data.TexCoordPtr = uv;
+    data.TexCoordStride = sizeof(uv[0]);
+    data.ColorPtr = diffuse;
+    data.ColorStride = sizeof(diffuse[0]);
+
+    ffp.DrawPrimitive(&ctx.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST, nullptr, 0, &data);
+}
+
+void Test_FFPDiagnosticHarness_SpecularStateFollowsDrawOrder() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKDWORD alphaUniform = ffp.GetShaderCache().GetUniforms().u_alphaParams;
+
+    ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "FFP diagnostic draw must submit through the runtime pipeline");
+    TestCheck(ctx.Encoder.FloatUniforms[alphaUniform].size() >= 4 &&
+              ctx.Encoder.FloatUniforms[alphaUniform][2] == 0.0f,
+              "A draw with specular disabled must upload a disabled specular flag");
+
+    ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.SubmitCount == 2,
+              "FFP diagnostic harness must record consecutive runtime draws");
+    TestCheck(ctx.Encoder.FloatUniforms[alphaUniform].size() >= 4 &&
+              ctx.Encoder.FloatUniforms[alphaUniform][2] == 1.0f,
+              "A later draw must observe restored specular state instead of leaking the previous draw");
+}
+
+void Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.LastVertexBytes.size() >= 32,
+              "FFP diagnostic harness must capture the submitted transient vertices");
+
+    CKDWORD color1 = 0;
+    memcpy(&color1, &ctx.Encoder.LastVertexBytes[28], sizeof(color1));
+    TestCheck((color1 & 0x00FFFFFF) == 0,
+              "PositionT vertices without a specular stream must default COLOR1 RGB to black");
+    TestCheck((color1 & 0xFF000000) == 0xFF000000,
+              "PositionT vertices without a specular stream must keep COLOR1 alpha opaque");
+}
+
+void Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_ONE);
+    ffp.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_SRCCOLOR);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    const CKDWORD src = (ctx.Encoder.LastState.Lo >> 16) & 0xF;
+    const CKDWORD dst = (ctx.Encoder.LastState.Lo >> 20) & 0xF;
+    TestCheck(src == VXBLEND_ONE,
+              "Runtime FFP draw state must preserve ONE as the fixed-up source blend");
+    TestCheck(dst == VXBLEND_INVSRCCOLOR,
+              "Runtime FFP draw state must submit the ONE/SRCCOLOR compatibility fixup");
+}
+
+void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKDWORD stageUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+
+    ffp.SetTexture(0, 0);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TFACTOR);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX,
+                             CKFFPackTexcoordIndex(3, CKFF_TEXGEN_CAMERASPACEREFLECTION));
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.FloatUniforms[stageUniform].size() >= CKFF_MAX_TEXTURE_STAGES * 16,
+              "FFP diagnostic harness must capture uploaded texture-stage uniforms");
+    TestCheck(ctx.Encoder.FloatUniforms[stageUniform][0] == (float)CKRST_TOP_ADD,
+              "Runtime stage uniform must expose the temporary color op before reset");
+    TestCheck(ctx.Encoder.FloatUniforms[stageUniform][9] ==
+                  (float)CKFFPackTexcoordIndex(3, CKFF_TEXGEN_CAMERASPACEREFLECTION),
+              "Runtime stage uniform must expose the temporary texcoord index before reset");
+
+    ffp.ResetTextureStage(0);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.FloatUniforms[stageUniform][0] == (float)CKRST_TOP_DISABLE,
+              "Runtime stage uniform must disable a reset stage with no bound texture");
+    TestCheck(ctx.Encoder.FloatUniforms[stageUniform][9] == 0.0f,
+              "Runtime stage uniform must restore the reset stage texcoord index");
+}
+
+void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKDWORD texMatrixUniform = ffp.GetShaderCache().GetUniforms().u_texMatrix;
+
+    VxMatrix textureMatrix = VxMatrix::Identity();
+    textureMatrix[0][0] = 2.0f;
+    textureMatrix[3][0] = 0.125f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, textureMatrix);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform].size() >= 16,
+              "FFP diagnostic harness must capture uploaded texture matrix uniforms");
+    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform][0] == 2.0f &&
+              ctx.Encoder.FloatUniforms[texMatrixUniform][12] == 0.125f,
+              "Runtime texture matrix uniform must expose the temporary texture transform");
+
+    ffp.ResetTextureStage(0);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform][0] == 1.0f &&
+              ctx.Encoder.FloatUniforms[texMatrixUniform][12] == 0.0f,
+              "Runtime texture matrix uniform must restore identity after stage reset");
+}
+
+void Test_FFPStateGuard_RestoresRenderAndTextureState() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    ffp.SetColorWriteMask(TRUE, FALSE, TRUE, FALSE);
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTexture(2, 5678);
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    VxMatrix world = VxMatrix::Identity();
+    world[3][0] = 3.0f;
+    ffp.SetTransform(VXMATRIX_WORLD, world);
+    VxMatrix textureMatrix = VxMatrix::Identity();
+    textureMatrix[0][0] = 2.0f;
+    textureMatrix[3][0] = 0.25f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, textureMatrix);
+    VxMatrix textureMatrix2 = VxMatrix::Identity();
+    textureMatrix2[1][1] = 3.0f;
+    textureMatrix2[3][1] = 0.5f;
+    ffp.SetTransform(VXMATRIX_TEXTURE2, textureMatrix2);
+
+    {
+        CKFFStateGuard guard(ffp);
+        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
+        ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+        ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+        ffp.SetTexture(0, 0);
+        ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD);
+        ffp.SetTexture(2, 0);
+        ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+        VxMatrix changedTexture2 = VxMatrix::Identity();
+        changedTexture2[1][1] = 5.0f;
+        ffp.SetTransform(VXMATRIX_TEXTURE2, changedTexture2);
+        VxMatrix changedWorld = VxMatrix::Identity();
+        changedWorld[3][0] = 9.0f;
+        ffp.SetTransform(VXMATRIX_WORLD, changedWorld);
+        VxMatrix changed = VxMatrix::Identity();
+        changed[0][0] = 4.0f;
+        ffp.SetTransform(VXMATRIX_TEXTURE0, changed);
+    }
+
+    CKFFTextureStageSnapshot restored;
+    ffp.SaveTextureStage(0, restored);
+    CKFFTextureStageSnapshot restoredStage2;
+    ffp.SaveTextureStage(2, restoredStage2);
+    TestCheck(ffp.GetRenderState(VXRENDERSTATE_SPECULARENABLE) == TRUE,
+              "FFP state guard must restore specular render state");
+    TestCheck(ffp.GetRenderState(VXRENDERSTATE_LIGHTING) == TRUE,
+              "FFP state guard must restore lighting render state");
+    TestCheck(ffp.GetColorWriteMask() == (CKRST_STATE_WRITE_R | CKRST_STATE_WRITE_B),
+              "FFP state guard must restore color write mask");
+    TestCheck(restored.Texture == 1234,
+              "FFP state guard must restore texture binding");
+    TestCheck(restored.States[CKRST_TSS_OP] == CKRST_TOP_MODULATE &&
+              restored.States[CKRST_TSS_ARG1] == CKRST_TA_TEXTURE,
+              "FFP state guard must restore texture stage state");
+    TestCheck(restored.TextureMatrix[0][0] == 2.0f &&
+              restored.TextureMatrix[3][0] == 0.25f,
+              "FFP state guard must restore texture matrix");
+    TestCheck(restoredStage2.Texture == 5678 &&
+              restoredStage2.States[CKRST_TSS_OP] == CKRST_TOP_ADD &&
+              restoredStage2.States[CKRST_TSS_ARG2] == CKRST_TA_CURRENT,
+              "FFP state guard must restore nonzero texture stages");
+    TestCheck(restoredStage2.TextureMatrix[1][1] == 3.0f &&
+              restoredStage2.TextureMatrix[3][1] == 0.5f,
+              "FFP state guard must restore nonzero texture matrices");
+    TestCheck(ffp.GetWorldMatrix()[3][0] == 3.0f,
+              "FFP state guard must restore world matrix");
+}
+
+void Test_FFPRenderStateGuard_RestoresOnlyScopedState() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+
+    {
+        CKFFRenderStateGuard guard(ffp, VXRENDERSTATE_SPECULARENABLE);
+        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
+        ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    }
+
+    TestCheck(ffp.GetRenderState(VXRENDERSTATE_SPECULARENABLE) == TRUE,
+              "Single render-state guard must restore the scoped state");
+    TestCheck(ffp.GetRenderState(VXRENDERSTATE_LIGHTING) == FALSE,
+              "Single render-state guard must not restore unrelated render states");
+}
+
+void Test_3dEntity_IndirectMatrixUsesRenderStateGuard() {
+    std::string source = ReadRenderEngineSource("src/CK3dEntity.cpp");
+    TestCheck(source.find("CKFFRenderStateGuard inverseWindingGuard") != std::string::npos,
+              "Indirect-matrix entity rendering must guard temporary inverse winding");
+    TestCheck(source.find("savedInverseWinding") == std::string::npos,
+              "Indirect-matrix entity rendering must not use hand-written inverse winding restore state");
+}
+
+void Test_Sprite3DBatches_UseFFPStateGuard() {
+    std::string source = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    const size_t batchPos = source.find("void RCKRenderContext::CallSprite3DBatches");
+    TestCheck(batchPos != std::string::npos, "Sprite3D batch implementation must be present");
+    const size_t nextPos = source.find("void RCKRenderContext::CheckObjectExtents", batchPos);
+    TestCheck(nextPos != std::string::npos, "Sprite3D batch source range must be bounded");
+    const std::string body = source.substr(batchPos, nextPos - batchPos);
+    TestCheck(body.find("CKFFStateGuard ffpState(m_FFPipeline)") != std::string::npos,
+              "Sprite3D batch flush must guard temporary FFP state and transforms");
+    TestCheck(body.find("SetTransform(VXMATRIX_WORLD, identity)") != std::string::npos,
+              "Sprite3D batch flush must still render batches in identity world space");
 }
 
 void Test_BumpEnv_StageStatesPackUniform() {
@@ -882,6 +1163,144 @@ void Test_TextureOpEvaluator_MatchesDxvkFormulas() {
     TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_DOTPRODUCT3, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.0f, 0.0f, 0.0f, 0.0f),
                    "DOTPRODUCT3 must replicate the saturated signed dot product");
+}
+
+void Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp() {
+    for (CKDWORD op = CKRST_TOP_DISABLE; op <= CKRST_TOP_LERP; ++op) {
+        TestCheck(CKFFClassifyTextureOpCoverage(op) != CKFF_COVERAGE_UNTESTED,
+                  "Every known CKRST_TOP_* op must have an explicit coverage classification");
+    }
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAP) == CKFF_COVERAGE_APPROXIMATE &&
+              CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_APPROXIMATE,
+              "Bump env ops must be documented as approximate shader coverage");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_FALLBACK,
+              "PREMODULATE must be an explicit fallback instead of an accidental default path");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_LERP + 1) == CKFF_COVERAGE_UNTESTED,
+              "Unknown texture ops must stay visibly untested");
+}
+
+void Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics() {
+    for (int i = 0; i < CKFF_SHADER_SEMANTIC_COUNT; ++i) {
+        TestCheck(CKFFClassifyShaderSemanticCoverage((CKFFShaderSemantic)i) != CKFF_COVERAGE_UNTESTED,
+                  "Every tracked FFP shader semantic must have an explicit coverage classification");
+    }
+
+    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_ARG_CURRENT) == CKFF_COVERAGE_EXACT &&
+              CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_ARG_TEMP) == CKFF_COVERAGE_EXACT,
+              "CURRENT and TEMP argument routing must be documented as exact shader coverage");
+    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT) == CKFF_COVERAGE_EXACT &&
+              CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE) == CKFF_COVERAGE_EXACT,
+              "Argument modifiers must be documented as exact shader coverage");
+    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING) == CKFF_COVERAGE_EXACT,
+              "Projected sampling must be documented in the shader coverage table");
+    TestCheck(CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAP) == CKFF_COVERAGE_APPROXIMATE &&
+              CKFFClassifyShaderSemanticCoverage(CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_APPROXIMATE,
+              "Bump env shader semantics must remain visibly approximate");
+    TestCheck(CKFFClassifyShaderSemanticCoverage((CKFFShaderSemantic)CKFF_SHADER_SEMANTIC_COUNT) == CKFF_COVERAGE_UNTESTED,
+              "Unknown shader semantics must stay visibly untested");
+}
+
+void Test_FFPStateDesc_DoesNotImplyVariantCache() {
+    std::string descHeader = ReadRenderEngineSource("src/CKFFStateDesc.h");
+    std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
+    std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+
+    TestCheck(descHeader.find("variant cache") != std::string::npos,
+              "State description header must document that it is not a shader variant cache");
+    TestCheck(descHeader.find("hash<CKFFStateDesc>") == std::string::npos,
+              "State descriptions must not carry unordered_map hash support unless a real variant cache exists");
+    TestCheck(cacheHeader.find("unordered_map") == std::string::npos &&
+              cacheHeader.find("m_ProgramCache") == std::string::npos &&
+              cacheSource.find("m_ProgramCache") == std::string::npos,
+              "FFP shader cache must not keep a misleading state-desc keyed program cache");
+}
+
+void Test_FFPStateDesc_StoresFullTextureOpRange() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_LERP);
+    desc.SetStageAlphaOp(0, CKRST_TOP_LERP);
+    desc.SetStageResultIsTemp(0, true);
+    desc.SetStageColorArg1(7, CKFF_TA_TEXTURE);
+    desc.SetStageColorArg2(7, CKFF_TA_CURRENT);
+    desc.SetStageAlphaOp(7, CKRST_TOP_MULTIPLYADD);
+    desc.SetStageResultIsTemp(7, true);
+    desc.SetSpecularAdd(true);
+    desc.SetAlphaTestEnabled(true);
+    desc.SetFogEnabled(true);
+    desc.SetAlphaFunc(VXCMP_GREATEREQUAL);
+
+    TestCheck(desc.GetStageColorOp(0) == CKRST_TOP_LERP,
+              "Fragment state desc must preserve 5-bit color texture ops");
+    TestCheck(desc.GetStageAlphaOp(0) == CKRST_TOP_LERP,
+              "Fragment state desc must preserve 5-bit alpha texture ops");
+    TestCheck(desc.GetStageResultIsTemp(0),
+              "Fragment state desc must preserve per-stage TEMP routing");
+    TestCheck(desc.GetStageColorArg1(7) == CKFF_TA_TEXTURE &&
+              desc.GetStageColorArg2(7) == CKFF_TA_CURRENT &&
+              desc.GetStageAlphaOp(7) == CKRST_TOP_MULTIPLYADD &&
+              desc.GetStageResultIsTemp(7),
+              "Fragment state desc must preserve stage 7 texture op and routing state");
+    TestCheck(desc.GetStageAlphaOp(6) == 0 && !desc.GetStageResultIsTemp(6),
+              "Fragment state desc stage storage must not bleed into inactive later stages");
+    TestCheck(desc.GetSpecularAdd() && desc.GetAlphaTestEnabled() && desc.GetFogEnabled(),
+              "Fragment state desc must preserve global FFP flags alongside stage storage");
+    TestCheck(desc.GetAlphaFunc() == VXCMP_GREATEREQUAL,
+              "Fragment state desc must preserve alpha func alongside stage storage");
+}
+
+void Test_FFPStateDesc_CoversEightTextureCoordinates() {
+    CKFFVSStateDesc desc;
+    desc.SetHasPositionT(true);
+    desc.SetHasTexCoord(7, true);
+    desc.SetTexGen(7, CKFF_TG_REFLECTION, true);
+
+    TestCheck(desc.GetHasPositionT(),
+              "Vertex state desc PositionT flag must not alias high texture coordinate bits");
+    TestCheck(desc.GetHasTexCoord7(),
+              "Vertex state desc must expose stage 7 texture coordinates through compatibility accessors");
+    TestCheck(desc.GetHasTexCoord(7),
+              "Vertex state desc must preserve generic stage 7 texture coordinate state");
+    TestCheck(desc.GetTexGenMode(7) == CKFF_TG_REFLECTION && desc.GetTexGenHasTransform(7),
+              "Vertex state desc must preserve stage 7 texgen and texture transform state");
+    TestCheck(!desc.GetHasTexCoord(8) && desc.GetTexGenMode(8) == 0 && !desc.GetTexGenHasTransform(8),
+              "Vertex state desc must reject out-of-range texture coordinate stages");
+}
+
+void Test_FFPStateDesc_UsesD3DTextureArgBaseValues() {
+    TestCheck(CKFF_TA_DIFFUSE == CKRST_TA_DIFFUSE &&
+              CKFF_TA_CURRENT == CKRST_TA_CURRENT &&
+              CKFF_TA_TEXTURE == CKRST_TA_TEXTURE &&
+              CKFF_TA_TFACTOR == CKRST_TA_TFACTOR &&
+              CKFF_TA_SPECULAR == CKRST_TA_SPECULAR &&
+              CKFF_TA_TEMP == CKRST_TA_TEMP,
+              "Fragment state desc texture args must preserve D3D/Virtools base argument values");
+}
+
+void Test_FFPStateDesc_BuildCapturesTempResultRouting() {
+    std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(ffp.find("SetStageResultIsTemp(stage") != std::string::npos &&
+              ffp.find("GetStageResultArg(m_StageStates[stage])") != std::string::npos &&
+              ffp.find("CKRST_TA_TEMP") != std::string::npos,
+              "BuildCurrentStateDesc must capture RESULTARG0 TEMP routing in the fragment state description");
+}
+
+void Test_TextureOpFallback_EvaluatesAsExplicitModulate() {
+    VxColor arg0(0.9f, 0.8f, 0.7f, 0.6f);
+    VxColor arg1(0.2f, 0.4f, 0.6f, 0.8f);
+    VxColor arg2(0.5f, 0.25f, 0.75f, 0.5f);
+    VxColor current(0.1f, 0.2f, 0.3f, 0.4f);
+    VxColor diffuse(0.3f, 0.3f, 0.3f, 0.3f);
+    VxColor texture(0.4f, 0.4f, 0.4f, 0.4f);
+
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_FALLBACK,
+              "PREMODULATE must be deliberately classified before using fallback evaluation");
+    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_PREMODULATE, arg0, arg1, arg2, current, diffuse, texture),
+                   arg1 * arg2,
+                   "PREMODULATE fallback must be the explicit arg1 * arg2 compatibility path");
+
+    std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
+    TestCheck(shader.find("return a * b;") != std::string::npos,
+              "Fragment shader fallback must remain an explicit arg1 * arg2 compatibility path");
 }
 
 void Test_PatchMesh_BasicMeshConversionIsImplemented() {
@@ -1113,6 +1532,109 @@ void Test_RasterizerDriver_DefaultShaderTargetIsUnknown() {
               "The FFP shader cache must document that internal shader blobs do not enable the public legacy shader API");
 }
 
+void Test_FFPDebugLogging_IsCentralized() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
+    std::string source = ReadRenderEngineSource("src/CKFFDebug.cpp");
+    std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
+
+    TestCheck(pipeline.find("DebugDrawLogLimit") == std::string::npos &&
+              pipeline.find("DebugReal3DLogLimit") == std::string::npos &&
+              pipeline.find("Debug3DContractLogLimit") == std::string::npos &&
+              pipeline.find("DebugPositionTLogLimit") == std::string::npos &&
+              pipeline.find("ShouldSkipDebug") == std::string::npos,
+              "FFP pipeline must not keep debug env limit or skip helpers inline");
+    TestCheck(pipeline.find("LogVertexClipSamples") == std::string::npos &&
+              pipeline.find("LogPositionTSamples") == std::string::npos &&
+              pipeline.find("LogPrimitiveIndexContract") == std::string::npos &&
+              pipeline.find("LogMatrixRows") == std::string::npos,
+              "FFP pipeline must delegate verbose debug sample logging to CKFFDebug");
+    TestCheck(pipeline.find("void CKFixedFunctionPipeline::BeginDebugFrame()") != std::string::npos &&
+              pipeline.find("m_DebugState.BeginFrame()") != std::string::npos,
+              "BeginDebugFrame must remain as the public render-frame hook and delegate to debug state");
+    TestCheck(header.find("struct CKFFDebugConfig") != std::string::npos &&
+              header.find("class CKFFDebugState") != std::string::npos &&
+              header.find("struct CKFFDrawDebugInfo") != std::string::npos,
+              "CKFFDebug must expose the internal config/state/draw-info types for FFP logging");
+
+    const char *envNames[] = {
+        "CK2_3D_DEBUG_DRAW_LOG_LIMIT",
+        "CK2_3D_DEBUG_REAL3D_LOG_LIMIT",
+        "CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT",
+        "CK2_3D_DEBUG_POSITIONT_LOG_LIMIT",
+        "CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME",
+        "CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS",
+        "CK2_3D_DEBUG_SKIP_3D_DRAWS",
+        "CK2_3D_DEBUG_FORCE_UNLIT",
+        "CK2_3D_DEBUG_DISABLE_FOG",
+        "CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS",
+        "CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS",
+        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_EXACT",
+        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_START",
+        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_END",
+        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_EXACT",
+        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START",
+        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END"
+    };
+    for (const char *envName : envNames) {
+        TestCheck(source.find(envName) != std::string::npos,
+                  "CKFFDebug.cpp must keep the existing FFP debug env interface names");
+    }
+
+    TestCheck(cmake.find("CKFFDebug.h") != std::string::npos &&
+              cmake.find("CKFFDebug.cpp") != std::string::npos,
+              "CKFFDebug must be part of the RenderEngine internal build inputs");
+}
+
+void Test_DebugLogger_HasGlobalOutputDisableOption() {
+    std::string header = ReadRenderEngineSource("src/CKDebugLogger.h");
+    std::string source = ReadRenderEngineSource("src/CKDebugLogger.cpp");
+    std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
+    std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
+
+    TestCheck(header.find("void EnableOutput(bool enable)") != std::string::npos &&
+              header.find("bool m_OutputEnabled") != std::string::npos,
+              "Debug logger must expose an internal master output switch");
+    TestCheck(rootCmake.find("option(CKRE_DEBUG_OUTPUT") != std::string::npos &&
+              srcCmake.find("CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>") != std::string::npos,
+              "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
+    TestCheck(source.find("CK2_3D_DEBUG_OUTPUT") != std::string::npos &&
+              source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
+              source.find("_stricmp(value, \"false\")") != std::string::npos &&
+              source.find("_stricmp(value, \"off\")") != std::string::npos &&
+              source.find("_stricmp(value, \"no\")") != std::string::npos,
+              "Debug logger must use the CMake default and support CK2_3D_DEBUG_OUTPUT=0/false/off/no as a runtime override");
+    TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
+              source.find("fclose(m_File)") != std::string::npos,
+              "Debug logger must drop output and close the log file when globally disabled");
+
+    const char *logPath = "ffp_contract_debug_logger_silenced.log";
+    std::remove(logPath);
+    CKDebugLogger::Instance().SetLogFilePath(logPath);
+    CKDebugLogger::Instance().EnableDebuggerOutput(false);
+    CKDebugLogger::Instance().EnableFileOutput(true);
+    CKDebugLogger::Instance().EnableOutput(false);
+    CKDebugLogger::Instance().Log("this message must not create a file");
+    CKDebugLogger::Instance().Flush();
+    FILE *file = nullptr;
+    fopen_s(&file, logPath, "r");
+    TestCheck(file == nullptr,
+              "Disabled debug logger output must not create or append the log file");
+    if (file)
+        fclose(file);
+
+    CKDebugLogger::Instance().EnableOutput(true);
+    CKDebugLogger::Instance().Log("this message should create a file");
+    CKDebugLogger::Instance().Flush();
+    CKDebugLogger::Instance().EnableFileOutput(false);
+    fopen_s(&file, logPath, "r");
+    TestCheck(file != nullptr,
+              "Re-enabled debug logger output must resume file logging");
+    if (file)
+        fclose(file);
+    std::remove(logPath);
+}
+
 } // namespace
 
 int main() {
@@ -1141,6 +1663,7 @@ int main() {
     tests.Run("Texture CopyContext converts readback format", &Test_TextureCopyContext_ConvertsReadbackToTextureFormat);
     tests.Run("Sprite CopyContext clamps destination region", &Test_SpriteCopyContext_ClampsDestinationRegion);
     tests.Run("CopyToVideo uploads backbuffer through scratch texture", &Test_CopyToVideo_UploadsBackbufferThroughScratchTexture);
+    tests.Run("2D entity Draw uses FFP state guard", &Test_2dEntity_DrawUsesFFPStateGuard);
     tests.Run("CopyToVideo texture stage snapshots", &Test_CopyToVideo_TextureStageSnapshotsPreserveMatrices);
     tests.Run("Render target validates cube faces and preserves depth", &Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth);
     tests.Run("Render pipeline render-first view order", &Test_RenderPipeline_RenderFirstViewPrecedesOpaqueScene);
@@ -1159,14 +1682,32 @@ int main() {
     tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
     tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
     tests.Run("Material channels clamp and clear FFP stages", &Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw);
+    tests.Run("Mesh depth/stencil-only draws use FFP state guard", &Test_Mesh_DepthStencilOnlyDrawsUseFFPStateGuard);
     tests.Run("Mesh default render restores scene specular", &Test_Mesh_DefaultRenderRestoresSceneSpecularState);
     tests.Run("Material channels no base texture keeps stage chain", &Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive);
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
+    tests.Run("FFP diagnostic specular state follows draw order", &Test_FFPDiagnosticHarness_SpecularStateFollowsDrawOrder);
+    tests.Run("FFP diagnostic PositionT default COLOR1", &Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack);
+    tests.Run("FFP diagnostic blend fixup reaches draw state", &Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState);
+    tests.Run("FFP diagnostic texture stage reset reaches uniforms", &Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms);
+    tests.Run("FFP diagnostic texture matrix reset reaches uniforms", &Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms);
+    tests.Run("FFP state guard restores render and texture state", &Test_FFPStateGuard_RestoresRenderAndTextureState);
+    tests.Run("FFP render state guard restores scoped state", &Test_FFPRenderStateGuard_RestoresOnlyScopedState);
+    tests.Run("3D entity indirect matrix uses render state guard", &Test_3dEntity_IndirectMatrixUsesRenderStateGuard);
+    tests.Run("Sprite3D batches use FFP state guard", &Test_Sprite3DBatches_UseFFPStateGuard);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
     tests.Run("Material effects use eight-stage FFP contract", &Test_MaterialEffects_UseEightStageFFPContract);
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
     tests.Run("Shader evaluator dxvk stage ops", &Test_ShaderEvaluator_CoversDxvkStageOps);
     tests.Run("Texture op evaluator dxvk formulas", &Test_TextureOpEvaluator_MatchesDxvkFormulas);
+    tests.Run("Texture op coverage classifies known FFP ops", &Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp);
+    tests.Run("Shader semantic coverage classifies known FFP semantics", &Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics);
+    tests.Run("FFP state desc does not imply variant cache", &Test_FFPStateDesc_DoesNotImplyVariantCache);
+    tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
+    tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
+    tests.Run("FFP state desc uses D3D texture arg values", &Test_FFPStateDesc_UsesD3DTextureArgBaseValues);
+    tests.Run("FFP state desc captures TEMP result routing", &Test_FFPStateDesc_BuildCapturesTempResultRouting);
+    tests.Run("Texture op fallback evaluates as explicit modulate", &Test_TextureOpFallback_EvaluatesAsExplicitModulate);
     tests.Run("PatchMesh basic mesh conversion implemented", &Test_PatchMesh_BasicMeshConversionIsImplemented);
     tests.Run("User draw primitive VBUFFER flag observable", &Test_UserDrawPrimitive_VBufferFlagIsObservable);
     tests.Run("CKVertexBuffer dirty range and hardware path", &Test_CKVertexBuffer_TracksDirtyRangeAndUsesHardwareWhenSafe);
@@ -1178,5 +1719,7 @@ int main() {
     tests.Run("Legacy SetVertexShader reset comments removed", &Test_LegacySetVertexShaderResetCommentsAreGone);
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
+    tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
+    tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();
 }

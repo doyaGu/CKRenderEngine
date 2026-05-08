@@ -79,9 +79,6 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
 
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
-        for (auto &pair : m_ProgramCache) {
-            m_Context->DeleteObject(pair.second, CKRST_OBJ_PROGRAM);
-        }
         if (m_Stage3DProgram) {
             m_Context->DeleteObject(m_Stage3DProgram, CKRST_OBJ_PROGRAM);
             m_Stage3DProgram = 0;
@@ -92,7 +89,6 @@ void CKFFShaderCache::Shutdown() {
         }
         m_FallbackProgram = 0;
     }
-    m_ProgramCache.clear();
     m_Context = nullptr;
 }
 
@@ -292,6 +288,6 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     return hProgram;
 }
 
-CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    return key.VS.GetHasPositionT() ? m_PositionTProgram : m_Stage3DProgram;
+CKDWORD CKFFShaderCache::GetProgram(const CKFFStateDesc &stateDesc) {
+    return stateDesc.VS.GetHasPositionT() ? m_PositionTProgram : m_Stage3DProgram;
 }

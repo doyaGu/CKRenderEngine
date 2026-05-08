@@ -6,7 +6,8 @@
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-#include "CKFFShaderKey.h"
+#include "CKFFStateDesc.h"
+#include "CKFFDebug.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -75,6 +76,37 @@ enum CKFFTexcoordGenerationMode {
     CKFF_TEXGEN_SPHEREMAP = 4
 };
 
+enum CKFFCoverage {
+    CKFF_COVERAGE_EXACT = 0,
+    CKFF_COVERAGE_APPROXIMATE = 1,
+    CKFF_COVERAGE_FALLBACK = 2,
+    CKFF_COVERAGE_UNTESTED = 3
+};
+
+enum CKFFShaderSemantic {
+    CKFF_SHADER_SEMANTIC_ARG_DIFFUSE = 0,
+    CKFF_SHADER_SEMANTIC_ARG_CURRENT,
+    CKFF_SHADER_SEMANTIC_ARG_TEXTURE,
+    CKFF_SHADER_SEMANTIC_ARG_TFACTOR,
+    CKFF_SHADER_SEMANTIC_ARG_SPECULAR,
+    CKFF_SHADER_SEMANTIC_ARG_TEMP,
+    CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT,
+    CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE,
+    CKFF_SHADER_SEMANTIC_RESULT_CURRENT,
+    CKFF_SHADER_SEMANTIC_RESULT_TEMP,
+    CKFF_SHADER_SEMANTIC_BUMPENVMAP,
+    CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE,
+    CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING,
+    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACENORMAL,
+    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEPOSITION,
+    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION,
+    CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP,
+    CKFF_SHADER_SEMANTIC_COUNT
+};
+
+CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op);
+CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic);
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -87,6 +119,8 @@ public:
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
+    CKDWORD GetColorWriteMask() const;
+    void SetColorWriteMask(CKDWORD mask);
     void ResetTextureStage(int stage);
     void DisableTextureStagesFrom(int firstStage);
     void SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const;
@@ -142,6 +176,7 @@ private:
     CKTransientGeometry m_TransientGeometry;
     CKRenderPipeline m_RenderPipeline;
     CKFrustumCuller m_FrustumCuller;
+    CKFFDebugState m_DebugState;
 
     // Current transform state
     VxMatrix m_World;
@@ -172,10 +207,48 @@ private:
     CKDWORD m_DirtyFlags;
 
     // Internal methods
-    CKFFShaderKey BuildCurrentKey(CKDWORD dpFlags, CKDWORD formatFlags = 0);
+    CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void BindTextures(CKRasterizerEncoder *encoder);
     float ComputeDepthKey() const;
+};
+
+class CKFFStateGuard {
+public:
+    explicit CKFFStateGuard(CKFixedFunctionPipeline &pipeline);
+    ~CKFFStateGuard();
+
+    CKFFStateGuard(const CKFFStateGuard &) = delete;
+    CKFFStateGuard &operator=(const CKFFStateGuard &) = delete;
+
+    void Restore();
+    void Dismiss();
+
+private:
+    CKFixedFunctionPipeline *m_Pipeline;
+    CKDWORD m_RenderStates[CKFF_RS_COUNT];
+    CKDWORD m_ColorWriteMask;
+    VxMatrix m_World;
+    VxMatrix m_View;
+    VxMatrix m_Projection;
+    CKFFTextureStageSnapshot m_TextureStages[CKFF_MAX_TEXTURE_STAGES];
+};
+
+class CKFFRenderStateGuard {
+public:
+    CKFFRenderStateGuard(CKFixedFunctionPipeline &pipeline, VXRENDERSTATETYPE state, CKBOOL active = TRUE);
+    ~CKFFRenderStateGuard();
+
+    CKFFRenderStateGuard(const CKFFRenderStateGuard &) = delete;
+    CKFFRenderStateGuard &operator=(const CKFFRenderStateGuard &) = delete;
+
+    void Restore();
+    void Dismiss();
+
+private:
+    CKFixedFunctionPipeline *m_Pipeline;
+    VXRENDERSTATETYPE m_State;
+    CKDWORD m_Value;
 };
 
 #endif // CKFIXEDFUNCTIONPIPELINE_H

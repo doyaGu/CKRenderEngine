@@ -1,27 +1,8 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKRasterizer.h"
-#include "CKDebugLogger.h"
 
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
-#include <climits>
-#include <cstdio>
-
-static int g_DrawLogCount = 0;
-static int g_Real3DDrawLogCount = 0;
-static int g_Real3DViewLogCount = 0;
-static int g_PositionTDrawLogCount = 0;
-static int g_Opaque3DDrawSerial = 0;
-static int g_Transparent3DDrawSerial = 0;
-static int g_3DContractLogCount = 0;
-
-static void LogMatrixRows(const char *label, const VxMatrix &m) {
-    CK_LOG_FMT("FFPipeline", "  %s row0: %.6f %.6f %.6f %.6f", label, m[0][0], m[0][1], m[0][2], m[0][3]);
-    CK_LOG_FMT("FFPipeline", "  %s row1: %.6f %.6f %.6f %.6f", label, m[1][0], m[1][1], m[1][2], m[1][3]);
-    CK_LOG_FMT("FFPipeline", "  %s row2: %.6f %.6f %.6f %.6f", label, m[2][0], m[2][1], m[2][2], m[2][3]);
-    CK_LOG_FMT("FFPipeline", "  %s row3: %.6f %.6f %.6f %.6f", label, m[3][0], m[3][1], m[3][2], m[3][3]);
-}
 
 static void MulMatrix(VxMatrix &dst, const VxMatrix &a, const VxMatrix &b) {
     VxMatrix tmp;
@@ -91,78 +72,6 @@ static VxColor ColorMix(const VxColor &a, const VxColor &b, const VxColor &facto
         a.a * (1.0f - factor.a) + b.a * factor.a);
 }
 
-static bool EnvEnabledRaw(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
-}
-
-static int EnvIntRaw(const char *name, int defaultValue) {
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0')
-        return defaultValue;
-
-    char *end = nullptr;
-    long parsed = std::strtol(value, &end, 10);
-    if (end == value)
-        return defaultValue;
-    if (parsed < INT_MIN)
-        return INT_MIN;
-    if (parsed > INT_MAX)
-        return INT_MAX;
-    return (int)parsed;
-}
-
-struct DebugDrawRange {
-    int Exact;
-    int Start;
-    int End;
-};
-
-static int DebugDrawLogLimit() {
-    static const int value = EnvIntRaw("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0);
-    return value;
-}
-
-static int DebugReal3DLogLimit() {
-    static const int value = EnvIntRaw("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0);
-    return value;
-}
-
-static int Debug3DContractLogLimit() {
-    static const int value = EnvIntRaw("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0);
-    return value;
-}
-
-static int DebugPositionTLogLimit() {
-    static const int value = EnvIntRaw("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0);
-    return value;
-}
-
-static bool DebugDrawSerialPerFrame() {
-    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME");
-    return enabled;
-}
-
-static bool DebugSkipPositionTDraws() {
-    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS");
-    return enabled;
-}
-
-static bool DebugSkip3DDraws() {
-    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_3D_DRAWS");
-    return enabled;
-}
-
-static bool DebugForceUnlit() {
-    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_FORCE_UNLIT");
-    return enabled;
-}
-
-static bool DebugDisableFog() {
-    static const bool enabled = EnvEnabledRaw("CK2_3D_DEBUG_DISABLE_FOG");
-    return enabled;
-}
-
 static float ReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback) {
     CKDWORD bits = cache.GetRenderState(state);
     if (bits == 0)
@@ -187,69 +96,6 @@ static CK_ADDRESS_MODE TranslateAddressMode(CKDWORD mode) {
     case VXTEXTURE_ADDRESSWRAP:
     default:
         return CKRST_ADDRESS_WRAP;
-    }
-}
-
-static const DebugDrawRange &Opaque3DDebugDrawRange() {
-    static const DebugDrawRange value = {
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_EXACT", -1),
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_START", 0),
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_END", INT_MAX)
-    };
-    return value;
-}
-
-static const DebugDrawRange &Transparent3DDebugDrawRange() {
-    static const DebugDrawRange value = {
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_EXACT", -1),
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START", 0),
-        EnvIntRaw("CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END", INT_MAX)
-    };
-    return value;
-}
-
-static bool ShouldSkipDebugView(CKRenderView view) {
-    static const bool skipOpaque3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS");
-    static const bool skipTransparent3D = EnvEnabledRaw("CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS");
-    return ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D) && skipOpaque3D) ||
-           (view == CKRP_VIEW_TRANSPARENT && skipTransparent3D);
-}
-
-static int NextDebugDrawSerial(CKRenderView view) {
-    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D)
-        return g_Opaque3DDrawSerial++;
-    if (view == CKRP_VIEW_TRANSPARENT)
-        return g_Transparent3DDrawSerial++;
-    return -1;
-}
-
-static bool ShouldSkipDebugDrawSerial(CKRenderView view, int drawSerial) {
-    if (drawSerial < 0)
-        return false;
-
-    const DebugDrawRange *range = nullptr;
-    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D) {
-        range = &Opaque3DDebugDrawRange();
-    } else if (view == CKRP_VIEW_TRANSPARENT) {
-        range = &Transparent3DDebugDrawRange();
-    } else {
-        return false;
-    }
-
-    if (range->Exact >= 0)
-        return drawSerial != range->Exact;
-    return drawSerial < range->Start || drawSerial > range->End;
-}
-
-static const char *PrimitiveName(VXPRIMITIVETYPE type) {
-    switch (type) {
-    case VX_POINTLIST: return "POINTLIST";
-    case VX_LINELIST: return "LINELIST";
-    case VX_LINESTRIP: return "LINESTRIP";
-    case VX_TRIANGLELIST: return "TRIANGLELIST";
-    case VX_TRIANGLESTRIP: return "TRIANGLESTRIP";
-    case VX_TRIANGLEFAN: return "TRIANGLEFAN";
-    default: return "UNKNOWN";
     }
 }
 
@@ -365,6 +211,68 @@ VxColor CKFFEvaluateTextureOp(CKDWORD op,
         return SaturateColor(ColorMix(arg2, arg1, arg0));
     default:
         return arg1 * arg2;
+    }
+}
+
+CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op) {
+    switch (op) {
+    case CKRST_TOP_DISABLE:
+    case CKRST_TOP_SELECTARG1:
+    case CKRST_TOP_SELECTARG2:
+    case CKRST_TOP_MODULATE:
+    case CKRST_TOP_MODULATE2X:
+    case CKRST_TOP_MODULATE4X:
+    case CKRST_TOP_ADD:
+    case CKRST_TOP_ADDSIGNED:
+    case CKRST_TOP_ADDSIGNED2X:
+    case CKRST_TOP_SUBTRACT:
+    case CKRST_TOP_ADDSMOOTH:
+    case CKRST_TOP_BLENDDIFFUSEALPHA:
+    case CKRST_TOP_BLENDTEXTUREALPHA:
+    case CKRST_TOP_BLENDFACTORALPHA:
+    case CKRST_TOP_BLENDTEXTUREALPHAPM:
+    case CKRST_TOP_BLENDCURRENTALPHA:
+    case CKRST_TOP_MODULATEALPHA_ADDCOLOR:
+    case CKRST_TOP_MODULATECOLOR_ADDALPHA:
+    case CKRST_TOP_MODULATEINVALPHA_ADDCOLOR:
+    case CKRST_TOP_MODULATEINVCOLOR_ADDALPHA:
+    case CKRST_TOP_DOTPRODUCT3:
+    case CKRST_TOP_MULTIPLYADD:
+    case CKRST_TOP_LERP:
+        return CKFF_COVERAGE_EXACT;
+    case CKRST_TOP_BUMPENVMAP:
+    case CKRST_TOP_BUMPENVMAPLUMINANCE:
+        return CKFF_COVERAGE_APPROXIMATE;
+    case CKRST_TOP_PREMODULATE:
+        return CKFF_COVERAGE_FALLBACK;
+    default:
+        return CKFF_COVERAGE_UNTESTED;
+    }
+}
+
+CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic) {
+    switch (semantic) {
+    case CKFF_SHADER_SEMANTIC_ARG_DIFFUSE:
+    case CKFF_SHADER_SEMANTIC_ARG_CURRENT:
+    case CKFF_SHADER_SEMANTIC_ARG_TEXTURE:
+    case CKFF_SHADER_SEMANTIC_ARG_TFACTOR:
+    case CKFF_SHADER_SEMANTIC_ARG_SPECULAR:
+    case CKFF_SHADER_SEMANTIC_ARG_TEMP:
+    case CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT:
+    case CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE:
+    case CKFF_SHADER_SEMANTIC_RESULT_CURRENT:
+    case CKFF_SHADER_SEMANTIC_RESULT_TEMP:
+    case CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING:
+    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACENORMAL:
+    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEPOSITION:
+    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION:
+    case CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP:
+        return CKFF_COVERAGE_EXACT;
+    case CKFF_SHADER_SEMANTIC_BUMPENVMAP:
+    case CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE:
+        return CKFF_COVERAGE_APPROXIMATE;
+    default:
+        return CKFF_COVERAGE_UNTESTED;
     }
 }
 
@@ -519,167 +427,6 @@ static float EncodeShaderLightType(VXLIGHT_TYPE type) {
     }
 }
 
-static void LogVertexClipSamples(const VxMatrix &world, const VxMatrix &view, const VxMatrix &proj,
-                                 const VxDrawPrimitiveData *data) {
-    if (!data || !data->PositionPtr) return;
-
-    VxMatrix viewProj, mvp;
-    MulMatrix(viewProj, view, proj);
-    MulMatrix(mvp, world, viewProj);
-    LogMatrixRows("CPU MVP", mvp);
-
-    int samples = data->VertexCount < 3 ? data->VertexCount : 3;
-    float minNdc[3] = { 1e30f, 1e30f, 1e30f };
-    float maxNdc[3] = { -1e30f, -1e30f, -1e30f };
-    int finiteCount = 0;
-    for (int i = 0; i < data->VertexCount; ++i) {
-        const float *p = (const float *)((const CKBYTE *)data->PositionPtr + i * data->PositionStride);
-        float x = p[0], y = p[1], z = p[2];
-        float cx = x * mvp[0][0] + y * mvp[1][0] + z * mvp[2][0] + mvp[3][0];
-        float cy = x * mvp[0][1] + y * mvp[1][1] + z * mvp[2][1] + mvp[3][1];
-        float cz = x * mvp[0][2] + y * mvp[1][2] + z * mvp[2][2] + mvp[3][2];
-        float cw = x * mvp[0][3] + y * mvp[1][3] + z * mvp[2][3] + mvp[3][3];
-        if (fabsf(cw) <= 0.000001f)
-            continue;
-        float nx = cx / cw;
-        float ny = cy / cw;
-        float nz = cz / cw;
-        if (!isfinite(nx) || !isfinite(ny) || !isfinite(nz))
-            continue;
-        if (nx < minNdc[0]) minNdc[0] = nx;
-        if (ny < minNdc[1]) minNdc[1] = ny;
-        if (nz < minNdc[2]) minNdc[2] = nz;
-        if (nx > maxNdc[0]) maxNdc[0] = nx;
-        if (ny > maxNdc[1]) maxNdc[1] = ny;
-        if (nz > maxNdc[2]) maxNdc[2] = nz;
-        ++finiteCount;
-    }
-    CK_LOG_FMT("FFPipeline",
-               "  ndc bounds vertices=%d finite=%d min=(%.3f %.3f %.3f) max=(%.3f %.3f %.3f)",
-               data->VertexCount, finiteCount, minNdc[0], minNdc[1], minNdc[2],
-               maxNdc[0], maxNdc[1], maxNdc[2]);
-
-    if (data->TexCoordPtr) {
-        float minUv[2] = { 1e30f, 1e30f };
-        float maxUv[2] = { -1e30f, -1e30f };
-        for (int i = 0; i < data->VertexCount; ++i) {
-            const float *uv = (const float *)((const CKBYTE *)data->TexCoordPtr + i * data->TexCoordStride);
-            if (!isfinite(uv[0]) || !isfinite(uv[1]))
-                continue;
-            if (uv[0] < minUv[0]) minUv[0] = uv[0];
-            if (uv[1] < minUv[1]) minUv[1] = uv[1];
-            if (uv[0] > maxUv[0]) maxUv[0] = uv[0];
-            if (uv[1] > maxUv[1]) maxUv[1] = uv[1];
-        }
-        CK_LOG_FMT("FFPipeline",
-                   "  uv0 stride=%d min=(%.3f %.3f) max=(%.3f %.3f)",
-                   data->TexCoordStride, minUv[0], minUv[1], maxUv[0], maxUv[1]);
-    } else {
-        CK_LOG("FFPipeline", "  uv0 missing");
-    }
-
-    for (int i = 0; i < samples; ++i) {
-        const float *p = (const float *)((const CKBYTE *)data->PositionPtr + i * data->PositionStride);
-        float x = p[0], y = p[1], z = p[2];
-        float cx = x * mvp[0][0] + y * mvp[1][0] + z * mvp[2][0] + mvp[3][0];
-        float cy = x * mvp[0][1] + y * mvp[1][1] + z * mvp[2][1] + mvp[3][1];
-        float cz = x * mvp[0][2] + y * mvp[1][2] + z * mvp[2][2] + mvp[3][2];
-        float cw = x * mvp[0][3] + y * mvp[1][3] + z * mvp[2][3] + mvp[3][3];
-        float invw = (fabsf(cw) > 0.000001f) ? (1.0f / cw) : 0.0f;
-        CK_LOG_FMT("FFPipeline",
-                   "  v%d pos=(%.6f %.6f %.6f) clip=(%.6f %.6f %.6f %.6f) ndc=(%.6f %.6f %.6f)",
-                   i, x, y, z, cx, cy, cz, cw, cx * invw, cy * invw, cz * invw);
-    }
-}
-
-static void LogPrimitiveIndexContract(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
-                                      const VxDrawPrimitiveData *data) {
-    if (!data)
-        return;
-
-    const int srcCount = (indices && indexCount > 0) ? indexCount : data->VertexCount;
-    int triCount = 0;
-    if (type == VX_TRIANGLELIST)
-        triCount = srcCount / 3;
-    else if (type == VX_TRIANGLESTRIP || type == VX_TRIANGLEFAN)
-        triCount = srcCount >= 3 ? srcCount - 2 : 0;
-
-    int minIndex = INT_MAX;
-    int maxIndex = INT_MIN;
-    int invalidCount = 0;
-    int duplicateTriCount = 0;
-    for (int i = 0; i < srcCount; ++i) {
-        int idx = indices ? indices[i] : i;
-        if (idx < minIndex) minIndex = idx;
-        if (idx > maxIndex) maxIndex = idx;
-        if (idx < 0 || idx >= data->VertexCount)
-            ++invalidCount;
-    }
-
-    if (type == VX_TRIANGLELIST && srcCount >= 3) {
-        for (int i = 0; i + 2 < srcCount; i += 3) {
-            int a = indices ? indices[i] : i;
-            int b = indices ? indices[i + 1] : i + 1;
-            int c = indices ? indices[i + 2] : i + 2;
-            if (a == b || b == c || a == c)
-                ++duplicateTriCount;
-        }
-    }
-
-    if (srcCount == 0) {
-        minIndex = 0;
-        maxIndex = 0;
-    }
-
-    CK_LOG_FMT("FFPipeline",
-               "  index contract: srcCount=%d indexed=%d min=%d max=%d invalid=%d tris=%d degenerateListTris=%d",
-               srcCount, indices ? 1 : 0, minIndex, maxIndex, invalidCount, triCount, duplicateTriCount);
-
-    if (srcCount > 0) {
-        char sample[160];
-        int written = 0;
-        int sampleCount = srcCount < 12 ? srcCount : 12;
-        for (int i = 0; i < sampleCount && written < (int)sizeof(sample) - 8; ++i) {
-            int idx = indices ? indices[i] : i;
-            int n = std::snprintf(sample + written, sizeof(sample) - written,
-                                  "%s%d", i ? "," : "", idx);
-            if (n <= 0)
-                break;
-            written += n;
-        }
-        sample[sizeof(sample) - 1] = '\0';
-        CK_LOG_FMT("FFPipeline", "  first indices: %s", sample);
-    }
-}
-
-static void LogPositionTSamples(const float *viewport, const VxDrawPrimitiveData *data) {
-    if (!viewport || !data || !data->PositionPtr) return;
-
-    CK_LOG_FMT("FFPipeline",
-               "  PositionT viewport sx=%.8f sy=%.8f ox=%.3f oy=%.3f posStride=%u color=%s uv=%s",
-               viewport[0], viewport[1], viewport[2], viewport[3],
-               data->PositionStride,
-               data->ColorPtr ? "yes" : "no",
-               data->TexCoordPtr ? "yes" : "no");
-
-    int samples = data->VertexCount < 4 ? data->VertexCount : 4;
-    for (int i = 0; i < samples; ++i) {
-        const float *p = (const float *)((const CKBYTE *)data->PositionPtr + i * data->PositionStride);
-        float rhw = fabsf(p[3]) > 0.000001f ? p[3] : 1.0f;
-        float clipW = 1.0f / rhw;
-        float ndcX = p[0] * viewport[0] + viewport[2];
-        float ndcY = p[1] * viewport[1] + viewport[3];
-        float ndcZ = p[2];
-        CKDWORD color = 0;
-        if (data->ColorPtr)
-            memcpy(&color, (const CKBYTE *)data->ColorPtr + i * data->ColorStride, 4);
-        CK_LOG_FMT("FFPipeline",
-                   "  pt%d screen=(%.3f %.3f %.3f %.6f) ndc=(%.3f %.3f %.3f) clip=(%.3f %.3f %.3f %.3f) color=0x%08X",
-                   i, p[0], p[1], p[2], p[3], ndcX, ndcY, ndcZ,
-                   ndcX * clipW, ndcY * clipW, ndcZ * clipW, clipW, color);
-    }
-}
-
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
@@ -728,6 +475,61 @@ void CKFixedFunctionPipeline::Shutdown() {
     m_Context = nullptr;
 }
 
+CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
+    : m_Pipeline(&pipeline),
+      m_ColorWriteMask(pipeline.GetColorWriteMask()),
+      m_World(pipeline.GetWorldMatrix()),
+      m_View(pipeline.GetViewMatrix()),
+      m_Projection(pipeline.GetProjectionMatrix()) {
+    for (int i = 0; i < CKFF_RS_COUNT; ++i)
+        m_RenderStates[i] = pipeline.GetRenderState((VXRENDERSTATETYPE)i);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        pipeline.SaveTextureStage(stage, m_TextureStages[stage]);
+}
+
+CKFFStateGuard::~CKFFStateGuard() {
+    Restore();
+}
+
+void CKFFStateGuard::Restore() {
+    if (!m_Pipeline)
+        return;
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_Pipeline->RestoreTextureStage(stage, m_TextureStages[stage]);
+    m_Pipeline->SetTransform(VXMATRIX_WORLD, m_World);
+    m_Pipeline->SetTransform(VXMATRIX_VIEW, m_View);
+    m_Pipeline->SetTransform(VXMATRIX_PROJECTION, m_Projection);
+    m_Pipeline->SetColorWriteMask(m_ColorWriteMask);
+    for (int i = 0; i < CKFF_RS_COUNT; ++i)
+        m_Pipeline->SetRenderState((VXRENDERSTATETYPE)i, m_RenderStates[i]);
+    m_Pipeline = nullptr;
+}
+
+void CKFFStateGuard::Dismiss() {
+    m_Pipeline = nullptr;
+}
+
+CKFFRenderStateGuard::CKFFRenderStateGuard(CKFixedFunctionPipeline &pipeline, VXRENDERSTATETYPE state, CKBOOL active)
+    : m_Pipeline(active ? &pipeline : nullptr),
+      m_State(state),
+      m_Value(active ? pipeline.GetRenderState(state) : 0) {
+}
+
+CKFFRenderStateGuard::~CKFFRenderStateGuard() {
+    Restore();
+}
+
+void CKFFRenderStateGuard::Restore() {
+    if (!m_Pipeline)
+        return;
+    m_Pipeline->SetRenderState(m_State, m_Value);
+    m_Pipeline = nullptr;
+}
+
+void CKFFRenderStateGuard::Dismiss() {
+    m_Pipeline = nullptr;
+}
+
 // ============================================================================
 // State tracking
 // ============================================================================
@@ -767,6 +569,14 @@ CKDWORD CKFixedFunctionPipeline::GetRenderState(VXRENDERSTATETYPE state) const {
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
     m_DrawStateCache.SetColorWriteMask(r, g, b, a);
+}
+
+CKDWORD CKFixedFunctionPipeline::GetColorWriteMask() const {
+    return m_DrawStateCache.GetColorWriteMask();
+}
+
+void CKFixedFunctionPipeline::SetColorWriteMask(CKDWORD mask) {
+    m_DrawStateCache.SetColorWriteMask(mask);
 }
 
 void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
@@ -961,11 +771,7 @@ CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
-    if (!DebugDrawSerialPerFrame())
-        return;
-
-    g_Opaque3DDrawSerial = 0;
-    g_Transparent3DDrawSerial = 0;
+    m_DebugState.BeginFrame();
 }
 
 // ============================================================================
@@ -983,26 +789,23 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
     const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
-    const int debugDrawSerial = NextDebugDrawSerial(view);
-    const int drawLogLimit = DebugDrawLogLimit();
+    const int debugDrawSerial = m_DebugState.NextDrawSerial(view);
+    CKFFDrawDebugInfo debugInfo = {};
+    debugInfo.View = view;
+    debugInfo.Type = type;
+    debugInfo.Indices = indices;
+    debugInfo.IndexCount = indexCount;
+    debugInfo.Data = data;
+    debugInfo.FormatFlags = formatFlags;
+    debugInfo.DrawSerial = debugDrawSerial;
+    debugInfo.World = &m_World;
+    debugInfo.ViewMatrix = &m_View;
+    debugInfo.Projection = &m_Projection;
+    debugInfo.Viewport = m_Viewport;
+    m_DebugState.LogDrawPrimitiveHeader(debugInfo);
 
-    if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-        CK_LOG_FMT("FFPipeline", "DrawPrimitive: view=%d serial=%d verts=%d indices=%d flags=0x%X",
-                   (int)view, debugDrawSerial, data->VertexCount, indexCount, data->Flags);
-        ++g_DrawLogCount;
-    }
-
-    if (ShouldSkipDebugView(view) ||
-        ShouldSkipDebugDrawSerial(view, debugDrawSerial) ||
-        (positionT && DebugSkipPositionTDraws()) ||
-        (!positionT && DebugSkip3DDraws())) {
-        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-            CK_LOG_FMT("FFPipeline",
-                       "DrawPrimitive skipped by env: view=%d serial=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X positionT=%d",
-                       (int)view, debugDrawSerial, (int)type, data->VertexCount, indexCount,
-                       data->Flags, formatFlags, positionT ? 1 : 0);
-            ++g_DrawLogCount;
-        }
+    if (m_DebugState.ShouldSkip(view, debugDrawSerial, positionT)) {
+        m_DebugState.LogDrawPrimitiveSkipped(debugInfo, positionT);
         return;
     }
 
@@ -1021,14 +824,11 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (!m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapMode,
             m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams)) {
-        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-            CK_LOG("FFPipeline", "DrawPrimitive: Prepare FAILED");
-            g_DrawLogCount++;
-        }
+        m_DebugState.LogDrawPrimitivePrepareFailed();
         return;
     }
 
-    // Build shader key and get program
+    // Build the fixed-function state description and select the matching program.
     m_CurrentActiveTextureCount = CKFFActiveTextureCountFromDPFlags(data->Flags);
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKDWORD op = m_StageStates[stage][CKRST_TSS_OP];
@@ -1038,92 +838,26 @@ void CKFixedFunctionPipeline::DrawPrimitive(
                 m_CurrentActiveTextureCount = stage + 1;
         }
     }
-    CKFFShaderKey key = BuildCurrentKey(data->Flags, formatFlags);
-    CKDWORD program = m_ShaderCache.GetProgram(key);
+    CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
+    CKDWORD program = m_ShaderCache.GetProgram(stateDesc);
     if (program == 0) {
-        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-            CK_LOG("FFPipeline", "DrawPrimitive: program == 0!");
-            g_DrawLogCount++;
-        }
+        m_DebugState.LogDrawPrimitiveProgramMissing();
         return;
     }
 
-    const int real3DLogLimit = DebugReal3DLogLimit();
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
-        CK_LOG_FMT("FFPipeline",
-                   "Real3D DrawPrimitive #%d: serial=%d view=%d type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
-                   g_Real3DDrawLogCount, debugDrawSerial, (int)view, (int)type, PrimitiveName(type), data->VertexCount, indexCount,
-                   data->Flags, formatFlags, stride, m_TextureHandles[0],
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_LIGHTING), m_ActiveLightCount, program);
-        CK_LOG_FMT("FFPipeline",
-                   "  key VS: normal=%d color0=%d color1=%d tex0=%d lighting=%d lightCount=%u FSstage0=%u",
-                   key.VS.GetHasNormal() ? 1 : 0, key.VS.GetHasColor0() ? 1 : 0,
-                   key.VS.GetHasColor1() ? 1 : 0, key.VS.GetHasTexCoord0() ? 1 : 0,
-                   key.VS.GetLightingEnabled() ? 1 : 0, key.VS.GetLightCount(),
-                   key.FS.GetStageColorOp(0));
-        LogMatrixRows("World", m_World);
-        LogMatrixRows("View", m_View);
-        LogMatrixRows("Proj", m_Projection);
-        LogPrimitiveIndexContract(type, indices, indexCount, data);
-        LogVertexClipSamples(m_World, m_View, m_Projection, data);
-        g_Real3DDrawLogCount++;
-    }
-    const int contractLimit = Debug3DContractLogLimit();
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        contractLimit > 0 && g_3DContractLogCount < contractLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
-        CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u keyLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
-                   g_3DContractLogCount, debugDrawSerial, (int)view, (int)type, PrimitiveName(type),
-                   data->VertexCount, indexCount, data->Flags, formatFlags, stride,
-                   key.VS.GetLightingEnabled() ? 1 : 0, m_CurrentActiveTextureCount,
-                   key.FS.GetStageColorOp(0),
-                   GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0),
-                   GetStageColorArg2(m_StageStates[0]),
-                   GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0),
-                   GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0),
-                   GetStageAlphaArg2(m_StageStates[0]),
-                   m_TextureHandles[0],
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_SRCBLEND),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_DESTBLEND),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZFUNC),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_CULLMODE));
-        LogPrimitiveIndexContract(type, indices, indexCount, data);
-        LogVertexClipSamples(m_World, m_View, m_Projection, data);
-        ++g_3DContractLogCount;
-    }
-    const int positionTLogLimit = DebugPositionTLogLimit();
-    if ((formatFlags & CKFF_VF_POSITIONT) &&
-        positionTLogLimit > 0 && g_PositionTDrawLogCount < positionTLogLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
-        CK_LOG_FMT("FFPipeline",
-                   "PositionT DrawPrimitive #%d: view=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u program=%u stage0=%u/%u/%u",
-                   g_PositionTDrawLogCount, (int)view, (int)type, data->VertexCount, indexCount,
-                   data->Flags, formatFlags, stride, m_TextureHandles[0], program,
-                   key.FS.GetStageColorOp(0), GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0),
-                   GetStageColorArg2(m_StageStates[0]));
-        LogPositionTSamples(m_Viewport, data);
-        g_PositionTDrawLogCount++;
-    }
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
-        (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
-        CK_LOG_FMT("FFPipeline", "Real3D non-identity view #%d: view=%d verts=%d indices=%d flags=0x%X program=%u",
-                   g_Real3DViewLogCount, (int)view, data->VertexCount, indexCount, data->Flags, program);
-        LogMatrixRows("World", m_World);
-        LogMatrixRows("View", m_View);
-        LogMatrixRows("Proj", m_Projection);
-        LogVertexClipSamples(m_World, m_View, m_Projection, data);
-        g_Real3DViewLogCount++;
-    }
+    debugInfo.Program = program;
+    debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+    debugInfo.ActiveLightCount = m_ActiveLightCount;
+    debugInfo.StateDesc = &stateDesc;
+    debugInfo.DrawState = &m_DrawStateCache;
+    debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+    debugInfo.Stage0.ColorArg1 = GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.ColorArg2 = GetStageColorArg2(m_StageStates[0]);
+    debugInfo.Stage0.AlphaOp = GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg1 = GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg2 = GetStageAlphaArg2(m_StageStates[0]);
+    debugInfo.Stage0.Texture = m_TextureHandles[0];
+    m_DebugState.LogDrawPrimitiveDetails(debugInfo);
 
     // Upload uniforms
     UploadUniforms(encoder);
@@ -1161,35 +895,29 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 {
     if (!encoder || !vb) return;
 
-    const int drawLogLimit = DebugDrawLogLimit();
-    if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-        CK_LOG_FMT("FFPipeline", "DrawVertexBuffer: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u",
-                   (int)view, vb, ib, vertexCount, indexCount, vertexLayout);
-        CK_LOG_FMT("FFPipeline", "  World row0: %.3f %.3f %.3f %.3f",
-                   m_World[0][0], m_World[0][1], m_World[0][2], m_World[0][3]);
-        CK_LOG_FMT("FFPipeline", "  World row1: %.3f %.3f %.3f %.3f",
-                   m_World[1][0], m_World[1][1], m_World[1][2], m_World[1][3]);
-        CK_LOG_FMT("FFPipeline", "  World row2: %.3f %.3f %.3f %.3f",
-                   m_World[2][0], m_World[2][1], m_World[2][2], m_World[2][3]);
-        CK_LOG_FMT("FFPipeline", "  World row3: %.3f %.3f %.3f %.3f",
-                   m_World[3][0], m_World[3][1], m_World[3][2], m_World[3][3]);
-        g_DrawLogCount++;
-    }
-
-    // Build shader key from the actual mesh vertex format.
+    // Build the fixed-function state description from the actual mesh vertex format.
     const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
-    const int debugDrawSerial = NextDebugDrawSerial(view);
-    if (ShouldSkipDebugView(view) ||
-        ShouldSkipDebugDrawSerial(view, debugDrawSerial) ||
-        (positionT && DebugSkipPositionTDraws()) ||
-        (!positionT && DebugSkip3DDraws())) {
-        if (drawLogLimit > 0 && g_DrawLogCount < drawLogLimit) {
-            CK_LOG_FMT("FFPipeline",
-                       "DrawVertexBuffer skipped by env: view=%d serial=%d type=%d vb=%u ib=%u verts=%u indices=%u dp=0x%X fmt=0x%X positionT=%d",
-                       (int)view, debugDrawSerial, (int)type, vb, ib, vertexCount, indexCount,
-                       dpFlags, formatFlags, positionT ? 1 : 0);
-            ++g_DrawLogCount;
-        }
+    const int debugDrawSerial = m_DebugState.NextDrawSerial(view);
+    CKFFDrawDebugInfo debugInfo = {};
+    debugInfo.View = view;
+    debugInfo.Type = type;
+    debugInfo.World = &m_World;
+    debugInfo.ViewMatrix = &m_View;
+    debugInfo.Projection = &m_Projection;
+    debugInfo.VertexBuffer = vb;
+    debugInfo.IndexBuffer = ib;
+    debugInfo.BaseVertex = baseVertex;
+    debugInfo.VertexCount = vertexCount;
+    debugInfo.StartIndex = startIndex;
+    debugInfo.PersistentIndexCount = indexCount;
+    debugInfo.DPFlags = dpFlags;
+    debugInfo.FormatFlags = formatFlags;
+    debugInfo.VertexLayout = vertexLayout;
+    debugInfo.DrawSerial = debugDrawSerial;
+    m_DebugState.LogDrawVertexBufferHeader(debugInfo);
+
+    if (m_DebugState.ShouldSkip(view, debugDrawSerial, positionT)) {
+        m_DebugState.LogDrawVertexBufferSkipped(debugInfo, positionT);
         return;
     }
 
@@ -1202,69 +930,23 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
                 m_CurrentActiveTextureCount = stage + 1;
         }
     }
-    CKFFShaderKey key = BuildCurrentKey(dpFlags, formatFlags);
-    CKDWORD program = m_ShaderCache.GetProgram(key);
+    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
+    CKDWORD program = m_ShaderCache.GetProgram(stateDesc);
     if (program == 0) return;
 
-    const int real3DLogLimit = DebugReal3DLogLimit();
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        real3DLogLimit > 0 && g_Real3DDrawLogCount < real3DLogLimit) {
-        CK_LOG_FMT("FFPipeline",
-                   "Real3D DrawVertexBuffer #%d: serial=%d view=%d type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
-                   g_Real3DDrawLogCount, debugDrawSerial, (int)view, (int)type, PrimitiveName(type), vb, ib, baseVertex, vertexCount,
-                   startIndex, indexCount, dpFlags, formatFlags, vertexLayout, m_TextureHandles[0],
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_LIGHTING), m_ActiveLightCount, program);
-        CK_LOG_FMT("FFPipeline",
-                   "  key VS: normal=%d color0=%d color1=%d tex0=%d lighting=%d lightCount=%u FSstage0=%u",
-                   key.VS.GetHasNormal() ? 1 : 0, key.VS.GetHasColor0() ? 1 : 0,
-                   key.VS.GetHasColor1() ? 1 : 0, key.VS.GetHasTexCoord0() ? 1 : 0,
-                   key.VS.GetLightingEnabled() ? 1 : 0, key.VS.GetLightCount(),
-                   key.FS.GetStageColorOp(0));
-        LogMatrixRows("World", m_World);
-        LogMatrixRows("View", m_View);
-        LogMatrixRows("Proj", m_Projection);
-        g_Real3DDrawLogCount++;
-    }
-    const int contractLimit = Debug3DContractLogLimit();
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        contractLimit > 0 && g_3DContractLogCount < contractLimit) {
-        CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u keyLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
-                   g_3DContractLogCount, debugDrawSerial, (int)view, (int)type, PrimitiveName(type),
-                   vb, ib, baseVertex, vertexCount, startIndex, indexCount, dpFlags, formatFlags, vertexLayout,
-                   key.VS.GetLightingEnabled() ? 1 : 0, m_CurrentActiveTextureCount,
-                   key.FS.GetStageColorOp(0),
-                   GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0),
-                   GetStageColorArg2(m_StageStates[0]),
-                   GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0),
-                   GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0),
-                   GetStageAlphaArg2(m_StageStates[0]),
-                   m_TextureHandles[0],
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_SRCBLEND),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_DESTBLEND),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZFUNC),
-                   m_DrawStateCache.GetRenderState(VXRENDERSTATE_CULLMODE));
-        LogMatrixRows("World", m_World);
-        LogMatrixRows("View", m_View);
-        LogMatrixRows("Proj", m_Projection);
-        ++g_3DContractLogCount;
-    }
-    if ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT) &&
-        real3DLogLimit > 0 && g_Real3DViewLogCount < real3DLogLimit &&
-        (fabsf(m_View[3][0]) > 0.001f || fabsf(m_View[3][1]) > 0.001f || fabsf(m_View[3][2]) > 0.001f)) {
-        CK_LOG_FMT("FFPipeline", "Real3D VB non-identity view #%d: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u program=%u",
-                   g_Real3DViewLogCount, (int)view, vb, ib, vertexCount, indexCount, vertexLayout, program);
-        LogMatrixRows("World", m_World);
-        LogMatrixRows("View", m_View);
-        LogMatrixRows("Proj", m_Projection);
-        g_Real3DViewLogCount++;
-    }
+    debugInfo.Program = program;
+    debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+    debugInfo.ActiveLightCount = m_ActiveLightCount;
+    debugInfo.StateDesc = &stateDesc;
+    debugInfo.DrawState = &m_DrawStateCache;
+    debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+    debugInfo.Stage0.ColorArg1 = GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.ColorArg2 = GetStageColorArg2(m_StageStates[0]);
+    debugInfo.Stage0.AlphaOp = GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg1 = GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg2 = GetStageAlphaArg2(m_StageStates[0]);
+    debugInfo.Stage0.Texture = m_TextureHandles[0];
+    m_DebugState.LogDrawVertexBufferDetails(debugInfo);
 
     // Upload uniforms
     UploadUniforms(encoder);
@@ -1301,57 +983,59 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 // Internal methods
 // ============================================================================
 
-CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentKey(CKDWORD dpFlags, CKDWORD formatFlags) {
-    CKFFShaderKey key;
+CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags) {
+    CKFFStateDesc stateDesc;
 
     const bool hasFormat = formatFlags != 0;
     const bool positionT = hasFormat ? ((formatFlags & CKFF_VF_POSITIONT) != 0) : ((dpFlags & CKRST_DP_TRANSFORM) == 0);
 
-    // Vertex key
-    key.VS.SetHasPosition(!positionT);
-    key.VS.SetHasPositionT(positionT);
-    key.VS.SetHasNormal(hasFormat ? ((formatFlags & CKFF_VF_NORMAL) != 0) : ((dpFlags & CKRST_DP_LIGHT) != 0));
-    key.VS.SetHasColor0(hasFormat ? ((formatFlags & CKFF_VF_COLOR0) != 0) : ((dpFlags & CKRST_DP_DIFFUSE) != 0));
-    key.VS.SetHasColor1(hasFormat ? ((formatFlags & CKFF_VF_COLOR1) != 0) : ((dpFlags & CKRST_DP_SPECULAR) != 0));
-    key.VS.SetHasTexCoord0(hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD0) != 0) : (m_CurrentActiveTextureCount > 0));
-    key.VS.SetHasTexCoord1(hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD1) != 0) : (m_CurrentActiveTextureCount > 1));
-    key.VS.SetHasTexCoord2(hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD2) != 0) : (m_CurrentActiveTextureCount > 2));
+    // Vertex state description
+    stateDesc.VS.SetHasPosition(!positionT);
+    stateDesc.VS.SetHasPositionT(positionT);
+    stateDesc.VS.SetHasNormal(hasFormat ? ((formatFlags & CKFF_VF_NORMAL) != 0) : ((dpFlags & CKRST_DP_LIGHT) != 0));
+    stateDesc.VS.SetHasColor0(hasFormat ? ((formatFlags & CKFF_VF_COLOR0) != 0) : ((dpFlags & CKRST_DP_DIFFUSE) != 0));
+    stateDesc.VS.SetHasColor1(hasFormat ? ((formatFlags & CKFF_VF_COLOR1) != 0) : ((dpFlags & CKRST_DP_SPECULAR) != 0));
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        stateDesc.VS.SetHasTexCoord(
+            stage,
+            hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (m_CurrentActiveTextureCount > stage));
+    }
 
     CKBOOL lighting = m_DrawStateCache.GetRenderState(VXRENDERSTATE_LIGHTING);
     CKBOOL specular = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE);
     CKBOOL normalize = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS);
 
-    if (DebugForceUnlit())
+    if (m_DebugState.ForceUnlit())
         lighting = FALSE;
 
-    key.VS.SetLightingEnabled(!positionT && lighting && key.VS.GetHasNormal());
-    m_CurrentLightingEnabled = key.VS.GetLightingEnabled();
-    key.VS.SetSpecularEnabled(specular != 0);
-    key.VS.SetNormalizeNormals(normalize != 0);
-    key.VS.SetLightCount(key.VS.GetLightingEnabled() ? m_ActiveLightCount : 0);
+    stateDesc.VS.SetLightingEnabled(!positionT && lighting && stateDesc.VS.GetHasNormal());
+    m_CurrentLightingEnabled = stateDesc.VS.GetLightingEnabled();
+    stateDesc.VS.SetSpecularEnabled(specular != 0);
+    stateDesc.VS.SetNormalizeNormals(normalize != 0);
+    stateDesc.VS.SetLightCount(stateDesc.VS.GetLightingEnabled() ? m_ActiveLightCount : 0);
 
     const CKBOOL colorVertex = m_DrawStateCache.GetRenderState(VXRENDERSTATE_COLORVERTEX);
     const CKDWORD diffuseSource = ResolveMaterialSource(
-        key.VS.GetLightingEnabled(), colorVertex,
+        stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD ambientSource = ResolveMaterialSource(
-        key.VS.GetLightingEnabled(), colorVertex,
+        stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENTFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD specularSource = ResolveMaterialSource(
-        key.VS.GetLightingEnabled(), colorVertex,
+        stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARFROMVERTEX),
         dpFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
     const CKDWORD emissiveSource = ResolveMaterialSource(
-        key.VS.GetLightingEnabled(), colorVertex,
+        stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
 
-    key.VS.SetDiffuseSource(diffuseSource);
-    key.VS.SetAmbientSource(ambientSource);
-    key.VS.SetSpecularSource(specularSource);
-    key.VS.SetEmissiveSource(emissiveSource);
+    stateDesc.VS.SetDiffuseSource(diffuseSource);
+    stateDesc.VS.SetAmbientSource(ambientSource);
+    stateDesc.VS.SetSpecularSource(specularSource);
+    stateDesc.VS.SetEmissiveSource(emissiveSource);
     m_MaterialSource[0] = (float)diffuseSource;
     m_MaterialSource[1] = (float)ambientSource;
     m_MaterialSource[2] = (float)specularSource;
@@ -1359,38 +1043,39 @@ CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentKey(CKDWORD dpFlags, CKDWORD 
 
     // Fog
     CKBOOL fogEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE);
-    if (DebugDisableFog())
+    if (m_DebugState.DisableFog())
         fogEnable = FALSE;
     if (fogEnable) {
         CKDWORD fogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE);
-        key.VS.SetFogMode(fogMode);
+        stateDesc.VS.SetFogMode(fogMode);
     }
 
-    // Fragment key mirrors the active fixed-function texture-stage contract.
+    // Fragment state description mirrors the active fixed-function texture-stage contract.
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < m_CurrentActiveTextureCount;
         const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
         const CKDWORD colorOp = GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
         const CKDWORD alphaOp = GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
-        key.FS.SetStageColorOp(stage, colorOp);
-        key.FS.SetStageColorArg1(stage, BaseTextureArg(GetStageColorArg1(m_StageStates[stage], hasTexture)));
-        key.FS.SetStageColorArg2(stage, BaseTextureArg(GetStageColorArg2(m_StageStates[stage])));
-        key.FS.SetStageAlphaOp(stage, alphaOp);
+        stateDesc.FS.SetStageColorOp(stage, colorOp);
+        stateDesc.FS.SetStageColorArg1(stage, BaseTextureArg(GetStageColorArg1(m_StageStates[stage], hasTexture)));
+        stateDesc.FS.SetStageColorArg2(stage, BaseTextureArg(GetStageColorArg2(m_StageStates[stage])));
+        stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
+        stateDesc.FS.SetStageResultIsTemp(stage, BaseTextureArg(GetStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
 
         if (colorOp == CKRST_TOP_DISABLE)
             break;
     }
 
-    key.FS.SetSpecularAdd(specular != 0);
-    key.FS.SetFogEnabled(fogEnable != 0);
+    stateDesc.FS.SetSpecularAdd(specular != 0);
+    stateDesc.FS.SetFogEnabled(fogEnable != 0);
 
     CKBOOL alphaTest = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
     if (alphaTest) {
-        key.FS.SetAlphaTestEnabled(true);
-        key.FS.SetAlphaFunc(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
+        stateDesc.FS.SetAlphaTestEnabled(true);
+        stateDesc.FS.SetAlphaFunc(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
     }
 
-    return key;
+    return stateDesc;
 }
 
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
@@ -1473,7 +1158,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     memcpy(&fogParams[1], &fe, sizeof(float));
     memcpy(&fogParams[2], &fd, sizeof(float));
     fogParams[3] = (m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
-                    !DebugDisableFog())
+                    !m_DebugState.DisableFog())
         ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE)
         : 0.0f;
     encoder->SetUniform(u.u_fogParams, fogParams, 1);
