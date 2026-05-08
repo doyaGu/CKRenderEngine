@@ -1321,8 +1321,10 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
+              shaderCompiler.find("normalize_specialized_variant") != std::string::npos &&
+              shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
+              shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
-              shaderCompiler.find("FFP specialized variant manifest entries are declared") != std::string::npos &&
               variantManifest.find("\"variants\": []") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
               "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary, even while the table is empty");
@@ -1330,6 +1332,9 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,
               "Internal rasterizer program descriptors must carry FFP specialization payloads");
+    TestCheck(ReadRenderEngineSource("src/CKFFSpecializationInfo.h").find("SetDwords") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFSpecializationInfo.cpp").find("memcpy(m_Data") != std::string::npos,
+              "Generated full-specialized module entries must be able to preserve their exact 10-dword FFP specialization payload");
     TestCheck(rootCmake.find("option(CKRE_FFP_DXVK_VARIANTS") != std::string::npos &&
               srcCmake.find("CKRE_FFP_DXVK_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_DXVK_VARIANTS}>,1,0>") != std::string::npos,
               "RenderEngine CMake must expose and propagate the FFP DXVK variant clean-break option");
