@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,13 @@ BACKENDS = [
     {"name": "spirv", "platform": "linux", "profile": "spirv"},
     {"name": "glsl", "platform": "linux", "profile": "150"},
 ]
+
+PROFILE_ENUMS = {
+    "dx11": "CKRST_SHADER_PROFILE_DX11",
+    "dx12": "CKRST_SHADER_PROFILE_DX12",
+    "spirv": "CKRST_SHADER_PROFILE_SPIRV",
+    "glsl": "CKRST_SHADER_PROFILE_GLSL",
+}
 
 FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
 
@@ -120,6 +128,93 @@ def ffp_specialized_shader_defines(spec_dwords: list[int]) -> list[str]:
     return defines
 
 
+def sanitize_identifier(value: str) -> str:
+    ident = re.sub(r"[^0-9A-Za-z_]", "_", value)
+    if not ident or ident[0].isdigit():
+        ident = "variant_" + ident
+    return ident
+
+
+def read_uint32(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 0xffffffff:
+        raise ValueError(f"{field} must be a uint32")
+    return value
+
+
+def read_bool(value: object, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a bool")
+    return value
+
+
+def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
+    if not isinstance(stage, dict):
+        raise ValueError(f"{field} must be an object")
+
+    return {
+        "colorOp": read_uint32(stage.get("colorOp"), f"{field}.colorOp"),
+        "colorArg0": read_uint32(stage.get("colorArg0"), f"{field}.colorArg0"),
+        "colorArg1": read_uint32(stage.get("colorArg1"), f"{field}.colorArg1"),
+        "colorArg2": read_uint32(stage.get("colorArg2"), f"{field}.colorArg2"),
+        "alphaOp": read_uint32(stage.get("alphaOp"), f"{field}.alphaOp"),
+        "alphaArg0": read_uint32(stage.get("alphaArg0"), f"{field}.alphaArg0"),
+        "alphaArg1": read_uint32(stage.get("alphaArg1"), f"{field}.alphaArg1"),
+        "alphaArg2": read_uint32(stage.get("alphaArg2"), f"{field}.alphaArg2"),
+        "resultIsTemp": read_bool(stage.get("resultIsTemp"), f"{field}.resultIsTemp"),
+    }
+
+
+def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
+    if not isinstance(key, dict):
+        raise ValueError(f"{field} must be an object")
+
+    tex_gen = key.get("vsTexGen")
+    if not isinstance(tex_gen, list) or len(tex_gen) != 8:
+        raise ValueError(f"{field}.vsTexGen must contain exactly 8 uint32 values")
+
+    stages = key.get("stages")
+    if not isinstance(stages, list) or len(stages) != 8:
+        raise ValueError(f"{field}.stages must contain exactly 8 stage objects")
+
+    return {
+        "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
+        "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
+                     for index, value in enumerate(tex_gen)],
+        "lastActiveTextureStage": read_uint32(key.get("lastActiveTextureStage"),
+                                              f"{field}.lastActiveTextureStage"),
+        "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
+                                          f"{field}.globalSpecularEnable"),
+        "stages": [normalize_specialized_stage(stage, f"{field}.stages[{index}]")
+                   for index, stage in enumerate(stages)],
+    }
+
+
+def normalize_specialized_variant(variant: dict[str, object], index: int) -> dict[str, object]:
+    name = variant.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].name must be a non-empty string")
+
+    vs = variant.get("vs")
+    if vs not in ("3d", "positiont"):
+        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].vs must be '3d' or 'positiont'")
+
+    spec_dwords = variant.get("specDwords")
+    if not isinstance(spec_dwords, list):
+        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords must be an array")
+    spec_dwords = [read_uint32(value, f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords[{dword_index}]")
+                   for dword_index, value in enumerate(spec_dwords)]
+
+    return {
+        "name": name,
+        "identifier": sanitize_identifier(name),
+        "vs": vs,
+        "specDwords": spec_dwords,
+        "defines": ffp_specialized_shader_defines(spec_dwords),
+        "key": normalize_specialized_key(variant.get("key"),
+                                         f"{FFP_VARIANT_MANIFEST} variants[{index}].key"),
+    }
+
+
 def ensure_dxc_runtime(script_dir: Path, shaderc: Path) -> None:
     if os.name != "nt":
         return
@@ -176,14 +271,100 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
         f.write("};\n")
 
 
-def write_specialized_module_table(generated_dir: Path) -> None:
+def specialized_fs_var_name(backend: dict[str, str], variant: dict[str, object]) -> str:
+    return f"s_{backend['name']}_ffp_{variant['identifier']}_fs_ff_stage"
+
+
+def write_specialized_key_function(f, variant: dict[str, object]) -> None:
+    ident = variant["identifier"]
+    key = variant["key"]
+    f.write(f"static CKFFShaderKey CKFFSpecializedKey_{ident}() {{\n")
+    f.write("    CKFFShaderKey key;\n")
+    f.write(f"    key.VS.Bits = {key['vsBits']}ull;\n")
+    for index, value in enumerate(key["vsTexGen"]):
+        f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
+    f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
+    f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")
+    for index, stage in enumerate(key["stages"]):
+        prefix = f"    key.FS.Stages[{index}]"
+        f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")
+        f.write(f"{prefix}.ColorArg0 = {stage['colorArg0']}u;\n")
+        f.write(f"{prefix}.ColorArg1 = {stage['colorArg1']}u;\n")
+        f.write(f"{prefix}.ColorArg2 = {stage['colorArg2']}u;\n")
+        f.write(f"{prefix}.AlphaOp = {stage['alphaOp']}u;\n")
+        f.write(f"{prefix}.AlphaArg0 = {stage['alphaArg0']}u;\n")
+        f.write(f"{prefix}.AlphaArg1 = {stage['alphaArg1']}u;\n")
+        f.write(f"{prefix}.AlphaArg2 = {stage['alphaArg2']}u;\n")
+        f.write(f"{prefix}.ResultIsTemp = {'true' if stage['resultIsTemp'] else 'false'};\n")
+    f.write("    return key;\n")
+    f.write("}\n\n")
+
+
+def write_specialized_spec_function(f, variant: dict[str, object]) -> None:
+    ident = variant["identifier"]
+    dwords = ", ".join(f"{value}u" for value in variant["specDwords"])
+    f.write(f"static CKFFSpecializationInfo CKFFSpecializedSpec_{ident}() {{\n")
+    f.write(f"    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = {{ {dwords} }};\n")
+    f.write("    CKFFSpecializationInfo info;\n")
+    f.write("    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);\n")
+    f.write("    return info;\n")
+    f.write("}\n\n")
+
+
+def write_specialized_module_function(f, backend: dict[str, str], variant: dict[str, object]) -> None:
+    backend_name = backend["name"]
+    ident = variant["identifier"]
+    vs_name = f"s_{backend_name}_vs_ff_{'positiont' if variant['vs'] == 'positiont' else '3d'}"
+    fs_name = specialized_fs_var_name(backend, variant)
+    f.write(f"static CKFFSpecializedModule CKFFSpecializedModule_{backend_name}_{ident}() {{\n")
+    f.write("    CKFFSpecializedModule module = {};\n")
+    f.write(f"    module.VSData = {vs_name};\n")
+    f.write(f"    module.VSSize = sizeof({vs_name});\n")
+    f.write(f"    module.FSData = {fs_name};\n")
+    f.write(f"    module.FSSize = sizeof({fs_name});\n")
+    f.write(f"    module.Specialization = CKFFSpecializedSpec_{ident}();\n")
+    f.write("    return module;\n")
+    f.write("}\n\n")
+
+
+def write_specialized_module_table(generated_dir: Path, backends: list[dict[str, str]],
+                                   variants: list[dict[str, object]]) -> None:
     path = generated_dir / "CKFFSpecializedModuleTable.generated.h"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
         f.write("// Auto-generated by compile_shaders.py - DO NOT EDIT\n")
         f.write("#pragma once\n\n")
-        f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
-        f.write("static const std::size_t g_CKFFSpecializedModuleCount = 0;\n")
+        if not variants:
+            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
+            f.write("static const std::size_t g_CKFFSpecializedModuleCount = 0;\n")
+            return
+
+        for backend in backends:
+            backend_name = backend["name"]
+            f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_3d.bin.h\"\n")
+            f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_positiont.bin.h\"\n")
+            for variant in variants:
+                ident = variant["identifier"]
+                f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
+        f.write("\n")
+
+        for variant in variants:
+            write_specialized_key_function(f, variant)
+            write_specialized_spec_function(f, variant)
+        for backend in backends:
+            for variant in variants:
+                write_specialized_module_function(f, backend, variant)
+
+        f.write("static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {\n")
+        for backend in backends:
+            for variant in variants:
+                ident = variant["identifier"]
+                f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, CKFFSpecializedKey_{ident}(), "
+                        f"CKFFSpecializedModule_{backend['name']}_{ident}() }},\n")
+        f.write("};\n\n")
+        f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;\n")
+        f.write("static const std::size_t g_CKFFSpecializedModuleCount = "
+                "sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);\n")
 
 
 def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object]]:
@@ -202,13 +383,21 @@ def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object
         if not isinstance(variant, dict):
             raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}] must be an object")
 
-    if variants:
-        raise NotImplementedError(
-            "FFP specialized variant manifest entries are declared, but module generation "
-            "is not implemented yet."
-        )
+    return [normalize_specialized_variant(variant, index)
+            for index, variant in enumerate(variants)]
 
-    return variants
+
+def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
+                                 tmp_dir: Path, backends: list[dict[str, str]],
+                                 variants: list[dict[str, object]]) -> None:
+    for backend in backends:
+        for variant in variants:
+            ident = variant["identifier"]
+            bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin"
+            bin_path.parent.mkdir(parents=True, exist_ok=True)
+            run_shaderc(shaderc, script_dir, SHADERS[2], backend, bin_path, variant["defines"])
+            header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
+            write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
 
 
 def main() -> int:
@@ -238,7 +427,8 @@ def main() -> int:
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())
-        write_specialized_module_table(generated_dir)
+        compile_specialized_variants(shaderc, script_dir, generated_dir, tmp_dir, selected, specialized_variants)
+        write_specialized_module_table(generated_dir, selected, specialized_variants)
 
     print("All shaders compiled successfully.")
     return 0

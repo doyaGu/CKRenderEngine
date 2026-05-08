@@ -62,6 +62,16 @@ CKDWORD CKFFSpecializationInfo::Get(CKFFSpecConstantId id) const {
     return (m_Data[layout.DwordOffset] & mask) >> layout.BitOffset;
 }
 
+void CKFFSpecializationInfo::SetDwords(const CKDWORD *data, CKDWORD count) {
+    memset(m_Data, 0, sizeof(m_Data));
+    if (!data)
+        return;
+
+    if (count > MaxSpecDwords)
+        count = MaxSpecDwords;
+    memcpy(m_Data, data, sizeof(CKDWORD) * count);
+}
+
 void CKFFSpecializationInfo::SetOptimized(bool optimized) {
     m_Data[0] = optimized ? 1u : 0u;
 }
