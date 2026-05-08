@@ -1332,7 +1332,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               moduleSource.find("CKFFSpecializedModuleTable.generated.h") != std::string::npos &&
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
               generatedTable.find("CKFFSpecializedKey_variant_3d_stage0_modulate") != std::string::npos &&
+              generatedTable.find("CKFFSpecializedKey_positiont_stage0_modulate") != std::string::npos &&
               generatedTable.find("s_dx11_ffp_variant_3d_stage0_modulate_fs_ff_stage") != std::string::npos &&
+              generatedTable.find("s_dx11_ffp_positiont_stage0_modulate_fs_ff_stage") != std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
               shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
               shaderCompiler.find("ffp_specialization_dwords_from_key") != std::string::npos &&
@@ -1344,6 +1346,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"positiont_stage0_modulate\"") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
               "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
@@ -1394,7 +1397,7 @@ private:
     bool m_HadValue = false;
 };
 
-void Test_FFPShaderCache_FullSpecializedVariantHit() {
+void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
@@ -1413,7 +1416,10 @@ void Test_FFPShaderCache_FullSpecializedVariantHit() {
     fs.SetStageResultIsTemp(0, false);
 
     CKFFShaderKey key;
-    key.VS = CKFFShaderKeyVS();
+    CKFFVSStateDesc vs;
+    vs.SetHasPosition(!positionT);
+    vs.SetHasPositionT(positionT);
+    key.VS = CKFFShaderKeyVS(vs);
     key.FS = CKFFBuildShaderKeyFS(fs, 1u);
     CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
 
@@ -1434,6 +1440,14 @@ void Test_FFPShaderCache_FullSpecializedVariantHit() {
     }
 
     cache.Shutdown();
+}
+
+void Test_FFPShaderCache_FullSpecialized3DVariantHit() {
+    Test_FFPShaderCache_FullSpecializedVariantHit(false);
+}
+
+void Test_FFPShaderCache_FullSpecializedPositionTVariantHit() {
+    Test_FFPShaderCache_FullSpecializedVariantHit(true);
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
@@ -2034,7 +2048,8 @@ int main() {
     tests.Run("FFP shader key fixed-function stage rules", &Test_FFPShaderKey_UsesFixedFunctionStageRules);
     tests.Run("FFP specialization info variant layout", &Test_FFPSpecializationInfo_MatchesFFPVariantLayout);
     tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
-    tests.Run("FFP shader cache full specialized variant hit", &Test_FFPShaderCache_FullSpecializedVariantHit);
+    tests.Run("FFP shader cache full specialized 3D variant hit", &Test_FFPShaderCache_FullSpecialized3DVariantHit);
+    tests.Run("FFP shader cache full specialized PositionT variant hit", &Test_FFPShaderCache_FullSpecializedPositionTVariantHit);
     tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP shader cache variant key dump opt-in", &Test_FFPShaderCache_VariantKeyDumpIsOptIn);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
