@@ -2823,6 +2823,36 @@ void Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives() {
               "CKFFStageState must be an internal RenderEngine build input used by the FFP pipeline");
 }
 
+void Test_FFPUniformStateHelpers_AreCentralized() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string header = ReadRenderEngineSource("src/CKFFUniformState.h");
+    std::string source = ReadRenderEngineSource("src/CKFFUniformState.cpp");
+    std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
+
+    TestCheck(pipeline.find("static float ReadFloatRenderState") == std::string::npos &&
+              pipeline.find("static CKDWORD ResolveMaterialSource") == std::string::npos &&
+              pipeline.find("static float EncodeShaderLightType") == std::string::npos,
+              "FFP pipeline must not keep uniform or material-source helper functions inline");
+    TestCheck(header.find("CKFFReadFloatRenderState") != std::string::npos &&
+              header.find("CKFFPackColorARGB") != std::string::npos &&
+              header.find("CKFFResolveMaterialSource") != std::string::npos &&
+              header.find("CKFFEncodeShaderLightType") != std::string::npos,
+              "CKFFUniformState must expose internal helpers for FFP uniform and state packing");
+    TestCheck(source.find("memcpy(&value, &bits, sizeof(value))") != std::string::npos &&
+              source.find("ColorGetRed") != std::string::npos &&
+              source.find("ColorGetGreen") != std::string::npos &&
+              source.find("ColorGetBlue") != std::string::npos &&
+              source.find("ColorGetAlpha") != std::string::npos,
+              "CKFFUniformState must keep render-state float decoding and use existing VxColor channel helpers");
+    TestCheck(pipeline.find("CKFFPackColorARGB(ambientColor") != std::string::npos &&
+              pipeline.find("CKFFPackColorARGB(fogColor") != std::string::npos &&
+              pipeline.find("CKFFPackColorARGB(tf") != std::string::npos,
+              "FFP uniform upload must use centralized color packing for ambient, fog, and texture factor colors");
+    TestCheck(cmake.find("CKFFUniformState.h") != std::string::npos &&
+              cmake.find("CKFFUniformState.cpp") != std::string::npos,
+              "CKFFUniformState must be part of the RenderEngine internal build inputs");
+}
+
 void Test_DebugLogger_HasGlobalOutputDisableOption() {
     std::string header = ReadRenderEngineSource("src/CKDebugLogger.h");
     std::string source = ReadRenderEngineSource("src/CKDebugLogger.cpp");
@@ -2988,6 +3018,7 @@ int main() {
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
+    tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);
     tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();
 }

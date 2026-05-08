@@ -1,36 +1,9 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKRasterizer.h"
+#include "CKFFUniformState.h"
 
 #include <cmath>
 #include <cstring>
-
-static float ReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback) {
-    CKDWORD bits = cache.GetRenderState(state);
-    if (bits == 0)
-        return fallback;
-
-    float value = fallback;
-    memcpy(&value, &bits, sizeof(value));
-    return value;
-}
-
-static CKDWORD ResolveMaterialSource(CKBOOL lighting, CKBOOL colorVertex, CKBOOL fromVertex,
-                                     CKDWORD dpFlags, CKDWORD streamFlag,
-                                     CKFFMaterialSource vertexSource) {
-    (void)lighting;
-    if (!colorVertex || !fromVertex || ((dpFlags & streamFlag) == 0))
-        return CKFF_MS_MATERIAL;
-    return vertexSource;
-}
-
-static float EncodeShaderLightType(VXLIGHT_TYPE type) {
-    switch (type) {
-    case VX_LIGHTDIREC: return 0.0f;
-    case VX_LIGHTSPOT:  return 2.0f;
-    case VX_LIGHTPOINT:
-    default:            return 1.0f;
-    }
-}
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
@@ -319,7 +292,7 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
     dst.Position[0] = light->Position.x;
     dst.Position[1] = light->Position.y;
     dst.Position[2] = light->Position.z;
-    dst.Position[3] = EncodeShaderLightType(light->Type);
+    dst.Position[3] = CKFFEncodeShaderLightType(light->Type);
 
     dst.Direction[0] = light->Direction.x;
     dst.Direction[1] = light->Direction.y;
@@ -417,13 +390,13 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
     CKFFPointSpriteParams pointParams;
-    pointParams.Size = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
-    pointParams.MinSize = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
-    pointParams.MaxSize = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
+    pointParams.Size = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
+    pointParams.MinSize = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
+    pointParams.MaxSize = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
     pointParams.ScaleEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE);
-    pointParams.ScaleA = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_A, 1.0f);
-    pointParams.ScaleB = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_B, 0.0f);
-    pointParams.ScaleC = ReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
+    pointParams.ScaleA = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_A, 1.0f);
+    pointParams.ScaleB = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_B, 0.0f);
+    pointParams.ScaleC = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
     pointParams.World = m_World;
     pointParams.View = m_View;
     if (!m_TransientGeometry.Prepare(
@@ -641,19 +614,19 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     stateDesc.VS.SetVertexBlendCount(vertexBlend.Count);
 
     const CKBOOL colorVertex = m_DrawStateCache.GetRenderState(VXRENDERSTATE_COLORVERTEX);
-    const CKDWORD diffuseSource = ResolveMaterialSource(
+    const CKDWORD diffuseSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
-    const CKDWORD ambientSource = ResolveMaterialSource(
+    const CKDWORD ambientSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENTFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
-    const CKDWORD specularSource = ResolveMaterialSource(
+    const CKDWORD specularSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARFROMVERTEX),
         dpFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
-    const CKDWORD emissiveSource = ResolveMaterialSource(
+    const CKDWORD emissiveSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX),
         dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
@@ -782,11 +755,13 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     // Light params: x=count, y/z/w = global ambient RGB
     CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
+    float ambientColorF[4];
+    CKFFPackColorARGB(ambientColor, ambientColorF);
     float lightParams[4];
     lightParams[0] = m_CurrentLightingEnabled ? (float)packed : -1.0f;
-    lightParams[1] = ((ambientColor >> 16) & 0xFF) / 255.0f;
-    lightParams[2] = ((ambientColor >> 8) & 0xFF) / 255.0f;
-    lightParams[3] = (ambientColor & 0xFF) / 255.0f;
+    lightParams[1] = ambientColorF[0];
+    lightParams[2] = ambientColorF[1];
+    lightParams[3] = ambientColorF[2];
     encoder->SetUniform(u.u_lightParams, lightParams, 1);
 
     encoder->SetUniform(u.u_material, &m_Material, 5);
@@ -800,12 +775,9 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     encoder->SetUniform(u.u_lightModelParams, lightModelParams, 1);
 
     float fogParams[4];
-    CKDWORD fs = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGSTART);
-    CKDWORD fe = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGEND);
-    CKDWORD fd = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGDENSITY);
-    memcpy(&fogParams[0], &fs, sizeof(float));
-    memcpy(&fogParams[1], &fe, sizeof(float));
-    memcpy(&fogParams[2], &fd, sizeof(float));
+    fogParams[0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
+    fogParams[1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
+    fogParams[2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
     fogParams[3] = (m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
                     !m_DebugState.DisableFog())
         ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE)
@@ -814,18 +786,12 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
     float fogColorF[4];
-    fogColorF[0] = ((fogColor >> 16) & 0xFF) / 255.0f;
-    fogColorF[1] = ((fogColor >> 8) & 0xFF) / 255.0f;
-    fogColorF[2] = (fogColor & 0xFF) / 255.0f;
-    fogColorF[3] = ((fogColor >> 24) & 0xFF) / 255.0f;
+    CKFFPackColorARGB(fogColor, fogColorF);
     encoder->SetUniform(u.u_fogColor, fogColorF, 1);
 
     CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
     float texFactor[4];
-    texFactor[0] = ((tf >> 16) & 0xFF) / 255.0f;
-    texFactor[1] = ((tf >> 8) & 0xFF) / 255.0f;
-    texFactor[2] = (tf & 0xFF) / 255.0f;
-    texFactor[3] = ((tf >> 24) & 0xFF) / 255.0f;
+    CKFFPackColorARGB(tf, texFactor);
     encoder->SetUniform(u.u_texFactor, texFactor, 1);
 
     float alphaParams[4];
