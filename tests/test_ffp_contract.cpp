@@ -1551,6 +1551,9 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
               ctx.CreatedShaderCount == 0 &&
               ctx.CreatedProgramCount == 0,
               "Full-specialized cache miss must fail explicitly without falling back to the uber shader or caching a null variant");
+    TestCheck(ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("projectedMask=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("specDword4=%u specDword5=%u specDword6=%u") != std::string::npos,
+              "Full-specialized cache miss diagnostics must include compact key and specialization fields for manifest growth");
 
     cache.Shutdown();
 }

@@ -363,8 +363,16 @@ CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) 
             module.Specialization);
     }
 
+    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     CK_LOG_FMT("ShaderCache",
-               "Full FFP specialized module cache miss: no generated module table is available for CK2_FFP_UBERSHADER=0");
+               "Full FFP specialized module cache miss: backend=%s positionT=%u vsBits=%llu lastStage=%u specular=%u projectedMask=%u specDword4=%u specDword5=%u specDword6=%u",
+               m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
+               key.VS.GetHasPositionT() ? 1u : 0u,
+               (unsigned long long)key.VS.Bits,
+               key.FS.LastActiveTextureStage,
+               key.FS.GlobalSpecularEnable ? 1u : 0u,
+               specInfo.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK),
+               specInfo.Data()[4], specInfo.Data()[5], specInfo.Data()[6]);
     return 0;
 }
 
