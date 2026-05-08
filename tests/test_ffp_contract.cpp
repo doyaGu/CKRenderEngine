@@ -413,11 +413,12 @@ void Test_UserClipPlane_IsConsumedByFFPShaderPath() {
               "SetUserClipPlane must store planes and forward them to the FFP path");
 
     std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string uniformState = ReadRenderEngineSource("src/CKFFUniformState.cpp");
     TestCheck(ffp.find("VXRENDERSTATE_CLIPPLANEENABLE") != std::string::npos,
               "FFP uniform upload must consume VXRENDERSTATE_CLIPPLANEENABLE");
-    TestCheck(ffp.find("clipCount = 0") != std::string::npos &&
-              ffp.find("clipPlanes[clipCount][0]") != std::string::npos &&
-              ffp.find("float clipParams[4] = {(float)clipCount") != std::string::npos,
+    TestCheck(uniformState.find("int clipCount = 0") != std::string::npos &&
+              uniformState.find("outClip.Planes[clipCount][0]") != std::string::npos &&
+              uniformState.find("outClip.Params[0] = (float)clipCount") != std::string::npos,
               "FFP clip plane upload must compact the enabled render-state mask into packed uniforms");
     TestCheck(ffp.find("encoder->SetUniform(u.u_clipPlanes") != std::string::npos &&
               ffp.find("encoder->SetUniform(u.u_clipParams") != std::string::npos,
@@ -2101,6 +2102,7 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
     std::string constants = ReadRenderEngineSource("src/CKFFConstants.h");
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string uniformState = ReadRenderEngineSource("src/CKFFUniformState.cpp");
 
     TestCheck(shader.find("#include \"fs_ff_common.sc\"") != std::string::npos &&
               common.find("CKFFStageParams") != std::string::npos &&
@@ -2138,7 +2140,7 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
               pipeline.find("m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS)") != std::string::npos &&
-              pipeline.find("specDwords[i] >> 24") != std::string::npos &&
+              uniformState.find("specDwords[i] >> 24") != std::string::npos &&
               pipeline.find("encoder->SetUniform(u.u_ffSpec") != std::string::npos,
               "FFP uniform table must bind the current draw's variant specialization mirror as byte-exact float lanes");
 }
@@ -2853,6 +2855,30 @@ void Test_FFPUniformStateHelpers_AreCentralized() {
               "CKFFUniformState must be part of the RenderEngine internal build inputs");
 }
 
+void Test_FFPUniformPayloadPacking_IsCentralized() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string header = ReadRenderEngineSource("src/CKFFUniformState.h");
+    std::string source = ReadRenderEngineSource("src/CKFFUniformState.cpp");
+
+    TestCheck(header.find("CKFFPackStageParams") != std::string::npos &&
+              header.find("CKFFPackSpecializationDwords") != std::string::npos &&
+              header.find("CKFFPackClipPlaneUniforms") != std::string::npos,
+              "CKFFUniformState must expose helpers for FFP uniform payload array packing");
+    TestCheck(source.find("CKFFPackStageParams") != std::string::npos &&
+              source.find("CKFFResolveStageColorOp") != std::string::npos &&
+              source.find("CKFFPackSpecializationDwords") != std::string::npos &&
+              source.find("CKFFPackClipPlaneUniforms") != std::string::npos,
+              "CKFFUniformState must own stage, specialization, and clip-plane uniform packing");
+    TestCheck(pipeline.find("float stageParams[CKFF_MAX_TEXTURE_STAGES * 4][4]") == std::string::npos &&
+              pipeline.find("float ffSpec[CKFFSpecializationInfo::MaxSpecDwords][4]") == std::string::npos &&
+              pipeline.find("float clipPlanes[6][4]") == std::string::npos,
+              "FFP pipeline must not inline large uniform payload packing arrays");
+    TestCheck(pipeline.find("CKFFPackStageParams(") != std::string::npos &&
+              pipeline.find("CKFFPackSpecializationDwords(") != std::string::npos &&
+              pipeline.find("CKFFPackClipPlaneUniforms(") != std::string::npos,
+              "FFP uniform upload must delegate payload packing to CKFFUniformState");
+}
+
 void Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string stageHeader = ReadRenderEngineSource("src/CKFFStageState.h");
@@ -3043,6 +3069,7 @@ int main() {
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);
+    tests.Run("FFP uniform payload packing centralized", &Test_FFPUniformPayloadPacking_IsCentralized);
     tests.Run("FFP stage state owns sampler and active texture helpers", &Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers);
     tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();
