@@ -87,12 +87,26 @@ public:
     }
 
     FFPDiagnosticEncoder Encoder;
+    CKDWORD CreatedShaderCount = 0;
+    CKDWORD CreatedProgramCount = 0;
+    std::vector<CKDWORD> LastProgramSpecializationDwords;
 
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
     CKERROR CreateTexture(CKDWORD, CKTextureDesc *, const VxImageDescEx *) override { return CK_OK; }
-    CKERROR CreateShader(CKDWORD, CKShaderDesc *) override { return CK_OK; }
-    CKERROR CreateProgram(CKDWORD, CKProgramDesc *) override { return CK_OK; }
+    CKERROR CreateShader(CKDWORD, CKShaderDesc *) override {
+        ++CreatedShaderCount;
+        return CK_OK;
+    }
+    CKERROR CreateProgram(CKDWORD, CKProgramDesc *desc) override {
+        ++CreatedProgramCount;
+        LastProgramSpecializationDwords.clear();
+        if (desc && desc->SpecializationDwords && desc->SpecializationDwordCount > 0) {
+            const CKDWORD *begin = desc->SpecializationDwords;
+            LastProgramSpecializationDwords.assign(begin, begin + desc->SpecializationDwordCount);
+        }
+        return CK_OK;
+    }
     CKERROR CreateUniform(CKDWORD, CKUniformDesc *) override { return CK_OK; }
     CKERROR CreateVertexLayout(CKDWORD layout, CKVertexLayoutDesc *desc) override {
         CKDWORD stride = 0;
