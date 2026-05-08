@@ -47,6 +47,108 @@ void TestColorClose(const VxColor &actual, const VxColor &expected, const char *
               message);
 }
 
+float TestSaturateFloat(float value) {
+    if (value < 0.0f) return 0.0f;
+    if (value > 1.0f) return 1.0f;
+    return value;
+}
+
+VxColor TestColorSplat(float value) {
+    return VxColor(value, value, value, value);
+}
+
+VxColor TestColorComplement(const VxColor &value) {
+    return VxColor(1.0f - value.r, 1.0f - value.g, 1.0f - value.b, 1.0f - value.a);
+}
+
+VxColor TestColorMad(const VxColor &a, const VxColor &b, const VxColor &c) {
+    return VxColor(a.r * b.r + c.r, a.g * b.g + c.g, a.b * b.b + c.b, a.a * b.a + c.a);
+}
+
+VxColor TestColorMix(const VxColor &a, const VxColor &b, const VxColor &t) {
+    return VxColor(a.r + (b.r - a.r) * t.r,
+                   a.g + (b.g - a.g) * t.g,
+                   a.b + (b.b - a.b) * t.b,
+                   a.a + (b.a - a.a) * t.a);
+}
+
+VxColor TestSaturateColor(const VxColor &value) {
+    return VxColor(TestSaturateFloat(value.r),
+                   TestSaturateFloat(value.g),
+                   TestSaturateFloat(value.b),
+                   TestSaturateFloat(value.a));
+}
+
+VxColor TestEvaluateTextureOp(CKDWORD op,
+                              const VxColor &arg0,
+                              const VxColor &arg1,
+                              const VxColor &arg2,
+                              const VxColor &current,
+                              const VxColor &diffuse,
+                              const VxColor &textureColor,
+                              const VxColor &textureFactor = VxColor(0.0f, 0.0f, 0.0f, 0.0f)) {
+    switch (op) {
+    case CKRST_TOP_DISABLE:
+        return current;
+    case CKRST_TOP_SELECTARG1:
+        return arg1;
+    case CKRST_TOP_SELECTARG2:
+        return arg2;
+    case CKRST_TOP_MODULATE:
+        return arg1 * arg2;
+    case CKRST_TOP_MODULATE2X:
+        return TestSaturateColor(arg1 * arg2 * 2.0f);
+    case CKRST_TOP_MODULATE4X:
+        return TestSaturateColor(arg1 * arg2 * 4.0f);
+    case CKRST_TOP_ADD:
+        return TestSaturateColor(arg1 + arg2);
+    case CKRST_TOP_ADDSIGNED:
+        return TestSaturateColor(arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f)));
+    case CKRST_TOP_ADDSIGNED2X:
+        return TestSaturateColor((arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f))) * 2.0f);
+    case CKRST_TOP_SUBTRACT:
+        return TestSaturateColor(arg1 - arg2);
+    case CKRST_TOP_ADDSMOOTH:
+        return TestSaturateColor(TestColorMad(TestColorComplement(arg1), arg2, arg1));
+    case CKRST_TOP_BLENDDIFFUSEALPHA:
+        return TestColorMix(arg2, arg1, TestColorSplat(diffuse.a));
+    case CKRST_TOP_BLENDTEXTUREALPHA:
+        return TestColorMix(arg2, arg1, TestColorSplat(textureColor.a));
+    case CKRST_TOP_BLENDFACTORALPHA:
+        return TestColorMix(arg2, arg1, TestColorSplat(textureFactor.a));
+    case CKRST_TOP_BLENDTEXTUREALPHAPM:
+        return TestSaturateColor(TestColorMad(arg2, TestColorSplat(1.0f - textureColor.a), arg1));
+    case CKRST_TOP_BLENDCURRENTALPHA:
+        return TestColorMix(arg2, arg1, TestColorSplat(current.a));
+    case CKRST_TOP_MODULATEALPHA_ADDCOLOR:
+        return TestSaturateColor(TestColorMad(TestColorSplat(arg1.a), arg2, arg1));
+    case CKRST_TOP_MODULATECOLOR_ADDALPHA:
+        return TestSaturateColor(TestColorMad(arg1, arg2, TestColorSplat(arg1.a)));
+    case CKRST_TOP_MODULATEINVALPHA_ADDCOLOR:
+        return TestSaturateColor(TestColorMad(TestColorSplat(1.0f - arg1.a), arg2, arg1));
+    case CKRST_TOP_MODULATEINVCOLOR_ADDALPHA:
+        return TestSaturateColor(TestColorMad(TestColorComplement(arg1), arg2, TestColorSplat(arg1.a)));
+    case CKRST_TOP_BUMPENVMAP:
+    case CKRST_TOP_BUMPENVMAPLUMINANCE:
+        return current;
+    case CKRST_TOP_PREMODULATE:
+        return arg1 * arg2;
+    case CKRST_TOP_DOTPRODUCT3: {
+        const float dot =
+            (arg1.r - 0.5f) * (arg2.r - 0.5f) +
+            (arg1.g - 0.5f) * (arg2.g - 0.5f) +
+            (arg1.b - 0.5f) * (arg2.b - 0.5f);
+        return TestColorSplat(TestSaturateFloat(dot * 4.0f));
+    }
+    case CKRST_TOP_MULTIPLYADD:
+        return TestSaturateColor(TestColorMad(arg1, arg2, arg0));
+    case CKRST_TOP_LERP:
+        return TestSaturateColor(TestColorMix(arg2, arg1, arg0));
+    default:
+        return current;
+    }
+}
+
 void Test_DPFlags_PretransformedTexturedColor_UsesPositionT() {
     const CKDWORD fmt = CKVertexLayoutCache::DPFlagsToFormatFlags(CKRST_DP_CL_VCT, false, true);
     TestCheck((fmt & CKFF_VF_POSITIONT) != 0, "Pre-transformed CL/VCT vertices must use POSITIONT");
@@ -1169,21 +1271,29 @@ void Test_TextureOpEvaluator_MatchesFFPFormulas() {
     const VxColor diffuse(0.60f, 0.60f, 0.60f, 0.50f);
     const VxColor texture(0.70f, 0.70f, 0.70f, 0.25f);
 
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MULTIPLYADD, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_MULTIPLYADD, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.41f, 0.70f, 0.90f, 0.375f),
                    "MULTIPLYADD must evaluate arg1 * arg2 + arg0");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_LERP, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_LERP, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.65f, 0.45f, 0.5125f, 0.4375f),
                    "LERP must evaluate arg0 * arg1 + (1 - arg0) * arg2");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MODULATEALPHA_ADDCOLOR, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_MODULATEALPHA_ADDCOLOR, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.40f, 0.525f, 0.6625f, 0.375f),
                    "MODULATEALPHA_ADDCOLOR must use arg1 alpha as the multiplier");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_MODULATEINVCOLOR_ADDALPHA, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_MODULATEINVCOLOR_ADDALPHA, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.89f, 0.55f, 0.35f, 0.625f),
                    "MODULATEINVCOLOR_ADDALPHA must complement arg1 color and add arg1 alpha");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_DOTPRODUCT3, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_DOTPRODUCT3, arg0, arg1, arg2, current, diffuse, texture),
                    VxColor(0.0f, 0.0f, 0.0f, 0.0f),
                    "DOTPRODUCT3 must replicate the saturated signed dot product");
+}
+
+void Test_TextureOpEvaluator_IsTestSideContractOnly() {
+    const std::string header = ReadRenderEngineSource("src/CKFixedFunctionPipeline.h");
+    const std::string source = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    TestCheck(header.find("CKFFEvaluateTextureOp(") == std::string::npos &&
+              source.find("CKFFEvaluateTextureOp(") == std::string::npos,
+              "Texture op CPU evaluator must remain test-side contract code, not production FFP API");
 }
 
 void Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp() {
@@ -2367,7 +2477,7 @@ void Test_FFPStateDesc_UsesD3DTextureArgBaseValues() {
 void Test_FFPStateDesc_BuildCapturesTempResultRouting() {
     std::string ffp = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     TestCheck(ffp.find("SetStageResultIsTemp(stage") != std::string::npos &&
-              ffp.find("GetStageResultArg(m_StageStates[stage])") != std::string::npos &&
+              ffp.find("CKFFResolveStageResultArg(m_StageStates[stage])") != std::string::npos &&
               ffp.find("CKRST_TA_TEMP") != std::string::npos,
               "BuildCurrentStateDesc must capture RESULTARG0 TEMP routing in the fragment state description");
 }
@@ -2382,10 +2492,10 @@ void Test_TextureOpFallback_EvaluatesAsExplicitModulate() {
 
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_FALLBACK,
               "PREMODULATE must be deliberately classified before using fallback evaluation");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_PREMODULATE, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_PREMODULATE, arg0, arg1, arg2, current, diffuse, texture),
                    arg1 * arg2,
                    "PREMODULATE fallback must be the explicit arg1 * arg2 compatibility path");
-    TestColorClose(CKFFEvaluateTextureOp(CKRST_TOP_LERP + 1, arg0, arg1, arg2, current, diffuse, texture),
+    TestColorClose(TestEvaluateTextureOp(CKRST_TOP_LERP + 1, arg0, arg1, arg2, current, diffuse, texture),
                    current,
                    "Unknown texture ops must preserve current instead of silently using the PREMODULATE fallback");
 
@@ -2515,7 +2625,7 @@ void Test_PointSprite_UsesD3DPointScaleAndCameraFacingAxes() {
 }
 
 void Test_CopyToVideo_TextureStageSnapshotsPreserveMatrices() {
-    std::string header = ReadRenderEngineSource("src/CKFixedFunctionPipeline.h");
+    std::string header = ReadRenderEngineSource("src/CKFFStageState.h");
     TestCheck(header.find("struct CKFFTextureStageSnapshot") != std::string::npos &&
               header.find("VxMatrix TextureMatrix") != std::string::npos,
               "Texture stage snapshots must preserve texture matrices as well as stage states");
@@ -2679,6 +2789,40 @@ void Test_FFPDebugLogging_IsCentralized() {
               "CKFFDebug must be part of the RenderEngine internal build inputs");
 }
 
+void Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string pipelineHeader = ReadRenderEngineSource("src/CKFixedFunctionPipeline.h");
+    std::string stageHeader = ReadRenderEngineSource("src/CKFFStageState.h");
+    std::string stageSource = ReadRenderEngineSource("src/CKFFStageState.cpp");
+    std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
+
+    TestCheck(pipeline.find("static void MulMatrix") == std::string::npos &&
+              pipeline.find("static void TransposeMatrix") == std::string::npos &&
+              pipeline.find("static float SaturateFloat") == std::string::npos &&
+              pipeline.find("static VxColor SaturateColor") == std::string::npos,
+              "FFP pipeline must use existing VxMath primitives instead of local matrix or clamp helpers");
+    TestCheck(pipeline.find("Vx3DMultiplyMatrix4(modelView") != std::string::npos &&
+              pipeline.find("Vx3DMultiplyMatrix4(viewProj") != std::string::npos &&
+              pipeline.find("Vx3DMultiplyMatrix4(modelViewProj") != std::string::npos &&
+              pipeline.find("Vx3DTransposeMatrix(normalMatrix") != std::string::npos,
+              "FFP uniform upload must use VxMath full 4x4 multiply and transpose helpers");
+    TestCheck(pipeline.find("static CKDWORD GetStageColorOp") == std::string::npos &&
+              pipeline.find("static CKDWORD GetStageAlphaOp") == std::string::npos &&
+              pipeline.find("static CKDWORD GetStageColorArg1") == std::string::npos &&
+              pipeline.find("static CKDWORD GetStageAlphaArg1") == std::string::npos,
+              "FFP pipeline must not keep texture stage state parsing helpers inline");
+    TestCheck(stageHeader.find("CKFFResolveStageColorOp") != std::string::npos &&
+              stageHeader.find("CKFFResolveStageAlphaOp") != std::string::npos &&
+              stageHeader.find("CKFFBaseTextureArg") != std::string::npos &&
+              stageSource.find("CKFFTranslateAddressMode") != std::string::npos &&
+              stageSource.find("XThreshold(result") != std::string::npos,
+              "CKFFStageState must own FFP stage helpers and use existing VxMath/XUtil clamp style");
+    TestCheck(pipelineHeader.find("#include \"CKFFStageState.h\"") != std::string::npos &&
+              cmake.find("CKFFStageState.h") != std::string::npos &&
+              cmake.find("CKFFStageState.cpp") != std::string::npos,
+              "CKFFStageState must be an internal RenderEngine build input used by the FFP pipeline");
+}
+
 void Test_DebugLogger_HasGlobalOutputDisableOption() {
     std::string header = ReadRenderEngineSource("src/CKDebugLogger.h");
     std::string source = ReadRenderEngineSource("src/CKDebugLogger.cpp");
@@ -2794,6 +2938,7 @@ int main() {
     tests.Run("Shader evaluator DOT3 matches D3D FFP", &Test_ShaderEvaluator_Dot3MatchesD3DFFP);
     tests.Run("Shader evaluator FFP stage ops", &Test_ShaderEvaluator_CoversFFPStageOps);
     tests.Run("Texture op evaluator FFP formulas", &Test_TextureOpEvaluator_MatchesFFPFormulas);
+    tests.Run("Texture op evaluator is test-side contract only", &Test_TextureOpEvaluator_IsTestSideContractOnly);
     tests.Run("Texture op coverage classifies known FFP ops", &Test_TextureOpCoverage_ClassifiesEveryKnownFFPOp);
     tests.Run("Shader semantic coverage classifies known FFP semantics", &Test_ShaderSemanticCoverage_ClassifiesKnownFFPSemantics);
     tests.Run("FFP shader key fixed-function stage rules", &Test_FFPShaderKey_UsesFixedFunctionStageRules);
@@ -2842,6 +2987,7 @@ int main() {
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
+    tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();
 }
