@@ -61,15 +61,18 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 }
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
-    : Stages{}, LastActiveTextureStage(0), AlphaFunc(0),
-      GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false) {}
+    : Stages{}, LastActiveTextureStage(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
+      GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false) {}
 
 bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
     if (LastActiveTextureStage != other.LastActiveTextureStage ||
         AlphaFunc != other.AlphaFunc ||
+        VertexFogMode != other.VertexFogMode ||
+        PixelFogMode != other.PixelFogMode ||
         GlobalSpecularEnable != other.GlobalSpecularEnable ||
         AlphaTestEnable != other.AlphaTestEnable ||
-        FogEnable != other.FogEnable)
+        FogEnable != other.FogEnable ||
+        RangeFog != other.RangeFog)
         return false;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &a = Stages[stage];
@@ -100,9 +103,12 @@ std::size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, texTransformFlags);
     seed = HashCombine(seed, key.FS.LastActiveTextureStage);
     seed = HashCombine(seed, key.FS.AlphaFunc);
+    seed = HashCombine(seed, key.FS.VertexFogMode);
+    seed = HashCombine(seed, key.FS.PixelFogMode);
     seed = HashCombine(seed, key.FS.GlobalSpecularEnable ? 1u : 0u);
     seed = HashCombine(seed, key.FS.AlphaTestEnable ? 1u : 0u);
     seed = HashCombine(seed, key.FS.FogEnable ? 1u : 0u);
+    seed = HashCombine(seed, key.FS.RangeFog ? 1u : 0u);
     for (const CKFFShaderKeyFSStage &stage : key.FS.Stages) {
         seed = HashCombine(seed, stage.ColorOp);
         seed = HashCombine(seed, stage.ColorArg0);
@@ -145,6 +151,9 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     key.AlphaTestEnable = desc.GetAlphaTestEnabled();
     key.AlphaFunc = key.AlphaTestEnable ? desc.GetAlphaFunc() : 0;
     key.FogEnable = desc.GetFogEnabled();
+    key.VertexFogMode = key.FogEnable ? desc.GetVertexFogMode() : 0;
+    key.PixelFogMode = key.FogEnable ? desc.GetPixelFogMode() : 0;
+    key.RangeFog = key.FogEnable && desc.GetRangeFog();
 
     CKDWORD activeCount = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
@@ -206,6 +215,9 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, key.AlphaTestEnable ? 1u : 0u);
     info.Set(CKFF_SPEC_ALPHA_FUNC, key.AlphaFunc);
     info.Set(CKFF_SPEC_FOG_ENABLED, key.FogEnable ? 1u : 0u);
+    info.Set(CKFF_SPEC_VERTEX_FOG_MODE, key.VertexFogMode);
+    info.Set(CKFF_SPEC_PIXEL_FOG_MODE, key.PixelFogMode);
+    info.Set(CKFF_SPEC_RANGE_FOG, key.RangeFog ? 1u : 0u);
     CKDWORD projectedSamplerMask = 0;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         if (key.Stages[stage].ProjectedSampler)

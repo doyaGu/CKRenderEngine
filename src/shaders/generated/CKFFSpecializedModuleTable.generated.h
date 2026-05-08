@@ -12,7 +12,7 @@
 #include "shaders/generated/dx11/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_167b97da902254d1_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
@@ -25,7 +25,7 @@
 #include "shaders/generated/dx12/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_167b97da902254d1_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
@@ -38,7 +38,7 @@
 #include "shaders/generated/spirv/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_167b97da902254d1_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
@@ -51,7 +51,7 @@
 #include "shaders/generated/glsl/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_167b97da902254d1_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
@@ -84,9 +84,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -207,9 +210,12 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -330,9 +336,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 1u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = true;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -453,9 +462,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 5u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -576,9 +588,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 3u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -663,7 +678,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_fog() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 3584u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -699,9 +714,12 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 3u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -786,7 +804,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_positiont_stage0_modulate_fog() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 3584u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -822,9 +840,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -945,9 +966,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 26u;
     key.FS.Stages[0].ColorArg0 = 3u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1068,9 +1092,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1191,9 +1218,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1314,9 +1344,12 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.VS.TexTransformFlags[7] = 0u;
     key.FS.LastActiveTextureStage = 0u;
     key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
     key.FS.GlobalSpecularEnable = false;
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1451,8 +1484,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_2f7b829250345295_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_2f7b829250345295_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1461,8 +1494,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_f133e0400be749bf_vs_ff_positiont;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_f133e0400be749bf_vs_ff_positiont);
-    module.FSData = s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1561,8 +1594,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_2f7b829250345295_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_2f7b829250345295_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1571,8 +1604,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_f133e0400be749bf_vs_ff_positiont;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_f133e0400be749bf_vs_ff_positiont);
-    module.FSData = s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1671,8 +1704,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_2f7b829250345295_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_2f7b829250345295_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1681,8 +1714,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_positiont_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_f133e0400be749bf_vs_ff_positiont;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_f133e0400be749bf_vs_ff_positiont);
-    module.FSData = s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1781,8 +1814,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_2f7b829250345295_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_2f7b829250345295_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1791,8 +1824,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_f133e0400be749bf_vs_ff_positiont;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_f133e0400be749bf_vs_ff_positiont);
-    module.FSData = s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_167b97da902254d1_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_167b97da902254d1_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }

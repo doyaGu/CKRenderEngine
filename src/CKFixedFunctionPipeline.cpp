@@ -1059,8 +1059,13 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     if (m_DebugState.DisableFog())
         fogEnable = FALSE;
     if (fogEnable) {
-        CKDWORD fogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE);
-        stateDesc.VS.SetFogMode(fogMode);
+        CKDWORD vertexFogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE);
+        CKDWORD pixelFogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE);
+        stateDesc.VS.SetFogMode(vertexFogMode);
+        stateDesc.VS.SetRangeFog(m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
+        stateDesc.FS.SetVertexFogMode(vertexFogMode);
+        stateDesc.FS.SetPixelFogMode(pixelFogMode);
+        stateDesc.FS.SetRangeFog(m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
     }
 
     // Fragment state description mirrors the active fixed-function texture-stage contract.

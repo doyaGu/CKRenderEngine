@@ -134,6 +134,9 @@ void LogVariantManifestCandidate(CKDWORD index, const CKFFShaderKey &key)
     CK_LOG_RAW_FMT("        \"alphaTestEnable\": %s,", key.FS.AlphaTestEnable ? "true" : "false");
     CK_LOG_RAW_FMT("        \"alphaFunc\": %u,", key.FS.AlphaFunc);
     CK_LOG_RAW_FMT("        \"fogEnable\": %s,", key.FS.FogEnable ? "true" : "false");
+    CK_LOG_RAW_FMT("        \"vertexFogMode\": %u,", key.FS.VertexFogMode);
+    CK_LOG_RAW_FMT("        \"pixelFogMode\": %u,", key.FS.PixelFogMode);
+    CK_LOG_RAW_FMT("        \"rangeFog\": %s,", key.FS.RangeFog ? "true" : "false");
     CK_LOG_RAW("        \"stages\": [");
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         LogVariantManifestStage(stage, key.FS.Stages[stage]);

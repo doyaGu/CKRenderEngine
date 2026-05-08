@@ -3,6 +3,7 @@ $input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v
 #include "bgfx_shader.sh"
 
 uniform vec4 u_fogColor;
+uniform vec4 u_fogParams;
 uniform vec4 u_alphaParams;
 uniform vec4 u_texFactor;
 uniform vec4 u_bumpEnv[2];
@@ -39,6 +40,18 @@ vec2 getSampleCoord(vec4 coord, int transformFlags)
 {
     if ((transformFlags & 0x100) == 0) return coord.xy;
     return coord.xy / max(abs(coord.w), 0.0001);
+}
+
+float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
+{
+    if (mode == 0) return vertexFogFactor;
+    if (mode == 1) {
+        float denom = max(u_fogParams.y - u_fogParams.x, 0.0001);
+        return clamp((u_fogParams.y - depth) / denom, 0.0, 1.0);
+    }
+    if (mode == 2) return clamp(exp(-(u_fogParams.z * depth)), 0.0, 1.0);
+    float e = u_fogParams.z * depth;
+    return clamp(exp(-(e * e)), 0.0, 1.0);
 }
 
 vec4 applyArgModifiers(vec4 value, int arg)
@@ -199,7 +212,9 @@ void main()
     }
     bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
     if (fogEnabled) {
-        current.rgb = mix(u_fogColor.rgb, current.rgb, v_texcoord7Fog.z);
+        int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_alphaParams.w);
+        float fogFactor = computePixelFogFactor(abs(v_clipPos.z), pixelFogMode, v_texcoord7Fog.z);
+        current.rgb = mix(u_fogColor.rgb, current.rgb, fogFactor);
     }
     gl_FragColor = clamp(current, 0.0, 1.0);
 }
