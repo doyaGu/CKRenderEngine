@@ -59,6 +59,30 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_TEXGEN7
 #define CKFF_VS_TEXGEN7 0
 #endif
+#ifndef CKFF_VS_TEXCOORD0
+#define CKFF_VS_TEXCOORD0 0
+#endif
+#ifndef CKFF_VS_TEXCOORD1
+#define CKFF_VS_TEXCOORD1 1
+#endif
+#ifndef CKFF_VS_TEXCOORD2
+#define CKFF_VS_TEXCOORD2 2
+#endif
+#ifndef CKFF_VS_TEXCOORD3
+#define CKFF_VS_TEXCOORD3 3
+#endif
+#ifndef CKFF_VS_TEXCOORD4
+#define CKFF_VS_TEXCOORD4 4
+#endif
+#ifndef CKFF_VS_TEXCOORD5
+#define CKFF_VS_TEXCOORD5 5
+#endif
+#ifndef CKFF_VS_TEXCOORD6
+#define CKFF_VS_TEXCOORD6 6
+#endif
+#ifndef CKFF_VS_TEXCOORD7
+#define CKFF_VS_TEXCOORD7 7
+#endif
 #endif
 
 int ckffVsTexGenMode(int stage, int packedIndex)
@@ -75,6 +99,22 @@ int ckffVsTexGenMode(int stage, int packedIndex)
     return 0;
 #else
     return packedIndex / 65536;
+#endif
+}
+
+int ckffVsTexcoordIndex(int stage, int packedIndex)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return CKFF_VS_TEXCOORD0;
+    if (stage == 1) return CKFF_VS_TEXCOORD1;
+    if (stage == 2) return CKFF_VS_TEXCOORD2;
+    if (stage == 3) return CKFF_VS_TEXCOORD3;
+    if (stage == 4) return CKFF_VS_TEXCOORD4;
+    if (stage == 5) return CKFF_VS_TEXCOORD5;
+    if (stage == 6) return CKFF_VS_TEXCOORD6;
+    return CKFF_VS_TEXCOORD7;
+#else
+    return packedIndex & 7;
 #endif
 }
 
@@ -153,7 +193,7 @@ vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4,
 vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
 {
     int generation = ckffVsTexGenMode(stage, packedIndex);
-    int index = packedIndex & 65535;
+    int index = ckffVsTexcoordIndex(stage, packedIndex);
     if (generation == 1) return vec4(viewNormal, 1.0);
     if (generation == 2) return vec4(viewPos, 1.0);
     if (generation == 3) {

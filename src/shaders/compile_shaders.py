@@ -143,6 +143,8 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
     ]
     for index, value in enumerate(key["vsTexGen"]):
         defines.append(f"CKFF_VS_TEXGEN{index}={value}")
+    for index, value in enumerate(key["vsTexCoordIndex"]):
+        defines.append(f"CKFF_VS_TEXCOORD{index}={value}")
     return defines
 
 
@@ -163,6 +165,7 @@ def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
         "vs": vs,
         "vsBits": key["vsBits"],
         "vsTexGen": key["vsTexGen"],
+        "vsTexCoordIndex": key["vsTexCoordIndex"],
     }, sort_keys=True, separators=(",", ":")).encode("ascii")
     return "vsspec_" + hashlib.sha1(payload).hexdigest()[:16]
 
@@ -255,6 +258,9 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     tex_gen = key.get("vsTexGen")
     if not isinstance(tex_gen, list) or len(tex_gen) != 8:
         raise ValueError(f"{field}.vsTexGen must contain exactly 8 uint32 values")
+    tex_coord_index = key.get("vsTexCoordIndex", [0, 1, 2, 3, 4, 5, 6, 7])
+    if not isinstance(tex_coord_index, list) or len(tex_coord_index) != 8:
+        raise ValueError(f"{field}.vsTexCoordIndex must contain exactly 8 uint32 values")
 
     stages = key.get("stages")
     if not isinstance(stages, list) or len(stages) > 8:
@@ -275,6 +281,8 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
         "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
         "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
                      for index, value in enumerate(tex_gen)],
+        "vsTexCoordIndex": [read_uint32(value, f"{field}.vsTexCoordIndex[{index}]") & 7
+                            for index, value in enumerate(tex_coord_index)],
         "lastActiveTextureStage": read_uint32(key.get("lastActiveTextureStage"),
                                               f"{field}.lastActiveTextureStage"),
         "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
@@ -408,6 +416,8 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"    key.VS.Bits = {key['vsBits']}ull;\n")
     for index, value in enumerate(key["vsTexGen"]):
         f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
+    for index, value in enumerate(key["vsTexCoordIndex"]):
+        f.write(f"    key.VS.TexCoordIndex[{index}] = {value}u;\n")
     f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
     f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
     f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")

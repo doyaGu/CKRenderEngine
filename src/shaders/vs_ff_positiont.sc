@@ -11,6 +11,30 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_FOG_MODE
 #define CKFF_VS_FOG_MODE 0
 #endif
+#ifndef CKFF_VS_TEXCOORD0
+#define CKFF_VS_TEXCOORD0 0
+#endif
+#ifndef CKFF_VS_TEXCOORD1
+#define CKFF_VS_TEXCOORD1 1
+#endif
+#ifndef CKFF_VS_TEXCOORD2
+#define CKFF_VS_TEXCOORD2 2
+#endif
+#ifndef CKFF_VS_TEXCOORD3
+#define CKFF_VS_TEXCOORD3 3
+#endif
+#ifndef CKFF_VS_TEXCOORD4
+#define CKFF_VS_TEXCOORD4 4
+#endif
+#ifndef CKFF_VS_TEXCOORD5
+#define CKFF_VS_TEXCOORD5 5
+#endif
+#ifndef CKFF_VS_TEXCOORD6
+#define CKFF_VS_TEXCOORD6 6
+#endif
+#ifndef CKFF_VS_TEXCOORD7
+#define CKFF_VS_TEXCOORD7 7
+#endif
 #endif
 
 bool ckffVsFogEnabled(float runtimeMode)
@@ -19,6 +43,22 @@ bool ckffVsFogEnabled(float runtimeMode)
     return CKFF_VS_FOG_MODE != 0;
 #else
     return runtimeMode > 0.5;
+#endif
+}
+
+int ckffVsTexcoordIndex(int stage, int packedIndex)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return CKFF_VS_TEXCOORD0;
+    if (stage == 1) return CKFF_VS_TEXCOORD1;
+    if (stage == 2) return CKFF_VS_TEXCOORD2;
+    if (stage == 3) return CKFF_VS_TEXCOORD3;
+    if (stage == 4) return CKFF_VS_TEXCOORD4;
+    if (stage == 5) return CKFF_VS_TEXCOORD5;
+    if (stage == 6) return CKFF_VS_TEXCOORD6;
+    return CKFF_VS_TEXCOORD7;
+#else
+    return packedIndex & 7;
 #endif
 }
 
@@ -46,14 +86,14 @@ void main()
 
     v_color0 = a_color0;
     v_color1 = a_color1;
-    int tc0 = int(u_stageParams[0 * 4 + 2].y) & 7;
-    int tc1 = int(u_stageParams[1 * 4 + 2].y) & 7;
-    int tc2 = int(u_stageParams[2 * 4 + 2].y) & 7;
-    int tc3 = int(u_stageParams[3 * 4 + 2].y) & 7;
-    int tc4 = int(u_stageParams[4 * 4 + 2].y) & 7;
-    int tc5 = int(u_stageParams[5 * 4 + 2].y) & 7;
-    int tc6 = int(u_stageParams[6 * 4 + 2].y) & 7;
-    int tc7 = int(u_stageParams[7 * 4 + 2].y) & 7;
+    int tc0 = ckffVsTexcoordIndex(0, int(u_stageParams[0 * 4 + 2].y));
+    int tc1 = ckffVsTexcoordIndex(1, int(u_stageParams[1 * 4 + 2].y));
+    int tc2 = ckffVsTexcoordIndex(2, int(u_stageParams[2 * 4 + 2].y));
+    int tc3 = ckffVsTexcoordIndex(3, int(u_stageParams[3 * 4 + 2].y));
+    int tc4 = ckffVsTexcoordIndex(4, int(u_stageParams[4 * 4 + 2].y));
+    int tc5 = ckffVsTexcoordIndex(5, int(u_stageParams[5 * 4 + 2].y));
+    int tc6 = ckffVsTexcoordIndex(6, int(u_stageParams[6 * 4 + 2].y));
+    int tc7 = ckffVsTexcoordIndex(7, int(u_stageParams[7 * 4 + 2].y));
     v_texcoord0 = selectTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord1 = selectTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord2 = selectTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
