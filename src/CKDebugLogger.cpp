@@ -9,13 +9,30 @@
 #endif
 #include <Windows.h>
 
+#ifndef CKRE_DEBUG_OUTPUT_DEFAULT
+#define CKRE_DEBUG_OUTPUT_DEFAULT 1
+#endif
+
+static bool EnvDebugOutputEnabled() {
+    const char *value = getenv("CK2_3D_DEBUG_OUTPUT");
+    if (!value || !*value)
+        return CKRE_DEBUG_OUTPUT_DEFAULT != 0;
+    return value[0] != '0' &&
+           _stricmp(value, "false") != 0 &&
+           _stricmp(value, "off") != 0 &&
+           _stricmp(value, "no") != 0;
+}
+
 CKDebugLogger &CKDebugLogger::Instance() {
     static CKDebugLogger instance;
     return instance;
 }
 
 CKDebugLogger::CKDebugLogger()
-    : m_DebuggerEnabled(true), m_FileEnabled(true), m_File(nullptr) {
+    : m_OutputEnabled(EnvDebugOutputEnabled()),
+      m_DebuggerEnabled(true),
+      m_FileEnabled(true),
+      m_File(nullptr) {
     InitializeCriticalSection(&m_CriticalSection);
     m_LogFilePath[0] = '\0';
 
@@ -56,6 +73,16 @@ CKDebugLogger::~CKDebugLogger() {
     DeleteCriticalSection(&m_CriticalSection);
 }
 
+void CKDebugLogger::EnableOutput(bool enable) {
+    EnterCriticalSection(&m_CriticalSection);
+    m_OutputEnabled = enable;
+    if (!m_OutputEnabled && m_File) {
+        fclose(m_File);
+        m_File = nullptr;
+    }
+    LeaveCriticalSection(&m_CriticalSection);
+}
+
 void CKDebugLogger::EnableDebuggerOutput(bool enable) {
     EnterCriticalSection(&m_CriticalSection);
     m_DebuggerEnabled = enable;
@@ -92,6 +119,11 @@ void CKDebugLogger::Log(const char *msg) {
     }
 
     EnterCriticalSection(&m_CriticalSection);
+
+    if (!m_OutputEnabled) {
+        LeaveCriticalSection(&m_CriticalSection);
+        return;
+    }
 
     if (m_DebuggerEnabled) {
         OutputDebugStringA(msg);
