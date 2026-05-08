@@ -151,6 +151,7 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_specialized_variants.json
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 
