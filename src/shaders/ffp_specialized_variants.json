@@ -120,7 +120,33 @@
       "name": "3d_stage0_modulate_fog",
       "vs": "3d",
       "key": {
-        "vsBits": 1,
+        "vsBits": 6291457,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": true,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "positiont_stage0_modulate_fog",
+      "vs": "positiont",
+      "key": {
+        "vsBits": 6295552,
         "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
         "lastActiveTextureStage": 0,
         "globalSpecularEnable": false,

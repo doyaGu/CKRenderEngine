@@ -32,6 +32,9 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_EMISSIVE_SOURCE
 #define CKFF_VS_EMISSIVE_SOURCE 0
 #endif
+#ifndef CKFF_VS_FOG_MODE
+#define CKFF_VS_FOG_MODE 0
+#endif
 #ifndef CKFF_VS_TEXGEN0
 #define CKFF_VS_TEXGEN0 0
 #endif
@@ -106,12 +109,21 @@ int ckffVsMaterialSource(int slot, float runtimeSource)
 #endif
 }
 
+int ckffVsFogMode(float runtimeMode)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return CKFF_VS_FOG_MODE;
+#else
+    return int(runtimeMode + 0.5);
+#endif
+}
+
 float computeFog(float depth, vec4 params)
 {
-    float mode = params.w;
-    if (mode < 0.5) return 1.0;
-    if (mode < 1.5) return clamp(exp(-(params.z * depth)), 0.0, 1.0);
-    if (mode < 2.5) {
+    int mode = ckffVsFogMode(params.w);
+    if (mode == 0) return 1.0;
+    if (mode == 1) return clamp(exp(-(params.z * depth)), 0.0, 1.0);
+    if (mode == 2) {
         float e = params.z * depth;
         return clamp(exp(-(e * e)), 0.0, 1.0);
     }

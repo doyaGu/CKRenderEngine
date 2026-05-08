@@ -7,6 +7,21 @@ uniform vec4 u_viewport;
 uniform vec4 u_fogParams;
 uniform vec4 u_stageParams[32];
 
+#if defined(CKFF_FULL_SPECIALIZED)
+#ifndef CKFF_VS_FOG_MODE
+#define CKFF_VS_FOG_MODE 0
+#endif
+#endif
+
+bool ckffVsFogEnabled(float runtimeMode)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return CKFF_VS_FOG_MODE != 0;
+#else
+    return runtimeMode > 0.5;
+#endif
+}
+
 vec4 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
 {
     vec2 uv = tc0;
@@ -46,7 +61,7 @@ void main()
     v_texcoord4 = selectTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord5 = selectTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord6 = selectTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
-    float fogFactor = u_fogParams.w > 0.5 ? a_color1.a : 1.0;
+    float fogFactor = ckffVsFogEnabled(u_fogParams.w) ? a_color1.a : 1.0;
     v_texcoord7Fog = selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7);
     v_texcoord7Fog.z = fogFactor;
 }

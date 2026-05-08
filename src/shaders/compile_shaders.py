@@ -139,6 +139,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
         f"CKFF_VS_AMBIENT_SOURCE={(vs_bits >> 27) & 3}",
         f"CKFF_VS_SPECULAR_SOURCE={(vs_bits >> 29) & 3}",
         f"CKFF_VS_EMISSIVE_SOURCE={(vs_bits >> 31) & 3}",
+        f"CKFF_VS_FOG_MODE={(vs_bits >> 21) & 3}",
     ]
     for index, value in enumerate(key["vsTexGen"]):
         defines.append(f"CKFF_VS_TEXGEN{index}={value}")

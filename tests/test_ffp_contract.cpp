@@ -1406,9 +1406,12 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"name\": \"3d_stage1_add_specular\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_alpha_test\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_fog\"") != std::string::npos &&
+              variantManifest.find("\"name\": \"positiont_stage0_modulate_fog\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_texgen_reflection\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_lit_one_light\"") != std::string::npos &&
               variantManifest.find("\"name\": \"3d_stage0_modulate_diffuse_color0\"") != std::string::npos &&
+              variantManifest.find("\"vsBits\": 6291457") != std::string::npos &&
+              variantManifest.find("\"vsBits\": 6295552") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaTestEnable\": true") != std::string::npos &&
@@ -1632,6 +1635,7 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
     CKFFShaderKey key;
     CKFFVSStateDesc vs;
     vs.SetHasPosition(true);
+    vs.SetFogMode(VXFOG_LINEAR);
     key.VS = CKFFShaderKeyVS(vs);
     key.FS = CKFFBuildShaderKeyFS(fs, 1u);
     CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
@@ -1645,6 +1649,45 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
     TestCheck(expectedSpec.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
               ctx.LastProgramSpecializationDwords[5] == expectedSpec.Data()[5],
               "Fog full-specialized variant must preserve fog state in specialization dword 5");
+
+    cache.Shutdown();
+}
+
+void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetFogEnabled(true);
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg0(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    CKFFVSStateDesc vs;
+    vs.SetHasPositionT(true);
+    vs.SetFogMode(VXFOG_LINEAR);
+    key.VS = CKFFShaderKeyVS(vs);
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+    CKFFSpecializationInfo expectedSpec = CKFFBuildSpecializationInfo(key.FS);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache must include a fog-enabled PositionT variant");
+    TestCheck(expectedSpec.Get(CKFF_SPEC_FOG_ENABLED) == 1 &&
+              ctx.LastProgramSpecializationDwords[5] == expectedSpec.Data()[5],
+              "PositionT fog full-specialized variant must preserve fog state in specialization dword 5");
 
     cache.Shutdown();
 }
@@ -1899,6 +1942,30 @@ void Test_FFPVertexShader_UsesSpecializedMaterialSourceKey() {
               compiler.find("(vs_bits >> 25) & 3") != std::string::npos &&
               compiler.find("(vs_bits >> 31) & 3") != std::string::npos,
               "Shader compiler must pass VS material source key fields without relying on high shader bit shifts");
+}
+
+void Test_FFPVertexShader_UsesSpecializedFogModeKey() {
+    std::string shader3D = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string shaderPositionT = ReadRenderEngineSource("src/shaders/vs_ff_positiont.sc");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+    std::string manifest = ReadRenderEngineSource("src/shaders/ffp_specialized_variants.json");
+
+    TestCheck(shader3D.find("CKFF_VS_FOG_MODE") != std::string::npos &&
+              shader3D.find("ckffVsFogMode") != std::string::npos &&
+              shader3D.find("int mode = ckffVsFogMode(params.w)") != std::string::npos,
+              "3D vertex shader must consume specialized VS fog mode instead of relying only on runtime fog params");
+    TestCheck(shaderPositionT.find("CKFF_VS_FOG_MODE") != std::string::npos &&
+              shaderPositionT.find("ckffVsFogEnabled") != std::string::npos &&
+              shaderPositionT.find("ckffVsFogEnabled(u_fogParams.w)") != std::string::npos,
+              "PositionT vertex shader must specialize fog enable so transformed color1 fog participates in variant lookup");
+    TestCheck(compiler.find("CKFF_VS_FOG_MODE") != std::string::npos &&
+              compiler.find("(vs_bits >> 21) & 3") != std::string::npos,
+              "Shader compiler must pass VS fog mode key bits into specialized VS compilation");
+    TestCheck(manifest.find("\"name\": \"3d_stage0_modulate_fog\"") != std::string::npos &&
+              manifest.find("\"name\": \"positiont_stage0_modulate_fog\"") != std::string::npos &&
+              manifest.find("\"vsBits\": 6291457") != std::string::npos &&
+              manifest.find("\"vsBits\": 6295552") != std::string::npos,
+              "Full-specialized manifest must include 3D and PositionT fog variants keyed by VS fog mode bits");
 }
 
 void Test_FFPStateDesc_FeedsExplicitVariantKey() {
@@ -2420,6 +2487,7 @@ int main() {
     tests.Run("FFP shader cache full specialized two-stage specular variant hit", &Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit);
     tests.Run("FFP shader cache full specialized alpha-test variant hit", &Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit);
     tests.Run("FFP shader cache full specialized fog variant hit", &Test_FFPShaderCache_FullSpecializedFogVariantHit);
+    tests.Run("FFP shader cache full specialized PositionT fog variant hit", &Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit);
     tests.Run("FFP shader cache full specialized texgen variant hit", &Test_FFPShaderCache_FullSpecializedTexGenVariantHit);
     tests.Run("FFP shader cache full specialized lit variant hit", &Test_FFPShaderCache_FullSpecializedLitVariantHit);
     tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
@@ -2429,6 +2497,7 @@ int main() {
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized lighting key", &Test_FFPVertexShader_UsesSpecializedLightingKey);
     tests.Run("FFP vertex shader specialized material source key", &Test_FFPVertexShader_UsesSpecializedMaterialSourceKey);
+    tests.Run("FFP vertex shader specialized fog mode key", &Test_FFPVertexShader_UsesSpecializedFogModeKey);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
     tests.Run("FFP state desc covers eight texture coordinates", &Test_FFPStateDesc_CoversEightTextureCoordinates);
