@@ -9,10 +9,11 @@
 #include "shaders/generated/dx11/specialized/vsspec_4e067edc01fb08e9_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_020d86945d9a97eb_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_4dee09728fdcc326_vs_ff_3d.bin.h"
-#include "shaders/generated/dx11/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/specialized/spec_e7318913926791b5_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_82955af1eb68bb15_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_bab05a009af632ac_vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_0d93031eece72ff9_vs_ff_3d.bin.h"
@@ -21,10 +22,11 @@
 #include "shaders/generated/dx12/specialized/vsspec_4e067edc01fb08e9_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_020d86945d9a97eb_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_4dee09728fdcc326_vs_ff_3d.bin.h"
-#include "shaders/generated/dx12/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/specialized/spec_e7318913926791b5_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_82955af1eb68bb15_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_bab05a009af632ac_vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_0d93031eece72ff9_vs_ff_3d.bin.h"
@@ -33,10 +35,11 @@
 #include "shaders/generated/spirv/specialized/vsspec_4e067edc01fb08e9_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_020d86945d9a97eb_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_4dee09728fdcc326_vs_ff_3d.bin.h"
-#include "shaders/generated/spirv/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/specialized/spec_e7318913926791b5_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_82955af1eb68bb15_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_bab05a009af632ac_vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_0d93031eece72ff9_vs_ff_3d.bin.h"
@@ -45,10 +48,11 @@
 #include "shaders/generated/glsl/specialized/vsspec_4e067edc01fb08e9_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_020d86945d9a97eb_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_4dee09728fdcc326_vs_ff_3d.bin.h"
-#include "shaders/generated/glsl/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/specialized/spec_7d2d0f43c5c08dee_fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/specialized/spec_d936791ebd717cd4_fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/specialized/spec_e7318913926791b5_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_0b77443876e5fa94_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_7a1aa219ef74f8b6_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_8f885f73a05288ca_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_3818d9487678a00a_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_89cf133bc39c0a8e_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     CKFFShaderKey key;
@@ -166,7 +170,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -288,7 +292,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_positiont_stage0_modulate() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -410,7 +414,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage1_add_specular() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 65536u, 2u, 2183267396u, 35750983u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 65536u, 2u, 2183267396u, 35750983u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -532,7 +536,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 176u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 176u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -654,7 +658,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_fog() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -776,7 +780,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_positiont_stage0_modulate_fog() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 512u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -898,7 +902,129 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFShaderKey key;
+    key.VS.Bits = 1ull;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.Stages[0].ColorOp = 26u;
+    key.FS.Stages[0].ColorArg0 = 3u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 25u;
+    key.FS.Stages[0].AlphaArg0 = 3u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[1].ColorOp = 0u;
+    key.FS.Stages[1].ColorArg0 = 0u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 0u;
+    key.FS.Stages[1].AlphaOp = 0u;
+    key.FS.Stages[1].AlphaArg0 = 0u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 0u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 3u, 3u, 0u, 0u, 0u, 36471898u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -1020,7 +1146,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -1142,7 +1268,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -1264,7 +1390,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
 }
 
 static CKFFSpecializationInfo CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0() {
-    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 0u, 0u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 35783748u, 0u, 0u, 0u };
     CKFFSpecializationInfo info;
     info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
     return info;
@@ -1274,8 +1400,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -1284,8 +1410,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_bab05a009af632ac_vs_ff_positiont;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_bab05a009af632ac_vs_ff_positiont);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -1294,8 +1420,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage1_add_sp
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_add_specular();
     return module;
 }
@@ -1304,8 +1430,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_d936791ebd717cd4_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_d936791ebd717cd4_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_8f885f73a05288ca_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_8f885f73a05288ca_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test();
     return module;
 }
@@ -1314,8 +1440,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_0d93031eece72ff9_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_0d93031eece72ff9_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1324,8 +1450,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont);
-    module.FSData = s_dx11_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1334,9 +1460,19 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
+    module.FSData = s_dx11_ffp_spec_89cf133bc39c0a8e_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_89cf133bc39c0a8e_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0();
     return module;
 }
 
@@ -1344,8 +1480,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection();
     return module;
 }
@@ -1354,8 +1490,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_020d86945d9a97eb_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_020d86945d9a97eb_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
     return module;
 }
@@ -1364,8 +1500,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_4dee09728fdcc326_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_ffp_vsspec_4dee09728fdcc326_vs_ff_3d);
-    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
@@ -1374,8 +1510,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -1384,8 +1520,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_bab05a009af632ac_vs_ff_positiont;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_bab05a009af632ac_vs_ff_positiont);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -1394,8 +1530,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage1_add_sp
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_add_specular();
     return module;
 }
@@ -1404,8 +1540,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_d936791ebd717cd4_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_d936791ebd717cd4_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_8f885f73a05288ca_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_8f885f73a05288ca_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test();
     return module;
 }
@@ -1414,8 +1550,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_0d93031eece72ff9_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_0d93031eece72ff9_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1424,8 +1560,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont);
-    module.FSData = s_dx12_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1434,9 +1570,19 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
+    module.FSData = s_dx12_ffp_spec_89cf133bc39c0a8e_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_89cf133bc39c0a8e_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0();
     return module;
 }
 
@@ -1444,8 +1590,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection();
     return module;
 }
@@ -1454,8 +1600,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_020d86945d9a97eb_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_020d86945d9a97eb_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
     return module;
 }
@@ -1464,8 +1610,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_ffp_vsspec_4dee09728fdcc326_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_ffp_vsspec_4dee09728fdcc326_vs_ff_3d);
-    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
@@ -1474,8 +1620,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -1484,8 +1630,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_positiont_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_bab05a009af632ac_vs_ff_positiont;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_bab05a009af632ac_vs_ff_positiont);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -1494,8 +1640,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage1_add_s
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_add_specular();
     return module;
 }
@@ -1504,8 +1650,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_d936791ebd717cd4_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_d936791ebd717cd4_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_8f885f73a05288ca_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_8f885f73a05288ca_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test();
     return module;
 }
@@ -1514,8 +1660,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_0d93031eece72ff9_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_0d93031eece72ff9_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1524,8 +1670,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_positiont_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont);
-    module.FSData = s_spirv_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1534,9 +1680,19 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
+    module.FSData = s_spirv_ffp_spec_89cf133bc39c0a8e_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_89cf133bc39c0a8e_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0();
     return module;
 }
 
@@ -1544,8 +1700,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection();
     return module;
 }
@@ -1554,8 +1710,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_020d86945d9a97eb_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_020d86945d9a97eb_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
     return module;
 }
@@ -1564,8 +1720,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_4dee09728fdcc326_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_ffp_vsspec_4dee09728fdcc326_vs_ff_3d);
-    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
@@ -1574,8 +1730,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -1584,8 +1740,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_bab05a009af632ac_vs_ff_positiont;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_bab05a009af632ac_vs_ff_positiont);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -1594,8 +1750,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage1_add_sp
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_7d2d0f43c5c08dee_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_7a1aa219ef74f8b6_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_add_specular();
     return module;
 }
@@ -1604,8 +1760,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_d936791ebd717cd4_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_d936791ebd717cd4_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_8f885f73a05288ca_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_8f885f73a05288ca_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test();
     return module;
 }
@@ -1614,8 +1770,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_0d93031eece72ff9_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_0d93031eece72ff9_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
     return module;
 }
@@ -1624,8 +1780,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_8efff86b8692b1b0_vs_ff_positiont);
-    module.FSData = s_glsl_ffp_spec_e7318913926791b5_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_e7318913926791b5_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_3818d9487678a00a_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
     return module;
 }
@@ -1634,9 +1790,19 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_f29164d2fef37d4a_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_82955af1eb68bb15_vs_ff_3d);
+    module.FSData = s_glsl_ffp_spec_89cf133bc39c0a8e_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_89cf133bc39c0a8e_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0();
     return module;
 }
 
@@ -1644,8 +1810,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_4e067edc01fb08e9_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection();
     return module;
 }
@@ -1654,8 +1820,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_020d86945d9a97eb_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_020d86945d9a97eb_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
     return module;
 }
@@ -1664,8 +1830,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_4dee09728fdcc326_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_ffp_vsspec_4dee09728fdcc326_vs_ff_3d);
-    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0b77443876e5fa94_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
     return module;
 }
@@ -1678,6 +1844,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_positiont_stage0_modulate_fog(), CKFFSpecializedModule_dx11_positiont_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_transform(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_texcoord_transform() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(), CKFFSpecializedModule_dx11_variant_3d_stage0_lerp_multiplyadd_arg0() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_lit_one_light() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate_diffuse_color0() },
@@ -1688,6 +1855,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_positiont_stage0_modulate_fog(), CKFFSpecializedModule_dx12_positiont_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_transform(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_texcoord_transform() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(), CKFFSpecializedModule_dx12_variant_3d_stage0_lerp_multiplyadd_arg0() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_lit_one_light() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate_diffuse_color0() },
@@ -1698,6 +1866,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_positiont_stage0_modulate_fog(), CKFFSpecializedModule_spirv_positiont_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_transform(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_texcoord_transform() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(), CKFFSpecializedModule_spirv_variant_3d_stage0_lerp_multiplyadd_arg0() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_lit_one_light() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate_diffuse_color0() },
@@ -1708,6 +1877,7 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_positiont_stage0_modulate_fog(), CKFFSpecializedModule_glsl_positiont_stage0_modulate_fog() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_transform(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_texcoord_transform() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(), CKFFSpecializedModule_glsl_variant_3d_stage0_lerp_multiplyadd_arg0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_texgen_reflection() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_lit_one_light() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate_diffuse_color0() },

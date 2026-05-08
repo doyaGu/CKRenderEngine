@@ -7,15 +7,18 @@ namespace {
 CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
     static const CKFFSpecBitfield fields[] = {
         {0, 0, 5},  // color op
+        {1, 0, 5},  // color arg0
         {0, 5, 5},  // color arg1
         {0, 10, 5}, // color arg2
         {0, 15, 5}, // alpha op
+        {2, 0, 5},  // alpha arg0
         {0, 20, 5}, // alpha arg1
         {0, 25, 5}, // alpha arg2
         {0, 30, 1}, // result is temp
     };
     CKFFSpecBitfield layout = fields[field];
-    layout.DwordOffset = 6 + stage;
+    layout.DwordOffset += (layout.DwordOffset == 0) ? 6 + stage : 0;
+    layout.BitOffset += (field == 1 || field == 5) ? stage * 5 : 0;
     return layout;
 }
 
@@ -44,8 +47,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
     }
 
     const CKDWORD index = (CKDWORD)id - (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP;
-    const CKDWORD stage = index / 7;
-    const CKDWORD field = index % 7;
+    const CKDWORD stage = index / 9;
+    const CKDWORD field = index % 9;
     if (stage < 4)
         return StageLayout(stage, field);
     return {0, 0, 0};
