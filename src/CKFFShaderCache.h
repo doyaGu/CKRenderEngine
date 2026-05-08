@@ -1,10 +1,12 @@
 #ifndef CKFFSHADERCACHE_H
 #define CKFFSHADERCACHE_H
 
-#include "CKFFStateDesc.h"
+#include "CKFFShaderKey.h"
 #include "CKFFConstants.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
+
+#include <unordered_map>
 
 class CKRasterizerContext;
 
@@ -16,36 +18,35 @@ public:
     void Init(CKRasterizerContext *ctx);
     void Shutdown();
 
-    // Select the fixed-function program for the given FFP state description.
+    // Select the fixed-function program for the given FFP shader key.
     // Returns the program handle (0 if unavailable).
-    CKDWORD GetProgram(const CKFFStateDesc &stateDesc);
+    CKDWORD GetProgram(const CKFFShaderKey &key);
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
 
-    // Get the fallback program (3D fixed-function stage shader)
-    CKDWORD GetFallbackProgram() const { return m_FallbackProgram; }
-
-    // Get specific programs
-    CKDWORD GetLitTexturedProgram() const { return m_Stage3DProgram; }
-    CKDWORD GetUnlitColorProgram() const { return m_PositionTProgram; }
+    bool UsesUberShader() const { return m_UseUberShader; }
+    size_t CachedProgramCount() const { return m_ProgramCache.size(); }
 
 private:
     CKRasterizerContext *m_Context;
     CKFFUniformHandles m_Uniforms;
-    CKDWORD m_FallbackProgram;
-    CKDWORD m_Stage3DProgram;
-    CKDWORD m_PositionTProgram;
+    CKShaderTargetDesc m_Target;
+    const void *m_BlobSet;
+    bool m_UseUberShader;
+    std::unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash> m_ProgramCache;
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;
 
     void CreateUniforms();
-    void CreatePrograms();
+    void ResolveShaderTarget();
+    CKDWORD CreateVariantProgram(const CKFFShaderKey &key);
     CKDWORD CreateProgramFromBinary(
         const CKShaderTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,
-        const unsigned char *fsData, unsigned int fsSize);
+        const unsigned char *fsData, unsigned int fsSize,
+        const CKFFSpecializationInfo &specInfo);
 
     CKDWORD AllocShaderHandle() { return m_NextShaderHandle++; }
     CKDWORD AllocProgramHandle() { return m_NextProgramHandle++; }

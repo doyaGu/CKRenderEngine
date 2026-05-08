@@ -839,7 +839,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         }
     }
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
-    CKDWORD program = m_ShaderCache.GetProgram(stateDesc);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKDWORD program = m_ShaderCache.GetProgram(shaderKey);
     if (program == 0) {
         m_DebugState.LogDrawPrimitiveProgramMissing();
         return;
@@ -931,7 +932,8 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         }
     }
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
-    CKDWORD program = m_ShaderCache.GetProgram(stateDesc);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKDWORD program = m_ShaderCache.GetProgram(shaderKey);
     if (program == 0) return;
 
     debugInfo.Program = program;
@@ -1057,9 +1059,13 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         const CKDWORD colorOp = GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
         const CKDWORD alphaOp = GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
         stateDesc.FS.SetStageColorOp(stage, colorOp);
+        stateDesc.FS.SetStageColorArg0(stage, GetStageColorArg0(m_StageStates[stage]));
         stateDesc.FS.SetStageColorArg1(stage, BaseTextureArg(GetStageColorArg1(m_StageStates[stage], hasTexture)));
         stateDesc.FS.SetStageColorArg2(stage, BaseTextureArg(GetStageColorArg2(m_StageStates[stage])));
         stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
+        stateDesc.FS.SetStageAlphaArg0(stage, GetStageAlphaArg0(m_StageStates[stage]));
+        stateDesc.FS.SetStageAlphaArg1(stage, BaseTextureArg(GetStageAlphaArg1(m_StageStates[stage], hasTexture)));
+        stateDesc.FS.SetStageAlphaArg2(stage, BaseTextureArg(GetStageAlphaArg2(m_StageStates[stage])));
         stateDesc.FS.SetStageResultIsTemp(stage, BaseTextureArg(GetStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
 
         if (colorOp == CKRST_TOP_DISABLE)
@@ -1076,6 +1082,15 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     }
 
     return stateDesc;
+}
+
+CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const {
+    CKDWORD textureBoundMask = 0;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (m_TextureHandles[stage] != 0)
+            textureBoundMask |= (1u << stage);
+    }
+    return CKFFBuildShaderKey(stateDesc, textureBoundMask);
 }
 
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
@@ -1222,6 +1237,9 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         stageParams[stage * 4 + 3][3] = 0.0f;
     }
     encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 4);
+
+    float ffSpec[CKFFSpecializationInfo::MaxSpecDwords][4] = {};
+    encoder->SetUniform(u.u_ffSpec, ffSpec, CKFFSpecializationInfo::MaxSpecDwords);
 
     float clipPlanes[6][4] = {};
     int clipCount = 0;

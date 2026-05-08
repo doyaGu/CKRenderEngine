@@ -1787,6 +1787,15 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *D
 
     auto *rec = new CKBgfxProgramRecord();
     rec->Handle = handle;
+    rec->SpecializationDwordCount = 0;
+    memset(rec->SpecializationDwords, 0, sizeof(rec->SpecializationDwords));
+    if (Desc->SpecializationDwords && Desc->SpecializationDwordCount > 0) {
+        rec->SpecializationDwordCount = Desc->SpecializationDwordCount;
+        if (rec->SpecializationDwordCount > 10)
+            rec->SpecializationDwordCount = 10;
+        memcpy(rec->SpecializationDwords, Desc->SpecializationDwords,
+               rec->SpecializationDwordCount * sizeof(CKDWORD));
+    }
 
     CKBgfxProgramRecord *&slot = EnsureSlot(m_Programs, Program);
     DestroyRecord(slot);
