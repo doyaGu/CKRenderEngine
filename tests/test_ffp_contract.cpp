@@ -1286,6 +1286,8 @@ void Test_FFPSpecializationInfo_MatchesDxvkFFPLayout() {
 void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
     std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+    std::string moduleHeader = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.h");
+    std::string moduleSource = ReadRenderEngineSource("src/CKFFSpecializedModuleTable.cpp");
     std::string rasterTypes = ReadRenderEngineSource("include/CKRasterizerTypes.h");
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
@@ -1305,8 +1307,13 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
               "FFP shader cache must expose the DXVK-style ubershader/specialization mode switch");
     TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
+              cacheSource.find("CKFFFindSpecializedModule") != std::string::npos &&
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
-              "CK2_FFP_UBERSHADER=0 must use an explicit full-specialized module path, not silently reuse the uber blob");
+              "CK2_FFP_UBERSHADER=0 must use an explicit full-specialized module lookup path, not silently reuse the uber blob");
+    TestCheck(moduleHeader.find("struct CKFFSpecializedModule") != std::string::npos &&
+              moduleHeader.find("CKFFFindSpecializedModule") != std::string::npos &&
+              moduleSource.find("return false;") != std::string::npos,
+              "Full specialized FFP modules must have an explicit generated-table boundary, even while the table is empty");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,

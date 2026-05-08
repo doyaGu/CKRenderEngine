@@ -60,6 +60,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFFDebug.h
         CKFFShaderKey.h
         CKFFSpecializationInfo.h
+        CKFFSpecializedModuleTable.h
         CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
@@ -124,6 +125,7 @@ set(CKRE_SOURCES
         CKFFDebug.cpp
         CKFFShaderKey.cpp
         CKFFSpecializationInfo.cpp
+        CKFFSpecializedModuleTable.cpp
         CKFFShaderCache.cpp
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
