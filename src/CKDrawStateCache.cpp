@@ -40,6 +40,8 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
     } else if (src == VXBLEND_BOTHINVSRCALPHA) {
         src = VXBLEND_INVSRCALPHA;
         dst = VXBLEND_SRCALPHA;
+    } else if (src == VXBLEND_ONE && dst == VXBLEND_SRCCOLOR) {
+        dst = VXBLEND_INVSRCCOLOR;
     }
 }
 

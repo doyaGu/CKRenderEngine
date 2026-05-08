@@ -35,6 +35,15 @@ static bool MeshDebugEnvEnabled(const char *name) {
     return value && value[0] != '\0' && value[0] != '0';
 }
 
+static void RestoreSceneSpecularState(RCKRenderContext *rc) {
+    if (!rc || !rc->m_RenderManager)
+        return;
+
+    rc->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_SPECULARENABLE,
+        rc->m_RenderManager->m_DisableSpecular.Value != 0 ? FALSE : TRUE);
+}
+
 static int MeshDebugEnvInt(const char *name, int defaultValue) {
     const char *value = std::getenv(name);
     if (!value || value[0] == '\0')
@@ -3957,6 +3966,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     CKDWORD zbufOnly = 0;
     CKDWORD stencilOnly = 0;
     CKBOOL renderChannels = (m_MaterialChannels.Size() > 0) && ((m_Flags & VXMESH_RENDERCHANNELS) != 0);
+
+    RestoreSceneSpecularState(rc);
 
     m_DrawFlags = CKRST_DP_DOCLIP;
 
