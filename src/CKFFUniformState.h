@@ -37,5 +37,11 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          CKFFStageParamsUniform &outParams);
 void CKFFPackSpecializationDwords(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec);
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip);
+int CKFFPackViewLights(const CKFFLightData lights[CKFF_MAX_LIGHTS],
+                       const CKBOOL lightEnabled[CKFF_MAX_LIGHTS],
+                       int activeLightCount,
+                       CKBOOL lightingEnabled,
+                       const VxMatrix &view,
+                       CKFFLightData outViewLights[CKFF_MAX_LIGHTS]);
 
 #endif // CKFFUNIFORMSTATE_H

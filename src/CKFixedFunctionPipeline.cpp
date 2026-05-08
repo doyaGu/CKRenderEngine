@@ -708,30 +708,8 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     // CKRST_DISCARD_ALL, upload the current fixed-function constants for every
     // draw instead of relying on dirty flags across submissions.
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
-    int packed = 0;
-    for (int i = 0; m_CurrentLightingEnabled && i < CKFF_MAX_LIGHTS && packed < m_ActiveLightCount; i++) {
-        if (!m_LightEnabled[i]) continue;
-
-        viewLights[packed] = m_Lights[i];
-
-        // Transform position to view space
-        VxVector pos(m_Lights[i].Position[0], m_Lights[i].Position[1], m_Lights[i].Position[2]);
-        VxVector viewPos;
-        Vx3DMultiplyMatrixVector(&viewPos, m_View, &pos);
-        viewLights[packed].Position[0] = viewPos.x;
-        viewLights[packed].Position[1] = viewPos.y;
-        viewLights[packed].Position[2] = viewPos.z;
-
-        // Transform direction to view space (rotation only)
-        VxVector dir(m_Lights[i].Direction[0], m_Lights[i].Direction[1], m_Lights[i].Direction[2]);
-        VxVector viewDir;
-        Vx3DRotateVector(&viewDir, m_View, &dir);
-        viewLights[packed].Direction[0] = viewDir.x;
-        viewLights[packed].Direction[1] = viewDir.y;
-        viewLights[packed].Direction[2] = viewDir.z;
-
-        packed++;
-    }
+    int packed = CKFFPackViewLights(m_Lights, m_LightEnabled, m_ActiveLightCount,
+                                    m_CurrentLightingEnabled ? TRUE : FALSE, m_View, viewLights);
 
     if (packed > 0) {
         encoder->SetUniform(u.u_lights, viewLights, packed * 7);
