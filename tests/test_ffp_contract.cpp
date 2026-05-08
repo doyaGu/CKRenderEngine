@@ -1361,6 +1361,11 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     TestCheck(rootCmake.find("option(CKRE_FFP_VARIANTS") != std::string::npos &&
               srcCmake.find("CKRE_FFP_VARIANTS=$<IF:$<BOOL:${CKRE_FFP_VARIANTS}>,1,0>") != std::string::npos,
               "RenderEngine CMake must expose and propagate the FFP variant clean-break option");
+    TestCheck(cacheSource.find("#ifndef CKRE_FFP_VARIANTS") != std::string::npos &&
+              cacheSource.find("#define CKRE_FFP_VARIANTS 1") != std::string::npos &&
+              cacheSource.find("#if !CKRE_FFP_VARIANTS") != std::string::npos &&
+              cacheSource.find("clean-break pure FFP variant pipeline") != std::string::npos,
+              "CKRE_FFP_VARIANTS must default on and OFF must fail explicitly instead of implying an old fixed-program fallback");
 }
 
 class ScopedEnvVar {
