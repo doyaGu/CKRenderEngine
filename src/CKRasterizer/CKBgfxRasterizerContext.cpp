@@ -2578,11 +2578,6 @@ void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
     enc->m_Active.store(FALSE, std::memory_order_release);
 }
 
-CKERROR CKBgfxRasterizerContext::Frame(CKBOOL VSync)
-{
-    return Frame(VSync ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE);
-}
-
 CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
 {
     if (!m_BgfxInitialized)

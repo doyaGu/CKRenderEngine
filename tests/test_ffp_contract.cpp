@@ -2948,6 +2948,8 @@ void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
               "Render pipeline must pass the present-sync update flag to the rasterizer context");
     TestCheck(rasterizerHeader.find("virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode)") != std::string::npos,
               "Rasterizer context must expose a frame submission path that can preserve present-vsync state");
+    TestCheck(rasterizerHeader.find("Frame(CKBOOL") == std::string::npos,
+              "Rasterizer frame submission must not expose a bool-vsync overload that collapses preserve-present mode");
     TestCheck(bgfxContext.find("SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT") != std::string::npos &&
               bgfxContext.find("SyncMode == CKRST_FRAME_SYNC_VSYNC") != std::string::npos &&
               bgfxContext.find("if (updatePresentSync && vsync != m_VSync)") != std::string::npos,

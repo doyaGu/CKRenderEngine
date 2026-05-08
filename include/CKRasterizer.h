@@ -310,8 +310,7 @@ public:
     // --- Encoder and frame ---
     virtual CKRasterizerEncoder *BeginEncoder() = 0;
     virtual void EndEncoder(CKRasterizerEncoder *Encoder) = 0;
-    virtual CKERROR Frame(CKBOOL VSync) = 0;
-    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) { return Frame(SyncMode == CKRST_FRAME_SYNC_VSYNC); }
+    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) = 0;
 
 public:
     CKRasterizerDriver *m_Driver;

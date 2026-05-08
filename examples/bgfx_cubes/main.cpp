@@ -426,7 +426,7 @@ int main()
             ctx->EndEncoder(enc);
         }
 
-        ctx->Frame(TRUE);
+        ctx->Frame(CKRST_FRAME_SYNC_VSYNC);
         frameCount++;
 
         if (frameCount % 300 == 0)

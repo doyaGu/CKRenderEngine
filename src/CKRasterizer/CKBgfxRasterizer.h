@@ -346,7 +346,6 @@ public:
     // Encoder and frame
     CKRasterizerEncoder *BeginEncoder() override;
     void EndEncoder(CKRasterizerEncoder *Encoder) override;
-    CKERROR Frame(CKBOOL VSync) override;
     CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) override;
 
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);

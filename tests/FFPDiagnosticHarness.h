@@ -183,7 +183,7 @@ public:
     CKDWORD GetAvailTransientInstanceBuffer(CKDWORD, CKDWORD) override { return 0; }
     CKRasterizerEncoder *BeginEncoder() override { return &Encoder; }
     void EndEncoder(CKRasterizerEncoder *) override {}
-    CKERROR Frame(CKBOOL) override { return CK_OK; }
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE) override { return CK_OK; }
 
 private:
     CKRenderStats m_Stats = {};
