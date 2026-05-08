@@ -2879,6 +2879,23 @@ void Test_FFPUniformPayloadPacking_IsCentralized() {
               "FFP uniform upload must delegate payload packing to CKFFUniformState");
 }
 
+void Test_FFPViewLightPacking_IsCentralizedAndUsesVxMath() {
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string header = ReadRenderEngineSource("src/CKFFUniformState.h");
+    std::string source = ReadRenderEngineSource("src/CKFFUniformState.cpp");
+
+    TestCheck(header.find("CKFFPackViewLights") != std::string::npos,
+              "CKFFUniformState must expose a helper for FFP view-space light packing");
+    TestCheck(source.find("CKFFPackViewLights") != std::string::npos &&
+              source.find("Vx3DMultiplyMatrixVector") != std::string::npos &&
+              source.find("Vx3DRotateVector") != std::string::npos,
+              "CKFFUniformState must use VxMath for light position and direction transforms");
+    TestCheck(pipeline.find("CKFFPackViewLights(") != std::string::npos &&
+              pipeline.find("Vx3DMultiplyMatrixVector(&viewPos") == std::string::npos &&
+              pipeline.find("Vx3DRotateVector(&viewDir") == std::string::npos,
+              "FFP uniform upload must delegate view-space light packing instead of inlining it");
+}
+
 void Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string stageHeader = ReadRenderEngineSource("src/CKFFStageState.h");
@@ -3070,6 +3087,7 @@ int main() {
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);
     tests.Run("FFP uniform payload packing centralized", &Test_FFPUniformPayloadPacking_IsCentralized);
+    tests.Run("FFP view light packing centralized", &Test_FFPViewLightPacking_IsCentralizedAndUsesVxMath);
     tests.Run("FFP stage state owns sampler and active texture helpers", &Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers);
     tests.Run("Debug logger global output disable option", &Test_DebugLogger_HasGlobalOutputDisableOption);
     return tests.ExitCode();

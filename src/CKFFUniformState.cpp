@@ -101,3 +101,39 @@ int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFCli
     outClip.Params[0] = (float)clipCount;
     return clipCount;
 }
+
+int CKFFPackViewLights(const CKFFLightData lights[CKFF_MAX_LIGHTS],
+                       const CKBOOL lightEnabled[CKFF_MAX_LIGHTS],
+                       int activeLightCount,
+                       CKBOOL lightingEnabled,
+                       const VxMatrix &view,
+                       CKFFLightData outViewLights[CKFF_MAX_LIGHTS]) {
+    if (!lights || !lightEnabled || !outViewLights || !lightingEnabled)
+        return 0;
+
+    int packed = 0;
+    for (int i = 0; i < CKFF_MAX_LIGHTS && packed < activeLightCount; i++) {
+        if (!lightEnabled[i])
+            continue;
+
+        outViewLights[packed] = lights[i];
+
+        VxVector pos(lights[i].Position[0], lights[i].Position[1], lights[i].Position[2]);
+        VxVector viewPos;
+        Vx3DMultiplyMatrixVector(&viewPos, view, &pos);
+        outViewLights[packed].Position[0] = viewPos.x;
+        outViewLights[packed].Position[1] = viewPos.y;
+        outViewLights[packed].Position[2] = viewPos.z;
+
+        VxVector dir(lights[i].Direction[0], lights[i].Direction[1], lights[i].Direction[2]);
+        VxVector viewDir;
+        Vx3DRotateVector(&viewDir, view, &dir);
+        outViewLights[packed].Direction[0] = viewDir.x;
+        outViewLights[packed].Direction[1] = viewDir.y;
+        outViewLights[packed].Direction[2] = viewDir.z;
+
+        packed++;
+    }
+
+    return packed;
+}
