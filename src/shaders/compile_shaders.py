@@ -168,6 +168,8 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     dwords[0] = 1
     set_spec_bits(dwords, 4, 16, 3, key["lastActiveTextureStage"])
     set_spec_bits(dwords, 6, 31, 1, 1 if key["globalSpecularEnable"] else 0)
+    set_spec_bits(dwords, 5, 4, 1, 1 if key["alphaTestEnable"] else 0)
+    set_spec_bits(dwords, 5, 5, 4, key["alphaFunc"])
     projected_sampler_mask = 0
 
     for stage_index, stage in enumerate(key["stages"][:4]):
@@ -235,6 +237,13 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
     while len(normalized_stages) < 8:
         normalized_stages.append(default_specialized_stage())
 
+    alpha_test_enable = read_bool(key.get("alphaTestEnable", False), f"{field}.alphaTestEnable")
+    alpha_func = read_uint32(key.get("alphaFunc", 0), f"{field}.alphaFunc")
+    if alpha_func > 0xf:
+        raise ValueError(f"{field}.alphaFunc must fit in 4 bits")
+    if not alpha_test_enable and alpha_func != 0:
+        raise ValueError(f"{field}.alphaFunc must be 0 when alphaTestEnable is false")
+
     return {
         "vsBits": read_uint32(key.get("vsBits"), f"{field}.vsBits"),
         "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
@@ -243,6 +252,8 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
                                               f"{field}.lastActiveTextureStage"),
         "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
                                           f"{field}.globalSpecularEnable"),
+        "alphaTestEnable": alpha_test_enable,
+        "alphaFunc": alpha_func,
         "stages": normalized_stages,
     }
 
@@ -357,7 +368,9 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     for index, value in enumerate(key["vsTexGen"]):
         f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
     f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
+    f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
     f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")
+    f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")

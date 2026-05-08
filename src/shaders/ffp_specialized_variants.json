@@ -8,6 +8,8 @@
         "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
         "lastActiveTextureStage": 0,
         "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
         "stages": [
           {
             "colorOp": 4,
@@ -31,6 +33,8 @@
         "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
         "lastActiveTextureStage": 0,
         "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
         "stages": [
           {
             "colorOp": 4,
@@ -54,6 +58,8 @@
         "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
         "lastActiveTextureStage": 1,
         "globalSpecularEnable": true,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
         "stages": [
           {
             "colorOp": 4,
@@ -77,6 +83,31 @@
             "alphaArg2": 1,
             "resultIsTemp": false,
             "projectedSampler": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "3d_stage0_modulate_alpha_test",
+      "vs": "3d",
+      "key": {
+        "vsBits": 1,
+        "vsTexGen": [0, 0, 0, 0, 0, 0, 0, 0],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": true,
+        "alphaFunc": 5,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false
           }
         ]
       }

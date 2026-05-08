@@ -36,7 +36,9 @@ struct CKFFShaderKeyFSStage {
 struct CKFFShaderKeyFS {
     CKFFShaderKeyFSStage Stages[CKFF_STATE_DESC_TEXTURE_STAGES];
     CKDWORD LastActiveTextureStage;
+    CKDWORD AlphaFunc;
     bool GlobalSpecularEnable;
+    bool AlphaTestEnable;
 
     CKFFShaderKeyFS();
 

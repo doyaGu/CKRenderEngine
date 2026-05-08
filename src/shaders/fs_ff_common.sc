@@ -101,6 +101,16 @@ int ckffSpecProjectedSamplerMask()
     return ckffSpecBits(ckffSpecDword(5), 0, 4);
 }
 
+bool ckffSpecAlphaTestEnabled()
+{
+    return ckffSpecBits(ckffSpecDword(5), 4, 1) != 0;
+}
+
+int ckffSpecAlphaFunc()
+{
+    return ckffSpecBits(ckffSpecDword(5), 5, 4);
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
