@@ -7,6 +7,7 @@ uniform vec4 u_alphaParams;
 uniform vec4 u_texFactor;
 uniform vec4 u_bumpEnv[2];
 uniform vec4 u_stageParams[32];
+uniform vec4 u_ffSpec[10];
 uniform vec4 u_clipPlanes[6];
 uniform vec4 u_clipParams;
 
@@ -18,6 +19,8 @@ SAMPLER2D(s_texture4, 4);
 SAMPLER2D(s_texture5, 5);
 SAMPLER2D(s_texture6, 6);
 SAMPLER2D(s_texture7, 7);
+
+#include "fs_ff_common.sc"
 
 vec4 getTextureColor(int stage, vec2 uv, bool hasTexture)
 {
@@ -128,9 +131,10 @@ void main()
         vec4 alphaParams = u_stageParams[stage * 4 + 1];
         vec4 colorExtra = u_stageParams[stage * 4 + 2];
         vec4 alphaExtra = u_stageParams[stage * 4 + 3];
-        int colorOp = int(colorParams.x);
-        int alphaOp = int(alphaParams.x);
-        bool hasTexture = colorParams.w > 0.5;
+        CKFFStageParams stageParams = ckffReadStageParams(stage, colorParams, alphaParams, colorExtra, alphaExtra);
+        int colorOp = stageParams.ColorOp;
+        int alphaOp = stageParams.AlphaOp;
+        bool hasTexture = stageParams.HasTexture;
 
         if (colorOp == 1) break;
 
@@ -143,7 +147,7 @@ void main()
         else if (stage == 6) stageCoord = v_texcoord6;
         else if (stage == 7) stageCoord = v_texcoord7Fog;
 
-        vec2 stageUv = getSampleCoord(stageCoord, int(colorExtra.z));
+        vec2 stageUv = getSampleCoord(stageCoord, stageParams.TexcoordTransformFlags);
 
         if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {
             vec2 bump = previousTexture.xy;
@@ -156,12 +160,12 @@ void main()
             float lum = clamp(texColor.z * u_bumpEnv[1].x + u_bumpEnv[1].y, 0.0, 1.0);
             texColor *= lum;
         }
-        vec4 colorA = getArg(int(colorParams.y), texColor, current, v_color0, v_color1, temp);
-        vec4 colorB = getArg(int(colorParams.z), texColor, current, v_color0, v_color1, temp);
-        vec4 colorC = getArg(int(colorExtra.x), texColor, current, v_color0, v_color1, temp);
-        vec4 alphaA = getArg(int(alphaParams.y), texColor, current, v_color0, v_color1, temp);
-        vec4 alphaB = getArg(int(alphaParams.z), texColor, current, v_color0, v_color1, temp);
-        vec4 alphaC = getArg(int(alphaExtra.x), texColor, current, v_color0, v_color1, temp);
+        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, v_color0, v_color1, temp);
+        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, v_color0, v_color1, temp);
+        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, v_color0, v_color1, temp);
+        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, v_color0, v_color1, temp);
+        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, v_color0, v_color1, temp);
+        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, v_color0, v_color1, temp);
 
         vec4 stageResult = current;
         vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, v_color0, texColor);
@@ -172,7 +176,7 @@ void main()
             stageResult = colorResult;
         }
 
-        int resultArg = int(alphaParams.w);
+        int resultArg = stageParams.ResultArg;
         if (resultArg == 5) {
             temp = stageResult;
         } else {
