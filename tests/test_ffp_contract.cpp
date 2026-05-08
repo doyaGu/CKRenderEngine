@@ -532,6 +532,21 @@ void Test_DrawState_FixesBothSrcAlphaBlendPair() {
     TestCheck(dst == VXBLEND_INVSRCALPHA, "BOTHSRCALPHA destination must become INVSRCALPHA");
 }
 
+void Test_DrawState_FixesLegacyScreenBlendPair() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    cache.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_ONE);
+    cache.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_SRCCOLOR);
+
+    const CKDrawState state = cache.BuildDrawState(VX_POINTLIST);
+    const CKDWORD src = (state.Lo >> 16) & 0xF;
+    const CKDWORD dst = (state.Lo >> 20) & 0xF;
+
+    TestCheck(src == VXBLEND_ONE, "ONE/SRCCOLOR source must remain ONE");
+    TestCheck(dst == VXBLEND_INVSRCCOLOR,
+              "Legacy particle screen blend must use inverse source color so black transparent texels preserve the framebuffer");
+}
+
 void Test_DrawState_InverseWindingSwapsCullDirection() {
     CKDrawStateCache cache;
     cache.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
@@ -737,6 +752,12 @@ void Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw() {
               "Material channel binding must not address stages beyond the FFP stage array");
     TestCheck(source.find("DisableTextureStagesFrom(1)") != std::string::npos,
               "Mesh rendering must clear additional mono-pass texture stages after draw");
+}
+
+void Test_Mesh_DefaultRenderRestoresSceneSpecularState() {
+    std::string source = ReadRenderEngineSource("src/CKMesh.cpp");
+    TestCheck(source.find("RestoreSceneSpecularState(rc)") != std::string::npos,
+              "Mesh default rendering must restore scene specular state before materials so callback state leaks cannot pop specular highlights");
 }
 
 void Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive() {
@@ -1128,6 +1149,7 @@ int main() {
     tests.Run("User draw primitive PositionT specular reset", &Test_UserDrawPrimitive_PositionTSpecularDefaultsOpaqueOnReuse);
     tests.Run("Draw state default material sources", &Test_DrawState_DefaultMaterialSourcesMatchFFP);
     tests.Run("Draw state fixes BOTHSRCALPHA blend pair", &Test_DrawState_FixesBothSrcAlphaBlendPair);
+    tests.Run("Draw state fixes legacy screen blend pair", &Test_DrawState_FixesLegacyScreenBlendPair);
     tests.Run("Draw state inverse winding swaps cull", &Test_DrawState_InverseWindingSwapsCullDirection);
     tests.Run("Draw state color write mask", &Test_DrawState_ColorWriteMaskCanDisableColorWrites);
     tests.Run("Draw state stencil render states", &Test_DrawState_StencilRenderStatesBuildStencilOps);
@@ -1137,6 +1159,7 @@ int main() {
     tests.Run("Texture stage blend multiplicative channel", &Test_TextureStageBlend_MultiplicativeChannelMapsToModulate);
     tests.Run("Texture stage blend unsupported fallback", &Test_TextureStageBlend_UnsupportedBlendRefusesMonoPass);
     tests.Run("Material channels clamp and clear FFP stages", &Test_MaterialChannels_ClampToFFPStageCapacityAndClearAfterDraw);
+    tests.Run("Mesh default render restores scene specular", &Test_Mesh_DefaultRenderRestoresSceneSpecularState);
     tests.Run("Material channels no base texture keeps stage chain", &Test_MaterialChannels_NoBaseTextureKeepsStageChainAlive);
     tests.Run("Texture stage reset clears effect state", &Test_TextureStage_ResetClearsLeakedEffectState);
     tests.Run("Bump env stage states pack uniform", &Test_BumpEnv_StageStatesPackUniform);
