@@ -450,8 +450,33 @@ def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object
         if not isinstance(variant, dict):
             raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}] must be an object")
 
-    return [normalize_specialized_variant(variant, index)
-            for index, variant in enumerate(variants)]
+    normalized = [normalize_specialized_variant(variant, index)
+                  for index, variant in enumerate(variants)]
+    validate_specialized_variants(normalized)
+    return normalized
+
+
+def variant_key_fingerprint(variant: dict[str, object]) -> str:
+    key = variant["key"]
+    return json.dumps(key, sort_keys=True, separators=(",", ":"))
+
+
+def validate_specialized_variants(variants: list[dict[str, object]]) -> None:
+    identifiers: dict[str, str] = {}
+    keys: dict[str, str] = {}
+    for variant in variants:
+        name = variant["name"]
+        ident = variant["identifier"]
+        previous_name = identifiers.get(ident)
+        if previous_name is not None:
+            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants '{previous_name}' and '{name}' produce duplicate identifier '{ident}'")
+        identifiers[ident] = name
+
+        fingerprint = variant_key_fingerprint(variant)
+        previous_key_name = keys.get(fingerprint)
+        if previous_key_name is not None:
+            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants '{previous_key_name}' and '{name}' produce duplicate FFP shader key")
+        keys[fingerprint] = name
 
 
 def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,

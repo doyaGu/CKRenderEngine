@@ -1345,6 +1345,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("stages must contain up to 8 stage objects") != std::string::npos &&
               shaderCompiler.find("specialization_identifier") != std::string::npos &&
               shaderCompiler.find("unique_specialized_fs_variants") != std::string::npos &&
+              shaderCompiler.find("validate_specialized_variants") != std::string::npos &&
+              shaderCompiler.find("duplicate FFP shader key") != std::string::npos &&
+              shaderCompiler.find("duplicate identifier") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
