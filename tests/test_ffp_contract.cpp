@@ -1358,6 +1358,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               shaderCompiler.find("duplicate FFP shader key") != std::string::npos &&
               shaderCompiler.find("duplicate identifier") != std::string::npos &&
               shaderCompiler.find("projectedSampler") != std::string::npos &&
+              shaderCompiler.find("clean_stale_specialized_headers") != std::string::npos &&
+              shaderCompiler.find("header.unlink()") != std::string::npos &&
               shaderCompiler.find("compile_specialized_variants") != std::string::npos &&
               shaderCompiler.find("write_specialized_module_table(generated_dir, selected, specialized_variants)") != std::string::npos &&
               shaderCompiler.find("--define") != std::string::npos &&
