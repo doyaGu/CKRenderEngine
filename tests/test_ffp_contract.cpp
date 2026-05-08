@@ -1422,6 +1422,36 @@ void Test_FFPShaderCache_FullSpecializedVariantHit() {
     cache.Shutdown();
 }
 
+void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFFShaderCache cache;
+    cache.Init(&ctx);
+
+    CKFFFSStateDesc fs;
+    fs.SetSpecularAdd(true);
+    fs.SetStageColorOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageColorArg2(0, CKRST_TA_CURRENT);
+    fs.SetStageAlphaOp(0, CKRST_TOP_MODULATE);
+    fs.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    fs.SetStageAlphaArg2(0, CKRST_TA_CURRENT);
+
+    CKFFShaderKey key;
+    key.VS = CKFFShaderKeyVS();
+    key.FS = CKFFBuildShaderKeyFS(fs, 1u);
+
+    CKDWORD program = cache.GetProgram(key);
+    TestCheck(program == 0 &&
+              cache.CachedProgramCount() == 0 &&
+              ctx.CreatedShaderCount == 0 &&
+              ctx.CreatedProgramCount == 0,
+              "Full-specialized cache miss must fail explicitly without falling back to the uber shader or caching a null variant");
+
+    cache.Shutdown();
+}
+
 void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
     std::string shader = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
     std::string common = ReadRenderEngineSource("src/shaders/fs_ff_common.sc");
@@ -1971,6 +2001,7 @@ int main() {
     tests.Run("FFP specialization info dxvk layout", &Test_FFPSpecializationInfo_MatchesDxvkFFPLayout);
     tests.Run("FFP shader cache dxvk variant contract", &Test_FFPShaderCache_UsesKeyedDxvkVariantContract);
     tests.Run("FFP shader cache full specialized variant hit", &Test_FFPShaderCache_FullSpecializedVariantHit);
+    tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
     tests.Run("FFP fragment shader dxvk common reader", &Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader);
     tests.Run("FFP state desc feeds explicit variant key", &Test_FFPStateDesc_FeedsExplicitVariantKey);
     tests.Run("FFP state desc stores full texture op range", &Test_FFPStateDesc_StoresFullTextureOpRange);
