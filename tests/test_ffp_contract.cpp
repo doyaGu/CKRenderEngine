@@ -1320,10 +1320,12 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
               moduleSource.find("g_CKFFSpecializedModules") != std::string::npos &&
               generatedTable.find("g_CKFFSpecializedModuleCount = 0") != std::string::npos &&
               shaderCompiler.find("load_specialized_variant_manifest") != std::string::npos &&
+              shaderCompiler.find("ffp_specialized_shader_defines") != std::string::npos &&
+              shaderCompiler.find("--define") != std::string::npos &&
               shaderCompiler.find("FFP specialized variant manifest entries are declared") != std::string::npos &&
               variantManifest.find("\"variants\": []") != std::string::npos &&
               srcCmake.find("ffp_specialized_variants.json") != std::string::npos,
-              "Full specialized FFP modules must have an explicit manifest-generated table boundary, even while the table is empty");
+              "Full specialized FFP modules must have an explicit manifest-generated table and shader define boundary, even while the table is empty");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,
@@ -1349,7 +1351,9 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
               common.find("ckffSpecDword(6 + stage)") != std::string::npos &&
               common.find("ckffUnpackSpecArg") != std::string::npos &&
               common.find("ckffSpecLastActiveTextureStage") != std::string::npos &&
-              common.find("ckffSpecGlobalSpecularEnabled") != std::string::npos,
+              common.find("ckffSpecGlobalSpecularEnabled") != std::string::npos &&
+              common.find("CKFF_FULL_SPECIALIZED") != std::string::npos &&
+              common.find("CKFF_SPEC_DWORD0") != std::string::npos,
               "Fragment shader must expose the DXVK-style specialization reader, global specular bit, and last active stage");
     TestCheck(shader.find("ckffReadStageParams(stage") != std::string::npos &&
               shader.find("stageParams.ResultArg") != std::string::npos &&
