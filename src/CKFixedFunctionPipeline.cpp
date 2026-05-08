@@ -4,74 +4,6 @@
 #include <cmath>
 #include <cstring>
 
-static void MulMatrix(VxMatrix &dst, const VxMatrix &a, const VxMatrix &b) {
-    VxMatrix tmp;
-    for (int r = 0; r < 4; ++r) {
-        for (int c = 0; c < 4; ++c) {
-            tmp[r][c] = a[r][0] * b[0][c] +
-                        a[r][1] * b[1][c] +
-                        a[r][2] * b[2][c] +
-                        a[r][3] * b[3][c];
-        }
-    }
-    dst = tmp;
-}
-
-static void TransposeMatrix(VxMatrix &dst, const VxMatrix &src) {
-    VxMatrix tmp;
-    for (int r = 0; r < 4; ++r) {
-        for (int c = 0; c < 4; ++c) {
-            tmp[r][c] = src[c][r];
-        }
-    }
-    dst = tmp;
-}
-
-static CKDWORD BaseTextureArg(CKDWORD arg) {
-    return arg & ~(CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE);
-}
-
-static float SaturateFloat(float value) {
-    if (value < 0.0f)
-        return 0.0f;
-    if (value > 1.0f)
-        return 1.0f;
-    return value;
-}
-
-static VxColor SaturateColor(const VxColor &value) {
-    VxColor result = value;
-    result.r = SaturateFloat(result.r);
-    result.g = SaturateFloat(result.g);
-    result.b = SaturateFloat(result.b);
-    result.a = SaturateFloat(result.a);
-    return result;
-}
-
-static VxColor ColorSplat(float value) {
-    return VxColor(value, value, value, value);
-}
-
-static VxColor ColorMad(const VxColor &a, const VxColor &b, const VxColor &c) {
-    return VxColor(
-        a.r * b.r + c.r,
-        a.g * b.g + c.g,
-        a.b * b.b + c.b,
-        a.a * b.a + c.a);
-}
-
-static VxColor ColorComplement(const VxColor &value) {
-    return VxColor(1.0f - value.r, 1.0f - value.g, 1.0f - value.b, 1.0f - value.a);
-}
-
-static VxColor ColorMix(const VxColor &a, const VxColor &b, const VxColor &factor) {
-    return VxColor(
-        a.r * (1.0f - factor.r) + b.r * factor.r,
-        a.g * (1.0f - factor.g) + b.g * factor.g,
-        a.b * (1.0f - factor.b) + b.b * factor.b,
-        a.a * (1.0f - factor.a) + b.a * factor.a);
-}
-
 static float ReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback) {
     CKDWORD bits = cache.GetRenderState(state);
     if (bits == 0)
@@ -80,388 +12,6 @@ static float ReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETY
     float value = fallback;
     memcpy(&value, &bits, sizeof(value));
     return value;
-}
-
-static CK_ADDRESS_MODE TranslateAddressMode(CKDWORD mode) {
-    switch (mode) {
-    case VXTEXTURE_ADDRESSMIRROR:
-        return CKRST_ADDRESS_MIRROR;
-    case VXTEXTURE_ADDRESSCLAMP:
-        return CKRST_ADDRESS_CLAMP;
-    case VXTEXTURE_ADDRESSBORDER:
-        return CKRST_ADDRESS_BORDER;
-    case VXTEXTURE_ADDRESSMIRRORONCE:
-        // MIRRORONCE is not directly expressible in the current bgfx sampler contract.
-        return CKRST_ADDRESS_CLAMP;
-    case VXTEXTURE_ADDRESSWRAP:
-    default:
-        return CKRST_ADDRESS_WRAP;
-    }
-}
-
-CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend) {
-    CKFFTextureStageOps ops;
-    ops.ColorOp = CKRST_TOP_MODULATE;
-    ops.ColorArg0 = CKRST_TA_CURRENT;
-    ops.ColorArg1 = CKRST_TA_TEXTURE;
-    ops.ColorArg2 = CKRST_TA_CURRENT;
-    ops.AlphaOp = CKRST_TOP_MODULATE;
-    ops.AlphaArg0 = CKRST_TA_CURRENT;
-    ops.AlphaArg1 = CKRST_TA_TEXTURE;
-    ops.AlphaArg2 = CKRST_TA_CURRENT;
-    ops.ResultArg = CKRST_TA_CURRENT;
-
-    switch (blend & VXTEXTUREBLEND_MASK) {
-    case VXTEXTUREBLEND_DECAL:
-    case VXTEXTUREBLEND_COPY:
-        ops.ColorOp = CKRST_TOP_SELECTARG1;
-        ops.AlphaOp = CKRST_TOP_SELECTARG1;
-        break;
-    case VXTEXTUREBLEND_DECALALPHA:
-    case VXTEXTUREBLEND_DECALMASK:
-        ops.ColorOp = CKRST_TOP_BLENDTEXTUREALPHA;
-        ops.AlphaOp = CKRST_TOP_SELECTARG1;
-        ops.AlphaArg1 = CKRST_TA_DIFFUSE;
-        break;
-    case VXTEXTUREBLEND_MODULATEALPHA:
-    case VXTEXTUREBLEND_MODULATEMASK:
-        ops.AlphaOp = CKRST_TOP_MODULATE;
-        break;
-    case VXTEXTUREBLEND_ADD:
-        ops.ColorOp = CKRST_TOP_ADD;
-        ops.AlphaOp = CKRST_TOP_SELECTARG1;
-        ops.AlphaArg1 = CKRST_TA_CURRENT;
-        break;
-    case VXTEXTUREBLEND_DOTPRODUCT3:
-        ops.ColorOp = CKRST_TOP_DOTPRODUCT3;
-        ops.ColorArg2 = CKRST_TA_TFACTOR;
-        ops.AlphaOp = CKRST_TOP_SELECTARG1;
-        ops.AlphaArg1 = CKRST_TA_CURRENT;
-        break;
-    case VXTEXTUREBLEND_MODULATE:
-    default:
-        break;
-    }
-
-    return ops;
-}
-
-VxColor CKFFEvaluateTextureOp(CKDWORD op,
-                              const VxColor &arg0,
-                              const VxColor &arg1,
-                              const VxColor &arg2,
-                              const VxColor &current,
-                              const VxColor &diffuse,
-                              const VxColor &textureColor,
-                              const VxColor &textureFactor) {
-    switch (op) {
-    case CKRST_TOP_DISABLE:
-        return current;
-    case CKRST_TOP_SELECTARG1:
-        return arg1;
-    case CKRST_TOP_SELECTARG2:
-        return arg2;
-    case CKRST_TOP_MODULATE:
-        return arg1 * arg2;
-    case CKRST_TOP_MODULATE2X:
-        return SaturateColor(arg1 * arg2 * 2.0f);
-    case CKRST_TOP_MODULATE4X:
-        return SaturateColor(arg1 * arg2 * 4.0f);
-    case CKRST_TOP_ADD:
-        return SaturateColor(arg1 + arg2);
-    case CKRST_TOP_ADDSIGNED:
-        return SaturateColor(arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f)));
-    case CKRST_TOP_ADDSIGNED2X:
-        return SaturateColor((arg1 + (arg2 - VxColor(0.5f, 0.5f, 0.5f, 0.5f))) * 2.0f);
-    case CKRST_TOP_SUBTRACT:
-        return SaturateColor(arg1 - arg2);
-    case CKRST_TOP_ADDSMOOTH:
-        return SaturateColor(ColorMad(ColorComplement(arg1), arg2, arg1));
-    case CKRST_TOP_BLENDDIFFUSEALPHA:
-        return ColorMix(arg2, arg1, ColorSplat(diffuse.a));
-    case CKRST_TOP_BLENDTEXTUREALPHA:
-        return ColorMix(arg2, arg1, ColorSplat(textureColor.a));
-    case CKRST_TOP_BLENDFACTORALPHA:
-        return ColorMix(arg2, arg1, ColorSplat(textureFactor.a));
-    case CKRST_TOP_BLENDTEXTUREALPHAPM:
-        return SaturateColor(ColorMad(arg2, ColorSplat(1.0f - textureColor.a), arg1));
-    case CKRST_TOP_BLENDCURRENTALPHA:
-        return ColorMix(arg2, arg1, ColorSplat(current.a));
-    case CKRST_TOP_MODULATEALPHA_ADDCOLOR:
-        return SaturateColor(ColorMad(ColorSplat(arg1.a), arg2, arg1));
-    case CKRST_TOP_MODULATECOLOR_ADDALPHA:
-        return SaturateColor(ColorMad(arg1, arg2, ColorSplat(arg1.a)));
-    case CKRST_TOP_MODULATEINVALPHA_ADDCOLOR:
-        return SaturateColor(ColorMad(ColorSplat(1.0f - arg1.a), arg2, arg1));
-    case CKRST_TOP_MODULATEINVCOLOR_ADDALPHA:
-        return SaturateColor(ColorMad(ColorComplement(arg1), arg2, ColorSplat(arg1.a)));
-    case CKRST_TOP_BUMPENVMAP:
-    case CKRST_TOP_BUMPENVMAPLUMINANCE:
-        return current;
-    case CKRST_TOP_PREMODULATE:
-        return arg1 * arg2;
-    case CKRST_TOP_DOTPRODUCT3: {
-        const float dot =
-            (arg1.r - 0.5f) * (arg2.r - 0.5f) +
-            (arg1.g - 0.5f) * (arg2.g - 0.5f) +
-            (arg1.b - 0.5f) * (arg2.b - 0.5f);
-        return ColorSplat(SaturateFloat(dot * 4.0f));
-    }
-    case CKRST_TOP_MULTIPLYADD:
-        return SaturateColor(ColorMad(arg1, arg2, arg0));
-    case CKRST_TOP_LERP:
-        return SaturateColor(ColorMix(arg2, arg1, arg0));
-    default:
-        return current;
-    }
-}
-
-CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op) {
-    switch (op) {
-    case CKRST_TOP_DISABLE:
-    case CKRST_TOP_SELECTARG1:
-    case CKRST_TOP_SELECTARG2:
-    case CKRST_TOP_MODULATE:
-    case CKRST_TOP_MODULATE2X:
-    case CKRST_TOP_MODULATE4X:
-    case CKRST_TOP_ADD:
-    case CKRST_TOP_ADDSIGNED:
-    case CKRST_TOP_ADDSIGNED2X:
-    case CKRST_TOP_SUBTRACT:
-    case CKRST_TOP_ADDSMOOTH:
-    case CKRST_TOP_BLENDDIFFUSEALPHA:
-    case CKRST_TOP_BLENDTEXTUREALPHA:
-    case CKRST_TOP_BLENDFACTORALPHA:
-    case CKRST_TOP_BLENDTEXTUREALPHAPM:
-    case CKRST_TOP_BLENDCURRENTALPHA:
-    case CKRST_TOP_MODULATEALPHA_ADDCOLOR:
-    case CKRST_TOP_MODULATECOLOR_ADDALPHA:
-    case CKRST_TOP_MODULATEINVALPHA_ADDCOLOR:
-    case CKRST_TOP_MODULATEINVCOLOR_ADDALPHA:
-    case CKRST_TOP_DOTPRODUCT3:
-    case CKRST_TOP_MULTIPLYADD:
-    case CKRST_TOP_LERP:
-    case CKRST_TOP_BUMPENVMAP:
-    case CKRST_TOP_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_EXACT;
-    case CKRST_TOP_PREMODULATE:
-        return CKFF_COVERAGE_FALLBACK;
-    default:
-        return CKFF_COVERAGE_UNTESTED;
-    }
-}
-
-CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic) {
-    switch (semantic) {
-    case CKFF_SHADER_SEMANTIC_ARG_DIFFUSE:
-    case CKFF_SHADER_SEMANTIC_ARG_CURRENT:
-    case CKFF_SHADER_SEMANTIC_ARG_TEXTURE:
-    case CKFF_SHADER_SEMANTIC_ARG_TFACTOR:
-    case CKFF_SHADER_SEMANTIC_ARG_SPECULAR:
-    case CKFF_SHADER_SEMANTIC_ARG_TEMP:
-    case CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT:
-    case CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE:
-    case CKFF_SHADER_SEMANTIC_RESULT_CURRENT:
-    case CKFF_SHADER_SEMANTIC_RESULT_TEMP:
-    case CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING:
-    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACENORMAL:
-    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEPOSITION:
-    case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION:
-    case CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP:
-    case CKFF_SHADER_SEMANTIC_BUMPENVMAP:
-    case CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_EXACT;
-    default:
-        return CKFF_COVERAGE_UNTESTED;
-    }
-}
-
-CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend) {
-    return CKFFLegacyTextureBlendToStageOps(blend).ColorOp;
-}
-
-CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend) {
-    return CKFFLegacyTextureBlendToStageOps(blend).AlphaOp;
-}
-
-CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
-                                  CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
-                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2) {
-    const CKDWORD src = (stageBlend >> 4) & 0xF;
-    const CKDWORD dst = stageBlend & 0xF;
-
-    if (!((src == VXBLEND_ZERO && dst == VXBLEND_SRCCOLOR) ||
-          (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO))) {
-        return FALSE;
-    }
-
-    colorOp = CKRST_TOP_MODULATE;
-    colorArg1 = CKRST_TA_TEXTURE;
-    colorArg2 = CKRST_TA_CURRENT;
-    alphaOp = CKRST_TOP_SELECTARG2;
-    alphaArg1 = CKRST_TA_TEXTURE;
-    alphaArg2 = CKRST_TA_CURRENT;
-    return TRUE;
-}
-
-static float StageStateAsFloat(CKDWORD value) {
-    float result = 0.0f;
-    memcpy(&result, &value, sizeof(float));
-    return result;
-}
-
-void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]) {
-    if (!outBumpEnv)
-        return;
-
-    memset(outBumpEnv, 0, sizeof(float) * 8);
-    if (!stageState)
-        return;
-
-    outBumpEnv[0][0] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT00]);
-    outBumpEnv[0][1] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT01]);
-    outBumpEnv[0][2] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT10]);
-    outBumpEnv[0][3] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT11]);
-    outBumpEnv[1][0] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLSCALE]);
-    outBumpEnv[1][1] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLOFFSET]);
-}
-
-Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
-                                       const VxColor &bumpValue,
-                                       const float bumpEnv[2][4]) {
-    return Vx2DVector(
-        baseUv.x + bumpEnv[0][0] * bumpValue.r + bumpEnv[0][1] * bumpValue.g,
-        baseUv.y + bumpEnv[0][2] * bumpValue.r + bumpEnv[0][3] * bumpValue.g);
-}
-
-float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
-                                   const float bumpEnv[2][4]) {
-    return SaturateFloat(bumpValue.b * bumpEnv[1][0] + bumpEnv[1][1]);
-}
-
-CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
-                                                 CKBOOL indexed,
-                                                 CKDWORD formatFlags) {
-    CKFFVertexBlendState state = {};
-    state.Mode = CKFF_VERTEX_BLEND_DISABLED;
-    state.Count = 0;
-    state.Indexed = FALSE;
-    state.Supported = TRUE;
-
-    if (vertexBlend == VXVBLEND_DISABLE)
-        return state;
-
-    if (vertexBlend == VXVBLEND_TWEENING) {
-        const bool hasTweenInput = (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
-        state.Supported = hasTweenInput ? TRUE : FALSE;
-        if (hasTweenInput)
-            state.Mode = CKFF_VERTEX_BLEND_TWEEN;
-        return state;
-    }
-
-    CKDWORD count = 0;
-    if (vertexBlend == VXVBLEND_0WEIGHTS || vertexBlend == VXVBLEND_1WEIGHTS)
-        count = 1;
-    else if (vertexBlend == VXVBLEND_2WEIGHTS)
-        count = 2;
-    else if (vertexBlend == VXVBLEND_3WEIGHTS)
-        count = 3;
-
-    if (count == 0)
-        return state;
-
-    const bool hasBlendInput = (formatFlags & CKFF_VF_BLENDWEIGHT) != 0;
-    const bool hasIndexInput = !indexed || ((formatFlags & CKFF_VF_BLENDINDEX) != 0);
-    state.Supported = (hasBlendInput && hasIndexInput) ? TRUE : FALSE;
-    if (state.Supported) {
-        state.Mode = CKFF_VERTEX_BLEND_NORMAL;
-        state.Count = count;
-        state.Indexed = indexed ? TRUE : FALSE;
-    }
-    return state;
-}
-
-static CKDWORD GetStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
-    if (!stageActive)
-        return CKRST_TOP_DISABLE;
-
-    CKDWORD op = stage[CKRST_TSS_OP];
-    if (op != 0)
-        return op;
-    if (!hasTexture)
-        return CKRST_TOP_DISABLE;
-    return CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorOp;
-}
-
-static CKDWORD GetStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasTexture) {
-    if (!stageActive)
-        return CKRST_TOP_DISABLE;
-
-    CKDWORD op = stage[CKRST_TSS_AOP];
-    if (op != 0)
-        return op;
-    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaOp : CKRST_TOP_DISABLE;
-}
-
-static CKDWORD GetStageColorArg1(const CKDWORD *stage, bool hasTexture) {
-    CKDWORD arg = stage[CKRST_TSS_ARG1];
-    if (arg != 0)
-        return arg;
-    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg1 : CKRST_TA_DIFFUSE;
-}
-
-static CKDWORD GetStageColorArg2(const CKDWORD *stage) {
-    CKDWORD arg = stage[CKRST_TSS_ARG2];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg2;
-}
-
-static CKDWORD GetStageColorArg0(const CKDWORD *stage) {
-    CKDWORD arg = stage[CKRST_TSS_COLORARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg0;
-}
-
-static CKDWORD GetStageAlphaArg1(const CKDWORD *stage, bool hasTexture) {
-    CKDWORD arg = stage[CKRST_TSS_AARG1];
-    if (arg != 0)
-        return arg;
-    return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg1 : CKRST_TA_DIFFUSE;
-}
-
-static CKDWORD GetStageAlphaArg2(const CKDWORD *stage) {
-    CKDWORD arg = stage[CKRST_TSS_AARG2];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg2;
-}
-
-static CKDWORD GetStageAlphaArg0(const CKDWORD *stage) {
-    CKDWORD arg = stage[CKRST_TSS_ALPHAARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg0;
-}
-
-static CKDWORD GetStageResultArg(const CKDWORD *stage) {
-    CKDWORD arg = stage[CKRST_TSS_RESULTARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ResultArg;
-}
-
-int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
-    CKDWORD mask = dpFlags & CKRST_DP_STAGESMASK;
-    int count = 0;
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if (mask & CKRST_DP_STAGE(stage))
-            count = stage + 1;
-    }
-    return count;
-}
-
-CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation) {
-    return (index & 0xFFFFu) | ((generation & 0xFFFFu) << 16);
-}
-
-CKDWORD CKFFTexcoordIndex(CKDWORD packed) {
-    return packed & 0xFFFFu;
-}
-
-CKDWORD CKFFTexcoordGeneration(CKDWORD packed) {
-    return (packed >> 16) & 0xFFFFu;
 }
 
 static CKDWORD ResolveMaterialSource(CKBOOL lighting, CKBOOL colorVertex, CKBOOL fromVertex,
@@ -908,11 +458,11 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     debugInfo.StateDesc = &stateDesc;
     debugInfo.DrawState = &m_DrawStateCache;
     debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
-    debugInfo.Stage0.ColorArg1 = GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.ColorArg2 = GetStageColorArg2(m_StageStates[0]);
-    debugInfo.Stage0.AlphaOp = GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg1 = GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg2 = GetStageAlphaArg2(m_StageStates[0]);
+    debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
+    debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
     debugInfo.Stage0.Texture = m_TextureHandles[0];
     m_DebugState.LogDrawPrimitiveDetails(debugInfo);
 
@@ -999,11 +549,11 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     debugInfo.StateDesc = &stateDesc;
     debugInfo.DrawState = &m_DrawStateCache;
     debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
-    debugInfo.Stage0.ColorArg1 = GetStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.ColorArg2 = GetStageColorArg2(m_StageStates[0]);
-    debugInfo.Stage0.AlphaOp = GetStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg1 = GetStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg2 = GetStageAlphaArg2(m_StageStates[0]);
+    debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
+    debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+    debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
     debugInfo.Stage0.Texture = m_TextureHandles[0];
     m_DebugState.LogDrawVertexBufferDetails(debugInfo);
 
@@ -1135,17 +685,17 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < m_CurrentActiveTextureCount;
         const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
-        const CKDWORD colorOp = GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
-        const CKDWORD alphaOp = GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
+        const CKDWORD colorOp = CKFFResolveStageColorOp(m_StageStates[stage], stageActive, hasTexture);
+        const CKDWORD alphaOp = CKFFResolveStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
         stateDesc.FS.SetStageColorOp(stage, colorOp);
-        stateDesc.FS.SetStageColorArg0(stage, GetStageColorArg0(m_StageStates[stage]));
-        stateDesc.FS.SetStageColorArg1(stage, BaseTextureArg(GetStageColorArg1(m_StageStates[stage], hasTexture)));
-        stateDesc.FS.SetStageColorArg2(stage, BaseTextureArg(GetStageColorArg2(m_StageStates[stage])));
+        stateDesc.FS.SetStageColorArg0(stage, CKFFResolveStageColorArg0(m_StageStates[stage]));
+        stateDesc.FS.SetStageColorArg1(stage, CKFFBaseTextureArg(CKFFResolveStageColorArg1(m_StageStates[stage], hasTexture)));
+        stateDesc.FS.SetStageColorArg2(stage, CKFFBaseTextureArg(CKFFResolveStageColorArg2(m_StageStates[stage])));
         stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
-        stateDesc.FS.SetStageAlphaArg0(stage, GetStageAlphaArg0(m_StageStates[stage]));
-        stateDesc.FS.SetStageAlphaArg1(stage, BaseTextureArg(GetStageAlphaArg1(m_StageStates[stage], hasTexture)));
-        stateDesc.FS.SetStageAlphaArg2(stage, BaseTextureArg(GetStageAlphaArg2(m_StageStates[stage])));
-        stateDesc.FS.SetStageResultIsTemp(stage, BaseTextureArg(GetStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
+        stateDesc.FS.SetStageAlphaArg0(stage, CKFFResolveStageAlphaArg0(m_StageStates[stage]));
+        stateDesc.FS.SetStageAlphaArg1(stage, CKFFBaseTextureArg(CKFFResolveStageAlphaArg1(m_StageStates[stage], hasTexture)));
+        stateDesc.FS.SetStageAlphaArg2(stage, CKFFBaseTextureArg(CKFFResolveStageAlphaArg2(m_StageStates[stage])));
+        stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(CKFFResolveStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
         stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
 
         if (colorOp == CKRST_TOP_DISABLE)
@@ -1186,11 +736,11 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     VxMatrix normalMatrix;
     VxMatrix viewProj;
     VxMatrix modelViewProj;
-    MulMatrix(modelView, m_World, m_View);
+    Vx3DMultiplyMatrix4(modelView, m_World, m_View);
     Vx3DInverseMatrix(normalMatrix, modelView);
-    TransposeMatrix(normalMatrix, normalMatrix);
-    MulMatrix(viewProj, m_View, m_Projection);
-    MulMatrix(modelViewProj, m_World, viewProj);
+    Vx3DTransposeMatrix(normalMatrix, normalMatrix);
+    Vx3DMultiplyMatrix4(viewProj, m_View, m_Projection);
+    Vx3DMultiplyMatrix4(modelViewProj, m_World, viewProj);
     encoder->SetUniform(u.u_ckModelViewProj, &modelViewProj, 1);
     encoder->SetUniform(u.u_ckModel, &m_World, 1);
     encoder->SetUniform(u.u_ckModelView, &modelView, 1);
@@ -1303,19 +853,19 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < m_CurrentActiveTextureCount;
         const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
-        stageParams[stage * 4 + 0][0] = (float)GetStageColorOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 4 + 0][1] = (float)GetStageColorArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 4 + 0][2] = (float)GetStageColorArg2(m_StageStates[stage]);
+        stageParams[stage * 4 + 0][0] = (float)CKFFResolveStageColorOp(m_StageStates[stage], stageActive, hasTexture);
+        stageParams[stage * 4 + 0][1] = (float)CKFFResolveStageColorArg1(m_StageStates[stage], hasTexture);
+        stageParams[stage * 4 + 0][2] = (float)CKFFResolveStageColorArg2(m_StageStates[stage]);
         stageParams[stage * 4 + 0][3] = hasTexture ? 1.0f : 0.0f;
-        stageParams[stage * 4 + 1][0] = (float)GetStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
-        stageParams[stage * 4 + 1][1] = (float)GetStageAlphaArg1(m_StageStates[stage], hasTexture);
-        stageParams[stage * 4 + 1][2] = (float)GetStageAlphaArg2(m_StageStates[stage]);
-        stageParams[stage * 4 + 1][3] = (float)GetStageResultArg(m_StageStates[stage]);
-        stageParams[stage * 4 + 2][0] = (float)GetStageColorArg0(m_StageStates[stage]);
+        stageParams[stage * 4 + 1][0] = (float)CKFFResolveStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
+        stageParams[stage * 4 + 1][1] = (float)CKFFResolveStageAlphaArg1(m_StageStates[stage], hasTexture);
+        stageParams[stage * 4 + 1][2] = (float)CKFFResolveStageAlphaArg2(m_StageStates[stage]);
+        stageParams[stage * 4 + 1][3] = (float)CKFFResolveStageResultArg(m_StageStates[stage]);
+        stageParams[stage * 4 + 2][0] = (float)CKFFResolveStageColorArg0(m_StageStates[stage]);
         stageParams[stage * 4 + 2][1] = (float)m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         stageParams[stage * 4 + 2][2] = (float)m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stageParams[stage * 4 + 2][3] = 0.0f;
-        stageParams[stage * 4 + 3][0] = (float)GetStageAlphaArg0(m_StageStates[stage]);
+        stageParams[stage * 4 + 3][0] = (float)CKFFResolveStageAlphaArg0(m_StageStates[stage]);
         stageParams[stage * 4 + 3][1] = 0.0f;
         stageParams[stage * 4 + 3][2] = 0.0f;
         stageParams[stage * 4 + 3][3] = 0.0f;
@@ -1418,10 +968,10 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
         break;
     }
 
-    CK_ADDRESS_MODE translateAddr = TranslateAddressMode(addr);
-    desc.AddressU = (addrU != 0) ? TranslateAddressMode(addrU) : translateAddr;
-    desc.AddressV = (addrV != 0) ? TranslateAddressMode(addrV) : translateAddr;
-    desc.AddressW = (addrW != 0) ? TranslateAddressMode(addrW) : translateAddr;
+    CK_ADDRESS_MODE translateAddr = CKFFTranslateAddressMode(addr);
+    desc.AddressU = (addrU != 0) ? CKFFTranslateAddressMode(addrU) : translateAddr;
+    desc.AddressV = (addrV != 0) ? CKFFTranslateAddressMode(addrV) : translateAddr;
+    desc.AddressW = (addrW != 0) ? CKFFTranslateAddressMode(addrW) : translateAddr;
 
     desc.BorderColor = m_StageStates[stage][CKRST_TSS_BORDERCOLOR];
     desc.CompareFunc = CKRST_COMPARE_NONE;

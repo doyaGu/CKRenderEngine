@@ -9,6 +9,7 @@
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
+#include "CKFFStageState.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -30,98 +31,6 @@ class CKRasterizerEncoder;
 #define CKFF_DIRTY_ALL        0xFF
 
 struct CKLightData;
-
-struct CKFFTextureStageOps {
-    CKDWORD ColorOp;
-    CKDWORD ColorArg0;
-    CKDWORD ColorArg1;
-    CKDWORD ColorArg2;
-    CKDWORD AlphaOp;
-    CKDWORD AlphaArg0;
-    CKDWORD AlphaArg1;
-    CKDWORD AlphaArg2;
-    CKDWORD ResultArg;
-};
-
-struct CKFFTextureStageSnapshot {
-    CKDWORD Texture;
-    CKDWORD States[CKFF_MAX_TEXTURE_STAGE_STATES];
-    VxMatrix TextureMatrix;
-};
-
-struct CKFFVertexBlendState {
-    CKDWORD Mode;
-    CKDWORD Count;
-    CKBOOL Indexed;
-    CKBOOL Supported;
-};
-
-CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
-VxColor CKFFEvaluateTextureOp(CKDWORD op,
-                              const VxColor &arg0,
-                              const VxColor &arg1,
-                              const VxColor &arg2,
-                              const VxColor &current,
-                              const VxColor &diffuse,
-                              const VxColor &textureColor,
-                              const VxColor &textureFactor = VxColor(0.0f, 0.0f, 0.0f, 0.0f));
-CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
-CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
-CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
-                                  CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
-                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2);
-void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]);
-Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
-                                       const VxColor &bumpValue,
-                                       const float bumpEnv[2][4]);
-float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
-                                   const float bumpEnv[2][4]);
-CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
-                                                 CKBOOL indexed,
-                                                 CKDWORD formatFlags);
-int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
-CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
-CKDWORD CKFFTexcoordIndex(CKDWORD packed);
-CKDWORD CKFFTexcoordGeneration(CKDWORD packed);
-
-enum CKFFTexcoordGenerationMode {
-    CKFF_TEXGEN_NONE = 0,
-    CKFF_TEXGEN_CAMERASPACENORMAL = 1,
-    CKFF_TEXGEN_CAMERASPACEPOSITION = 2,
-    CKFF_TEXGEN_CAMERASPACEREFLECTION = 3,
-    CKFF_TEXGEN_SPHEREMAP = 4
-};
-
-enum CKFFCoverage {
-    CKFF_COVERAGE_EXACT = 0,
-    CKFF_COVERAGE_APPROXIMATE = 1,
-    CKFF_COVERAGE_FALLBACK = 2,
-    CKFF_COVERAGE_UNTESTED = 3
-};
-
-enum CKFFShaderSemantic {
-    CKFF_SHADER_SEMANTIC_ARG_DIFFUSE = 0,
-    CKFF_SHADER_SEMANTIC_ARG_CURRENT,
-    CKFF_SHADER_SEMANTIC_ARG_TEXTURE,
-    CKFF_SHADER_SEMANTIC_ARG_TFACTOR,
-    CKFF_SHADER_SEMANTIC_ARG_SPECULAR,
-    CKFF_SHADER_SEMANTIC_ARG_TEMP,
-    CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT,
-    CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE,
-    CKFF_SHADER_SEMANTIC_RESULT_CURRENT,
-    CKFF_SHADER_SEMANTIC_RESULT_TEMP,
-    CKFF_SHADER_SEMANTIC_BUMPENVMAP,
-    CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE,
-    CKFF_SHADER_SEMANTIC_PROJECTED_SAMPLING,
-    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACENORMAL,
-    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEPOSITION,
-    CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION,
-    CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP,
-    CKFF_SHADER_SEMANTIC_COUNT
-};
-
-CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op);
-CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic);
 
 class CKFixedFunctionPipeline {
 public:
