@@ -40,5 +40,6 @@ ckre_add_test(simple_mesh_test
 )
 
 ckre_add_test(ffp_contract_tests
+    FFPDiagnosticHarness.h
     test_ffp_contract.cpp
 )

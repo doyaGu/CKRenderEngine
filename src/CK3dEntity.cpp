@@ -10,6 +10,7 @@
 #include "CKScene.h"
 #include "CKDependencies.h"
 #include "CKRasterizer.h"
+#include "CKFixedFunctionPipeline.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKMesh.h"
@@ -2586,10 +2587,11 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     }
 
     // Handle indirect matrix (mirrored objects)
-    CKDWORD savedInverseWinding = 0;
-    if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        savedInverseWinding = dev->m_FFPipeline.GetRenderState(VXRENDERSTATE_INVERSEWINDING);
-        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding == 0 ? TRUE : FALSE);
+    const CKBOOL hasIndirectMatrix = (m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0;
+    CKFFRenderStateGuard inverseWindingGuard(dev->m_FFPipeline, VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
+    if (hasIndirectMatrix) {
+        const CKDWORD inverseWinding = dev->m_FFPipeline.GetRenderState(VXRENDERSTATE_INVERSEWINDING);
+        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);
     }
 
     // Handle skin update for non-PM meshes
@@ -2654,10 +2656,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
         }
     }
 
-    // Restore inverse winding if changed
-    if ((m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0) {
-        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, savedInverseWinding);
-    }
+    inverseWindingGuard.Restore();
 
     // Update render extents if requested
     if ((Flags & CKRENDER_UPDATEEXTENTS) != 0) {

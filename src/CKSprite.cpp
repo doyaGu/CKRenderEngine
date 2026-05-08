@@ -258,6 +258,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     }
 
     CKFixedFunctionPipeline &ffp = rctx->m_FFPipeline;
+    CKFFStateGuard ffpState(ffp);
 
     // Set render states for 2D sprite rendering
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);

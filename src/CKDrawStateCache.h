@@ -22,6 +22,8 @@ public:
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
 
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
+    void SetColorWriteMask(CKDWORD mask);
+    CKDWORD GetColorWriteMask() const;
 
     CKDrawState BuildDrawState(VXPRIMITIVETYPE topology);
 

@@ -153,10 +153,18 @@ void CKDrawStateCache::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a)
     if (g) mask |= CKRST_STATE_WRITE_G;
     if (b) mask |= CKRST_STATE_WRITE_B;
     if (a) mask |= CKRST_STATE_WRITE_A;
+    SetColorWriteMask(mask);
+}
+
+void CKDrawStateCache::SetColorWriteMask(CKDWORD mask) {
     if (m_ColorWriteMask == mask)
         return;
     m_ColorWriteMask = mask;
     m_DirtyMask |= CKFF_DIRTY_COLORMASK;
+}
+
+CKDWORD CKDrawStateCache::GetColorWriteMask() const {
+    return m_ColorWriteMask;
 }
 
 CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {

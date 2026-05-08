@@ -2456,19 +2456,8 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
         return FALSE;
 
     CKFixedFunctionPipeline &ffp = m_FFPipeline;
-    const CKDWORD oldCull = ffp.GetRenderState(VXRENDERSTATE_CULLMODE);
-    const CKDWORD oldLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
-    const CKDWORD oldFog = ffp.GetRenderState(VXRENDERSTATE_FOGENABLE);
-    const CKDWORD oldZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
-    const CKDWORD oldZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
-    const CKDWORD oldZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
-    const CKDWORD oldAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
-    const CKDWORD oldAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
-    const CKDWORD oldClipPlanes = ffp.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    CKFFStateGuard ffpState(ffp);
     const CKViewportData oldViewport = m_ViewportData;
-    CKFFTextureStageSnapshot oldStages[CKFF_MAX_TEXTURE_STAGES];
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        ffp.SaveTextureStage(stage, oldStages[stage]);
 
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
@@ -2520,19 +2509,8 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
         DrawPrimitive(VX_TRIANGLEFAN, nullptr, 4, data);
     }
 
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        ffp.RestoreTextureStage(stage, oldStages[stage]);
     m_ViewportData = oldViewport;
     ffp.SetViewport(m_ViewportData);
-    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, oldCull);
-    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, oldLighting);
-    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, oldFog);
-    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, oldZEnable);
-    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, oldZWrite);
-    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, oldZFunc);
-    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, oldAlphaBlend);
-    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, oldAlphaTest);
-    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, oldClipPlanes);
 
     return data ? videoFormat.TotalImageSize : FALSE;
 }
@@ -3240,6 +3218,7 @@ void RCKRenderContext::CallSprite3DBatches() {
     }
 
     // Use original literals (do not define new constants)
+    CKFFStateGuard ffpState(m_FFPipeline);
 
     m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     m_FFPipeline.SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
