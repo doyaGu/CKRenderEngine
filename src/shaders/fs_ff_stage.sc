@@ -197,6 +197,9 @@ void main()
     } else {
         if (!alphaPass(current.a, int(u_alphaParams.y))) discard;
     }
-    current.rgb = mix(u_fogColor.rgb, current.rgb, v_texcoord7Fog.z);
+    bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
+    if (fogEnabled) {
+        current.rgb = mix(u_fogColor.rgb, current.rgb, v_texcoord7Fog.z);
+    }
     gl_FragColor = clamp(current, 0.0, 1.0);
 }

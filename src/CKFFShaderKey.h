@@ -39,6 +39,7 @@ struct CKFFShaderKeyFS {
     CKDWORD AlphaFunc;
     bool GlobalSpecularEnable;
     bool AlphaTestEnable;
+    bool FogEnable;
 
     CKFFShaderKeyFS();
 
