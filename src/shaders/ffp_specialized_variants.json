@@ -75,7 +75,8 @@
             "alphaArg0": 1,
             "alphaArg1": 2,
             "alphaArg2": 1,
-            "resultIsTemp": false
+            "resultIsTemp": false,
+            "projectedSampler": true
           }
         ]
       }

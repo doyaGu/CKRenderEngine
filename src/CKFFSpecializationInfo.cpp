@@ -31,6 +31,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {4, 16, 3};
     case CKFF_SPEC_GLOBAL_SPECULAR_ENABLED:
         return {6, 31, 1};
+    case CKFF_SPEC_PROJECTED_SAMPLER_MASK:
+        return {5, 0, 4};
     default:
         break;
     }

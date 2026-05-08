@@ -114,7 +114,8 @@ void LogVariantManifestStage(CKDWORD stage, const CKFFShaderKeyFSStage &s)
     CK_LOG_RAW_FMT("            \"alphaArg0\": %u,", s.AlphaArg0);
     CK_LOG_RAW_FMT("            \"alphaArg1\": %u,", s.AlphaArg1);
     CK_LOG_RAW_FMT("            \"alphaArg2\": %u,", s.AlphaArg2);
-    CK_LOG_RAW_FMT("            \"resultIsTemp\": %s", s.ResultIsTemp ? "true" : "false");
+    CK_LOG_RAW_FMT("            \"resultIsTemp\": %s,", s.ResultIsTemp ? "true" : "false");
+    CK_LOG_RAW_FMT("            \"projectedSampler\": %s", s.ProjectedSampler ? "true" : "false");
     CK_LOG_RAW_FMT("          }%s", stage + 1u < CKFF_STATE_DESC_TEXTURE_STAGES ? "," : "");
 }
 

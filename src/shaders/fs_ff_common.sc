@@ -96,6 +96,11 @@ bool ckffSpecGlobalSpecularEnabled()
     return ckffSpecBits(ckffSpecDword(6), 31, 1) != 0;
 }
 
+int ckffSpecProjectedSamplerMask()
+{
+    return ckffSpecBits(ckffSpecDword(5), 0, 4);
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
@@ -120,6 +125,11 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
         params.AlphaArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 20, 5));
         params.AlphaArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 25, 5));
         params.ResultArg = ckffSpecBits(word, 30, 1) != 0 ? 5 : 1;
+        if ((ckffSpecProjectedSamplerMask() & (1 << stage)) != 0) {
+            params.TexcoordTransformFlags |= 0x100;
+        } else {
+            params.TexcoordTransformFlags &= ~0x100;
+        }
     }
 
     return params;

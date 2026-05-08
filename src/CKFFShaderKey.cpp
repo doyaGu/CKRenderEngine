@@ -57,7 +57,8 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
             a.AlphaArg0 != b.AlphaArg0 ||
             a.AlphaArg1 != b.AlphaArg1 ||
             a.AlphaArg2 != b.AlphaArg2 ||
-            a.ResultIsTemp != b.ResultIsTemp)
+            a.ResultIsTemp != b.ResultIsTemp ||
+            a.ProjectedSampler != b.ProjectedSampler)
             return false;
     }
     return true;
@@ -79,6 +80,7 @@ std::size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, stage.AlphaArg1);
         seed = HashCombine(seed, stage.AlphaArg2);
         seed = HashCombine(seed, stage.ResultIsTemp ? 1u : 0u);
+        seed = HashCombine(seed, stage.ProjectedSampler ? 1u : 0u);
     }
     return seed;
 }
@@ -120,6 +122,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.AlphaArg1 = desc.GetStageAlphaArg1(stage);
         dst.AlphaArg2 = desc.GetStageAlphaArg2(stage);
         dst.ResultIsTemp = desc.GetStageResultIsTemp(stage);
+        dst.ProjectedSampler = desc.GetStageProjectedSampler(stage);
 
         if (dst.ColorOp == 0 || dst.ColorOp == CKRST_TOP_DISABLE)
             break;
@@ -129,6 +132,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
             dst.ColorOp = CKRST_TOP_DISABLE;
             dst.AlphaOp = CKRST_TOP_DISABLE;
             dst.ResultIsTemp = false;
+            dst.ProjectedSampler = false;
             break;
         }
 
@@ -163,6 +167,12 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
     info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
+    CKDWORD projectedSamplerMask = 0;
+    for (CKDWORD stage = 0; stage < 4; ++stage) {
+        if (key.Stages[stage].ProjectedSampler)
+            projectedSamplerMask |= (1u << stage);
+    }
+    info.Set(CKFF_SPEC_PROJECTED_SAMPLER_MASK, projectedSamplerMask);
 
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
