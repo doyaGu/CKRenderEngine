@@ -8,6 +8,7 @@ renderer backend. Runtime code selects the matching set after bgfx initializes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -133,6 +134,11 @@ def sanitize_identifier(value: str) -> str:
     if not ident or ident[0].isdigit():
         ident = "variant_" + ident
     return ident
+
+
+def specialization_identifier(spec_dwords: list[int]) -> str:
+    payload = ",".join(str(value) for value in spec_dwords).encode("ascii")
+    return "spec_" + hashlib.sha1(payload).hexdigest()[:16]
 
 
 def read_uint32(value: object, field: str) -> int:
@@ -263,6 +269,7 @@ def normalize_specialized_variant(variant: dict[str, object], index: int) -> dic
         "identifier": sanitize_identifier(name),
         "vs": vs,
         "specDwords": spec_dwords,
+        "fsIdentifier": specialization_identifier(spec_dwords),
         "defines": ffp_specialized_shader_defines(spec_dwords),
         "key": key,
     }
@@ -325,7 +332,14 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
 
 
 def specialized_fs_var_name(backend: dict[str, str], variant: dict[str, object]) -> str:
-    return f"s_{backend['name']}_ffp_{variant['identifier']}_fs_ff_stage"
+    return f"s_{backend['name']}_ffp_{variant['fsIdentifier']}_fs_ff_stage"
+
+
+def unique_specialized_fs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
+    unique: dict[str, dict[str, object]] = {}
+    for variant in variants:
+        unique.setdefault(variant["fsIdentifier"], variant)
+    return list(unique.values())
 
 
 def write_specialized_key_function(f, variant: dict[str, object]) -> None:
@@ -396,8 +410,8 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
             backend_name = backend["name"]
             f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_3d.bin.h\"\n")
             f.write(f"#include \"shaders/generated/{backend_name}/vs_ff_positiont.bin.h\"\n")
-            for variant in variants:
-                ident = variant["identifier"]
+            for variant in unique_specialized_fs_variants(variants):
+                ident = variant["fsIdentifier"]
                 f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
         f.write("\n")
 
@@ -443,9 +457,10 @@ def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object
 def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
                                  tmp_dir: Path, backends: list[dict[str, str]],
                                  variants: list[dict[str, object]]) -> None:
+    fs_variants = unique_specialized_fs_variants(variants)
     for backend in backends:
-        for variant in variants:
-            ident = variant["identifier"]
+        for variant in fs_variants:
+            ident = variant["fsIdentifier"]
             bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin"
             bin_path.parent.mkdir(parents=True, exist_ok=True)
             run_shaderc(shaderc, script_dir, SHADERS[2], backend, bin_path, variant["defines"])

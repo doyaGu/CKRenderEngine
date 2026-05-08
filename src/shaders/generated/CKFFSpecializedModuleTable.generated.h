@@ -3,20 +3,16 @@
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
-#include "shaders/generated/dx11/specialized/variant_3d_stage0_modulate_fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/specialized/positiont_stage0_modulate_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
-#include "shaders/generated/dx12/specialized/variant_3d_stage0_modulate_fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/specialized/positiont_stage0_modulate_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
-#include "shaders/generated/spirv/specialized/variant_3d_stage0_modulate_fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/specialized/positiont_stage0_modulate_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
-#include "shaders/generated/glsl/specialized/variant_3d_stage0_modulate_fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/specialized/positiont_stage0_modulate_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_66de5cc3eb9d0d6f_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     CKFFShaderKey key;
@@ -212,8 +208,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_vs_ff_3d;
     module.VSSize = sizeof(s_dx11_vs_ff_3d);
-    module.FSData = s_dx11_ffp_variant_3d_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_variant_3d_stage0_modulate_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -222,8 +218,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_vs_ff_positiont;
     module.VSSize = sizeof(s_dx11_vs_ff_positiont);
-    module.FSData = s_dx11_ffp_positiont_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_dx11_ffp_positiont_stage0_modulate_fs_ff_stage);
+    module.FSData = s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -232,8 +228,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_vs_ff_3d;
     module.VSSize = sizeof(s_dx12_vs_ff_3d);
-    module.FSData = s_dx12_ffp_variant_3d_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_variant_3d_stage0_modulate_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -242,8 +238,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_dx12_vs_ff_positiont;
     module.VSSize = sizeof(s_dx12_vs_ff_positiont);
-    module.FSData = s_dx12_ffp_positiont_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_dx12_ffp_positiont_stage0_modulate_fs_ff_stage);
+    module.FSData = s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -252,8 +248,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_variant_3d_stage0_modul
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_vs_ff_3d;
     module.VSSize = sizeof(s_spirv_vs_ff_3d);
-    module.FSData = s_spirv_ffp_variant_3d_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_variant_3d_stage0_modulate_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -262,8 +258,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_positiont_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_vs_ff_positiont;
     module.VSSize = sizeof(s_spirv_vs_ff_positiont);
-    module.FSData = s_spirv_ffp_positiont_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_spirv_ffp_positiont_stage0_modulate_fs_ff_stage);
+    module.FSData = s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
@@ -272,8 +268,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_variant_3d_stage0_modula
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_vs_ff_3d;
     module.VSSize = sizeof(s_glsl_vs_ff_3d);
-    module.FSData = s_glsl_ffp_variant_3d_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_variant_3d_stage0_modulate_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
     return module;
 }
@@ -282,8 +278,8 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_positiont_stage0_modulat
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_vs_ff_positiont;
     module.VSSize = sizeof(s_glsl_vs_ff_positiont);
-    module.FSData = s_glsl_ffp_positiont_stage0_modulate_fs_ff_stage;
-    module.FSSize = sizeof(s_glsl_ffp_positiont_stage0_modulate_fs_ff_stage);
+    module.FSData = s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_66de5cc3eb9d0d6f_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
     return module;
 }
