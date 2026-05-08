@@ -10,6 +10,11 @@
 
 class CKRasterizerContext;
 
+enum CKFFShaderMode {
+    CKFF_SHADER_MODE_UBER_SPECIALIZED = 0,
+    CKFF_SHADER_MODE_FULL_SPECIALIZED = 1
+};
+
 class CKFFShaderCache {
 public:
     CKFFShaderCache();
@@ -26,6 +31,9 @@ public:
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
 
     bool UsesUberShader() const { return m_UseUberShader; }
+    CKFFShaderMode GetShaderMode() const {
+        return m_UseUberShader ? CKFF_SHADER_MODE_UBER_SPECIALIZED : CKFF_SHADER_MODE_FULL_SPECIALIZED;
+    }
     size_t CachedProgramCount() const { return m_ProgramCache.size(); }
 
 private:
@@ -42,6 +50,8 @@ private:
     void CreateUniforms();
     void ResolveShaderTarget();
     CKDWORD CreateVariantProgram(const CKFFShaderKey &key);
+    CKDWORD CreateUberSpecializedProgram(const CKFFShaderKey &key);
+    CKDWORD CreateFullSpecializedProgram(const CKFFShaderKey &key);
     CKDWORD CreateProgramFromBinary(
         const CKShaderTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,

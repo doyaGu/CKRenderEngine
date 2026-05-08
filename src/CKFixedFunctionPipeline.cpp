@@ -840,6 +840,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    SetCurrentShaderKey(shaderKey);
     CKDWORD program = m_ShaderCache.GetProgram(shaderKey);
     if (program == 0) {
         m_DebugState.LogDrawPrimitiveProgramMissing();
@@ -933,6 +934,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     }
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    SetCurrentShaderKey(shaderKey);
     CKDWORD program = m_ShaderCache.GetProgram(shaderKey);
     if (program == 0) return;
 
@@ -1093,6 +1095,10 @@ CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentShaderKey(const CKFFStateDesc
     return CKFFBuildShaderKey(stateDesc, textureBoundMask);
 }
 
+void CKFixedFunctionPipeline::SetCurrentShaderKey(const CKFFShaderKey &shaderKey) {
+    m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS);
+}
+
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     if (!encoder) return;
 
@@ -1239,6 +1245,9 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     encoder->SetUniform(u.u_stageParams, stageParams, CKFF_MAX_TEXTURE_STAGES * 4);
 
     float ffSpec[CKFFSpecializationInfo::MaxSpecDwords][4] = {};
+    const CKDWORD *specDwords = m_CurrentSpecializationInfo.Data();
+    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i)
+        ffSpec[i][0] = (float)specDwords[i];
     encoder->SetUniform(u.u_ffSpec, ffSpec, CKFFSpecializationInfo::MaxSpecDwords);
 
     float clipPlanes[6][4] = {};

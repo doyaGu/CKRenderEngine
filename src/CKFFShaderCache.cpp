@@ -237,6 +237,19 @@ void CKFFShaderCache::ResolveShaderTarget() {
 }
 
 CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
+    if (!m_UseUberShader)
+        return CreateFullSpecializedProgram(key);
+    return CreateUberSpecializedProgram(key);
+}
+
+CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
+    (void)key;
+    CK_LOG_FMT("ShaderCache",
+               "Full FFP specialized module cache miss: no generated module table is available for CK2_FFP_UBERSHADER=0");
+    return 0;
+}
+
+CKDWORD CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) {
     const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
     if (!set)
         return 0;

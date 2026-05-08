@@ -178,6 +178,7 @@ private:
     CKRenderPipeline m_RenderPipeline;
     CKFrustumCuller m_FrustumCuller;
     CKFFDebugState m_DebugState;
+    CKFFSpecializationInfo m_CurrentSpecializationInfo;
 
     // Current transform state
     VxMatrix m_World;
@@ -210,6 +211,7 @@ private:
     // Internal methods
     CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
     CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
+    void SetCurrentShaderKey(const CKFFShaderKey &shaderKey);
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void BindTextures(CKRasterizerEncoder *encoder);
     float ComputeDepthKey() const;

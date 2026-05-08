@@ -1279,6 +1279,9 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     TestCheck(cacheHeader.find("CKDWORD GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
               cacheHeader.find("unordered_map<CKFFShaderKey, CKDWORD, CKFFShaderKeyHash>") != std::string::npos,
               "FFP shader cache must be keyed by explicit DXVK-style FFP shader keys");
+    TestCheck(cacheHeader.find("CKFF_SHADER_MODE_UBER_SPECIALIZED") != std::string::npos &&
+              cacheHeader.find("CKFF_SHADER_MODE_FULL_SPECIALIZED") != std::string::npos,
+              "FFP shader cache must expose distinct DXVK-style uber and full specialized modes");
     TestCheck(cacheHeader.find("m_Stage3DProgram") == std::string::npos &&
               cacheHeader.find("m_PositionTProgram") == std::string::npos &&
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
@@ -1286,6 +1289,9 @@ void Test_FFPShaderCache_UsesKeyedDxvkVariantContract() {
     TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
               "FFP shader cache must expose the DXVK-style ubershader/specialization mode switch");
+    TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
+              cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
+              "CK2_FFP_UBERSHADER=0 must use an explicit full-specialized module path, not silently reuse the uber blob");
     TestCheck(rasterTypes.find("SpecializationDwords") != std::string::npos &&
               rasterTypes.find("SpecializationDwordCount") != std::string::npos &&
               bgfxContext.find("rec->SpecializationDwords") != std::string::npos,
@@ -1316,8 +1322,9 @@ void Test_FFPFragmentShader_UsesDxvkStyleCommonStageReader() {
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
+              pipeline.find("m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS)") != std::string::npos &&
               pipeline.find("encoder->SetUniform(u.u_ffSpec") != std::string::npos,
-              "FFP uniform table must bind a zeroed specialization mirror when native spec constants are unavailable");
+              "FFP uniform table must bind the current draw's DXVK-style specialization mirror");
 }
 
 void Test_FFPStateDesc_FeedsExplicitVariantKey() {
