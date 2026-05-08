@@ -127,6 +127,8 @@ void main()
     int previousColorOp = 0;
 
     for (int stage = 0; stage < 8; ++stage) {
+        if (ckffSpecIsOptimized() && stage > ckffSpecLastActiveTextureStage()) break;
+
         vec4 colorParams = u_stageParams[stage * 4 + 0];
         vec4 alphaParams = u_stageParams[stage * 4 + 1];
         vec4 colorExtra = u_stageParams[stage * 4 + 2];
@@ -187,7 +189,8 @@ void main()
         previousColorOp = colorOp;
     }
 
-    if (u_alphaParams.z > 0.5) {
+    bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_alphaParams.z > 0.5);
+    if (specularEnabled) {
         current.rgb += v_color1.rgb;
     }
     if (!alphaPass(current.a)) discard;
