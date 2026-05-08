@@ -4037,13 +4037,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         if (zbufOnly) {
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
             CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
-            const CKDWORD savedLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
-            const CKDWORD savedAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
-            const CKDWORD savedAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
-            const CKDWORD savedZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
-            const CKDWORD savedZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
-            const CKDWORD savedZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
-            const CKDWORD savedStencilEnable = ffp.GetRenderState(VXRENDERSTATE_STENCILENABLE);
+            CKFFStateGuard ffpState(ffp);
 
             ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
@@ -4059,33 +4053,11 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
                 rc->m_Current3DView, VX_TRIANGLELIST,
                 m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
-
-            ffp.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, savedLighting);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, savedAlphaBlend);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, savedAlphaTest);
-            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, savedZEnable);
-            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, savedZWrite);
-            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, savedZFunc);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, savedStencilEnable);
         } else if (stencilOnly) {
             // Stencil only rendering mode
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
             CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
-            const CKDWORD savedLighting = ffp.GetRenderState(VXRENDERSTATE_LIGHTING);
-            const CKDWORD savedAlphaBlend = ffp.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE);
-            const CKDWORD savedAlphaTest = ffp.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
-            const CKDWORD savedZEnable = ffp.GetRenderState(VXRENDERSTATE_ZENABLE);
-            const CKDWORD savedZWrite = ffp.GetRenderState(VXRENDERSTATE_ZWRITEENABLE);
-            const CKDWORD savedZFunc = ffp.GetRenderState(VXRENDERSTATE_ZFUNC);
-            const CKDWORD savedStencilEnable = ffp.GetRenderState(VXRENDERSTATE_STENCILENABLE);
-            const CKDWORD savedStencilFunc = ffp.GetRenderState(VXRENDERSTATE_STENCILFUNC);
-            const CKDWORD savedStencilFail = ffp.GetRenderState(VXRENDERSTATE_STENCILFAIL);
-            const CKDWORD savedStencilZFail = ffp.GetRenderState(VXRENDERSTATE_STENCILZFAIL);
-            const CKDWORD savedStencilPass = ffp.GetRenderState(VXRENDERSTATE_STENCILPASS);
-            const CKDWORD savedStencilRef = ffp.GetRenderState(VXRENDERSTATE_STENCILREF);
-            const CKDWORD savedStencilMask = ffp.GetRenderState(VXRENDERSTATE_STENCILMASK);
-            const CKDWORD savedStencilWriteMask = ffp.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+            CKFFStateGuard ffpState(ffp);
 
             ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
@@ -4108,22 +4080,6 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
                 rc->m_Current3DView, VX_TRIANGLELIST,
                 m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
-
-            ffp.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, savedLighting);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, savedAlphaBlend);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, savedAlphaTest);
-            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, savedZEnable);
-            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, savedZWrite);
-            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, savedZFunc);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, savedStencilEnable);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, savedStencilFunc);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILFAIL, savedStencilFail);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILZFAIL, savedStencilZFail);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, savedStencilPass);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILREF, savedStencilRef);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, savedStencilMask);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, savedStencilWriteMask);
 
             // Match original: stencil-only disables channel passes.
             renderChannels = FALSE;
@@ -4290,6 +4246,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
             // Wireframe overlay
             if (rc->m_DisplayWireframe) {
+                CKFFStateGuard ffpState(rc->m_FFPipeline);
                 VxMatrix projMat;
                 memcpy(&projMat, rc->GetProjectionTransformationMatrix(), sizeof(VxMatrix));
                 float origZ = projMat[3][2];
@@ -4321,6 +4278,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
     // Render lines
     if (lineCount) {
+        CKFFStateGuard ffpState(rc->m_FFPipeline);
         VxDrawPrimitiveData lineDp;
         memset(&lineDp, 0, sizeof(lineDp));
 
@@ -4591,6 +4549,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
 //--------------------------------------------
 int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable) {
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
+    CKFFStateGuard ffpState(dev->m_FFPipeline);
 
     // Setup flags for channel rendering
     data->Flags = m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;

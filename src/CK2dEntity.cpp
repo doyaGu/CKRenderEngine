@@ -5,6 +5,7 @@
 #include "CKRasterizer.h"
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
+#include "CKFixedFunctionPipeline.h"
 
 #include <cstdlib>
 
@@ -837,6 +838,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             dev->SetFullViewport(&dev->m_ViewportData, (int) width, (int) height);
         }
 
+        CKFFStateGuard ffpState(dev->m_FFPipeline);
+
         // Set material
         m_Material->SetAsCurrent(dev, TRUE, FALSE);
 
@@ -932,6 +935,9 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             s_BlackFullscreenLogCount++;
         }
         if (isFullscreenBlack && SkipFullscreenBlack2DEnabled()) {
+            if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
+                dev->SetViewRect(savedViewRect);
+            }
             return CK_OK;
         }
 
@@ -949,6 +955,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         // No material - draw placeholder (editor mode only)
         if (m_Context->IsPlaying())
             return CK_OK;
+
+        CKFFStateGuard ffpState(dev->m_FFPipeline);
 
         // Set blend states for transparent black fill
         dev->SetState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
