@@ -490,6 +490,7 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
                                  tmp_dir: Path, backends: list[dict[str, str]],
                                  variants: list[dict[str, object]]) -> None:
     fs_variants = unique_specialized_fs_variants(variants)
+    clean_stale_specialized_headers(generated_dir, backends, fs_variants)
     for backend in backends:
         for variant in fs_variants:
             ident = variant["fsIdentifier"]
@@ -498,6 +499,18 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
             run_shaderc(shaderc, script_dir, SHADERS[2], backend, bin_path, variant["defines"])
             header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
             write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
+
+
+def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str, str]],
+                                    fs_variants: list[dict[str, object]]) -> None:
+    expected = {f"{variant['fsIdentifier']}_fs_ff_stage.bin.h" for variant in fs_variants}
+    for backend in backends:
+        specialized_dir = generated_dir / backend["name"] / "specialized"
+        if not specialized_dir.is_dir():
+            continue
+        for header in specialized_dir.glob("*_fs_ff_stage.bin.h"):
+            if header.name not in expected:
+                header.unlink()
 
 
 def main() -> int:
