@@ -147,6 +147,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
         defines.append(f"CKFF_VS_TEXCOORD{index}={value}")
     for index, value in enumerate(key["vsTexTransformFlags"]):
         defines.append(f"CKFF_VS_TEXFLAGS{index}={value}")
+    defines.append(f"CKFF_VS_TEXCOORD_DECL_MASK={key['vsTexcoordDeclMask']}")
     return defines
 
 

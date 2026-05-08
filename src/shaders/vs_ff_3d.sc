@@ -35,6 +35,9 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_FOG_MODE
 #define CKFF_VS_FOG_MODE 0
 #endif
+#ifndef CKFF_VS_TEXCOORD_DECL_MASK
+#define CKFF_VS_TEXCOORD_DECL_MASK 4793490
+#endif
 #ifndef CKFF_VS_TEXGEN0
 #define CKFF_VS_TEXGEN0 0
 #endif
@@ -158,6 +161,22 @@ int ckffVsTexTransformFlags(int stage, float runtimeFlags)
 #endif
 }
 
+int ckffVsTexcoordComponentCount(int stage)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return (CKFF_VS_TEXCOORD_DECL_MASK >> 0) & 7;
+    if (stage == 1) return (CKFF_VS_TEXCOORD_DECL_MASK >> 3) & 7;
+    if (stage == 2) return (CKFF_VS_TEXCOORD_DECL_MASK >> 6) & 7;
+    if (stage == 3) return (CKFF_VS_TEXCOORD_DECL_MASK >> 9) & 7;
+    if (stage == 4) return (CKFF_VS_TEXCOORD_DECL_MASK >> 12) & 7;
+    if (stage == 5) return (CKFF_VS_TEXCOORD_DECL_MASK >> 15) & 7;
+    if (stage == 6) return (CKFF_VS_TEXCOORD_DECL_MASK >> 18) & 7;
+    return (CKFF_VS_TEXCOORD_DECL_MASK >> 21) & 7;
+#else
+    return 2;
+#endif
+}
+
 bool ckffVsBit(int bit, bool runtimeValue)
 {
 #if defined(CKFF_FULL_SPECIALIZED)
@@ -247,7 +266,12 @@ vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, 
         float m = length(refl + vec3(0.0, 0.0, 1.0)) * 2.0;
         return vec4(refl.xy / max(m, 0.0001) + 0.5, 0.0, 1.0);
     }
-    return vec4(selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7), 0.0, 0.0);
+    int declaredCount = ckffVsTexcoordComponentCount(stage);
+    vec4 result = vec4(selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7), 0.0, 1.0);
+    if (declaredCount <= 1) result.y = 0.0;
+    if (declaredCount <= 2) result.z = 0.0;
+    if (declaredCount <= 3) result.w = 0.0;
+    return result;
 }
 
 vec4 transformTexcoord(int stage, vec4 coord)
@@ -261,7 +285,8 @@ vec4 transformTexcoord(int stage, vec4 coord)
 
     int packedIndex = int(params.y);
     int generation = ckffVsTexGenMode(stage, packedIndex);
-    if (generation == 0 && applyTransform) {
+    int declaredCount = ckffVsTexcoordComponentCount(stage);
+    if (generation == 0 && applyTransform && declaredCount < 3) {
         coord.z = 1.0;
     }
 

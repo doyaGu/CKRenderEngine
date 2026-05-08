@@ -285,9 +285,10 @@ void Test_TexGen_TextureMatrixUsesBgfxVxMatrixSemantics() {
               "Texture matrix transform must use the bgfx/VxMatrix convention that preserves D3D row-vector translation");
     TestCheck(source.find("vec3 refl = reflect(eye, viewNormal)") != std::string::npos,
               "Camera-space reflection vector must follow D3D FFP reflect(viewPosition, normal) semantics");
-    TestCheck(source.find("return vec4(selectTexcoord(index & 7") != std::string::npos &&
-              source.find(", 0.0, 0.0)") != std::string::npos,
-              "Pass-through texcoords must use D3D FFP padding before texture matrix transforms");
+    TestCheck(source.find("int declaredCount = ckffVsTexcoordComponentCount(stage)") != std::string::npos &&
+              source.find("vec4 result = vec4(selectTexcoord(index & 7") != std::string::npos &&
+              source.find("if (declaredCount <= 2) result.z = 0.0") != std::string::npos,
+              "Pass-through texcoords must use declared component-count padding before texture matrix transforms");
 }
 
 void Test_RenderTarget_AttachesDepthStencilTexture() {
@@ -2032,17 +2033,21 @@ void Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey() {
 
     TestCheck(shader.find("CKFF_VS_TEXFLAGS0") != std::string::npos &&
               shader.find("ckffVsTexTransformFlags") != std::string::npos &&
+              shader.find("CKFF_VS_TEXCOORD_DECL_MASK") != std::string::npos &&
+              shader.find("ckffVsTexcoordComponentCount") != std::string::npos &&
               shader.find("int flags = ckffVsTexTransformFlags(stage, params.z)") != std::string::npos,
-              "3D vertex shader must consume specialized VS texture transform flags");
+              "3D vertex shader must consume specialized VS texture transform flags and texcoord declaration counts");
     TestCheck(pipeline.find("stateDesc.VS.SetTextureTransformFlags(stage, transformFlags)") != std::string::npos &&
               pipeline.find("const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS]") != std::string::npos,
               "FFP shader key construction must copy texture transform flags into the VS key");
     TestCheck(compiler.find("CKFF_VS_TEXFLAGS{index}") != std::string::npos &&
               compiler.find("\"vsTexTransformFlags\"") != std::string::npos &&
+              compiler.find("CKFF_VS_TEXCOORD_DECL_MASK") != std::string::npos &&
               compiler.find("key.VS.TexTransformFlags[{index}]") != std::string::npos,
-              "Shader compiler must pass VS texture transform flags into specialized VS compilation");
-    TestCheck(keyHeader.find("TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES]") != std::string::npos,
-              "FFP VS shader key must include texture transform flags");
+              "Shader compiler must pass VS texture transform flags and texcoord declaration counts into specialized VS compilation");
+    TestCheck(keyHeader.find("TexTransformFlags[CKFF_STATE_DESC_TEXTURE_STAGES]") != std::string::npos &&
+              keyHeader.find("VertexTexcoordDeclMask") != std::string::npos,
+              "FFP VS shader key must include texture transform flags and texcoord declaration mask");
 }
 
 void Test_FFPVertexShader_UsesSpecializedLightingKey() {
