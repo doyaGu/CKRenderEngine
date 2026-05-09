@@ -34,6 +34,15 @@ static FILE *GetBgfxLogFile() {
     return g_BgfxLogFile;
 }
 
+static void CloseBgfxLogFile()
+{
+    if (g_BgfxLogFile)
+    {
+        fclose(g_BgfxLogFile);
+        g_BgfxLogFile = nullptr;
+    }
+}
+
 static void BgfxLogf(const char *tag, const char *fmt, ...)
 {
     char msg[2048];
@@ -202,7 +211,11 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
         VxImageDescEx *target = m_Context->m_BackbufferReadTarget;
         if (target && target->Image)
         {
-            memcpy(target->Image, _data, _size);
+            uint32_t dstSize = (uint32_t)(target->BytesPerLine * target->Height);
+            if (dstSize == 0)
+                dstSize = (uint32_t)(target->Width * (target->BitsPerPixel / 8) * target->Height);
+            uint32_t copySize = (dstSize > 0 && _size > dstSize) ? dstSize : _size;
+            memcpy(target->Image, _data, copySize);
             target->Width = (int)_width;
             target->Height = (int)_height;
             target->BytesPerLine = (int)_pitch;
@@ -1260,6 +1273,7 @@ CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
 
         bgfx::shutdown();
         m_BgfxInitialized = FALSE;
+        CloseBgfxLogFile();
     }
 }
 
@@ -2352,7 +2366,10 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer(
     bgfx::TransientVertexBuffer *tvb = &m_TransientVBPool[slot];
     bgfx::allocTransientVertexBuffer(tvb, VertexCount, layoutRec->Layout);
     if (tvb->data == NULL)
+    {
+        m_TransientVBCount.fetch_sub(1, std::memory_order_relaxed);
         return FALSE;
+    }
 
     Buffer->Data = tvb->data;
     Buffer->Size = tvb->size;
@@ -2380,7 +2397,10 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
     bgfx::TransientIndexBuffer *tib = &m_TransientIBPool[slot];
     bgfx::allocTransientIndexBuffer(tib, IndexCount, Index32 ? true : false);
     if (tib->data == NULL)
+    {
+        m_TransientIBCount.fetch_sub(1, std::memory_order_relaxed);
         return FALSE;
+    }
 
     Buffer->Data = tib->data;
     Buffer->Size = tib->size;
@@ -2415,7 +2435,10 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
     bgfx::InstanceDataBuffer *idb = &m_TransientInstPool[slot];
     bgfx::allocInstanceDataBuffer(idb, InstanceCount, stride);
     if (idb->data == NULL)
+    {
+        m_TransientInstCount.fetch_sub(1, std::memory_order_relaxed);
         return FALSE;
+    }
 
     Buffer->Data = idb->data;
     Buffer->Size = idb->size;
@@ -2787,8 +2810,7 @@ void CKBgfxRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Inf
     bgfx::UniformInfo bgfxInfo;
     bgfx::getUniformInfo(handle, bgfxInfo);
 
-    strncpy(Info->Name, bgfxInfo.name, sizeof(Info->Name) - 1);
-    Info->Name[sizeof(Info->Name) - 1] = '\0';
+    strncpy_s(Info->Name, bgfxInfo.name, _TRUNCATE);
     Info->Count = bgfxInfo.num;
 
     switch (bgfxInfo.type)
