@@ -90,7 +90,7 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
 bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
 {
     char value[32] = {0};
-    if (!CKBgfxConfigString("Renderer.Type", value, (CKDWORD)sizeof(value)) ||
+    if (!CKBgfxConfigString("Renderer", "Backend", value, (CKDWORD)sizeof(value)) ||
         _stricmp(value, "auto") == 0)
         return bgfx::RendererType::Count;
     if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
@@ -102,6 +102,6 @@ bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
     if (_stricmp(value, "opengl") == 0 || _stricmp(value, "gl") == 0)
         return bgfx::RendererType::OpenGL;
 
-    CKBgfxLogf("Init", "unknown Renderer.Type='%s', falling back to auto", value);
+    CKBgfxLogf("Init", "unknown Renderer/Backend='%s', falling back to auto", value);
     return bgfx::RendererType::Count;
 }

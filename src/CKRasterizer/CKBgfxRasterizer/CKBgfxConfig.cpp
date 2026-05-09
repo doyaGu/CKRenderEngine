@@ -6,7 +6,12 @@
 #endif
 #include <Windows.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+
+static const char *kCKBgfxConfigFile = "CKBgfxRasterizer.ini";
+static const char *kCKBgfxConfigSection = "CKBgfxRasterizer";
 
 static int CKBgfxConfigStricmp(const char *a, const char *b)
 {
@@ -52,13 +57,13 @@ static void CKBgfxLoadConfig(VxConfiguration &config)
         GetModuleFileNameA(hMod, path, MAX_PATH);
         char *last = strrchr(path, '\\');
         if (last) {
-            strcpy_s(last + 1, MAX_PATH - (last + 1 - path), "CKBgfxRasterizer.cfg");
+            strcpy_s(last + 1, MAX_PATH - (last + 1 - path), kCKBgfxConfigFile);
             if (CKBgfxLoadConfigFile(config, path))
                 return;
         }
     }
 
-    CKBgfxLoadConfigFile(config, "CKBgfxRasterizer.cfg");
+    CKBgfxLoadConfigFile(config, kCKBgfxConfigFile);
 }
 
 static VxConfiguration *CKBgfxGetConfig()
@@ -72,13 +77,21 @@ static VxConfiguration *CKBgfxGetConfig()
     return &s_Config;
 }
 
-bool CKBgfxConfigString(const char *name, char *buffer, CKDWORD bufferSize)
+bool CKBgfxConfigString(const char *section, const char *name, char *buffer, CKDWORD bufferSize)
 {
-    if (!name || !buffer || bufferSize == 0)
+    if (!section || !name || !buffer || bufferSize == 0)
         return false;
 
     buffer[0] = '\0';
-    VxConfigurationEntry *entry = CKBgfxGetConfig()->GetEntry(name, TRUE);
+    char sectionPath[256] = {0};
+    if (sprintf_s(sectionPath, "%s.%s", kCKBgfxConfigSection, section) < 0)
+        return false;
+
+    VxConfigurationSection *configSection = CKBgfxGetConfig()->GetSubSection(sectionPath, TRUE);
+    if (!configSection)
+        return false;
+
+    VxConfigurationEntry *entry = configSection->GetEntry(name);
     if (!entry)
         return false;
 
@@ -90,11 +103,22 @@ bool CKBgfxConfigString(const char *name, char *buffer, CKDWORD bufferSize)
     return buffer[0] != '\0';
 }
 
-bool CKBgfxConfigBool(const char *name, bool fallback)
+bool CKBgfxConfigBool(const char *section, const char *name, bool fallback)
 {
     char value[32] = {0};
-    if (!CKBgfxConfigString(name, value, (CKDWORD)sizeof(value)))
+    if (!CKBgfxConfigString(section, name, value, (CKDWORD)sizeof(value)))
         return fallback;
 
     return CKBgfxConfigParseBool(value, fallback);
+}
+
+int CKBgfxConfigInt(const char *section, const char *name, int fallback)
+{
+    char value[64] = {0};
+    if (!CKBgfxConfigString(section, name, value, (CKDWORD)sizeof(value)))
+        return fallback;
+
+    char *end = nullptr;
+    long parsed = std::strtol(value, &end, 10);
+    return (end != value) ? (int)parsed : fallback;
 }
