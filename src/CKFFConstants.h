@@ -78,6 +78,10 @@ struct CKFFUniformHandles {
     // Transform uniforms are NOT here: bgfx handles u_model, u_modelView,
     // u_modelViewProj, u_viewProj automatically via SetViewTransform/SetTransform.
     CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
+    CKDWORD u_ffMatrices;   // mat4 array: MVP, model, modelView, normal
+    CKDWORD u_ffDrawParams; // vec4 array: vertex params[0..7], fragment params[8..11], inline light[12..18]
+    CKDWORD u_ffVertexParams; // vec4 array: material[5], material sources, light params, light model params
+    CKDWORD u_ffFragmentParams; // vec4 array: alpha, texfactor, fog params, fog color
     CKDWORD u_ckModelViewProj;
     CKDWORD u_ckModel;
     CKDWORD u_ckModelView;

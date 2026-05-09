@@ -62,7 +62,7 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
     : Stages{}, LastActiveTextureStage(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
-      GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false) {}
+      GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false), ClipEnable(false) {}
 
 bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
     if (LastActiveTextureStage != other.LastActiveTextureStage ||
@@ -72,7 +72,8 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
         GlobalSpecularEnable != other.GlobalSpecularEnable ||
         AlphaTestEnable != other.AlphaTestEnable ||
         FogEnable != other.FogEnable ||
-        RangeFog != other.RangeFog)
+        RangeFog != other.RangeFog ||
+        ClipEnable != other.ClipEnable)
         return false;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &a = Stages[stage];
@@ -109,6 +110,7 @@ std::size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
     seed = HashCombine(seed, key.FS.AlphaTestEnable ? 1u : 0u);
     seed = HashCombine(seed, key.FS.FogEnable ? 1u : 0u);
     seed = HashCombine(seed, key.FS.RangeFog ? 1u : 0u);
+    seed = HashCombine(seed, key.FS.ClipEnable ? 1u : 0u);
     for (const CKFFShaderKeyFSStage &stage : key.FS.Stages) {
         seed = HashCombine(seed, stage.ColorOp);
         seed = HashCombine(seed, stage.ColorArg0);
@@ -154,6 +156,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     key.VertexFogMode = key.FogEnable ? desc.GetVertexFogMode() : 0;
     key.PixelFogMode = key.FogEnable ? desc.GetPixelFogMode() : 0;
     key.RangeFog = key.FogEnable && desc.GetRangeFog();
+    key.ClipEnable = desc.GetClipEnabled();
 
     CKDWORD activeCount = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {

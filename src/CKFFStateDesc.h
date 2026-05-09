@@ -320,11 +320,13 @@ struct CKFFFSStateDesc {
     void SetAlphaTestEnabled(bool v){ SetBit(1, v); }
     void SetFogEnabled(bool v)      { SetBit(2, v); }
     void SetRangeFog(bool v)        { SetBit(11, v); }
+    void SetClipEnabled(bool v)     { SetBit(12, v); }
 
     bool GetSpecularAdd() const      { return GetBit(0); }
     bool GetAlphaTestEnabled() const { return GetBit(1); }
     bool GetFogEnabled() const       { return GetBit(2); }
     bool GetRangeFog() const         { return GetBit(11); }
+    bool GetClipEnabled() const      { return GetBit(12); }
 
     // --- Alpha func (bits 3-6) ---
     void SetAlphaFunc(uint32_t func) { SetField(3, 4, func); }

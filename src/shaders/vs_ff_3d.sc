@@ -3,16 +3,9 @@ $output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, 
 
 #include "bgfx_shader.sh"
 
-uniform mat4 u_ckModelViewProj;
-uniform mat4 u_ckModel;
-uniform mat4 u_ckModelView;
-uniform mat4 u_ckNormalMatrix;
+uniform mat4 u_ffMatrices[4];
 uniform mat4 u_texMatrix[8];
-uniform vec4 u_lightParams;
-uniform vec4 u_material[5];
-uniform vec4 u_fogParams;
-uniform vec4 u_ffParams;
-uniform vec4 u_lightModelParams;
+uniform vec4 u_ffDrawParams[19];
 uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[32];
 
@@ -119,6 +112,16 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_TEXFLAGS7
 #define CKFF_VS_TEXFLAGS7 0
 #endif
+#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
+#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
+#endif
+#if ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
+#define CKFF_VS_NEEDS_VIEW_SPACE 1
+#else
+#define CKFF_VS_NEEDS_VIEW_SPACE 0
+#endif
+#else
+#define CKFF_VS_NEEDS_VIEW_SPACE 1
 #endif
 
 int ckffVsTexGenMode(int stage, int packedIndex)
@@ -303,14 +306,19 @@ vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, 
 
 vec4 transformTexcoord(int stage, vec4 coord)
 {
+#if defined(CKFF_FULL_SPECIALIZED)
+    int flags = ckffVsTexTransformFlags(stage, 0.0);
+    int packedIndex = 0;
+#else
     vec4 params = u_stageParams[stage * 4 + 2];
     int flags = ckffVsTexTransformFlags(stage, params.z);
+    int packedIndex = int(params.y);
+#endif
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
     bool applyTransform = count > 1 && count <= 4;
 
-    int packedIndex = int(params.y);
     int generation = ckffVsTexGenMode(stage, packedIndex);
     int declaredCount = ckffVsTexcoordComponentCount(stage);
     if (generation == 0 && applyTransform && declaredCount < 3) {
@@ -341,25 +349,86 @@ void main()
     if (vertexBlendMode != 0 && vertexBlendCount > 0) {
         localPos = localPos;
     }
-    gl_Position = mul(u_ckModelViewProj, localPos);
-    v_clipPos = mul(u_ckModel, localPos);
+    gl_Position = mul(u_ffMatrices[0], localPos);
+    v_clipPos = mul(u_ffMatrices[1], localPos);
 
-    vec4 viewPos = mul(u_ckModelView, localPos);
-    vec3 viewNormal = mul(u_ckNormalMatrix, vec4(a_normal, 0.0)).xyz;
-    if (ckffVsBit(14, u_lightModelParams.y > 0.5)) {
+    vec4 viewPos;
+    vec3 viewNormal;
+#if CKFF_VS_NEEDS_VIEW_SPACE
+    viewPos = mul(u_ffMatrices[2], localPos);
+    viewNormal = mul(u_ffMatrices[3], vec4(a_normal, 0.0)).xyz;
+#if defined(CKFF_FULL_SPECIALIZED)
+    if ((CKFF_VS_BITS & (1 << 14)) != 0) {
         viewNormal = normalize(viewNormal);
     }
+#else
+    if (ckffVsBit(14, u_ffDrawParams[7].y > 0.5)) {
+        viewNormal = normalize(viewNormal);
+    }
+#endif
+#else
+    viewPos = vec4_splat(0.0);
+    viewNormal = vec3_splat(0.0);
+#endif
 
-    vec4 matDiffuse  = selectMaterialSource(0, u_ffParams.x, u_material[0], a_color0, a_color1);
-    vec4 matAmbient  = selectMaterialSource(1, u_ffParams.y, u_material[1], a_color0, a_color1);
-    vec4 matSpecular = selectMaterialSource(2, u_ffParams.z, u_material[2], a_color0, a_color1);
-    vec4 matEmissive = selectMaterialSource(3, u_ffParams.w, u_material[3], a_color0, a_color1);
-    float matPower   = u_material[4].x;
+#if defined(CKFF_FULL_SPECIALIZED)
+    #if CKFF_VS_DIFFUSE_SOURCE == 1
+        vec4 matDiffuse = a_color0;
+    #elif CKFF_VS_DIFFUSE_SOURCE == 2
+        vec4 matDiffuse = a_color1;
+    #else
+        vec4 matDiffuse = u_ffDrawParams[0];
+    #endif
 
-    int rawLightCount = int(u_lightParams.x);
+    #if (CKFF_VS_BITS & (1 << 13)) != 0
+        #if CKFF_VS_AMBIENT_SOURCE == 1
+            vec4 matAmbient = a_color0;
+        #elif CKFF_VS_AMBIENT_SOURCE == 2
+            vec4 matAmbient = a_color1;
+        #else
+            vec4 matAmbient = u_ffDrawParams[1];
+        #endif
+
+        #if CKFF_VS_SPECULAR_SOURCE == 1
+            vec4 matSpecular = a_color0;
+        #elif CKFF_VS_SPECULAR_SOURCE == 2
+            vec4 matSpecular = a_color1;
+        #else
+            vec4 matSpecular = u_ffDrawParams[2];
+        #endif
+
+        #if CKFF_VS_EMISSIVE_SOURCE == 1
+            vec4 matEmissive = a_color0;
+        #elif CKFF_VS_EMISSIVE_SOURCE == 2
+            vec4 matEmissive = a_color1;
+        #else
+            vec4 matEmissive = u_ffDrawParams[3];
+        #endif
+        float matPower = u_ffDrawParams[4].x;
+    #else
+        vec4 matAmbient = vec4_splat(0.0);
+        vec4 matSpecular = vec4_splat(0.0);
+        vec4 matEmissive = vec4_splat(0.0);
+        float matPower = 0.0;
+    #endif
+#else
+    vec4 matDiffuse  = selectMaterialSource(0, u_ffDrawParams[5].x, u_ffDrawParams[0], a_color0, a_color1);
+    vec4 matAmbient  = selectMaterialSource(1, u_ffDrawParams[5].y, u_ffDrawParams[1], a_color0, a_color1);
+    vec4 matSpecular = selectMaterialSource(2, u_ffDrawParams[5].z, u_ffDrawParams[2], a_color0, a_color1);
+    vec4 matEmissive = selectMaterialSource(3, u_ffDrawParams[5].w, u_ffDrawParams[3], a_color0, a_color1);
+    float matPower   = u_ffDrawParams[4].x;
+#endif
+
+#if defined(CKFF_FULL_SPECIALIZED)
+    bool lightingEnabled = (CKFF_VS_BITS & (1 << 13)) != 0;
+    int lightCount = (CKFF_VS_BITS >> 17) & 15;
+    vec3 globalAmbient = vec3(0.0, 0.0, 0.0);
+#else
+    int rawLightCount = int(u_ffDrawParams[6].x);
     bool lightingEnabled = ckffVsBit(13, rawLightCount >= 0);
     int lightCount = ckffVsBits(17, 15, rawLightCount < 0 ? 0 : rawLightCount);
-    vec3 globalAmbient = u_lightParams.yzw;
+    vec3 globalAmbient = u_ffDrawParams[6].yzw;
+#endif
 
     vec4 litDiffuse = matDiffuse;
     vec3 litSpecular = a_color1.rgb;
@@ -373,13 +442,14 @@ void main()
             if (i >= lightCount) break;
 
             int base = i * 7;
-            vec4 lPos   = u_lights[base + 0];
-            vec4 lDir   = u_lights[base + 1];
-            vec4 lDiff  = u_lights[base + 2];
-            vec4 lSpec  = u_lights[base + 3];
-            vec4 lAmb   = u_lights[base + 4];
-            vec4 lAtten = u_lights[base + 5];
-            vec4 lSpot  = u_lights[base + 6];
+            bool inlineLight = (i == 0 && u_ffDrawParams[7].w > 0.5);
+            vec4 lPos   = inlineLight ? u_ffDrawParams[12] : u_lights[base + 0];
+            vec4 lDir   = inlineLight ? u_ffDrawParams[13] : u_lights[base + 1];
+            vec4 lDiff  = inlineLight ? u_ffDrawParams[14] : u_lights[base + 2];
+            vec4 lSpec  = inlineLight ? u_ffDrawParams[15] : u_lights[base + 3];
+            vec4 lAmb   = inlineLight ? u_ffDrawParams[16] : u_lights[base + 4];
+            vec4 lAtten = inlineLight ? u_ffDrawParams[17] : u_lights[base + 5];
+            vec4 lSpot  = inlineLight ? u_ffDrawParams[18] : u_lights[base + 6];
 
             vec3 toLight;
             float atten = 1.0;
@@ -406,11 +476,19 @@ void main()
 
             if (nDotL > 0.0 && matPower > 0.0) {
                 vec3 halfVec;
-                if (ckffVsBit(16, u_lightModelParams.x > 0.5)) {
+#if defined(CKFF_FULL_SPECIALIZED)
+                if ((CKFF_VS_BITS & (1 << 16)) != 0) {
                     halfVec = toLight - normalize(viewPos.xyz);
                 } else {
                     halfVec = toLight - vec3(0.0, 0.0, 1.0);
                 }
+#else
+                if (ckffVsBit(16, u_ffDrawParams[7].x > 0.5)) {
+                    halfVec = toLight - normalize(viewPos.xyz);
+                } else {
+                    halfVec = toLight - vec3(0.0, 0.0, 1.0);
+                }
+#endif
                 halfVec = normalize(halfVec);
                 float nDotH = max(dot(viewNormal, halfVec), 0.0);
                 specularAccum += lSpec.rgb * pow(nDotH, matPower) * atten;
@@ -427,6 +505,16 @@ void main()
     v_color0 = clamp(litDiffuse, 0.0, 1.0);
     v_color0.a = matDiffuse.a;
     v_color1 = vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a);
+#if defined(CKFF_FULL_SPECIALIZED)
+    int tc0 = ckffVsTexcoordIndex(0, 0);
+    int tc1 = ckffVsTexcoordIndex(1, 0);
+    int tc2 = ckffVsTexcoordIndex(2, 0);
+    int tc3 = ckffVsTexcoordIndex(3, 0);
+    int tc4 = ckffVsTexcoordIndex(4, 0);
+    int tc5 = ckffVsTexcoordIndex(5, 0);
+    int tc6 = ckffVsTexcoordIndex(6, 0);
+    int tc7 = ckffVsTexcoordIndex(7, 0);
+#else
     int tc0 = int(u_stageParams[0 * 4 + 2].y);
     int tc1 = int(u_stageParams[1 * 4 + 2].y);
     int tc2 = int(u_stageParams[2 * 4 + 2].y);
@@ -435,13 +523,51 @@ void main()
     int tc5 = int(u_stageParams[5 * 4 + 2].y);
     int tc6 = int(u_stageParams[6 * 4 + 2].y);
     int tc7 = int(u_stageParams[7 * 4 + 2].y);
+#endif
     v_texcoord0 = transformTexcoord(0, generateTexcoord(0, tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1
     v_texcoord1 = transformTexcoord(1, generateTexcoord(1, tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord1 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 2
     v_texcoord2 = transformTexcoord(2, generateTexcoord(2, tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord2 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 3
     v_texcoord3 = transformTexcoord(3, generateTexcoord(3, tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord3 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 4
     v_texcoord4 = transformTexcoord(4, generateTexcoord(4, tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord4 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 5
     v_texcoord5 = transformTexcoord(5, generateTexcoord(5, tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord5 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 6
     v_texcoord6 = transformTexcoord(6, generateTexcoord(6, tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+#else
+    v_texcoord6 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7
     v_texcoord7Fog = transformTexcoord(7, generateTexcoord(7, tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_fogParams);
+#else
+    v_texcoord7Fog = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if defined(CKFF_FULL_SPECIALIZED)
+#if CKFF_VS_FOG_MODE != 0
+    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_ffDrawParams[10]);
+#else
+    v_texcoord7Fog.z = 1.0;
+#endif
+#else
+    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_ffDrawParams[10]);
+#endif
 }
+

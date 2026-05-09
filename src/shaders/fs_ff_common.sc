@@ -44,6 +44,18 @@ struct CKFFStageParams
 #ifndef CKFF_SPEC_DWORD9
 #define CKFF_SPEC_DWORD9 0
 #endif
+#ifndef CKFF_FS_STAGE0_HAS_TEXTURE
+#define CKFF_FS_STAGE0_HAS_TEXTURE 0
+#endif
+#ifndef CKFF_FS_STAGE1_HAS_TEXTURE
+#define CKFF_FS_STAGE1_HAS_TEXTURE 0
+#endif
+#ifndef CKFF_FS_STAGE2_HAS_TEXTURE
+#define CKFF_FS_STAGE2_HAS_TEXTURE 0
+#endif
+#ifndef CKFF_FS_STAGE3_HAS_TEXTURE
+#define CKFF_FS_STAGE3_HAS_TEXTURE 0
+#endif
 #endif
 
 bool ckffSpecIsOptimized()
@@ -101,6 +113,19 @@ int ckffSpecProjectedSamplerMask()
     return ckffSpecBits(ckffSpecDword(5), 0, 4);
 }
 
+bool ckffSpecStageHasTexture(int stage)
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    if (stage == 0) return CKFF_FS_STAGE0_HAS_TEXTURE != 0;
+    if (stage == 1) return CKFF_FS_STAGE1_HAS_TEXTURE != 0;
+    if (stage == 2) return CKFF_FS_STAGE2_HAS_TEXTURE != 0;
+    if (stage == 3) return CKFF_FS_STAGE3_HAS_TEXTURE != 0;
+    return false;
+#else
+    return false;
+#endif
+}
+
 bool ckffSpecAlphaTestEnabled()
 {
     return ckffSpecBits(ckffSpecDword(5), 4, 1) != 0;
@@ -134,6 +159,19 @@ bool ckffSpecRangeFog()
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
+#if defined(CKFF_FULL_SPECIALIZED)
+    params.ColorOp = 0;
+    params.ColorArg0 = 0;
+    params.ColorArg1 = 0;
+    params.ColorArg2 = 0;
+    params.AlphaOp = 0;
+    params.AlphaArg0 = 0;
+    params.AlphaArg1 = 0;
+    params.AlphaArg2 = 0;
+    params.ResultArg = 1;
+    params.TexcoordTransformFlags = 0;
+    params.HasTexture = ckffSpecStageHasTexture(stage);
+#else
     params.ColorOp = int(colorParams.x);
     params.ColorArg0 = int(colorExtra.x);
     params.ColorArg1 = int(colorParams.y);
@@ -145,6 +183,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.ResultArg = int(alphaParams.w);
     params.TexcoordTransformFlags = int(colorExtra.z);
     params.HasTexture = colorParams.w > 0.5;
+#endif
 
     if (stage < 4 && ckffSpecIsOptimized()) {
         int word = ckffSpecDword(6 + stage);
