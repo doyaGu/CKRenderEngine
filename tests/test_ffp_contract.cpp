@@ -26,6 +26,13 @@
 namespace {
 
 std::string ReadRenderEngineSource(const char *relativePath) {
+#ifdef CKRE_SOURCE_DIR
+    std::string path = CKRE_SOURCE_DIR;
+    if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') {
+        path += '/';
+    }
+    path += relativePath;
+#else
     std::string path = __FILE__;
     const std::string suffix = "tests\\test_ffp_contract.cpp";
     size_t pos = path.rfind(suffix);
@@ -36,6 +43,7 @@ std::string ReadRenderEngineSource(const char *relativePath) {
     TestCheck(pos != std::string::npos, "FFP contract test source path must resolve the RenderEngine source root");
     path.erase(pos);
     path += relativePath;
+#endif
 
     std::ifstream file(path.c_str());
     TestCheck(file.good(), "RenderEngine source file must be readable for contract checks");
@@ -1973,7 +1981,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     std::string shaderCompiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
     std::string variantManifest = ReadRenderEngineSource("src/shaders/ffp_specialized_variants.json");
     std::string rasterTypes = ReadRenderEngineSource("include/CKRasterizerTypes.h");
-    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
     std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
     std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
@@ -3402,7 +3410,7 @@ void Test_RasterizerDriver_DefaultShaderTargetIsUnknown() {
     TestCheck(target.Format == CKRST_SHADER_FORMAT_UNKNOWN, "Unsupported driver shader format must be unknown");
     TestCheck(target.Profile == CKRST_SHADER_PROFILE_UNKNOWN, "Unsupported driver shader profile must be unknown");
 
-    std::string driverSource = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerDriver.cpp");
+    std::string driverSource = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerDriver.cpp");
     TestCheck(driverSource.find("Public legacy shader compilation is intentionally unsupported") != std::string::npos,
               "The bgfx driver must explicitly document public legacy shader target support as unsupported");
 
@@ -3416,7 +3424,7 @@ void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
     std::string pipelineHeader = ReadRenderEngineSource("src/CKRenderPipeline.h");
     std::string pipelineSource = ReadRenderEngineSource("src/CKRenderPipeline.cpp");
     std::string rasterizerHeader = ReadRenderEngineSource("include/CKRasterizer.h");
-    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
 
     TestCheck(renderContext.find("EndFrame(CKRST_FRAME_SYNC_PRESERVE_PRESENT)") != std::string::npos,
               "Render-to-texture bgfx flushes must not overwrite the backbuffer present-vsync state");
@@ -3435,8 +3443,8 @@ void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
 }
 
 void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
-    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
-    std::string bgfxHeader = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer.h");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxHeader = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.h");
 
     TestCheck(bgfxContext.find("CK2_3D_Captures") == std::string::npos &&
               bgfxContext.find("CK2_3D_DEBUG_CAPTURE_") == std::string::npos,
@@ -3452,7 +3460,7 @@ void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
 }
 
 void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
-    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
     std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxConfig.cpp");
     std::string bgfxConfigIni = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini");
     std::string bgfxCmake = ReadRenderEngineSource("src/CKRasterizer/CMakeLists.txt");
