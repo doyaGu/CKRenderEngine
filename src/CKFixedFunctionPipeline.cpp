@@ -2,7 +2,7 @@
 #include "CKRasterizer.h"
 #include "CKFFUniformState.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 
 #include <algorithm>
@@ -112,11 +112,9 @@ static bool CKFFTextureSetEquals(
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
-    m_DiagnosticConfig.StatsEnabled = CKRenderDebugConfigBool("DEBUG_FFP_STATS", false);
-    m_DiagnosticConfig.UniformHistEnabled = CKRenderDebugConfigBool("DEBUG_FFP_UNIFORM_HIST", false);
-    m_DiagnosticConfig.StatsInterval = CKRenderDebugConfigInt("DEBUG_FFP_STATS_INTERVAL", 60);
-    if (m_DiagnosticConfig.StatsInterval <= 0)
-        m_DiagnosticConfig.StatsInterval = 60;
+    m_DiagnosticConfig.StatsEnabled = CKRenderSettingsFFPStatsEnabled();
+    m_DiagnosticConfig.UniformHistEnabled = CKRenderSettingsFFPUniformHistEnabled();
+    m_DiagnosticConfig.StatsInterval = CKRenderSettingsFFPStatsInterval();
 
     Vx3DMatrixIdentity(m_World);
     Vx3DMatrixIdentity(m_View);
@@ -482,20 +480,23 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
     const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
-    const int debugDrawSerial = m_DebugState.NextDrawSerial(view);
-    CKFFDrawDebugInfo debugInfo = {};
-    debugInfo.View = view;
-    debugInfo.Type = type;
-    debugInfo.Indices = indices;
-    debugInfo.IndexCount = indexCount;
-    debugInfo.Data = data;
-    debugInfo.FormatFlags = formatFlags;
-    debugInfo.DrawSerial = debugDrawSerial;
-    debugInfo.World = &m_World;
-    debugInfo.ViewMatrix = &m_View;
-    debugInfo.Projection = &m_Projection;
-    debugInfo.Viewport = m_Viewport;
-    m_DebugState.LogDrawPrimitiveHeader(debugInfo);
+    const bool debugLogging = m_DebugState.AnyLoggingEnabled();
+    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.Indices = indices;
+        debugInfo.IndexCount = indexCount;
+        debugInfo.Data = data;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.DrawSerial = debugDrawSerial;
+        debugInfo.World = &m_World;
+        debugInfo.ViewMatrix = &m_View;
+        debugInfo.Projection = &m_Projection;
+        debugInfo.Viewport = m_Viewport;
+        m_DebugState.LogDrawPrimitiveHeader(debugInfo);
+    }
 
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
@@ -516,7 +517,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (!m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapMode,
             m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams)) {
-        m_DebugState.LogDrawPrimitivePrepareFailed();
+        if (debugLogging)
+            m_DebugState.LogDrawPrimitivePrepareFailed();
         if (collectStats)
             ++m_FrameStats.PrepareFailures;
         return;
@@ -544,7 +546,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         m_FrameStats.ProgramUs += CKRenderPerfElapsedUs(statsStart);
     if (program == 0) {
-        m_DebugState.LogDrawPrimitiveProgramMissing();
+        if (debugLogging)
+            m_DebugState.LogDrawPrimitiveProgramMissing();
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
         return;
@@ -556,19 +559,33 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         m_FrameStats.HasLastProgram = TRUE;
     }
 
-    debugInfo.Program = program;
-    debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
-    debugInfo.ActiveLightCount = m_ActiveLightCount;
-    debugInfo.StateDesc = &stateDesc;
-    debugInfo.DrawState = &m_DrawStateCache;
-    debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
-    debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
-    debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
-    debugInfo.Stage0.Texture = m_TextureHandles[0];
-    m_DebugState.LogDrawPrimitiveDetails(debugInfo);
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.Indices = indices;
+        debugInfo.IndexCount = indexCount;
+        debugInfo.Data = data;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.DrawSerial = debugDrawSerial;
+        debugInfo.World = &m_World;
+        debugInfo.ViewMatrix = &m_View;
+        debugInfo.Projection = &m_Projection;
+        debugInfo.Viewport = m_Viewport;
+        debugInfo.Program = program;
+        debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+        debugInfo.ActiveLightCount = m_ActiveLightCount;
+        debugInfo.StateDesc = &stateDesc;
+        debugInfo.DrawState = &m_DrawStateCache;
+        debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
+        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
+        debugInfo.Stage0.Texture = m_TextureHandles[0];
+        m_DebugState.LogDrawPrimitiveDetails(debugInfo);
+    }
 
     // Upload uniforms
     if (statsTiming)
@@ -657,24 +674,27 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 
     // Build the fixed-function state description from the actual mesh vertex format.
     const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
-    const int debugDrawSerial = m_DebugState.NextDrawSerial(view);
-    CKFFDrawDebugInfo debugInfo = {};
-    debugInfo.View = view;
-    debugInfo.Type = type;
-    debugInfo.World = &m_World;
-    debugInfo.ViewMatrix = &m_View;
-    debugInfo.Projection = &m_Projection;
-    debugInfo.VertexBuffer = vb;
-    debugInfo.IndexBuffer = ib;
-    debugInfo.BaseVertex = baseVertex;
-    debugInfo.VertexCount = vertexCount;
-    debugInfo.StartIndex = startIndex;
-    debugInfo.PersistentIndexCount = indexCount;
-    debugInfo.DPFlags = dpFlags;
-    debugInfo.FormatFlags = formatFlags;
-    debugInfo.VertexLayout = vertexLayout;
-    debugInfo.DrawSerial = debugDrawSerial;
-    m_DebugState.LogDrawVertexBufferHeader(debugInfo);
+    const bool debugLogging = m_DebugState.AnyLoggingEnabled();
+    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.World = &m_World;
+        debugInfo.ViewMatrix = &m_View;
+        debugInfo.Projection = &m_Projection;
+        debugInfo.VertexBuffer = vb;
+        debugInfo.IndexBuffer = ib;
+        debugInfo.BaseVertex = baseVertex;
+        debugInfo.VertexCount = vertexCount;
+        debugInfo.StartIndex = startIndex;
+        debugInfo.PersistentIndexCount = indexCount;
+        debugInfo.DPFlags = dpFlags;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.VertexLayout = vertexLayout;
+        debugInfo.DrawSerial = debugDrawSerial;
+        m_DebugState.LogDrawVertexBufferHeader(debugInfo);
+    }
 
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
@@ -704,19 +724,37 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         m_FrameStats.HasLastProgram = TRUE;
     }
 
-    debugInfo.Program = program;
-    debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
-    debugInfo.ActiveLightCount = m_ActiveLightCount;
-    debugInfo.StateDesc = &stateDesc;
-    debugInfo.DrawState = &m_DrawStateCache;
-    debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
-    debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
-    debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
-    debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
-    debugInfo.Stage0.Texture = m_TextureHandles[0];
-    m_DebugState.LogDrawVertexBufferDetails(debugInfo);
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.World = &m_World;
+        debugInfo.ViewMatrix = &m_View;
+        debugInfo.Projection = &m_Projection;
+        debugInfo.VertexBuffer = vb;
+        debugInfo.IndexBuffer = ib;
+        debugInfo.BaseVertex = baseVertex;
+        debugInfo.VertexCount = vertexCount;
+        debugInfo.StartIndex = startIndex;
+        debugInfo.PersistentIndexCount = indexCount;
+        debugInfo.DPFlags = dpFlags;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.VertexLayout = vertexLayout;
+        debugInfo.DrawSerial = debugDrawSerial;
+        debugInfo.Program = program;
+        debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+        debugInfo.ActiveLightCount = m_ActiveLightCount;
+        debugInfo.StateDesc = &stateDesc;
+        debugInfo.DrawState = &m_DrawStateCache;
+        debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
+        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
+        debugInfo.Stage0.Texture = m_TextureHandles[0];
+        m_DebugState.LogDrawVertexBufferDetails(debugInfo);
+    }
 
     // Upload uniforms
     if (statsTiming)

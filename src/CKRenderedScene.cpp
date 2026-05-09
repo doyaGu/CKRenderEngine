@@ -1,7 +1,7 @@
 #include "CKRenderedScene.h"
 
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 
 #include "VxMatrix.h"
@@ -24,13 +24,11 @@ extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
 
 static bool RenderedSceneFrameLogEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_FRAME_LOG", false);
-    return enabled;
+    return CKRenderSettingsFrameLogEnabled();
 }
 
 static bool RenderedSceneCameraLogEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
-    return enabled;
+    return CKRenderSettingsRenderedSceneCameraLogEnabled();
 }
 
 CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {

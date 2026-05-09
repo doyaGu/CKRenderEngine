@@ -1,6 +1,6 @@
 #include "CKRenderPerfStats.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 
 #include <cstring>
 #if defined(_WIN32)
@@ -14,8 +14,7 @@ static CKRenderPerfStats g_RenderPerfStats = {};
 static CKDWORD g_RenderPerfNowCallCount = 0;
 
 bool CKRenderPerfStatsEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_RENDER_STATS", false);
-    return enabled;
+    return CKRenderSettingsRenderStatsEnabled();
 }
 
 double CKRenderPerfNow() {

@@ -1,5 +1,5 @@
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 
 #include <cstdarg>
 #include <cstring>
@@ -14,7 +14,7 @@
 #endif
 
 static bool ConfigDebugOutputEnabled() {
-    return CKRenderDebugConfigBool("DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
+    return CKRenderSettingsDebugOutputEnabled(CKRE_DEBUG_OUTPUT_DEFAULT != 0);
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
@@ -51,7 +51,7 @@ CKDebugLogger::CKDebugLogger()
     }
 
     char configPath[MAX_PATH] = {0};
-    if (CKRenderDebugConfigString("LOG", configPath, MAX_PATH)) {
+    if (CKRenderSettingsLogPath(configPath, MAX_PATH)) {
         strncpy_s(m_LogFilePath, MAX_PATH, configPath, _TRUNCATE);
     }
 }

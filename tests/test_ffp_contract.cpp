@@ -7,7 +7,7 @@
 #include "CKFFShaderCache.h"
 #include "CKFFUniformState.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 #include "CKRasterizer.h"
 #include "CKRenderPipeline.h"
@@ -1140,30 +1140,30 @@ void Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted() {
               "FFP draws with one bound texture must submit exactly one texture binding");
 }
 
-void Test_RenderDebugConfig_BoolParserSupportsNamedValues() {
-    TestCheck(CKRenderDebugConfigParseBool("1", false) == true,
+void Test_RenderSettings_BoolParserSupportsNamedValues() {
+    TestCheck(CKRenderSettingsParseBool("1", false) == true,
               "Render debug config bool parser must accept 1 as enabled");
-    TestCheck(CKRenderDebugConfigParseBool("true", false) == true,
+    TestCheck(CKRenderSettingsParseBool("true", false) == true,
               "Render debug config bool parser must accept true as enabled");
-    TestCheck(CKRenderDebugConfigParseBool("on", false) == true,
+    TestCheck(CKRenderSettingsParseBool("on", false) == true,
               "Render debug config bool parser must accept on as enabled");
-    TestCheck(CKRenderDebugConfigParseBool("yes", false) == true,
+    TestCheck(CKRenderSettingsParseBool("yes", false) == true,
               "Render debug config bool parser must accept yes as enabled");
-    TestCheck(CKRenderDebugConfigParseBool("0", true) == false,
+    TestCheck(CKRenderSettingsParseBool("0", true) == false,
               "Render debug config bool parser must accept 0 as disabled");
-    TestCheck(CKRenderDebugConfigParseBool("false", true) == false,
+    TestCheck(CKRenderSettingsParseBool("false", true) == false,
               "Render debug config bool parser must accept false as disabled");
-    TestCheck(CKRenderDebugConfigParseBool("off", true) == false,
+    TestCheck(CKRenderSettingsParseBool("off", true) == false,
               "Render debug config bool parser must accept off as disabled");
-    TestCheck(CKRenderDebugConfigParseBool("no", true) == false,
+    TestCheck(CKRenderSettingsParseBool("no", true) == false,
               "Render debug config bool parser must accept no as disabled");
-    TestCheck(CKRenderDebugConfigParseBool("", true) == true &&
-                  CKRenderDebugConfigParseBool("maybe", false) == false,
+    TestCheck(CKRenderSettingsParseBool("", true) == true &&
+                  CKRenderSettingsParseBool("maybe", false) == false,
               "Render debug config bool parser must preserve fallback for empty or unknown values");
 }
 
 static void SetTestDebugConfig(const char *name, const char *value) {
-    CKRenderDebugConfigSetOverrideForTests(name, value);
+    CKRenderSettingsSetOverrideForTests(name, value);
 }
 
 void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
@@ -1190,28 +1190,29 @@ void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
 void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
     std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
     std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
 
-    TestCheck(perfSource.find("DEBUG_RENDER_STATS") != std::string::npos &&
-                  perfSource.find("CKRenderDebugConfigBool") != std::string::npos &&
+    TestCheck(settingsSource.find("DEBUG_RENDER_STATS") != std::string::npos &&
+                  perfSource.find("CKRenderSettingsRenderStatsEnabled") != std::string::npos &&
                   perfSource.find("\"RenderStats\"") != std::string::npos,
               "DEBUG_RENDER_STATS enabled path must keep emitting RenderStats logs");
-    TestCheck(ffpSource.find("DEBUG_FFP_STATS") != std::string::npos &&
-                  ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
+    TestCheck(settingsSource.find("DEBUG_FFP_STATS") != std::string::npos &&
+                  ffpSource.find("CKRenderSettingsFFPStatsEnabled") != std::string::npos &&
                   ffpSource.find("\"FFPStats\"") != std::string::npos,
               "DEBUG_FFP_STATS enabled path must keep emitting FFPStats logs");
-    TestCheck(ffpSource.find("DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
-                  ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
+    TestCheck(settingsSource.find("DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
+                  ffpSource.find("CKRenderSettingsFFPUniformHistEnabled") != std::string::npos &&
                   ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
               "FFP uniform histogram must remain available behind its explicit config gate");
 }
 
-void Test_RenderDebugConfig_UsesCK2_3DIniAndNoEnvApis() {
-    std::string header = ReadRenderEngineSource("src/CKRenderDebugConfig.h");
-    std::string source = ReadRenderEngineSource("src/CKRenderDebugConfig.cpp");
+void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
+    std::string header = ReadRenderEngineSource("src/CKRenderSettings.h");
+    std::string source = ReadRenderEngineSource("src/CKRenderSettings.cpp");
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
-    TestCheck(header.find("CKRenderDebugConfigBool") != std::string::npos &&
-              header.find("CKRenderDebugConfigString") != std::string::npos,
+    TestCheck(header.find("CKRenderSettingsBool") != std::string::npos &&
+              header.find("CKRenderSettingsString") != std::string::npos,
               "Render debug configuration must expose the centralized config accessors");
     TestCheck(source.find("#include \"VxConfiguration.h\"") != std::string::npos &&
               source.find("VxConfiguration") != std::string::npos,
@@ -1224,16 +1225,20 @@ void Test_RenderDebugConfig_UsesCK2_3DIniAndNoEnvApis() {
               source.find("getenv(") == std::string::npos &&
               source.find("_putenv_s") == std::string::npos,
               "CK2_3D debug configuration must not read process environment variables");
-    TestCheck(cmake.find("CKRenderDebugConfig.h") != std::string::npos &&
-              cmake.find("CKRenderDebugConfig.cpp") != std::string::npos &&
-              cmake.find("CKRenderDebugEnv") == std::string::npos,
-              "RenderEngine build inputs must use the CK2_3D.ini debug config helper");
+    const std::string oldHelperName = std::string("CKRender") + "DebugConfig";
+    TestCheck(cmake.find("CKRenderSettings.h") != std::string::npos &&
+              cmake.find("CKRenderSettings.cpp") != std::string::npos &&
+              cmake.find(oldHelperName) == std::string::npos,
+              "RenderEngine build inputs must use the CK2_3D.ini settings helper");
+    TestCheck(header.find(oldHelperName) == std::string::npos &&
+              source.find(oldHelperName) == std::string::npos,
+              "RenderEngine settings helper must not keep the old debug-config name");
 }
 
 class ScopedDebugConfigValue {
 public:
     ScopedDebugConfigValue(const char *name, const char *value) : m_Name(name) {
-        m_HadValue = CKRenderDebugConfigGetOverrideForTests(name, m_Previous, sizeof(m_Previous));
+        m_HadValue = CKRenderSettingsGetOverrideForTests(name, m_Previous, sizeof(m_Previous));
         Set(value);
     }
 
@@ -1243,7 +1248,7 @@ public:
 
 private:
     static void Set(const char *name, const char *value) {
-        CKRenderDebugConfigSetOverrideForTests(name, value);
+        CKRenderSettingsSetOverrideForTests(name, value);
     }
 
     void Set(const char *value) {
@@ -1939,6 +1944,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
     std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
+    std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
 
     TestCheck(cacheHeader.find("struct CKFFProgramBinding") != std::string::npos &&
               cacheHeader.find("CKFFProgramBinding GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
@@ -1952,7 +1958,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               cacheHeader.find("m_PositionTProgram") == std::string::npos &&
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
               "Clean-break FFP shader cache must not keep the old fixed-program selection API");
-    TestCheck(cacheSource.find("FFP_UBERSHADER") != std::string::npos &&
+    TestCheck(settingsSource.find("FFP_UBERSHADER") != std::string::npos &&
+              cacheSource.find("CKRenderSettingsFFPUberShaderEnabled") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, program != 0, module.Specialization)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, false, specInfo)") != std::string::npos,
@@ -3417,7 +3424,7 @@ void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
     std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxConfig.cpp");
     std::string bgfxCmake = ReadRenderEngineSource("src/CKRasterizer/CMakeLists.txt");
 
-    TestCheck(bgfxContext.find("CKRenderDebugConfig") == std::string::npos,
+    TestCheck(bgfxContext.find("CKRenderSettings") == std::string::npos,
               "bgfx rasterizer must not include CK2_3D private debug config helpers");
     TestCheck(bgfxContext.find("CK2_3D") == std::string::npos &&
               bgfxConfig.find("CK2_3D") == std::string::npos,
@@ -3439,6 +3446,7 @@ void Test_FFPDebugLogging_IsCentralized() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
     std::string source = ReadRenderEngineSource("src/CKFFDebug.cpp");
+    std::string settings = ReadRenderEngineSource("src/CKRenderSettings.cpp");
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
     TestCheck(pipeline.find("DebugDrawLogLimit") == std::string::npos &&
@@ -3459,6 +3467,10 @@ void Test_FFPDebugLogging_IsCentralized() {
               header.find("class CKFFDebugState") != std::string::npos &&
               header.find("struct CKFFDrawDebugInfo") != std::string::npos,
               "CKFFDebug must expose the internal config/state/draw-info types for FFP logging");
+    TestCheck(header.find("AnyLoggingEnabled") != std::string::npos &&
+              source.find("CKFFDebugState::AnyLoggingEnabled") != std::string::npos &&
+              pipeline.find("m_DebugState.AnyLoggingEnabled()") != std::string::npos,
+              "FFP draw diagnostics must have a cached gate before verbose draw-info assembly");
 
     const char *configNames[] = {
         "DEBUG_DRAW_LOG_LIMIT",
@@ -3468,8 +3480,8 @@ void Test_FFPDebugLogging_IsCentralized() {
         "DEBUG_DRAW_SERIAL_PER_FRAME"
     };
     for (const char *configName : configNames) {
-        TestCheck(source.find(configName) != std::string::npos,
-                  "CKFFDebug.cpp must keep the existing FFP debug config keys");
+        TestCheck(settings.find(configName) != std::string::npos,
+                  "CKRenderSettings.cpp must keep the existing FFP debug config keys");
     }
     const char *removedConfigNames[] = {
         "CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS",
@@ -3638,7 +3650,7 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
               "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
     TestCheck(source.find("DEBUG_OUTPUT") != std::string::npos &&
               source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
-              source.find("CKRenderDebugConfigBool(\"DEBUG_OUTPUT\"") != std::string::npos,
+              source.find("CKRenderSettingsDebugOutputEnabled") != std::string::npos,
               "Debug logger must use the CMake default and support DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
@@ -3729,10 +3741,10 @@ int main() {
     tests.Run("FFP diagnostic PositionT default COLOR1", &Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack);
     tests.Run("FFP diagnostic blend fixup reaches draw state", &Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState);
     tests.Run("FFP diagnostic unbound texture stages are not submitted", &Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted);
-    tests.Run("Render debug config bool parser", &Test_RenderDebugConfig_BoolParserSupportsNamedValues);
+    tests.Run("Render settings bool parser", &Test_RenderSettings_BoolParserSupportsNamedValues);
     tests.Run("FFP diagnostics disabled stats skip timing and histogram", &Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram);
     tests.Run("Diagnostic stats config gates keep log tags", &Test_DiagnosticStats_ConfigGatesKeepLogTags);
-    tests.Run("Render debug config uses CK2_3D ini", &Test_RenderDebugConfig_UsesCK2_3DIniAndNoEnvApis);
+    tests.Run("Render settings uses CK2_3D ini", &Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis);
     tests.Run("FFP diagnostic frame stats capture draw costs", &Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts);
     tests.Run("FFP diagnostic full specialized skips uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors);
     tests.Run("FFP diagnostic full specialized unlit 3D skips light uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms);

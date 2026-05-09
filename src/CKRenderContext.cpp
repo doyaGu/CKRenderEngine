@@ -8,7 +8,7 @@
 #endif
 
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 
 #include "VxMath.h"
@@ -65,18 +65,15 @@ static CKBYTE *ConvertCopyImage(const VxImageDescEx &src, const VxImageDescEx &v
 }
 
 static bool RenderFrameLogEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_FRAME_LOG", false);
-    return enabled;
+    return CKRenderSettingsFrameLogEnabled();
 }
 
 static bool CameraAttachLogEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_LOG_CAMERA_ATTACH", false);
-    return enabled;
+    return CKRenderSettingsCameraAttachLogEnabled();
 }
 
 static bool PresentSyncLogEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("DEBUG_LOG_PRESENT_SYNC", false);
-    return enabled;
+    return CKRenderSettingsPresentSyncLogEnabled();
 }
 
 CK_CLASSID RCKRenderContext::GetClassID() {

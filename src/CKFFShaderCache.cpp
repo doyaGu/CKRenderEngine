@@ -2,7 +2,7 @@
 #include "CKFFSpecializedModuleTable.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 
 #include <cstdio>
 #include <cstring>
@@ -75,7 +75,7 @@ CKFFShaderCache::~CKFFShaderCache() {
 
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
-    m_UseUberShader = CKRenderDebugConfigBool("FFP_UBERSHADER", false);
+    m_UseUberShader = CKRenderSettingsFFPUberShaderEnabled();
     CreateUniforms();
     ResolveShaderTarget();
 }

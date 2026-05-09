@@ -65,6 +65,7 @@ public:
     CKFFDebugState();
 
     void BeginFrame();
+    bool AnyLoggingEnabled() const;
     int NextDrawSerial(CKRenderView view);
 
     void LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info);
