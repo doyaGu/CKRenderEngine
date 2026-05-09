@@ -13,3 +13,11 @@ set(BGFX_CONFIG_MULTITHREADED ON CACHE BOOL "" FORCE)
 if (NOT TARGET bgfx)
     add_subdirectory(bgfx)
 endif ()
+
+if (TARGET bgfx AND CKRE_BUILD_SHARED AND BGFX_LIBRARY_TYPE STREQUAL "STATIC")
+    target_compile_definitions(bgfx PRIVATE BGFX_SHARED_LIB_BUILD=1)
+endif ()
+
+if (TARGET shaderc AND MINGW)
+    target_compile_definitions(shaderc PRIVATE SHADERC_CONFIG_HAS_DXC=0)
+endif ()

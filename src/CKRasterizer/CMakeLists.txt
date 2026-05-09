@@ -17,6 +17,10 @@ if (CKRE_BUILD_SHARED)
     add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizer)
 
+    if (MSVC)
+        target_link_options(CKBgfxRasterizer PRIVATE /WHOLEARCHIVE:$<TARGET_FILE:bgfx>)
+    endif ()
+
     set_target_properties(CKBgfxRasterizer PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
