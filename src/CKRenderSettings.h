@@ -5,10 +5,6 @@
 #include "CKTypes.h"
 
 bool CKRenderSettingsParseBool(const char *value, bool fallback);
-bool CKRenderSettingsBool(const char *name, bool fallback);
-int CKRenderSettingsInt(const char *name, int fallback);
-CKDWORD CKRenderSettingsDword(const char *name, CKDWORD fallback);
-bool CKRenderSettingsString(const char *name, char *buffer, CKDWORD bufferSize);
 
 bool CKRenderSettingsDebugOutputEnabled(bool fallback);
 bool CKRenderSettingsLogPath(char *buffer, CKDWORD bufferSize);
@@ -61,8 +57,8 @@ inline int CKRenderSettingsMeshContractLogLimit() { return 0; }
 inline bool CKRenderSettingsMeshHardwareIndexRangesLogEnabled() { return false; }
 #endif
 
-void CKRenderSettingsSetOverrideForTests(const char *name, const char *value);
-bool CKRenderSettingsGetOverrideForTests(const char *name, char *buffer, CKDWORD bufferSize);
+void CKRenderSettingsSetOverrideForTests(const char *section, const char *name, const char *value);
+bool CKRenderSettingsGetOverrideForTests(const char *section, const char *name, char *buffer, CKDWORD bufferSize);
 void CKRenderSettingsClearOverridesForTests();
 
 #endif
