@@ -78,6 +78,10 @@ set(CKRE_PRIVATE_HEADERS
         CKRenderPerfStats.h
 )
 
+set(CKRE_CONFIG_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/CK2_3D.ini
+)
+
 set(CKRE_SOURCES
         CK2_3D.cpp
 
@@ -234,7 +238,7 @@ endfunction()
 set(CKRE_TARGETS)
 
 if (CKRE_BUILD_SHARED)
-    add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+    add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS} ${CKRE_CONFIG_FILES})
     ckre_configure_target(CK2_3D)
 
     # Shared library specific settings
@@ -248,6 +252,13 @@ if (CKRE_BUILD_SHARED)
     if (TARGET CK2_3D_shaders)
         add_dependencies(CK2_3D CK2_3D_shaders)
     endif ()
+
+    add_custom_command(TARGET CK2_3D POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/CK2_3D.ini"
+            "$<TARGET_FILE_DIR:CK2_3D>/CK2_3D.ini"
+            VERBATIM
+    )
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
@@ -290,6 +301,10 @@ if (CKRE_INSTALL)
                 RUNTIME DESTINATION RenderEngines
                 LIBRARY DESTINATION RenderEngines
                 ARCHIVE DESTINATION lib
+        )
+
+        install(FILES ${CKRE_CONFIG_FILES}
+                DESTINATION RenderEngines
         )
     endif ()
 

@@ -1221,6 +1221,7 @@ void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
 void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
     std::string header = ReadRenderEngineSource("src/CKRenderSettings.h");
     std::string source = ReadRenderEngineSource("src/CKRenderSettings.cpp");
+    std::string ini = ReadRenderEngineSource("src/CK2_3D.ini");
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
     TestCheck(header.find("CKRenderSettingsBool") != std::string::npos &&
@@ -1232,6 +1233,10 @@ void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
     TestCheck(source.find("CK2_3D.ini") != std::string::npos &&
               source.find("\"CK2_3D\"") != std::string::npos,
               "Render debug configuration must read the CK2_3D section from CK2_3D.ini");
+    TestCheck(ini.find("<CK2_3D>") != std::string::npos &&
+              ini.find("VertexCache = 16") != std::string::npos &&
+              ini.find("TextureVideoFormat = _16_ARGB1555") != std::string::npos,
+              "RenderEngine must ship a source-controlled CK2_3D.ini with default render settings");
     TestCheck(source.find("GetEnvironmentVariableA") == std::string::npos &&
               source.find("std::getenv") == std::string::npos &&
               source.find("getenv(") == std::string::npos &&
@@ -1240,8 +1245,10 @@ void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
     const std::string oldHelperName = std::string("CKRender") + "DebugConfig";
     TestCheck(cmake.find("CKRenderSettings.h") != std::string::npos &&
               cmake.find("CKRenderSettings.cpp") != std::string::npos &&
+              cmake.find("CK2_3D.ini") != std::string::npos &&
+              cmake.find("DESTINATION RenderEngines") != std::string::npos &&
               cmake.find(oldHelperName) == std::string::npos,
-              "RenderEngine build inputs must use the CK2_3D.ini settings helper");
+              "RenderEngine build inputs must include and install CK2_3D.ini");
     TestCheck(header.find(oldHelperName) == std::string::npos &&
               source.find(oldHelperName) == std::string::npos,
               "RenderEngine settings helper must not keep the old debug-config name");
