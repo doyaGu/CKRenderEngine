@@ -1,5 +1,9 @@
 #include "CKDX9Rasterizer.h"
 
+#ifdef CK_LIB
+#define CKRasterizerGetInfo CKDX9RasterizerGetInfo
+#endif
+
 PFN_D3DXDeclaratorFromFVF D3DXDeclaratorFromFVF = NULL;
 PFN_D3DXFVFFromDeclarator D3DXFVFFromDeclarator = NULL;
 PFN_D3DXAssembleShader D3DXAssembleShader = NULL;

@@ -31,6 +31,10 @@ if (CKRE_BUILD_STATIC)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
             FOLDER "Rasterizer"
     )
+
+    if (NOT TARGET CKDX9Rasterizer)
+        add_library(CKDX9Rasterizer ALIAS CKDX9RasterizerStatic)
+    endif ()
 endif ()
 
 foreach (_ckre_dx9_target IN LISTS _ckre_dx9_targets)
@@ -43,13 +47,27 @@ foreach (_ckre_dx9_target IN LISTS _ckre_dx9_targets)
             ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    # Link against CKRasterizerLib and Virtools SDK
+    get_target_property(_ckre_dx9_type ${_ckre_dx9_target} TYPE)
+    if (_ckre_dx9_type STREQUAL "STATIC_LIBRARY")
+        set(_ckre_dx9_ck2_dep CK2)
+        if (TARGET CK2Static)
+            set(_ckre_dx9_ck2_dep CK2Static)
+        endif ()
+        set(_ckre_dx9_vxmath_dep VxMath)
+        if (TARGET VxMathStatic)
+            set(_ckre_dx9_vxmath_dep VxMathStatic)
+        endif ()
+    else ()
+        set(_ckre_dx9_ck2_dep CK2)
+        set(_ckre_dx9_vxmath_dep VxMath)
+    endif ()
+
     target_link_libraries(${_ckre_dx9_target}
             PUBLIC
             CKRasterizerLib
             PRIVATE
-            CK2
-            VxMath
+            ${_ckre_dx9_ck2_dep}
+            ${_ckre_dx9_vxmath_dep}
             d3d9 dxguid
     )
 endforeach ()
@@ -58,7 +76,7 @@ endforeach ()
 # Installation
 # =============================================================================
 if (CKRE_INSTALL)
-    if (TARGET CKDX9Rasterizer)
+    if (CKRE_BUILD_SHARED AND TARGET CKDX9Rasterizer)
         install(TARGETS CKDX9Rasterizer
                 EXPORT CKRenderEngineTargets
                 RUNTIME DESTINATION RenderEngines

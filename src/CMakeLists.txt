@@ -179,6 +179,10 @@ if (CKRE_BUILD_STATIC)
     )
 
     list(APPEND CKRE_TARGETS CK2_3DStatic)
+
+    if (NOT TARGET CK2_3D)
+        add_library(CK2_3D ALIAS CK2_3DStatic)
+    endif ()
 endif ()
 
 # =============================================================================
@@ -190,7 +194,7 @@ if (CKRE_INSTALL)
     )
 
     # Install CK2_3D to RenderEngines directory (shared) or lib directory (static)
-    if (TARGET CK2_3D)
+    if (CKRE_BUILD_SHARED AND TARGET CK2_3D)
         install(TARGETS CK2_3D
                 EXPORT CKRenderEngineTargets
                 RUNTIME DESTINATION RenderEngines
