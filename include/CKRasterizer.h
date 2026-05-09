@@ -39,14 +39,14 @@ typedef void (*CKRST_GETINFO)(CKRasterizerInfo *);
 
 class CKRasterizer {
 public:
-    CKRasterizer() : m_MainWindow(NULL) {}
-    virtual ~CKRasterizer() = default;
+    CKRasterizer();
+    virtual ~CKRasterizer();
 
-    virtual CKBOOL Start(WIN_HANDLE AppWnd) { return FALSE; }
-    virtual void Close() {}
+    virtual CKBOOL Start(WIN_HANDLE AppWnd);
+    virtual void Close();
 
-    virtual int GetDriverCount() { return m_Drivers.Size(); }
-    virtual CKRasterizerDriver *GetDriver(CKDWORD Index) { return m_Drivers[Index]; }
+    virtual int GetDriverCount();
+    virtual CKRasterizerDriver *GetDriver(CKDWORD Index);
 
 public:
     WIN_HANDLE m_MainWindow;
@@ -59,24 +59,15 @@ public:
 
 class CKRasterizerDriver {
 public:
-    CKRasterizerDriver()
-        : m_Hardware(FALSE),
-          m_CapsUpToDate(FALSE),
-          m_Owner(NULL),
-          m_DriverIndex(0) {}
+    CKRasterizerDriver();
 
-    virtual ~CKRasterizerDriver() = default;
+    virtual ~CKRasterizerDriver();
 
-    virtual CKRasterizerContext *CreateContext() { return NULL; }
-    virtual CKBOOL DestroyContext(CKRasterizerContext *Context) { return FALSE; }
+    virtual CKRasterizerContext *CreateContext();
+    virtual CKBOOL DestroyContext(CKRasterizerContext *Context);
 
-    virtual CKERROR GetShaderTarget(CKShaderTargetDesc *Target) const
-    {
-        if (Target)
-            *Target = CKShaderTargetDesc();
-        return CKERR_NOTIMPLEMENTED;
-    }
-    virtual CKERROR GetProgrammableCaps(VxProgCapsDesc &Caps) = 0;
+    virtual CKERROR GetShaderTarget(CKShaderTargetDesc *Target) const;
+    virtual CKERROR GetProgrammableCaps(VxProgCapsDesc &Caps);
 
 public:
     CKBOOL m_Hardware;
@@ -473,19 +464,5 @@ public:
 private:
     CKDrawState m_State;
 };
-
-// ===========================================================================
-// CKRasterizerContext inline constructor
-// ===========================================================================
-
-inline CKRasterizerContext::CKRasterizerContext()
-    : m_Driver(NULL),
-      m_PosX(0), m_PosY(0),
-      m_Width(0), m_Height(0),
-      m_Bpp(0), m_ZBpp(0), m_StencilBpp(0),
-      m_Fullscreen(FALSE), m_RefreshRate(0),
-      m_Window(NULL)
-{
-}
 
 #endif // CKRASTERIZER_H

@@ -126,7 +126,6 @@ set(CKRE_SOURCES
         CKRenderedScene.cpp
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
-        CKRasterizer/CKNULLRasterizer.cpp
 
         CKFixedFunctionPipeline.cpp
         CKFFStageState.cpp
@@ -160,6 +159,8 @@ endif ()
 # Add the bgfx rasterizer plugin targets when requested.
 if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
     add_subdirectory(CKRasterizer)
+elseif (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
+    add_subdirectory(CKRasterizer/CKRasterizerLib)
 endif ()
 
 find_package(Python3 COMPONENTS Interpreter)
@@ -218,6 +219,8 @@ function(ckre_configure_target TARGET_NAME)
     if (WIN32)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
+
+    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
 
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
 

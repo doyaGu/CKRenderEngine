@@ -1,4 +1,6 @@
 # CKRasterizer - bgfx-backed default rasterizer implementation
+add_subdirectory(CKRasterizerLib)
+
 set(CKBGFX_RASTERIZER_SOURCES
         CKBgfxConfig.cpp
         CKBgfxRasterizer.cpp
@@ -55,8 +57,7 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
 
     target_link_libraries(${_ckre_bgfx_target}
             PRIVATE
-            CK2
-            VxMath
+            CKRasterizerLib
             bgfx
             bimg
             bx
