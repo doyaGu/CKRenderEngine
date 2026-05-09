@@ -1,13 +1,24 @@
 #include "CKBgfxRasterizer.h"
 
+#include <new>
+
 CKBgfxRasterizer::CKBgfxRasterizer() {}
 
-CKBgfxRasterizer::~CKBgfxRasterizer() {}
+CKBgfxRasterizer::~CKBgfxRasterizer()
+{
+    Close();
+}
 
 CKBOOL CKBgfxRasterizer::Start(WIN_HANDLE AppWnd)
 {
+    if (m_Drivers.Size() > 0)
+        return TRUE;
+
     m_MainWindow = AppWnd;
-    auto *driver = new CKBgfxRasterizerDriver(this);
+    auto *driver = new (std::nothrow) CKBgfxRasterizerDriver(this);
+    if (!driver)
+        return FALSE;
+
     m_Drivers.PushBack(driver);
     return TRUE;
 }
@@ -19,27 +30,27 @@ void CKBgfxRasterizer::Close()
     m_Drivers.Clear();
 }
 
-static CKBgfxRasterizer *g_Rasterizer = NULL;
-
 static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
 {
-    g_Rasterizer = new CKBgfxRasterizer();
-    if (!g_Rasterizer->Start(AppWnd))
-    {
-        delete g_Rasterizer;
-        g_Rasterizer = NULL;
+    auto *rasterizer = new (std::nothrow) CKBgfxRasterizer();
+    if (!rasterizer)
+        return NULL;
+
+    if (!rasterizer->Start(AppWnd)) {
+        delete rasterizer;
+        return NULL;
     }
-    return g_Rasterizer;
+
+    return rasterizer;
 }
 
 static void CKBgfxRasterizerClose(CKRasterizer *rst)
 {
-    if (rst)
-    {
-        rst->Close();
-        delete rst;
-    }
-    g_Rasterizer = NULL;
+    if (!rst)
+        return;
+
+    rst->Close();
+    delete rst;
 }
 
 #ifdef CK_LIB
@@ -48,6 +59,9 @@ void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info)
 extern "C" __declspec(dllexport) void CKRasterizerGetInfo(CKRasterizerInfo *info)
 #endif
 {
+    if (!info)
+        return;
+
     info->Desc = "bgfx Rasterizer";
     info->StartFct = CKBgfxRasterizerStart;
     info->CloseFct = CKBgfxRasterizerClose;

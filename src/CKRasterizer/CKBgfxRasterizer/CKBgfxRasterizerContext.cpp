@@ -1,5 +1,6 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxConfig.h"
+#include "CKBgfxInternal.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -9,100 +10,8 @@
 #include <bgfx/platform.h>
 #include <algorithm>
 #include <cstdarg>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-// ===========================================================================
-// CKBgfxCallback
-// ===========================================================================
-
-static FILE *g_BgfxLogFile = nullptr;
-static FILE *GetBgfxLogFile() {
-    if (!g_BgfxLogFile) {
-        char path[MAX_PATH] = {0};
-        HMODULE hMod = nullptr;
-        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               (LPCSTR)&GetBgfxLogFile, &hMod)) {
-            GetModuleFileNameA(hMod, path, MAX_PATH);
-            char *last = strrchr(path, '\\');
-            if (last) { strcpy_s(last + 1, MAX_PATH - (last + 1 - path), "CKBgfx_Trace.log"); }
-        }
-        if (path[0] == '\0') strcpy_s(path, "CKBgfx_Trace.log");
-        g_BgfxLogFile = fopen(path, "w");
-    }
-    return g_BgfxLogFile;
-}
-
-static void CloseBgfxLogFile()
-{
-    if (g_BgfxLogFile)
-    {
-        fclose(g_BgfxLogFile);
-        g_BgfxLogFile = nullptr;
-    }
-}
-
-static void BgfxLogf(const char *tag, const char *fmt, ...)
-{
-    char msg[2048];
-    int n = _snprintf_s(msg, sizeof(msg), _TRUNCATE, "[CKBgfx] [%s] ", tag ? tag : "?");
-    if (n < 0) n = 0;
-    va_list args;
-    va_start(args, fmt);
-    _vsnprintf_s(msg + n, sizeof(msg) - n, _TRUNCATE, fmt, args);
-    va_end(args);
-    OutputDebugStringA(msg);
-    OutputDebugStringA("\n");
-    FILE *f = GetBgfxLogFile();
-    if (f) { fputs(msg, f); fputc('\n', f); fflush(f); }
-}
-
-static const char *RendererTypeName(bgfx::RendererType::Enum type)
-{
-    switch (type)
-    {
-    case bgfx::RendererType::Direct3D11: return "Direct3D11";
-    case bgfx::RendererType::Direct3D12: return "Direct3D12";
-    case bgfx::RendererType::Vulkan:     return "Vulkan";
-    case bgfx::RendererType::OpenGL:     return "OpenGL";
-    case bgfx::RendererType::OpenGLES:   return "OpenGLES";
-    case bgfx::RendererType::Noop:       return "Noop";
-    default:                             return "Auto";
-    }
-}
-
-static CK_SHADER_PROFILE ShaderProfile(bgfx::RendererType::Enum type)
-{
-    switch (type)
-    {
-    case bgfx::RendererType::Direct3D11: return CKRST_SHADER_PROFILE_DX11;
-    case bgfx::RendererType::Direct3D12: return CKRST_SHADER_PROFILE_DX12;
-    case bgfx::RendererType::Vulkan:     return CKRST_SHADER_PROFILE_SPIRV;
-    case bgfx::RendererType::OpenGL:
-    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_GLSL;
-    default:                             return CKRST_SHADER_PROFILE_UNKNOWN;
-    }
-}
-
-static bgfx::RendererType::Enum ParseRequestedRenderer()
-{
-    char value[32] = {0};
-    if (!CKBgfxConfigString("Renderer.Type", value, (CKDWORD)sizeof(value)) ||
-        _stricmp(value, "auto") == 0)
-        return bgfx::RendererType::Count;
-    if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
-        return bgfx::RendererType::Direct3D11;
-    if (_stricmp(value, "d3d12") == 0 || _stricmp(value, "direct3d12") == 0)
-        return bgfx::RendererType::Direct3D12;
-    if (_stricmp(value, "vulkan") == 0)
-        return bgfx::RendererType::Vulkan;
-    if (_stricmp(value, "opengl") == 0 || _stricmp(value, "gl") == 0)
-        return bgfx::RendererType::OpenGL;
-
-    BgfxLogf("Init", "unknown Renderer.Type='%s', falling back to auto", value);
-    return bgfx::RendererType::Count;
-}
 
 static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
 {
@@ -124,125 +33,6 @@ static uint32_t FirstDword(const void *data, uint32_t size)
     if (data && size >= sizeof(value))
         memcpy(&value, data, sizeof(value));
     return value;
-}
-
-static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
-                       uint32_t pitch, const void *data, bool yflip)
-{
-    if (!path || !data || width == 0 || height == 0 || pitch < width * 4)
-        return false;
-
-    FILE *f = nullptr;
-    if (fopen_s(&f, path, "wb") != 0 || !f)
-        return false;
-
-    const uint32_t outPitch = width * 4;
-    const uint32_t imageSize = outPitch * height;
-    const uint32_t fileSize = 14 + 40 + imageSize;
-
-    unsigned char fileHeader[14] = {
-        'B', 'M',
-        (unsigned char)(fileSize), (unsigned char)(fileSize >> 8),
-        (unsigned char)(fileSize >> 16), (unsigned char)(fileSize >> 24),
-        0, 0, 0, 0,
-        54, 0, 0, 0
-    };
-    unsigned char infoHeader[40] = {
-        40, 0, 0, 0,
-        (unsigned char)(width), (unsigned char)(width >> 8),
-        (unsigned char)(width >> 16), (unsigned char)(width >> 24),
-        (unsigned char)(height), (unsigned char)(height >> 8),
-        (unsigned char)(height >> 16), (unsigned char)(height >> 24),
-        1, 0,
-        32, 0,
-        0, 0, 0, 0,
-        (unsigned char)(imageSize), (unsigned char)(imageSize >> 8),
-        (unsigned char)(imageSize >> 16), (unsigned char)(imageSize >> 24),
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0
-    };
-
-    fwrite(fileHeader, 1, sizeof(fileHeader), f);
-    fwrite(infoHeader, 1, sizeof(infoHeader), f);
-
-    const unsigned char *src = (const unsigned char *)data;
-    for (uint32_t outY = 0; outY < height; ++outY) {
-        uint32_t srcY = yflip ? outY : (height - 1 - outY);
-        fwrite(src + srcY * pitch, 1, outPitch, f);
-    }
-
-    fclose(f);
-    return true;
-}
-
-void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enum code, const char *str)
-{
-    char buf[1024];
-    _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                "FATAL(%d) at %s:%u: %s\n",
-                (int)code, filePath ? filePath : "?", (unsigned)line, str ? str : "");
-    OutputDebugStringA(buf);
-    FILE *f = GetBgfxLogFile();
-    if (f) { fputs(buf, f); fflush(f); }
-}
-
-void CKBgfxCallback::traceVargs(const char *filePath, uint16_t line, const char *format, va_list argList)
-{
-    char buf[2048];
-    int n = _snprintf_s(buf, sizeof(buf) - 1, _TRUNCATE, "%s(%u): ", filePath ? filePath : "?", (unsigned)line);
-    if (n < 0) n = 0;
-    _vsnprintf_s(buf + n, sizeof(buf) - n, _TRUNCATE, format, argList);
-    OutputDebugStringA(buf);
-    FILE *f = GetBgfxLogFile();
-    if (f) { fputs(buf, f); fflush(f); }
-}
-
-void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
-                                 uint32_t _pitch, bgfx::TextureFormat::Enum /*_format*/,
-                                 const void *_data, uint32_t _size, bool _yflip)
-{
-    if (!m_Context)
-        return;
-
-    if (_filePath && strcmp(_filePath, "__backbuffer_read__") == 0)
-    {
-        VxImageDescEx *target = m_Context->m_BackbufferReadTarget;
-        if (target && target->Image)
-        {
-            uint32_t dstSize = (uint32_t)(target->BytesPerLine * target->Height);
-            if (dstSize == 0)
-                dstSize = (uint32_t)(target->Width * (target->BitsPerPixel / 8) * target->Height);
-            uint32_t copySize = (dstSize > 0 && _size > dstSize) ? dstSize : _size;
-            memcpy(target->Image, _data, copySize);
-            target->Width = (int)_width;
-            target->Height = (int)_height;
-            target->BytesPerLine = (int)_pitch;
-            target->BitsPerPixel = (int)(_pitch / _width * 8);
-        }
-        m_Context->m_BackbufferReadReady.store(true, std::memory_order_release);
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(m_Context->m_ScreenShotMutex);
-    if (m_Context->m_PendingScreenShotCallback)
-    {
-        m_Context->m_PendingScreenShotCallback(
-            m_Context->m_PendingScreenShotFB,
-            (CKDWORD)_width, (CKDWORD)_height, (CKDWORD)_pitch,
-            _data, (CKDWORD)_size, _yflip ? TRUE : FALSE);
-        m_Context->m_PendingScreenShotCallback = NULL;
-        return;
-    }
-
-    if (_filePath && strstr(_filePath, ".bmp") != NULL)
-    {
-        bool ok = WriteBmp32(_filePath, _width, _height, _pitch, _data, _yflip);
-        BgfxLogf("Capture", "saved path=%s ok=%d size=%ux%u pitch=%u bytes=%u yflip=%d",
-                 _filePath, ok ? 1 : 0, (unsigned)_width, (unsigned)_height,
-                 (unsigned)_pitch, (unsigned)_size, _yflip ? 1 : 0);
-    }
 }
 
 // ===========================================================================
@@ -1005,7 +795,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
         CKBgfxConfigBool("Debug.LogTextureBindings", FALSE);
     if (s_LogTextureBindings &&
         s_SetTextureLogCount < 80) {
-        BgfxLogf("SetTexture",
+        CKBgfxLogf("SetTexture",
                  "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
                  Stage, Uniform, Texture, (void *)uniRec, (void *)texRec,
                  bgfx::isValid(textureHandle) ? textureHandle.idx : 0xffff,
@@ -1037,12 +827,12 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
     if (s_LogUniforms && s_uniformLogCount < 256) {
         const float *f = static_cast<const float *>(Data);
         if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
-            BgfxLogf("SetUniform",
+            CKBgfxLogf("SetUniform",
                      "uniform=%u name=%s handle=%u type=%u count=%u recCount=%u first=(%.3f %.3f %.3f %.3f)",
                      Uniform, rec->Name, rec->Handle.idx, (unsigned)rec->Type, Count, rec->Count,
                      f[0], f[1], f[2], f[3]);
         } else {
-            BgfxLogf("SetUniform",
+            CKBgfxLogf("SetUniform",
                      "uniform=%u name=%s handle=%u type=%u count=%u recCount=%u data=%p",
                      Uniform, rec->Name, rec->Handle.idx, (unsigned)rec->Type, Count, rec->Count, Data);
         }
@@ -1273,8 +1063,9 @@ CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
 
         bgfx::shutdown();
         m_BgfxInitialized = FALSE;
-        CloseBgfxLogFile();
     }
+
+    CKBgfxCloseLogFile();
 }
 
 CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
@@ -1282,17 +1073,26 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
                                        CKBOOL Fullscreen, int RefreshRate,
                                        int Zbpp, int StencilBpp)
 {
+    if (m_BgfxInitialized)
+        return Resize(PosX, PosY, Width, Height, 0);
+
     m_Window = Window;
     m_PosX = PosX;
     m_PosY = PosY;
 
     if (Width <= 0 || Height <= 0)
     {
-        RECT rc;
-        ::GetClientRect((HWND)Window, &rc);
+        RECT rc = {0, 0, 640, 480};
+        if (Window)
+            ::GetClientRect((HWND)Window, &rc);
         Width = rc.right - rc.left;
         Height = rc.bottom - rc.top;
     }
+
+    if (Width <= 0)
+        Width = 640;
+    if (Height <= 0)
+        Height = 480;
 
     m_Width = Width;
     m_Height = Height;
@@ -1302,7 +1102,7 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_Fullscreen = Fullscreen;
     m_RefreshRate = RefreshRate;
 
-    const bgfx::RendererType::Enum requestedRenderer = ParseRequestedRenderer();
+    const bgfx::RendererType::Enum requestedRenderer = CKBgfxParseRequestedRenderer();
 
     bgfx::Init init;
     init.type = requestedRenderer;
@@ -1313,30 +1113,32 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     init.callback = &m_BgfxCallback;
 
     if (!bgfx::init(init)) {
-        BgfxLogf("Init", "bgfx init failed for requested renderer '%s'",
-                 RendererTypeName(requestedRenderer));
+        CKBgfxLogf("Init", "bgfx init failed for requested renderer '%s' window=%p size=%dx%d",
+                   CKBgfxRendererTypeName(requestedRenderer), Window, Width, Height);
         return FALSE;
     }
 
     m_BgfxInitialized = TRUE;
     const bgfx::RendererType::Enum actualRenderer = bgfx::getRendererType();
-    m_RendererName = RendererTypeName(actualRenderer);
+    m_RendererName = CKBgfxRendererTypeName(actualRenderer);
     if (m_Driver) {
         CKBgfxRasterizerDriver *driver = static_cast<CKBgfxRasterizerDriver *>(m_Driver);
         driver->m_ShaderTarget.Format = CKRST_SHADER_FORMAT_NATIVE;
-        driver->m_ShaderTarget.Profile = ShaderProfile(actualRenderer);
+        driver->m_ShaderTarget.Profile = CKBgfxShaderProfile(actualRenderer);
         driver->m_ShaderTarget.Version = 0;
         driver->m_ShaderTarget.Flags = 0;
         m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererName);
     }
 
-    BgfxLogf("Init", "renderer requested=%s actual=%s",
-             RendererTypeName(requestedRenderer), m_RendererName);
+    CKBgfxLogf("Init", "renderer requested=%s actual=%s",
+               CKBgfxRendererTypeName(requestedRenderer), m_RendererName);
 
     const uint32_t whitePixel = 0xffffffffu;
     const bgfx::Memory *whiteMem = bgfx::copy(&whitePixel, sizeof(whitePixel));
     m_DefaultWhiteTexture = bgfx::createTexture2D(
         1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, whiteMem);
+    if (!bgfx::isValid(m_DefaultWhiteTexture))
+        CKBgfxLogf("Init", "failed to create default white texture");
 
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
     bgfx::setViewClear(0,
@@ -1390,7 +1192,7 @@ void CKBgfxRasterizerContext::ConfigureDebug()
     if (CKBgfxConfigBool("Debug.LogConfig", FALSE) ||
         m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
         m_DebugOverlay) {
-        BgfxLogf("Debug", "configured bgfxFlags=0x%X overlay=%d",
+        CKBgfxLogf("Debug", "configured bgfxFlags=0x%X overlay=%d",
                  m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
     }
 }
@@ -1627,7 +1429,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
         CKBgfxConfigBool("Debug.LogTextures", FALSE);
     if (s_LogTextures &&
         s_CreateTextureLogCount < 80) {
-        BgfxLogf("CreateTexture",
+        CKBgfxLogf("CreateTexture",
                  "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u mips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
                  Texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
                  (int)pf, (int)fmt, rec->BitsPerPixel, Desc->MipMapCount, copiedBytes,
@@ -1693,17 +1495,15 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *D
     {
         CKBgfxShaderRecord *ps = GetShader(Desc->PixelShader);
         if (!vs || !ps) {
-            FILE *lf = GetBgfxLogFile();
-            if (lf) fprintf(lf, "[CreateProgram] FAIL: vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d\n",
-                           vs, Desc->VertexShader, ps, Desc->PixelShader, m_Shaders.Size());
+            CKBgfxLogf("CreateProgram", "missing shaders vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d",
+                       vs, Desc->VertexShader, ps, Desc->PixelShader, m_Shaders.Size());
             return CKERR_INVALIDPARAMETER;
         }
 
         handle = bgfx::createProgram(vs->Handle, ps->Handle, false);
         if (!bgfx::isValid(handle)) {
-            FILE *lf = GetBgfxLogFile();
-            if (lf) fprintf(lf, "[CreateProgram] bgfx::createProgram INVALID: vs.idx=%u ps.idx=%u\n",
-                           vs->Handle.idx, ps->Handle.idx);
+            CKBgfxLogf("CreateProgram", "bgfx::createProgram failed vs.idx=%u ps.idx=%u",
+                       vs->Handle.idx, ps->Handle.idx);
             return CKERR_INVALIDPARAMETER;
         }
 
@@ -2081,7 +1881,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         if (s_LogTextures &&
             s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
-            BgfxLogf("UpdateTexture",
+            CKBgfxLogf("UpdateTexture",
                      "id=%u handle=%u mip=%u face=%u region=%ux%u+%u,%u rec=%ux%u recBpp=%u data=%dx%d dataBpp=%d pitch=%u rowBytes=%u first=0x%08X hash=0x%08X",
                      Texture, rec->Handle.idx, Mip, Face, w, h, x, y,
                      rec->Width, rec->Height, rec->BitsPerPixel,
@@ -2160,10 +1960,15 @@ CKERROR CKBgfxRasterizerContext::ReadFrameBuffer(CKDWORD FrameBuffer,
         bgfx::requestScreenShot(invalid, "__backbuffer_read__");
 
         bgfx::frame();
-        while (!m_BackbufferReadReady.load(std::memory_order_acquire))
+        int waitFrames = 0;
+        while (!m_BackbufferReadReady.load(std::memory_order_acquire) && waitFrames++ < 120)
             bgfx::frame();
 
         m_BackbufferReadTarget = NULL;
+        if (!m_BackbufferReadReady.load(std::memory_order_acquire)) {
+            CKBgfxLogf("ReadFrameBuffer", "backbuffer readback timed out");
+            return CKERR_INVALIDOPERATION;
+        }
         return CK_OK;
     }
 
@@ -2494,6 +2299,11 @@ CKRasterizerEncoder *CKBgfxRasterizerContext::BeginEncoder()
         {
             m_Encoders[i].m_Context = this;
             m_Encoders[i].m_Encoder = bgfx::begin(true);
+            if (!m_Encoders[i].m_Encoder) {
+                m_Encoders[i].m_Context = NULL;
+                m_Encoders[i].m_Active.store(FALSE, std::memory_order_release);
+                return NULL;
+            }
             m_Encoders[i].m_StencilRef = 0;
             m_Encoders[i].m_StencilReadMask = 0xFF;
             m_Encoders[i].m_StencilWriteMask = 0xFF;
@@ -2511,12 +2321,23 @@ void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
 {
     if (!Encoder)
         return;
-    auto *enc = static_cast<CKBgfxEncoder *>(Encoder);
-    if (enc->m_Encoder)
-    {
+
+    CKBgfxEncoder *enc = NULL;
+    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i) {
+        if (Encoder == &m_Encoders[i]) {
+            enc = &m_Encoders[i];
+            break;
+        }
+    }
+
+    if (!enc)
+        return;
+
+    if (enc->m_Encoder) {
         bgfx::end(enc->m_Encoder);
         enc->m_Encoder = NULL;
     }
+
     enc->m_Active.store(FALSE, std::memory_order_release);
 }
 
@@ -2551,7 +2372,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
         CKBgfxConfigBool("Debug.LogPresentSync", FALSE);
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
-        BgfxLogf("PresentSync",
+        CKBgfxLogf("PresentSync",
                  "frame=%u syncMode=%d currentVSync=%d resetFlags=0x%X",
                  m_DebugFrameId, SyncMode,
                  m_VSync ? 1 : 0, m_ResetFlags);

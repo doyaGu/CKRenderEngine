@@ -366,7 +366,33 @@ static void TestDrawStateBuilderLayout()
 }
 
 // ============================================================================
-// Test 5: Stress test - multi-threaded slot acquisition with release/reuse
+// Test 5: Rasterizer start/close lifecycle
+// ============================================================================
+
+static void TestBgfxRasterizerLifecycle()
+{
+    TEST_SECTION("CKBgfxRasterizer Start/Close Lifecycle");
+
+    CKBgfxRasterizer rasterizer;
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "new rasterizer has no drivers");
+    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "start succeeds without creating a context");
+    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "start creates one bgfx driver");
+    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "repeated start is idempotent");
+    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "repeated start does not add another driver");
+
+    CKRasterizerDriver *driver = rasterizer.GetDriver(0);
+    TEST_ASSERT(driver != NULL, "driver exists after start");
+    TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
+    TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
+
+    rasterizer.Close();
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "close removes driver");
+    rasterizer.Close();
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "repeated close is safe");
+}
+
+// ============================================================================
+// Test 6: Stress test - multi-threaded slot acquisition with release/reuse
 // ============================================================================
 
 static void TestEncoderSlotReuse()
@@ -447,6 +473,7 @@ int main()
     TestDrawStateBuilderLayout();
     TestEncoderSlotAtomic();
     TestTransientCounterAtomic();
+    TestBgfxRasterizerLifecycle();
     TestEncoderSlotReuse();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",

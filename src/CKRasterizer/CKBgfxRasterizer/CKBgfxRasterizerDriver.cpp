@@ -5,6 +5,8 @@
 #endif
 #include <windows.h>
 
+#include <new>
+
 CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
 {
     m_Owner = owner;
@@ -96,13 +98,19 @@ CKBgfxRasterizerDriver::~CKBgfxRasterizerDriver()
 
 CKRasterizerContext *CKBgfxRasterizerDriver::CreateContext()
 {
-    auto *ctx = new CKBgfxRasterizerContext(this);
+    auto *ctx = new (std::nothrow) CKBgfxRasterizerContext(this);
+    if (!ctx)
+        return NULL;
+
     m_Contexts.PushBack(ctx);
     return ctx;
 }
 
 CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
 {
+    if (!Context)
+        return FALSE;
+
     for (int i = 0; i < m_Contexts.Size(); ++i)
     {
         if (m_Contexts[i] == Context)

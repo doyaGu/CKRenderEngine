@@ -2,7 +2,9 @@
 add_subdirectory(CKRasterizerLib)
 
 set(CKBGFX_RASTERIZER_SOURCES
+        CKBgfxRasterizer/CKBgfxCallback.cpp
         CKBgfxRasterizer/CKBgfxConfig.cpp
+        CKBgfxRasterizer/CKBgfxInternal.cpp
         CKBgfxRasterizer/CKBgfxRasterizer.cpp
         CKBgfxRasterizer/CKBgfxRasterizerDriver.cpp
         CKBgfxRasterizer/CKBgfxRasterizerContext.cpp
@@ -10,6 +12,7 @@ set(CKBGFX_RASTERIZER_SOURCES
 
 set(CKBGFX_RASTERIZER_HEADERS
         CKBgfxRasterizer/CKBgfxConfig.h
+        CKBgfxRasterizer/CKBgfxInternal.h
         CKBgfxRasterizer/CKBgfxRasterizer.h
 )
 
@@ -88,6 +91,7 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
             ${CKRE_INCLUDE_DIR}
     )
     target_link_libraries(test_bgfx_rasterizer PRIVATE
+            CKBgfxRasterizer
             CK2
             VxMath
             bgfx
