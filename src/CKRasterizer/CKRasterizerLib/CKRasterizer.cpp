@@ -13,6 +13,7 @@ CKBOOL CKRasterizer::Start(WIN_HANDLE AppWnd)
 {
     m_MainWindow = AppWnd;
     CKRasterizerDriver *driver = new CKRasterizerDriver;
+    driver->InitNULLRasterizerCaps(this);
     m_Drivers.PushBack(driver);
     return TRUE;
 }

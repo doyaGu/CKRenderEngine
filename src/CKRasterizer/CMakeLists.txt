@@ -67,6 +67,20 @@ endforeach ()
 
 # Tests
 if (CKRE_BUILD_TESTS OR BUILD_TESTING)
+    add_executable(test_null_rasterizer tests/test_null_rasterizer.cpp)
+    target_include_directories(test_null_rasterizer PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CKRE_INCLUDE_DIR}
+    )
+    target_link_libraries(test_null_rasterizer PRIVATE
+            CKRasterizerLib
+    )
+    set_target_properties(test_null_rasterizer PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+            FOLDER "Tests"
+    )
+    add_test(NAME NullRasterizerTests COMMAND test_null_rasterizer)
+
     add_executable(test_bgfx_rasterizer tests/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
