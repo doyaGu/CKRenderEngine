@@ -1,16 +1,16 @@
-# CKRasterizer - bgfx-backed default rasterizer implementation
+# CKRasterizer - rasterizer core and bgfx implementation
 add_subdirectory(CKRasterizerLib)
 
 set(CKBGFX_RASTERIZER_SOURCES
-        CKBgfxConfig.cpp
-        CKBgfxRasterizer.cpp
-        CKBgfxRasterizerDriver.cpp
-        CKBgfxRasterizerContext.cpp
+        CKBgfxRasterizer/CKBgfxConfig.cpp
+        CKBgfxRasterizer/CKBgfxRasterizer.cpp
+        CKBgfxRasterizer/CKBgfxRasterizerDriver.cpp
+        CKBgfxRasterizer/CKBgfxRasterizerContext.cpp
 )
 
 set(CKBGFX_RASTERIZER_HEADERS
-        CKBgfxConfig.h
-        CKBgfxRasterizer.h
+        CKBgfxRasterizer/CKBgfxConfig.h
+        CKBgfxRasterizer/CKBgfxRasterizer.h
 )
 
 set(_ckre_bgfx_targets)
@@ -49,10 +49,11 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
     target_include_directories(${_ckre_bgfx_target}
             PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer>
             $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
             PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
     )
 
     target_link_libraries(${_ckre_bgfx_target}
@@ -69,6 +70,7 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
     add_executable(test_bgfx_rasterizer tests/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
             ${CKRE_INCLUDE_DIR}
     )
     target_link_libraries(test_bgfx_rasterizer PRIVATE
