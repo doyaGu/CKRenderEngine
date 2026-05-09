@@ -6,7 +6,6 @@
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
 #include "CKFixedFunctionPipeline.h"
-#include "CKRenderDebugEnv.h"
 
 // External function from CKMeshUtils.cpp
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
@@ -17,11 +16,6 @@ static int CompareByZOrder(const void *a, const void *b) {
     CK2dEntity *ent1 = *(CK2dEntity **) a;
     CK2dEntity *ent2 = *(CK2dEntity **) b;
     return ent1->GetZOrder() - ent2->GetZOrder();
-}
-
-static bool LogFullscreenBlack2DEnabled() {
-    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_FULLSCREEN_BLACK_2D", false);
-    return enabled;
 }
 
 CK_CLASSID RCK2dEntity::m_ClassID = CKCID_2DENTITY;
@@ -899,30 +893,6 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         positionPtr[2] = 0.0f;
         positionPtr[3] = 1.0f;
 
-        static int s_BlackFullscreenLogCount = 0;
-        const bool isFullscreenBlack =
-            !m_Material->GetTexture(0) &&
-            colorValue == 0xFF000000 &&
-            (int)m_VtxPos.left == 0 && (int)m_VtxPos.top == 0 &&
-            (int)m_VtxPos.right == dev->m_ViewportData.ViewWidth &&
-            (int)m_VtxPos.bottom == dev->m_ViewportData.ViewHeight;
-
-        if (LogFullscreenBlack2DEnabled() &&
-            s_BlackFullscreenLogCount < 16 && isFullscreenBlack) {
-            CKObject *parentObj = GetParent();
-            CK_LOG_FMT("2DEntity",
-                       "Fullscreen black quad #%d: obj=%s id=%u class=%d parent=%s flags=0x%X isBackground=%d view=%d material=%s",
-                       s_BlackFullscreenLogCount,
-                       GetName() ? GetName() : "<unnamed>",
-                       GetID(),
-                       GetClassID(),
-                       parentObj && parentObj->GetName() ? parentObj->GetName() : "<none>",
-                       m_Flags,
-                       IsBackground() ? 1 : 0,
-                       (int)dev->m_Current2DView,
-                       m_Material->GetName() ? m_Material->GetName() : "<unnamed>");
-            s_BlackFullscreenLogCount++;
-        }
         // Draw quad as triangle fan
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 

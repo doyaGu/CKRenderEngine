@@ -377,16 +377,10 @@ private:
     std::atomic<bool> m_BackbufferReadReady;
 
     CKDWORD m_DebugFrameId;
-    CKDWORD m_DebugCaptureFirstFrames;
-    CKDWORD m_DebugCaptureInterval;
-    CKDWORD m_DebugCaptureLimit;
-    CKDWORD m_DebugCaptureSaved;
     CKDWORD m_DebugBgfxFlags;
     CKBOOL m_DebugOverlay;
-    char m_DebugCaptureDir[260];
 
-    void ConfigureDebugCapture();
-    void RequestDebugFrameCapture();
+    void ConfigureDebug();
     void DrawDebugOverlay();
 
     XArray<CKBgfxShaderRecord *> m_Shaders;
