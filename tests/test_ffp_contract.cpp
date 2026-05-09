@@ -3402,6 +3402,29 @@ void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
               "Explicit rasterizer screenshot callback API must remain available");
 }
 
+void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugEnv() {
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxConfig.cpp");
+    std::string bgfxCmake = ReadRenderEngineSource("src/CKRasterizer/CMakeLists.txt");
+
+    TestCheck(bgfxContext.find("CKRenderDebugEnv") == std::string::npos,
+              "bgfx rasterizer must not include CK2_3D private debug env helpers");
+    TestCheck(bgfxContext.find("CK2_3D") == std::string::npos &&
+              bgfxConfig.find("CK2_3D") == std::string::npos,
+              "bgfx rasterizer diagnostics must use rasterizer-owned names instead of CK2_3D names");
+    TestCheck(bgfxContext.find("GetEnvironmentVariableA") == std::string::npos &&
+              bgfxContext.find("getenv(") == std::string::npos &&
+              bgfxConfig.find("GetEnvironmentVariableA") == std::string::npos &&
+              bgfxConfig.find("getenv(") == std::string::npos,
+              "bgfx rasterizer debug configuration must not read process environment variables");
+    TestCheck(bgfxConfig.find("#include \"VxConfiguration.h\"") != std::string::npos &&
+              bgfxConfig.find("VxConfiguration") != std::string::npos,
+              "bgfx rasterizer debug configuration must be backed by VxConfiguration");
+    TestCheck(bgfxCmake.find("CKBgfxConfig.cpp") != std::string::npos &&
+              bgfxCmake.find("CKBgfxConfig.h") != std::string::npos,
+              "bgfx rasterizer must own its internal VxConfiguration helper in the rasterizer target");
+}
+
 void Test_FFPDebugLogging_IsCentralized() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
@@ -3773,6 +3796,7 @@ int main() {
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     tests.Run("bgfx RTT flush preserves present vsync", &Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync);
     tests.Run("bgfx automatic debug capture removed", &Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved);
+    tests.Run("bgfx debug config is rasterizer-owned", &Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugEnv);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);

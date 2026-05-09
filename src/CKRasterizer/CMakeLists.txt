@@ -1,11 +1,13 @@
 # CKRasterizer - bgfx-backed default rasterizer implementation
 set(CKBGFX_RASTERIZER_SOURCES
+        CKBgfxConfig.cpp
         CKBgfxRasterizer.cpp
         CKBgfxRasterizerDriver.cpp
         CKBgfxRasterizerContext.cpp
 )
 
 set(CKBGFX_RASTERIZER_HEADERS
+        CKBgfxConfig.h
         CKBgfxRasterizer.h
 )
 
