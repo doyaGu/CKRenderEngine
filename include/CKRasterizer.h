@@ -68,6 +68,7 @@ public:
 
     virtual CKERROR GetShaderTarget(CKShaderTargetDesc *Target) const;
     virtual CKERROR GetProgrammableCaps(VxProgCapsDesc &Caps);
+    virtual void InitNULLRasterizerCaps(CKRasterizer *Owner);
 
 public:
     CKBOOL m_Hardware;
@@ -176,10 +177,10 @@ public:
     virtual CKBOOL Create(WIN_HANDLE Window, int PosX = 0, int PosY = 0,
                           int Width = 0, int Height = 0, int Bpp = -1,
                           CKBOOL Fullscreen = FALSE, int RefreshRate = 0,
-                          int Zbpp = -1, int StencilBpp = -1) { return FALSE; }
+                          int Zbpp = -1, int StencilBpp = -1);
     virtual CKBOOL Resize(int PosX = 0, int PosY = 0,
                           int Width = 0, int Height = 0,
-                          CKDWORD Flags = 0) { return FALSE; }
+                          CKDWORD Flags = 0);
 
     // --- Resource creation ---
     virtual CKERROR CreateVertexBuffer(CKDWORD Buffer, CKVertexBufferDesc *Desc,

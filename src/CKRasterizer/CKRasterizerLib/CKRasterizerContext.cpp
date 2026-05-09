@@ -119,6 +119,33 @@ CKRasterizerContext::CKRasterizerContext()
 {
 }
 
+CKBOOL CKRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
+                                   int Width, int Height, int Bpp,
+                                   CKBOOL Fullscreen, int RefreshRate,
+                                   int Zbpp, int StencilBpp)
+{
+    m_Window = Window;
+    m_PosX = PosX;
+    m_PosY = PosY;
+    m_Width = Width;
+    m_Height = Height;
+    m_Bpp = Bpp;
+    m_Fullscreen = Fullscreen;
+    m_RefreshRate = RefreshRate;
+    m_ZBpp = Zbpp;
+    m_StencilBpp = StencilBpp;
+    return TRUE;
+}
+
+CKBOOL CKRasterizerContext::Resize(int PosX, int PosY, int Width, int Height, CKDWORD)
+{
+    m_PosX = PosX;
+    m_PosY = PosY;
+    m_Width = Width;
+    m_Height = Height;
+    return TRUE;
+}
+
 CKERROR CKRasterizerContext::CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *)
 {
     return CK_OK;
