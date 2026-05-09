@@ -1,7 +1,7 @@
 #include "CKRenderedScene.h"
 
 #include "CKDebugLogger.h"
-#include "CKRenderDebugEnv.h"
+#include "CKRenderDebugConfig.h"
 #include "CKRenderPerfStats.h"
 
 #include "VxMatrix.h"
@@ -24,12 +24,12 @@ extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
 
 static bool RenderedSceneFrameLogEnabled() {
-    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_FRAME_LOG", false);
+    static const bool enabled = CKRenderDebugConfigBool("CK2_3D_DEBUG_FRAME_LOG", false);
     return enabled;
 }
 
 static bool RenderedSceneCameraLogEnabled() {
-    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
+    static const bool enabled = CKRenderDebugConfigBool("CK2_3D_DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
     return enabled;
 }
 

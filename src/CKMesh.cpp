@@ -16,7 +16,7 @@
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugEnv.h"
+#include "CKRenderDebugConfig.h"
 #include "CKRenderPerfStats.h"
 #include "CKTransientGeometry.h"
 #include "MeshStriper.h"
@@ -31,8 +31,8 @@ extern CKBOOL g_UpdateTransparency;
 extern void (*g_BuildNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 extern void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 
-static bool MeshDebugEnvEnabled(const char *name) {
-    return CKRenderDebugEnvBool(name, false);
+static bool MeshDebugConfigEnabled(const char *name) {
+    return CKRenderDebugConfigBool(name, false);
 }
 
 static void RestoreSceneSpecularState(RCKRenderContext *rc) {
@@ -44,8 +44,8 @@ static void RestoreSceneSpecularState(RCKRenderContext *rc) {
         rc->m_RenderManager->m_DisableSpecular.Value != 0 ? FALSE : TRUE);
 }
 
-static int MeshDebugEnvInt(const char *name, int defaultValue) {
-    return CKRenderDebugEnvInt(name, defaultValue);
+static int MeshDebugConfigInt(const char *name, int defaultValue) {
+    return CKRenderDebugConfigInt(name, defaultValue);
 }
 
 static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, RCKMaterial *mat) {
@@ -4441,7 +4441,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     }
                     static int s_meshContractLogCount = 0;
                     static const int s_MeshLogLimit =
-                        MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                        MeshDebugConfigInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
                     const int meshLogLimit = s_MeshLogLimit;
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
@@ -4507,7 +4507,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
                     static int s_meshContractLogCount = 0;
                     static const int s_MeshLogLimit =
-                        MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+                        MeshDebugConfigInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
                     const int meshLogLimit = s_MeshLogLimit;
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
@@ -5551,7 +5551,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                         maxIndex = value;
                 }
                 static const bool s_LogHwIndexRanges =
-                    MeshDebugEnvEnabled("CK2_3D_DEBUG_LOG_HW_INDEX_RANGES");
+                    MeshDebugConfigEnabled("CK2_3D_DEBUG_LOG_HW_INDEX_RANGES");
                 if (s_LogHwIndexRanges &&
                     s_indexRangeLogCount < 16) {
                     CK_LOG_FMT("Mesh",

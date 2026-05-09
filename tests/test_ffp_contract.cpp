@@ -7,7 +7,7 @@
 #include "CKFFShaderCache.h"
 #include "CKFFUniformState.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugEnv.h"
+#include "CKRenderDebugConfig.h"
 #include "CKRenderPerfStats.h"
 #include "CKRasterizer.h"
 #include "CKRenderPipeline.h"
@@ -1140,42 +1140,35 @@ void Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted() {
               "FFP draws with one bound texture must submit exactly one texture binding");
 }
 
-void Test_RenderDebugEnv_BoolParserSupportsNamedValues() {
-    TestCheck(CKRenderDebugParseBool("1", false) == true,
-              "Render debug env bool parser must accept 1 as enabled");
-    TestCheck(CKRenderDebugParseBool("true", false) == true,
-              "Render debug env bool parser must accept true as enabled");
-    TestCheck(CKRenderDebugParseBool("on", false) == true,
-              "Render debug env bool parser must accept on as enabled");
-    TestCheck(CKRenderDebugParseBool("yes", false) == true,
-              "Render debug env bool parser must accept yes as enabled");
-    TestCheck(CKRenderDebugParseBool("0", true) == false,
-              "Render debug env bool parser must accept 0 as disabled");
-    TestCheck(CKRenderDebugParseBool("false", true) == false,
-              "Render debug env bool parser must accept false as disabled");
-    TestCheck(CKRenderDebugParseBool("off", true) == false,
-              "Render debug env bool parser must accept off as disabled");
-    TestCheck(CKRenderDebugParseBool("no", true) == false,
-              "Render debug env bool parser must accept no as disabled");
-    TestCheck(CKRenderDebugParseBool("", true) == true &&
-                  CKRenderDebugParseBool("maybe", false) == false,
-              "Render debug env bool parser must preserve fallback for empty or unknown values");
+void Test_RenderDebugConfig_BoolParserSupportsNamedValues() {
+    TestCheck(CKRenderDebugConfigParseBool("1", false) == true,
+              "Render debug config bool parser must accept 1 as enabled");
+    TestCheck(CKRenderDebugConfigParseBool("true", false) == true,
+              "Render debug config bool parser must accept true as enabled");
+    TestCheck(CKRenderDebugConfigParseBool("on", false) == true,
+              "Render debug config bool parser must accept on as enabled");
+    TestCheck(CKRenderDebugConfigParseBool("yes", false) == true,
+              "Render debug config bool parser must accept yes as enabled");
+    TestCheck(CKRenderDebugConfigParseBool("0", true) == false,
+              "Render debug config bool parser must accept 0 as disabled");
+    TestCheck(CKRenderDebugConfigParseBool("false", true) == false,
+              "Render debug config bool parser must accept false as disabled");
+    TestCheck(CKRenderDebugConfigParseBool("off", true) == false,
+              "Render debug config bool parser must accept off as disabled");
+    TestCheck(CKRenderDebugConfigParseBool("no", true) == false,
+              "Render debug config bool parser must accept no as disabled");
+    TestCheck(CKRenderDebugConfigParseBool("", true) == true &&
+                  CKRenderDebugConfigParseBool("maybe", false) == false,
+              "Render debug config bool parser must preserve fallback for empty or unknown values");
 }
 
-static void SetTestEnvVar(const char *name, const char *value) {
-#if defined(_WIN32)
-    _putenv_s(name, value ? value : "");
-#else
-    if (value)
-        setenv(name, value, 1);
-    else
-        unsetenv(name);
-#endif
+static void SetTestDebugConfig(const char *name, const char *value) {
+    CKRenderDebugConfigSetOverrideForTests(name, value);
 }
 
 void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
-    SetTestEnvVar("CK2_3D_DEBUG_FFP_STATS", "0");
-    SetTestEnvVar("CK2_3D_DEBUG_FFP_UNIFORM_HIST", "0");
+    SetTestDebugConfig("CK2_3D_DEBUG_FFP_STATS", "0");
+    SetTestDebugConfig("CK2_3D_DEBUG_FFP_UNIFORM_HIST", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1194,46 +1187,63 @@ void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
               "Disabled FFP uniform histogram must not collect per-uniform counters");
 }
 
-void Test_DiagnosticStats_EnvGatesKeepLogTags() {
+void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
     std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
     std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
 
     TestCheck(perfSource.find("CK2_3D_DEBUG_RENDER_STATS") != std::string::npos &&
+                  perfSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   perfSource.find("\"RenderStats\"") != std::string::npos,
               "CK2_3D_DEBUG_RENDER_STATS enabled path must keep emitting RenderStats logs");
     TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_STATS") != std::string::npos &&
+                  ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   ffpSource.find("\"FFPStats\"") != std::string::npos,
               "CK2_3D_DEBUG_FFP_STATS enabled path must keep emitting FFPStats logs");
     TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
+                  ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
-              "FFP uniform histogram must remain available behind its explicit env gate");
+              "FFP uniform histogram must remain available behind its explicit config gate");
 }
 
-class ScopedEnvVar {
+void Test_RenderDebugConfig_UsesCK2_3DIniAndNoEnvApis() {
+    std::string header = ReadRenderEngineSource("src/CKRenderDebugConfig.h");
+    std::string source = ReadRenderEngineSource("src/CKRenderDebugConfig.cpp");
+    std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
+
+    TestCheck(header.find("CKRenderDebugConfigBool") != std::string::npos &&
+              header.find("CKRenderDebugConfigString") != std::string::npos,
+              "Render debug configuration must expose the centralized config accessors");
+    TestCheck(source.find("#include \"VxConfiguration.h\"") != std::string::npos &&
+              source.find("VxConfiguration") != std::string::npos,
+              "Render debug configuration must be backed by VxConfiguration");
+    TestCheck(source.find("CK2_3D.ini") != std::string::npos &&
+              source.find("\"CK2_3D\"") != std::string::npos,
+              "Render debug configuration must read the CK2_3D section from CK2_3D.ini");
+    TestCheck(source.find("GetEnvironmentVariableA") == std::string::npos &&
+              source.find("std::getenv") == std::string::npos &&
+              source.find("getenv(") == std::string::npos &&
+              source.find("_putenv_s") == std::string::npos,
+              "CK2_3D debug configuration must not read process environment variables");
+    TestCheck(cmake.find("CKRenderDebugConfig.h") != std::string::npos &&
+              cmake.find("CKRenderDebugConfig.cpp") != std::string::npos &&
+              cmake.find("CKRenderDebugEnv") == std::string::npos,
+              "RenderEngine build inputs must use the CK2_3D.ini debug config helper");
+}
+
+class ScopedDebugConfigValue {
 public:
-    ScopedEnvVar(const char *name, const char *value) : m_Name(name) {
-        const char *existing = std::getenv(name);
-        if (existing) {
-            m_HadValue = true;
-            m_Previous = existing;
-        }
+    ScopedDebugConfigValue(const char *name, const char *value) : m_Name(name) {
+        m_HadValue = CKRenderDebugConfigGetOverrideForTests(name, m_Previous, sizeof(m_Previous));
         Set(value);
     }
 
-    ~ScopedEnvVar() {
-        Set(m_HadValue ? m_Previous.c_str() : nullptr);
+    ~ScopedDebugConfigValue() {
+        Set(m_HadValue ? m_Previous : nullptr);
     }
 
 private:
     static void Set(const char *name, const char *value) {
-#if defined(_WIN32)
-        _putenv_s(name, value ? value : "");
-#else
-        if (value)
-            setenv(name, value, 1);
-        else
-            unsetenv(name);
-#endif
+        CKRenderDebugConfigSetOverrideForTests(name, value);
     }
 
     void Set(const char *value) {
@@ -1241,12 +1251,12 @@ private:
     }
 
     std::string m_Name;
-    std::string m_Previous;
+    char m_Previous[256] = {0};
     bool m_HadValue = false;
 };
 
 void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
-    ScopedEnvVar statsEnv("CK2_3D_DEBUG_FFP_STATS", "1");
+    ScopedDebugConfigValue statsConfig("CK2_3D_DEBUG_FFP_STATS", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1283,7 +1293,7 @@ void DrawDiagnosticFullSpecializedTexturedTriangle(CKFixedFunctionPipeline &ffp,
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1303,7 +1313,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1345,7 +1355,7 @@ static CKLightData MakeDiagnosticDirectionalLight(float r, float g, float b) {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1376,7 +1386,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUniforms() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1407,7 +1417,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUni
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1439,7 +1449,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1470,7 +1480,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
-    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1501,7 +1511,7 @@ void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
-    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2055,7 +2065,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2142,7 +2152,7 @@ CKFFShaderKey MakeUncataloguedFFPUberKey() {
 }
 
 void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgram() {
-    ScopedEnvVar unsetUber("CK2_FFP_UBERSHADER", nullptr);
+    ScopedDebugConfigValue unsetUber("CK2_FFP_UBERSHADER", nullptr);
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2173,7 +2183,7 @@ void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgr
 }
 
 void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
-    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2218,7 +2228,7 @@ void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2270,7 +2280,7 @@ void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2310,7 +2320,7 @@ void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2350,7 +2360,7 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2390,7 +2400,7 @@ void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2425,7 +2435,7 @@ void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2459,7 +2469,7 @@ void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2498,7 +2508,7 @@ void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2534,7 +2544,7 @@ void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2569,7 +2579,7 @@ void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantMissFallsBackToUber() {
-    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -3391,7 +3401,7 @@ void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
 
     TestCheck(bgfxContext.find("CK2_3D_Captures") == std::string::npos &&
               bgfxContext.find("CK2_3D_DEBUG_CAPTURE_") == std::string::npos,
-              "bgfx rasterizer must not keep obsolete automatic CK2_3D_Captures env capture path");
+              "bgfx rasterizer must not keep obsolete automatic CK2_3D_Captures capture path");
     TestCheck(bgfxContext.find("ConfigureDebugCapture") == std::string::npos &&
               bgfxContext.find("RequestDebugFrameCapture") == std::string::npos,
               "bgfx rasterizer must not run automatic debug capture setup or per-frame capture requests");
@@ -3402,13 +3412,13 @@ void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
               "Explicit rasterizer screenshot callback API must remain available");
 }
 
-void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugEnv() {
+void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
     std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxConfig.cpp");
     std::string bgfxCmake = ReadRenderEngineSource("src/CKRasterizer/CMakeLists.txt");
 
-    TestCheck(bgfxContext.find("CKRenderDebugEnv") == std::string::npos,
-              "bgfx rasterizer must not include CK2_3D private debug env helpers");
+    TestCheck(bgfxContext.find("CKRenderDebugConfig") == std::string::npos,
+              "bgfx rasterizer must not include CK2_3D private debug config helpers");
     TestCheck(bgfxContext.find("CK2_3D") == std::string::npos &&
               bgfxConfig.find("CK2_3D") == std::string::npos,
               "bgfx rasterizer diagnostics must use rasterizer-owned names instead of CK2_3D names");
@@ -3436,7 +3446,7 @@ void Test_FFPDebugLogging_IsCentralized() {
               pipeline.find("Debug3DContractLogLimit") == std::string::npos &&
               pipeline.find("DebugPositionTLogLimit") == std::string::npos &&
               pipeline.find("ShouldSkipDebug") == std::string::npos,
-              "FFP pipeline must not keep debug env limit or skip helpers inline");
+              "FFP pipeline must not keep debug config limit or skip helpers inline");
     TestCheck(pipeline.find("LogVertexClipSamples") == std::string::npos &&
               pipeline.find("LogPositionTSamples") == std::string::npos &&
               pipeline.find("LogPrimitiveIndexContract") == std::string::npos &&
@@ -3450,18 +3460,18 @@ void Test_FFPDebugLogging_IsCentralized() {
               header.find("struct CKFFDrawDebugInfo") != std::string::npos,
               "CKFFDebug must expose the internal config/state/draw-info types for FFP logging");
 
-    const char *envNames[] = {
+    const char *configNames[] = {
         "CK2_3D_DEBUG_DRAW_LOG_LIMIT",
         "CK2_3D_DEBUG_REAL3D_LOG_LIMIT",
         "CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT",
         "CK2_3D_DEBUG_POSITIONT_LOG_LIMIT",
         "CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME"
     };
-    for (const char *envName : envNames) {
-        TestCheck(source.find(envName) != std::string::npos,
-                  "CKFFDebug.cpp must keep the existing FFP debug env interface names");
+    for (const char *configName : configNames) {
+        TestCheck(source.find(configName) != std::string::npos,
+                  "CKFFDebug.cpp must keep the existing FFP debug config keys");
     }
-    const char *removedEnvNames[] = {
+    const char *removedConfigNames[] = {
         "CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS",
         "CK2_3D_DEBUG_SKIP_3D_DRAWS",
         "CK2_3D_DEBUG_FORCE_UNLIT",
@@ -3475,9 +3485,9 @@ void Test_FFPDebugLogging_IsCentralized() {
         "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START",
         "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END"
     };
-    for (const char *envName : removedEnvNames) {
-        TestCheck(source.find(envName) == std::string::npos,
-                  "CKFFDebug.cpp must not keep behavior-changing FFP draw skip/force env paths");
+    for (const char *configName : removedConfigNames) {
+        TestCheck(source.find(configName) == std::string::npos,
+                  "CKFFDebug.cpp must not keep behavior-changing FFP draw skip/force config paths");
     }
 
     TestCheck(cmake.find("CKFFDebug.h") != std::string::npos &&
@@ -3628,8 +3638,8 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
               "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
     TestCheck(source.find("CK2_3D_DEBUG_OUTPUT") != std::string::npos &&
               source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
-              source.find("CKRenderDebugEnvBool(\"CK2_3D_DEBUG_OUTPUT\"") != std::string::npos,
-              "Debug logger must use the CMake default and support CK2_3D_DEBUG_OUTPUT=0/false/off/no as a runtime override");
+              source.find("CKRenderDebugConfigBool(\"CK2_3D_DEBUG_OUTPUT\"") != std::string::npos,
+              "Debug logger must use the CMake default and support CK2_3D_DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
               "Debug logger must drop output and close the log file when globally disabled");
@@ -3719,9 +3729,10 @@ int main() {
     tests.Run("FFP diagnostic PositionT default COLOR1", &Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack);
     tests.Run("FFP diagnostic blend fixup reaches draw state", &Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState);
     tests.Run("FFP diagnostic unbound texture stages are not submitted", &Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted);
-    tests.Run("Render debug env bool parser", &Test_RenderDebugEnv_BoolParserSupportsNamedValues);
+    tests.Run("Render debug config bool parser", &Test_RenderDebugConfig_BoolParserSupportsNamedValues);
     tests.Run("FFP diagnostics disabled stats skip timing and histogram", &Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram);
-    tests.Run("Diagnostic stats env gates keep log tags", &Test_DiagnosticStats_EnvGatesKeepLogTags);
+    tests.Run("Diagnostic stats config gates keep log tags", &Test_DiagnosticStats_ConfigGatesKeepLogTags);
+    tests.Run("Render debug config uses CK2_3D ini", &Test_RenderDebugConfig_UsesCK2_3DIniAndNoEnvApis);
     tests.Run("FFP diagnostic frame stats capture draw costs", &Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts);
     tests.Run("FFP diagnostic full specialized skips uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors);
     tests.Run("FFP diagnostic full specialized unlit 3D skips light uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms);
@@ -3796,7 +3807,7 @@ int main() {
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     tests.Run("bgfx RTT flush preserves present vsync", &Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync);
     tests.Run("bgfx automatic debug capture removed", &Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved);
-    tests.Run("bgfx debug config is rasterizer-owned", &Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugEnv);
+    tests.Run("bgfx debug config is rasterizer-owned", &Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);

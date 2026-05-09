@@ -1,6 +1,6 @@
 #include "CKFFDebug.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugEnv.h"
+#include "CKRenderDebugConfig.h"
 #include "CKVertexLayoutCache.h"
 
 #include <cmath>
@@ -10,11 +10,11 @@
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static const CKFFDebugConfig value = {
-        CKRenderDebugEnvInt("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
-        CKRenderDebugEnvInt("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
-        CKRenderDebugEnvInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
-        CKRenderDebugEnvInt("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
-        CKRenderDebugEnvBool("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME", false)
+        CKRenderDebugConfigInt("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
+        CKRenderDebugConfigBool("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME", false)
     };
     return value;
 }
