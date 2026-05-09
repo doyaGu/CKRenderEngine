@@ -32,6 +32,60 @@ class CKRasterizerEncoder;
 
 struct CKLightData;
 
+struct CKFFFrameStats {
+    CKDWORD FrameIndex;
+    CKDWORD SoftwareDraws;
+    CKDWORD HardwareDraws;
+    CKDWORD SubmittedDraws;
+    CKDWORD PrepareFailures;
+    CKDWORD ProgramMisses;
+    CKDWORD UniformSets;
+    CKDWORD UniformVec4s;
+    CKDWORD UniformHandleSets[64];
+    CKDWORD UniformHandleVec4s[64];
+    CKDWORD TextureBinds;
+    CKDWORD VertexLayoutSets;
+    CKDWORD VertexBufferSets;
+    CKDWORD IndexBufferSets;
+    CKDWORD TransformSets;
+    CKDWORD ConsecutiveProgramRepeats;
+    CKDWORD ConsecutiveDrawStateRepeats;
+    CKDWORD ConsecutiveTextureSetRepeats;
+    CKDWORD ConsecutiveVertexBufferRepeats;
+    CKDWORD ConsecutiveIndexBufferRepeats;
+    CKDWORD ConsecutiveWorldMatrixRepeats;
+    CKDWORD DrawStateCacheHits;
+    CKDWORD DrawStateRebuilds;
+    CKDWORD TransientVertexBytes;
+    CKDWORD TransientIndexBytes;
+    double PrepareUs;
+    double StateUs;
+    double ProgramUs;
+    double UniformUs;
+    double TextureUs;
+    double TransformUs;
+    double DrawStateBuildUs;
+    double EncoderStateUs;
+    double StencilUs;
+    double LayoutUs;
+    double BufferBindUs;
+    double SubmitUs;
+    CKDWORD LastProgram;
+    CKDrawState LastDrawState;
+    CKDWORD LastActiveTextureCount;
+    CKDWORD LastTextureHandles[CKFF_MAX_TEXTURE_STAGES];
+    CKDWORD LastVertexBuffer;
+    CKDWORD LastIndexBuffer;
+    CKDWORD LastVertexLayout;
+    VxMatrix LastWorldMatrix;
+    CKBOOL HasLastProgram;
+    CKBOOL HasLastDrawState;
+    CKBOOL HasLastTextureSet;
+    CKBOOL HasLastVertexBuffer;
+    CKBOOL HasLastIndexBuffer;
+    CKBOOL HasLastWorldMatrix;
+};
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -90,6 +144,7 @@ public:
     const VxMatrix &GetViewMatrix() const { return m_View; }
     const VxMatrix &GetProjectionMatrix() const { return m_Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
+    const CKFFFrameStats &GetFrameStats() const { return m_FrameStats; }
 
 private:
     CKRasterizerContext *m_Context;
@@ -102,6 +157,8 @@ private:
     CKRenderPipeline m_RenderPipeline;
     CKFrustumCuller m_FrustumCuller;
     CKFFDebugState m_DebugState;
+    CKFFShaderKey m_CurrentShaderKey;
+    CKFFProgramBinding m_CurrentProgramBinding;
     CKFFSpecializationInfo m_CurrentSpecializationInfo;
 
     // Current transform state
@@ -131,13 +188,22 @@ private:
 
     // Dirty tracking
     CKDWORD m_DirtyFlags;
+    CKFFFrameStats m_FrameStats;
 
     // Internal methods
     CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
     CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
-    void SetCurrentShaderKey(const CKFFShaderKey &shaderKey);
+    void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void UploadUniforms(CKRasterizerEncoder *encoder);
+    void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
+    CKDWORD CurrentTextureMatrixUploadCount() const;
+    bool CurrentShaderUsesBumpEnv() const;
+    bool CurrentShaderUsesTexFactor() const;
+    bool CurrentShaderUsesMaterialUniform() const;
+    bool CurrentShaderUsesViewSpaceUniforms() const;
     void BindTextures(CKRasterizerEncoder *encoder);
+    CKDWORD SubmitDiscardFlags() const;
+    void LogAndResetFrameStats();
     float ComputeDepthKey() const;
 };
 

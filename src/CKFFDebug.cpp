@@ -29,28 +29,13 @@ static int EnvIntRaw(const char *name, int defaultValue) {
     return (int)parsed;
 }
 
-CKFFDebugState::DrawRange MakeRange(const char *exact, const char *start, const char *end) {
-    CKFFDebugState::DrawRange value = {
-        EnvIntRaw(exact, -1),
-        EnvIntRaw(start, 0),
-        EnvIntRaw(end, INT_MAX)
-    };
-    return value;
-}
-
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static const CKFFDebugConfig value = {
         EnvIntRaw("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
         EnvIntRaw("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
         EnvIntRaw("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
         EnvIntRaw("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
-        EnvEnabledRaw("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME"),
-        EnvEnabledRaw("CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS"),
-        EnvEnabledRaw("CK2_3D_DEBUG_SKIP_3D_DRAWS"),
-        EnvEnabledRaw("CK2_3D_DEBUG_FORCE_UNLIT"),
-        EnvEnabledRaw("CK2_3D_DEBUG_DISABLE_FOG"),
-        EnvEnabledRaw("CK2_3D_DEBUG_SKIP_OPAQUE3D_DRAWS"),
-        EnvEnabledRaw("CK2_3D_DEBUG_SKIP_TRANSPARENT3D_DRAWS")
+        EnvEnabledRaw("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME")
     };
     return value;
 }
@@ -81,43 +66,12 @@ int CKFFDebugState::NextDrawSerial(CKRenderView view) {
     return -1;
 }
 
-bool CKFFDebugState::ShouldSkip(CKRenderView view, int drawSerial, bool positionT) const {
-    const CKFFDebugConfig &config = CKFFDebugConfig::Get();
-    const bool skipView =
-        ((view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D) && config.SkipOpaque3DDraws) ||
-        (view == CKRP_VIEW_TRANSPARENT && config.SkipTransparent3DDraws);
-    return skipView ||
-           ShouldSkipDrawSerial(view, drawSerial) ||
-           (positionT && config.SkipPositionTDraws) ||
-           (!positionT && config.Skip3DDraws);
-}
-
-bool CKFFDebugState::ForceUnlit() const {
-    return CKFFDebugConfig::Get().ForceUnlit;
-}
-
-bool CKFFDebugState::DisableFog() const {
-    return CKFFDebugConfig::Get().DisableFog;
-}
-
 void CKFFDebugState::LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info) {
     const int limit = CKFFDebugConfig::Get().DrawLogLimit;
     if (limit > 0 && m_DrawLogCount < limit) {
         CK_LOG_FMT("FFPipeline", "DrawPrimitive: view=%d serial=%d verts=%d indices=%d flags=0x%X",
                    (int)info.View, info.DrawSerial, info.Data ? info.Data->VertexCount : 0,
                    info.IndexCount, info.Data ? info.Data->Flags : 0);
-        ++m_DrawLogCount;
-    }
-}
-
-void CKFFDebugState::LogDrawPrimitiveSkipped(const CKFFDrawDebugInfo &info, bool positionT) {
-    const int limit = CKFFDebugConfig::Get().DrawLogLimit;
-    if (limit > 0 && m_DrawLogCount < limit) {
-        CK_LOG_FMT("FFPipeline",
-                   "DrawPrimitive skipped by env: view=%d serial=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X positionT=%d",
-                   (int)info.View, info.DrawSerial, (int)info.Type,
-                   info.Data ? info.Data->VertexCount : 0, info.IndexCount,
-                   info.Data ? info.Data->Flags : 0, info.FormatFlags, positionT ? 1 : 0);
         ++m_DrawLogCount;
     }
 }
@@ -240,18 +194,6 @@ void CKFFDebugState::LogDrawVertexBufferHeader(const CKFFDrawDebugInfo &info) {
     }
 }
 
-void CKFFDebugState::LogDrawVertexBufferSkipped(const CKFFDrawDebugInfo &info, bool positionT) {
-    const int limit = CKFFDebugConfig::Get().DrawLogLimit;
-    if (limit > 0 && m_DrawLogCount < limit) {
-        CK_LOG_FMT("FFPipeline",
-                   "DrawVertexBuffer skipped by env: view=%d serial=%d type=%d vb=%u ib=%u verts=%u indices=%u dp=0x%X fmt=0x%X positionT=%d",
-                   (int)info.View, info.DrawSerial, (int)info.Type, info.VertexBuffer,
-                   info.IndexBuffer, info.VertexCount, info.PersistentIndexCount, info.DPFlags,
-                   info.FormatFlags, positionT ? 1 : 0);
-        ++m_DrawLogCount;
-    }
-}
-
 void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
     if (!info.StateDesc || !info.DrawState || !info.World || !info.ViewMatrix || !info.Projection)
         return;
@@ -322,36 +264,6 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
 
 bool CKFFDebugState::Is3DView(CKRenderView view) const {
     return view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT;
-}
-
-bool CKFFDebugState::ShouldSkipDrawSerial(CKRenderView view, int drawSerial) const {
-    if (drawSerial < 0)
-        return false;
-
-    const DrawRange &range = RangeForView(view);
-    if (range.Exact == -2)
-        return false;
-    if (range.Exact >= 0)
-        return drawSerial != range.Exact;
-    return drawSerial < range.Start || drawSerial > range.End;
-}
-
-const CKFFDebugState::DrawRange &CKFFDebugState::RangeForView(CKRenderView view) const {
-    static const DrawRange opaque = MakeRange(
-        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_EXACT",
-        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_START",
-        "CK2_3D_DEBUG_ONLY_OPAQUE3D_DRAW_END");
-    static const DrawRange transparent = MakeRange(
-        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_EXACT",
-        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START",
-        "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END");
-    static const DrawRange none = { -2, 0, INT_MAX };
-
-    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D)
-        return opaque;
-    if (view == CKRP_VIEW_TRANSPARENT)
-        return transparent;
-    return none;
 }
 
 bool CKFFDebugState::HasNonIdentityViewTranslation(const VxMatrix &view) const {

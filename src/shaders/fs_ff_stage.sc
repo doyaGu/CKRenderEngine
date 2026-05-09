@@ -2,10 +2,7 @@ $input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v
 
 #include "bgfx_shader.sh"
 
-uniform vec4 u_fogColor;
-uniform vec4 u_fogParams;
-uniform vec4 u_alphaParams;
-uniform vec4 u_texFactor;
+uniform vec4 u_ffDrawParams[12];
 uniform vec4 u_bumpEnv[2];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
@@ -22,6 +19,13 @@ SAMPLER2D(s_texture6, 6);
 SAMPLER2D(s_texture7, 7);
 
 #include "fs_ff_common.sc"
+
+#ifndef CKFF_FS_ACTIVE_STAGE_COUNT
+#define CKFF_FS_ACTIVE_STAGE_COUNT 8
+#endif
+#ifndef CKFF_FS_USES_CLIP_PLANES
+#define CKFF_FS_USES_CLIP_PLANES 1
+#endif
 
 vec4 getTextureColor(int stage, vec2 uv, bool hasTexture)
 {
@@ -46,11 +50,11 @@ float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
 {
     if (mode == 0) return vertexFogFactor;
     if (mode == 1) {
-        float denom = max(u_fogParams.y - u_fogParams.x, 0.0001);
-        return clamp((u_fogParams.y - depth) / denom, 0.0, 1.0);
+        float denom = max(u_ffDrawParams[10].y - u_ffDrawParams[10].x, 0.0001);
+        return clamp((u_ffDrawParams[10].y - depth) / denom, 0.0, 1.0);
     }
-    if (mode == 2) return clamp(exp(-(u_fogParams.z * depth)), 0.0, 1.0);
-    float e = u_fogParams.z * depth;
+    if (mode == 2) return clamp(exp(-(u_ffDrawParams[10].z * depth)), 0.0, 1.0);
+    float e = u_ffDrawParams[10].z * depth;
     return clamp(exp(-(e * e)), 0.0, 1.0);
 }
 
@@ -73,7 +77,7 @@ vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specula
     if (baseArg == 0) value = diffuse;
     else if (baseArg == 1) value = current;
     else if (baseArg == 2) value = textureColor;
-    else if (baseArg == 3) value = u_texFactor;
+    else if (baseArg == 3) value = u_ffDrawParams[9];
     else if (baseArg == 4) value = specular;
     else if (baseArg == 5) value = temp;
     return applyArgModifiers(value, arg);
@@ -94,7 +98,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 11) return clamp(a + b - a * b, 0.0, 1.0);
     if (op == 12) return mix(b, a, diffuse.a);
     if (op == 13) return mix(b, a, textureColor.a);
-    if (op == 14) return mix(b, a, u_texFactor.a);
+    if (op == 14) return mix(b, a, u_ffDrawParams[9].a);
     if (op == 15) return clamp(a + b * (1.0 - textureColor.a), 0.0, 1.0);
     if (op == 16) return mix(b, a, current.a);
     if (op == 17) return a * b;
@@ -114,7 +118,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
 
 bool alphaPass(float alpha, int func)
 {
-    float ref = u_alphaParams.x;
+    float ref = u_ffDrawParams[8].x;
     if (func == 0 || func == 8) return true;
     if (func == 1) return false;
     if (func == 2) return alpha < ref;
@@ -128,24 +132,47 @@ bool alphaPass(float alpha, int func)
 
 void main()
 {
+#if defined(CKFF_FULL_SPECIALIZED)
+    #if CKFF_FS_USES_CLIP_PLANES
+        int clipCount = int(u_clipParams.x);
+        for (int clipIndex = 0; clipIndex < 6; ++clipIndex) {
+            if (clipIndex >= clipCount) break;
+            if (dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0) discard;
+        }
+    #endif
+#else
     int clipCount = int(u_clipParams.x);
     for (int clipIndex = 0; clipIndex < 6; ++clipIndex) {
         if (clipIndex >= clipCount) break;
         if (dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0) discard;
     }
+#endif
 
     vec4 current = v_color0;
     vec4 temp = vec4(0.0, 0.0, 0.0, 1.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
     int previousColorOp = 0;
 
+#if defined(CKFF_FULL_SPECIALIZED)
+    for (int stage = 0; stage < CKFF_FS_ACTIVE_STAGE_COUNT; ++stage) {
+#else
     for (int stage = 0; stage < 8; ++stage) {
+#endif
+#if !defined(CKFF_FULL_SPECIALIZED)
         if (ckffSpecIsOptimized() && stage > ckffSpecLastActiveTextureStage()) break;
+#endif
 
+#if defined(CKFF_FULL_SPECIALIZED)
+        vec4 colorParams = vec4_splat(0.0);
+        vec4 alphaParams = vec4_splat(0.0);
+        vec4 colorExtra = vec4_splat(0.0);
+        vec4 alphaExtra = vec4_splat(0.0);
+#else
         vec4 colorParams = u_stageParams[stage * 4 + 0];
         vec4 alphaParams = u_stageParams[stage * 4 + 1];
         vec4 colorExtra = u_stageParams[stage * 4 + 2];
         vec4 alphaExtra = u_stageParams[stage * 4 + 3];
+#endif
         CKFFStageParams stageParams = ckffReadStageParams(stage, colorParams, alphaParams, colorExtra, alphaExtra);
         int colorOp = stageParams.ColorOp;
         int alphaOp = stageParams.AlphaOp;
@@ -202,20 +229,21 @@ void main()
         previousColorOp = colorOp;
     }
 
-    bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_alphaParams.z > 0.5);
+    bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_ffDrawParams[8].z > 0.5);
     if (specularEnabled) {
         current.rgb += v_color1.rgb;
     }
     if (ckffSpecIsOptimized()) {
         if (ckffSpecAlphaTestEnabled() && !alphaPass(current.a, ckffSpecAlphaFunc())) discard;
     } else {
-        if (!alphaPass(current.a, int(u_alphaParams.y))) discard;
+        if (!alphaPass(current.a, int(u_ffDrawParams[8].y))) discard;
     }
     bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
     if (fogEnabled) {
-        int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_alphaParams.w);
+        int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_ffDrawParams[8].w);
         float fogFactor = computePixelFogFactor(abs(v_clipPos.z), pixelFogMode, v_texcoord7Fog.z);
-        current.rgb = mix(u_fogColor.rgb, current.rgb, fogFactor);
+        current.rgb = mix(u_ffDrawParams[11].rgb, current.rgb, fogFactor);
     }
     gl_FragColor = clamp(current, 0.0, 1.0);
 }
+

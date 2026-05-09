@@ -66,7 +66,7 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
 } // namespace
 
 CKFFShaderCache::CKFFShaderCache()
-    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(true),
+    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
@@ -76,10 +76,10 @@ CKFFShaderCache::~CKFFShaderCache() {
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
     const char *uber = std::getenv("CK2_FFP_UBERSHADER");
-    m_UseUberShader = !(uber && (std::strcmp(uber, "0") == 0 ||
-                                 _stricmp(uber, "false") == 0 ||
-                                 _stricmp(uber, "off") == 0 ||
-                                 _stricmp(uber, "no") == 0));
+    m_UseUberShader = uber && (std::strcmp(uber, "1") == 0 ||
+                               _stricmp(uber, "true") == 0 ||
+                               _stricmp(uber, "on") == 0 ||
+                               _stricmp(uber, "yes") == 0);
     CreateUniforms();
     ResolveShaderTarget();
 }
@@ -87,8 +87,8 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
         for (CKFFProgramCacheTable::Iterator it = m_ProgramCache.Begin(); it != m_ProgramCache.End(); ++it) {
-            if (*it)
-                m_Context->DeleteObject(*it, CKRST_OBJ_PROGRAM);
+            if ((*it).Program)
+                m_Context->DeleteObject((*it).Program, CKRST_OBJ_PROGRAM);
         }
         m_ProgramCache.Clear();
     }
@@ -100,6 +100,18 @@ void CKFFShaderCache::CreateUniforms() {
     if (!m_Context) return;
 
     CKUniformDesc desc;
+
+    desc.Type = CKRST_UNIFORM_MATRIX4;
+    desc.Name = (char *)"u_ffMatrices";
+    desc.Count = 4;
+    m_Uniforms.u_ffMatrices = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ffMatrices, &desc);
+
+    desc.Type = CKRST_UNIFORM_FLOAT4;
+    desc.Name = (char *)"u_ffDrawParams";
+    desc.Count = 19;
+    m_Uniforms.u_ffDrawParams = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ffDrawParams, &desc);
 
     desc.Type = CKRST_UNIFORM_MATRIX4;
     desc.Name = (char *)"u_ckModelViewProj";
@@ -128,6 +140,16 @@ void CKFFShaderCache::CreateUniforms() {
     m_Context->CreateUniform(m_Uniforms.u_texMatrix, &desc);
 
     desc.Type = CKRST_UNIFORM_FLOAT4;
+    desc.Name = (char *)"u_ffVertexParams";
+    desc.Count = 8;
+    m_Uniforms.u_ffVertexParams = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ffVertexParams, &desc);
+
+    desc.Name = (char *)"u_ffFragmentParams";
+    desc.Count = 4;
+    m_Uniforms.u_ffFragmentParams = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_ffFragmentParams, &desc);
+
     desc.Name = (char *)"u_lights";
     desc.Count = CKFF_MAX_LIGHTS * 7;
     m_Uniforms.u_lights = AllocUniformHandle();
@@ -237,42 +259,53 @@ void CKFFShaderCache::ResolveShaderTarget() {
                set->Name, m_UseUberShader ? "uber" : "full-specialized");
 }
 
-CKDWORD CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
+CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
     if (!m_UseUberShader)
         return CreateFullSpecializedProgram(key);
     return CreateUberSpecializedProgram(key);
 }
 
-CKDWORD CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
+CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
     CKFFSpecializedModule module;
     if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
-        return CreateProgramFromBinary(
+        CKDWORD program = CreateProgramFromBinary(
             m_Target,
             module.VSData, module.VSSize,
             module.FSData, module.FSSize,
             module.Specialization);
+        return CKFFProgramBinding(program, program != 0, module.Specialization);
     }
 
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     CK_LOG_FMT("ShaderCache",
-               "Full FFP specialized module cache miss: backend=%s positionT=%u vsBits=%llu lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword4=%u specDword5=%u specDword6=%u",
+               "Full FFP specialized module cache miss: backend=%s positionT=%u vsBits=%llu vsTexcoordDeclMask=%u vsTexGen0=%u vsTexGen1=%u vsTexGen2=%u vsTexGen3=%u vsTexGen4=%u vsTexGen5=%u vsTexGen6=%u vsTexGen7=%u vsTexCoordIndex0=%u vsTexCoordIndex1=%u vsTexCoordIndex2=%u vsTexCoordIndex3=%u vsTexCoordIndex4=%u vsTexCoordIndex5=%u vsTexCoordIndex6=%u vsTexCoordIndex7=%u vsTexTransformFlags0=%u vsTexTransformFlags1=%u vsTexTransformFlags2=%u vsTexTransformFlags3=%u vsTexTransformFlags4=%u vsTexTransformFlags5=%u vsTexTransformFlags6=%u vsTexTransformFlags7=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
                m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
                key.VS.GetHasPositionT() ? 1u : 0u,
                (unsigned long long)key.VS.Bits,
+               key.VS.VertexTexcoordDeclMask,
+               key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
+               key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7],
+               key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
+               key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7],
+               key.VS.TexTransformFlags[0], key.VS.TexTransformFlags[1], key.VS.TexTransformFlags[2], key.VS.TexTransformFlags[3],
+               key.VS.TexTransformFlags[4], key.VS.TexTransformFlags[5], key.VS.TexTransformFlags[6], key.VS.TexTransformFlags[7],
                key.FS.LastActiveTextureStage,
                key.FS.GlobalSpecularEnable ? 1u : 0u,
                key.FS.AlphaTestEnable ? 1u : 0u,
                key.FS.AlphaFunc,
                key.FS.FogEnable ? 1u : 0u,
                specInfo.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK),
-               specInfo.Data()[4], specInfo.Data()[5], specInfo.Data()[6]);
-    return 0;
+               specInfo.Data()[0], specInfo.Data()[1], specInfo.Data()[2],
+               specInfo.Data()[3], specInfo.Data()[4], specInfo.Data()[5],
+               specInfo.Data()[6], specInfo.Data()[7], specInfo.Data()[8],
+               specInfo.Data()[9]);
+    return CreateUberSpecializedProgram(key);
 }
 
-CKDWORD CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) {
+CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) {
     const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
     if (!set)
-        return 0;
+        return CKFFProgramBinding();
 
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const unsigned char *vsData = key.VS.GetHasPositionT() ? set->VSPositionT : set->VS3D;
@@ -286,7 +319,7 @@ CKDWORD CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) 
                key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
                key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
                key.FS.FogEnable ? 1u : 0u);
-    return program;
+    return CKFFProgramBinding(program, false, specInfo);
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
@@ -343,14 +376,14 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     return hProgram;
 }
 
-CKDWORD CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    CKDWORD program = 0;
-    if (m_ProgramCache.LookUp(key, program))
-        return program;
+CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
+    CKFFProgramBinding binding;
+    if (m_ProgramCache.LookUp(key, binding))
+        return binding;
 
-    program = CreateVariantProgram(key);
-    if (program) {
-        m_ProgramCache.Insert(key, program);
+    binding = CreateVariantProgram(key);
+    if (binding.Program) {
+        m_ProgramCache.Insert(key, binding);
     }
-    return program;
+    return binding;
 }

@@ -14,6 +14,18 @@ enum CKFFShaderMode {
     CKFF_SHADER_MODE_FULL_SPECIALIZED = 1
 };
 
+struct CKFFProgramBinding {
+    CKDWORD Program;
+    bool FullSpecialized;
+    CKFFSpecializationInfo Specialization;
+
+    CKFFProgramBinding() : Program(0), FullSpecialized(false), Specialization() {}
+    CKFFProgramBinding(CKDWORD program, bool fullSpecialized, const CKFFSpecializationInfo &specialization)
+        : Program(program), FullSpecialized(fullSpecialized), Specialization(specialization) {}
+
+    operator CKDWORD() const { return Program; }
+};
+
 struct CKFFShaderKeyXHash {
     int operator()(const CKFFShaderKey &key) const {
         CKFFShaderKeyHash hash;
@@ -21,7 +33,7 @@ struct CKFFShaderKeyXHash {
     }
 };
 
-typedef XHashTable<CKDWORD, CKFFShaderKey, CKFFShaderKeyXHash> CKFFProgramCacheTable;
+typedef XHashTable<CKFFProgramBinding, CKFFShaderKey, CKFFShaderKeyXHash> CKFFProgramCacheTable;
 
 class CKFFShaderCache {
 public:
@@ -33,7 +45,7 @@ public:
 
     // Select the fixed-function program for the given FFP shader key.
     // Returns the program handle (0 if unavailable).
-    CKDWORD GetProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding GetProgram(const CKFFShaderKey &key);
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
@@ -57,9 +69,9 @@ private:
 
     void CreateUniforms();
     void ResolveShaderTarget();
-    CKDWORD CreateVariantProgram(const CKFFShaderKey &key);
-    CKDWORD CreateUberSpecializedProgram(const CKFFShaderKey &key);
-    CKDWORD CreateFullSpecializedProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding CreateVariantProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding CreateUberSpecializedProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding CreateFullSpecializedProgram(const CKFFShaderKey &key);
     CKDWORD CreateProgramFromBinary(
         const CKShaderTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,

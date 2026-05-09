@@ -445,8 +445,8 @@ void Test_UserClipPlane_IsConsumedByFFPShaderPath() {
               uniformState.find("outClip.Planes[clipCount][0]") != std::string::npos &&
               uniformState.find("outClip.Params[0] = (float)clipCount") != std::string::npos,
               "FFP clip plane upload must compact the enabled render-state mask into packed uniforms");
-    TestCheck(ffp.find("encoder->SetUniform(u.u_clipPlanes") != std::string::npos &&
-              ffp.find("encoder->SetUniform(u.u_clipParams") != std::string::npos,
+    TestCheck(ffp.find("UploadUniform(encoder, u.u_clipPlanes") != std::string::npos &&
+              ffp.find("UploadUniform(encoder, u.u_clipParams") != std::string::npos,
               "FFP uniform upload must bind clip plane uniforms");
 
     std::string fs = ReadRenderEngineSource("src/shaders/fs_ff_stage.sc");
@@ -531,9 +531,11 @@ void Test_2dEntity_DrawUsesFFPStateGuard() {
     const std::string body = source.substr(drawPos, nextPos - drawPos);
     TestCheck(body.find("CKFFStateGuard ffpState(dev->m_FFPipeline)") != std::string::npos,
               "2D entity Draw must guard its temporary FFP render and texture state");
-    TestCheck(body.find("SkipFullscreenBlack2DEnabled()") != std::string::npos &&
-              body.find("dev->SetViewRect(savedViewRect)") != std::string::npos,
-              "2D entity debug skip must restore the viewport before returning");
+    TestCheck(body.find("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D") == std::string::npos &&
+              body.find("SkipFullscreenBlack2DEnabled") == std::string::npos,
+              "2D entity Draw must not keep behavior-changing fullscreen black skip debug path");
+    TestCheck(body.find("dev->SetViewRect(savedViewRect)") != std::string::npos,
+              "2D entity Draw must restore the viewport after rendering");
 }
 
 void Test_RenderTarget_ValidatesCubeFacesAndPreservesDepth() {
@@ -992,27 +994,89 @@ void DrawDiagnosticPositionTTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnostic
     ffp.DrawPrimitive(&ctx.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST, nullptr, 0, &data);
 }
 
+void DrawDiagnostic3DTexturedTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnosticContext &ctx) {
+    float positions[3][3] = {
+        {0.0f, 0.0f, 0.5f},
+        {1.0f, 0.0f, 0.5f},
+        {0.0f, 1.0f, 0.5f},
+    };
+    float uv[3][2] = {
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {0.0f, 1.0f},
+    };
+    CKDWORD diffuse[3] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.VertexCount = 3;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(positions[0]);
+    data.TexCoordPtr = uv;
+    data.TexCoordStride = sizeof(uv[0]);
+    data.ColorPtr = diffuse;
+    data.ColorStride = sizeof(diffuse[0]);
+
+    ffp.DrawPrimitive(&ctx.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST, nullptr, 0, &data);
+}
+
+void DrawDiagnostic3DTexturedNormalTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnosticContext &ctx) {
+    float positions[3][3] = {
+        {0.0f, 0.0f, 0.5f},
+        {1.0f, 0.0f, 0.5f},
+        {0.0f, 1.0f, 0.5f},
+    };
+    float normals[3][3] = {
+        {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f},
+    };
+    float uv[3][2] = {
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {0.0f, 1.0f},
+    };
+    CKDWORD diffuse[3] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.Flags = CKRST_DP_TR_CL_VNT;
+    data.VertexCount = 3;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(positions[0]);
+    data.NormalPtr = normals;
+    data.NormalStride = sizeof(normals[0]);
+    data.TexCoordPtr = uv;
+    data.TexCoordStride = sizeof(uv[0]);
+    data.ColorPtr = diffuse;
+    data.ColorStride = sizeof(diffuse[0]);
+
+    ffp.DrawPrimitive(&ctx.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST, nullptr, 0, &data);
+}
+
 void Test_FFPDiagnosticHarness_SpecularStateFollowsDrawOrder() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(&ctx);
-    const CKDWORD alphaUniform = ffp.GetShaderCache().GetUniforms().u_alphaParams;
+    const CKDWORD drawUniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
 
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
     DrawDiagnosticPositionTTriangle(ffp, ctx);
     TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
               "FFP diagnostic draw must submit through the runtime pipeline");
-    TestCheck(ctx.Encoder.FloatUniforms[alphaUniform].size() >= 4 &&
-              ctx.Encoder.FloatUniforms[alphaUniform][2] == 0.0f,
+    TestCheck(ctx.Encoder.FloatUniforms[drawUniform].size() >= 36 &&
+              ctx.Encoder.FloatUniforms[drawUniform][34] == 0.0f,
               "A draw with specular disabled must upload a disabled specular flag");
 
     ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     DrawDiagnosticPositionTTriangle(ffp, ctx);
     TestCheck(ctx.Encoder.SubmitCount == 2,
               "FFP diagnostic harness must record consecutive runtime draws");
-    TestCheck(ctx.Encoder.FloatUniforms[alphaUniform].size() >= 4 &&
-              ctx.Encoder.FloatUniforms[alphaUniform][2] == 1.0f,
+    TestCheck(ctx.Encoder.FloatUniforms[drawUniform].size() >= 36 &&
+              ctx.Encoder.FloatUniforms[drawUniform][34] == 1.0f,
               "A later draw must observe restored specular state instead of leaking the previous draw");
 }
 
@@ -1053,7 +1117,284 @@ void Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState() {
               "Runtime FFP draw state must submit the ONE/SRCCOLOR compatibility fixup");
 }
 
+void Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.TextureBindCount == 0,
+              "FFP draws without bound textures must not submit eight default-white texture bindings");
+
+    ffp.SetTexture(0, 1234);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+    TestCheck(ctx.Encoder.TextureBindCount == 1,
+              "FFP draws with one bound texture must submit exactly one texture binding");
+}
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char *name, const char *value) : m_Name(name) {
+        const char *existing = std::getenv(name);
+        if (existing) {
+            m_HadValue = true;
+            m_Previous = existing;
+        }
+        Set(value);
+    }
+
+    ~ScopedEnvVar() {
+        Set(m_HadValue ? m_Previous.c_str() : nullptr);
+    }
+
+private:
+    static void Set(const char *name, const char *value) {
+#if defined(_WIN32)
+        _putenv_s(name, value ? value : "");
+#else
+        if (value)
+            setenv(name, value, 1);
+        else
+            unsetenv(name);
+#endif
+    }
+
+    void Set(const char *value) {
+        Set(m_Name.c_str(), value);
+    }
+
+    std::string m_Name;
+    std::string m_Previous;
+    bool m_HadValue = false;
+};
+
+void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.SoftwareDraws == 1,
+              "FFP frame stats must count software DrawPrimitive submissions");
+    TestCheck(stats.HardwareDraws == 0,
+              "FFP frame stats must not count transient draws as hardware draws");
+    TestCheck(stats.SubmittedDraws == 1,
+              "FFP frame stats must count submitted draws");
+    TestCheck(stats.TransientVertexBytes == 96,
+              "FFP frame stats must capture transient vertex bytes for a PositionT triangle");
+    TestCheck(stats.TransientIndexBytes == 0,
+              "FFP frame stats must capture absent transient index buffers");
+    TestCheck(stats.UniformSets > 0 && stats.UniformVec4s <= 45,
+              "FFP frame stats must count the reduced per-draw uniform uploads");
+    TestCheck(stats.TextureBinds == 0,
+              "FFP frame stats must count only actual texture bindings");
+}
+
+void DrawDiagnosticFullSpecializedTexturedTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnosticContext &ctx) {
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    DrawDiagnosticFullSpecializedTexturedTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Full-specialized diagnostic draw must submit a real program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_stageParams) == ctx.Encoder.FloatUniforms.end(),
+              "Offline full-specialized draws must not upload the runtime stage parameter mirror");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_ffSpec) == ctx.Encoder.FloatUniforms.end(),
+              "Offline full-specialized draws must not upload the specialization dword mirror");
+    TestCheck(ffp.GetFrameStats().UniformVec4s <= 45,
+              "Offline full-specialized draws must materially reduce per-draw uniform vec4 uploads");
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+
+    DrawDiagnostic3DTexturedNormalTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Full-specialized unlit 3D diagnostic draw must submit a real program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_lightParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_lightModelParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_lights) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized unlit 3D draws must not upload lighting uniforms");
+}
+
+static CKLightData MakeDiagnosticDirectionalLight(float r, float g, float b) {
+    CKLightData light;
+    memset(&light, 0, sizeof(light));
+    light.Type = VX_LIGHTDIREC;
+    light.Diffuse = VxColor(r, g, b, 1.0f);
+    light.Specular = VxColor(0.0f, 0.0f, 0.0f, 1.0f);
+    light.Ambient = VxColor(0.0f, 0.0f, 0.0f, 1.0f);
+    light.Direction = VxVector(0.0f, 0.0f, -1.0f);
+    light.Range = 1000.0f;
+    light.Attenuation0 = 1.0f;
+    light.OuterSpotCone = 1.0f;
+    light.InnerSpotCone = 1.0f;
+    return light;
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    CKLightData light = MakeDiagnosticDirectionalLight(1.0f, 1.0f, 1.0f);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    ffp.SetLight(0, &light);
+    ffp.EnableLight(0, TRUE);
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+
+    DrawDiagnostic3DTexturedTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Full-specialized single-light draw must submit a real program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_lights) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized single-light draw must inline the light payload into packed draw params");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_ffDrawParams) != ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.UniformCounts[u.u_ffDrawParams] >= 8,
+              "Full-specialized single-light draw must keep lighting header data in packed draw params");
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUniforms() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+
+    DrawDiagnostic3DTexturedTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Full-specialized unlit 3D vertex-color diagnostic draw must submit a real program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_stageParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_ffSpec) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized unlit 3D vertex-color draw must hit the offline specialized program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_material) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_ffParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_ffVertexParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_ffDrawParams) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized unlit 3D vertex-color draws must not upload material-source uniforms");
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+
+    DrawDiagnostic3DTexturedTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Full-specialized unlit 3D no-texgen diagnostic draw must submit a real program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_ffMatrices) != ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.UniformCounts[u.u_ffMatrices] == 2,
+              "Full-specialized unlit 3D draws without fog or texgen must pack only MVP and model matrices");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_ckModelView) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_ckNormalMatrix) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized unlit 3D draws without fog or texgen must not upload view-space uniforms");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_clipParams) == ctx.Encoder.FloatUniforms.end() &&
+              ctx.Encoder.FloatUniforms.find(u.u_clipPlanes) == ctx.Encoder.FloatUniforms.end(),
+              "Full-specialized no-clip draws must not upload clip uniforms");
+}
+
+void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
+    ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_TFACTOR);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT4 | CKRST_TTF_PROJECTED);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_NOTEQUAL);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_EXP2);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_EXP);
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    TestCheck(ctx.Encoder.SubmitCount == 1 && ctx.Encoder.LastProgram != 0,
+              "Uncatalogued full-specialized diagnostic draw must fall back to an uber program");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_stageParams) != ctx.Encoder.FloatUniforms.end(),
+              "Uber fallback draws must still upload runtime stage parameters");
+    TestCheck(ctx.Encoder.FloatUniforms.find(u.u_ffSpec) != ctx.Encoder.FloatUniforms.end(),
+              "Uber fallback draws must still upload specialization dword mirrors");
+}
+
 void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
+    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1084,6 +1425,7 @@ void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
+    ScopedEnvVar forceUber("CK2_FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1093,20 +1435,24 @@ void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
     VxMatrix textureMatrix = VxMatrix::Identity();
     textureMatrix[0][0] = 2.0f;
     textureMatrix[3][0] = 0.125f;
+    ffp.SetTexture(0, 1234);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
     ffp.SetTransform(VXMATRIX_TEXTURE0, textureMatrix);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
     DrawDiagnosticPositionTTriangle(ffp, ctx);
 
-    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform].size() >= 16,
+    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform].size() >= 4,
               "FFP diagnostic harness must capture uploaded texture matrix uniforms");
-    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform][0] == 2.0f &&
-              ctx.Encoder.FloatUniforms[texMatrixUniform][12] == 0.125f,
+    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform][0] == 2.0f,
               "Runtime texture matrix uniform must expose the temporary texture transform");
 
     ffp.ResetTextureStage(0);
+    ctx.Encoder.FloatUniforms.erase(texMatrixUniform);
     DrawDiagnosticPositionTTriangle(ffp, ctx);
-    TestCheck(ctx.Encoder.FloatUniforms[texMatrixUniform][0] == 1.0f &&
-              ctx.Encoder.FloatUniforms[texMatrixUniform][12] == 0.0f,
-              "Runtime texture matrix uniform must restore identity after stage reset");
+    TestCheck(ctx.Encoder.FloatUniforms.find(texMatrixUniform) == ctx.Encoder.FloatUniforms.end(),
+              "Runtime texture matrix uniform must stop uploading once reset clears transform flags");
 }
 
 void Test_FFPStateGuard_RestoresRenderAndTextureState() {
@@ -1508,10 +1854,11 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
     std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
-    TestCheck(cacheHeader.find("CKDWORD GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
-              cacheHeader.find("XHashTable<CKDWORD, CKFFShaderKey") != std::string::npos &&
+    TestCheck(cacheHeader.find("struct CKFFProgramBinding") != std::string::npos &&
+              cacheHeader.find("CKFFProgramBinding GetProgram(const CKFFShaderKey &key)") != std::string::npos &&
+              cacheHeader.find("XHashTable<CKFFProgramBinding, CKFFShaderKey") != std::string::npos &&
               cacheHeader.find("std::unordered_map") == std::string::npos,
-              "FFP shader cache must be keyed by explicit specialized FFP shader keys using VxMath hash table containers");
+              "FFP shader cache must return program binding metadata from explicit specialized FFP shader keys using VxMath hash table containers");
     TestCheck(cacheHeader.find("CKFF_SHADER_MODE_UBER_SPECIALIZED") != std::string::npos &&
               cacheHeader.find("CKFF_SHADER_MODE_FULL_SPECIALIZED") != std::string::npos,
               "FFP shader cache must expose distinct specialized uber and full specialized modes");
@@ -1520,7 +1867,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
               "Clean-break FFP shader cache must not keep the old fixed-program selection API");
     TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
-              cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
+              cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos &&
+              cacheSource.find("CKFFProgramBinding(program, program != 0, module.Specialization)") != std::string::npos &&
+              cacheSource.find("CKFFProgramBinding(program, false, specInfo)") != std::string::npos,
               "FFP shader cache must expose the specialized ubershader/specialization mode switch");
     TestCheck(cacheHeader.find("m_VariantStats") == std::string::npos &&
               cacheHeader.find("RecordVariantKey") == std::string::npos &&
@@ -1600,9 +1949,9 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               variantManifest.find("\"vsBits\": 68719476737") != std::string::npos &&
               variantManifest.find("\"vsTexcoordDeclMask\": 4793491") != std::string::npos &&
               variantManifest.find("\"vsTexcoordDeclMask\": 4793492") != std::string::npos &&
-              variantManifest.find("\"vsTexTransformFlags\": [2, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
-              variantManifest.find("\"vsTexTransformFlags\": [260, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
-              variantManifest.find("\"vsTexTransformFlags\": [259, 0, 0, 0, 0, 0, 0, 0]") != std::string::npos &&
+              variantManifest.find("\"vsTexTransformFlags\"") != std::string::npos &&
+              variantManifest.find("260") != std::string::npos &&
+              variantManifest.find("259") != std::string::npos &&
               variantManifest.find("\"lastActiveTextureStage\": 1") != std::string::npos &&
               variantManifest.find("\"globalSpecularEnable\": true") != std::string::npos &&
               variantManifest.find("\"alphaTestEnable\": true") != std::string::npos &&
@@ -1628,42 +1977,6 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               cacheSource.find("CKRE_FFP_VARIANTS") == std::string::npos,
               "FFP variants are the only supported pipeline and must not expose an impossible disable option");
 }
-
-class ScopedEnvVar {
-public:
-    ScopedEnvVar(const char *name, const char *value) : m_Name(name) {
-        const char *existing = std::getenv(name);
-        if (existing) {
-            m_HadValue = true;
-            m_Previous = existing;
-        }
-        Set(value);
-    }
-
-    ~ScopedEnvVar() {
-        Set(m_HadValue ? m_Previous.c_str() : nullptr);
-    }
-
-private:
-    static void Set(const char *name, const char *value) {
-#if defined(_WIN32)
-        _putenv_s(name, value ? value : "");
-#else
-        if (value)
-            setenv(name, value, 1);
-        else
-            unsetenv(name);
-#endif
-    }
-
-    void Set(const char *value) {
-        Set(m_Name.c_str(), value);
-    }
-
-    std::string m_Name;
-    std::string m_Previous;
-    bool m_HadValue = false;
-};
 
 void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
@@ -1752,7 +2065,7 @@ CKFFShaderKey MakeUncataloguedFFPUberKey() {
     return key;
 }
 
-void Test_FFPShaderCache_DefaultUberModeCreatesAndCachesProgram() {
+void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgram() {
     ScopedEnvVar unsetUber("CK2_FFP_UBERSHADER", nullptr);
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
@@ -1764,20 +2077,20 @@ void Test_FFPShaderCache_DefaultUberModeCreatesAndCachesProgram() {
     CKDWORD firstProgram = cache.GetProgram(key);
     CKDWORD secondProgram = cache.GetProgram(key);
 
-    TestCheck(cache.UsesUberShader() &&
-              cache.GetShaderMode() == CKFF_SHADER_MODE_UBER_SPECIALIZED,
-              "Unset CK2_FFP_UBERSHADER must select the uber shader specialization path");
+    TestCheck(!cache.UsesUberShader() &&
+              cache.GetShaderMode() == CKFF_SHADER_MODE_FULL_SPECIALIZED,
+              "Unset CK2_FFP_UBERSHADER must select the full-specialized shader path");
     TestCheck(firstProgram != 0 &&
               secondProgram == firstProgram &&
               cache.CachedProgramCount() == 1 &&
               ctx.CreatedShaderCount == 2 &&
               ctx.CreatedProgramCount == 1,
-              "Default uber shader path must create and cache a program even for keys outside the offline catalog");
+              "Default full-specialized shader path must fall back and cache keys outside the offline catalog");
     TestCheck(ctx.LastProgramSpecializationDwords.size() == CKFFSpecializationInfo::MaxSpecDwords,
-              "Default uber shader path must pass the FFP specialization payload to the rasterizer program descriptor");
+              "Default full-specialized fallback must pass the FFP specialization payload to the rasterizer program descriptor");
     for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
         TestCheck(ctx.LastProgramSpecializationDwords[i] == expectedSpec.Data()[i],
-                  "Default uber shader path specialization payload must match the key-derived FFP dwords");
+                  "Default full-specialized fallback specialization payload must match the key-derived FFP dwords");
     }
 
     cache.Shutdown();
@@ -1804,13 +2117,13 @@ void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
 void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
     std::string cacheSource = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
 
-    const size_t uberFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateUberSpecializedProgram");
+    const size_t uberFn = cacheSource.find("CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram");
     const size_t programFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateProgramFromBinary");
     const std::string uberBody = (uberFn != std::string::npos && programFn != std::string::npos && uberFn < programFn)
         ? cacheSource.substr(uberFn, programFn - uberFn)
         : std::string();
 
-    const size_t fullFn = cacheSource.find("CKDWORD CKFFShaderCache::CreateFullSpecializedProgram");
+    const size_t fullFn = cacheSource.find("CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram");
     const std::string fullBody = (fullFn != std::string::npos && uberFn != std::string::npos && fullFn < uberFn)
         ? cacheSource.substr(fullFn, uberFn - fullFn)
         : std::string();
@@ -1824,8 +2137,8 @@ void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
               uberBody.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos,
               "Uber shader path must use the generic uber shader blobs and key-derived specialization payload, not the offline catalog");
     TestCheck(fullBody.find("CKFFFindSpecializedModule") != std::string::npos &&
-              fullBody.find("CreateUberSpecializedProgram") == std::string::npos,
-              "Full-specialized path is the only path that may query the offline catalog and it must not fallback to uber on miss");
+              fullBody.find("CreateUberSpecializedProgram") != std::string::npos,
+              "Full-specialized path must query the offline catalog first and fall back to uber when the runtime key is not cataloged");
 }
 
 void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
@@ -2179,7 +2492,7 @@ void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
     cache.Shutdown();
 }
 
-void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
+void Test_FFPShaderCache_FullSpecializedVariantMissFallsBackToUber() {
     ScopedEnvVar forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
@@ -2200,15 +2513,21 @@ void Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback() {
     key.FS = CKFFBuildShaderKeyFS(fs, 1u);
 
     CKDWORD program = cache.GetProgram(key);
-    TestCheck(program == 0 &&
-              cache.CachedProgramCount() == 0 &&
-              ctx.CreatedShaderCount == 0 &&
-              ctx.CreatedProgramCount == 0,
-              "Full-specialized cache miss must fail explicitly without falling back to the uber shader or caching a null variant");
+    CKDWORD cachedProgram = cache.GetProgram(key);
+    TestCheck(program != 0 &&
+              cachedProgram == program &&
+              cache.CachedProgramCount() == 1 &&
+              ctx.CreatedShaderCount == 2 &&
+              ctx.CreatedProgramCount == 1,
+              "Full-specialized cache miss must fall back to the uber shader and cache the program instead of dropping the draw");
     TestCheck(ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("projectedMask=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("vsTexcoordDeclMask=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("vsTexGen0=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("vsTexCoordIndex0=%u") != std::string::npos &&
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("vsTexTransformFlags0=%u") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("alphaTest=%u alphaFunc=%u") != std::string::npos &&
               ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("fog=%u") != std::string::npos &&
-              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("specDword4=%u specDword5=%u specDword6=%u") != std::string::npos,
+              ReadRenderEngineSource("src/CKFFShaderCache.cpp").find("specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u") != std::string::npos,
               "Full-specialized cache miss diagnostics must include compact key and specialization fields for manifest growth");
 
     cache.Shutdown();
@@ -2257,7 +2576,7 @@ void Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL() {
 
     std::string cacheHeader = ReadRenderEngineSource("src/CKFFShaderCache.h");
     std::string layoutHeader = ReadRenderEngineSource("src/CKVertexLayoutCache.h");
-    TestCheck(cacheHeader.find("XHashTable<CKDWORD, CKFFShaderKey") != std::string::npos &&
+    TestCheck(cacheHeader.find("XHashTable<CKFFProgramBinding, CKFFShaderKey") != std::string::npos &&
               layoutHeader.find("XHashTable<CKDWORD, CKDWORD>") != std::string::npos,
               "RenderEngine cache internals must use VxMath hash tables, not downgrade cache semantics to linear arrays");
 }
@@ -2295,6 +2614,7 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
     std::string constants = ReadRenderEngineSource("src/CKFFConstants.h");
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string uniformState = ReadRenderEngineSource("src/CKFFUniformState.cpp");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
 
     TestCheck(shader.find("#include \"fs_ff_common.sc\"") != std::string::npos &&
               common.find("CKFFStageParams") != std::string::npos &&
@@ -2328,13 +2648,28 @@ void Test_FFPFragmentShader_UsesFFPVariantCommonStageReader() {
               shader.find("ckffSpecPixelFogMode()") != std::string::npos &&
               shader.find("computePixelFogFactor") != std::string::npos,
               "Fragment shader main loop must consume decoded FFP stage params and variant spec global controls");
+    TestCheck(shader.find("CKFF_FS_ACTIVE_STAGE_COUNT") != std::string::npos &&
+              shader.find("stage < CKFF_FS_ACTIVE_STAGE_COUNT") != std::string::npos &&
+              shader.find("#if !defined(CKFF_FULL_SPECIALIZED)") != std::string::npos,
+              "Full-specialized fragment shader must compile the stage interpreter to the active stage count");
+    TestCheck(shader.find("vec4 colorParams = vec4_splat(0.0)") != std::string::npos &&
+              common.find("ckffSpecStageHasTexture") != std::string::npos &&
+              common.find("CKFF_FS_STAGE0_HAS_TEXTURE") != std::string::npos &&
+              common.find("#if defined(CKFF_FULL_SPECIALIZED)") != std::string::npos &&
+              compiler.find("CKFF_FS_STAGE{index}_HAS_TEXTURE") != std::string::npos &&
+              compiler.find("CKFF_FS_USES_BUMP_ENV") != std::string::npos &&
+              compiler.find("CKFF_FS_USES_TEXFACTOR") != std::string::npos &&
+              compiler.find("CKFF_FS_USES_CLIP_PLANES") != std::string::npos,
+              "Full-specialized fragment shader must compile stage texture/static dependency fields instead of reading runtime stage mirrors");
     TestCheck(cmake.find("fs_ff_common.sc") != std::string::npos,
               "Shader common helper must participate in the shader generation target dependencies");
     TestCheck(constants.find("u_ffSpec") != std::string::npos &&
-              pipeline.find("m_CurrentSpecializationInfo = CKFFBuildSpecializationInfo(shaderKey.FS)") != std::string::npos &&
+              pipeline.find("m_CurrentProgramBinding.Specialization") != std::string::npos &&
               uniformState.find("specDwords[i] >> 24") != std::string::npos &&
-              pipeline.find("encoder->SetUniform(u.u_ffSpec") != std::string::npos,
-              "FFP uniform table must bind the current draw's variant specialization mirror as byte-exact float lanes");
+              pipeline.find("const bool fullSpecialized = m_CurrentProgramBinding.FullSpecialized") != std::string::npos &&
+              pipeline.find("if (!fullSpecialized)") != std::string::npos &&
+              pipeline.find("UploadUniform(encoder, u.u_ffSpec") != std::string::npos,
+              "FFP uniform table must bind specialization mirrors only for uber fallback draws");
 }
 
 void Test_FFPVertexShader_UsesSpecializedTexGenKey() {
@@ -2386,6 +2721,24 @@ void Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey() {
               "FFP VS shader key must include texture transform flags and texcoord declaration mask");
 }
 
+void Test_FFPVertexShader_FullSpecializedAvoidsUnusedTexcoordGeneration() {
+    std::string vs3d = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
+    std::string vsPositionT = ReadRenderEngineSource("src/shaders/vs_ff_positiont.sc");
+    std::string compiler = ReadRenderEngineSource("src/shaders/compile_shaders.py");
+
+    TestCheck(compiler.find("CKFF_VS_ACTIVE_TEXCOORD_COUNT") != std::string::npos &&
+              compiler.find("lastActiveTextureStage") != std::string::npos,
+              "Shader compiler must pass active texture coordinate count into specialized VS compilation");
+    TestCheck(vs3d.find("#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1") != std::string::npos &&
+              vs3d.find("#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7") != std::string::npos &&
+              vs3d.find("v_texcoord7Fog.z = computeFog") != std::string::npos,
+              "Full-specialized 3D VS must compile out unused texcoord generation while preserving fog output");
+    TestCheck(vsPositionT.find("#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1") != std::string::npos &&
+              vsPositionT.find("#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7") != std::string::npos &&
+              vsPositionT.find("v_texcoord7Fog.z = fogFactor") != std::string::npos,
+              "Full-specialized PositionT VS must compile out unused texcoord transforms while preserving fog output");
+}
+
 void Test_FFPVertexShader_UsesSpecializedLightingKey() {
     std::string shader = ReadRenderEngineSource("src/shaders/vs_ff_3d.sc");
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
@@ -2430,7 +2783,7 @@ void Test_FFPVertexShader_UsesSpecializedMaterialSourceKey() {
               shader.find("CKFF_VS_SPECULAR_SOURCE") != std::string::npos &&
               shader.find("CKFF_VS_EMISSIVE_SOURCE") != std::string::npos &&
               shader.find("ckffVsMaterialSource") != std::string::npos &&
-              shader.find("selectMaterialSource(0, u_ffParams.x") != std::string::npos,
+              shader.find("selectMaterialSource(0, u_ffDrawParams[5].x") != std::string::npos,
               "3D vertex shader must consume specialized VS material source fields");
     TestCheck(compiler.find("CKFF_VS_DIFFUSE_SOURCE") != std::string::npos &&
               compiler.find("(vs_bits >> 25) & 3") != std::string::npos &&
@@ -2450,7 +2803,7 @@ void Test_FFPVertexShader_UsesSpecializedFogModeKey() {
               "3D vertex shader must consume specialized VS fog mode instead of relying only on runtime fog params");
     TestCheck(shaderPositionT.find("CKFF_VS_FOG_MODE") != std::string::npos &&
               shaderPositionT.find("ckffVsFogEnabled") != std::string::npos &&
-              shaderPositionT.find("ckffVsFogEnabled(u_fogParams.w)") != std::string::npos,
+              shaderPositionT.find("ckffVsFogEnabled(u_ffDrawParams[10].w)") != std::string::npos,
               "PositionT vertex shader must specialize fog enable so transformed color1 fog participates in variant lookup");
     TestCheck(compiler.find("CKFF_VS_FOG_MODE") != std::string::npos &&
               compiler.find("(vs_bits >> 21) & 3") != std::string::npos,
@@ -2986,7 +3339,13 @@ void Test_FFPDebugLogging_IsCentralized() {
         "CK2_3D_DEBUG_REAL3D_LOG_LIMIT",
         "CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT",
         "CK2_3D_DEBUG_POSITIONT_LOG_LIMIT",
-        "CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME",
+        "CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME"
+    };
+    for (const char *envName : envNames) {
+        TestCheck(source.find(envName) != std::string::npos,
+                  "CKFFDebug.cpp must keep the existing FFP debug env interface names");
+    }
+    const char *removedEnvNames[] = {
         "CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS",
         "CK2_3D_DEBUG_SKIP_3D_DRAWS",
         "CK2_3D_DEBUG_FORCE_UNLIT",
@@ -3000,9 +3359,9 @@ void Test_FFPDebugLogging_IsCentralized() {
         "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_START",
         "CK2_3D_DEBUG_ONLY_TRANSPARENT3D_DRAW_END"
     };
-    for (const char *envName : envNames) {
-        TestCheck(source.find(envName) != std::string::npos,
-                  "CKFFDebug.cpp must keep the existing FFP debug env interface names");
+    for (const char *envName : removedEnvNames) {
+        TestCheck(source.find(envName) == std::string::npos,
+                  "CKFFDebug.cpp must not keep behavior-changing FFP draw skip/force env paths");
     }
 
     TestCheck(cmake.find("CKFFDebug.h") != std::string::npos &&
@@ -3245,6 +3604,13 @@ int main() {
     tests.Run("FFP diagnostic specular state follows draw order", &Test_FFPDiagnosticHarness_SpecularStateFollowsDrawOrder);
     tests.Run("FFP diagnostic PositionT default COLOR1", &Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack);
     tests.Run("FFP diagnostic blend fixup reaches draw state", &Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState);
+    tests.Run("FFP diagnostic unbound texture stages are not submitted", &Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted);
+    tests.Run("FFP diagnostic frame stats capture draw costs", &Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts);
+    tests.Run("FFP diagnostic full specialized skips uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors);
+    tests.Run("FFP diagnostic full specialized unlit 3D skips light uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms);
+    tests.Run("FFP diagnostic full specialized unlit 3D skips vertex-color material uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUniforms);
+    tests.Run("FFP diagnostic full specialized unlit 3D skips view-space uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms);
+    tests.Run("FFP diagnostic full specialized miss keeps uber uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors);
     tests.Run("FFP diagnostic texture stage reset reaches uniforms", &Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms);
     tests.Run("FFP diagnostic texture matrix reset reaches uniforms", &Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms);
     tests.Run("FFP state guard restores render and texture state", &Test_FFPStateGuard_RestoresRenderAndTextureState);
@@ -3263,7 +3629,7 @@ int main() {
     tests.Run("FFP shader key fixed-function stage rules", &Test_FFPShaderKey_UsesFixedFunctionStageRules);
     tests.Run("FFP specialization info variant layout", &Test_FFPSpecializationInfo_MatchesFFPVariantLayout);
     tests.Run("FFP shader cache variant contract", &Test_FFPShaderCache_UsesKeyedFFPVariantContract);
-    tests.Run("FFP shader cache default uber mode creates and caches program", &Test_FFPShaderCache_DefaultUberModeCreatesAndCachesProgram);
+    tests.Run("FFP shader cache default full specialized falls back for uncatalogued program", &Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgram);
     tests.Run("FFP shader cache explicit uber mode creates program", &Test_FFPShaderCache_ExplicitUberModeCreatesProgram);
     tests.Run("FFP shader cache uber and catalog boundaries explicit", &Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit);
     tests.Run("FFP shader cache full specialized 3D variant hit", &Test_FFPShaderCache_FullSpecialized3DVariantHit);
@@ -3277,13 +3643,14 @@ int main() {
     tests.Run("FFP shader cache full specialized three-arg variant hit", &Test_FFPShaderCache_FullSpecializedThreeArgVariantHit);
     tests.Run("FFP shader cache full specialized lit variant hit", &Test_FFPShaderCache_FullSpecializedLitVariantHit);
     tests.Run("FFP shader cache full specialized material-source variant hit", &Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit);
-    tests.Run("FFP shader cache full specialized variant miss", &Test_FFPShaderCache_FullSpecializedVariantMissDoesNotFallback);
+    tests.Run("FFP shader cache full specialized variant miss falls back", &Test_FFPShaderCache_FullSpecializedVariantMissFallsBackToUber);
     tests.Run("FFP shader cache runtime variant key dump removed", &Test_FFPShaderCache_RuntimeVariantKeyDumpRemoved);
     tests.Run("RenderEngine FFP internals use VxMath containers", &Test_RenderEngineProductionFFPInternals_UseVxMathContainersInsteadOfSTL);
     tests.Run("Fullscreen device recreation invalidates hardware geometry caches", &Test_FullscreenDeviceRecreation_InvalidatesHardwareGeometryCaches);
     tests.Run("FFP fragment shader variant common reader", &Test_FFPFragmentShader_UsesFFPVariantCommonStageReader);
     tests.Run("FFP vertex shader specialized texgen key", &Test_FFPVertexShader_UsesSpecializedTexGenKey);
     tests.Run("FFP vertex shader specialized texture transform flags key", &Test_FFPVertexShader_UsesSpecializedTexTransformFlagsKey);
+    tests.Run("FFP vertex shader full specialized avoids unused texcoord generation", &Test_FFPVertexShader_FullSpecializedAvoidsUnusedTexcoordGeneration);
     tests.Run("FFP vertex shader specialized lighting key", &Test_FFPVertexShader_UsesSpecializedLightingKey);
     tests.Run("FFP vertex shader specialized vertex blend key", &Test_FFPVertexShader_UsesSpecializedVertexBlendKey);
     tests.Run("FFP vertex shader specialized material source key", &Test_FFPVertexShader_UsesSpecializedMaterialSourceKey);

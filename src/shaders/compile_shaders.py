@@ -117,11 +117,43 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         print(result.stdout.strip())
 
 
-def ffp_specialized_shader_defines(spec_dwords: list[int]) -> list[str]:
+def ffp_stage_arg_base(arg: int) -> int:
+    return arg & ~(0x10 | 0x20)
+
+
+def ffp_stage_uses_arg(stages: list[dict[str, object]], base_arg: int) -> bool:
+    for stage in stages:
+        for field in ("colorArg0", "colorArg1", "colorArg2", "alphaArg0", "alphaArg1", "alphaArg2"):
+            if ffp_stage_arg_base(int(stage[field])) == base_arg:
+                return True
+    return False
+
+
+def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object]) -> list[str]:
     if len(spec_dwords) != 10:
         raise ValueError("FFP specialized shader payload must contain exactly 10 dwords")
 
-    defines = ["CKFF_FULL_SPECIALIZED=1"]
+    stages = key["stages"]
+    last_active_stage = int(key["lastActiveTextureStage"])
+    active_stages = stages[:last_active_stage + 1]
+    uses_bump_env = any(int(stage["colorOp"]) in (22, 23) for stage in active_stages)
+    uses_texfactor = ffp_stage_uses_arg(active_stages, 3) or any(
+        int(stage["colorOp"]) == 14 or int(stage["alphaOp"]) == 14
+        for stage in active_stages
+    )
+    defines = [
+        "CKFF_FULL_SPECIALIZED=1",
+        f"CKFF_FS_ACTIVE_STAGE_COUNT={((spec_dwords[4] >> 16) & 7) + 1}",
+        f"CKFF_FS_USES_BUMP_ENV={1 if uses_bump_env else 0}",
+        f"CKFF_FS_USES_TEXFACTOR={1 if uses_texfactor else 0}",
+        f"CKFF_FS_USES_CLIP_PLANES={1 if key.get('clipEnable', False) else 0}",
+    ]
+    for index, stage in enumerate(stages[:4]):
+        uses_texture = index <= last_active_stage and any(
+            ffp_stage_arg_base(int(stage[field])) == 2
+            for field in ("colorArg0", "colorArg1", "colorArg2", "alphaArg0", "alphaArg1", "alphaArg2")
+        )
+        defines.append(f"CKFF_FS_STAGE{index}_HAS_TEXTURE={1 if uses_texture else 0}")
     for index, dword in enumerate(spec_dwords):
         if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
             raise ValueError(f"FFP specialization dword {index} must be a uint32")
@@ -143,6 +175,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
         f"CKFF_VS_VERTEX_BLEND_MODE={(vs_bits >> 35) & 3}",
         f"CKFF_VS_VERTEX_BLEND_INDEXED={(vs_bits >> 37) & 1}",
         f"CKFF_VS_VERTEX_BLEND_COUNT={(vs_bits >> 38) & 3}",
+        f"CKFF_VS_ACTIVE_TEXCOORD_COUNT={int(key['lastActiveTextureStage']) + 1}",
     ]
     for index, value in enumerate(key["vsTexGen"]):
         defines.append(f"CKFF_VS_TEXGEN{index}={value}")
@@ -161,8 +194,9 @@ def sanitize_identifier(value: str) -> str:
     return ident
 
 
-def specialization_identifier(spec_dwords: list[int]) -> str:
-    payload = ",".join(str(value) for value in spec_dwords).encode("ascii")
+def specialization_identifier(spec_dwords: list[int], key: dict[str, object] | None = None) -> str:
+    payload_obj = {"specDwords": spec_dwords, "clipEnable": bool(key.get("clipEnable", False)) if key else False}
+    payload = json.dumps(payload_obj, sort_keys=True, separators=(",", ":")).encode("ascii")
     return "spec_" + hashlib.sha1(payload).hexdigest()[:16]
 
 
@@ -330,6 +364,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
         "vertexFogMode": vertex_fog_mode if fog_enable else 0,
         "pixelFogMode": pixel_fog_mode if fog_enable else 0,
         "rangeFog": read_bool(key.get("rangeFog", False), f"{field}.rangeFog") if fog_enable else False,
+        "clipEnable": read_bool(key.get("clipEnable", False), f"{field}.clipEnable"),
         "stages": normalized_stages,
     }
 
@@ -363,8 +398,8 @@ def normalize_specialized_variant(variant: dict[str, object], index: int) -> dic
         "vs": vs,
         "vsIdentifier": vs_specialization_identifier(vs, key),
         "specDwords": spec_dwords,
-        "fsIdentifier": specialization_identifier(spec_dwords),
-        "defines": ffp_specialized_shader_defines(spec_dwords),
+        "fsIdentifier": specialization_identifier(spec_dwords, key),
+        "defines": ffp_specialized_shader_defines(spec_dwords, key),
         "key": key,
     }
 
@@ -469,6 +504,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
     f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
     f.write(f"    key.FS.RangeFog = {'true' if key['rangeFog'] else 'false'};\n")
+    f.write(f"    key.FS.ClipEnable = {'true' if key.get('clipEnable', False) else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")

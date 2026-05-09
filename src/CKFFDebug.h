@@ -17,12 +17,6 @@ struct CKFFDebugConfig {
     int Contract3DLogLimit;
     int PositionTLogLimit;
     bool DrawSerialPerFrame;
-    bool SkipPositionTDraws;
-    bool Skip3DDraws;
-    bool ForceUnlit;
-    bool DisableFog;
-    bool SkipOpaque3DDraws;
-    bool SkipTransparent3DDraws;
 
     static const CKFFDebugConfig &Get();
 };
@@ -68,34 +62,21 @@ struct CKFFDrawDebugInfo {
 
 class CKFFDebugState {
 public:
-    struct DrawRange {
-        int Exact;
-        int Start;
-        int End;
-    };
-
     CKFFDebugState();
 
     void BeginFrame();
     int NextDrawSerial(CKRenderView view);
-    bool ShouldSkip(CKRenderView view, int drawSerial, bool positionT) const;
-    bool ForceUnlit() const;
-    bool DisableFog() const;
 
     void LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info);
-    void LogDrawPrimitiveSkipped(const CKFFDrawDebugInfo &info, bool positionT);
     void LogDrawPrimitivePrepareFailed();
     void LogDrawPrimitiveProgramMissing();
     void LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info);
 
     void LogDrawVertexBufferHeader(const CKFFDrawDebugInfo &info);
-    void LogDrawVertexBufferSkipped(const CKFFDrawDebugInfo &info, bool positionT);
     void LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info);
 
 private:
     bool Is3DView(CKRenderView view) const;
-    bool ShouldSkipDrawSerial(CKRenderView view, int drawSerial) const;
-    const DrawRange &RangeForView(CKRenderView view) const;
     bool HasNonIdentityViewTranslation(const VxMatrix &view) const;
 
     void LogMatrixRows(const char *label, const VxMatrix &m) const;

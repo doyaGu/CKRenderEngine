@@ -27,8 +27,10 @@ public:
     CKDrawState LastState = {};
     CKDWORD LastProgram = 0;
     CKDWORD SubmitCount = 0;
+    CKDWORD TextureBindCount = 0;
     std::vector<CKBYTE> LastVertexBytes;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
+    std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
     void SetState(CKDrawState State) override { LastState = State; }
     void SetStencilRef(CKDWORD) override {}
@@ -49,12 +51,13 @@ public:
     }
     void SetTransientIndexBuffer(CKTransientIndexBuffer *) override {}
     void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *) override {}
-    void SetTexture(CKDWORD, CKDWORD, CKDWORD, CKSamplerDesc *) override {}
+    void SetTexture(CKDWORD, CKDWORD, CKDWORD, CKSamplerDesc *) override { ++TextureBindCount; }
     void SetUniform(CKDWORD uniform, const void *data, CKDWORD count) override {
         if (!data)
             return;
         const float *values = static_cast<const float *>(data);
         FloatUniforms[uniform].assign(values, values + count * 4);
+        UniformCounts[uniform] = count;
     }
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetComputeImage(CKDWORD, CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}

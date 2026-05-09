@@ -4,7 +4,7 @@ $output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, 
 #include "bgfx_shader.sh"
 
 uniform vec4 u_viewport;
-uniform vec4 u_fogParams;
+uniform vec4 u_ffDrawParams[12];
 uniform vec4 u_stageParams[32];
 uniform mat4 u_texMatrix[8];
 
@@ -59,6 +59,9 @@ uniform mat4 u_texMatrix[8];
 #endif
 #ifndef CKFF_VS_TEXFLAGS7
 #define CKFF_VS_TEXFLAGS7 0
+#endif
+#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
+#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
 #endif
 #endif
 
@@ -118,8 +121,12 @@ vec4 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4,
 
 vec4 transformTexcoord(int stage, vec4 coord)
 {
+#if defined(CKFF_FULL_SPECIALIZED)
+    int flags = ckffVsTexTransformFlags(stage, 0.0);
+#else
     vec4 params = u_stageParams[stage * 4 + 2];
     int flags = ckffVsTexTransformFlags(stage, params.z);
+#endif
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
@@ -151,6 +158,16 @@ void main()
 
     v_color0 = a_color0;
     v_color1 = a_color1;
+#if defined(CKFF_FULL_SPECIALIZED)
+    int tc0 = ckffVsTexcoordIndex(0, 0);
+    int tc1 = ckffVsTexcoordIndex(1, 0);
+    int tc2 = ckffVsTexcoordIndex(2, 0);
+    int tc3 = ckffVsTexcoordIndex(3, 0);
+    int tc4 = ckffVsTexcoordIndex(4, 0);
+    int tc5 = ckffVsTexcoordIndex(5, 0);
+    int tc6 = ckffVsTexcoordIndex(6, 0);
+    int tc7 = ckffVsTexcoordIndex(7, 0);
+#else
     int tc0 = ckffVsTexcoordIndex(0, int(u_stageParams[0 * 4 + 2].y));
     int tc1 = ckffVsTexcoordIndex(1, int(u_stageParams[1 * 4 + 2].y));
     int tc2 = ckffVsTexcoordIndex(2, int(u_stageParams[2 * 4 + 2].y));
@@ -159,14 +176,48 @@ void main()
     int tc5 = ckffVsTexcoordIndex(5, int(u_stageParams[5 * 4 + 2].y));
     int tc6 = ckffVsTexcoordIndex(6, int(u_stageParams[6 * 4 + 2].y));
     int tc7 = ckffVsTexcoordIndex(7, int(u_stageParams[7 * 4 + 2].y));
+#endif
     v_texcoord0 = transformTexcoord(0, selectTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1
     v_texcoord1 = transformTexcoord(1, selectTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord1 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 2
     v_texcoord2 = transformTexcoord(2, selectTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord2 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 3
     v_texcoord3 = transformTexcoord(3, selectTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord3 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 4
     v_texcoord4 = transformTexcoord(4, selectTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord4 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 5
     v_texcoord5 = transformTexcoord(5, selectTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord5 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 6
     v_texcoord6 = transformTexcoord(6, selectTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    float fogFactor = ckffVsFogEnabled(u_fogParams.w) ? a_color1.a : 1.0;
+#else
+    v_texcoord6 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#if defined(CKFF_FULL_SPECIALIZED)
+    float fogFactor = CKFF_VS_FOG_MODE != 0 ? a_color1.a : 1.0;
+#else
+    float fogFactor = ckffVsFogEnabled(u_ffDrawParams[10].w) ? a_color1.a : 1.0;
+#endif
+#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7
     v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+#else
+    v_texcoord7Fog = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
     v_texcoord7Fog.z = fogFactor;
 }
+
