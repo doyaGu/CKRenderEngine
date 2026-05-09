@@ -101,14 +101,25 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
             ${CKRE_INCLUDE_DIR}
     )
-    target_link_libraries(test_bgfx_rasterizer PRIVATE
-            CKBgfxRasterizer
-            CK2
-            VxMath
-            bgfx
-            bimg
-            bx
-    )
+    if (TARGET CKBgfxRasterizerStatic)
+        target_link_libraries(test_bgfx_rasterizer PRIVATE
+                CKBgfxRasterizerStatic
+                CKRasterizerLib
+                bgfx
+                bimg
+                bx
+        )
+    else ()
+        target_sources(test_bgfx_rasterizer PRIVATE ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS})
+        target_link_libraries(test_bgfx_rasterizer PRIVATE
+                CKRasterizerLib
+                CK2
+                VxMath
+                bgfx
+                bimg
+                bx
+        )
+    endif ()
     set_target_properties(test_bgfx_rasterizer PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
             FOLDER "Tests"

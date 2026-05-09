@@ -4,6 +4,9 @@ function(ckre_add_test TARGET_NAME)
         ${CKRE_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
     )
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
+    )
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
         CK2
