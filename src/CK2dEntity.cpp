@@ -6,8 +6,7 @@
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
 #include "CKFixedFunctionPipeline.h"
-
-#include <cstdlib>
+#include "CKRenderDebugEnv.h"
 
 // External function from CKMeshUtils.cpp
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
@@ -20,13 +19,8 @@ static int CompareByZOrder(const void *a, const void *b) {
     return ent1->GetZOrder() - ent2->GetZOrder();
 }
 
-static bool EnvFlagEnabled(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
-}
-
 static bool LogFullscreenBlack2DEnabled() {
-    static const bool enabled = EnvFlagEnabled("CK2_3D_DEBUG_LOG_FULLSCREEN_BLACK_2D");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_FULLSCREEN_BLACK_2D", false);
     return enabled;
 }
 

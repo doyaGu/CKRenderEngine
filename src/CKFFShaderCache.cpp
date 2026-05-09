@@ -2,9 +2,9 @@
 #include "CKFFSpecializedModuleTable.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
@@ -75,11 +75,7 @@ CKFFShaderCache::~CKFFShaderCache() {
 
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
-    const char *uber = std::getenv("CK2_FFP_UBERSHADER");
-    m_UseUberShader = uber && (std::strcmp(uber, "1") == 0 ||
-                               _stricmp(uber, "true") == 0 ||
-                               _stricmp(uber, "on") == 0 ||
-                               _stricmp(uber, "yes") == 0);
+    m_UseUberShader = CKRenderDebugEnvBool("CK2_FFP_UBERSHADER", false);
     CreateUniforms();
     ResolveShaderTarget();
 }

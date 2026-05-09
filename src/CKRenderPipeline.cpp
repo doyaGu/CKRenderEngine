@@ -1,8 +1,7 @@
 #include "CKRenderPipeline.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
-
-#include <cstdlib>
+#include "CKRenderDebugEnv.h"
 
 CKRenderPipeline::CKRenderPipeline()
     : m_Context(nullptr), m_Encoder(nullptr) {
@@ -72,8 +71,9 @@ void CKRenderPipeline::BeginFrame(
     m_Context->SetViewTransform(CKRP_VIEW_BACKGROUND2D, &identity, &m_OrthoProj);
 
     // Log matrices on first few frames and then periodically
+    static const bool s_LogFrameMatrices = CKRenderDebugEnvBool("CK2_3D_DEBUG_FRAME_LOG", false);
     static int s_logCount = 0;
-    if (s_logCount < 5 || (s_logCount >= 30 && s_logCount < 33)) {
+    if (s_LogFrameMatrices && (s_logCount < 5 || (s_logCount >= 30 && s_logCount < 33))) {
         CK_LOG_FMT("RenderPipeline", "View matrix row0: %.3f %.3f %.3f %.3f",
                    view[0][0], view[0][1], view[0][2], view[0][3]);
         CK_LOG_FMT("RenderPipeline", "View matrix row1: %.3f %.3f %.3f %.3f",
@@ -121,8 +121,7 @@ void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     if (!m_Context) return;
 
     static const bool s_LogPresentSync = []() {
-        const char *value = std::getenv("CK2_3D_DEBUG_LOG_PRESENT_SYNC");
-        return value && value[0] != '\0' && value[0] != '0';
+        return CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", false);
     }();
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {

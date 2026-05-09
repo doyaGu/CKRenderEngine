@@ -71,6 +71,7 @@ set(CKRE_PRIVATE_HEADERS
         CKTransientGeometry.h
         CKRenderPipeline.h
         CKFrustumCuller.h
+        CKRenderDebugEnv.h
         CKRenderPerfStats.h
 )
 
@@ -137,6 +138,7 @@ set(CKRE_SOURCES
         CKTransientGeometry.cpp
         CKRenderPipeline.cpp
         CKFrustumCuller.cpp
+        CKRenderDebugEnv.cpp
         CKRenderPerfStats.cpp
 
         CKDebugLogger.cpp

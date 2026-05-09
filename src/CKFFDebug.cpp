@@ -1,41 +1,20 @@
 #include "CKFFDebug.h"
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 #include "CKVertexLayoutCache.h"
 
 #include <cmath>
 #include <climits>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-
-static bool EnvEnabledRaw(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
-}
-
-static int EnvIntRaw(const char *name, int defaultValue) {
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0')
-        return defaultValue;
-
-    char *end = nullptr;
-    long parsed = std::strtol(value, &end, 10);
-    if (end == value)
-        return defaultValue;
-    if (parsed < INT_MIN)
-        return INT_MIN;
-    if (parsed > INT_MAX)
-        return INT_MAX;
-    return (int)parsed;
-}
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static const CKFFDebugConfig value = {
-        EnvIntRaw("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
-        EnvIntRaw("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
-        EnvIntRaw("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
-        EnvIntRaw("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
-        EnvEnabledRaw("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME")
+        CKRenderDebugEnvInt("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
+        CKRenderDebugEnvInt("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
+        CKRenderDebugEnvInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
+        CKRenderDebugEnvInt("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
+        CKRenderDebugEnvBool("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME", false)
     };
     return value;
 }
