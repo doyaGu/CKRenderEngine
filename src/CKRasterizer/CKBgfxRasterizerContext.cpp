@@ -1,5 +1,5 @@
 #include "CKBgfxRasterizer.h"
-#include "CKRenderDebugEnv.h"
+#include "CKBgfxConfig.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -79,7 +79,7 @@ static CK_SHADER_PROFILE ShaderProfile(bgfx::RendererType::Enum type)
 static bgfx::RendererType::Enum ParseRequestedRenderer()
 {
     char value[32] = {0};
-    if (!CKRenderDebugEnvString("CK2_3D_BGFX_RENDERER", value, (CKDWORD)sizeof(value)) ||
+    if (!CKBgfxConfigString("Renderer.Type", value, (CKDWORD)sizeof(value)) ||
         _stricmp(value, "auto") == 0)
         return bgfx::RendererType::Count;
     if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
@@ -91,7 +91,7 @@ static bgfx::RendererType::Enum ParseRequestedRenderer()
     if (_stricmp(value, "opengl") == 0 || _stricmp(value, "gl") == 0)
         return bgfx::RendererType::OpenGL;
 
-    BgfxLogf("Init", "unknown CK2_3D_BGFX_RENDERER='%s', falling back to auto", value);
+    BgfxLogf("Init", "unknown Renderer.Type='%s', falling back to auto", value);
     return bgfx::RendererType::Count;
 }
 
@@ -989,7 +989,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
     bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
     static const CKBOOL s_LogTextureBindings =
-        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURE_BINDINGS", FALSE);
+        CKBgfxConfigBool("Debug.LogTextureBindings", FALSE);
     if (s_LogTextureBindings &&
         s_SetTextureLogCount < 80) {
         BgfxLogf("SetTexture",
@@ -1020,7 +1020,7 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
         return;
     static int s_uniformLogCount = 0;
     static const CKBOOL s_LogUniforms =
-        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_UNIFORMS", FALSE);
+        CKBgfxConfigBool("Debug.LogUniforms", FALSE);
     if (s_LogUniforms && s_uniformLogCount < 256) {
         const float *f = static_cast<const float *>(Data);
         if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
@@ -1357,15 +1357,15 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
 void CKBgfxRasterizerContext::ConfigureDebug()
 {
     m_DebugBgfxFlags = BGFX_DEBUG_NONE;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_WIREFRAME", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_STATS", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_TEXT", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_PROFILER", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
-    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_ALL", FALSE))
+    if (CKBgfxConfigBool("Debug.BgfxWireframe", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
+    if (CKBgfxConfigBool("Debug.BgfxIFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
+    if (CKBgfxConfigBool("Debug.BgfxStats", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
+    if (CKBgfxConfigBool("Debug.BgfxText", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
+    if (CKBgfxConfigBool("Debug.BgfxProfiler", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
+    if (CKBgfxConfigBool("Debug.BgfxAll", FALSE))
         m_DebugBgfxFlags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS | BGFX_DEBUG_PROFILER;
 
-    m_DebugOverlay = CKRenderDebugEnvBool("CK2_3D_DEBUG_OVERLAY",
+    m_DebugOverlay = CKBgfxConfigBool("Debug.Overlay",
                                 (m_DebugBgfxFlags & BGFX_DEBUG_TEXT) ? TRUE : FALSE);
     if (m_DebugOverlay)
         m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
@@ -1373,7 +1373,7 @@ void CKBgfxRasterizerContext::ConfigureDebug()
     if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
         bgfx::setDebug(m_DebugBgfxFlags);
 
-    if (CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_CONFIG", FALSE) ||
+    if (CKBgfxConfigBool("Debug.LogConfig", FALSE) ||
         m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
         m_DebugOverlay) {
         BgfxLogf("Debug", "configured bgfxFlags=0x%X overlay=%d",
@@ -1388,7 +1388,7 @@ void CKBgfxRasterizerContext::DrawDebugOverlay()
 
     const bgfx::Stats *s = bgfx::getStats();
     bgfx::dbgTextClear(0, false);
-    bgfx::dbgTextPrintf(0, 0, 0x4f, "CK2_3D bgfx debug frame=%u size=%ux%u",
+    bgfx::dbgTextPrintf(0, 0, 0x4f, "CKBgfx debug frame=%u size=%ux%u",
                         m_DebugFrameId, (unsigned)m_Width, (unsigned)m_Height);
     if (s) {
         bgfx::dbgTextPrintf(0, 1, 0x2f, "bgfx gpuFrame=%u draws=%u blits=%u computes=%u views=%u",
@@ -1610,7 +1610,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     slot = rec;
 
     static const CKBOOL s_LogTextures =
-        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+        CKBgfxConfigBool("Debug.LogTextures", FALSE);
     if (s_LogTextures &&
         s_CreateTextureLogCount < 80) {
         BgfxLogf("CreateTexture",
@@ -2063,7 +2063,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
         CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
         static const CKBOOL s_LogTextures =
-            CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+            CKBgfxConfigBool("Debug.LogTextures", FALSE);
         if (s_LogTextures &&
             s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
@@ -2525,7 +2525,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
     }
 
     static const CKBOOL s_LogPresentSync =
-        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", FALSE);
+        CKBgfxConfigBool("Debug.LogPresentSync", FALSE);
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
         BgfxLogf("PresentSync",
