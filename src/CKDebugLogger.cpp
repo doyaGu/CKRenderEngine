@@ -13,17 +13,13 @@
 #define CKRE_DEBUG_OUTPUT_DEFAULT 1
 #endif
 
-static bool ConfigDebugOutputEnabled() {
-    return CKRenderSettingsDebugOutputEnabled(CKRE_DEBUG_OUTPUT_DEFAULT != 0);
-}
-
 CKDebugLogger &CKDebugLogger::Instance() {
     static CKDebugLogger instance;
     return instance;
 }
 
 CKDebugLogger::CKDebugLogger()
-    : m_OutputEnabled(ConfigDebugOutputEnabled()),
+    : m_OutputEnabled(CKRenderSettingsDebugOutputEnabled(CKRE_DEBUG_OUTPUT_DEFAULT != 0)),
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
       m_File(nullptr) {
