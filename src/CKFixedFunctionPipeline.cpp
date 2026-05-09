@@ -112,9 +112,11 @@ static bool CKFFTextureSetEquals(
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_DiagnosticConfig.StatsEnabled = CKRenderSettingsFFPStatsEnabled();
     m_DiagnosticConfig.UniformHistEnabled = CKRenderSettingsFFPUniformHistEnabled();
     m_DiagnosticConfig.StatsInterval = CKRenderSettingsFFPStatsInterval();
+#endif
 
     Vx3DMatrixIdentity(m_World);
     Vx3DMatrixIdentity(m_View);
@@ -137,8 +139,17 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     m_MaterialSource[1] = (float)CKFF_MS_MATERIAL;
     m_MaterialSource[2] = (float)CKFF_MS_MATERIAL;
     m_MaterialSource[3] = (float)CKFF_MS_MATERIAL;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     memset(&m_FrameStats, 0, sizeof(m_FrameStats));
+#endif
 }
+
+#if !CKRE_ENABLE_FFP_DIAGNOSTICS
+const CKFFFrameStats &CKFixedFunctionPipeline::GetFrameStats() const {
+    static const CKFFFrameStats s_EmptyStats = {};
+    return s_EmptyStats;
+}
+#endif
 
 CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
@@ -458,8 +469,10 @@ CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_DebugState.BeginFrame();
     LogAndResetFrameStats();
+#endif
 }
 
 // ============================================================================
@@ -472,14 +485,16 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     VxDrawPrimitiveData *data)
 {
     if (!encoder || !data || data->VertexCount == 0) return;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats)
         ++m_FrameStats.SoftwareDraws;
+#endif
 
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
-    const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
     if (debugLogging) {
@@ -497,6 +512,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.Viewport = m_Viewport;
         m_DebugState.LogDrawPrimitiveHeader(debugInfo);
     }
+#endif
 
     // Prepare transient geometry
     const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
@@ -510,48 +526,63 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     pointParams.ScaleC = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
     pointParams.World = m_World;
     pointParams.View = m_View;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     if (!m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapMode,
             m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams)) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (debugLogging)
             m_DebugState.LogDrawPrimitivePrepareFailed();
         if (collectStats)
             ++m_FrameStats.PrepareFailures;
+#endif
         return;
     }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.PrepareUs += CKRenderPerfElapsedUs(statsStart);
     if (collectStats) {
         m_FrameStats.TransientVertexBytes += m_TransientGeometry.GetLastVertexBytes();
         m_FrameStats.TransientIndexBytes += m_TransientGeometry.GetLastIndexBytes();
     }
+#endif
 
     // Build the fixed-function state description and select the matching program.
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(data->Flags, m_TextureHandles, m_StageStates);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     SetCurrentProgramBinding(shaderKey, programBinding);
     CKDWORD program = programBinding.Program;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.ProgramUs += CKRenderPerfElapsedUs(statsStart);
+#endif
     if (program == 0) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (debugLogging)
             m_DebugState.LogDrawPrimitiveProgramMissing();
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
+#endif
         return;
     }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats) {
         if (m_FrameStats.HasLastProgram && m_FrameStats.LastProgram == program)
             ++m_FrameStats.ConsecutiveProgramRepeats;
@@ -586,11 +617,15 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.Stage0.Texture = m_TextureHandles[0];
         m_DebugState.LogDrawPrimitiveDetails(debugInfo);
     }
+#endif
 
     // Upload uniforms
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     UploadUniforms(encoder);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
 
@@ -603,8 +638,10 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKDWORD transformIdx = m_Context->AllocTransform(&m_World, 1);
     encoder->SetTransform(transformIdx, 1);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats)
         ++m_FrameStats.TransformSets;
     if (statsTiming)
@@ -613,11 +650,13 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     // Set draw state
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKDrawState drawState = m_DrawStateCache.BuildDrawState(
         (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
          (type == VX_POINTLIST && m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE)))
             ? VX_TRIANGLELIST
             : type);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.DrawStateBuildUs += CKRenderPerfElapsedUs(statsStart);
     if (collectStats) {
@@ -631,32 +670,47 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#else
+    const CKDWORD stencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
+    const CKDWORD stencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
+    const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+#endif
     encoder->SetState(drawState);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.EncoderStateUs += CKRenderPerfElapsedUs(statsStart);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     encoder->SetStencilRef(stencilRef);
     encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StencilUs += CKRenderPerfElapsedUs(statsStart);
 
     // Bind textures
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     BindTextures(encoder);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.TextureUs += CKRenderPerfElapsedUs(statsStart);
+#endif
 
     // Submit
     float depth = ComputeDepthKey();
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     encoder->Submit(view, program, *(CKDWORD *)&depth, SubmitDiscardFlags());
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.SubmitUs += CKRenderPerfElapsedUs(statsStart);
     if (collectStats)
         ++m_FrameStats.SubmittedDraws;
+#endif
 }
 
 void CKFixedFunctionPipeline::DrawVertexBuffer(
@@ -668,12 +722,12 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD vertexLayout)
 {
     if (!encoder || !vb) return;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats)
         ++m_FrameStats.HardwareDraws;
 
     // Build the fixed-function state description from the actual mesh vertex format.
-    const bool positionT = (formatFlags & CKFF_VF_POSITIONT) != 0;
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
     if (debugLogging) {
@@ -695,28 +749,38 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         debugInfo.DrawSerial = debugDrawSerial;
         m_DebugState.LogDrawVertexBufferHeader(debugInfo);
     }
+#endif
 
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     SetCurrentProgramBinding(shaderKey, programBinding);
     CKDWORD program = programBinding.Program;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.ProgramUs += CKRenderPerfElapsedUs(statsStart);
+#endif
     if (program == 0) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
+#endif
         return;
     }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats) {
         if (m_FrameStats.HasLastProgram && m_FrameStats.LastProgram == program)
             ++m_FrameStats.ConsecutiveProgramRepeats;
@@ -755,11 +819,15 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         debugInfo.Stage0.Texture = m_TextureHandles[0];
         m_DebugState.LogDrawVertexBufferDetails(debugInfo);
     }
+#endif
 
     // Upload uniforms
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     UploadUniforms(encoder);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
 
@@ -772,8 +840,10 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     }
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKDWORD transformIdx = m_Context->AllocTransform(&m_World, 1);
     encoder->SetTransform(transformIdx, 1);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats)
         ++m_FrameStats.TransformSets;
     if (statsTiming)
@@ -782,7 +852,9 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     // Set draw state
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     CKDrawState drawState = m_DrawStateCache.BuildDrawState(type);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.DrawStateBuildUs += CKRenderPerfElapsedUs(statsStart);
     if (collectStats) {
@@ -796,28 +868,42 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#else
+    const CKDWORD stencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
+    const CKDWORD stencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
+    const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+#endif
     encoder->SetState(drawState);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.EncoderStateUs += CKRenderPerfElapsedUs(statsStart);
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     encoder->SetStencilRef(stencilRef);
     encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StencilUs += CKRenderPerfElapsedUs(statsStart);
+#endif
 
     // Set vertex layout
     if (vertexLayout) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (statsTiming)
             statsStart = CKRenderPerfNow();
+#endif
         encoder->SetVertexLayout(vertexLayout);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.VertexLayoutSets;
         if (statsTiming)
             m_FrameStats.LayoutUs += CKRenderPerfElapsedUs(statsStart);
+#endif
     }
 
     // Bind buffers
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats) {
         if (m_FrameStats.HasLastVertexBuffer &&
             m_FrameStats.LastVertexBuffer == vb &&
@@ -833,33 +919,46 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     }
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     encoder->SetVertexBuffer(0, vb, baseVertex, vertexCount);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats)
         ++m_FrameStats.VertexBufferSets;
+#endif
     if (ib) {
         encoder->SetIndexBuffer(ib, startIndex, indexCount);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.IndexBufferSets;
+#endif
     }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.BufferBindUs += CKRenderPerfElapsedUs(statsStart);
 
     // Bind textures
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     BindTextures(encoder);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.TextureUs += CKRenderPerfElapsedUs(statsStart);
+#endif
 
     // Submit
     float depth = ComputeDepthKey();
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
+#endif
     encoder->Submit(view, program, *(CKDWORD *)&depth, SubmitDiscardFlags());
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.SubmitUs += CKRenderPerfElapsedUs(statsStart);
     if (collectStats)
         ++m_FrameStats.SubmittedDraws;
+#endif
 }
 
 // ============================================================================
@@ -1244,6 +1343,7 @@ void CKFixedFunctionPipeline::UploadUniform(CKRasterizerEncoder *encoder, CKDWOR
     if (!encoder)
         return;
     encoder->SetUniform(uniform, data, count);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled) {
         ++m_FrameStats.UniformSets;
         m_FrameStats.UniformVec4s += count;
@@ -1255,6 +1355,7 @@ void CKFixedFunctionPipeline::UploadUniform(CKRasterizerEncoder *encoder, CKDWOR
         ++m_FrameStats.UniformHandleSets[slot];
         m_FrameStats.UniformHandleVec4s[slot] += count;
     }
+#endif
 }
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
@@ -1270,6 +1371,7 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         desiredTextures[i] = (i < activeCount) ? m_TextureHandles[i] : 0;
         desiredSamplers[i] = BuildSamplerDesc((int)i);
     }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats) {
         if (m_FrameStats.HasLastTextureSet &&
@@ -1290,6 +1392,15 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         if (collectStats)
             ++m_FrameStats.TextureBinds;
     }
+#else
+    for (CKDWORD i = 0; i < activeCount; ++i) {
+        const CKDWORD texture = desiredTextures[i];
+        if (texture == 0)
+            continue;
+        CKSamplerDesc sampler = desiredSamplers[i];
+        encoder->SetTexture(i, u.s_texture[i], texture, &sampler);
+    }
+#endif
 }
 
 CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
@@ -1297,6 +1408,7 @@ CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (!collectStats)
         return;
@@ -1374,6 +1486,7 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
     m_DrawStateCache.ResetBuildStats();
     memset(&m_FrameStats, 0, sizeof(m_FrameStats));
     m_FrameStats.FrameIndex = nextFrame;
+#endif
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
