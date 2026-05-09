@@ -25,9 +25,15 @@ endif ()
 # =============================================================================
 # Project options
 # =============================================================================
+set(_ckre_generate_shaders_default ON)
+if (MINGW)
+    set(_ckre_generate_shaders_default OFF)
+endif ()
+
 option(CKRE_BUILD_SHARED "Build shared library" ON)
 option(CKRE_BUILD_STATIC "Build static library" OFF)
 option(CKRE_BUILD_BGFX_RASTERIZER "Build bgfx rasterizer plugin targets" ON)
+option(CKRE_GENERATE_SHADERS "Regenerate CK2_3D bgfx fixed-function shader headers at build time" ${_ckre_generate_shaders_default})
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
