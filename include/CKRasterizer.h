@@ -91,76 +91,76 @@ public:
     virtual ~CKRasterizerEncoder() = default;
 
     // Draw state
-    virtual void SetState(CKDrawState State) = 0;
-    virtual void SetStencilRef(CKDWORD Ref) = 0;
-    virtual void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask = 0xFF) = 0;
-    virtual void SetScissor(const CKRECT *Rect) = 0;
-    virtual void SetPointSize(float Size) = 0;
+    virtual void SetState(CKDrawState State);
+    virtual void SetStencilRef(CKDWORD Ref);
+    virtual void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask = 0xFF);
+    virtual void SetScissor(const CKRECT *Rect);
+    virtual void SetPointSize(float Size);
 
     // Transform
-    virtual void SetTransform(CKDWORD TransformIndex, CKDWORD Count = 1) = 0;
+    virtual void SetTransform(CKDWORD TransformIndex, CKDWORD Count = 1);
 
     // Geometry binding
-    virtual void SetVertexLayout(CKDWORD Layout) = 0;
+    virtual void SetVertexLayout(CKDWORD Layout);
     virtual void SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                 CKDWORD StartVertex, CKDWORD VertexCount) = 0;
+                                 CKDWORD StartVertex, CKDWORD VertexCount);
     virtual void SetIndexBuffer(CKDWORD Buffer,
-                                CKDWORD StartIndex, CKDWORD IndexCount) = 0;
+                                CKDWORD StartIndex, CKDWORD IndexCount);
     virtual void SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                   CKDWORD StartInstance, CKDWORD InstanceCount) = 0;
+                                   CKDWORD StartInstance, CKDWORD InstanceCount);
     virtual void SetTransientVertexBuffer(CKDWORD Stream,
-                                          CKTransientVertexBuffer *Buffer) = 0;
-    virtual void SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer) = 0;
+                                          CKTransientVertexBuffer *Buffer);
+    virtual void SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer);
     virtual void SetTransientInstanceBuffer(CKDWORD Stream,
-                                            CKTransientInstanceBuffer *Buffer) = 0;
+                                            CKTransientInstanceBuffer *Buffer);
 
     // Resource binding
     virtual void SetTexture(CKDWORD Stage, CKDWORD Uniform,
-                            CKDWORD Texture, CKSamplerDesc *Sampler = NULL) = 0;
+                            CKDWORD Texture, CKSamplerDesc *Sampler = NULL);
     virtual void SetUniform(CKDWORD Uniform, const void *Data,
-                            CKDWORD Count = 1) = 0;
+                            CKDWORD Count = 1);
 
     // Compute binding
     virtual void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
-                                  CK_ACCESS_MODE Access) = 0;
+                                  CK_ACCESS_MODE Access);
     virtual void SetComputeImage(CKDWORD Stage, CKDWORD Texture,
-                                 CKDWORD Mip, CK_ACCESS_MODE Access) = 0;
+                                 CKDWORD Mip, CK_ACCESS_MODE Access);
 
     // Occlusion queries
-    virtual void SetCondition(CKDWORD Query, CKBOOL Visible) = 0;
+    virtual void SetCondition(CKDWORD Query, CKBOOL Visible);
 
     // Debug markers
-    virtual void SetMarker(CKSTRING Name) = 0;
+    virtual void SetMarker(CKSTRING Name);
 
     // Submission -- graphics
     virtual void Submit(CKRenderView View, CKDWORD Program,
                         CKDWORD Depth = 0,
-                        CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
+                        CKDWORD Flags = CKRST_DISCARD_ALL);
     virtual void SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
                                       CKDWORD Query, CKDWORD Depth = 0,
-                                      CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
+                                      CKDWORD Flags = CKRST_DISCARD_ALL);
     virtual void SubmitIndirect(CKRenderView View, CKDWORD Program,
                                 CKDWORD IndirectBuffer,
                                 CKDWORD Start = 0, CKDWORD Count = 1,
                                 CKDWORD Depth = 0,
-                                CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
+                                CKDWORD Flags = CKRST_DISCARD_ALL);
 
     // Submission -- compute
     virtual void Dispatch(CKRenderView View, CKDWORD Program,
                           CKDWORD NumX = 1, CKDWORD NumY = 1, CKDWORD NumZ = 1,
-                          CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
+                          CKDWORD Flags = CKRST_DISCARD_ALL);
     virtual void DispatchIndirect(CKRenderView View, CKDWORD Program,
                                   CKDWORD IndirectBuffer,
                                   CKDWORD Start = 0, CKDWORD Count = 1,
-                                  CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
+                                  CKDWORD Flags = CKRST_DISCARD_ALL);
 
     // Utility
-    virtual void Touch(CKRenderView View) = 0;
+    virtual void Touch(CKRenderView View);
     virtual void Blit(CKRenderView View,
                       CKDWORD DstTexture, CKDWORD DstMip,
                       CKDWORD DstX, CKDWORD DstY,
                       CKDWORD SrcTexture, CKDWORD SrcMip,
-                      const CKRECT *SrcRect) = 0;
+                      const CKRECT *SrcRect);
 };
 
 // ===========================================================================
@@ -183,125 +183,125 @@ public:
 
     // --- Resource creation ---
     virtual CKERROR CreateVertexBuffer(CKDWORD Buffer, CKVertexBufferDesc *Desc,
-                                       const void *Data) = 0;
+                                       const void *Data);
     virtual CKERROR CreateIndexBuffer(CKDWORD Buffer, CKIndexBufferDesc *Desc,
-                                      CKBOOL Index32, const void *Data) = 0;
+                                      CKBOOL Index32, const void *Data);
     virtual CKERROR CreateTexture(CKDWORD Texture, CKTextureDesc *Desc,
-                                  const VxImageDescEx *Data) = 0;
-    virtual CKERROR CreateShader(CKDWORD Shader, CKShaderDesc *Desc) = 0;
-    virtual CKERROR CreateProgram(CKDWORD Program, CKProgramDesc *Desc) = 0;
-    virtual CKERROR CreateUniform(CKDWORD Uniform, CKUniformDesc *Desc) = 0;
-    virtual CKERROR CreateVertexLayout(CKDWORD Layout, CKVertexLayoutDesc *Desc) = 0;
-    virtual CKERROR CreateFrameBuffer(CKDWORD FrameBuffer, CKFrameBufferDesc *Desc) = 0;
-    virtual CKERROR CreateDepthTexture(CKDWORD Texture, CKDepthTextureDesc *Desc) = 0;
-    virtual CKERROR CreateOcclusionQuery(CKDWORD Query, CKOcclusionQueryDesc *Desc) = 0;
-    virtual CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc) = 0;
-    virtual CKERROR DeleteObject(CKDWORD Object, CKDWORD Type) = 0;
-    virtual void FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL) = 0;
+                                  const VxImageDescEx *Data);
+    virtual CKERROR CreateShader(CKDWORD Shader, CKShaderDesc *Desc);
+    virtual CKERROR CreateProgram(CKDWORD Program, CKProgramDesc *Desc);
+    virtual CKERROR CreateUniform(CKDWORD Uniform, CKUniformDesc *Desc);
+    virtual CKERROR CreateVertexLayout(CKDWORD Layout, CKVertexLayoutDesc *Desc);
+    virtual CKERROR CreateFrameBuffer(CKDWORD FrameBuffer, CKFrameBufferDesc *Desc);
+    virtual CKERROR CreateDepthTexture(CKDWORD Texture, CKDepthTextureDesc *Desc);
+    virtual CKERROR CreateOcclusionQuery(CKDWORD Query, CKOcclusionQueryDesc *Desc);
+    virtual CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc);
+    virtual CKERROR DeleteObject(CKDWORD Object, CKDWORD Type);
+    virtual void FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL);
 
     // --- Resource update ---
     virtual CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
-                                       CKDWORD Size, const void *Data) = 0;
+                                       CKDWORD Size, const void *Data);
     virtual CKERROR UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
-                                      CKDWORD Size, const void *Data) = 0;
+                                      CKDWORD Size, const void *Data);
     virtual CKERROR UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face,
                                   const CKRECT *Region,
-                                  const VxImageDescEx *Data) = 0;
+                                  const VxImageDescEx *Data);
 
     // --- Readback ---
     virtual CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip,
-                                VxImageDescEx *Data) = 0;
+                                VxImageDescEx *Data);
     virtual CKERROR ReadFrameBuffer(CKDWORD FrameBuffer,
-                                    VxImageDescEx *Data) = 0;
+                                    VxImageDescEx *Data);
 
     // --- Occlusion query results ---
     virtual CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD Query,
-                                                    CKDWORD *PixelCount = NULL) = 0;
+                                                   CKDWORD *PixelCount = NULL);
 
     // --- Palette ---
-    virtual void SetPaletteColor(CKDWORD Index, CKDWORD RGBA) = 0;
+    virtual void SetPaletteColor(CKDWORD Index, CKDWORD RGBA);
 
     // --- Debug text overlay ---
-    virtual void DbgTextClear(CKDWORD Color = 0, CKBOOL Small = FALSE) = 0;
+    virtual void DbgTextClear(CKDWORD Color = 0, CKBOOL Small = FALSE);
     virtual void DbgTextPrintf(CKWORD X, CKWORD Y, CKDWORD Attr,
-                               CKSTRING Format, ...) = 0;
+                               CKSTRING Format, ...);
     virtual void DbgTextImage(CKWORD X, CKWORD Y, CKWORD Width, CKWORD Height,
-                              const void *Data, CKWORD Pitch) = 0;
+                              const void *Data, CKWORD Pitch);
 
     // --- Debug flags ---
-    virtual void SetDebug(CKDWORD Flags) = 0;
+    virtual void SetDebug(CKDWORD Flags);
 
     // --- Statistics ---
-    virtual const CKRenderStats *GetStats() = 0;
+    virtual const CKRenderStats *GetStats();
 
     // --- Resource naming ---
-    virtual void SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name) = 0;
+    virtual void SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name);
 
     // --- Shader reflection ---
     virtual CKDWORD GetShaderUniforms(CKDWORD Shader, CKDWORD *Uniforms = NULL,
-                                       CKDWORD MaxCount = 0) = 0;
-    virtual void GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info) = 0;
+                                      CKDWORD MaxCount = 0);
+    virtual void GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info);
 
     // --- Framebuffer queries ---
     virtual CKDWORD GetFrameBufferTexture(CKDWORD FrameBuffer,
-                                           CKDWORD Attachment = 0) = 0;
+                                          CKDWORD Attachment = 0);
 
     // --- Resource validation ---
     virtual CKBOOL IsTextureValid(CKDWORD Depth, CKBOOL CubeMap, CKWORD NumLayers,
-                                  CKDWORD Format, CKDWORD Flags) = 0;
+                                  CKDWORD Format, CKDWORD Flags);
     virtual CKBOOL IsFrameBufferValid(CKDWORD ColorCount,
                                       const CKFrameBufferAttachmentDesc *Color,
-                                      const CKFrameBufferAttachmentDesc *DepthStencil = NULL) = 0;
+                                      const CKFrameBufferAttachmentDesc *DepthStencil = NULL);
 
     // --- Texture info ---
     virtual void CalcTextureSize(CKTextureInfo *Info, CKWORD Width, CKWORD Height,
                                  CKWORD Depth, CKBOOL CubeMap, CKBOOL HasMips,
-                                 CKWORD NumLayers, CKDWORD Format) = 0;
+                                 CKWORD NumLayers, CKDWORD Format);
 
     // --- Screenshot capture ---
     virtual void RequestScreenShot(CKDWORD FrameBuffer,
-                                   CKScreenShotCallback Callback) = 0;
+                                   CKScreenShotCallback Callback);
 
     // --- Render views ---
-    virtual CKERROR SetViewName(CKRenderView View, CKSTRING Name) = 0;
-    virtual CKERROR SetViewRect(CKRenderView View, const CKRECT &Rect) = 0;
-    virtual CKERROR SetViewScissor(CKRenderView View, const CKRECT *Rect) = 0;
+    virtual CKERROR SetViewName(CKRenderView View, CKSTRING Name);
+    virtual CKERROR SetViewRect(CKRenderView View, const CKRECT &Rect);
+    virtual CKERROR SetViewScissor(CKRenderView View, const CKRECT *Rect);
     virtual CKERROR SetViewClear(CKRenderView View, CKDWORD Flags,
-                                 CKDWORD Color, float Z, CKDWORD Stencil) = 0;
+                                 CKDWORD Color, float Z, CKDWORD Stencil);
     virtual CKERROR SetViewTransform(CKRenderView View,
                                      const VxMatrix *ViewMatrix,
-                                     const VxMatrix *ProjMatrix) = 0;
-    virtual CKERROR SetViewFrameBuffer(CKRenderView View, CKDWORD FrameBuffer) = 0;
-    virtual CKERROR SetViewMode(CKRenderView View, CK_VIEW_MODE Mode) = 0;
+                                     const VxMatrix *ProjMatrix);
+    virtual CKERROR SetViewFrameBuffer(CKRenderView View, CKDWORD FrameBuffer);
+    virtual CKERROR SetViewMode(CKRenderView View, CK_VIEW_MODE Mode);
     virtual CKERROR SetViewOrder(CKRenderView Start, CKWORD Count,
-                                 const CKRenderView *Order) = 0;
-    virtual CKERROR ResetView(CKRenderView View) = 0;
-    virtual CKERROR TouchView(CKRenderView View) = 0;
+                                 const CKRenderView *Order);
+    virtual CKERROR ResetView(CKRenderView View);
+    virtual CKERROR TouchView(CKRenderView View);
 
     // --- Transform cache ---
-    virtual CKDWORD AllocTransform(VxMatrix *Transform, CKDWORD Count) = 0;
+    virtual CKDWORD AllocTransform(VxMatrix *Transform, CKDWORD Count);
 
     // --- Transient buffers ---
     virtual CKBOOL AllocTransientVertexBuffer(CKTransientVertexBuffer *Buffer,
                                               CKDWORD VertexCount,
-                                              CKDWORD Layout) = 0;
+                                              CKDWORD Layout);
     virtual CKBOOL AllocTransientIndexBuffer(CKTransientIndexBuffer *Buffer,
                                              CKDWORD IndexCount,
-                                             CKBOOL Index32 = FALSE) = 0;
+                                             CKBOOL Index32 = FALSE);
     virtual CKBOOL AllocTransientInstanceBuffer(CKTransientInstanceBuffer *Buffer,
                                                 CKDWORD InstanceCount,
-                                                CKDWORD Layout) = 0;
+                                                CKDWORD Layout);
     virtual CKDWORD GetAvailTransientVertexBuffer(CKDWORD VertexCount,
-                                                  CKDWORD Layout) = 0;
+                                                  CKDWORD Layout);
     virtual CKDWORD GetAvailTransientIndexBuffer(CKDWORD IndexCount,
-                                                 CKBOOL Index32 = FALSE) = 0;
+                                                 CKBOOL Index32 = FALSE);
     virtual CKDWORD GetAvailTransientInstanceBuffer(CKDWORD InstanceCount,
-                                                    CKDWORD Layout) = 0;
+                                                    CKDWORD Layout);
 
     // --- Encoder and frame ---
-    virtual CKRasterizerEncoder *BeginEncoder() = 0;
-    virtual void EndEncoder(CKRasterizerEncoder *Encoder) = 0;
-    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) = 0;
+    virtual CKRasterizerEncoder *BeginEncoder();
+    virtual void EndEncoder(CKRasterizerEncoder *Encoder);
+    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode);
 
 public:
     CKRasterizerDriver *m_Driver;

@@ -14,12 +14,17 @@ CKRasterizerDriver::~CKRasterizerDriver() = default;
 
 CKRasterizerContext *CKRasterizerDriver::CreateContext()
 {
-    return NULL;
+    CKRasterizerContext *context = new CKRasterizerContext();
+    context->m_Driver = this;
+    m_Contexts.PushBack(context);
+    return context;
 }
 
-CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *)
+CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
 {
-    return FALSE;
+    m_Contexts.Remove(Context);
+    delete Context;
+    return TRUE;
 }
 
 CKERROR CKRasterizerDriver::GetShaderTarget(CKShaderTargetDesc *Target) const
@@ -32,5 +37,5 @@ CKERROR CKRasterizerDriver::GetShaderTarget(CKShaderTargetDesc *Target) const
 CKERROR CKRasterizerDriver::GetProgrammableCaps(VxProgCapsDesc &Caps)
 {
     memset(&Caps, 0, sizeof(Caps));
-    return CKERR_NOTIMPLEMENTED;
+    return CK_OK;
 }

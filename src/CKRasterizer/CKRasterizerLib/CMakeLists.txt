@@ -3,7 +3,6 @@ set(CKRASTERIZER_LIB_SOURCES
         CKRasterizer.cpp
         CKRasterizerDriver.cpp
         CKRasterizerContext.cpp
-        CKNULLRasterizer.cpp
 )
 
 set(CKRASTERIZER_LIB_HEADERS
