@@ -3446,7 +3446,8 @@ void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
 
 void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
     std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
-    std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxConfig.cpp");
+    std::string bgfxConfig = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxConfig.cpp");
+    std::string bgfxConfigIni = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini");
     std::string bgfxCmake = ReadRenderEngineSource("src/CKRasterizer/CMakeLists.txt");
 
     TestCheck(bgfxContext.find("CKRenderSettings") == std::string::npos,
@@ -3462,6 +3463,16 @@ void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
     TestCheck(bgfxConfig.find("#include \"VxConfiguration.h\"") != std::string::npos &&
               bgfxConfig.find("VxConfiguration") != std::string::npos,
               "bgfx rasterizer debug configuration must be backed by VxConfiguration");
+    TestCheck(bgfxConfig.find("CKBgfxRasterizer.ini") != std::string::npos &&
+              bgfxConfig.find("CKBgfxRasterizer.cfg") == std::string::npos &&
+              bgfxConfig.find("GetSubSection(sectionPath, TRUE)") != std::string::npos &&
+              bgfxConfigIni.find("<CKBgfxRasterizer>") != std::string::npos &&
+              bgfxConfigIni.find("<Renderer>") != std::string::npos &&
+              bgfxConfigIni.find("Backend = auto") != std::string::npos &&
+              bgfxConfigIni.find("<Debug>") != std::string::npos &&
+              bgfxConfigIni.find("<Bgfx>") != std::string::npos &&
+              bgfxConfigIni.find("<Log>") != std::string::npos,
+              "bgfx rasterizer must use nested CKBgfxRasterizer.ini sections with explicit backend config");
     TestCheck(bgfxCmake.find("CKBgfxConfig.cpp") != std::string::npos &&
               bgfxCmake.find("CKBgfxConfig.h") != std::string::npos,
               "bgfx rasterizer must own its internal VxConfiguration helper in the rasterizer target");

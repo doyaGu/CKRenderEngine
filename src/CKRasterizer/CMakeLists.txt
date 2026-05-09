@@ -16,10 +16,14 @@ set(CKBGFX_RASTERIZER_HEADERS
         CKBgfxRasterizer/CKBgfxRasterizer.h
 )
 
+set(CKBGFX_RASTERIZER_CONFIG
+        ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer/CKBgfxRasterizer.ini
+)
+
 set(_ckre_bgfx_targets)
 
 if (CKRE_BUILD_SHARED)
-    add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS})
+    add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizer)
 
     if (MSVC)
@@ -32,10 +36,17 @@ if (CKRE_BUILD_SHARED)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
             FOLDER "Rasterizer"
     )
+
+    add_custom_command(TARGET CKBgfxRasterizer POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CKBGFX_RASTERIZER_CONFIG}"
+            "$<TARGET_FILE_DIR:CKBgfxRasterizer>/CKBgfxRasterizer.ini"
+            VERBATIM
+    )
 endif ()
 
 if (CKRE_BUILD_STATIC)
-    add_library(CKBgfxRasterizerStatic STATIC ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS})
+    add_library(CKBgfxRasterizerStatic STATIC ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizerStatic)
 
     set_target_properties(CKBgfxRasterizerStatic PROPERTIES
@@ -113,6 +124,10 @@ if (CKRE_INSTALL)
                 RUNTIME DESTINATION RenderEngines
                 LIBRARY DESTINATION RenderEngines
                 ARCHIVE DESTINATION lib
+        )
+
+        install(FILES ${CKBGFX_RASTERIZER_CONFIG}
+                DESTINATION RenderEngines
         )
     endif ()
 

@@ -3,7 +3,8 @@
 
 #include "CKTypes.h"
 
-bool CKBgfxConfigBool(const char *name, bool fallback);
-bool CKBgfxConfigString(const char *name, char *buffer, CKDWORD bufferSize);
+bool CKBgfxConfigBool(const char *section, const char *name, bool fallback);
+int CKBgfxConfigInt(const char *section, const char *name, int fallback);
+bool CKBgfxConfigString(const char *section, const char *name, char *buffer, CKDWORD bufferSize);
 
 #endif
