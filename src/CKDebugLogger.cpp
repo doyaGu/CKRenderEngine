@@ -1,7 +1,7 @@
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 
 #include <cstdarg>
-#include <cstdlib>
 #include <cstring>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -14,13 +14,7 @@
 #endif
 
 static bool EnvDebugOutputEnabled() {
-    const char *value = getenv("CK2_3D_DEBUG_OUTPUT");
-    if (!value || !*value)
-        return CKRE_DEBUG_OUTPUT_DEFAULT != 0;
-    return value[0] != '0' &&
-           _stricmp(value, "false") != 0 &&
-           _stricmp(value, "off") != 0 &&
-           _stricmp(value, "no") != 0;
+    return CKRenderDebugEnvBool("CK2_3D_DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
@@ -56,8 +50,8 @@ CKDebugLogger::CKDebugLogger()
         strncpy_s(m_LogFilePath, MAX_PATH, "CK2_3D_Debug.log", _TRUNCATE);
     }
 
-    const char *envPath = getenv("CK2_3D_LOG");
-    if (envPath && *envPath) {
+    char envPath[MAX_PATH] = {0};
+    if (CKRenderDebugEnvString("CK2_3D_LOG", envPath, MAX_PATH)) {
         strncpy_s(m_LogFilePath, MAX_PATH, envPath, _TRUNCATE);
     }
 }

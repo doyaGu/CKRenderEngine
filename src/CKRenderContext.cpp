@@ -8,6 +8,7 @@
 #endif
 
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 #include "CKRenderPerfStats.h"
 
 #include "VxMath.h"
@@ -36,8 +37,6 @@
 #include "RCKSprite3D.h"
 #include "CKFixedFunctionPipeline.h"
 
-#include <cstdlib>
-
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
 static CKBOOL SameCopyPixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
@@ -65,23 +64,18 @@ static CKBYTE *ConvertCopyImage(const VxImageDescEx &src, const VxImageDescEx &v
     return converted;
 }
 
-static bool RenderDebugLogEnabled(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
-}
-
 static bool RenderFrameLogEnabled() {
-    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_FRAME_LOG");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_FRAME_LOG", false);
     return enabled;
 }
 
 static bool CameraAttachLogEnabled() {
-    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_LOG_CAMERA_ATTACH");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_CAMERA_ATTACH", false);
     return enabled;
 }
 
 static bool PresentSyncLogEnabled() {
-    static const bool enabled = RenderDebugLogEnabled("CK2_3D_DEBUG_LOG_PRESENT_SYNC");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", false);
     return enabled;
 }
 

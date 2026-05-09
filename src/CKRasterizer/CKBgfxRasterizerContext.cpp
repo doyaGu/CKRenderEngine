@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKRenderDebugEnv.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -48,32 +49,6 @@ static void BgfxLogf(const char *tag, const char *fmt, ...)
     if (f) { fputs(msg, f); fputc('\n', f); fflush(f); }
 }
 
-static CKDWORD GetEnvDword(const char *name, CKDWORD fallback)
-{
-    char value[64] = {0};
-    DWORD n = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
-    if (n == 0 || n >= sizeof(value))
-        return fallback;
-    char *end = nullptr;
-    unsigned long parsed = strtoul(value, &end, 10);
-    return (end != value) ? (CKDWORD)parsed : fallback;
-}
-
-static CKBOOL GetEnvBool(const char *name, CKBOOL fallback)
-{
-    char value[32] = {0};
-    DWORD n = GetEnvironmentVariableA(name, value, (DWORD)sizeof(value));
-    if (n == 0 || n >= sizeof(value))
-        return fallback;
-    if (_stricmp(value, "1") == 0 || _stricmp(value, "true") == 0 ||
-        _stricmp(value, "yes") == 0 || _stricmp(value, "on") == 0)
-        return TRUE;
-    if (_stricmp(value, "0") == 0 || _stricmp(value, "false") == 0 ||
-        _stricmp(value, "no") == 0 || _stricmp(value, "off") == 0)
-        return FALSE;
-    return fallback;
-}
-
 static const char *RendererTypeName(bgfx::RendererType::Enum type)
 {
     switch (type)
@@ -104,8 +79,8 @@ static CK_SHADER_PROFILE ShaderProfile(bgfx::RendererType::Enum type)
 static bgfx::RendererType::Enum ParseRequestedRenderer()
 {
     char value[32] = {0};
-    DWORD n = GetEnvironmentVariableA("CK2_3D_BGFX_RENDERER", value, (DWORD)sizeof(value));
-    if (n == 0 || n >= sizeof(value) || _stricmp(value, "auto") == 0)
+    if (!CKRenderDebugEnvString("CK2_3D_BGFX_RENDERER", value, (CKDWORD)sizeof(value)) ||
+        _stricmp(value, "auto") == 0)
         return bgfx::RendererType::Count;
     if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
         return bgfx::RendererType::Direct3D11;
@@ -1029,7 +1004,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
     bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
     static const CKBOOL s_LogTextureBindings =
-        GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURE_BINDINGS", FALSE);
+        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURE_BINDINGS", FALSE);
     if (s_LogTextureBindings &&
         s_SetTextureLogCount < 80) {
         BgfxLogf("SetTexture",
@@ -1059,7 +1034,9 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
     if (!rec)
         return;
     static int s_uniformLogCount = 0;
-    if (GetEnvBool("CK2_3D_DEBUG_LOG_UNIFORMS", FALSE) && s_uniformLogCount < 256) {
+    static const CKBOOL s_LogUniforms =
+        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_UNIFORMS", FALSE);
+    if (s_LogUniforms && s_uniformLogCount < 256) {
         const float *f = static_cast<const float *>(Data);
         if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
             BgfxLogf("SetUniform",
@@ -1398,24 +1375,24 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
 void CKBgfxRasterizerContext::ConfigureDebugCapture()
 {
     GetDefaultCaptureDir(m_DebugCaptureDir, sizeof(m_DebugCaptureDir));
-    GetEnvironmentVariableA("CK2_3D_DEBUG_CAPTURE_DIR", m_DebugCaptureDir, (DWORD)sizeof(m_DebugCaptureDir));
+    CKRenderDebugEnvString("CK2_3D_DEBUG_CAPTURE_DIR", m_DebugCaptureDir, (CKDWORD)sizeof(m_DebugCaptureDir));
     CreateDirectoryA(m_DebugCaptureDir, NULL);
 
-    m_DebugCaptureFirstFrames = GetEnvDword("CK2_3D_DEBUG_CAPTURE_FIRST", 0);
-    m_DebugCaptureInterval = GetEnvDword("CK2_3D_DEBUG_CAPTURE_INTERVAL", 0);
-    m_DebugCaptureLimit = GetEnvDword("CK2_3D_DEBUG_CAPTURE_LIMIT", 0);
+    m_DebugCaptureFirstFrames = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_FIRST", 0);
+    m_DebugCaptureInterval = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_INTERVAL", 0);
+    m_DebugCaptureLimit = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_LIMIT", 0);
     m_DebugCaptureSaved = 0;
 
     m_DebugBgfxFlags = BGFX_DEBUG_NONE;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_WIREFRAME", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_STATS", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_TEXT", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_PROFILER", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
-    if (GetEnvBool("CK2_3D_BGFX_DEBUG_ALL", FALSE))
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_WIREFRAME", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_STATS", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_TEXT", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_PROFILER", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
+    if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_ALL", FALSE))
         m_DebugBgfxFlags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS | BGFX_DEBUG_PROFILER;
 
-    m_DebugOverlay = GetEnvBool("CK2_3D_DEBUG_OVERLAY",
+    m_DebugOverlay = CKRenderDebugEnvBool("CK2_3D_DEBUG_OVERLAY",
                                 (m_DebugBgfxFlags & BGFX_DEBUG_TEXT) ? TRUE : FALSE);
     if (m_DebugOverlay)
         m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
@@ -1423,7 +1400,7 @@ void CKBgfxRasterizerContext::ConfigureDebugCapture()
     if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
         bgfx::setDebug(m_DebugBgfxFlags);
 
-    if (GetEnvBool("CK2_3D_DEBUG_LOG_CONFIG", FALSE) ||
+    if (CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_CONFIG", FALSE) ||
         m_DebugCaptureFirstFrames != 0 ||
         m_DebugCaptureInterval != 0 ||
         m_DebugCaptureLimit != 0 ||
@@ -1691,7 +1668,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     slot = rec;
 
     static const CKBOOL s_LogTextures =
-        GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
     if (s_LogTextures &&
         s_CreateTextureLogCount < 80) {
         BgfxLogf("CreateTexture",
@@ -2144,7 +2121,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
         CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
         static const CKBOOL s_LogTextures =
-            GetEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
+            CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_TEXTURES", FALSE);
         if (s_LogTextures &&
             s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
@@ -2606,7 +2583,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
     }
 
     static const CKBOOL s_LogPresentSync =
-        GetEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", FALSE);
+        CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", FALSE);
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
         BgfxLogf("PresentSync",

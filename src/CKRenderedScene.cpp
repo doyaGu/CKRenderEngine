@@ -1,6 +1,7 @@
 #include "CKRenderedScene.h"
 
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 #include "CKRenderPerfStats.h"
 
 #include "VxMatrix.h"
@@ -19,23 +20,16 @@
 #include "RCKCamera.h"
 #include "RCKLight.h"
 
-#include <cstdlib>
-
 extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
 
-static bool EnvEnabled(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
-}
-
 static bool RenderedSceneFrameLogEnabled() {
-    static const bool enabled = EnvEnabled("CK2_3D_DEBUG_FRAME_LOG");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_FRAME_LOG", false);
     return enabled;
 }
 
 static bool RenderedSceneCameraLogEnabled() {
-    static const bool enabled = EnvEnabled("CK2_3D_DEBUG_LOG_RENDERED_SCENE_CAMERA");
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
     return enabled;
 }
 

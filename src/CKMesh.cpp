@@ -16,13 +16,13 @@
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 #include "CKRenderPerfStats.h"
 #include "CKTransientGeometry.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
 
 #include <climits>
-#include <cstdlib>
 
 // External global for transparency update flag
 extern CKBOOL g_UpdateTransparency;
@@ -32,8 +32,7 @@ extern void (*g_BuildNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 extern void (*g_BuildFaceNormalsFunc)(CKFace *, CKWORD *, int, VxVertex *, int);
 
 static bool MeshDebugEnvEnabled(const char *name) {
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && value[0] != '0';
+    return CKRenderDebugEnvBool(name, false);
 }
 
 static void RestoreSceneSpecularState(RCKRenderContext *rc) {
@@ -46,18 +45,7 @@ static void RestoreSceneSpecularState(RCKRenderContext *rc) {
 }
 
 static int MeshDebugEnvInt(const char *name, int defaultValue) {
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0')
-        return defaultValue;
-    char *end = nullptr;
-    long parsed = std::strtol(value, &end, 10);
-    if (end == value)
-        return defaultValue;
-    if (parsed < INT_MIN)
-        return INT_MIN;
-    if (parsed > INT_MAX)
-        return INT_MAX;
-    return (int)parsed;
+    return CKRenderDebugEnvInt(name, defaultValue);
 }
 
 static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, RCKMaterial *mat) {
