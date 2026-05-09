@@ -86,11 +86,13 @@ struct CKFFFrameStats {
     CKBOOL HasLastWorldMatrix;
 };
 
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
 struct CKFFDiagnosticConfig {
     bool StatsEnabled;
     bool UniformHistEnabled;
     int StatsInterval;
 };
+#endif
 
 class CKFixedFunctionPipeline {
 public:
@@ -150,7 +152,11 @@ public:
     const VxMatrix &GetViewMatrix() const { return m_View; }
     const VxMatrix &GetProjectionMatrix() const { return m_Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKFFFrameStats &GetFrameStats() const { return m_FrameStats; }
+#else
+    const CKFFFrameStats &GetFrameStats() const;
+#endif
 
 private:
     CKRasterizerContext *m_Context;
@@ -162,7 +168,9 @@ private:
     CKTransientGeometry m_TransientGeometry;
     CKRenderPipeline m_RenderPipeline;
     CKFrustumCuller m_FrustumCuller;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
+#endif
     CKFFShaderKey m_CurrentShaderKey;
     CKFFProgramBinding m_CurrentProgramBinding;
     CKFFSpecializationInfo m_CurrentSpecializationInfo;
@@ -194,8 +202,10 @@ private:
 
     // Dirty tracking
     CKDWORD m_DirtyFlags;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFFrameStats m_FrameStats;
     CKFFDiagnosticConfig m_DiagnosticConfig;
+#endif
 
     // Internal methods
     CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
