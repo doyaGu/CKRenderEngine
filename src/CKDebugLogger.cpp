@@ -14,7 +14,7 @@
 #endif
 
 static bool ConfigDebugOutputEnabled() {
-    return CKRenderDebugConfigBool("CK2_3D_DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
+    return CKRenderDebugConfigBool("DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
@@ -51,7 +51,7 @@ CKDebugLogger::CKDebugLogger()
     }
 
     char configPath[MAX_PATH] = {0};
-    if (CKRenderDebugConfigString("CK2_3D_LOG", configPath, MAX_PATH)) {
+    if (CKRenderDebugConfigString("LOG", configPath, MAX_PATH)) {
         strncpy_s(m_LogFilePath, MAX_PATH, configPath, _TRUNCATE);
     }
 }

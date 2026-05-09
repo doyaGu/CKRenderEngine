@@ -71,7 +71,7 @@ void CKRenderPipeline::BeginFrame(
     m_Context->SetViewTransform(CKRP_VIEW_BACKGROUND2D, &identity, &m_OrthoProj);
 
     // Log matrices on first few frames and then periodically
-    static const bool s_LogFrameMatrices = CKRenderDebugConfigBool("CK2_3D_DEBUG_FRAME_LOG", false);
+    static const bool s_LogFrameMatrices = CKRenderDebugConfigBool("DEBUG_FRAME_LOG", false);
     static int s_logCount = 0;
     if (s_LogFrameMatrices && (s_logCount < 5 || (s_logCount >= 30 && s_logCount < 33))) {
         CK_LOG_FMT("RenderPipeline", "View matrix row0: %.3f %.3f %.3f %.3f",
@@ -121,7 +121,7 @@ void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     if (!m_Context) return;
 
     static const bool s_LogPresentSync = []() {
-        return CKRenderDebugConfigBool("CK2_3D_DEBUG_LOG_PRESENT_SYNC", false);
+        return CKRenderDebugConfigBool("DEBUG_LOG_PRESENT_SYNC", false);
     }();
     static int s_PresentSyncLogCount = 0;
     if (s_LogPresentSync && s_PresentSyncLogCount < 64) {

@@ -10,11 +10,11 @@
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static const CKFFDebugConfig value = {
-        CKRenderDebugConfigInt("CK2_3D_DEBUG_DRAW_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("CK2_3D_DEBUG_REAL3D_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("CK2_3D_DEBUG_POSITIONT_LOG_LIMIT", 0),
-        CKRenderDebugConfigBool("CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME", false)
+        CKRenderDebugConfigInt("DEBUG_DRAW_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("DEBUG_REAL3D_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
+        CKRenderDebugConfigInt("DEBUG_POSITIONT_LOG_LIMIT", 0),
+        CKRenderDebugConfigBool("DEBUG_DRAW_SERIAL_PER_FRAME", false)
     };
     return value;
 }
