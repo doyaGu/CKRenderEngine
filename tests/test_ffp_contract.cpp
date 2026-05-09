@@ -1191,6 +1191,8 @@ void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
     std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
     std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
+    std::string configHeader = ReadRenderEngineSource("src/CKRenderConfig.h");
+    std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
 
     TestCheck(settingsSource.find("DEBUG_RENDER_STATS") != std::string::npos &&
                   perfSource.find("CKRenderSettingsRenderStatsEnabled") != std::string::npos &&
@@ -1204,6 +1206,16 @@ void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
                   ffpSource.find("CKRenderSettingsFFPUniformHistEnabled") != std::string::npos &&
                   ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
               "FFP uniform histogram must remain available behind its explicit config gate");
+    TestCheck(rootCmake.find("option(CKRE_ENABLE_DIAGNOSTICS \"Enable optional CK2_3D diagnostic code unless a category overrides it\" OFF)") != std::string::npos &&
+                  rootCmake.find("option(CKRE_ENABLE_DEBUG_LOGGER \"Enable CK2_3D internal diagnostic logger support\" ${CKRE_ENABLE_DIAGNOSTICS})") != std::string::npos &&
+                  rootCmake.find("option(CKRE_ENABLE_RENDER_STATS \"Enable frame traversal and render wrapper timing diagnostics\" ${CKRE_ENABLE_DIAGNOSTICS})") != std::string::npos &&
+                  rootCmake.find("option(CKRE_ENABLE_FFP_DIAGNOSTICS \"Enable fixed-function pipeline stats, uniform histogram, and draw logging diagnostics\" ${CKRE_ENABLE_DIAGNOSTICS})") != std::string::npos,
+              "Diagnostic compile-time switches must use one disabled master default with category switches following it");
+    TestCheck(configHeader.find("#define CKRE_ENABLE_DEBUG_LOGGER 0") != std::string::npos &&
+                  configHeader.find("#define CKRE_ENABLE_RENDER_STATS 0") != std::string::npos &&
+                  configHeader.find("#define CKRE_ENABLE_FFP_DIAGNOSTICS 0") != std::string::npos &&
+                  configHeader.find("CKRE_DEBUG_LOG_OUTPUT_DEFAULT") == std::string::npos,
+              "Diagnostic fallback macros must default to disabled when CMake definitions are absent");
 }
 
 void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
@@ -1261,6 +1273,7 @@ private:
 };
 
 void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
     ScopedDebugConfigValue statsConfig("DEBUG_FFP_STATS", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
@@ -1284,6 +1297,18 @@ void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
               "FFP frame stats must count the reduced per-draw uniform uploads");
     TestCheck(stats.TextureBinds == 0,
               "FFP frame stats must count only actual texture bindings");
+#else
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.SoftwareDraws == 0 && stats.SubmittedDraws == 0 && stats.UniformSets == 0,
+              "FFP frame stats must stay fully disabled when CKRE_ENABLE_FFP_DIAGNOSTICS is off");
+#endif
 }
 
 void DrawDiagnosticFullSpecializedTexturedTriangle(CKFixedFunctionPipeline &ffp, FFPDiagnosticContext &ctx) {
@@ -3639,23 +3664,23 @@ void Test_FFPStageStateOwnsSamplerAndActiveTextureHelpers() {
 void Test_DebugLogger_HasGlobalOutputDisableOption() {
     std::string header = ReadRenderEngineSource("src/CKDebugLogger.h");
     std::string source = ReadRenderEngineSource("src/CKDebugLogger.cpp");
+    std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
-    std::string srcCmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
     TestCheck(header.find("void EnableOutput(bool enable)") != std::string::npos &&
               header.find("bool m_OutputEnabled") != std::string::npos,
               "Debug logger must expose an internal master output switch");
-    TestCheck(rootCmake.find("option(CKRE_DEBUG_OUTPUT") != std::string::npos &&
-              srcCmake.find("CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>") != std::string::npos,
-              "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
-    TestCheck(source.find("DEBUG_OUTPUT") != std::string::npos &&
-              source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
+    TestCheck(rootCmake.find("CKRE_DEBUG_LOG_OUTPUT_DEFAULT") == std::string::npos &&
+              source.find("CKRenderSettingsDebugOutputEnabled(false)") != std::string::npos,
+              "Debug logger output must default off and use CK2_3D.ini DEBUG_OUTPUT as the runtime override");
+    TestCheck(settingsSource.find("DEBUG_OUTPUT") != std::string::npos &&
               source.find("CKRenderSettingsDebugOutputEnabled") != std::string::npos,
-              "Debug logger must use the CMake default and support DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
+              "Debug logger must support DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
               "Debug logger must drop output and close the log file when globally disabled");
 
+#if CKRE_ENABLE_DEBUG_LOGGER
     const char *logPath = "ffp_contract_debug_logger_silenced.log";
     std::remove(logPath);
     CKDebugLogger::Instance().SetLogFilePath(logPath);
@@ -3681,6 +3706,11 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
     if (file)
         fclose(file);
     std::remove(logPath);
+#else
+    TestCheck(header.find("#define CK_LOG_RAW(msg)                  ((void)0)") != std::string::npos &&
+                  header.find("#define CK_LOG_FMT(category, fmt, ...)   ((void)0)") != std::string::npos,
+              "Disabled logging builds must compile CK_LOG* calls to no-ops");
+#endif
 }
 
 } // namespace
