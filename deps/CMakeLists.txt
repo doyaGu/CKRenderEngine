@@ -1,8 +1,12 @@
 # RenderEngine third-party dependencies
 
-# bgfx is the default rasterizer backend. Build shaderc too because CK2_3D
-# generates fixed-function shader blobs as part of the normal build.
-set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
+# bgfx is the default rasterizer backend. Build bgfx tools only when CK2_3D
+# is configured to regenerate fixed-function shader blobs.
+set(BGFX_BUILD_TOOLS ${CKRE_GENERATE_SHADERS} CACHE BOOL "" FORCE)
+set(BGFX_BUILD_TOOLS_BIN2C OFF CACHE BOOL "" FORCE)
+set(BGFX_BUILD_TOOLS_GEOMETRY OFF CACHE BOOL "" FORCE)
+set(BGFX_BUILD_TOOLS_SHADER ${CKRE_GENERATE_SHADERS} CACHE BOOL "" FORCE)
+set(BGFX_BUILD_TOOLS_TEXTURE OFF CACHE BOOL "" FORCE)
 set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
