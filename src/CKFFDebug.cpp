@@ -1,6 +1,6 @@
 #include "CKFFDebug.h"
 #include "CKDebugLogger.h"
-#include "CKRenderDebugConfig.h"
+#include "CKRenderSettings.h"
 #include "CKVertexLayoutCache.h"
 
 #include <cmath>
@@ -10,11 +10,11 @@
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static const CKFFDebugConfig value = {
-        CKRenderDebugConfigInt("DEBUG_DRAW_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("DEBUG_REAL3D_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("DEBUG_3D_CONTRACT_LOG_LIMIT", 0),
-        CKRenderDebugConfigInt("DEBUG_POSITIONT_LOG_LIMIT", 0),
-        CKRenderDebugConfigBool("DEBUG_DRAW_SERIAL_PER_FRAME", false)
+        CKRenderSettingsFFPDrawLogLimit(),
+        CKRenderSettingsFFPReal3DLogLimit(),
+        CKRenderSettingsFFPContract3DLogLimit(),
+        CKRenderSettingsFFPPositionTLogLimit(),
+        CKRenderSettingsFFPDrawSerialPerFrame()
     };
     return value;
 }
@@ -35,6 +35,15 @@ void CKFFDebugState::BeginFrame() {
 
     m_Opaque3DDrawSerial = 0;
     m_Transparent3DDrawSerial = 0;
+}
+
+bool CKFFDebugState::AnyLoggingEnabled() const {
+    const CKFFDebugConfig &config = CKFFDebugConfig::Get();
+    return config.DrawLogLimit > 0 ||
+           config.Real3DLogLimit > 0 ||
+           config.Contract3DLogLimit > 0 ||
+           config.PositionTLogLimit > 0 ||
+           config.DrawSerialPerFrame;
 }
 
 int CKFFDebugState::NextDrawSerial(CKRenderView view) {
