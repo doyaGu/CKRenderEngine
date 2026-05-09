@@ -536,6 +536,10 @@ void Test_2dEntity_DrawUsesFFPStateGuard() {
     TestCheck(body.find("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D") == std::string::npos &&
               body.find("SkipFullscreenBlack2DEnabled") == std::string::npos,
               "2D entity Draw must not keep behavior-changing fullscreen black skip debug path");
+    TestCheck(source.find("CK2_3D_DEBUG_LOG_FULLSCREEN_BLACK_2D") == std::string::npos &&
+              source.find("LogFullscreenBlack2D") == std::string::npos &&
+              body.find("Fullscreen black quad") == std::string::npos,
+              "2D entity Draw must not keep obsolete fullscreen black logging diagnostics");
     TestCheck(body.find("dev->SetViewRect(savedViewRect)") != std::string::npos,
               "2D entity Draw must restore the viewport after rendering");
 }
@@ -3381,6 +3385,23 @@ void Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync() {
               "bgfx rasterizer must only reset swapchain vsync when a backbuffer present updates it");
 }
 
+void Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved() {
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxHeader = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer.h");
+
+    TestCheck(bgfxContext.find("CK2_3D_Captures") == std::string::npos &&
+              bgfxContext.find("CK2_3D_DEBUG_CAPTURE_") == std::string::npos,
+              "bgfx rasterizer must not keep obsolete automatic CK2_3D_Captures env capture path");
+    TestCheck(bgfxContext.find("ConfigureDebugCapture") == std::string::npos &&
+              bgfxContext.find("RequestDebugFrameCapture") == std::string::npos,
+              "bgfx rasterizer must not run automatic debug capture setup or per-frame capture requests");
+    TestCheck(bgfxHeader.find("m_DebugCapture") == std::string::npos &&
+              bgfxHeader.find("m_DebugCaptureDir") == std::string::npos,
+              "bgfx rasterizer state must not keep obsolete automatic debug capture counters");
+    TestCheck(bgfxContext.find("void CKBgfxRasterizerContext::RequestScreenShot") != std::string::npos,
+              "Explicit rasterizer screenshot callback API must remain available");
+}
+
 void Test_FFPDebugLogging_IsCentralized() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
@@ -3751,6 +3772,7 @@ int main() {
     tests.Run("Shader target profiles", &Test_ShaderTarget_ProfilesAreExplicitAndDistinct);
     tests.Run("Driver default shader target", &Test_RasterizerDriver_DefaultShaderTargetIsUnknown);
     tests.Run("bgfx RTT flush preserves present vsync", &Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync);
+    tests.Run("bgfx automatic debug capture removed", &Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);

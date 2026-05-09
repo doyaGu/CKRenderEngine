@@ -117,21 +117,6 @@ static uint32_t FirstDword(const void *data, uint32_t size)
     return value;
 }
 
-static void GetDefaultCaptureDir(char *path, size_t pathSize)
-{
-    path[0] = '\0';
-    HMODULE hMod = nullptr;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           (LPCSTR)&GetDefaultCaptureDir, &hMod)) {
-        GetModuleFileNameA(hMod, path, (DWORD)pathSize);
-        char *last = strrchr(path, '\\');
-        if (last)
-            strcpy_s(last + 1, pathSize - (last + 1 - path), "CK2_3D_Captures");
-    }
-    if (path[0] == '\0')
-        strcpy_s(path, pathSize, "CK2_3D_Captures");
-}
-
 static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
                        uint32_t pitch, const void *data, bool yflip)
 {
@@ -1234,15 +1219,12 @@ CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
-      m_DebugFrameId(0), m_DebugCaptureFirstFrames(0), m_DebugCaptureInterval(0),
-      m_DebugCaptureLimit(0), m_DebugCaptureSaved(0), m_DebugBgfxFlags(0),
-      m_DebugOverlay(FALSE),
+      m_DebugFrameId(0), m_DebugBgfxFlags(0), m_DebugOverlay(FALSE),
       m_TransformCount{0},
       m_TransientVBCount{0}, m_TransientIBCount{0}, m_TransientInstCount{0}
 {
     m_Driver = driver;
     m_BgfxCallback.SetContext(this);
-    m_DebugCaptureDir[0] = '\0';
 }
 
 CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
@@ -1348,7 +1330,7 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
                         0x000000ff, 1.0f, 0);
     bgfx::touch(0);
     bgfx::frame();
-    ConfigureDebugCapture();
+    ConfigureDebug();
 
     return TRUE;
 }
@@ -1372,17 +1354,8 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
     return TRUE;
 }
 
-void CKBgfxRasterizerContext::ConfigureDebugCapture()
+void CKBgfxRasterizerContext::ConfigureDebug()
 {
-    GetDefaultCaptureDir(m_DebugCaptureDir, sizeof(m_DebugCaptureDir));
-    CKRenderDebugEnvString("CK2_3D_DEBUG_CAPTURE_DIR", m_DebugCaptureDir, (CKDWORD)sizeof(m_DebugCaptureDir));
-    CreateDirectoryA(m_DebugCaptureDir, NULL);
-
-    m_DebugCaptureFirstFrames = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_FIRST", 0);
-    m_DebugCaptureInterval = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_INTERVAL", 0);
-    m_DebugCaptureLimit = CKRenderDebugEnvDword("CK2_3D_DEBUG_CAPTURE_LIMIT", 0);
-    m_DebugCaptureSaved = 0;
-
     m_DebugBgfxFlags = BGFX_DEBUG_NONE;
     if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_WIREFRAME", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
     if (CKRenderDebugEnvBool("CK2_3D_BGFX_DEBUG_IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
@@ -1401,14 +1374,10 @@ void CKBgfxRasterizerContext::ConfigureDebugCapture()
         bgfx::setDebug(m_DebugBgfxFlags);
 
     if (CKRenderDebugEnvBool("CK2_3D_DEBUG_LOG_CONFIG", FALSE) ||
-        m_DebugCaptureFirstFrames != 0 ||
-        m_DebugCaptureInterval != 0 ||
-        m_DebugCaptureLimit != 0 ||
         m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
         m_DebugOverlay) {
-        BgfxLogf("Debug", "configured captureDir=%s first=%u interval=%u limit=%u bgfxFlags=0x%X overlay=%d",
-                 m_DebugCaptureDir, m_DebugCaptureFirstFrames, m_DebugCaptureInterval,
-                 m_DebugCaptureLimit, m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
+        BgfxLogf("Debug", "configured bgfxFlags=0x%X overlay=%d",
+                 m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
     }
 }
 
@@ -1429,33 +1398,6 @@ void CKBgfxRasterizerContext::DrawDebugOverlay()
                             (long long)s->waitSubmit, (long long)s->waitRender);
     }
     bgfx::dbgTextPrintf(0, 3, 0x1f, "views: 0 clear 1 bg2d 2 opaque3d 3 transparent 4 fg2d");
-}
-
-void CKBgfxRasterizerContext::RequestDebugFrameCapture()
-{
-    bool shouldCapture = false;
-    if (m_DebugFrameId < m_DebugCaptureFirstFrames)
-        shouldCapture = true;
-    if (m_DebugCaptureInterval != 0 && (m_DebugFrameId % m_DebugCaptureInterval) == 0)
-        shouldCapture = true;
-    if (!shouldCapture)
-        return;
-    if (m_DebugCaptureLimit != 0 && m_DebugCaptureSaved >= m_DebugCaptureLimit)
-        return;
-
-    char path[MAX_PATH] = {0};
-    _snprintf_s(path, sizeof(path), _TRUNCATE, "%s\\frame_%06u.bmp",
-                m_DebugCaptureDir, m_DebugFrameId);
-    bgfx::FrameBufferHandle invalid = BGFX_INVALID_HANDLE;
-    bgfx::requestScreenShot(invalid, path);
-    ++m_DebugCaptureSaved;
-
-    const bgfx::Stats *s = bgfx::getStats();
-    BgfxLogf("Capture",
-             "requested frame=%u bgfxGpuFrame=%u path=%s draws=%u blits=%u computes=%u views=%u",
-             m_DebugFrameId, s ? s->gpuFrameNum : 0, path,
-             s ? s->numDraw : 0, s ? s->numBlit : 0,
-             s ? s->numCompute : 0, s ? s->numViews : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -2594,7 +2536,6 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
     }
 
     DrawDebugOverlay();
-    RequestDebugFrameCapture();
 
     bgfx::frame();
     ++m_DebugFrameId;
