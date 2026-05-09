@@ -7,6 +7,7 @@
 #include <Windows.h>
 
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -15,11 +16,13 @@ namespace {
 const char *kRenderSettingsFile = "CK2_3D.ini";
 const char *kRenderSettingsSection = "CK2_3D";
 const int kRenderSettingsOverrideCount = 64;
+const int kRenderSettingsOverrideSectionSize = 128;
 const int kRenderSettingsOverrideNameSize = 128;
 const int kRenderSettingsOverrideValueSize = 256;
 
 struct CKRenderSettingsOverride {
     bool Used;
+    char Section[kRenderSettingsOverrideSectionSize];
     char Name[kRenderSettingsOverrideNameSize];
     char Value[kRenderSettingsOverrideValueSize];
 };
@@ -78,12 +81,13 @@ VxConfiguration *CKRenderSettingsGetConfig() {
     return &s_Config;
 }
 
-int CKRenderSettingsFindOverride(const char *name) {
-    if (!name || name[0] == '\0')
+int CKRenderSettingsFindOverride(const char *section, const char *name) {
+    if (!section || section[0] == '\0' || !name || name[0] == '\0')
         return -1;
 
     for (int i = 0; i < kRenderSettingsOverrideCount; ++i) {
         if (g_RenderSettingsOverrides[i].Used &&
+            CKRenderSettingsStricmp(g_RenderSettingsOverrides[i].Section, section) == 0 &&
             CKRenderSettingsStricmp(g_RenderSettingsOverrides[i].Name, name) == 0) {
             return i;
         }
@@ -99,8 +103,8 @@ int CKRenderSettingsFindFreeOverride() {
     return -1;
 }
 
-bool CKRenderSettingsOverrideString(const char *name, char *buffer, CKDWORD bufferSize) {
-    int index = CKRenderSettingsFindOverride(name);
+bool CKRenderSettingsOverrideString(const char *section, const char *name, char *buffer, CKDWORD bufferSize) {
+    int index = CKRenderSettingsFindOverride(section, name);
     if (index < 0)
         return false;
     return CKRenderSettingsCopyString(buffer, bufferSize, g_RenderSettingsOverrides[index].Value);
@@ -129,36 +133,39 @@ bool CKRenderSettingsParseBool(const char *value, bool fallback) {
     return fallback;
 }
 
-bool CKRenderSettingsString(const char *name, char *buffer, CKDWORD bufferSize) {
-    if (!name || !buffer || bufferSize == 0)
+static bool CKRenderSettingsString(const char *section, const char *name, char *buffer, CKDWORD bufferSize) {
+    if (!section || !name || !buffer || bufferSize == 0)
         return false;
 
     buffer[0] = '\0';
-    if (CKRenderSettingsOverrideString(name, buffer, bufferSize))
+    if (CKRenderSettingsOverrideString(section, name, buffer, bufferSize))
         return true;
 
-    char entryName[256] = {0};
-    strcpy_s(entryName, kRenderSettingsSection);
-    strcat_s(entryName, ".");
-    strcat_s(entryName, name);
+    char sectionPath[256] = {0};
+    if (sprintf_s(sectionPath, "%s.%s", kRenderSettingsSection, section) < 0)
+        return false;
 
-    VxConfigurationEntry *entry = CKRenderSettingsGetConfig()->GetEntry(entryName, TRUE);
+    VxConfigurationSection *configSection = CKRenderSettingsGetConfig()->GetSubSection(sectionPath, TRUE);
+    if (!configSection)
+        return false;
+
+    VxConfigurationEntry *entry = configSection->GetEntry(name);
     if (!entry)
         return false;
 
     return CKRenderSettingsCopyString(buffer, bufferSize, entry->GetValue());
 }
 
-bool CKRenderSettingsBool(const char *name, bool fallback) {
+static bool CKRenderSettingsBool(const char *section, const char *name, bool fallback) {
     char value[32] = {0};
-    if (!CKRenderSettingsString(name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsString(section, name, value, (CKDWORD)sizeof(value)))
         return fallback;
     return CKRenderSettingsParseBool(value, fallback);
 }
 
-int CKRenderSettingsInt(const char *name, int fallback) {
+static int CKRenderSettingsInt(const char *section, const char *name, int fallback) {
     char value[64] = {0};
-    if (!CKRenderSettingsString(name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsString(section, name, value, (CKDWORD)sizeof(value)))
         return fallback;
 
     char *end = nullptr;
@@ -172,9 +179,9 @@ int CKRenderSettingsInt(const char *name, int fallback) {
     return (int)parsed;
 }
 
-CKDWORD CKRenderSettingsDword(const char *name, CKDWORD fallback) {
+static CKDWORD CKRenderSettingsDword(const char *section, const char *name, CKDWORD fallback) {
     char value[64] = {0};
-    if (!CKRenderSettingsString(name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsString(section, name, value, (CKDWORD)sizeof(value)))
         return fallback;
 
     char *end = nullptr;
@@ -183,94 +190,95 @@ CKDWORD CKRenderSettingsDword(const char *name, CKDWORD fallback) {
 }
 
 bool CKRenderSettingsDebugOutputEnabled(bool fallback) {
-    return CKRenderSettingsBool("DEBUG_OUTPUT", fallback);
+    return CKRenderSettingsBool("Debug", "Output", fallback);
 }
 
 bool CKRenderSettingsLogPath(char *buffer, CKDWORD bufferSize) {
-    return CKRenderSettingsString("LOG", buffer, bufferSize);
+    return CKRenderSettingsString("Debug", "LogPath", buffer, bufferSize);
 }
 
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
 bool CKRenderSettingsFrameLogEnabled() {
-    return CKRenderSettingsBool("DEBUG_FRAME_LOG", false);
+    return CKRenderSettingsBool("Debug.FrameLog", "Enabled", false);
 }
 
 bool CKRenderSettingsCameraAttachLogEnabled() {
-    return CKRenderSettingsBool("DEBUG_LOG_CAMERA_ATTACH", false);
+    return CKRenderSettingsBool("Debug.FrameLog", "CameraAttach", false);
 }
 
 bool CKRenderSettingsPresentSyncLogEnabled() {
-    return CKRenderSettingsBool("DEBUG_LOG_PRESENT_SYNC", false);
+    return CKRenderSettingsBool("Debug.FrameLog", "PresentSync", false);
 }
 
 bool CKRenderSettingsRenderedSceneCameraLogEnabled() {
-    return CKRenderSettingsBool("DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
+    return CKRenderSettingsBool("Debug.FrameLog", "RenderedSceneCamera", false);
 }
 #endif
 
 #if CKRE_ENABLE_RENDER_STATS
 bool CKRenderSettingsRenderStatsEnabled() {
-    return CKRenderSettingsBool("DEBUG_RENDER_STATS", false);
+    return CKRenderSettingsBool("Debug.RenderStats", "Enabled", false);
 }
 #endif
 
 bool CKRenderSettingsFFPUberShaderEnabled() {
-    return CKRenderSettingsBool("FFP_UBERSHADER", false);
+    return CKRenderSettingsBool("FFP", "UberShader", false);
 }
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
 bool CKRenderSettingsFFPStatsEnabled() {
-    return CKRenderSettingsBool("DEBUG_FFP_STATS", false);
+    return CKRenderSettingsBool("Debug.FFPStats", "Enabled", false);
 }
 
 bool CKRenderSettingsFFPUniformHistEnabled() {
-    return CKRenderSettingsBool("DEBUG_FFP_UNIFORM_HIST", false);
+    return CKRenderSettingsBool("Debug.FFPStats", "UniformHistogram", false);
 }
 
 int CKRenderSettingsFFPStatsInterval() {
-    int interval = CKRenderSettingsInt("DEBUG_FFP_STATS_INTERVAL", 60);
+    int interval = CKRenderSettingsInt("Debug.FFPStats", "Interval", 60);
     return interval > 0 ? interval : 60;
 }
 
 int CKRenderSettingsFFPDrawLogLimit() {
-    return CKRenderSettingsInt("DEBUG_DRAW_LOG_LIMIT", 0);
+    return CKRenderSettingsInt("Debug.FFPLog", "DrawLimit", 0);
 }
 
 int CKRenderSettingsFFPReal3DLogLimit() {
-    return CKRenderSettingsInt("DEBUG_REAL3D_LOG_LIMIT", 0);
+    return CKRenderSettingsInt("Debug.FFPLog", "Real3DLimit", 0);
 }
 
 int CKRenderSettingsFFPContract3DLogLimit() {
-    return CKRenderSettingsInt("DEBUG_3D_CONTRACT_LOG_LIMIT", 0);
+    return CKRenderSettingsInt("Debug.FFPLog", "Contract3DLimit", 0);
 }
 
 int CKRenderSettingsFFPPositionTLogLimit() {
-    return CKRenderSettingsInt("DEBUG_POSITIONT_LOG_LIMIT", 0);
+    return CKRenderSettingsInt("Debug.FFPLog", "PositionTLimit", 0);
 }
 
 bool CKRenderSettingsFFPDrawSerialPerFrame() {
-    return CKRenderSettingsBool("DEBUG_DRAW_SERIAL_PER_FRAME", false);
+    return CKRenderSettingsBool("Debug.FFPLog", "DrawSerialPerFrame", false);
 }
 #endif
 
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
 int CKRenderSettingsMeshContractLogLimit() {
-    return CKRenderSettingsInt("DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
+    return CKRenderSettingsInt("Debug.MeshLog", "ContractLimit", 0);
 }
 
 bool CKRenderSettingsMeshHardwareIndexRangesLogEnabled() {
-    return CKRenderSettingsBool("DEBUG_LOG_HW_INDEX_RANGES", false);
+    return CKRenderSettingsBool("Debug.MeshLog", "HardwareIndexRanges", false);
 }
 #endif
 
-void CKRenderSettingsSetOverrideForTests(const char *name, const char *value) {
-    if (!name || name[0] == '\0')
+void CKRenderSettingsSetOverrideForTests(const char *section, const char *name, const char *value) {
+    if (!section || section[0] == '\0' || !name || name[0] == '\0')
         return;
 
-    int index = CKRenderSettingsFindOverride(name);
+    int index = CKRenderSettingsFindOverride(section, name);
     if (!value) {
         if (index >= 0) {
             g_RenderSettingsOverrides[index].Used = false;
+            g_RenderSettingsOverrides[index].Section[0] = '\0';
             g_RenderSettingsOverrides[index].Name[0] = '\0';
             g_RenderSettingsOverrides[index].Value[0] = '\0';
         }
@@ -283,21 +291,23 @@ void CKRenderSettingsSetOverrideForTests(const char *name, const char *value) {
         return;
 
     g_RenderSettingsOverrides[index].Used = true;
+    strncpy_s(g_RenderSettingsOverrides[index].Section, section, _TRUNCATE);
     strncpy_s(g_RenderSettingsOverrides[index].Name, name, _TRUNCATE);
     strncpy_s(g_RenderSettingsOverrides[index].Value, value, _TRUNCATE);
 }
 
-bool CKRenderSettingsGetOverrideForTests(const char *name, char *buffer, CKDWORD bufferSize) {
+bool CKRenderSettingsGetOverrideForTests(const char *section, const char *name, char *buffer, CKDWORD bufferSize) {
     if (!buffer || bufferSize == 0)
         return false;
 
     buffer[0] = '\0';
-    return CKRenderSettingsOverrideString(name, buffer, bufferSize);
+    return CKRenderSettingsOverrideString(section, name, buffer, bufferSize);
 }
 
 void CKRenderSettingsClearOverridesForTests() {
     for (int i = 0; i < kRenderSettingsOverrideCount; ++i) {
         g_RenderSettingsOverrides[i].Used = false;
+        g_RenderSettingsOverrides[i].Section[0] = '\0';
         g_RenderSettingsOverrides[i].Name[0] = '\0';
         g_RenderSettingsOverrides[i].Value[0] = '\0';
     }
