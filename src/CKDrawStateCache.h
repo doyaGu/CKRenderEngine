@@ -26,6 +26,9 @@ public:
     CKDWORD GetColorWriteMask() const;
 
     CKDrawState BuildDrawState(VXPRIMITIVETYPE topology);
+    CKDWORD GetBuildCacheHits() const { return m_BuildCacheHits; }
+    CKDWORD GetBuildRebuilds() const { return m_BuildRebuilds; }
+    void ResetBuildStats();
 
     void Reset();
 
@@ -35,6 +38,8 @@ private:
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;
     CKDWORD m_ColorWriteMask;
+    CKDWORD m_BuildCacheHits;
+    CKDWORD m_BuildRebuilds;
 
     void SetDefaults();
 };

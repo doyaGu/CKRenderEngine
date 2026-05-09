@@ -37,6 +37,11 @@ protected:
     CKBOOL IsUpToDate();
 
     char *m_Text;
+    char *m_FontName;
+    int m_FontSize;
+    int m_FontWeight;
+    CKBOOL m_FontItalic;
+    CKBOOL m_FontUnderline;
     CKDWORD m_FontColor;
     CKDWORD m_BkColor;
     FONT_HANDLE m_Font;

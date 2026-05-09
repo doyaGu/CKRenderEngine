@@ -46,6 +46,8 @@ public:
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
+    CKDWORD GetLastVertexBytes() const { return m_LastVertexBytes; }
+    CKDWORD GetLastIndexBytes() const { return m_LastIndexBytes; }
 
     // Convert triangle fan/strip indices to triangle list.
     // Returns the number of output indices written to dst.
@@ -74,6 +76,8 @@ private:
     CKRasterizerContext *m_Context;
     CKVertexLayoutCache *m_LayoutCache;
     CKDWORD m_LastLayout;
+    CKDWORD m_LastVertexBytes;
+    CKDWORD m_LastIndexBytes;
     XArray<CKWORD> m_TempIndices;
 
     int ConvertToTriangleList(VXPRIMITIVETYPE srcType,

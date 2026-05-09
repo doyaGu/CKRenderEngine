@@ -16,6 +16,7 @@
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"
 #include "CKDebugLogger.h"
+#include "CKRenderPerfStats.h"
 #include "CKTransientGeometry.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
@@ -3362,6 +3363,10 @@ void RCKMesh::SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) {
 
 CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
     // Match IDA at 0x1001d852
+    const bool renderStats = CKRenderPerfStatsEnabled();
+    const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    if (renderStats)
+        ++CKRenderPerfCurrent().MeshRenderCalls;
     RCKRenderContext *rc = (RCKRenderContext *) Dev;
     RCK3dEntity *ent = (RCK3dEntity *) Mov;
 
@@ -3426,6 +3431,8 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
         DefaultRender(rc, ent);
     }
 
+    if (renderStats)
+        CKRenderPerfCurrent().MeshRenderUs += CKRenderPerfElapsedUs(perfStart);
     return 0;
 }
 
@@ -3963,6 +3970,10 @@ CKBOOL RCKMesh::IsPM() {
 // DefaultRender - Main mesh rendering function
 //--------------------------------------------
 int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
+    const bool renderStats = CKRenderPerfStatsEnabled();
+    const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    if (renderStats)
+        ++CKRenderPerfCurrent().MeshDefaultCalls;
     CKRasterizerContext *rstContext = rc->m_RasterizerContext;
 
     const int vertexCount = m_Vertices.Size();
@@ -3977,6 +3988,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     CKDWORD zbufOnly = 0;
     CKDWORD stencilOnly = 0;
     CKBOOL renderChannels = (m_MaterialChannels.Size() > 0) && ((m_Flags & VXMESH_RENDERCHANNELS) != 0);
+    if (renderStats && renderChannels)
+        ++CKRenderPerfCurrent().RenderChannelMeshes;
 
     RestoreSceneSpecularState(rc);
 
@@ -4206,9 +4219,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             m_Valid++;
             const CKDWORD vbCaps = CKRST_SPECIFICCAPS_CANDOVERTEXBUFFER | CKRST_SPECIFICCAPS_HARDWARETL;
             if (m_Valid > 3 && (rstContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & vbCaps) == vbCaps) {
+                if (renderStats)
+                    ++CKRenderPerfCurrent().VertexBufferChecks;
                 if (CheckHWVertexBuffer(rstContext, dp)) {
                     dp = nullptr; // Use HW vertex buffer instead
                     m_VertexBufferReady = 1;
+                    if (renderStats)
+                        ++CKRenderPerfCurrent().VertexBufferReady;
                 }
             } else {
                 m_VertexBufferReady = 0;
@@ -4314,6 +4331,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     if (m_ActiveTextureChannels.Size() > 0)
         rc->m_FFPipeline.DisableTextureStagesFrom(1);
 
+    if (renderStats)
+        CKRenderPerfCurrent().MeshDefaultUs += CKRenderPerfElapsedUs(perfStart);
     return 1;
 }
 
@@ -4322,6 +4341,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 // IDA: 0x10022829 (1864 bytes)
 //--------------------------------------------
 int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
+    const bool renderStats = CKRenderPerfStatsEnabled();
+    const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    if (renderStats) {
+        ++CKRenderPerfCurrent().MeshGroupCalls;
+        if (group && group->m_Material && group->m_Material->IsAlphaTransparent())
+            ++CKRenderPerfCurrent().AlphaGroups;
+    }
     RCKMaterial *mat = group->m_Material;
 
     // Check for pre-render submesh callbacks - sub_1002C220 checks if Size() > 0
@@ -4420,6 +4446,11 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             for (int p = 0; p < group->m_Primitives.Size(); p++) {
                 CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 if (prim->m_Indices.Size() > 0) {
+                    if (renderStats) {
+                        ++CKRenderPerfCurrent().PrimitiveEntries;
+                        ++CKRenderPerfCurrent().SoftwarePrimitiveEntries;
+                        CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
+                    }
                     static int s_meshContractLogCount = 0;
                     static const int s_MeshLogLimit =
                         MeshDebugEnvInt("CK2_3D_DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
@@ -4478,6 +4509,12 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                 CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 CKDWORD indexCount = prim->m_Indices.Size();
                 if (indexCount > 0) {
+                    if (renderStats) {
+                        ++CKRenderPerfCurrent().PrimitiveEntries;
+                        ++CKRenderPerfCurrent().HardwarePrimitiveEntries;
+                        ++CKRenderPerfCurrent().DrawVertexBufferCalls;
+                        CKRenderPerfCurrent().TotalGroupIndices += indexCount;
+                    }
                     CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
                     CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
                     static int s_meshContractLogCount = 0;
@@ -4551,6 +4588,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         dev->m_Stats.ObjectsCallbacksTime += dev->m_ObjectsCallbacksTimeProfiler.Current();
     }
 
+    if (renderStats)
+        CKRenderPerfCurrent().MeshGroupUs += CKRenderPerfElapsedUs(perfStart);
     return 1;
 }
 
@@ -4559,6 +4598,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
 // IDA: 0x10022f71 (1115 bytes)
 //--------------------------------------------
 int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable) {
+    const bool renderStats = CKRenderPerfStatsEnabled();
+    const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
     CKFFStateGuard ffpState(dev->m_FFPipeline);
 
@@ -4661,6 +4702,11 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
             indices = m_FaceVertexIndices.Begin();
             indexCount = m_FaceVertexIndices.Size();
         }
+        if (renderStats) {
+            ++CKRenderPerfCurrent().MeshChannelPasses;
+            ++CKRenderPerfCurrent().ChannelPrimitiveEntries;
+            CKRenderPerfCurrent().TotalChannelIndices += (CKDWORD)indexCount;
+        }
 
         dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
 
@@ -4678,6 +4724,8 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
     projMat[3][2] = origZ;
     dev->SetProjectionTransformationMatrix(projMat);
 
+    if (renderStats)
+        CKRenderPerfCurrent().MeshChannelsUs += CKRenderPerfElapsedUs(perfStart);
     return 1;
 }
 

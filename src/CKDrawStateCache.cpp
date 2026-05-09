@@ -1,18 +1,10 @@
 #include "CKDrawStateCache.h"
-#include <cstdlib>
 #include <cstring>
 
 static CKDWORD FloatState(float value) {
     CKDWORD bits = 0;
     memcpy(&bits, &value, sizeof(bits));
     return bits;
-}
-
-static bool EnvEnabled(const char *name) {
-    const char *value = std::getenv(name);
-    if (!value || !*value)
-        return false;
-    return value[0] != '0' && value[0] != 'n' && value[0] != 'N';
 }
 
 static CKDWORD RemapCullMode(CKDWORD mode) {
@@ -46,7 +38,8 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
 }
 
 CKDrawStateCache::CKDrawStateCache()
-    : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA) {
+    : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA),
+      m_BuildCacheHits(0), m_BuildRebuilds(0) {
     m_CachedState = {0, 0, 0};
     SetDefaults();
 }
@@ -102,6 +95,11 @@ void CKDrawStateCache::SetDefaults() {
 
 void CKDrawStateCache::Reset() {
     SetDefaults();
+}
+
+void CKDrawStateCache::ResetBuildStats() {
+    m_BuildCacheHits = 0;
+    m_BuildRebuilds = 0;
 }
 
 void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
@@ -171,8 +169,11 @@ CKDWORD CKDrawStateCache::GetColorWriteMask() const {
 }
 
 CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
-    if (m_DirtyMask == 0 && topology == m_LastTopology)
+    if (m_DirtyMask == 0 && topology == m_LastTopology) {
+        ++m_BuildCacheHits;
         return m_CachedState;
+    }
+    ++m_BuildRebuilds;
 
     m_LastTopology = topology;
 
@@ -190,8 +191,6 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Cull
     CKDWORD cullMode = m_States[VXRENDERSTATE_CULLMODE];
-    if (EnvEnabled("CK2_3D_DEBUG_NO_CULL"))
-        cullMode = VXCULL_NONE;
     if (m_States[VXRENDERSTATE_INVERSEWINDING]) {
         if (cullMode == VXCULL_CW)
             cullMode = VXCULL_CCW;
