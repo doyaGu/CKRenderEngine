@@ -9,17 +9,13 @@
 #endif
 #include <Windows.h>
 
-#ifndef CKRE_DEBUG_OUTPUT_DEFAULT
-#define CKRE_DEBUG_OUTPUT_DEFAULT 1
-#endif
-
 CKDebugLogger &CKDebugLogger::Instance() {
     static CKDebugLogger instance;
     return instance;
 }
 
 CKDebugLogger::CKDebugLogger()
-    : m_OutputEnabled(CKRenderSettingsDebugOutputEnabled(CKRE_DEBUG_OUTPUT_DEFAULT != 0)),
+    : m_OutputEnabled(CKRenderSettingsDebugOutputEnabled(false)),
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
       m_File(nullptr) {

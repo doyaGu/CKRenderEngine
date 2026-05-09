@@ -31,7 +31,22 @@ option(CKRE_BUILD_BGFX_RASTERIZER "Build bgfx rasterizer plugin targets" ON)
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
-option(CKRE_DEBUG_OUTPUT "Enable CK2_3D debug logger output by default; CK2_3D_DEBUG_OUTPUT can override at runtime" ON)
+option(CKRE_ENABLE_DIAGNOSTICS "Enable optional CK2_3D diagnostic code unless a category overrides it" OFF)
+option(CKRE_ENABLE_DEBUG_LOGGER "Enable CK2_3D internal diagnostic logger support" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_RENDER_STATS "Enable frame traversal and render wrapper timing diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_FFP_DIAGNOSTICS "Enable fixed-function pipeline stats, uniform histogram, and draw logging diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_FRAME_DIAGNOSTICS "Enable frame, camera, and present-sync diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_MESH_DIAGNOSTICS "Enable mesh contract and hardware index diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
+
+function(ckre_apply_diagnostic_definitions TARGET_NAME SCOPE)
+    target_compile_definitions(${TARGET_NAME} ${SCOPE}
+            CKRE_ENABLE_DEBUG_LOGGER=$<IF:$<BOOL:${CKRE_ENABLE_DEBUG_LOGGER}>,1,0>
+            CKRE_ENABLE_RENDER_STATS=$<IF:$<BOOL:${CKRE_ENABLE_RENDER_STATS}>,1,0>
+            CKRE_ENABLE_FFP_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_FFP_DIAGNOSTICS}>,1,0>
+            CKRE_ENABLE_FRAME_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_FRAME_DIAGNOSTICS}>,1,0>
+            CKRE_ENABLE_MESH_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_MESH_DIAGNOSTICS}>,1,0>
+    )
+endfunction()
 
 if ((CKRE_BUILD_TESTS OR CKRE_BUILD_EXAMPLES) AND NOT CKRE_BUILD_STATIC)
     message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests/examples require static libraries")
@@ -267,6 +282,12 @@ if (CKRE_IS_TOP_LEVEL)
     if (VIRTOOLS_SDK_PATH)
         message(STATUS "  Virtools SDK:         ${VIRTOOLS_SDK_PATH}")
     endif ()
+    message(STATUS "  Diagnostics:          ${CKRE_ENABLE_DIAGNOSTICS}")
+    message(STATUS "  Debug Logger:         ${CKRE_ENABLE_DEBUG_LOGGER}")
+    message(STATUS "  Render Stats:         ${CKRE_ENABLE_RENDER_STATS}")
+    message(STATUS "  FFP Diagnostics:      ${CKRE_ENABLE_FFP_DIAGNOSTICS}")
+    message(STATUS "  Frame Diagnostics:    ${CKRE_ENABLE_FRAME_DIAGNOSTICS}")
+    message(STATUS "  Mesh Diagnostics:     ${CKRE_ENABLE_MESH_DIAGNOSTICS}")
     message(STATUS "  Install:              ${CKRE_INSTALL}")
     message(STATUS "  Install Prefix:       ${CMAKE_INSTALL_PREFIX}")
     message(STATUS "============================================================")

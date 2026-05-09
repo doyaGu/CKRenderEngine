@@ -190,6 +190,7 @@ bool CKRenderSettingsLogPath(char *buffer, CKDWORD bufferSize) {
     return CKRenderSettingsString("LOG", buffer, bufferSize);
 }
 
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
 bool CKRenderSettingsFrameLogEnabled() {
     return CKRenderSettingsBool("DEBUG_FRAME_LOG", false);
 }
@@ -205,15 +206,19 @@ bool CKRenderSettingsPresentSyncLogEnabled() {
 bool CKRenderSettingsRenderedSceneCameraLogEnabled() {
     return CKRenderSettingsBool("DEBUG_LOG_RENDERED_SCENE_CAMERA", false);
 }
+#endif
 
+#if CKRE_ENABLE_RENDER_STATS
 bool CKRenderSettingsRenderStatsEnabled() {
     return CKRenderSettingsBool("DEBUG_RENDER_STATS", false);
 }
+#endif
 
 bool CKRenderSettingsFFPUberShaderEnabled() {
     return CKRenderSettingsBool("FFP_UBERSHADER", false);
 }
 
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
 bool CKRenderSettingsFFPStatsEnabled() {
     return CKRenderSettingsBool("DEBUG_FFP_STATS", false);
 }
@@ -246,7 +251,9 @@ int CKRenderSettingsFFPPositionTLogLimit() {
 bool CKRenderSettingsFFPDrawSerialPerFrame() {
     return CKRenderSettingsBool("DEBUG_DRAW_SERIAL_PER_FRAME", false);
 }
+#endif
 
+#if CKRE_ENABLE_MESH_DIAGNOSTICS
 int CKRenderSettingsMeshContractLogLimit() {
     return CKRenderSettingsInt("DEBUG_MESH_CONTRACT_LOG_LIMIT", 0);
 }
@@ -254,6 +261,7 @@ int CKRenderSettingsMeshContractLogLimit() {
 bool CKRenderSettingsMeshHardwareIndexRangesLogEnabled() {
     return CKRenderSettingsBool("DEBUG_LOG_HW_INDEX_RANGES", false);
 }
+#endif
 
 void CKRenderSettingsSetOverrideForTests(const char *name, const char *value) {
     if (!name || name[0] == '\0')
