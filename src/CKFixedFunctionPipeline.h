@@ -86,6 +86,12 @@ struct CKFFFrameStats {
     CKBOOL HasLastWorldMatrix;
 };
 
+struct CKFFDiagnosticConfig {
+    bool StatsEnabled;
+    bool UniformHistEnabled;
+    int StatsInterval;
+};
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -189,6 +195,7 @@ private:
     // Dirty tracking
     CKDWORD m_DirtyFlags;
     CKFFFrameStats m_FrameStats;
+    CKFFDiagnosticConfig m_DiagnosticConfig;
 
     // Internal methods
     CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);

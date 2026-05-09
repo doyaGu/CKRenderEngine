@@ -7,6 +7,8 @@
 #include "CKFFShaderCache.h"
 #include "CKFFUniformState.h"
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
+#include "CKRenderPerfStats.h"
 #include "CKRasterizer.h"
 #include "CKRenderPipeline.h"
 #include "RCKRenderContext.h"
@@ -1134,6 +1136,75 @@ void Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted() {
               "FFP draws with one bound texture must submit exactly one texture binding");
 }
 
+void Test_RenderDebugEnv_BoolParserSupportsNamedValues() {
+    TestCheck(CKRenderDebugParseBool("1", false) == true,
+              "Render debug env bool parser must accept 1 as enabled");
+    TestCheck(CKRenderDebugParseBool("true", false) == true,
+              "Render debug env bool parser must accept true as enabled");
+    TestCheck(CKRenderDebugParseBool("on", false) == true,
+              "Render debug env bool parser must accept on as enabled");
+    TestCheck(CKRenderDebugParseBool("yes", false) == true,
+              "Render debug env bool parser must accept yes as enabled");
+    TestCheck(CKRenderDebugParseBool("0", true) == false,
+              "Render debug env bool parser must accept 0 as disabled");
+    TestCheck(CKRenderDebugParseBool("false", true) == false,
+              "Render debug env bool parser must accept false as disabled");
+    TestCheck(CKRenderDebugParseBool("off", true) == false,
+              "Render debug env bool parser must accept off as disabled");
+    TestCheck(CKRenderDebugParseBool("no", true) == false,
+              "Render debug env bool parser must accept no as disabled");
+    TestCheck(CKRenderDebugParseBool("", true) == true &&
+                  CKRenderDebugParseBool("maybe", false) == false,
+              "Render debug env bool parser must preserve fallback for empty or unknown values");
+}
+
+static void SetTestEnvVar(const char *name, const char *value) {
+#if defined(_WIN32)
+    _putenv_s(name, value ? value : "");
+#else
+    if (value)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
+
+void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
+    SetTestEnvVar("CK2_3D_DEBUG_FFP_STATS", "0");
+    SetTestEnvVar("CK2_3D_DEBUG_FFP_UNIFORM_HIST", "0");
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext ctx(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&ctx);
+
+    CKRenderPerfResetNowCallCountForTests();
+    DrawDiagnosticPositionTTriangle(ffp, ctx);
+
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(CKRenderPerfNowCallCountForTests() == 0,
+              "Disabled FFP stats must not call the high-frequency timing entry");
+    TestCheck(stats.PrepareUs == 0.0 && stats.StateUs == 0.0 && stats.ProgramUs == 0.0 &&
+                  stats.UniformUs == 0.0 && stats.SubmitUs == 0.0,
+              "Disabled FFP stats must leave per-draw timing buckets untouched");
+    TestCheck(stats.UniformHandleSets[1] == 0 && stats.UniformHandleVec4s[1] == 0,
+              "Disabled FFP uniform histogram must not collect per-uniform counters");
+}
+
+void Test_DiagnosticStats_EnvGatesKeepLogTags() {
+    std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
+    std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+
+    TestCheck(perfSource.find("CK2_3D_DEBUG_RENDER_STATS") != std::string::npos &&
+                  perfSource.find("\"RenderStats\"") != std::string::npos,
+              "CK2_3D_DEBUG_RENDER_STATS enabled path must keep emitting RenderStats logs");
+    TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_STATS") != std::string::npos &&
+                  ffpSource.find("\"FFPStats\"") != std::string::npos,
+              "CK2_3D_DEBUG_FFP_STATS enabled path must keep emitting FFPStats logs");
+    TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
+                  ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
+              "FFP uniform histogram must remain available behind its explicit env gate");
+}
+
 class ScopedEnvVar {
 public:
     ScopedEnvVar(const char *name, const char *value) : m_Name(name) {
@@ -1171,6 +1242,7 @@ private:
 };
 
 void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
+    ScopedEnvVar statsEnv("CK2_3D_DEBUG_FFP_STATS", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -3512,9 +3584,7 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
               "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
     TestCheck(source.find("CK2_3D_DEBUG_OUTPUT") != std::string::npos &&
               source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
-              source.find("_stricmp(value, \"false\")") != std::string::npos &&
-              source.find("_stricmp(value, \"off\")") != std::string::npos &&
-              source.find("_stricmp(value, \"no\")") != std::string::npos,
+              source.find("CKRenderDebugEnvBool(\"CK2_3D_DEBUG_OUTPUT\"") != std::string::npos,
               "Debug logger must use the CMake default and support CK2_3D_DEBUG_OUTPUT=0/false/off/no as a runtime override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
@@ -3605,6 +3675,9 @@ int main() {
     tests.Run("FFP diagnostic PositionT default COLOR1", &Test_FFPDiagnosticHarness_PositionTDefaultColor1KeepsRGBBlack);
     tests.Run("FFP diagnostic blend fixup reaches draw state", &Test_FFPDiagnosticHarness_BlendFixupReachesSubmittedDrawState);
     tests.Run("FFP diagnostic unbound texture stages are not submitted", &Test_FFPDiagnosticHarness_UnboundTextureStagesAreNotSubmitted);
+    tests.Run("Render debug env bool parser", &Test_RenderDebugEnv_BoolParserSupportsNamedValues);
+    tests.Run("FFP diagnostics disabled stats skip timing and histogram", &Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram);
+    tests.Run("Diagnostic stats env gates keep log tags", &Test_DiagnosticStats_EnvGatesKeepLogTags);
     tests.Run("FFP diagnostic frame stats capture draw costs", &Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts);
     tests.Run("FFP diagnostic full specialized skips uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors);
     tests.Run("FFP diagnostic full specialized unlit 3D skips light uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms);
