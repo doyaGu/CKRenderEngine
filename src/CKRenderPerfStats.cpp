@@ -1,7 +1,7 @@
 #include "CKRenderPerfStats.h"
 #include "CKDebugLogger.h"
+#include "CKRenderDebugEnv.h"
 
-#include <cstdlib>
 #include <cstring>
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -11,16 +11,15 @@
 #endif
 
 static CKRenderPerfStats g_RenderPerfStats = {};
+static CKDWORD g_RenderPerfNowCallCount = 0;
 
 bool CKRenderPerfStatsEnabled() {
-    static const bool enabled = []() {
-        const char *value = std::getenv("CK2_3D_DEBUG_RENDER_STATS");
-        return value && value[0] != '\0' && value[0] != '0';
-    }();
+    static const bool enabled = CKRenderDebugEnvBool("CK2_3D_DEBUG_RENDER_STATS", false);
     return enabled;
 }
 
 double CKRenderPerfNow() {
+    ++g_RenderPerfNowCallCount;
 #if defined(_WIN32)
     LARGE_INTEGER counter;
     QueryPerformanceCounter(&counter);
@@ -28,6 +27,14 @@ double CKRenderPerfNow() {
 #else
     return 0.0;
 #endif
+}
+
+void CKRenderPerfResetNowCallCountForTests() {
+    g_RenderPerfNowCallCount = 0;
+}
+
+CKDWORD CKRenderPerfNowCallCountForTests() {
+    return g_RenderPerfNowCallCount;
 }
 
 double CKRenderPerfElapsedUs(double start) {

@@ -54,6 +54,8 @@ struct CKRenderPerfStats {
 bool CKRenderPerfStatsEnabled();
 double CKRenderPerfNow();
 double CKRenderPerfElapsedUs(double start);
+void CKRenderPerfResetNowCallCountForTests();
+CKDWORD CKRenderPerfNowCallCountForTests();
 void CKRenderPerfBeginFrame(CKDWORD entities3D, CKDWORD entities2D, CKDWORD cameras, CKDWORD lights);
 void CKRenderPerfAddSection(CKRenderPerfSection section, double us);
 void CKRenderPerfLogAndReset();
