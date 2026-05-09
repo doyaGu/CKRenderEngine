@@ -1,5 +1,7 @@
 #include "CKRasterizer.h"
 
+#include <string.h>
+
 class CKNULLRasterizerEncoder : public CKRasterizerEncoder {
 public:
     void SetState(CKDrawState State) override {}
