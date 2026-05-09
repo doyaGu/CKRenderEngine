@@ -1,6 +1,7 @@
 #ifndef CKFFDEBUG_H
 #define CKFFDEBUG_H
 
+#include "CKRenderConfig.h"
 #include "VxMath.h"
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerEnums.h"
@@ -11,6 +12,8 @@
 
 struct VxDrawPrimitiveData;
 
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+
 struct CKFFDebugConfig {
     int DrawLogLimit;
     int Real3DLogLimit;
@@ -20,6 +23,20 @@ struct CKFFDebugConfig {
 
     static const CKFFDebugConfig &Get();
 };
+
+#else
+
+struct CKFFDebugConfig {
+    int DrawLogLimit = 0;
+    int Real3DLogLimit = 0;
+    int Contract3DLogLimit = 0;
+    int PositionTLogLimit = 0;
+    bool DrawSerialPerFrame = false;
+
+    static const CKFFDebugConfig &Get() { static CKFFDebugConfig c; return c; }
+};
+
+#endif
 
 struct CKFFDrawDebugStage {
     CKDWORD ColorOp;
@@ -60,6 +77,8 @@ struct CKFFDrawDebugInfo {
     CKDWORD VertexLayout;
 };
 
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+
 class CKFFDebugState {
 public:
     CKFFDebugState();
@@ -96,5 +115,23 @@ private:
     int m_Transparent3DDrawSerial;
     int m_3DContractLogCount;
 };
+
+#else
+
+class CKFFDebugState {
+public:
+    CKFFDebugState() {}
+    void BeginFrame() {}
+    bool AnyLoggingEnabled() const { return false; }
+    int NextDrawSerial(CKRenderView) { return -1; }
+    void LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &) {}
+    void LogDrawPrimitivePrepareFailed() {}
+    void LogDrawPrimitiveProgramMissing() {}
+    void LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &) {}
+    void LogDrawVertexBufferHeader(const CKFFDrawDebugInfo &) {}
+    void LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &) {}
+};
+
+#endif
 
 #endif // CKFFDEBUG_H

@@ -1,5 +1,9 @@
 #pragma once
 
+#include "CKRenderConfig.h"
+
+#if CKRE_ENABLE_DEBUG_LOGGER
+
 #include <cstdio>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,7 +43,16 @@ private:
     CRITICAL_SECTION m_CriticalSection;
 };
 
-#define CK_LOG_RAW(msg) CKDebugLogger::Instance().Log(msg)
-#define CK_LOG_RAW_FMT(fmt, ...) CKDebugLogger::Instance().Logf(fmt, __VA_ARGS__)
-#define CK_LOG(category, msg) CKDebugLogger::Instance().LogTagged(category, msg)
-#define CK_LOG_FMT(category, fmt, ...) CKDebugLogger::Instance().LogTaggedf(category, fmt, __VA_ARGS__)
+#define CK_LOG_RAW(msg)                  CKDebugLogger::Instance().Log(msg)
+#define CK_LOG_RAW_FMT(fmt, ...)         CKDebugLogger::Instance().Logf(fmt, __VA_ARGS__)
+#define CK_LOG(category, msg)            CKDebugLogger::Instance().LogTagged(category, msg)
+#define CK_LOG_FMT(category, fmt, ...)   CKDebugLogger::Instance().LogTaggedf(category, fmt, __VA_ARGS__)
+
+#else
+
+#define CK_LOG_RAW(msg)                  ((void)0)
+#define CK_LOG_RAW_FMT(fmt, ...)         ((void)0)
+#define CK_LOG(category, msg)            ((void)0)
+#define CK_LOG_FMT(category, fmt, ...)   ((void)0)
+
+#endif

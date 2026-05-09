@@ -1,4 +1,7 @@
 #include "CKRenderPerfStats.h"
+
+#if CKRE_ENABLE_RENDER_STATS
+
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 
@@ -123,3 +126,5 @@ void CKRenderPerfLogAndReset() {
 
     ++g_RenderPerfStats.FrameIndex;
 }
+
+#endif // CKRE_ENABLE_RENDER_STATS

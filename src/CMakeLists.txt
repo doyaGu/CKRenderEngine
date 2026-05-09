@@ -57,6 +57,9 @@ set(CKRE_PUBLIC_HEADERS
 
 set(CKRE_PRIVATE_HEADERS
         CKFixedFunctionPipeline.h
+        CKRenderConfig.h
+        CKDebugLogger.h
+        CKException.h
         CKFFDebug.h
         CKFFStageState.h
         CKFFUniformState.h
@@ -126,7 +129,6 @@ set(CKRE_SOURCES
         CKRasterizer/CKNULLRasterizer.cpp
 
         CKFixedFunctionPipeline.cpp
-        CKFFDebug.cpp
         CKFFStageState.cpp
         CKFFUniformState.cpp
         CKFFShaderKey.cpp
@@ -139,13 +141,21 @@ set(CKRE_SOURCES
         CKRenderPipeline.cpp
         CKFrustumCuller.cpp
         CKRenderSettings.cpp
-        CKRenderPerfStats.cpp
-
-        CKDebugLogger.cpp
-        CKException.cpp
 
         CK2_3D.rc
 )
+
+if (CKRE_ENABLE_DEBUG_LOGGER)
+    list(APPEND CKRE_SOURCES CKDebugLogger.cpp CKException.cpp)
+endif ()
+
+if (CKRE_ENABLE_RENDER_STATS)
+    list(APPEND CKRE_SOURCES CKRenderPerfStats.cpp)
+endif ()
+
+if (CKRE_ENABLE_FFP_DIAGNOSTICS)
+    list(APPEND CKRE_SOURCES CKFFDebug.cpp)
+endif ()
 
 # Add the bgfx rasterizer plugin targets when requested.
 if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
@@ -207,9 +217,7 @@ function(ckre_configure_target TARGET_NAME)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
 
-    target_compile_definitions(${TARGET_NAME} PRIVATE
-            CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>
-    )
+    ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
 
     set_target_properties(${TARGET_NAME} PROPERTIES
             VERSION ${PROJECT_VERSION}

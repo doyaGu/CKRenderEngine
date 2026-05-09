@@ -9,6 +9,7 @@ function(ckre_add_test TARGET_NAME)
         CK2
         VxMath
     )
+    ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     )

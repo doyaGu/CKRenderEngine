@@ -1,4 +1,7 @@
 #include "CKFFDebug.h"
+
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 #include "CKVertexLayoutCache.h"
@@ -447,3 +450,5 @@ const char *CKFFDebugState::PrimitiveName(VXPRIMITIVETYPE type) const {
     default: return "UNKNOWN";
     }
 }
+
+#endif // CKRE_ENABLE_FFP_DIAGNOSTICS

@@ -1,15 +1,22 @@
 #pragma once
 
+#include "CKRenderConfig.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
 
-// Installs the CK2_3D unhandled exception filter and prepares symbol handling.
+#if CKRE_ENABLE_DEBUG_LOGGER
+
 void CKInstallExceptionHandler();
-
-// Removes the previously installed exception filter and releases symbol resources.
 void CKRemoveExceptionHandler();
-
-// Unhandled exception callback; exposed for testing or explicit invocation.
 LONG WINAPI CKExceptionHandler(EXCEPTION_POINTERS *pExceptionInfo);
+
+#else
+
+inline void CKInstallExceptionHandler() {}
+inline void CKRemoveExceptionHandler() {}
+inline LONG WINAPI CKExceptionHandler(EXCEPTION_POINTERS *) { return EXCEPTION_CONTINUE_SEARCH; }
+
+#endif

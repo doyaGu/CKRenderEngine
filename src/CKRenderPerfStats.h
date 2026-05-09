@@ -1,6 +1,7 @@
 #ifndef CK_RENDER_PERF_STATS_H
 #define CK_RENDER_PERF_STATS_H
 
+#include "CKRenderConfig.h"
 #include "CKTypes.h"
 
 enum CKRenderPerfSection {
@@ -51,6 +52,7 @@ struct CKRenderPerfStats {
     double DrawPrimitiveWrapperUs;
 };
 
+#if CKRE_ENABLE_RENDER_STATS
 bool CKRenderPerfStatsEnabled();
 double CKRenderPerfNow();
 double CKRenderPerfElapsedUs(double start);
@@ -60,5 +62,16 @@ void CKRenderPerfBeginFrame(CKDWORD entities3D, CKDWORD entities2D, CKDWORD came
 void CKRenderPerfAddSection(CKRenderPerfSection section, double us);
 void CKRenderPerfLogAndReset();
 CKRenderPerfStats &CKRenderPerfCurrent();
+#else
+inline bool CKRenderPerfStatsEnabled() { return false; }
+inline double CKRenderPerfNow() { return 0.0; }
+inline double CKRenderPerfElapsedUs(double) { return 0.0; }
+inline void CKRenderPerfResetNowCallCountForTests() {}
+inline CKDWORD CKRenderPerfNowCallCountForTests() { return 0; }
+inline void CKRenderPerfBeginFrame(CKDWORD, CKDWORD, CKDWORD, CKDWORD) {}
+inline void CKRenderPerfAddSection(CKRenderPerfSection, double) {}
+inline void CKRenderPerfLogAndReset() {}
+inline CKRenderPerfStats &CKRenderPerfCurrent() { static CKRenderPerfStats s = {}; return s; }
+#endif
 
 #endif
