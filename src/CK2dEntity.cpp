@@ -30,11 +30,6 @@ static bool LogFullscreenBlack2DEnabled() {
     return enabled;
 }
 
-static bool SkipFullscreenBlack2DEnabled() {
-    static const bool enabled = EnvFlagEnabled("CK2_3D_DEBUG_SKIP_FULLSCREEN_BLACK_2D");
-    return enabled;
-}
-
 CK_CLASSID RCK2dEntity::m_ClassID = CKCID_2DENTITY;
 
 CK_CLASSID RCK2dEntity::GetClassID() {
@@ -934,13 +929,6 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
                        m_Material->GetName() ? m_Material->GetName() : "<unnamed>");
             s_BlackFullscreenLogCount++;
         }
-        if (isFullscreenBlack && SkipFullscreenBlack2DEnabled()) {
-            if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
-                dev->SetViewRect(savedViewRect);
-            }
-            return CK_OK;
-        }
-
         // Draw quad as triangle fan
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 

@@ -176,7 +176,8 @@ static void ReadTexcoord0(VxDrawPrimitiveData *data, CKDWORD srcIndex, float uv[
 }
 
 CKTransientGeometry::CKTransientGeometry()
-    : m_Context(nullptr), m_LayoutCache(nullptr), m_LastLayout(0) {}
+    : m_Context(nullptr), m_LayoutCache(nullptr), m_LastLayout(0),
+      m_LastVertexBytes(0), m_LastIndexBytes(0) {}
 
 CKTransientGeometry::~CKTransientGeometry() {
     Shutdown();
@@ -204,6 +205,8 @@ CKBOOL CKTransientGeometry::Prepare(
 {
     if (!data || data->VertexCount == 0 || !m_Context || !encoder)
         return FALSE;
+    m_LastVertexBytes = 0;
+    m_LastIndexBytes = 0;
 
     // Determine vertex format from data
     bool hasNormal = (data->NormalPtr != nullptr);
@@ -236,12 +239,14 @@ CKBOOL CKTransientGeometry::Prepare(
         const CKDWORD spriteVertexCount = vertexCount * 4;
         if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
             return FALSE;
+        m_LastVertexBytes = tvb.Size;
 
         CKTransientIndexBuffer tib;
         memset(&tib, 0, sizeof(tib));
         const CKDWORD spriteIndexCount = vertexCount * 6;
         if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, FALSE))
             return FALSE;
+        m_LastIndexBytes = tib.Size;
 
         VxMatrix invWorld;
         VxMatrix invView;
@@ -361,6 +366,7 @@ CKBOOL CKTransientGeometry::Prepare(
         memset(&tvb, 0, sizeof(tvb));
         if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)triangleIndices.Size(), layoutHandle))
             return FALSE;
+        m_LastVertexBytes = tvb.Size;
 
         for (int i = 0; i < triangleIndices.Size(); i += 3) {
             float uv[3][2];
@@ -384,6 +390,7 @@ CKBOOL CKTransientGeometry::Prepare(
     memset(&tvb, 0, sizeof(tvb));
     if (!m_Context->AllocTransientVertexBuffer(&tvb, vertexCount, layoutHandle))
         return FALSE;
+    m_LastVertexBytes = tvb.Size;
 
     // Interleave vertex data into the transient buffer
     InterleaveVertices(tvb.Data, stride, vertexCount, formatFlags, data);
@@ -402,6 +409,7 @@ CKBOOL CKTransientGeometry::Prepare(
         memset(&tib, 0, sizeof(tib));
         if (!m_Context->AllocTransientIndexBuffer(&tib, maxTriListIndices, FALSE))
             return FALSE;
+        m_LastIndexBytes = tib.Size;
 
         if (indices && indexCount > 0) {
             ConvertPrimitiveToTriangleList(primType, indices, srcCount, (CKWORD *)tib.Data);
@@ -419,6 +427,7 @@ CKBOOL CKTransientGeometry::Prepare(
         memset(&tib, 0, sizeof(tib));
         if (!m_Context->AllocTransientIndexBuffer(&tib, indexCount, FALSE))
             return FALSE;
+        m_LastIndexBytes = tib.Size;
         memcpy(tib.Data, indices, indexCount * sizeof(CKWORD));
         encoder->SetTransientIndexBuffer(&tib);
     }

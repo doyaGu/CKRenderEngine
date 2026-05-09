@@ -8,6 +8,7 @@
 #endif
 
 #include "CKDebugLogger.h"
+#include "CKRenderPerfStats.h"
 
 #include "VxMath.h"
 #include "VxIntersect.h"
@@ -1523,10 +1524,14 @@ CKDWORD RCKRenderContext::GetFogColor() {
 }
 
 CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data) {
+    const bool renderStats = CKRenderPerfStatsEnabled();
+    const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
     if (!data)
         return FALSE;
     if (data->VertexCount <= 0)
         return FALSE;
+    if (renderStats)
+        ++CKRenderPerfCurrent().DrawPrimitiveCalls;
 
     // Set lighting mode based on normals
     if ((data->Flags & CKRST_DP_LIGHT) != 0 && data->NormalPtr) {
@@ -1580,6 +1585,8 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     VxDrawPrimitiveData drawData = *data;
     drawData.Flags &= ~CKRST_DP_VBUFFER;
     m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
+    if (renderStats)
+        CKRenderPerfCurrent().DrawPrimitiveWrapperUs += CKRenderPerfElapsedUs(perfStart);
     return TRUE;
 }
 
