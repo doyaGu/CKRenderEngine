@@ -1,5 +1,5 @@
 #include "CKDebugLogger.h"
-#include "CKRenderDebugEnv.h"
+#include "CKRenderDebugConfig.h"
 
 #include <cstdarg>
 #include <cstring>
@@ -13,8 +13,8 @@
 #define CKRE_DEBUG_OUTPUT_DEFAULT 1
 #endif
 
-static bool EnvDebugOutputEnabled() {
-    return CKRenderDebugEnvBool("CK2_3D_DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
+static bool ConfigDebugOutputEnabled() {
+    return CKRenderDebugConfigBool("CK2_3D_DEBUG_OUTPUT", CKRE_DEBUG_OUTPUT_DEFAULT != 0);
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
@@ -23,7 +23,7 @@ CKDebugLogger &CKDebugLogger::Instance() {
 }
 
 CKDebugLogger::CKDebugLogger()
-    : m_OutputEnabled(EnvDebugOutputEnabled()),
+    : m_OutputEnabled(ConfigDebugOutputEnabled()),
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
       m_File(nullptr) {
@@ -50,9 +50,9 @@ CKDebugLogger::CKDebugLogger()
         strncpy_s(m_LogFilePath, MAX_PATH, "CK2_3D_Debug.log", _TRUNCATE);
     }
 
-    char envPath[MAX_PATH] = {0};
-    if (CKRenderDebugEnvString("CK2_3D_LOG", envPath, MAX_PATH)) {
-        strncpy_s(m_LogFilePath, MAX_PATH, envPath, _TRUNCATE);
+    char configPath[MAX_PATH] = {0};
+    if (CKRenderDebugConfigString("CK2_3D_LOG", configPath, MAX_PATH)) {
+        strncpy_s(m_LogFilePath, MAX_PATH, configPath, _TRUNCATE);
     }
 }
 
