@@ -40,6 +40,10 @@
 #include "RCKSprite.h"
 #include "RCKSpriteText.h"
 
+#ifdef CK_LIB
+#define CKGetPluginInfo CKGet_CK2_3D_PluginInfo
+#endif
+
 #define VIRTOOLS_RENDERENGIEN_GUID CKGUID(0xAABCF63, 0)
 
 extern void SetProcessorSpecific_FunctionsPtr();
@@ -85,9 +89,16 @@ void RegisterRasterizer(const char *dll) {
 }
 
 void EnumerateRasterizers() {
-    char moduleName[MAX_PATH];
-
     if (!g_EnumerationDone) {
+#ifdef CK_LIB
+        extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
+        CKRasterizerInfo info;
+        CKBgfxRasterizerGetInfo(&info);
+        info.DllInstance = nullptr;
+        info.DllName = "CKBgfxRasterizer";
+        g_RasterizersInfo.PushBack(info);
+#else
+        char moduleName[MAX_PATH];
         VxGetModuleFileName(g_DllHandle, moduleName, MAX_PATH);
         CKPathSplitter ps(moduleName);
 
@@ -135,6 +146,7 @@ void EnumerateRasterizers() {
             info.Desc = "NULL Rasterizer";
             g_RasterizersInfo.PushBack(info);
         }
+#endif
 
         g_EnumerationDone = TRUE;
     }
@@ -181,7 +193,7 @@ CKERROR ExitInstanceFct(CKContext *context) {
     return CK_OK;
 }
 
-PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo() {
+PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo(int) {
     EnumerateRasterizers();
     InitializeCK2_3D();
     SetProcessorSpecific_FunctionsPtr();

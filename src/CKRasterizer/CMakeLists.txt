@@ -37,6 +37,10 @@ if (CKRE_BUILD_STATIC)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
             FOLDER "Rasterizer"
     )
+
+    if (NOT TARGET CKBgfxRasterizer)
+        add_library(CKBgfxRasterizer ALIAS CKBgfxRasterizerStatic)
+    endif ()
 endif ()
 
 foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
@@ -82,7 +86,7 @@ endif ()
 
 # Installation
 if (CKRE_INSTALL)
-    if (TARGET CKBgfxRasterizer)
+    if (CKRE_BUILD_SHARED AND TARGET CKBgfxRasterizer)
         install(TARGETS CKBgfxRasterizer
                 EXPORT CKRenderEngineTargets
                 RUNTIME DESTINATION RenderEngines
