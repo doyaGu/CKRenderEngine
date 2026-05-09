@@ -1167,8 +1167,8 @@ static void SetTestDebugConfig(const char *name, const char *value) {
 }
 
 void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
-    SetTestDebugConfig("CK2_3D_DEBUG_FFP_STATS", "0");
-    SetTestDebugConfig("CK2_3D_DEBUG_FFP_UNIFORM_HIST", "0");
+    SetTestDebugConfig("DEBUG_FFP_STATS", "0");
+    SetTestDebugConfig("DEBUG_FFP_UNIFORM_HIST", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1191,15 +1191,15 @@ void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
     std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
     std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
 
-    TestCheck(perfSource.find("CK2_3D_DEBUG_RENDER_STATS") != std::string::npos &&
+    TestCheck(perfSource.find("DEBUG_RENDER_STATS") != std::string::npos &&
                   perfSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   perfSource.find("\"RenderStats\"") != std::string::npos,
-              "CK2_3D_DEBUG_RENDER_STATS enabled path must keep emitting RenderStats logs");
-    TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_STATS") != std::string::npos &&
+              "DEBUG_RENDER_STATS enabled path must keep emitting RenderStats logs");
+    TestCheck(ffpSource.find("DEBUG_FFP_STATS") != std::string::npos &&
                   ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   ffpSource.find("\"FFPStats\"") != std::string::npos,
-              "CK2_3D_DEBUG_FFP_STATS enabled path must keep emitting FFPStats logs");
-    TestCheck(ffpSource.find("CK2_3D_DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
+              "DEBUG_FFP_STATS enabled path must keep emitting FFPStats logs");
+    TestCheck(ffpSource.find("DEBUG_FFP_UNIFORM_HIST") != std::string::npos &&
                   ffpSource.find("CKRenderDebugConfigBool") != std::string::npos &&
                   ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
               "FFP uniform histogram must remain available behind its explicit config gate");
@@ -1256,7 +1256,7 @@ private:
 };
 
 void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
-    ScopedDebugConfigValue statsConfig("CK2_3D_DEBUG_FFP_STATS", "1");
+    ScopedDebugConfigValue statsConfig("DEBUG_FFP_STATS", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1293,7 +1293,7 @@ void DrawDiagnosticFullSpecializedTexturedTriangle(CKFixedFunctionPipeline &ffp,
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1313,7 +1313,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1355,7 +1355,7 @@ static CKLightData MakeDiagnosticDirectionalLight(float r, float g, float b) {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1386,7 +1386,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1417,7 +1417,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUni
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1449,7 +1449,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1480,7 +1480,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
-    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1511,7 +1511,7 @@ void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
-    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1952,7 +1952,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               cacheHeader.find("m_PositionTProgram") == std::string::npos &&
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
               "Clean-break FFP shader cache must not keep the old fixed-program selection API");
-    TestCheck(cacheSource.find("CK2_FFP_UBERSHADER") != std::string::npos &&
+    TestCheck(cacheSource.find("FFP_UBERSHADER") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, program != 0, module.Specialization)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, false, specInfo)") != std::string::npos,
@@ -1971,7 +1971,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
     TestCheck(cacheSource.find("CreateFullSpecializedProgram") != std::string::npos &&
               cacheSource.find("CKFFFindSpecializedModule") != std::string::npos &&
               cacheSource.find("Full FFP specialized module cache miss") != std::string::npos,
-              "CK2_FFP_UBERSHADER=0 must use an explicit full-specialized module lookup path, not silently reuse the uber blob");
+              "FFP_UBERSHADER=0 must use an explicit full-specialized module lookup path, not silently reuse the uber blob");
     TestCheck(moduleHeader.find("struct CKFFSpecializedModule") != std::string::npos &&
               moduleHeader.find("struct CKFFSpecializedModuleEntry") != std::string::npos &&
               moduleHeader.find("CKFFFindSpecializedModule") != std::string::npos &&
@@ -2065,7 +2065,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2093,7 +2093,7 @@ void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
     CKDWORD program = cache.GetProgram(key);
     TestCheck(!cache.UsesUberShader() &&
               cache.GetShaderMode() == CKFF_SHADER_MODE_FULL_SPECIALIZED,
-              "CK2_FFP_UBERSHADER=0 must select full-specialized FFP shader mode");
+              "FFP_UBERSHADER=0 must select full-specialized FFP shader mode");
     TestCheck(program != 0 &&
               cache.CachedProgramCount() == 1 &&
               ctx.CreatedShaderCount == 2 &&
@@ -2152,7 +2152,7 @@ CKFFShaderKey MakeUncataloguedFFPUberKey() {
 }
 
 void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgram() {
-    ScopedDebugConfigValue unsetUber("CK2_FFP_UBERSHADER", nullptr);
+    ScopedDebugConfigValue unsetUber("FFP_UBERSHADER", nullptr);
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2165,7 +2165,7 @@ void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgr
 
     TestCheck(!cache.UsesUberShader() &&
               cache.GetShaderMode() == CKFF_SHADER_MODE_FULL_SPECIALIZED,
-              "Unset CK2_FFP_UBERSHADER must select the full-specialized shader path");
+              "Unset FFP_UBERSHADER must select the full-specialized shader path");
     TestCheck(firstProgram != 0 &&
               secondProgram == firstProgram &&
               cache.CachedProgramCount() == 1 &&
@@ -2183,7 +2183,7 @@ void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgr
 }
 
 void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
-    ScopedDebugConfigValue forceUber("CK2_FFP_UBERSHADER", "1");
+    ScopedDebugConfigValue forceUber("FFP_UBERSHADER", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2195,7 +2195,7 @@ void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
               cache.GetShaderMode() == CKFF_SHADER_MODE_UBER_SPECIALIZED &&
               program != 0 &&
               ctx.CreatedProgramCount == 1,
-              "CK2_FFP_UBERSHADER=1 must force the uber shader specialization path");
+              "FFP_UBERSHADER=1 must force the uber shader specialization path");
 
     cache.Shutdown();
 }
@@ -2228,7 +2228,7 @@ void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2280,7 +2280,7 @@ void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2320,7 +2320,7 @@ void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2360,7 +2360,7 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2400,7 +2400,7 @@ void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2435,7 +2435,7 @@ void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2469,7 +2469,7 @@ void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2508,7 +2508,7 @@ void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2544,7 +2544,7 @@ void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2579,7 +2579,7 @@ void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantMissFallsBackToUber() {
-    ScopedDebugConfigValue forceFullSpecialized("CK2_FFP_UBERSHADER", "0");
+    ScopedDebugConfigValue forceFullSpecialized("FFP_UBERSHADER", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -3461,11 +3461,11 @@ void Test_FFPDebugLogging_IsCentralized() {
               "CKFFDebug must expose the internal config/state/draw-info types for FFP logging");
 
     const char *configNames[] = {
-        "CK2_3D_DEBUG_DRAW_LOG_LIMIT",
-        "CK2_3D_DEBUG_REAL3D_LOG_LIMIT",
-        "CK2_3D_DEBUG_3D_CONTRACT_LOG_LIMIT",
-        "CK2_3D_DEBUG_POSITIONT_LOG_LIMIT",
-        "CK2_3D_DEBUG_DRAW_SERIAL_PER_FRAME"
+        "DEBUG_DRAW_LOG_LIMIT",
+        "DEBUG_REAL3D_LOG_LIMIT",
+        "DEBUG_3D_CONTRACT_LOG_LIMIT",
+        "DEBUG_POSITIONT_LOG_LIMIT",
+        "DEBUG_DRAW_SERIAL_PER_FRAME"
     };
     for (const char *configName : configNames) {
         TestCheck(source.find(configName) != std::string::npos,
@@ -3636,10 +3636,10 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
     TestCheck(rootCmake.find("option(CKRE_DEBUG_OUTPUT") != std::string::npos &&
               srcCmake.find("CKRE_DEBUG_OUTPUT_DEFAULT=$<IF:$<BOOL:${CKRE_DEBUG_OUTPUT}>,1,0>") != std::string::npos,
               "RenderEngine CMake must expose CKRE_DEBUG_OUTPUT and pass it as the debug logger default");
-    TestCheck(source.find("CK2_3D_DEBUG_OUTPUT") != std::string::npos &&
+    TestCheck(source.find("DEBUG_OUTPUT") != std::string::npos &&
               source.find("CKRE_DEBUG_OUTPUT_DEFAULT") != std::string::npos &&
-              source.find("CKRenderDebugConfigBool(\"CK2_3D_DEBUG_OUTPUT\"") != std::string::npos,
-              "Debug logger must use the CMake default and support CK2_3D_DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
+              source.find("CKRenderDebugConfigBool(\"DEBUG_OUTPUT\"") != std::string::npos,
+              "Debug logger must use the CMake default and support DEBUG_OUTPUT=0/false/off/no as a CK2_3D.ini override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
               "Debug logger must drop output and close the log file when globally disabled");

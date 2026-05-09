@@ -75,7 +75,7 @@ CKFFShaderCache::~CKFFShaderCache() {
 
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
-    m_UseUberShader = CKRenderDebugConfigBool("CK2_FFP_UBERSHADER", false);
+    m_UseUberShader = CKRenderDebugConfigBool("FFP_UBERSHADER", false);
     CreateUniforms();
     ResolveShaderTarget();
 }

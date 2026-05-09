@@ -112,9 +112,9 @@ static bool CKFFTextureSetEquals(
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
-    m_DiagnosticConfig.StatsEnabled = CKRenderDebugConfigBool("CK2_3D_DEBUG_FFP_STATS", false);
-    m_DiagnosticConfig.UniformHistEnabled = CKRenderDebugConfigBool("CK2_3D_DEBUG_FFP_UNIFORM_HIST", false);
-    m_DiagnosticConfig.StatsInterval = CKRenderDebugConfigInt("CK2_3D_DEBUG_FFP_STATS_INTERVAL", 60);
+    m_DiagnosticConfig.StatsEnabled = CKRenderDebugConfigBool("DEBUG_FFP_STATS", false);
+    m_DiagnosticConfig.UniformHistEnabled = CKRenderDebugConfigBool("DEBUG_FFP_UNIFORM_HIST", false);
+    m_DiagnosticConfig.StatsInterval = CKRenderDebugConfigInt("DEBUG_FFP_STATS_INTERVAL", 60);
     if (m_DiagnosticConfig.StatsInterval <= 0)
         m_DiagnosticConfig.StatsInterval = 60;
 

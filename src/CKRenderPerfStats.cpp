@@ -14,7 +14,7 @@ static CKRenderPerfStats g_RenderPerfStats = {};
 static CKDWORD g_RenderPerfNowCallCount = 0;
 
 bool CKRenderPerfStatsEnabled() {
-    static const bool enabled = CKRenderDebugConfigBool("CK2_3D_DEBUG_RENDER_STATS", false);
+    static const bool enabled = CKRenderDebugConfigBool("DEBUG_RENDER_STATS", false);
     return enabled;
 }
 
