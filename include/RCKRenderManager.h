@@ -89,14 +89,6 @@ public:
     CKRasterizerContext *GetFullscreenContext();
     int GetPreferredSoftwareDriver();
 
-private:
-    void ApplyRenderOptionChange(CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue);
-    void ApplyRenderOptionsToContexts();
-    void InvalidateTextureVideoMemory();
-    void ApplyTextureVideoFormat(VX_PIXELFORMAT format);
-    void ApplySpriteVideoFormat(VX_PIXELFORMAT format);
-
-public:
     XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;  // 0x28
     XClassArray<VxCallBack> m_TemporaryPostRenderCallbacks; // 0x34
     XSObjectArray m_RenderContexts;                          // 0x40

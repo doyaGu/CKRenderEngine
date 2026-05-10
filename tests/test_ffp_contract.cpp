@@ -3695,7 +3695,7 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
                   manager.find("context->ApplyRenderOptions()") != std::string::npos &&
                   manager.find("ApplyRenderOptionChange(") != std::string::npos &&
                   manager.find("if (oldValue == Value)") != std::string::npos &&
-                  manager.find("InvalidateTextureVideoMemory()") != std::string::npos &&
+                  manager.find("InvalidateTextureVideoMemory(") != std::string::npos &&
                   manager.find("ApplyTextureVideoFormat(") != std::string::npos &&
                   manager.find("ApplySpriteVideoFormat(") != std::string::npos &&
                   pipelineHeader.find("m_DisableTextureFiltering") != std::string::npos &&

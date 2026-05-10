@@ -84,6 +84,12 @@ static void ApplyIniRenderOptions(RCKRenderManager *manager) {
         settings.GetPixelFormat(manager->m_SpriteVideoFormat.Key.CStr(), manager->m_SpriteVideoFormat.Value);
 }
 
+static void ApplyRenderOptionChange(RCKRenderManager *manager, CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue);
+static void ApplyRenderOptionsToContexts(RCKRenderManager *manager);
+static void InvalidateTextureVideoMemory(RCKRenderManager *manager);
+static void ApplyTextureVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format);
+static void ApplySpriteVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format);
+
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
@@ -491,7 +497,7 @@ void RCKRenderManager::SetDesiredTexturesVideoFormat(VxImageDescEx &VideoFormat)
     if (oldValue == newValue)
         return;
     m_TextureVideoFormat.Value = newValue;
-    ApplyTextureVideoFormat((VX_PIXELFORMAT)newValue);
+    ApplyTextureVideoFormat(this, (VX_PIXELFORMAT)newValue);
 }
 
 CKRenderContext *RCKRenderManager::GetRenderContext(int pos) {
@@ -610,73 +616,73 @@ void RCKRenderManager::SetRenderOptions(CKSTRING RenderOptionString, CKDWORD Val
             if (oldValue == Value)
                 return;
             option->Value = Value;
-            ApplyRenderOptionChange(RenderOptionString, oldValue, Value);
+            ApplyRenderOptionChange(this, RenderOptionString, oldValue, Value);
             return;
         }
     }
 }
 
-void RCKRenderManager::ApplyRenderOptionChange(CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue) {
+static void ApplyRenderOptionChange(RCKRenderManager *manager, CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue) {
     (void)oldValue;
 
-    if (stricmp(RenderOptionString, m_TextureVideoFormat.Key.CStr()) == 0) {
-        ApplyTextureVideoFormat((VX_PIXELFORMAT)newValue);
+    if (stricmp(RenderOptionString, manager->m_TextureVideoFormat.Key.CStr()) == 0) {
+        ApplyTextureVideoFormat(manager, (VX_PIXELFORMAT)newValue);
         return;
     }
 
-    if (stricmp(RenderOptionString, m_SpriteVideoFormat.Key.CStr()) == 0) {
-        ApplySpriteVideoFormat((VX_PIXELFORMAT)newValue);
+    if (stricmp(RenderOptionString, manager->m_SpriteVideoFormat.Key.CStr()) == 0) {
+        ApplySpriteVideoFormat(manager, (VX_PIXELFORMAT)newValue);
         return;
     }
 
-    if (stricmp(RenderOptionString, m_DisableMipmap.Key.CStr()) == 0) {
-        InvalidateTextureVideoMemory();
+    if (stricmp(RenderOptionString, manager->m_DisableMipmap.Key.CStr()) == 0) {
+        InvalidateTextureVideoMemory(manager);
     }
 
-    ApplyRenderOptionsToContexts();
+    ApplyRenderOptionsToContexts(manager);
 }
 
-void RCKRenderManager::ApplyRenderOptionsToContexts() {
-    for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
-        RCKRenderContext *context = (RCKRenderContext *) m_Context->GetObject(*it);
+static void ApplyRenderOptionsToContexts(RCKRenderManager *manager) {
+    for (CK_ID *it = manager->m_RenderContexts.Begin(); it != manager->m_RenderContexts.End(); ++it) {
+        RCKRenderContext *context = (RCKRenderContext *) manager->m_Context->GetObject(*it);
         if (context)
             context->ApplyRenderOptions();
     }
 }
 
-void RCKRenderManager::InvalidateTextureVideoMemory() {
-    int textureCount = m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
-    CK_ID *textureIds = m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
+static void InvalidateTextureVideoMemory(RCKRenderManager *manager) {
+    int textureCount = manager->m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
+    CK_ID *textureIds = manager->m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
     for (int i = 0; i < textureCount; ++i) {
-        CKTexture *texture = (CKTexture *) m_Context->GetObject(textureIds[i]);
+        CKTexture *texture = (CKTexture *) manager->m_Context->GetObject(textureIds[i]);
         if (texture)
             texture->FreeVideoMemory();
     }
 }
 
-void RCKRenderManager::ApplyTextureVideoFormat(VX_PIXELFORMAT format) {
-    int textureCount = m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
-    CK_ID *textureIds = m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
+static void ApplyTextureVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format) {
+    int textureCount = manager->m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
+    CK_ID *textureIds = manager->m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
     for (int i = 0; i < textureCount; ++i) {
-        CKTexture *texture = (CKTexture *) m_Context->GetObject(textureIds[i]);
+        CKTexture *texture = (CKTexture *) manager->m_Context->GetObject(textureIds[i]);
         if (texture)
             texture->SetDesiredVideoFormat(format);
     }
 }
 
-void RCKRenderManager::ApplySpriteVideoFormat(VX_PIXELFORMAT format) {
-    int spriteCount = m_Context->GetObjectsCountByClassID(CKCID_SPRITE);
-    CK_ID *spriteIds = m_Context->GetObjectsListByClassID(CKCID_SPRITE);
+static void ApplySpriteVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format) {
+    int spriteCount = manager->m_Context->GetObjectsCountByClassID(CKCID_SPRITE);
+    CK_ID *spriteIds = manager->m_Context->GetObjectsListByClassID(CKCID_SPRITE);
     for (int i = 0; i < spriteCount; ++i) {
-        CKSprite *sprite = (CKSprite *) m_Context->GetObject(spriteIds[i]);
+        CKSprite *sprite = (CKSprite *) manager->m_Context->GetObject(spriteIds[i]);
         if (sprite)
             sprite->SetDesiredVideoFormat(format);
     }
 
-    int spriteTextCount = m_Context->GetObjectsCountByClassID(CKCID_SPRITETEXT);
-    CK_ID *spriteTextIds = m_Context->GetObjectsListByClassID(CKCID_SPRITETEXT);
+    int spriteTextCount = manager->m_Context->GetObjectsCountByClassID(CKCID_SPRITETEXT);
+    CK_ID *spriteTextIds = manager->m_Context->GetObjectsListByClassID(CKCID_SPRITETEXT);
     for (int i = 0; i < spriteTextCount; ++i) {
-        CKSprite *spriteText = (CKSprite *) m_Context->GetObject(spriteTextIds[i]);
+        RCKSpriteText *spriteText = (RCKSpriteText *) manager->m_Context->GetObject(spriteTextIds[i]);
         if (spriteText)
             spriteText->SetDesiredVideoFormat(format);
     }
