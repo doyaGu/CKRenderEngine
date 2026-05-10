@@ -45,6 +45,6 @@ set_target_properties(CKRasterizerLib PROPERTIES
 if (CKRE_INSTALL)
     install(TARGETS CKRasterizerLib
             EXPORT CKRenderEngineTargets
-            ARCHIVE DESTINATION lib
+            ARCHIVE DESTINATION lib COMPONENT Development
     )
 endif ()

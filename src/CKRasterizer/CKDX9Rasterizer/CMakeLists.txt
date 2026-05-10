@@ -79,16 +79,16 @@ if (CKRE_INSTALL)
     if (CKRE_BUILD_SHARED AND TARGET CKDX9Rasterizer)
         install(TARGETS CKDX9Rasterizer
                 EXPORT CKRenderEngineTargets
-                RUNTIME DESTINATION RenderEngines
-                LIBRARY DESTINATION RenderEngines
-                ARCHIVE DESTINATION lib
+                RUNTIME DESTINATION RenderEngines COMPONENT Runtime
+                LIBRARY DESTINATION RenderEngines COMPONENT Runtime
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
     endif ()
 
     if (TARGET CKDX9RasterizerStatic)
         install(TARGETS CKDX9RasterizerStatic
                 EXPORT CKRenderEngineTargets
-                ARCHIVE DESTINATION lib
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
     endif ()
 endif ()

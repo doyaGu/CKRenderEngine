@@ -242,11 +242,13 @@ if (CKRE_INSTALL)
             FILE CKRenderEngineTargets.cmake
             NAMESPACE CKRenderEngine::
             DESTINATION "${CKRE_INSTALL_CMAKEDIR}"
+            COMPONENT Development
     )
     install(FILES
             "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfig.cmake"
             "${CMAKE_CURRENT_BINARY_DIR}/CKRenderEngineConfigVersion.cmake"
             DESTINATION "${CKRE_INSTALL_CMAKEDIR}"
+            COMPONENT Development
     )
 endif ()
 
