@@ -110,7 +110,6 @@ public:
     VxOption m_DisableSpecular;
     VxOption m_UseIndexBuffers;
     VxOption m_EnableScreenDump;
-    VxOption m_EnableDebugMode;
     VxOption m_VertexCache;
     VxOption m_SortTransparentObjects;
     VxOption m_TextureCacheManagement;

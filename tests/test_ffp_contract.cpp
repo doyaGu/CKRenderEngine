@@ -3640,7 +3640,6 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
         "Antialias",
         "UseIndexBuffers",
         "EnableScreenDump",
-        "EnableDebugMode",
         "VertexCache",
         "SortTransparentObjects",
         "TextureCacheManagement",
@@ -3679,9 +3678,15 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
               "Scene render-state options must keep only modern FFP render-state setup");
     TestCheck(context.find("m_ForceSoftware.Value") != std::string::npos &&
                   context.find("m_EnableScreenDump.Value") != std::string::npos &&
-                  context.find("m_EnableDebugMode.Value") != std::string::npos &&
                   context.find("m_SortTransparentObjects.Value") != std::string::npos,
-              "Context-level options must still drive driver selection, capture/debug keys, and transparent sorting");
+              "Context-level options must still drive driver selection, screen capture keys, and transparent sorting");
+    TestCheck(ini.find("EnableDebugMode") == std::string::npos &&
+                  renderManagerHeader.find("m_EnableDebugMode") == std::string::npos &&
+                  manager.find("m_EnableDebugMode") == std::string::npos &&
+                  context.find("m_EnableDebugMode.Value") == std::string::npos &&
+                  context.find("GetDC(") == std::string::npos &&
+                  context.find("DrawTextA(") == std::string::npos,
+              "GDI debug overlay and its CK2_3D root option must remain retired");
     TestCheck(mesh.find("m_VertexCache.Value") != std::string::npos &&
                   mesh.find("m_UseIndexBuffers.Value") != std::string::npos,
               "Mesh options must feed vertex-cache optimization and hardware index-buffer use");
