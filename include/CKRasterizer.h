@@ -181,6 +181,7 @@ public:
     virtual CKBOOL Resize(int PosX = 0, int PosY = 0,
                           int Width = 0, int Height = 0,
                           CKDWORD Flags = 0);
+    virtual void SetAntialias(CKDWORD Samples);
 
     // --- Resource creation ---
     virtual CKERROR CreateVertexBuffer(CKDWORD Buffer, CKVertexBufferDesc *Desc,

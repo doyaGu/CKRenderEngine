@@ -111,6 +111,7 @@ static bool CKFFTextureSetEquals(
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
+      m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
@@ -172,6 +173,11 @@ void CKFixedFunctionPipeline::Shutdown() {
     m_ShaderCache.Shutdown();
     m_RenderPipeline.Shutdown();
     m_Context = nullptr;
+}
+
+void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps) {
+    m_DisableTextureFiltering = DisableTextureFiltering;
+    m_DisableMipmaps = DisableMipmaps;
 }
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
@@ -1493,7 +1499,15 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return CKFFBuildSamplerDesc(nullptr);
-    return CKFFBuildSamplerDesc(m_StageStates[stage]);
+    CKSamplerDesc desc = CKFFBuildSamplerDesc(m_StageStates[stage]);
+    if (m_DisableTextureFiltering) {
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MagFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+    } else if (m_DisableMipmaps) {
+        desc.MipFilter = CKRST_FILTER_NEAREST;
+    }
+    return desc;
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {

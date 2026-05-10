@@ -343,6 +343,8 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
     if (rm->m_TextureCacheManagement.Value)
         desc.Flags |= CKRST_TEXTURE_MANAGED;
+    if (rm->m_DisableMipmap.Value)
+        desc.MipMapCount = 0;
 
     // Check for cube map
     if ((m_BitmapFlags & CKBITMAPDATA_CUBEMAP) != 0 && GetSlotCount() == 6 && GetWidth() == GetHeight()) {

@@ -1193,10 +1193,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     // Set new driver and create context
     m_RasterizerDriver = newDriver;
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
-
-    // Settings moved out of rasterizer context in v2
-    // m_RasterizerContext->m_EnableScreenDump = m_RenderManager->m_EnableScreenDump.Value;
-    // m_RasterizerContext->m_Antialias = m_RenderManager->m_Antialias.Value;
+    ApplyRenderOptions();
 
     // Try to create the context with current settings
     CKBOOL created = m_RasterizerContext->Create(
@@ -1225,7 +1222,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         m_RasterizerDriver->DestroyContext(m_RasterizerContext);
         m_RasterizerDriver = oldDriver;
         m_RasterizerContext = m_RasterizerDriver->CreateContext();
-        // m_Antialias moved out of rasterizer context in v2
+        ApplyRenderOptions();
 
         CKBOOL restored = m_RasterizerContext->Create(
             m_WinHandle,
@@ -1402,6 +1399,15 @@ CKBOOL RCKRenderContext::SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State,
 
 CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
     return m_RasterizerContext;
+}
+
+void RCKRenderContext::ApplyRenderOptions() {
+    if (m_RasterizerContext)
+        m_RasterizerContext->SetAntialias(m_RenderManager->m_Antialias.Value);
+
+    m_FFPipeline.SetRenderOptions(
+        m_RenderManager->m_DisableFilter.Value != 0,
+        m_RenderManager->m_DisableMipmap.Value != 0);
 }
 
 void RCKRenderContext::SetClearBackground(CKBOOL ClearBack) {
@@ -2836,11 +2842,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Create rasterizer context
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
-
-    // Settings moved out of rasterizer context in v2
-    // m_RasterizerContext->m_Antialias = (m_RenderManager->m_Antialias.Value != 0);
-    // m_RasterizerContext->m_EnableScreenDump = (m_RenderManager->m_EnableScreenDump.Value != 0);
-    // m_RasterizerContext->m_EnsureVertexShader = (m_RenderManager->m_EnsureVertexShader.Value != 0);
+    ApplyRenderOptions();
 
     // Create the actual rasterizer context
     if (!m_RasterizerContext->Create(m_WinHandle, localRect.left, localRect.top,
@@ -2858,6 +2860,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Initialize the fixed-function pipeline
     m_FFPipeline.Init(m_RasterizerContext);
+    ApplyRenderOptions();
 
     m_Fullscreen = Fullscreen;
 

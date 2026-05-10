@@ -41,6 +41,23 @@ static int CKBgfxConfigPositiveInt(const char *section, const char *name, int fa
     return value > 0 ? value : fallback;
 }
 
+static uint32_t CKBgfxMsaaResetFlags(CKDWORD samples)
+{
+    if (samples >= 16) return BGFX_RESET_MSAA_X16;
+    if (samples >= 8)  return BGFX_RESET_MSAA_X8;
+    if (samples >= 4)  return BGFX_RESET_MSAA_X4;
+    if (samples >= 2)  return BGFX_RESET_MSAA_X2;
+    return BGFX_RESET_NONE;
+}
+
+static uint32_t CKBgfxBuildResetFlags(CKBOOL vsync, CKDWORD samples)
+{
+    uint32_t flags = CKBgfxMsaaResetFlags(samples);
+    if (vsync)
+        flags |= BGFX_RESET_VSYNC;
+    return flags;
+}
+
 // ===========================================================================
 // Helper: ensure slot array is large enough and return pointer at index
 // ===========================================================================
@@ -797,9 +814,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
     bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
-    static const CKBOOL s_LogTextureBindings =
-        CKBgfxConfigBool("Debug.Log", "TextureBindings", FALSE);
-    if (s_LogTextureBindings &&
+    if (CKBgfxDebugSettings().Log.TextureBindings &&
         s_SetTextureLogCount < 80) {
         CKBgfxLogf("SetTexture",
                  "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
@@ -828,9 +843,7 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
     if (!rec)
         return;
     static int s_uniformLogCount = 0;
-    static const CKBOOL s_LogUniforms =
-        CKBgfxConfigBool("Debug.Log", "Uniforms", FALSE);
-    if (s_LogUniforms && s_uniformLogCount < 256) {
+    if (CKBgfxDebugSettings().Log.Uniforms && s_uniformLogCount < 256) {
         const float *f = static_cast<const float *>(Data);
         if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
             CKBgfxLogf("SetUniform",
@@ -1025,7 +1038,7 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
     : m_BgfxInitialized(FALSE), m_RendererName("Unknown"),
       m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
-      m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE),
+      m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE), m_AntialiasSamples(0),
       m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
       m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
       m_DebugFrameId(0), m_DebugBgfxFlags(0), m_DebugOverlay(FALSE),
@@ -1180,24 +1193,14 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
 
 void CKBgfxRasterizerContext::ConfigureDebug()
 {
-    m_DebugBgfxFlags = BGFX_DEBUG_NONE;
-    if (CKBgfxConfigBool("Debug.Bgfx", "Wireframe", FALSE)) m_DebugBgfxFlags |= BGFX_DEBUG_WIREFRAME;
-    if (CKBgfxConfigBool("Debug.Bgfx", "IFH", FALSE))       m_DebugBgfxFlags |= BGFX_DEBUG_IFH;
-    if (CKBgfxConfigBool("Debug.Bgfx", "Stats", FALSE))     m_DebugBgfxFlags |= BGFX_DEBUG_STATS;
-    if (CKBgfxConfigBool("Debug.Bgfx", "Text", FALSE))      m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
-    if (CKBgfxConfigBool("Debug.Bgfx", "Profiler", FALSE))  m_DebugBgfxFlags |= BGFX_DEBUG_PROFILER;
-    if (CKBgfxConfigBool("Debug.Bgfx", "All", FALSE))
-        m_DebugBgfxFlags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS | BGFX_DEBUG_PROFILER;
-
-    m_DebugOverlay = CKBgfxConfigBool("Debug", "Overlay",
-                                (m_DebugBgfxFlags & BGFX_DEBUG_TEXT) ? TRUE : FALSE);
-    if (m_DebugOverlay)
-        m_DebugBgfxFlags |= BGFX_DEBUG_TEXT;
+    const CKBgfxDebugConfig &debug = CKBgfxDebugSettings();
+    m_DebugBgfxFlags = debug.BgfxFlags;
+    m_DebugOverlay = debug.Overlay ? TRUE : FALSE;
 
     if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
         bgfx::setDebug(m_DebugBgfxFlags);
 
-    if (CKBgfxConfigBool("Debug.Log", "Config", FALSE) ||
+    if (debug.Log.Config ||
         m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
         m_DebugOverlay) {
         CKBgfxLogf("Debug", "configured bgfxFlags=0x%X overlay=%d",
@@ -1433,9 +1436,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     DestroyRecord(slot);
     slot = rec;
 
-    static const CKBOOL s_LogTextures =
-        CKBgfxConfigBool("Debug.Log", "Textures", FALSE);
-    if (s_LogTextures &&
+    if (CKBgfxDebugSettings().Log.Textures &&
         s_CreateTextureLogCount < 80) {
         CKBgfxLogf("CreateTexture",
                  "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u mips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
@@ -1884,9 +1885,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         CKDWORD bpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : 32;
         CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
         CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
-        static const CKBOOL s_LogTextures =
-            CKBgfxConfigBool("Debug.Log", "Textures", FALSE);
-        if (s_LogTextures &&
+        if (CKBgfxDebugSettings().Log.Textures &&
             s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
             CKBgfxLogf("UpdateTexture",
@@ -2133,6 +2132,18 @@ CKERROR CKBgfxRasterizerContext::TouchView(CKRenderView View)
     return CK_OK;
 }
 
+void CKBgfxRasterizerContext::SetAntialias(CKDWORD Samples)
+{
+    const CKDWORD clamped = Samples >= 16 ? 16 : Samples >= 8 ? 8 : Samples >= 4 ? 4 : Samples >= 2 ? 2 : 0;
+    if (m_AntialiasSamples == clamped)
+        return;
+
+    m_AntialiasSamples = clamped;
+    m_ResetFlags = CKBgfxBuildResetFlags(m_VSync, m_AntialiasSamples);
+    if (m_BgfxInitialized)
+        bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+}
+
 // ---------------------------------------------------------------------------
 // Transform cache
 // ---------------------------------------------------------------------------
@@ -2373,14 +2384,12 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
     if (updatePresentSync && vsync != m_VSync)
     {
         m_VSync = vsync;
-        m_ResetFlags = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+        m_ResetFlags = CKBgfxBuildResetFlags(vsync, m_AntialiasSamples);
         bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
     }
 
-    static const CKBOOL s_LogPresentSync =
-        CKBgfxConfigBool("Debug.Log", "PresentSync", FALSE);
     static int s_PresentSyncLogCount = 0;
-    if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
+    if (CKBgfxDebugSettings().Log.PresentSync && s_PresentSyncLogCount < 64) {
         CKBgfxLogf("PresentSync",
                  "frame=%u syncMode=%d currentVSync=%d resetFlags=0x%X",
                  m_DebugFrameId, SyncMode,
