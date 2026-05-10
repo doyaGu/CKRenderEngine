@@ -602,6 +602,11 @@ void RCKRenderManager::SetRenderOptions(CKSTRING RenderOptionString, CKDWORD Val
         VxOption *option = m_Options[i];
         if (stricmp(option->Key.CStr(), RenderOptionString) == 0) {
             option->Value = Value;
+            for (CK_ID *it = m_RenderContexts.Begin(); it != m_RenderContexts.End(); ++it) {
+                RCKRenderContext *context = (RCKRenderContext *) m_Context->GetObject(*it);
+                if (context)
+                    context->ApplyRenderOptions();
+            }
             return;
         }
     }

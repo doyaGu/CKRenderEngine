@@ -146,6 +146,10 @@ CKBOOL CKRasterizerContext::Resize(int PosX, int PosY, int Width, int Height, CK
     return TRUE;
 }
 
+void CKRasterizerContext::SetAntialias(CKDWORD)
+{
+}
+
 CKERROR CKRasterizerContext::CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *)
 {
     return CK_OK;

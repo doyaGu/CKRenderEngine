@@ -101,6 +101,7 @@ public:
 
     void Init(CKRasterizerContext *ctx);
     void Shutdown();
+    void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps);
 
     // === State tracking ===
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
@@ -160,6 +161,8 @@ public:
 
 private:
     CKRasterizerContext *m_Context;
+    CKBOOL m_DisableTextureFiltering;
+    CKBOOL m_DisableMipmaps;
 
     // Subsystems
     CKFFShaderCache m_ShaderCache;

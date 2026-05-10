@@ -3582,6 +3582,128 @@ void Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig() {
               "bgfx rasterizer must own its internal VxConfiguration helper in the rasterizer target");
 }
 
+void Test_BgfxRasterizer_DefaultDoesNotCreateTraceLog() {
+    std::string bgfxCallback = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxCallback.cpp");
+    std::string bgfxInternal = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxInternal.cpp");
+    std::string bgfxInternalHeader = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxInternal.h");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string bgfxConfigIni = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini");
+
+    TestCheck(bgfxConfigIni.find("File = 0") != std::string::npos &&
+                  bgfxConfigIni.find("Trace = 0") != std::string::npos,
+              "bgfx rasterizer file and trace logging must default off in CKBgfxRasterizer.ini");
+    TestCheck(bgfxInternalHeader.find("struct CKBgfxDebugConfig") != std::string::npos &&
+                  bgfxInternal.find("CKBgfxReadDebugSettings()") != std::string::npos &&
+                  bgfxInternal.find("const CKBgfxLogConfig &log = CKBgfxDebugSettings().Log") != std::string::npos &&
+                  bgfxInternal.find("if (CKBgfxFileLogEnabled())") != std::string::npos,
+              "CKBgfxLogf must not create CKBgfx_Trace.log unless cached Debug.Log/File is enabled");
+    TestCheck(bgfxInternal.find("OutputDebugStringA(msg)") != std::string::npos &&
+                  bgfxInternal.find("FILE *f = CKBgfxGetLogFile()") != std::string::npos,
+              "bgfx diagnostic messages may still go to debugger output without opening the trace file");
+    TestCheck(bgfxCallback.find("CKBgfxLogEnabled(\"Trace\", false)") != std::string::npos &&
+                  bgfxCallback.find("_vsnprintf_s") != std::string::npos,
+              "bgfx trace callbacks must be gated before formatting trace messages by default");
+    TestCheck(bgfxContext.find("CKBgfxConfigBool(\"Debug.Log\"") == std::string::npos &&
+                  bgfxContext.find("CKBgfxConfigBool(\"Debug.Bgfx\"") == std::string::npos &&
+                  bgfxContext.find("CKBgfxDebugSettings().Log.TextureBindings") != std::string::npos &&
+                  bgfxContext.find("CKBgfxDebugSettings().Log.Uniforms") != std::string::npos &&
+                  bgfxContext.find("CKBgfxDebugSettings().Log.Textures") != std::string::npos &&
+                  bgfxContext.find("CKBgfxDebugSettings().Log.PresentSync") != std::string::npos,
+              "bgfx debug logging switches must be cached before hot render paths use them");
+}
+
+void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
+    std::string ini = ReadRenderEngineSource("src/CK2_3D.ini");
+    std::string manager = ReadRenderEngineSource("src/CKRenderManager.cpp");
+    std::string contextHeader = ReadRenderEngineSource("include/RCKRenderContext.h");
+    std::string context = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    std::string scene = ReadRenderEngineSource("src/CKRenderedScene.cpp");
+    std::string mesh = ReadRenderEngineSource("src/CKMesh.cpp");
+    std::string texture = ReadRenderEngineSource("src/CKTexture.cpp");
+    std::string sprite = ReadRenderEngineSource("src/CKSprite.cpp");
+    std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string pipelineHeader = ReadRenderEngineSource("src/CKFixedFunctionPipeline.h");
+    std::string rasterizerHeader = ReadRenderEngineSource("include/CKRasterizer.h");
+    std::string bgfxHeader = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.h");
+    std::string bgfxContext = ReadRenderEngineSource("src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
+    std::string ffpCache = ReadRenderEngineSource("src/CKFFShaderCache.cpp");
+    std::string debugLogger = ReadRenderEngineSource("src/CKDebugLogger.cpp");
+    std::string settings = ReadRenderEngineSource("src/CKRenderSettings.cpp");
+
+    const char *rootOptions[] = {
+        "DisablePerspectiveCorrection",
+        "ForceLinearFog",
+        "ForceSoftware",
+        "DisableFilter",
+        "EnsureVertexShader",
+        "DisableDithering",
+        "DisableMipmap",
+        "DisableSpecular",
+        "Antialias",
+        "UseIndexBuffers",
+        "EnableScreenDump",
+        "EnableDebugMode",
+        "VertexCache",
+        "SortTransparentObjects",
+        "TextureCacheManagement",
+        "TextureVideoFormat",
+        "SpriteVideoFormat"
+    };
+    for (const char *option : rootOptions) {
+        TestCheck(ini.find(option) != std::string::npos &&
+                      manager.find(option) != std::string::npos,
+                  "Every CK2_3D root option must be present in the ini and registered by RCKRenderManager");
+    }
+
+    TestCheck(manager.find("CKRenderRootSettings()") != std::string::npos &&
+                  manager.find("settings.GetDword(option->Key.CStr()") != std::string::npos &&
+                  manager.find("settings.GetPixelFormat(manager->m_TextureVideoFormat") != std::string::npos,
+              "Root render options must be read through CKRenderSettings as the only CK2_3D.ini entry point");
+    TestCheck(scene.find("m_DisablePerspectiveCorrection.Value") != std::string::npos &&
+                  scene.find("m_ForceLinearFog.Value") != std::string::npos &&
+                  scene.find("m_DisableSpecular.Value") != std::string::npos &&
+                  scene.find("m_DisableDithering.Value") != std::string::npos,
+              "Scene render-state options must affect modern FFP render-state setup");
+    TestCheck(context.find("m_ForceSoftware.Value") != std::string::npos &&
+                  context.find("m_EnableScreenDump.Value") != std::string::npos &&
+                  context.find("m_EnableDebugMode.Value") != std::string::npos &&
+                  context.find("m_SortTransparentObjects.Value") != std::string::npos,
+              "Context-level options must still drive driver selection, capture/debug keys, and transparent sorting");
+    TestCheck(mesh.find("m_VertexCache.Value") != std::string::npos &&
+                  mesh.find("m_UseIndexBuffers.Value") != std::string::npos,
+              "Mesh options must feed vertex-cache optimization and hardware index-buffer use");
+    TestCheck(texture.find("m_TextureCacheManagement.Value") != std::string::npos &&
+                  texture.find("m_TextureVideoFormat.Value") != std::string::npos &&
+                  sprite.find("m_SpriteVideoFormat.Value") != std::string::npos,
+              "Texture options must feed cache management and requested texture/sprite video formats");
+    TestCheck(context.find("SetRenderOptions(") != std::string::npos &&
+                  context.find("m_DisableFilter.Value") != std::string::npos &&
+                  context.find("m_DisableMipmap.Value") != std::string::npos &&
+                  contextHeader.find("ApplyRenderOptions") != std::string::npos &&
+                  manager.find("context->ApplyRenderOptions()") != std::string::npos &&
+                  pipelineHeader.find("m_DisableTextureFiltering") != std::string::npos &&
+                  pipeline.find("desc.MinFilter = CKRST_FILTER_NEAREST") != std::string::npos &&
+                  texture.find("desc.MipMapCount = 0") != std::string::npos,
+              "DisableFilter and DisableMipmap must affect FFP sampler state, texture creation, and runtime option updates");
+    TestCheck(rasterizerHeader.find("virtual void SetAntialias(CKDWORD Samples)") != std::string::npos &&
+                  context.find("SetAntialias(m_RenderManager->m_Antialias.Value)") != std::string::npos &&
+                  bgfxHeader.find("m_AntialiasSamples") != std::string::npos &&
+                  bgfxContext.find("CKBgfxBuildResetFlags(m_VSync, m_AntialiasSamples)") != std::string::npos,
+              "Antialias must reach the bgfx reset flags instead of being a dead render-manager option");
+    TestCheck(ffpCache.find("CKRenderFFPSettings().GetBool(\"UberShader\", false)") != std::string::npos &&
+                  debugLogger.find("CKRenderDebugSettings().GetBool(\"Output\", false)") != std::string::npos &&
+                  settings.find("\"Debug.FrameLog\"") != std::string::npos &&
+                  settings.find("\"Debug.RenderStats\"") != std::string::npos &&
+                  settings.find("\"Debug.FFPStats\"") != std::string::npos &&
+                  settings.find("\"Debug.FFPLog\"") != std::string::npos &&
+                  settings.find("\"Debug.MeshLog\"") != std::string::npos,
+              "Nested CK2_3D options must keep their concrete render/debug consumers");
+    TestCheck(manager.find("EnsureVertexShader") != std::string::npos &&
+                  context.find("m_EnsureVertexShader") == std::string::npos &&
+                  bgfxContext.find("CKBgfxShaderProfile") != std::string::npos,
+              "EnsureVertexShader must remain a compatibility option while bgfx stays shader-backed by construction");
+}
+
 void Test_FFPDebugLogging_IsCentralized() {
     std::string pipeline = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
     std::string header = ReadRenderEngineSource("src/CKFFDebug.h");
@@ -3973,6 +4095,8 @@ int main() {
     tests.Run("bgfx RTT flush preserves present vsync", &Test_BgfxRasterizer_RttFlushDoesNotOverwritePresentVSync);
     tests.Run("bgfx automatic debug capture removed", &Test_BgfxRasterizer_AutomaticDebugCaptureIsRemoved);
     tests.Run("bgfx debug config is rasterizer-owned", &Test_BgfxRasterizer_DoesNotDependOnCK2_3DPrivateDebugConfig);
+    tests.Run("bgfx default does not create trace log", &Test_BgfxRasterizer_DefaultDoesNotCreateTraceLog);
+    tests.Run("Render settings all CK2 ini options have runtime semantics", &Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics);
     tests.Run("FFP debug logging is centralized", &Test_FFPDebugLogging_IsCentralized);
     tests.Run("FFP stage helpers centralized and use VxMath", &Test_FFPStageHelpers_AreCentralizedAndUseVxMathPrimitives);
     tests.Run("FFP uniform state helpers centralized", &Test_FFPUniformStateHelpers_AreCentralized);

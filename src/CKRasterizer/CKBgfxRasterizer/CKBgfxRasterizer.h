@@ -328,6 +328,7 @@ public:
                          const CKRenderView *Order) override;
     CKERROR ResetView(CKRenderView View) override;
     CKERROR TouchView(CKRenderView View) override;
+    void SetAntialias(CKDWORD Samples) override;
 
     // Transform cache
     CKDWORD AllocTransform(VxMatrix *Transform, CKDWORD Count) override;
@@ -367,6 +368,7 @@ private:
     bgfx::TextureHandle m_DefaultWhiteTexture;
     CKBOOL m_VSync;
     uint32_t m_ResetFlags;
+    CKDWORD m_AntialiasSamples;
     CKBgfxCallback m_BgfxCallback;
     CKBgfxEncoder m_Encoders[CKRST_MAX_ENCODERS];
 

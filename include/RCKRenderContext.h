@@ -98,6 +98,7 @@ public:
     CKBOOL SetTexture(CKTexture *tex, CKBOOL Clamped = 0, int Stage = 0) override;
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
     CKRasterizerContext *GetRasterizerContext() override;
+    void ApplyRenderOptions();
     void SetClearBackground(CKBOOL ClearBack = TRUE) override;
     CKBOOL GetClearBackground() override;
     void SetClearZBuffer(CKBOOL ClearZ = TRUE) override;
