@@ -100,9 +100,6 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_EnableScreenDump.Set("EnableScreenDump", FALSE);
     m_Options.PushBack(&m_EnableScreenDump);
 
-    m_EnableDebugMode.Set("EnableDebugMode", FALSE);
-    m_Options.PushBack(&m_EnableDebugMode);
-
     m_VertexCache.Set("VertexCache", 16);
     m_Options.PushBack(&m_VertexCache);
 
