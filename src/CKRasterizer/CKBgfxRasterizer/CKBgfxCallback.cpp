@@ -69,6 +69,9 @@ void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enu
 
 void CKBgfxCallback::traceVargs(const char *filePath, uint16_t line, const char *format, va_list argList)
 {
+    if (!CKBgfxLogEnabled("Trace", false))
+        return;
+
     char buf[2048];
     int n = _snprintf_s(buf, sizeof(buf) - 1, _TRUNCATE, "%s(%u): ",
                         filePath ? filePath : "?", (unsigned)line);
