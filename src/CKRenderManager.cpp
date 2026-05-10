@@ -4,6 +4,7 @@
 #include "CKRasterizer.h"
 #include "CKMaterial.h"
 #include "CKParameterManager.h"
+#include "CKRenderSettings.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
@@ -66,6 +67,23 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     memcpy(drvDesc->DisplayModes, rstDriver->m_DisplayModes.Begin(), displayModeCount * sizeof(VxDisplayMode));
 }
 
+static void ApplyIniRenderOptions(RCKRenderManager *manager) {
+    if (!manager)
+        return;
+
+    const CKRenderSettingsView settings = CKRenderRootSettings();
+    for (int i = 0; i < manager->m_Options.Size(); ++i) {
+        VxOption *option = manager->m_Options[i];
+        if (option)
+            option->Value = settings.GetDword(option->Key.CStr(), option->Value);
+    }
+
+    manager->m_TextureVideoFormat.Value =
+        settings.GetPixelFormat(manager->m_TextureVideoFormat.Key.CStr(), manager->m_TextureVideoFormat.Value);
+    manager->m_SpriteVideoFormat.Value =
+        settings.GetPixelFormat(manager->m_SpriteVideoFormat.Key.CStr(), manager->m_SpriteVideoFormat.Value);
+}
+
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
@@ -117,6 +135,8 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     m_DisablePerspectiveCorrection.Set("DisablePerspectiveCorrection", FALSE);
     m_Options.PushBack(&m_DisablePerspectiveCorrection);
+
+    ApplyIniRenderOptions(this);
 
     m_RenderContextMaskFree = -1;
     m_NextObjectIndex = 0;

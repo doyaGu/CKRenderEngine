@@ -14,6 +14,7 @@
 class CKDebugLogger {
 public:
     static CKDebugLogger &Instance();
+    static bool OutputEnabled();
 
     void EnableOutput(bool enable);
     void EnableDebuggerOutput(bool enable);
@@ -34,6 +35,7 @@ private:
     CKDebugLogger &operator=(const CKDebugLogger &) = delete;
 
     void OpenFileIfNeeded();
+    bool IsOutputEnabled() const { return m_OutputEnabled; }
 
     char m_LogFilePath[MAX_PATH];
     bool m_OutputEnabled;
@@ -43,10 +45,10 @@ private:
     CRITICAL_SECTION m_CriticalSection;
 };
 
-#define CK_LOG_RAW(msg)                  CKDebugLogger::Instance().Log(msg)
-#define CK_LOG_RAW_FMT(fmt, ...)         CKDebugLogger::Instance().Logf(fmt, __VA_ARGS__)
-#define CK_LOG(category, msg)            CKDebugLogger::Instance().LogTagged(category, msg)
-#define CK_LOG_FMT(category, fmt, ...)   CKDebugLogger::Instance().LogTaggedf(category, fmt, __VA_ARGS__)
+#define CK_LOG_RAW(msg)                  do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().Log(msg); } while (0)
+#define CK_LOG_RAW_FMT(fmt, ...)         do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().Logf(fmt, __VA_ARGS__); } while (0)
+#define CK_LOG(category, msg)            do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().LogTagged(category, msg); } while (0)
+#define CK_LOG_FMT(category, fmt, ...)   do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().LogTaggedf(category, fmt, __VA_ARGS__); } while (0)
 
 #else
 

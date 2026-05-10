@@ -254,6 +254,30 @@ CK_RENDER_FLAGS RCKRenderContext::ResolveRenderFlags(CK_RENDER_FLAGS Flags) cons
                : Flags;
 }
 
+static bool FrameLogEnabled() {
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+    return CKRenderDiagnosticsSettings().FrameLog.Enabled;
+#else
+    return false;
+#endif
+}
+
+static bool PresentSyncLogEnabled() {
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+    return CKRenderDiagnosticsSettings().FrameLog.PresentSync;
+#else
+    return false;
+#endif
+}
+
+static bool CameraAttachLogEnabled() {
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+    return CKRenderDiagnosticsSettings().FrameLog.CameraAttach;
+#else
+    return false;
+#endif
+}
+
 static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeManager *TimeManager) {
     if (!TimeManager)
         return Flags;
@@ -267,7 +291,7 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
     }
 
     static int s_PresentSyncLogCount = 0;
-    if (CKRenderSettingsPresentSyncLogEnabled() && s_PresentSyncLogCount < 64) {
+    if (PresentSyncLogEnabled() && s_PresentSyncLogCount < 64) {
         CK_LOG_FMT("PresentSync",
                    "limitOptions=0x%X frameRateMode=0x%X inputFlags=0x%X resolvedFlags=0x%X waitVbl=%d",
                    TimeManager->GetLimitOptions(), frameRateMode, Flags, resolved,
@@ -279,7 +303,7 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
 
 static void LogPresentFrameRateContract(const char *stage, CK_RENDER_FLAGS inputFlags, CK_RENDER_FLAGS resolvedFlags,
                                         CKTimeManager *timeManager) {
-    if (!CKRenderSettingsPresentSyncLogEnabled())
+    if (!PresentSyncLogEnabled())
         return;
 
     static int s_PresentFrameLogCount = 0;
@@ -504,7 +528,7 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
-    const bool frameLog = CKRenderSettingsFrameLogEnabled();
+    const bool frameLog = FrameLogEnabled();
     if (frameLog)
         CK_LOG("Clear", "enter");
     if (!m_RasterizerContext)
@@ -554,7 +578,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
-    const bool frameLog = CKRenderSettingsFrameLogEnabled();
+    const bool frameLog = FrameLogEnabled();
     if (frameLog)
         CK_LOG("DrawScene", "enter");
     if (!m_RasterizerContext)
@@ -863,7 +887,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         RestoreStereoRenderState(rootEntity, originalWorldMat);
     } else {
         // Normal rendering (non-stereo)
-        const bool frameLog = CKRenderSettingsFrameLogEnabled();
+        const bool frameLog = FrameLogEnabled();
         if (frameLog)
             CK_LOG("Render", "about to Clear");
         err = Clear(renderFlags);
@@ -2211,7 +2235,7 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
 
         static int s_attachLogCount = 0;
-        if (CKRenderSettingsCameraAttachLogEnabled() && s_attachLogCount < 16) {
+        if (CameraAttachLogEnabled() && s_attachLogCount < 16) {
             CK3dEntity *target = cam->GetClassID() == CKCID_TARGETCAMERA ? cam->GetTarget() : nullptr;
             int aspectWidth = 0;
             int aspectHeight = 0;

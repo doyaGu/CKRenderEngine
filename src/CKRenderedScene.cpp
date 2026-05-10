@@ -24,11 +24,19 @@ extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
 
 static bool RenderedSceneFrameLogEnabled() {
-    return CKRenderSettingsFrameLogEnabled();
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+    return CKRenderDiagnosticsSettings().FrameLog.Enabled;
+#else
+    return false;
+#endif
 }
 
 static bool RenderedSceneCameraLogEnabled() {
-    return CKRenderSettingsRenderedSceneCameraLogEnabled();
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+    return CKRenderDiagnosticsSettings().FrameLog.RenderedSceneCamera;
+#else
+    return false;
+#endif
 }
 
 CKRenderedScene::CKRenderedScene(CKRenderContext *rc) {

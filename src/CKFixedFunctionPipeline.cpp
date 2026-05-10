@@ -113,9 +113,10 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    m_DiagnosticConfig.StatsEnabled = CKRenderSettingsFFPStatsEnabled();
-    m_DiagnosticConfig.UniformHistEnabled = CKRenderSettingsFFPUniformHistEnabled();
-    m_DiagnosticConfig.StatsInterval = CKRenderSettingsFFPStatsInterval();
+    const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
+    m_DiagnosticConfig.StatsEnabled = settings.Enabled;
+    m_DiagnosticConfig.UniformHistEnabled = settings.UniformHistogram;
+    m_DiagnosticConfig.StatsInterval = settings.Interval;
 #endif
 
     Vx3DMatrixIdentity(m_World);
