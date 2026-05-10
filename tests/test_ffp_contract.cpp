@@ -1170,13 +1170,13 @@ void Test_RenderSettings_BoolParserSupportsNamedValues() {
               "Render debug config bool parser must preserve fallback for empty or unknown values");
 }
 
-static void SetTestDebugConfig(const char *section, const char *name, const char *value) {
+static void SetTestDebugConfig(CKRenderSettingsSection section, const char *name, const char *value) {
     CKRenderSettingsSetOverrideForTests(section, name, value);
 }
 
 void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
-    SetTestDebugConfig("Debug.FFPStats", "Enabled", "0");
-    SetTestDebugConfig("Debug.FFPStats", "UniformHistogram", "0");
+    SetTestDebugConfig(CKRenderSettingsSection::DebugFFPStats, "Enabled", "0");
+    SetTestDebugConfig(CKRenderSettingsSection::DebugFFPStats, "UniformHistogram", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1198,23 +1198,40 @@ void Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram() {
 void Test_DiagnosticStats_ConfigGatesKeepLogTags() {
     std::string perfSource = ReadRenderEngineSource("src/CKRenderPerfStats.cpp");
     std::string ffpSource = ReadRenderEngineSource("src/CKFixedFunctionPipeline.cpp");
+    std::string frameSource = ReadRenderEngineSource("src/CKRenderContext.cpp");
+    std::string meshSource = ReadRenderEngineSource("src/CKMesh.cpp");
+    std::string ffDebugSource = ReadRenderEngineSource("src/CKFFDebug.cpp");
+    std::string settingsHeader = ReadRenderEngineSource("src/CKRenderSettings.h");
     std::string settingsSource = ReadRenderEngineSource("src/CKRenderSettings.cpp");
     std::string configHeader = ReadRenderEngineSource("src/CKRenderConfig.h");
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
 
-    TestCheck(settingsSource.find("\"Debug.RenderStats\"") != std::string::npos &&
+    TestCheck(settingsHeader.find("struct CKRenderDiagnosticsConfig") != std::string::npos &&
+                  settingsHeader.find("const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings()") != std::string::npos &&
+                  settingsSource.find("CKRenderDiagnosticsSettings()") != std::string::npos,
+              "Render diagnostics must be read once through a typed CKRenderSettings diagnostics snapshot");
+    TestCheck(settingsSource.find("DebugRenderStats") != std::string::npos &&
                   settingsSource.find("\"Enabled\"") != std::string::npos &&
-                  perfSource.find("CKRenderSettingsRenderStatsEnabled") != std::string::npos &&
+                  perfSource.find("CKRenderDiagnosticsSettings().RenderStats.Enabled") != std::string::npos &&
                   perfSource.find("\"RenderStats\"") != std::string::npos,
               "Debug.RenderStats/Enabled path must keep emitting RenderStats logs");
-    TestCheck(settingsSource.find("\"Debug.FFPStats\"") != std::string::npos &&
-                  ffpSource.find("CKRenderSettingsFFPStatsEnabled") != std::string::npos &&
+    TestCheck(settingsSource.find("DebugFFPStats") != std::string::npos &&
+                  ffpSource.find("CKRenderDiagnosticsSettings().FFPStats") != std::string::npos &&
                   ffpSource.find("\"FFPStats\"") != std::string::npos,
               "Debug.FFPStats/Enabled path must keep emitting FFPStats logs");
     TestCheck(settingsSource.find("\"UniformHistogram\"") != std::string::npos &&
-                  ffpSource.find("CKRenderSettingsFFPUniformHistEnabled") != std::string::npos &&
+                  ffpSource.find("UniformHistogram") != std::string::npos &&
                   ffpSource.find("\"FFPUniformHist\"") != std::string::npos,
               "FFP uniform histogram must remain available behind its explicit config gate");
+    TestCheck(frameSource.find("CKRenderFrameLogSettings().GetBool") == std::string::npos &&
+                  frameSource.find("CKRenderDiagnosticsSettings().FrameLog") != std::string::npos,
+              "Frame diagnostics must use the cached diagnostics snapshot instead of repeated settings reads");
+    TestCheck(meshSource.find("CKRenderMeshLogSettings().Get") == std::string::npos &&
+                  meshSource.find("CKRenderDiagnosticsSettings().MeshLog") != std::string::npos,
+              "Mesh diagnostics must use the cached diagnostics snapshot instead of repeated settings reads");
+    TestCheck(ffDebugSource.find("CKRenderFFPLogSettings()") == std::string::npos &&
+                  ffDebugSource.find("CKRenderDiagnosticsSettings().FFPLog") != std::string::npos,
+              "FFP debug logging must use the cached diagnostics snapshot instead of repeated settings reads");
     TestCheck(rootCmake.find("option(CKRE_ENABLE_DIAGNOSTICS \"Enable optional CK2_3D diagnostic code unless a category overrides it\" OFF)") != std::string::npos &&
                   rootCmake.find("option(CKRE_ENABLE_DEBUG_LOGGER \"Enable CK2_3D internal diagnostic logger support\" ${CKRE_ENABLE_DIAGNOSTICS})") != std::string::npos &&
                   rootCmake.find("option(CKRE_ENABLE_RENDER_STATS \"Enable frame traversal and render wrapper timing diagnostics\" ${CKRE_ENABLE_DIAGNOSTICS})") != std::string::npos &&
@@ -1233,11 +1250,22 @@ void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
     std::string ini = ReadRenderEngineSource("src/CK2_3D.ini");
     std::string cmake = ReadRenderEngineSource("src/CMakeLists.txt");
 
-    TestCheck(header.find("CKRenderSettingsBool") == std::string::npos &&
-              header.find("CKRenderSettingsString") == std::string::npos &&
-              header.find("CKRenderSettingsInt") == std::string::npos &&
-              header.find("CKRenderSettingsDword") == std::string::npos,
-              "Render settings must keep generic section/key config access internal");
+    TestCheck(header.find("enum class CKRenderSettingsSection") != std::string::npos &&
+              header.find("CKRenderSettingsGetString") != std::string::npos &&
+              header.find("CKRenderSettingsGetBool") != std::string::npos &&
+              header.find("CKRenderSettingsGetInt") != std::string::npos &&
+              header.find("CKRenderSettingsGetDword") != std::string::npos &&
+              header.find("CKRenderSettingsGetPixelFormat") != std::string::npos &&
+              header.find("class CKRenderSettingsView") != std::string::npos &&
+              header.find("inline CKRenderSettingsView CKRenderSettings(CKRenderSettingsSection section)") != std::string::npos &&
+              header.find("CKRenderFrameLogSettings") != std::string::npos &&
+              header.find("CKRenderFFPStatsSettings") != std::string::npos,
+              "Render settings must expose one generic section/key/type API with a concise section helper");
+    TestCheck(header.find("CKRenderSettingsRoot") == std::string::npos &&
+              header.find("CKRenderSettingsDebugOutputEnabled") == std::string::npos &&
+              header.find("CKRenderSettingsFFPStatsEnabled") == std::string::npos &&
+              header.find("CKRenderSettingsMeshContractLogLimit") == std::string::npos,
+              "Render settings must not expose per-option helper functions");
     TestCheck(source.find("#include \"VxConfiguration.h\"") != std::string::npos &&
               source.find("VxConfiguration") != std::string::npos,
               "Render debug configuration must be backed by VxConfiguration");
@@ -1279,9 +1307,50 @@ void Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis() {
               "RenderEngine settings helper must not keep the old debug-config name");
 }
 
+void Test_RenderSettings_GenericApiReadsRootAndNestedSections() {
+    std::string header = ReadRenderEngineSource("src/CKRenderSettings.h");
+    std::string source = ReadRenderEngineSource("src/CKRenderSettings.cpp");
+    std::string managerSource = ReadRenderEngineSource("src/CKRenderManager.cpp");
+    char textureFormat[64] = {0};
+
+    TestCheck(header.find("Root,") != std::string::npos &&
+              header.find("FFP") != std::string::npos &&
+              header.find("DebugFFPStats") != std::string::npos,
+              "Render settings section enum must model CK2_3D root and nested sections");
+    const CKRenderSettingsView rootSettings = CKRenderRootSettings();
+    const CKRenderSettingsView ffpSettings = CKRenderFFPSettings();
+    TestCheck(rootSettings.GetDword("VertexCache", 0) == 16,
+              "Generic CK2_3D integer reader must read VertexCache from the root section");
+    TestCheck(rootSettings.GetString("TextureVideoFormat", textureFormat, sizeof(textureFormat)) &&
+                  std::string(textureFormat) == "_16_ARGB1555",
+              "Generic CK2_3D string reader must read TextureVideoFormat from the root section");
+    TestCheck(ffpSettings.GetBool("UberShader", true) == false,
+              "Generic CK2_3D bool reader must read nested FFP options");
+
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "VertexCache", "42");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "TextureVideoFormat", "_DXT5");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "SpriteVideoFormat", "NotAFormat");
+    TestCheck(rootSettings.GetDword("VertexCache", 16) == 42,
+              "Generic CK2_3D overrides must feed integer option readers");
+    TestCheck(rootSettings.GetPixelFormat("TextureVideoFormat", _16_ARGB1555) == _DXT5,
+              "Generic CK2_3D pixel format reader must parse supported Virtools format names");
+    TestCheck(rootSettings.GetPixelFormat("SpriteVideoFormat", _16_ARGB1555) == _16_ARGB1555,
+              "Generic CK2_3D pixel format reader must preserve fallback for unsupported format names");
+    TestCheck(source.find("VxString2PixelFormat") != std::string::npos &&
+              source.find("\"_16_ARGB1555\"") == std::string::npos,
+              "Render settings must delegate pixel format parsing to VxMath instead of owning a format-name table");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "VertexCache", nullptr);
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "TextureVideoFormat", nullptr);
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "SpriteVideoFormat", nullptr);
+    TestCheck(managerSource.find("CKRenderRootSettings()") != std::string::npos &&
+              managerSource.find(".GetDword(") != std::string::npos &&
+              managerSource.find(".GetPixelFormat(") != std::string::npos,
+              "Render manager must consume CK2_3D root options through the generic settings helper");
+}
+
 class ScopedDebugConfigValue {
 public:
-    ScopedDebugConfigValue(const char *section, const char *name, const char *value)
+    ScopedDebugConfigValue(CKRenderSettingsSection section, const char *name, const char *value)
         : m_Section(section), m_Name(name) {
         m_HadValue = CKRenderSettingsGetOverrideForTests(section, name, m_Previous, sizeof(m_Previous));
         Set(value);
@@ -1292,15 +1361,15 @@ public:
     }
 
 private:
-    static void Set(const char *section, const char *name, const char *value) {
+    static void Set(CKRenderSettingsSection section, const char *name, const char *value) {
         CKRenderSettingsSetOverrideForTests(section, name, value);
     }
 
     void Set(const char *value) {
-        Set(m_Section.c_str(), m_Name.c_str(), value);
+        Set(m_Section, m_Name.c_str(), value);
     }
 
-    std::string m_Section;
+    CKRenderSettingsSection m_Section;
     std::string m_Name;
     char m_Previous[256] = {0};
     bool m_HadValue = false;
@@ -1308,7 +1377,7 @@ private:
 
 void Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts() {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    ScopedDebugConfigValue statsConfig("Debug.FFPStats", "Enabled", "1");
+    ScopedDebugConfigValue statsConfig(CKRenderSettingsSection::DebugFFPStats, "Enabled", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1357,7 +1426,7 @@ void DrawDiagnosticFullSpecializedTexturedTriangle(CKFixedFunctionPipeline &ffp,
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1377,7 +1446,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1419,7 +1488,7 @@ static CKLightData MakeDiagnosticDirectionalLight(float r, float g, float b) {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1450,7 +1519,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedSingleLightInlinesLightUniform() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1481,7 +1550,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsVertexColorMaterialUni
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1513,7 +1582,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsViewSpaceUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1544,7 +1613,7 @@ void Test_FFPDiagnosticHarness_FullSpecializedMissKeepsUberUniformMirrors() {
 }
 
 void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
-    ScopedDebugConfigValue forceUber("FFP", "UberShader", "1");
+    ScopedDebugConfigValue forceUber(CKRenderSettingsSection::FFP, "UberShader", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1575,7 +1644,7 @@ void Test_FFPDiagnosticHarness_TextureStageResetReachesUniforms() {
 }
 
 void Test_FFPDiagnosticHarness_TextureMatrixResetReachesUniforms() {
-    ScopedDebugConfigValue forceUber("FFP", "UberShader", "1");
+    ScopedDebugConfigValue forceUber(CKRenderSettingsSection::FFP, "UberShader", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2018,8 +2087,8 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
               cacheSource.find("GetProgram(const CKFFStateDesc") == std::string::npos,
               "Clean-break FFP shader cache must not keep the old fixed-program selection API");
     TestCheck(settingsSource.find("\"FFP\"") != std::string::npos &&
-              settingsSource.find("\"UberShader\"") != std::string::npos &&
-              cacheSource.find("CKRenderSettingsFFPUberShaderEnabled") != std::string::npos &&
+              cacheSource.find("\"UberShader\"") != std::string::npos &&
+              cacheSource.find("CKRenderFFPSettings().GetBool") != std::string::npos &&
               cacheSource.find("CKFFBuildSpecializationInfo(key.FS)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, program != 0, module.Specialization)") != std::string::npos &&
               cacheSource.find("CKFFProgramBinding(program, false, specInfo)") != std::string::npos,
@@ -2132,7 +2201,7 @@ void Test_FFPShaderCache_UsesKeyedFFPVariantContract() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantHit(bool positionT) {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2219,7 +2288,7 @@ CKFFShaderKey MakeUncataloguedFFPUberKey() {
 }
 
 void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgram() {
-    ScopedDebugConfigValue unsetUber("FFP", "UberShader", nullptr);
+    ScopedDebugConfigValue unsetUber(CKRenderSettingsSection::FFP, "UberShader", nullptr);
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2250,7 +2319,7 @@ void Test_FFPShaderCache_DefaultFullSpecializedModeFallsBackForUncataloguedProgr
 }
 
 void Test_FFPShaderCache_ExplicitUberModeCreatesProgram() {
-    ScopedDebugConfigValue forceUber("FFP", "UberShader", "1");
+    ScopedDebugConfigValue forceUber(CKRenderSettingsSection::FFP, "UberShader", "1");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2295,7 +2364,7 @@ void Test_FFPShaderCache_UberAndCatalogBoundariesAreExplicit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2347,7 +2416,7 @@ void Test_FFPShaderCache_FullSpecializedTwoStageSpecularVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2387,7 +2456,7 @@ void Test_FFPShaderCache_FullSpecializedAlphaTestVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2427,7 +2496,7 @@ void Test_FFPShaderCache_FullSpecializedFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2467,7 +2536,7 @@ void Test_FFPShaderCache_FullSpecializedPositionTFogVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2502,7 +2571,7 @@ void Test_FFPShaderCache_FullSpecializedTexGenVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2536,7 +2605,7 @@ void Test_FFPShaderCache_FullSpecializedTexcoordTransformVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2575,7 +2644,7 @@ void Test_FFPShaderCache_FullSpecializedThreeArgVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2611,7 +2680,7 @@ void Test_FFPShaderCache_FullSpecializedLitVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -2646,7 +2715,7 @@ void Test_FFPShaderCache_FullSpecializedMaterialSourceVariantHit() {
 }
 
 void Test_FFPShaderCache_FullSpecializedVariantMissFallsBackToUber() {
-    ScopedDebugConfigValue forceFullSpecialized("FFP", "UberShader", "0");
+    ScopedDebugConfigValue forceFullSpecialized(CKRenderSettingsSection::FFP, "UberShader", "0");
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext ctx(&driver);
     CKFFShaderCache cache;
@@ -3552,8 +3621,9 @@ void Test_FFPDebugLogging_IsCentralized() {
         "\"DrawSerialPerFrame\""
     };
     for (const char *configName : configNames) {
-        TestCheck(settings.find(configName) != std::string::npos,
-                  "CKRenderSettings.cpp must keep the nested FFP debug log config keys");
+        TestCheck(settings.find(configName) != std::string::npos ||
+                      source.find(configName) != std::string::npos,
+                  "FFP debug logging must keep the nested FFP debug log config keys");
     }
     const char *removedConfigNames[] = {
         "CK2_3D_DEBUG_SKIP_POSITIONT_DRAWS",
@@ -3715,14 +3785,18 @@ void Test_DebugLogger_HasGlobalOutputDisableOption() {
     std::string rootCmake = ReadRenderEngineSource("CMakeLists.txt");
 
     TestCheck(header.find("void EnableOutput(bool enable)") != std::string::npos &&
-              header.find("bool m_OutputEnabled") != std::string::npos,
+              header.find("bool m_OutputEnabled") != std::string::npos &&
+              header.find("static bool OutputEnabled()") != std::string::npos,
               "Debug logger must expose an internal master output switch");
+    TestCheck(header.find("if (CKDebugLogger::OutputEnabled())") != std::string::npos &&
+              header.find("LogTaggedf(category, fmt") != std::string::npos,
+              "Runtime-disabled debug logging must skip formatting arguments and logger calls at the macro boundary");
     TestCheck(rootCmake.find("CKRE_DEBUG_LOG_OUTPUT_DEFAULT") == std::string::npos &&
-              source.find("CKRenderSettingsDebugOutputEnabled(false)") != std::string::npos,
+              source.find("CKRenderDebugSettings().GetBool(\"Output\", false)") != std::string::npos,
               "Debug logger output must default off and use CK2_3D.ini Debug/Output as the runtime override");
     TestCheck(settingsSource.find("\"Debug\"") != std::string::npos &&
-              settingsSource.find("\"Output\"") != std::string::npos &&
-              source.find("CKRenderSettingsDebugOutputEnabled") != std::string::npos,
+              source.find("\"Output\"") != std::string::npos &&
+              source.find("CKRenderDebugSettings().GetBool(\"Output\", false)") != std::string::npos,
               "Debug logger must support Debug/Output=0/false/off/no as a CK2_3D.ini override");
     TestCheck(source.find("if (!m_OutputEnabled)") != std::string::npos &&
               source.find("fclose(m_File)") != std::string::npos,
@@ -3823,6 +3897,7 @@ int main() {
     tests.Run("FFP diagnostics disabled stats skip timing and histogram", &Test_FFPDiagnostics_DisabledStatsSkipTimingAndHistogram);
     tests.Run("Diagnostic stats config gates keep log tags", &Test_DiagnosticStats_ConfigGatesKeepLogTags);
     tests.Run("Render settings uses CK2_3D ini", &Test_RenderSettings_UsesCK2_3DIniAndNoEnvApis);
+    tests.Run("Render settings generic API reads root and nested sections", &Test_RenderSettings_GenericApiReadsRootAndNestedSections);
     tests.Run("FFP diagnostic frame stats capture draw costs", &Test_FFPDiagnosticHarness_FrameStatsCaptureDrawCosts);
     tests.Run("FFP diagnostic full specialized skips uniform mirrors", &Test_FFPDiagnosticHarness_FullSpecializedSkipsSpecializedUniformMirrors);
     tests.Run("FFP diagnostic full specialized unlit 3D skips light uniforms", &Test_FFPDiagnosticHarness_FullSpecializedUnlit3DSkipsLightUniforms);
