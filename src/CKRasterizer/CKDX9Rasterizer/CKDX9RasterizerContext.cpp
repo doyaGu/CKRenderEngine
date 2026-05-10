@@ -45,6 +45,11 @@ static inline CKDWORD GetMsb(CKDWORD num, CKDWORD max)
 #endif
 }
 
+static inline CKBOOL IsValidArrayIndex(CKDWORD index, int size)
+{
+    return size > 0 && index < static_cast<CKDWORD>(size);
+}
+
 CKBOOL CKDX9VertexShaderDesc::Create(CKDX9RasterizerContext *Ctx, CKVertexShaderDesc *Format)
 {
     if (!Ctx || !Ctx->m_Device)
@@ -1053,7 +1058,7 @@ CKBOOL CKDX9RasterizerContext::SetTexture(CKDWORD Texture, int Stage)
     HRESULT hr = S_OK;
 
     // Case 1: Disabling a texture or using an invalid texture
-    if (Texture == 0 || Texture >= m_Textures.Size() || m_Textures[Texture] == NULL ||
+    if (Texture == 0 || !IsValidArrayIndex(Texture, m_Textures.Size()) || m_Textures[Texture] == NULL ||
         !(m_Textures[Texture]->Flags & CKRST_TEXTURE_VALID))
     {
         // Disable texture for this stage
@@ -1397,7 +1402,7 @@ CKBOOL CKDX9RasterizerContext::SetVertexShader(CKDWORD VShaderIndex)
         return SUCCEEDED(m_Device->SetVertexShader(NULL));
     }
 
-    if (VShaderIndex >= m_VertexShaders.Size())
+    if (!IsValidArrayIndex(VShaderIndex, m_VertexShaders.Size()))
         return FALSE;
 
     // Get and validate shader descriptor
@@ -1432,7 +1437,7 @@ CKBOOL CKDX9RasterizerContext::SetPixelShader(CKDWORD PShaderIndex)
         return SUCCEEDED(m_Device->SetPixelShader(NULL));
     }
 
-    if (PShaderIndex >= m_PixelShaders.Size())
+    if (!IsValidArrayIndex(PShaderIndex, m_PixelShaders.Size()))
         return FALSE;
 
     // Get and validate shader
@@ -1543,7 +1548,7 @@ CKBOOL CKDX9RasterizerContext::DrawPrimitive(VXPRIMITIVETYPE pType, WORD *indice
 
     // Get a suitable dynamic vertex buffer
     CKDWORD index = GetDynamicVertexBuffer(vertexFormat, data->VertexCount, vertexSize, clip);
-    CKDX9VertexBufferDesc *vertexBufferDesc = (index < m_VertexBuffers.Size()) ? static_cast<CKDX9VertexBufferDesc *>(m_VertexBuffers[index]) : NULL;
+    CKDX9VertexBufferDesc *vertexBufferDesc = IsValidArrayIndex(index, m_VertexBuffers.Size()) ? static_cast<CKDX9VertexBufferDesc *>(m_VertexBuffers[index]) : NULL;
     if (!vertexBufferDesc || !vertexBufferDesc->DxBuffer)
         return FALSE;
 
@@ -1613,7 +1618,7 @@ CKBOOL CKDX9RasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE pType, CKDWORD Ve
     if (VertexCount == 0)
         return FALSE;
 
-    if (VertexBuffer >= m_VertexBuffers.Size())
+    if (!IsValidArrayIndex(VertexBuffer, m_VertexBuffers.Size()))
         return FALSE;
 
     CKVertexBufferDesc *vertexBufferDesc = m_VertexBuffers[VertexBuffer];
@@ -1662,7 +1667,7 @@ CKBOOL CKDX9RasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE pType, CKDWORD 
         return FALSE;
 
     // Check if indices are valid
-    if (VB >= m_VertexBuffers.Size() || IB >= m_IndexBuffers.Size())
+    if (!IsValidArrayIndex(VB, m_VertexBuffers.Size()) || !IsValidArrayIndex(IB, m_IndexBuffers.Size()))
         return FALSE;
 
     // Get and validate both buffers
@@ -1737,7 +1742,7 @@ CKBOOL CKDX9RasterizerContext::CreateObject(CKDWORD ObjIndex, CKRST_OBJECTTYPE T
 #endif
     CKBOOL result = FALSE;
 
-    if (ObjIndex >= m_Textures.Size())
+    if (!IsValidArrayIndex(ObjIndex, m_Textures.Size()))
         return FALSE;
 
     switch (Type)
@@ -1788,7 +1793,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
     texture_used[Texture] = 1;
     fprintf(stderr, "load texture %d %dx%d %d\n", Texture, SurfDesc.Width, SurfDesc.Height, miplevel);
 #endif
-    if (Texture >= m_Textures.Size())
+    if (!IsValidArrayIndex(Texture, m_Textures.Size()))
         return FALSE;
 
     CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(m_Textures[Texture]);
@@ -1852,7 +1857,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
          if (miplevel == -1 && desc->MipMapCount > 0)
          {
             // Generate each mipmap level from the base level using box filter
-            for (int i = 1; i <= desc->MipMapCount; ++i)
+            for (CKDWORD i = 1; i <= desc->MipMapCount; ++i)
             {
                 IDirect3DSurface9 *pMipSurface = NULL;
                 hr = desc->DxTexture->GetSurfaceLevel(i, &pMipSurface);
@@ -1953,7 +1958,7 @@ CKBOOL CKDX9RasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx 
         dst = src;
 
         // Generate each mip level
-        for (int i = 1; i <= desc->MipMapCount; ++i)
+        for (CKDWORD i = 1; i <= desc->MipMapCount; ++i)
         {
             // Generate the next mip level
             VxGenerateMipMap(dst, mipmapBuffer);
@@ -2014,7 +2019,7 @@ CKBOOL CKDX9RasterizerContext::CopyToTexture(CKDWORD Texture, VxRect *Src, VxRec
             Src->left, Src->top, Src->right, Src->bottom,
             Dest->left, Dest->top, Dest->right, Dest->bottom);
 #endif
-    if (Texture >= m_Textures.Size())
+    if (!IsValidArrayIndex(Texture, m_Textures.Size()))
         return FALSE;
 
     CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(m_Textures[Texture]);
@@ -2211,7 +2216,7 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
         return TRUE;
     }
 
-    if (TextureObject >= m_Textures.Size() || m_DefaultBackBuffer)
+    if (!IsValidArrayIndex(TextureObject, m_Textures.Size()) || m_DefaultBackBuffer)
         return FALSE;
 
     // Handle cube map case
@@ -2262,7 +2267,7 @@ CKBOOL CKDX9RasterizerContext::SetTargetTexture(CKDWORD TextureObject, int Width
     }
 
     // Unbind all textures to avoid circular dependencies
-    for (int i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
+    for (CKDWORD i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
     {
         m_Device->SetTexture(i, NULL);
     }
@@ -2453,7 +2458,7 @@ CKBOOL CKDX9RasterizerContext::DrawSprite(CKDWORD Sprite, VxRect *src, VxRect *d
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (!src || !dst || Sprite >= m_Sprites.Size())
+    if (!src || !dst || !IsValidArrayIndex(Sprite, m_Sprites.Size()))
         return FALSE;
 
     CKSpriteDesc *sprite = m_Sprites[Sprite];
@@ -2800,7 +2805,7 @@ void *CKDX9RasterizerContext::LockVertexBuffer(CKDWORD VB, CKDWORD StartVertex, 
     ZoneScopedN(__FUNCTION__);
 #endif
 
-    if (VB >= m_VertexBuffers.Size())
+    if (!IsValidArrayIndex(VB, m_VertexBuffers.Size()))
         return NULL;
 
     CKDX9VertexBufferDesc *vb = static_cast<CKDX9VertexBufferDesc *>(m_VertexBuffers[VB]);
@@ -2819,7 +2824,7 @@ CKBOOL CKDX9RasterizerContext::UnlockVertexBuffer(CKDWORD VB)
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (VB >= m_VertexBuffers.Size())
+    if (!IsValidArrayIndex(VB, m_VertexBuffers.Size()))
         return FALSE;
 
     CKDX9VertexBufferDesc *vb = static_cast<CKDX9VertexBufferDesc *>(m_VertexBuffers[VB]);
@@ -3190,7 +3195,7 @@ int CKDX9RasterizerContext::CopyFromMemoryBuffer(CKRECT *rect, VXBUFFER_TYPE buf
     UINT rowSize = XMin(static_cast<UINT>(img_desc.BytesPerLine), static_cast<UINT>(lockedRect.Pitch));
 
     // Copy each row
-    for (UINT y = 0; y < img_desc.Height; ++y)
+    for (int y = 0; y < img_desc.Height; ++y)
     {
         memcpy(destData, srcData, rowSize);
         destData += lockedRect.Pitch;
@@ -3365,7 +3370,7 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (Texture >= m_Textures.Size())
+    if (!IsValidArrayIndex(Texture, m_Textures.Size()))
         return FALSE;
 
     CKDX9TextureDesc *desc = static_cast<CKDX9TextureDesc *>(m_Textures[Texture]);
@@ -3424,7 +3429,7 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
         if (miplevel == -1 && mipMapCount > 0)
         {
             // Create all mipmap levels from the loaded surface
-            for (int i = 1; i < mipMapCount + 1; ++i)
+            for (CKDWORD i = 1; i < mipMapCount + 1; ++i)
             {
                 IDirect3DSurface9 *pMipSurface = NULL;
                 hr = desc->DxCubeTexture->GetCubeMapSurface((D3DCUBEMAP_FACES)Face, i, &pMipSurface);
@@ -3521,7 +3526,7 @@ CKBOOL CKDX9RasterizerContext::LoadCubeMapTexture(CKDWORD Texture, const VxImage
         dst = src;
 
         // For each mipmap level
-        for (int i = 1; i < desc->MipMapCount + 1; ++i)
+        for (CKDWORD i = 1; i < desc->MipMapCount + 1; ++i)
         {
             // Generate next mipmap level
             VxGenerateMipMap(dst, image);
@@ -3572,7 +3577,7 @@ void *CKDX9RasterizerContext::LockIndexBuffer(CKDWORD IB, CKDWORD StartIndex, CK
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (IB >= m_IndexBuffers.Size())
+    if (!IsValidArrayIndex(IB, m_IndexBuffers.Size()))
         return NULL;
 
     CKDX9IndexBufferDesc *ib = static_cast<CKDX9IndexBufferDesc *>(m_IndexBuffers[IB]);
@@ -3618,7 +3623,7 @@ CKBOOL CKDX9RasterizerContext::UnlockIndexBuffer(CKDWORD IB)
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (IB >= m_IndexBuffers.Size())
+    if (!IsValidArrayIndex(IB, m_IndexBuffers.Size()))
         return FALSE;
 
     CKDX9IndexBufferDesc *ib = static_cast<CKDX9IndexBufferDesc *>(m_IndexBuffers[IB]);
@@ -3636,7 +3641,7 @@ CKBOOL CKDX9RasterizerContext::CreateTextureFromFile(CKDWORD Texture, CKSTRING F
     if (!Filename || !param)
         return FALSE;
         
-    if (Texture >= m_Textures.Size())
+    if (!IsValidArrayIndex(Texture, m_Textures.Size()))
         return FALSE;
 
     // Check if D3DX function is available
@@ -3993,7 +3998,7 @@ CKBOOL CKDX9RasterizerContext::InternalDrawPrimitiveVB(VXPRIMITIVETYPE pType, CK
         {
             needNewBuffer = TRUE;
         }
-        else if (indexcount > desc->m_MaxIndexCount)
+        else if (static_cast<CKDWORD>(indexcount) > desc->m_MaxIndexCount)
         {
             delete desc;
             desc = NULL;
@@ -4168,7 +4173,7 @@ void CKDX9RasterizerContext::SetupStreams(LPDIRECT3DVERTEXBUFFER9 Buffer, CKDWOR
     CKBOOL useFixedPipeline = TRUE;
 
     // Check if we're using programmable vertex pipeline
-    if (m_CurrentVertexShaderCache != 0 && m_CurrentVertexShaderCache < m_VertexShaders.Size())
+    if (m_CurrentVertexShaderCache != 0 && IsValidArrayIndex(m_CurrentVertexShaderCache, m_VertexShaders.Size()))
     {
         CKDX9VertexShaderDesc *desc = static_cast<CKDX9VertexShaderDesc *>(m_VertexShaders[m_CurrentVertexShaderCache]);
 
@@ -4264,7 +4269,7 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
     if (!DesiredFormat || !m_Device)
         return FALSE;
 
-    if (Texture >= m_Textures.Size())
+    if (!IsValidArrayIndex(Texture, m_Textures.Size()))
         return FALSE;
 
     // Adjust mipmap count (1 means no mipmaps)
@@ -4490,7 +4495,7 @@ CKBOOL CKDX9RasterizerContext::CreateTexture(CKDWORD Texture, CKTextureDesc *Des
     if (success)
     {
         // Reset any texture bindings potentially affected by this creation
-        for (int i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
+        for (CKDWORD i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
         {
             // Only unbind stages that might have the new texture (to avoid unnecessary state changes)
             LPDIRECT3DBASETEXTURE9 boundTexture = NULL;
@@ -4530,7 +4535,7 @@ CKBOOL CKDX9RasterizerContext::CreateVertexShader(CKDWORD VShader, CKVertexShade
 #if LOGGING && LOG_CREATEVERTEXSHADER
     fprintf(stderr, "create vertex shader %d\n", VShader);
 #endif
-    if (VShader >= m_VertexShaders.Size() || DesiredFormat == 0)
+    if (!IsValidArrayIndex(VShader, m_VertexShaders.Size()) || DesiredFormat == 0)
         return FALSE;
 
     if (!m_Device)
@@ -4614,7 +4619,7 @@ CKBOOL CKDX9RasterizerContext::CreatePixelShader(CKDWORD PShader, CKPixelShaderD
 #if LOGGING && LOG_CREATEPIXELSHADER
     fprintf(stderr, "create pixel shader %d\n", PShader);
 #endif
-    if (PShader >= m_PixelShaders.Size() || !DesiredFormat)
+    if (!IsValidArrayIndex(PShader, m_PixelShaders.Size()) || !DesiredFormat)
         return FALSE;
 
     // Validate required resources
@@ -4696,7 +4701,7 @@ CKBOOL CKDX9RasterizerContext::CreateVertexBuffer(CKDWORD VB, CKVertexBufferDesc
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (VB >= m_VertexBuffers.Size() || !DesiredFormat)
+    if (!IsValidArrayIndex(VB, m_VertexBuffers.Size()) || !DesiredFormat)
         return FALSE;
 
     DWORD fvf = DesiredFormat->m_VertexFormat;
@@ -4741,7 +4746,7 @@ CKBOOL CKDX9RasterizerContext::CreateIndexBuffer(CKDWORD IB, CKIndexBufferDesc *
 #ifdef TRACY_ENABLE
     ZoneScopedN(__FUNCTION__);
 #endif
-    if (IB >= m_IndexBuffers.Size() || !DesiredFormat)
+    if (!IsValidArrayIndex(IB, m_IndexBuffers.Size()) || !DesiredFormat)
         return FALSE;
 
     DWORD usage = D3DUSAGE_WRITEONLY;
@@ -5128,7 +5133,7 @@ void CKDX9RasterizerContext::FlushNonManagedObjects()
     HRESULT hr;
 
     // Clear all texture stages first
-    for (int i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
+    for (CKDWORD i = 0; i < m_Driver->m_3DCaps.MaxNumberTextureStage; ++i)
     {
         hr = m_Device->SetTexture(i, NULL);
         if (FAILED(hr))
@@ -5522,7 +5527,8 @@ LPDIRECT3DSURFACE9 CKDX9RasterizerContext::GetTempZBuffer(int Width, int Height)
     {
         // Verify surface is compatible
         D3DSURFACE_DESC desc;
-        if (SUCCEEDED(surface->GetDesc(&desc)) && desc.Width >= Width && desc.Height >= Height)
+        if (SUCCEEDED(surface->GetDesc(&desc)) && Width >= 0 && Height >= 0 &&
+            desc.Width >= static_cast<UINT>(Width) && desc.Height >= static_cast<UINT>(Height))
         {
             // Buffer is large enough, reuse it
             return surface;

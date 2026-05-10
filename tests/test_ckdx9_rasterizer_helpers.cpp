@@ -125,6 +125,20 @@ public:
                                            D3DPRESENT_PARAMETERS *, IDirect3DDevice9 **) { return D3DERR_INVALIDCALL; }
 };
 
+class FakeAdapterCountD3D9 : public FakeFormatD3D9
+{
+public:
+    FakeAdapterCountD3D9() : adapterIdentifierCalled(false) {}
+
+    HRESULT STDMETHODCALLTYPE GetAdapterIdentifier(UINT, DWORD, D3DADAPTER_IDENTIFIER9 *)
+    {
+        adapterIdentifierCalled = true;
+        return D3D_OK;
+    }
+
+    bool adapterIdentifierCalled;
+};
+
 bool ReadRenderTargetPixel(CKDX9RasterizerContext *context, IDirect3DSurface9 *surface,
                            UINT x, UINT y, CKDWORD *pixel)
 {
@@ -222,6 +236,26 @@ void SetLightRejectsOutOfRangeIndex()
 
     TestCheck(context.SetLight(RST_MAX_LIGHT, &data) == FALSE,
               "SetLight should reject out-of-range light indices");
+}
+
+void InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    FakeAdapterCountD3D9 fakeD3D9;
+    CKDX9Rasterizer rasterizer;
+    rasterizer.m_D3D9 = &fakeD3D9;
+
+    CKDX9RasterizerDriver driver(&rasterizer);
+
+    TestCheck(driver.InitializeCaps(-1, D3DDEVTYPE_HAL) == FALSE,
+              "InitializeCaps should reject negative adapter indices");
+    TestCheck(!fakeD3D9.adapterIdentifierCalled,
+              "InitializeCaps must validate adapter indices before querying D3D");
+
+    rasterizer.m_D3D9 = NULL;
+#endif
 }
 
 void RenderTargetTextureUsesSingleSampleableResource()
@@ -979,6 +1013,7 @@ int main()
     tests.Run("Unsupported D3D formats do not create valid texture descs", &UnsupportedD3DFormatDoesNotCreateValidTextureDesc);
     tests.Run("SetLight rejects null data", &SetLightRejectsNullData);
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
+    tests.Run("InitializeCaps rejects negative adapter indices", &InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery);
     tests.Run("2D render target textures use one sampleable resource", &RenderTargetTextureUsesSingleSampleableResource);
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);

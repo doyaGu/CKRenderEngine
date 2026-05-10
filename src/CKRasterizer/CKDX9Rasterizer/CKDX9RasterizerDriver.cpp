@@ -13,31 +13,35 @@ CKRasterizerContext *CKDX9RasterizerDriver::CreateContext()
 
 CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevType)
 {
-    // Store adapter and device info
-    m_AdapterIndex = AdapterIndex;
-    m_DevType = DevType;
-    
     // Get D3D9 interface
     IDirect3D9* pD3D = static_cast<CKDX9Rasterizer*>(m_Owner)->m_D3D9;
     if (!pD3D)
         return FALSE;
 
+    // Check if adapter is valid
+    if (AdapterIndex < 0)
+        return FALSE;
+
+    const UINT adapter = static_cast<UINT>(AdapterIndex);
+    UINT adapterCount = pD3D->GetAdapterCount();
+    if (adapter >= adapterCount)
+        return FALSE;
+
+    // Store adapter and device info
+    m_AdapterIndex = adapter;
+    m_DevType = DevType;
+
     // Get adapter identifier
-    if (FAILED(pD3D->GetAdapterIdentifier(AdapterIndex, D3DENUM_WHQL_LEVEL, &m_D3DIdentifier)))
+    if (FAILED(pD3D->GetAdapterIdentifier(adapter, D3DENUM_WHQL_LEVEL, &m_D3DIdentifier)))
         return FALSE;
 
     // Get current display mode
     D3DDISPLAYMODE currentMode;
-    if (FAILED(pD3D->GetAdapterDisplayMode(AdapterIndex, &currentMode)))
+    if (FAILED(pD3D->GetAdapterDisplayMode(adapter, &currentMode)))
         return FALSE;
 
     // Get device capabilities
-    if (FAILED(pD3D->GetDeviceCaps(AdapterIndex, DevType, &m_D3DCaps)))
-        return FALSE;
-
-    // Check if adapter is valid
-    UINT adapterCount = pD3D->GetAdapterCount();
-    if (AdapterIndex >= adapterCount)
+    if (FAILED(pD3D->GetDeviceCaps(adapter, DevType, &m_D3DCaps)))
         return FALSE;
 
     // Define formats to check for display modes
@@ -52,7 +56,7 @@ CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevTyp
      const int allowedAdapterFormatArrayCount = sizeof(allowedAdapterFormatArray) / sizeof(allowedAdapterFormatArray[0]);
 
      // Add current display mode format to render formats
-     if (SUCCEEDED(pD3D->CheckDeviceType(AdapterIndex, DevType, currentMode.Format, currentMode.Format, FALSE)))
+     if (SUCCEEDED(pD3D->CheckDeviceType(adapter, DevType, currentMode.Format, currentMode.Format, FALSE)))
      {
          m_RenderFormats.PushBack(currentMode.Format);
 
@@ -75,18 +79,18 @@ CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevTyp
      for (int i = 0; i < allowedAdapterFormatArrayCount; ++i)
      {
          D3DFORMAT format = allowedAdapterFormatArray[i];
-         UINT numAdapterModes = pD3D->GetAdapterModeCount(AdapterIndex, format);
+         UINT numAdapterModes = pD3D->GetAdapterModeCount(adapter, format);
 
          for (UINT mode = 0; mode < numAdapterModes; ++mode)
          {
              D3DDISPLAYMODE displayMode;
-             if (SUCCEEDED(pD3D->EnumAdapterModes(AdapterIndex, format, mode, &displayMode)))
+             if (SUCCEEDED(pD3D->EnumAdapterModes(adapter, format, mode, &displayMode)))
              {
                  // Filter out low-resolution modes
                  if (displayMode.Width >= 640 && displayMode.Height >= 400)
                  {
                      // Check if the device can render to this format
-                     if (SUCCEEDED(pD3D->CheckDeviceType(AdapterIndex, DevType, displayMode.Format, displayMode.Format, FALSE)))
+                     if (SUCCEEDED(pD3D->CheckDeviceType(adapter, DevType, displayMode.Format, displayMode.Format, FALSE)))
                      {
                          // Add supported format if not already in list
                          if (!m_RenderFormats.IsHere(displayMode.Format))
