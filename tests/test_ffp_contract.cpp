@@ -50,6 +50,30 @@ std::string ReadRenderEngineSource(const char *relativePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
+bool RenderEngineSourceExists(const char *relativePath) {
+#ifdef CKRE_SOURCE_DIR
+    std::string path = CKRE_SOURCE_DIR;
+    if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') {
+        path += '/';
+    }
+    path += relativePath;
+#else
+    std::string path = __FILE__;
+    const std::string suffix = "tests\\test_ffp_contract.cpp";
+    size_t pos = path.rfind(suffix);
+    if (pos == std::string::npos) {
+        const std::string altSuffix = "tests/test_ffp_contract.cpp";
+        pos = path.rfind(altSuffix);
+    }
+    TestCheck(pos != std::string::npos, "FFP contract test source path must resolve the RenderEngine source root");
+    path.erase(pos);
+    path += relativePath;
+#endif
+
+    std::ifstream file(path.c_str());
+    return file.good();
+}
+
 void TestColorClose(const VxColor &actual, const VxColor &expected, const char *message) {
     TestCheck(fabs(actual.r - expected.r) < 0.0001f &&
               fabs(actual.g - expected.g) < 0.0001f &&
@@ -3687,6 +3711,9 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
                   context.find("GetDC(") == std::string::npos &&
                   context.find("DrawTextA(") == std::string::npos,
               "GDI debug overlay and its CK2_3D root option must remain retired");
+    TestCheck(!RenderEngineSourceExists("src/shaders/vs_ff_lit.asm") &&
+                  !RenderEngineSourceExists("src/shaders/vs_ck_lit.asm"),
+              "Legacy disassembly shader dumps must not remain in the shader source tree");
     TestCheck(mesh.find("m_VertexCache.Value") != std::string::npos &&
                   mesh.find("m_UseIndexBuffers.Value") != std::string::npos,
               "Mesh options must feed vertex-cache optimization and hardware index-buffer use");
