@@ -5,6 +5,7 @@ set(CKRE_PUBLIC_HEADERS
         ${CKRE_VERSION_HEADER}
         ${CKRE_INCLUDE_DIR}/CKRenderEngineTypes.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineEnums.h
+        ${CKRE_INCLUDE_DIR}/CKRenderSettings.h
 
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
@@ -57,9 +58,14 @@ set(CKRE_PUBLIC_HEADERS
 
 set(CKRE_PRIVATE_HEADERS)
 
+set(CKRE_CONFIG_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/CK2_3D.ini
+)
+
 set(CKRE_SOURCES
         CK2_3D.cpp
 
+        CKRenderSettings.cpp
         CKRenderManager.cpp
         CKRenderContext.cpp
         CKCallbacksContainer.cpp
@@ -150,7 +156,7 @@ endfunction()
 set(CKRE_TARGETS)
 
 if (CKRE_BUILD_SHARED)
-    add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+    add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS} ${CKRE_CONFIG_FILES})
     ckre_configure_target(CK2_3D)
 
     # Shared library specific settings
@@ -161,6 +167,13 @@ if (CKRE_BUILD_SHARED)
     )
 
     target_link_libraries(CK2_3D PRIVATE CKRasterizerLib)
+
+    add_custom_command(TARGET CK2_3D POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/CK2_3D.ini"
+            "$<TARGET_FILE_DIR:CK2_3D>/CK2_3D.ini"
+            VERBATIM
+    )
 
     list(APPEND CKRE_TARGETS CK2_3D)
 endif ()
@@ -200,6 +213,9 @@ if (CKRE_INSTALL)
                 RUNTIME DESTINATION RenderEngines
                 LIBRARY DESTINATION RenderEngines
                 ARCHIVE DESTINATION lib
+        )
+        install(FILES ${CKRE_CONFIG_FILES}
+                DESTINATION RenderEngines
         )
     endif ()
 

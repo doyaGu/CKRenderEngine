@@ -59,3 +59,7 @@ target_include_directories(ckdx9_rasterizer_helper_tests PRIVATE
 target_link_libraries(ckdx9_rasterizer_helper_tests PRIVATE
     CKDX9RasterizerStatic
 )
+
+ckre_add_test(render_settings_tests
+    test_render_settings.cpp
+)
