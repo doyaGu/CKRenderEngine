@@ -3,10 +3,22 @@ function(ckre_add_test TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CKRE_INCLUDE_DIR}
     )
+
+    set(_ckre_test_ck2_dep CK2)
+    if (TARGET CK2Static)
+        set(_ckre_test_ck2_dep CK2Static)
+    endif ()
+
+    set(_ckre_test_vxmath_dep VxMath)
+    if (TARGET VxMathStatic)
+        set(_ckre_test_vxmath_dep VxMathStatic)
+    endif ()
+
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
-        CK2
-        VxMath
+        CKDX9RasterizerStatic
+        ${_ckre_test_ck2_dep}
+        ${_ckre_test_vxmath_dep}
     )
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin

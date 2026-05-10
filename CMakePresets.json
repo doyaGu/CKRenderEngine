@@ -1,0 +1,148 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "msvc-win32-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": "Win32",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "msvc-x64-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "renderengine-dx9-runtime-msvc-win32",
+      "displayName": "RenderEngine DX9 Runtime (MSVC Win32)",
+      "description": "Build the current DX9 rasterizer runtime using shared libraries.",
+      "inherits": "msvc-win32-base",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "ON",
+        "CKRE_BUILD_STATIC": "OFF",
+        "CKRE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "renderengine-dx9-runtime-msvc-x64",
+      "displayName": "RenderEngine DX9 Runtime (MSVC x64)",
+      "description": "Build the x64 DX9 rasterizer runtime using shared libraries.",
+      "inherits": "msvc-x64-base",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "ON",
+        "CKRE_BUILD_STATIC": "OFF",
+        "CKRE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "renderengine-dx9-static-msvc-win32",
+      "displayName": "RenderEngine DX9 Static (MSVC Win32)",
+      "description": "Build static RenderEngine and DX9 rasterizer libraries.",
+      "inherits": "msvc-win32-base",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "OFF",
+        "CKRE_BUILD_STATIC": "ON",
+        "CKRE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "renderengine-dx9-static-msvc-x64",
+      "displayName": "RenderEngine DX9 Static (MSVC x64)",
+      "description": "Build x64 static RenderEngine and DX9 rasterizer libraries.",
+      "inherits": "msvc-x64-base",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "OFF",
+        "CKRE_BUILD_STATIC": "ON",
+        "CKRE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "renderengine-dx9-tests-msvc-win32",
+      "displayName": "RenderEngine DX9 Tests (MSVC Win32)",
+      "description": "Build RenderEngine tests against static CKRenderEngine libraries.",
+      "inherits": "renderengine-dx9-static-msvc-win32",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "OFF",
+        "CKRE_BUILD_STATIC": "ON",
+        "CKRE_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "renderengine-dx9-tests-msvc-x64",
+      "displayName": "RenderEngine DX9 Tests (MSVC x64)",
+      "description": "Build x64 RenderEngine tests against static CKRenderEngine libraries.",
+      "inherits": "renderengine-dx9-static-msvc-x64",
+      "cacheVariables": {
+        "CKRE_BUILD_SHARED": "OFF",
+        "CKRE_BUILD_STATIC": "ON",
+        "CKRE_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "renderengine-dx9-runtime-win32-release",
+      "displayName": "RenderEngine DX9 Runtime Win32 Release",
+      "configurePreset": "renderengine-dx9-runtime-msvc-win32",
+      "configuration": "Release"
+    },
+    {
+      "name": "renderengine-dx9-runtime-x64-release",
+      "displayName": "RenderEngine DX9 Runtime x64 Release",
+      "configurePreset": "renderengine-dx9-runtime-msvc-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "renderengine-dx9-static-win32-release",
+      "displayName": "RenderEngine DX9 Static Win32 Release",
+      "configurePreset": "renderengine-dx9-static-msvc-win32",
+      "configuration": "Release"
+    },
+    {
+      "name": "renderengine-dx9-static-x64-release",
+      "displayName": "RenderEngine DX9 Static x64 Release",
+      "configurePreset": "renderengine-dx9-static-msvc-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "renderengine-dx9-tests-win32-release",
+      "displayName": "RenderEngine DX9 Tests Win32 Release",
+      "configurePreset": "renderengine-dx9-tests-msvc-win32",
+      "configuration": "Release"
+    },
+    {
+      "name": "renderengine-dx9-tests-x64-release",
+      "displayName": "RenderEngine DX9 Tests x64 Release",
+      "configurePreset": "renderengine-dx9-tests-msvc-x64",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "renderengine-dx9-tests-win32-release",
+      "displayName": "RenderEngine DX9 Tests Win32 Release",
+      "configurePreset": "renderengine-dx9-tests-msvc-win32",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "renderengine-dx9-tests-x64-release",
+      "displayName": "RenderEngine DX9 Tests x64 Release",
+      "configurePreset": "renderengine-dx9-tests-msvc-x64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
