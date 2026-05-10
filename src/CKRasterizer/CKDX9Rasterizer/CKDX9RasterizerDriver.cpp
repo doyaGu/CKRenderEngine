@@ -726,6 +726,11 @@ D3DFORMAT CKDX9RasterizerDriver::FindNearestDepthFormat(D3DFORMAT pf, int ZBpp, 
     if (ZBpp <= 0)
         ZBpp = desc.BitsPerPixel;
 
+    // The legacy render context defaults rely on a stencil buffer for effects
+    // such as ShadowStencil. Preserve that unless stencil was explicitly disabled.
+    if (StencilBpp < 0)
+        StencilBpp = 8;
+
     // Define arrays of depth formats by category
     // Order is from most desirable to least desirable for each category
 

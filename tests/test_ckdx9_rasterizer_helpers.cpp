@@ -139,6 +139,48 @@ public:
     bool adapterIdentifierCalled;
 };
 
+class FakeDepthStencilD3D9 : public FakeFormatD3D9
+{
+public:
+    HRESULT STDMETHODCALLTYPE CheckDeviceFormat(UINT, D3DDEVTYPE, D3DFORMAT, DWORD Usage,
+                                                D3DRESOURCETYPE RType, D3DFORMAT CheckFormat)
+    {
+        if ((Usage & D3DUSAGE_RENDERTARGET) != 0 && RType == D3DRTYPE_SURFACE)
+            return D3D_OK;
+
+        if ((Usage & D3DUSAGE_DEPTHSTENCIL) != 0 && RType == D3DRTYPE_SURFACE)
+        {
+            switch (CheckFormat)
+            {
+                case D3DFMT_D24S8:
+                case D3DFMT_D24X8:
+                case D3DFMT_D32:
+                case D3DFMT_D16:
+                    return D3D_OK;
+                default:
+                    return D3DERR_NOTAVAILABLE;
+            }
+        }
+
+        return FakeFormatD3D9::CheckDeviceFormat(0, D3DDEVTYPE_HAL, D3DFMT_UNKNOWN, Usage, RType, CheckFormat);
+    }
+
+    HRESULT STDMETHODCALLTYPE CheckDepthStencilMatch(UINT, D3DDEVTYPE, D3DFORMAT,
+                                                     D3DFORMAT, D3DFORMAT CheckFormat)
+    {
+        switch (CheckFormat)
+        {
+            case D3DFMT_D24S8:
+            case D3DFMT_D24X8:
+            case D3DFMT_D32:
+            case D3DFMT_D16:
+                return D3D_OK;
+            default:
+                return D3DERR_NOTAVAILABLE;
+        }
+    }
+};
+
 bool ReadRenderTargetPixel(CKDX9RasterizerContext *context, IDirect3DSurface9 *surface,
                            UINT x, UINT y, CKDWORD *pixel)
 {
@@ -236,6 +278,27 @@ void SetLightRejectsOutOfRangeIndex()
 
     TestCheck(context.SetLight(RST_MAX_LIGHT, &data) == FALSE,
               "SetLight should reject out-of-range light indices");
+}
+
+void DefaultDepthFormatKeepsStencilAvailable()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    FakeDepthStencilD3D9 fakeD3D9;
+    CKDX9Rasterizer rasterizer;
+    rasterizer.m_D3D9 = &fakeD3D9;
+
+    CKDX9RasterizerDriver driver(&rasterizer);
+    driver.m_AdapterIndex = 0;
+    driver.m_DevType = D3DDEVTYPE_HAL;
+
+    const D3DFORMAT selected = driver.FindNearestDepthFormat(D3DFMT_X8R8G8B8, -1, -1);
+    rasterizer.m_D3D9 = NULL;
+
+    TestCheck(selected == D3DFMT_D24S8,
+              "Default DX9 depth format selection should keep stencil available for ShadowStencil");
+#endif
 }
 
 void InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery()
@@ -1013,6 +1076,7 @@ int main()
     tests.Run("Unsupported D3D formats do not create valid texture descs", &UnsupportedD3DFormatDoesNotCreateValidTextureDesc);
     tests.Run("SetLight rejects null data", &SetLightRejectsNullData);
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
+    tests.Run("Default DX9 depth format keeps stencil available", &DefaultDepthFormatKeepsStencilAvailable);
     tests.Run("InitializeCaps rejects negative adapter indices", &InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery);
     tests.Run("2D render target textures use one sampleable resource", &RenderTargetTextureUsesSingleSampleableResource);
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
