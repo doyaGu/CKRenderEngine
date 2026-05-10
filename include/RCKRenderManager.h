@@ -104,9 +104,7 @@ public:
     XArray<CKVertexBuffer *> m_VertexBuffers;
     VxOption m_ForceLinearFog;
     VxOption m_ForceSoftware;
-    VxOption m_EnsureVertexShader;
     VxOption m_DisableFilter;
-    VxOption m_DisableDithering;
     VxOption m_Antialias;
     VxOption m_DisableMipmap;
     VxOption m_DisableSpecular;
@@ -116,7 +114,6 @@ public:
     VxOption m_VertexCache;
     VxOption m_SortTransparentObjects;
     VxOption m_TextureCacheManagement;
-    VxOption m_DisablePerspectiveCorrection;
     VxOption m_TextureVideoFormat;
     VxOption m_SpriteVideoFormat;
     XArray<VxOption*> m_Options;

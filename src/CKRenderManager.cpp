@@ -118,15 +118,11 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_ForceLinearFog.Set("ForceLinearFog", FALSE);
     m_Options.PushBack(&m_ForceLinearFog);
 
-    m_EnsureVertexShader.Set("EnsureVertexShader", FALSE);
-
     m_ForceSoftware.Set("ForceSoftware", FALSE);
     m_Options.PushBack(&m_ForceSoftware);
 
     m_DisableFilter.Set("DisableFilter", FALSE);
     m_Options.PushBack(&m_DisableFilter);
-
-    m_DisableDithering.Set("DisableDithering", FALSE);
 
     m_Antialias.Set("Antialias", 0);
     m_Options.PushBack(&m_Antialias);
@@ -136,8 +132,6 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     m_DisableSpecular.Set("DisableSpecular", FALSE);
     m_Options.PushBack(&m_DisableSpecular);
-
-    m_DisablePerspectiveCorrection.Set("DisablePerspectiveCorrection", FALSE);
 
     ApplyIniRenderOptions(this);
 
