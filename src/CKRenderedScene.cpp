@@ -557,17 +557,8 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
         ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     }
 
-    if (rm->m_DisableDithering.Value != 0) {
-        ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
-    } else {
-        ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
-    }
-
-    if (rm->m_DisablePerspectiveCorrection.Value != 0) {
-        ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
-    } else {
-        ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
-    }
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
     // m_PresentInterval / m_CurrentPresentInterval were v1 fields on
     // CKRasterizerContext; filter/mipmap modes are now managed by the

@@ -3631,12 +3631,9 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
     std::string settings = ReadRenderEngineSource("src/CKRenderSettings.cpp");
 
     const char *rootOptions[] = {
-        "DisablePerspectiveCorrection",
         "ForceLinearFog",
         "ForceSoftware",
         "DisableFilter",
-        "EnsureVertexShader",
-        "DisableDithering",
         "DisableMipmap",
         "DisableSpecular",
         "Antialias",
@@ -3650,20 +3647,35 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
         "SpriteVideoFormat"
     };
     for (const char *option : rootOptions) {
-        TestCheck(ini.find(option) != std::string::npos &&
-                      manager.find(option) != std::string::npos,
+        std::string iniAssignment = std::string("    ") + option + " =";
+        TestCheck(ini.find(iniAssignment) != std::string::npos &&
+                      manager.find(std::string("m_Options.PushBack(&m_") + option) != std::string::npos,
                   "Every CK2_3D root option must be present in the ini and registered by RCKRenderManager");
+    }
+    const char *legacyOptions[] = {
+        "EnsureVertexShader",
+        "DisablePerspectiveCorrection",
+        "DisableDithering"
+    };
+    for (const char *option : legacyOptions) {
+        std::string iniAssignment = std::string("    ") + option + " =";
+        TestCheck(ini.find(iniAssignment) == std::string::npos &&
+                      manager.find(std::string("m_Options.PushBack(&m_") + option) == std::string::npos,
+                  "Legacy weak RenderEngine options must not remain active CK2_3D root options");
     }
 
     TestCheck(manager.find("CKRenderRootSettings()") != std::string::npos &&
                   manager.find("settings.GetDword(option->Key.CStr()") != std::string::npos &&
                   manager.find("settings.GetPixelFormat(manager->m_TextureVideoFormat") != std::string::npos,
               "Root render options must be read through CKRenderSettings as the only CK2_3D.ini entry point");
-    TestCheck(scene.find("m_DisablePerspectiveCorrection.Value") != std::string::npos &&
-                  scene.find("m_ForceLinearFog.Value") != std::string::npos &&
+    TestCheck(scene.find("m_DisablePerspectiveCorrection.Value") == std::string::npos &&
+                  scene.find("m_DisableDithering.Value") == std::string::npos,
+              "Legacy weak render states must not keep manager-option consumption paths");
+    TestCheck(scene.find("m_ForceLinearFog.Value") != std::string::npos &&
                   scene.find("m_DisableSpecular.Value") != std::string::npos &&
-                  scene.find("m_DisableDithering.Value") != std::string::npos,
-              "Scene render-state options must affect modern FFP render-state setup");
+                  scene.find("VXRENDERSTATE_DITHERENABLE, TRUE") != std::string::npos &&
+                  scene.find("VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE") != std::string::npos,
+              "Scene render-state options must keep only modern FFP render-state setup");
     TestCheck(context.find("m_ForceSoftware.Value") != std::string::npos &&
                   context.find("m_EnableScreenDump.Value") != std::string::npos &&
                   context.find("m_EnableDebugMode.Value") != std::string::npos &&
@@ -3681,6 +3693,11 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
                   context.find("m_DisableMipmap.Value") != std::string::npos &&
                   contextHeader.find("ApplyRenderOptions") != std::string::npos &&
                   manager.find("context->ApplyRenderOptions()") != std::string::npos &&
+                  manager.find("ApplyRenderOptionChange(") != std::string::npos &&
+                  manager.find("if (oldValue == Value)") != std::string::npos &&
+                  manager.find("InvalidateTextureVideoMemory()") != std::string::npos &&
+                  manager.find("ApplyTextureVideoFormat(") != std::string::npos &&
+                  manager.find("ApplySpriteVideoFormat(") != std::string::npos &&
                   pipelineHeader.find("m_DisableTextureFiltering") != std::string::npos &&
                   pipeline.find("desc.MinFilter = CKRST_FILTER_NEAREST") != std::string::npos &&
                   texture.find("desc.MipMapCount = 0") != std::string::npos,
@@ -3698,10 +3715,11 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
                   settings.find("\"Debug.FFPLog\"") != std::string::npos &&
                   settings.find("\"Debug.MeshLog\"") != std::string::npos,
               "Nested CK2_3D options must keep their concrete render/debug consumers");
-    TestCheck(manager.find("EnsureVertexShader") != std::string::npos &&
+    TestCheck(manager.find("m_EnsureVertexShader.Set") != std::string::npos &&
+                  manager.find("m_Options.PushBack(&m_EnsureVertexShader)") == std::string::npos &&
                   context.find("m_EnsureVertexShader") == std::string::npos &&
                   bgfxContext.find("CKBgfxShaderProfile") != std::string::npos,
-              "EnsureVertexShader must remain a compatibility option while bgfx stays shader-backed by construction");
+              "EnsureVertexShader must remain only as a layout-preserving member while bgfx stays shader-backed by construction");
 }
 
 void Test_FFPDebugLogging_IsCentralized() {
