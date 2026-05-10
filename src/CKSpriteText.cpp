@@ -8,6 +8,11 @@ CK_CLASSID RCKSpriteText::m_ClassID = CKCID_SPRITETEXT;
 // Constructor: 0x10061f00
 RCKSpriteText::RCKSpriteText(CKContext *Context, CKSTRING name) : RCKSprite(Context, name) {
     m_Text = nullptr;
+    m_FontName = nullptr;
+    m_FontSize = 12;
+    m_FontWeight = 400;
+    m_FontItalic = FALSE;
+    m_FontUnderline = FALSE;
     m_Font = nullptr;
     m_FontColor = 0xFFFFFFFF; // White
     m_BkColor = 0;
@@ -26,6 +31,8 @@ RCKSpriteText::~RCKSpriteText() {
     ClearFont();
     delete[] m_Text;
     m_Text = nullptr;
+    delete[] m_FontName;
+    m_FontName = nullptr;
 }
 
 // GetClassID: 0x10062519
@@ -40,11 +47,17 @@ int RCKSpriteText::GetMemoryOccupation() {
     if (m_Text) {
         size += (int)strlen(m_Text) + 1;
     }
+    if (m_FontName) {
+        size += (int)strlen(m_FontName) + 1;
+    }
     return size;
 }
 
 // SetText: 0x10062021
 void RCKSpriteText::SetText(CKSTRING text) {
+    if ((!m_Text && (!text || !*text)) || (m_Text && text && strcmp(m_Text, text) == 0))
+        return;
+
     if (m_Text) {
         delete[] m_Text;
     }
@@ -66,6 +79,9 @@ CKSTRING RCKSpriteText::GetText() {
 
 // SetTextColor: 0x100620c0
 void RCKSpriteText::SetTextColor(CKDWORD col) {
+    if (m_FontColor == col)
+        return;
+
     m_FontColor = col;
     Redraw();
 }
@@ -77,6 +93,9 @@ CKDWORD RCKSpriteText::GetTextColor() {
 
 // SetBackgroundColor: 0x100620f5
 void RCKSpriteText::SetBackgroundColor(CKDWORD col) {
+    if (m_BkColor == col)
+        return;
+
     m_BkColor = col;
     Redraw();
 }
@@ -88,15 +107,41 @@ CKDWORD RCKSpriteText::GetBackgroundTextColor() {
 
 // SetFont: 0x10062349
 void RCKSpriteText::SetFont(CKSTRING FontName, int FontSize, int Weight, CKBOOL italic, CKBOOL underline) {
+    const char *newFontName = FontName ? FontName : "";
+    const char *oldFontName = m_FontName ? m_FontName : "";
+    if (m_Font &&
+        m_FontSize == FontSize &&
+        m_FontWeight == Weight &&
+        m_FontItalic == italic &&
+        m_FontUnderline == underline &&
+        strcmp(oldFontName, newFontName) == 0)
+        return;
+
     if (m_Font) {
         VxDeleteFont(m_Font);
     }
     m_Font = VxCreateFont(FontName, FontSize, Weight, italic, underline);
+
+    delete[] m_FontName;
+    m_FontName = nullptr;
+    if (FontName) {
+        size_t len = strlen(FontName);
+        m_FontName = new char[len + 1];
+        strcpy(m_FontName, FontName);
+    }
+    m_FontSize = FontSize;
+    m_FontWeight = Weight;
+    m_FontItalic = italic;
+    m_FontUnderline = underline;
+
     Redraw();
 }
 
 // SetAlign: 0x1006212a
 void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
+    if ((m_Flags & 0xFFFF) == ((CKDWORD)align & 0xFFFF))
+        return;
+
     m_Flags &= 0xFFFF0000;
     m_Flags |= (CKDWORD) align & 0xFFFF;
     Redraw();
@@ -104,7 +149,7 @@ void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
 
 // GetAlign: 0x10062173
 CKSPRITETEXT_ALIGNMENT RCKSpriteText::GetAlign() {
-    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF0000);
+    return (CKSPRITETEXT_ALIGNMENT) (m_Flags & 0xFFFF);
 }
 
 // ClearFont: 0x1006218c
@@ -113,6 +158,12 @@ void RCKSpriteText::ClearFont() {
         VxDeleteFont(m_Font);
     }
     m_Font = 0;
+    delete[] m_FontName;
+    m_FontName = nullptr;
+    m_FontSize = 12;
+    m_FontWeight = 400;
+    m_FontItalic = FALSE;
+    m_FontUnderline = FALSE;
 }
 
 // IsUpToDate: 0x10062500
@@ -237,11 +288,20 @@ CKERROR RCKSpriteText::Copy(CKObject &o, CKDependenciesContext &context) {
         return err;
 
     RCKSpriteText &src = static_cast<RCKSpriteText &>(o);
-    m_Text = src.m_Text; // Note: shallow copy like original
+
+    delete[] m_Text;
+    m_Text = nullptr;
+    if (src.m_Text) {
+        size_t len = strlen(src.m_Text);
+        m_Text = new char[len + 1];
+        strcpy(m_Text, src.m_Text);
+    }
+
+    SetFont(src.m_FontName, src.m_FontSize, src.m_FontWeight, src.m_FontItalic, src.m_FontUnderline);
     m_FontColor = src.m_FontColor;
     m_BkColor = src.m_BkColor;
-    m_Font = src.m_Font;
     m_Flags = src.m_Flags;
+    Redraw();
 
     return CK_OK;
 }
