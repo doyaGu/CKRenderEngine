@@ -4432,8 +4432,11 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                         CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
                     }
                     static int s_meshContractLogCount = 0;
-                    static const int s_MeshLogLimit = CKRenderSettingsMeshContractLogLimit();
-                    const int meshLogLimit = s_MeshLogLimit;
+#if CKRE_ENABLE_MESH_DIAGNOSTICS
+                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.ContractLimit;
+#else
+                    const int meshLogLimit = 0;
+#endif
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
@@ -4497,8 +4500,11 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
                     CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
                     static int s_meshContractLogCount = 0;
-                    static const int s_MeshLogLimit = CKRenderSettingsMeshContractLogLimit();
-                    const int meshLogLimit = s_MeshLogLimit;
+#if CKRE_ENABLE_MESH_DIAGNOSTICS
+                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.ContractLimit;
+#else
+                    const int meshLogLimit = 0;
+#endif
                     if (s_meshContractLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
@@ -5540,8 +5546,12 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                     if (value > maxIndex)
                         maxIndex = value;
                 }
-                static const bool s_LogHwIndexRanges = CKRenderSettingsMeshHardwareIndexRangesLogEnabled();
-                if (s_LogHwIndexRanges &&
+#if CKRE_ENABLE_MESH_DIAGNOSTICS
+                const bool logHwIndexRanges = CKRenderDiagnosticsSettings().MeshLog.HardwareIndexRanges;
+#else
+                const bool logHwIndexRanges = false;
+#endif
+                if (logHwIndexRanges &&
                     s_indexRangeLogCount < 16) {
                     CK_LOG_FMT("Mesh",
                                "HW IB range #%d: group=%d base=%u verts=%u start=%u count=%u maxIndex=%u remap=%u",

@@ -14,8 +14,12 @@ CKDebugLogger &CKDebugLogger::Instance() {
     return instance;
 }
 
+bool CKDebugLogger::OutputEnabled() {
+    return Instance().IsOutputEnabled();
+}
+
 CKDebugLogger::CKDebugLogger()
-    : m_OutputEnabled(CKRenderSettingsDebugOutputEnabled(false)),
+    : m_OutputEnabled(CKRenderDebugSettings().GetBool("Output", false)),
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
       m_File(nullptr) {
@@ -43,7 +47,7 @@ CKDebugLogger::CKDebugLogger()
     }
 
     char configPath[MAX_PATH] = {0};
-    if (CKRenderSettingsLogPath(configPath, MAX_PATH)) {
+    if (CKRenderDebugSettings().GetString("LogPath", configPath, MAX_PATH)) {
         strncpy_s(m_LogFilePath, MAX_PATH, configPath, _TRUNCATE);
     }
 }

@@ -71,9 +71,14 @@ void CKRenderPipeline::BeginFrame(
     m_Context->SetViewTransform(CKRP_VIEW_BACKGROUND2D, &identity, &m_OrthoProj);
 
     // Log matrices on first few frames and then periodically
-    static const bool s_LogFrameMatrices = CKRenderSettingsFrameLogEnabled();
+    const bool logFrameMatrices =
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+        CKRenderDiagnosticsSettings().FrameLog.Enabled;
+#else
+        false;
+#endif
     static int s_logCount = 0;
-    if (s_LogFrameMatrices && (s_logCount < 5 || (s_logCount >= 30 && s_logCount < 33))) {
+    if (logFrameMatrices && (s_logCount < 5 || (s_logCount >= 30 && s_logCount < 33))) {
         CK_LOG_FMT("RenderPipeline", "View matrix row0: %.3f %.3f %.3f %.3f",
                    view[0][0], view[0][1], view[0][2], view[0][3]);
         CK_LOG_FMT("RenderPipeline", "View matrix row1: %.3f %.3f %.3f %.3f",
@@ -120,9 +125,14 @@ void CKRenderPipeline::BeginFrame(
 void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     if (!m_Context) return;
 
-    static const bool s_LogPresentSync = CKRenderSettingsPresentSyncLogEnabled();
+    const bool logPresentSync =
+#if CKRE_ENABLE_FRAME_DIAGNOSTICS
+        CKRenderDiagnosticsSettings().FrameLog.PresentSync;
+#else
+        false;
+#endif
     static int s_PresentSyncLogCount = 0;
-    if (s_LogPresentSync && s_PresentSyncLogCount < 64) {
+    if (logPresentSync && s_PresentSyncLogCount < 64) {
         CK_LOG_FMT("PresentSync", "RenderPipeline/EndFrame syncMode=%d", syncMode);
         ++s_PresentSyncLogCount;
     }

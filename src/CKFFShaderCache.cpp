@@ -20,8 +20,6 @@
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 
-namespace {
-
 struct CKFFShaderBlobSet {
     CK_SHADER_PROFILE Profile;
     const char *Name;
@@ -63,8 +61,6 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
-} // namespace
-
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
@@ -75,7 +71,7 @@ CKFFShaderCache::~CKFFShaderCache() {
 
 void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
-    m_UseUberShader = CKRenderSettingsFFPUberShaderEnabled();
+    m_UseUberShader = CKRenderFFPSettings().GetBool("UberShader", false);
     CreateUniforms();
     ResolveShaderTarget();
 }

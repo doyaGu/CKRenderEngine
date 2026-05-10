@@ -12,13 +12,13 @@
 #include <cstring>
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
-    static const CKFFDebugConfig value = {
-        CKRenderSettingsFFPDrawLogLimit(),
-        CKRenderSettingsFFPReal3DLogLimit(),
-        CKRenderSettingsFFPContract3DLogLimit(),
-        CKRenderSettingsFFPPositionTLogLimit(),
-        CKRenderSettingsFFPDrawSerialPerFrame()
-    };
+    static CKFFDebugConfig value = {};
+    const CKRenderFFPLogConfig &settings = CKRenderDiagnosticsSettings().FFPLog;
+    value.DrawLogLimit = settings.DrawLimit;
+    value.Real3DLogLimit = settings.Real3DLimit;
+    value.Contract3DLogLimit = settings.Contract3DLimit;
+    value.PositionTLogLimit = settings.PositionTLimit;
+    value.DrawSerialPerFrame = settings.DrawSerialPerFrame;
     return value;
 }
 

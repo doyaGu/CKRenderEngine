@@ -17,7 +17,7 @@ static CKRenderPerfStats g_RenderPerfStats = {};
 static CKDWORD g_RenderPerfNowCallCount = 0;
 
 bool CKRenderPerfStatsEnabled() {
-    return CKRenderSettingsRenderStatsEnabled();
+    return CKRenderDiagnosticsSettings().RenderStats.Enabled;
 }
 
 double CKRenderPerfNow() {
