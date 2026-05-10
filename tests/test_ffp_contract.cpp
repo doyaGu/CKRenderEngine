@@ -3615,6 +3615,7 @@ void Test_BgfxRasterizer_DefaultDoesNotCreateTraceLog() {
 void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
     std::string ini = ReadRenderEngineSource("src/CK2_3D.ini");
     std::string manager = ReadRenderEngineSource("src/CKRenderManager.cpp");
+    std::string renderManagerHeader = ReadRenderEngineSource("include/RCKRenderManager.h");
     std::string contextHeader = ReadRenderEngineSource("include/RCKRenderContext.h");
     std::string context = ReadRenderEngineSource("src/CKRenderContext.cpp");
     std::string scene = ReadRenderEngineSource("src/CKRenderedScene.cpp");
@@ -3715,11 +3716,15 @@ void Test_RenderSettings_AllCK2IniOptionsHaveRuntimeSemantics() {
                   settings.find("\"Debug.FFPLog\"") != std::string::npos &&
                   settings.find("\"Debug.MeshLog\"") != std::string::npos,
               "Nested CK2_3D options must keep their concrete render/debug consumers");
-    TestCheck(manager.find("m_EnsureVertexShader.Set") != std::string::npos &&
-                  manager.find("m_Options.PushBack(&m_EnsureVertexShader)") == std::string::npos &&
+    TestCheck(manager.find("m_EnsureVertexShader") == std::string::npos &&
+                  manager.find("m_DisablePerspectiveCorrection") == std::string::npos &&
+                  manager.find("m_DisableDithering") == std::string::npos &&
+                  renderManagerHeader.find("m_EnsureVertexShader") == std::string::npos &&
+                  renderManagerHeader.find("m_DisablePerspectiveCorrection") == std::string::npos &&
+                  renderManagerHeader.find("m_DisableDithering") == std::string::npos &&
                   context.find("m_EnsureVertexShader") == std::string::npos &&
                   bgfxContext.find("CKBgfxShaderProfile") != std::string::npos,
-              "EnsureVertexShader must remain only as a layout-preserving member while bgfx stays shader-backed by construction");
+              "Legacy weak RenderEngine VxOption members must be removed completely");
 }
 
 void Test_FFPDebugLogging_IsCentralized() {
