@@ -12,6 +12,62 @@
 
 static FILE *g_BgfxLogFile = nullptr;
 
+static bool CKBgfxLogNameEquals(const char *lhs, const char *rhs)
+{
+    return lhs && rhs && _stricmp(lhs, rhs) == 0;
+}
+
+static CKBgfxDebugConfig CKBgfxReadDebugSettings()
+{
+    CKBgfxDebugConfig config = {};
+
+    if (CKBgfxConfigBool("Debug.Bgfx", "Wireframe", false)) config.BgfxFlags |= BGFX_DEBUG_WIREFRAME;
+    if (CKBgfxConfigBool("Debug.Bgfx", "IFH", false))       config.BgfxFlags |= BGFX_DEBUG_IFH;
+    if (CKBgfxConfigBool("Debug.Bgfx", "Stats", false))     config.BgfxFlags |= BGFX_DEBUG_STATS;
+    if (CKBgfxConfigBool("Debug.Bgfx", "Text", false))      config.BgfxFlags |= BGFX_DEBUG_TEXT;
+    if (CKBgfxConfigBool("Debug.Bgfx", "Profiler", false))  config.BgfxFlags |= BGFX_DEBUG_PROFILER;
+    if (CKBgfxConfigBool("Debug.Bgfx", "All", false))
+        config.BgfxFlags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS | BGFX_DEBUG_PROFILER;
+
+    config.Overlay = CKBgfxConfigBool("Debug", "Overlay", (config.BgfxFlags & BGFX_DEBUG_TEXT) != 0);
+    if (config.Overlay)
+        config.BgfxFlags |= BGFX_DEBUG_TEXT;
+
+    config.Log.File = CKBgfxConfigBool("Debug.Log", "File", false);
+    config.Log.Trace = CKBgfxConfigBool("Debug.Log", "Trace", false);
+    config.Log.Config = CKBgfxConfigBool("Debug.Log", "Config", false);
+    config.Log.Textures = CKBgfxConfigBool("Debug.Log", "Textures", false);
+    config.Log.TextureBindings = CKBgfxConfigBool("Debug.Log", "TextureBindings", false);
+    config.Log.Uniforms = CKBgfxConfigBool("Debug.Log", "Uniforms", false);
+    config.Log.PresentSync = CKBgfxConfigBool("Debug.Log", "PresentSync", false);
+
+    return config;
+}
+
+const CKBgfxDebugConfig &CKBgfxDebugSettings()
+{
+    static const CKBgfxDebugConfig s_Config = CKBgfxReadDebugSettings();
+    return s_Config;
+}
+
+bool CKBgfxLogEnabled(const char *name, bool fallback)
+{
+    const CKBgfxLogConfig &log = CKBgfxDebugSettings().Log;
+    if (CKBgfxLogNameEquals(name, "File")) return log.File;
+    if (CKBgfxLogNameEquals(name, "Trace")) return log.Trace;
+    if (CKBgfxLogNameEquals(name, "Config")) return log.Config;
+    if (CKBgfxLogNameEquals(name, "Textures")) return log.Textures;
+    if (CKBgfxLogNameEquals(name, "TextureBindings")) return log.TextureBindings;
+    if (CKBgfxLogNameEquals(name, "Uniforms")) return log.Uniforms;
+    if (CKBgfxLogNameEquals(name, "PresentSync")) return log.PresentSync;
+    return fallback;
+}
+
+static bool CKBgfxFileLogEnabled()
+{
+    return CKBgfxLogEnabled("File", false);
+}
+
 static FILE *CKBgfxGetLogFile()
 {
     if (!g_BgfxLogFile) {
@@ -54,11 +110,13 @@ void CKBgfxLogf(const char *tag, const char *fmt, ...)
     OutputDebugStringA(msg);
     OutputDebugStringA("\n");
 
-    FILE *f = CKBgfxGetLogFile();
-    if (f) {
-        fputs(msg, f);
-        fputc('\n', f);
-        fflush(f);
+    if (CKBgfxFileLogEnabled()) {
+        FILE *f = CKBgfxGetLogFile();
+        if (f) {
+            fputs(msg, f);
+            fputc('\n', f);
+            fflush(f);
+        }
     }
 }
 
