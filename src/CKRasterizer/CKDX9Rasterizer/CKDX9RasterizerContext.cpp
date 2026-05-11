@@ -50,6 +50,64 @@ static inline CKBOOL IsValidArrayIndex(CKDWORD index, int size)
     return size > 0 && index < static_cast<CKDWORD>(size);
 }
 
+CKBOOL GetDX9TextureBlendState(VXTEXTURE_BLENDMODE Mode, CKDX9TextureBlendState &State)
+{
+    switch (Mode)
+    {
+        case VXTEXTUREBLEND_DECAL:
+        case VXTEXTUREBLEND_COPY:
+            State.ColorOp = D3DTOP_SELECTARG1;
+            State.ColorArg1 = D3DTA_TEXTURE;
+            State.ColorArg2 = D3DTA_CURRENT;
+            State.AlphaOp = D3DTOP_SELECTARG1;
+            State.AlphaArg1 = D3DTA_TEXTURE;
+            State.AlphaArg2 = D3DTA_CURRENT;
+            return TRUE;
+
+        case VXTEXTUREBLEND_MODULATE:
+        case VXTEXTUREBLEND_MODULATEALPHA:
+        case VXTEXTUREBLEND_MODULATEMASK:
+            State.ColorOp = D3DTOP_MODULATE;
+            State.ColorArg1 = D3DTA_TEXTURE;
+            State.ColorArg2 = D3DTA_CURRENT;
+            State.AlphaOp = D3DTOP_MODULATE;
+            State.AlphaArg1 = D3DTA_TEXTURE;
+            State.AlphaArg2 = D3DTA_CURRENT;
+            return TRUE;
+
+        case VXTEXTUREBLEND_DECALALPHA:
+        case VXTEXTUREBLEND_DECALMASK:
+            State.ColorOp = D3DTOP_BLENDTEXTUREALPHA;
+            State.ColorArg1 = D3DTA_TEXTURE;
+            State.ColorArg2 = D3DTA_CURRENT;
+            State.AlphaOp = D3DTOP_SELECTARG1;
+            State.AlphaArg1 = D3DTA_DIFFUSE;
+            State.AlphaArg2 = D3DTA_CURRENT;
+            return TRUE;
+
+        case VXTEXTUREBLEND_ADD:
+            State.ColorOp = D3DTOP_ADD;
+            State.ColorArg1 = D3DTA_TEXTURE;
+            State.ColorArg2 = D3DTA_CURRENT;
+            State.AlphaOp = D3DTOP_SELECTARG1;
+            State.AlphaArg1 = D3DTA_CURRENT;
+            State.AlphaArg2 = D3DTA_CURRENT;
+            return TRUE;
+
+        case VXTEXTUREBLEND_DOTPRODUCT3:
+            State.ColorOp = D3DTOP_DOTPRODUCT3;
+            State.ColorArg1 = D3DTA_TEXTURE;
+            State.ColorArg2 = D3DTA_TFACTOR;
+            State.AlphaOp = D3DTOP_SELECTARG1;
+            State.AlphaArg1 = D3DTA_CURRENT;
+            State.AlphaArg2 = D3DTA_CURRENT;
+            return TRUE;
+
+        default:
+            return FALSE;
+    }
+}
+
 CKBOOL CKDX9VertexShaderDesc::Create(CKDX9RasterizerContext *Ctx, CKVertexShaderDesc *Format)
 {
     if (!Ctx || !Ctx->m_Device)
@@ -1303,49 +1361,17 @@ CKBOOL CKDX9RasterizerContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAG
                 }
             }
 
-            switch (Value)
             {
-                case VXTEXTUREBLEND_DECAL:
-                case VXTEXTUREBLEND_COPY:
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+                CKDX9TextureBlendState blend;
+                if (!GetDX9TextureBlendState(static_cast<VXTEXTURE_BLENDMODE>(Value), blend))
                     break;
-                case VXTEXTUREBLEND_MODULATE:
-                case VXTEXTUREBLEND_MODULATEALPHA:
-                case VXTEXTUREBLEND_MODULATEMASK:
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_MODULATE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG2, D3DTA_CURRENT);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
-                    break;
-                case VXTEXTUREBLEND_DECALALPHA:
-                case VXTEXTUREBLEND_DECALMASK:
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_BLENDTEXTUREALPHA);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG2, D3DTA_CURRENT);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-                    break;
-                case VXTEXTUREBLEND_ADD:
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_ADD);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG2, D3DTA_CURRENT);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, D3DTA_CURRENT);
-                    break;
-                case VXTEXTUREBLEND_DOTPRODUCT3:
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-                    m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, D3DTA_CURRENT);
-                    break;
-                default:
-                    break;
+
+                m_Device->SetTextureStageState(Stage, D3DTSS_COLOROP, blend.ColorOp);
+                m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG1, blend.ColorArg1);
+                m_Device->SetTextureStageState(Stage, D3DTSS_COLORARG2, blend.ColorArg2);
+                m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAOP, blend.AlphaOp);
+                m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG1, blend.AlphaArg1);
+                m_Device->SetTextureStageState(Stage, D3DTSS_ALPHAARG2, blend.AlphaArg2);
             }
             break;
         case CKRST_TSS_STAGEBLEND:

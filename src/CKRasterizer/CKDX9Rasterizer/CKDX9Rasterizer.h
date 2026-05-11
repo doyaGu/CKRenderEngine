@@ -135,6 +135,18 @@ VX_PIXELFORMAT D3DFormatToVxPixelFormat(D3DFORMAT ddpf);
 D3DFORMAT TextureDescToD3DFormat(CKTextureDesc *desc);
 void D3DFormatToTextureDesc(D3DFORMAT ddpf, CKTextureDesc *desc);
 
+struct CKDX9TextureBlendState
+{
+    D3DTEXTUREOP ColorOp;
+    DWORD ColorArg1;
+    DWORD ColorArg2;
+    D3DTEXTUREOP AlphaOp;
+    DWORD AlphaArg1;
+    DWORD AlphaArg2;
+};
+
+CKBOOL GetDX9TextureBlendState(VXTEXTURE_BLENDMODE Mode, CKDX9TextureBlendState &State);
+
 //------
 
 class CKDX9RasterizerDriver;

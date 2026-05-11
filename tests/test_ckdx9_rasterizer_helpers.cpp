@@ -259,6 +259,34 @@ void UnsupportedD3DFormatDoesNotCreateValidTextureDesc()
               "Unsupported D3D formats should leave texture desc format empty");
 }
 
+void TextureBlendModulateAlphaKeepsVirtoolsModulateContract()
+{
+    CKDX9TextureBlendState state;
+    TestCheck(GetDX9TextureBlendState(VXTEXTUREBLEND_MODULATEALPHA, state),
+              "MODULATEALPHA should have a DX9 texture blend mapping");
+
+    TestCheck(state.ColorOp == D3DTOP_MODULATE,
+              "MODULATEALPHA color should remain texture times diffuse in CK2_3D");
+    TestCheck(state.ColorArg1 == D3DTA_TEXTURE && state.ColorArg2 == D3DTA_CURRENT,
+              "MODULATEALPHA color modulation should use texture and current color");
+    TestCheck(state.AlphaOp == D3DTOP_MODULATE,
+              "MODULATEALPHA alpha should remain texture alpha times diffuse alpha");
+    TestCheck(state.AlphaArg1 == D3DTA_TEXTURE && state.AlphaArg2 == D3DTA_CURRENT,
+              "MODULATEALPHA alpha modulation should use texture and current alpha");
+}
+
+void TextureBlendModulateKeepsPlainMultiply()
+{
+    CKDX9TextureBlendState state;
+    TestCheck(GetDX9TextureBlendState(VXTEXTUREBLEND_MODULATE, state),
+              "MODULATE should have a DX9 texture blend mapping");
+
+    TestCheck(state.ColorOp == D3DTOP_MODULATE,
+              "MODULATE color should remain plain texture times diffuse");
+    TestCheck(state.AlphaOp == D3DTOP_MODULATE,
+              "MODULATE alpha should remain plain texture alpha times diffuse alpha");
+}
+
 void SetLightRejectsNullData()
 {
     CKDX9Rasterizer rasterizer;
@@ -1074,6 +1102,8 @@ int main()
     tests.Run("_32_ARGB8888 maps to D3DFMT_A8R8G8B8", &Argb8888MapsToD3DFormat);
     tests.Run("D3DFormatToTextureDesc marks A8R8G8B8 correctly", &A8R8G8B8TextureDescCarriesRgbAlphaAndBpp);
     tests.Run("Unsupported D3D formats do not create valid texture descs", &UnsupportedD3DFormatDoesNotCreateValidTextureDesc);
+    tests.Run("MODULATEALPHA keeps CK2_3D modulation contract", &TextureBlendModulateAlphaKeepsVirtoolsModulateContract);
+    tests.Run("MODULATE keeps plain multiply", &TextureBlendModulateKeepsPlainMultiply);
     tests.Run("SetLight rejects null data", &SetLightRejectsNullData);
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
     tests.Run("Default DX9 depth format keeps stencil available", &DefaultDepthFormatKeepsStencilAvailable);
