@@ -596,13 +596,10 @@ static void ApplyStencil(bgfx::Encoder *encoder, CKDrawState state,
 {
     uint32_t fstencil = ToBgfxFrontStencil(state, ref, readMask);
     uint32_t bstencil = ToBgfxBackStencil(state, ref, readMask);
-    if (fstencil != BGFX_STENCIL_NONE)
-    {
-        if (encoder)
-            encoder->setStencil(fstencil, bstencil);
-        else
-            bgfx::setStencil(fstencil, bstencil);
-    }
+    if (encoder)
+        encoder->setStencil(fstencil, bstencil);
+    else
+        bgfx::setStencil(fstencil, bstencil);
 }
 
 void CKBgfxEncoder::SetState(CKDrawState State)
