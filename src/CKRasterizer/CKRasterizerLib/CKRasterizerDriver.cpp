@@ -65,12 +65,29 @@ void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner)
     m_DriverIndex = 0;
 
     m_DisplayModes.Clear();
-    VxDisplayMode displayMode;
-    displayMode.Width = 640;
-    displayMode.Height = 480;
-    displayMode.Bpp = 32;
-    displayMode.RefreshRate = 0;
-    m_DisplayModes.PushBack(displayMode);
+    static const int resolutions[][2] = {
+        {640, 480},
+        {800, 600},
+        {1024, 768},
+        {1280, 720},
+        {1280, 960},
+        {1280, 1024},
+        {1366, 768},
+        {1600, 900},
+        {1920, 1080},
+    };
+    static const int bpps[] = {16, 32};
+
+    for (int i = 0; i < (int)(sizeof(resolutions) / sizeof(resolutions[0])); ++i) {
+        for (int j = 0; j < (int)(sizeof(bpps) / sizeof(bpps[0])); ++j) {
+            VxDisplayMode displayMode;
+            displayMode.Width = resolutions[i][0];
+            displayMode.Height = resolutions[i][1];
+            displayMode.Bpp = bpps[j];
+            displayMode.RefreshRate = 60;
+            m_DisplayModes.PushBack(displayMode);
+        }
+    }
 
     m_TextureFormats.Clear();
     CKTextureDesc textureDesc;
