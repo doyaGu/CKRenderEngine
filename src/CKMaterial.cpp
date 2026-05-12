@@ -257,8 +257,8 @@ RCKMaterial::RCKMaterial(CKContext *Context, CKSTRING name)
     //   Bit 4:      AlphaTest
     //   Bit 5:      Sprite3DBatch
     //   Bits 8-13:  Effect (6 bits)
-    //   Bits 14-18: ZFunc (5 bits)
-    //   Bits 19-23: AlphaFunc (5 bits)
+    //   Bits 14-18: ZFunc (stored as 4 bits in serialized chunks)
+    //   Bits 19-23: AlphaFunc (stored as 4 bits in serialized chunks)
     //
     // Step 1: Low byte = 6 (ZWrite + PerspectiveCorrection)
     // Step 2: Clear effect bits (bits 8-13)
@@ -474,13 +474,14 @@ CKStateChunk *RCKMaterial::Save(CKFile *file, CKDWORD flags) {
 
     // Pack flags into single DWORD:
     // Bits 0-7:   Material flags (low byte of m_Flags)
-    // Bits 8-12:  ZFunc (from m_Flags bits 14-18, 5 bits)
-    // Bits 16-20: AlphaFunc (from m_Flags bits 19-23, 5 bits)
+    // Bits 8-11:  ZFunc low nibble (from m_Flags bits 14-17)
+    // Bits 16-19: AlphaFunc low nibble (from m_Flags bits 19-22)
+    // Bits 12-15 and 20-23 are reserved and must stay clear.
     // Bits 24-31: AlphaRef
     CKDWORD packedFlags =
         (m_Flags & 0xFF) |
-        (((m_Flags >> 14) & 0x1F) << 8) |
-        (((m_Flags >> 19) & 0x1F) << 16) |
+        (((m_Flags >> 14) & 0xF) << 8) |
+        (((m_Flags >> 19) & 0xF) << 16) |
         ((m_AlphaRef & 0xFF) << 24);
 
     chunk->WriteDword(packedModes);
@@ -649,8 +650,8 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
 
             // Unpack flags (matches CK2_3D.dll: low byte + 4-bit ZFunc + 4-bit AlphaFunc + AlphaRef byte)
             m_Flags = (m_Flags & ~0xFF) | (packedFlags & 0xFF);
-            m_Flags = (m_Flags & ~0x7C000) | ((((packedFlags >> 8) & 0x1F) << 14));
-            m_Flags = (m_Flags & ~0xF80000) | ((((packedFlags >> 16) & 0x1F) << 19));
+            m_Flags = (m_Flags & ~0x7C000) | ((((packedFlags >> 8) & 0xF) << 14));
+            m_Flags = (m_Flags & ~0xF80000) | ((((packedFlags >> 16) & 0xF) << 19));
             m_AlphaRef = (packedFlags >> 24) & 0xFF;
 
             // Ensure AlphaFunc is valid
