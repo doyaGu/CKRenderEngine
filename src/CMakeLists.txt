@@ -179,14 +179,20 @@ set(CKRE_SHADER_SOURCES
 )
 
 if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND TARGET shaderc)
-    add_custom_target(CK2_3D_shaders
+    set(CKRE_SHADER_STAMP "${CMAKE_CURRENT_BINARY_DIR}/CK2_3D_shaders.stamp")
+    add_custom_command(OUTPUT "${CKRE_SHADER_STAMP}"
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
                     --shaderc $<TARGET_FILE:shaderc>
+            COMMAND "${CMAKE_COMMAND}" -E touch "${CKRE_SHADER_STAMP}"
             DEPENDS shaderc ${CKRE_SHADER_SOURCES}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
-            SOURCES ${CKRE_SHADER_SOURCES}
             COMMENT "Generating CK2_3D bgfx fixed-function shaders"
+            VERBATIM
+    )
+    add_custom_target(CK2_3D_shaders
+            DEPENDS "${CKRE_SHADER_STAMP}"
+            SOURCES ${CKRE_SHADER_SOURCES}
     )
 elseif (CKRE_GENERATE_SHADERS)
     message(WARNING "CK2_3D_shaders target disabled: Python3 or bgfx shaderc target not available")
