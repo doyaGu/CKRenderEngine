@@ -13,6 +13,10 @@ float CKFFReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE 
     return value;
 }
 
+float CKFFNormalizeAlphaRef(CKDWORD alphaRef) {
+    return (float)(alphaRef & 0xFFu) / 255.0f;
+}
+
 void CKFFPackColorARGB(CKDWORD color, float outColor[4]) {
     if (!outColor)
         return;
