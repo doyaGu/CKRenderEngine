@@ -1798,7 +1798,16 @@ CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
  * Returns TRUE if blending is enabled and dest blend is not zero.
  */
 CKBOOL RCKMaterial::IsAlphaTransparent() {
-    return AlphaBlendEnabled() && (m_DestBlend != VXBLEND_ZERO);
+    if (!AlphaBlendEnabled() || m_DestBlend == VXBLEND_ZERO)
+        return FALSE;
+
+    // Depth-writing alpha-test materials are cutouts. They need the opaque
+    // depth order, not the sorted alpha-blend queue, otherwise they can be
+    // drawn after real transparent objects and overwrite them per pixel.
+    if (AlphaTestEnabled() && ZWriteEnabled())
+        return FALSE;
+
+    return TRUE;
 }
 
 //=============================================================================
