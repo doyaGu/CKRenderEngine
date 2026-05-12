@@ -21,6 +21,29 @@ static void SwapTransparentObjects(CKTransparentObject *a, CKTransparentObject *
     *b = temp;
 }
 
+static bool ShouldApplyPlaceClip(const VxRect &clip) {
+    // CK2_3D.dll @ 0x100787f0 treats zero width or zero height as an empty clip.
+    if (clip.IsEmpty())
+        return false;
+
+    VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
+    return clip.left != unit.left ||
+           clip.top != unit.top ||
+           clip.right != unit.right ||
+           clip.bottom != unit.bottom;
+}
+
+static bool ShouldSwapTransparentTieFallback(const CKTransparentObject &current,
+                                             const CKTransparentObject &previous) {
+    // CK2_3D.dll @ 0x10078617 compares [previous+4] + EPSILON with [current+4].
+    return previous.m_ZhMin + EPSILON < current.m_ZhMin;
+}
+
+static float PlaneCameraDot(const VxPlane &plane, const VxVector &cameraPos) {
+    // CK2_3D.dll sub_10009BB9 uses DotProduct(normal,camera), not plane.Classify(camera).
+    return DotProduct(plane.m_Normal, cameraPos);
+}
+
 // IDA sub_10009BB9: tie-breaker used by SortTransparentObjects when projected Z extents overlap.
 // Returns: -1, 0, 1 (ordering hint).
 static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, const VxVector &cameraPos) {
@@ -30,7 +53,7 @@ static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, 
     const float dz = localBox.Max.z - localBox.Min.z;
     if (dz < EPSILON) {
         const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
-        const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+        const float prod = PlaneCameraDot(plane, cameraPos) * plane.Classify(b->m_WorldBoundingBox);
         if (prod != 0.0f)
             return (prod >= 0.0f) ? 1 : -1;
         return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
@@ -43,14 +66,14 @@ static int ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3dEntity *b, 
             return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
 
         const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
-        const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+        const float prod = PlaneCameraDot(plane, cameraPos) * plane.Classify(b->m_WorldBoundingBox);
         if (prod == 0.0f)
             return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
         return (prod >= 0.0f) ? 1 : -1;
     }
 
     const VxPlane plane(a->m_WorldMatrix[1], a->m_WorldMatrix[3]);
-    const float prod = plane.Classify(cameraPos) * plane.Classify(b->m_WorldBoundingBox);
+    const float prod = PlaneCameraDot(plane, cameraPos) * plane.Classify(b->m_WorldBoundingBox);
     if (prod == 0.0f)
         return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cameraPos);
     return (prod >= 0.0f) ? 1 : -1;
@@ -91,8 +114,7 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
                 RCKPlace *place = (RCKPlace *) node->m_Entity;
                 VxRect &clip = place->ViewportClip();
                 if (!clip.IsNull()) {
-                    VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
-                    if (clip.IsInside(unit)) {
+                    if (ShouldApplyPlaceClip(clip)) {
                         clipRectSet = TRUE;
 
                         VxRect rect = clip;
@@ -163,8 +185,8 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
         root->AddTransparentObject(node);
     } else {
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-        CKDWORD renderFlags = flags | CK_RENDER_CLEARVIEWPORT;
-        node->m_Entity->Render((CKRenderContext *) rc, renderFlags);
+        // CK2_3D.dll RenderTransparents @ 0x10077c3a forwards opaque entity render flags unchanged.
+        node->m_Entity->Render((CKRenderContext *) rc, flags);
         rc->m_SceneTraversalTimeProfiler.Reset();
     }
 }
@@ -548,8 +570,7 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
         RCKPlace *place = (RCKPlace *) m_Entity;
         VxRect &clip = place->ViewportClip();
         if (!clip.IsNull()) {
-            VxRect unit(0.0f, 0.0f, 1.0f, 1.0f);
-            if (clip.IsInside(unit)) {
+            if (ShouldApplyPlaceClip(clip)) {
                 clipRectSet = TRUE;
 
                 VxRect rect = clip;
@@ -565,7 +586,9 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     if (m_Entity->GetClassID() == CKCID_CHARACTER)
         m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
 
-    if ((m_EntityMask & dev->m_MaskFree) != 0 && m_Entity->IsToBeRendered()) {
+    // CK2_3D.dll NoTestsTraversal @ 0x10077fb4 tests the current entity with m_RenderContextMask.
+    if ((m_RenderContextMask & dev->m_MaskFree) != 0 && m_Entity->IsToBeRendered()) {
+        m_Entity->ModifyMoveableFlags(0, VX_MOVEABLE_EXTENTSUPTODATE);
         if (m_Entity->IsToBeRenderedLast()) {
             m_TimeFpsCalc = dev->m_TimeFpsCalc;
             dev->m_RenderManager->m_SceneGraphRootNode.AddTransparentObject(this);
@@ -620,7 +643,8 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                 VxMatrix mvp;
                 Vx3DMultiplyMatrix4(mvp, viewProj, entity->GetWorldMatrix());
 
-                const VxBbox &bbox = entity->GetBoundingBox(FALSE);
+                // CK2_3D.dll passes TRUE here: mvp already contains the entity world matrix.
+                const VxBbox &bbox = entity->GetBoundingBox(TRUE);
                 VxProjectBoxZExtents(mvp, bbox, it->m_ZhMin, it->m_ZhMax);
 
                 ++it;
@@ -689,7 +713,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
                                 continue;
                             }
 
-                            if (prev->m_ZhMax + EPSILON < k->m_ZhMax) {
+                            if (ShouldSwapTransparentTieFallback(*k, *prev)) {
                                 SwapTransparentObjects(k, prev);
                                 noSwaps = FALSE;
                             }

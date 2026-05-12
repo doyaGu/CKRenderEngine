@@ -2761,18 +2761,18 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
     m_RasterizerContext->m_ViewportData.ViewHeight = safeClipHeight;
     m_RasterizerContext->SetViewport(&m_RasterizerContext->m_ViewportData);
 
-    const double invW = 1.0 / (double) safeClipWidth;
-    const double invH = 1.0 / (double) safeClipHeight;
+    const float invW = (float) (1.0 / (double) clipWidth);
+    const float invH = (float) (1.0 / (double) clipHeight);
     const float dx = (float) (right + left - (m_ViewportData.ViewWidth + 2 * m_ViewportData.ViewX));
     const float dy = (float) (top + bottom - (m_ViewportData.ViewHeight + 2 * m_ViewportData.ViewY));
 
     VxMatrix clipProj;
     clipProj.Clear();
 
-    clipProj[0][0] = (float) ((double) m_ViewportData.ViewWidth * (double) m_ProjectionMatrix[0][0] / (double) safeClipWidth);
-    clipProj[1][1] = (float) ((double) m_ViewportData.ViewHeight * (double) m_ProjectionMatrix[1][1] / (double) safeClipHeight);
-    clipProj[2][0] = (float) (-dx * invW);
-    clipProj[2][1] = (float) (dy * invH);
+    clipProj[0][0] = (float) ((double) m_ViewportData.ViewWidth * (double) m_ProjectionMatrix[0][0] / (double) clipWidth);
+    clipProj[1][1] = (float) ((double) m_ViewportData.ViewHeight * (double) m_ProjectionMatrix[1][1] / (double) clipHeight);
+    clipProj[2][0] = -dx * invW;
+    clipProj[2][1] = dy * invH;
     clipProj[2][2] = m_FarPlane / (m_FarPlane - m_NearPlane);
     clipProj[3][2] = -clipProj[2][2] * m_NearPlane;
     clipProj[2][3] = 1.0f;
@@ -2843,8 +2843,6 @@ void RCKRenderContext::CallSprite3DBatches() {
     if (m_Sprite3DBatches.Size() == 0) {
         return;
     }
-
-    // Use original literals (do not define new constants)
 
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
@@ -3010,7 +3008,7 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
 
             VxMatrix mvp;
             Vx3DMultiplyMatrix4(mvp, viewProj, entity->m_WorldMatrix);
-            const VxBbox &bbox = entity->GetBoundingBox(FALSE);
+            const VxBbox &bbox = entity->GetBoundingBox(TRUE);
             VxProjectBoxZExtents(mvp, bbox, items[i].zhMin, items[i].zhMax);
         }
 
@@ -3080,7 +3078,7 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
                             continue;
                         }
 
-                        if (prev.zhMax + EPSILON < curr.zhMax) {
+                        if (prev.zhMin + EPSILON < curr.zhMin) {
                             TransparentItem tmp = curr;
                             curr = prev;
                             prev = tmp;

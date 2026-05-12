@@ -31,8 +31,6 @@ struct CKSceneGraphNode;
 // Transparent object entry for sorting
 struct CKTransparentObject {
     CKSceneGraphNode *m_Node; // The scene graph node
-    // NOTE: Field order must match the original CK2_3D.dll layout (12 bytes total).
-    // IDA shows VxProjectBoxZExtents writes ZhMin at +4 and ZhMax at +8.
     float m_ZhMin;            // Minimum Z in homogeneous coordinates (for depth sorting)
     float m_ZhMax;            // Maximum Z in homogeneous coordinates
 };
