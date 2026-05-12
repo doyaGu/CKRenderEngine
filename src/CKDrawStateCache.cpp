@@ -32,8 +32,6 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
     } else if (src == VXBLEND_BOTHINVSRCALPHA) {
         src = VXBLEND_INVSRCALPHA;
         dst = VXBLEND_SRCALPHA;
-    } else if (src == VXBLEND_ONE && dst == VXBLEND_SRCCOLOR) {
-        dst = VXBLEND_INVSRCCOLOR;
     }
 }
 
@@ -55,6 +53,7 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_ALPHABLENDENABLE] = FALSE;
     m_States[VXRENDERSTATE_SRCBLEND] = VXBLEND_ONE;
     m_States[VXRENDERSTATE_DESTBLEND] = VXBLEND_ZERO;
+    m_States[VXRENDERSTATE_BLENDOP] = VXBLENDOP_ADD;
     m_States[VXRENDERSTATE_ALPHATESTENABLE] = FALSE;
     m_States[VXRENDERSTATE_ALPHAFUNC] = VXCMP_ALWAYS;
     m_States[VXRENDERSTATE_ALPHAREF] = 0;
@@ -115,6 +114,7 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
     case VXRENDERSTATE_ALPHABLENDENABLE:
     case VXRENDERSTATE_SRCBLEND:
     case VXRENDERSTATE_DESTBLEND:
+    case VXRENDERSTATE_BLENDOP:
         m_DirtyMask |= CKFF_DIRTY_BLEND;
         break;
     case VXRENDERSTATE_ZENABLE:
@@ -209,6 +209,8 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
         FixupBlendPair(srcBlend, dstBlend);
         lo |= CKRST_STATE_BLEND(srcBlend, dstBlend);
     }
+
+    mid |= CKRST_STATE_BLEND_EQ(m_States[VXRENDERSTATE_BLENDOP]);
 
     // Topology
     mid |= CKRST_STATE_PT(topology);
