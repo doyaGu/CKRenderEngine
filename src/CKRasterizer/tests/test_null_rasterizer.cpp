@@ -10,6 +10,21 @@ static int Fail()
     return EXIT_FAILURE;
 }
 
+static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+{
+    for (int i = 0; i < driver->m_DisplayModes.Size(); ++i) {
+        const VxDisplayMode &mode = driver->m_DisplayModes[i];
+        if (mode.Width == width &&
+            mode.Height == height &&
+            mode.Bpp == bpp &&
+            mode.RefreshRate == refreshRate) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int main()
 {
     CKRasterizer *rasterizer = CKNULLRasterizerStart(NULL);
@@ -26,7 +41,13 @@ int main()
     if (driver->m_Hardware || !driver->m_CapsUpToDate)
         return Fail();
 
-    if (driver->m_DisplayModes.Size() != 1 || driver->m_TextureFormats.Size() != 1)
+    if (driver->m_DisplayModes.Size() < 4 || driver->m_TextureFormats.Size() != 1)
+        return Fail();
+
+    if (!HasDisplayMode(driver, 640, 480, 32, 60) ||
+        !HasDisplayMode(driver, 800, 600, 32, 60) ||
+        !HasDisplayMode(driver, 1024, 768, 16, 60) ||
+        !HasDisplayMode(driver, 1920, 1080, 32, 60))
         return Fail();
 
     if ((driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) == 0 ||
