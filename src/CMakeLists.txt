@@ -298,20 +298,21 @@ if (CKRE_INSTALL)
     if (CKRE_BUILD_SHARED AND TARGET CK2_3D)
         install(TARGETS CK2_3D
                 EXPORT CKRenderEngineTargets
-                RUNTIME DESTINATION RenderEngines
-                LIBRARY DESTINATION RenderEngines
-                ARCHIVE DESTINATION lib
+                RUNTIME DESTINATION RenderEngines COMPONENT Runtime
+                LIBRARY DESTINATION RenderEngines COMPONENT Runtime
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
 
         install(FILES ${CKRE_CONFIG_FILES}
                 DESTINATION RenderEngines
+                COMPONENT Runtime
         )
     endif ()
 
     if (TARGET CK2_3DStatic)
         install(TARGETS CK2_3DStatic
                 EXPORT CKRenderEngineTargets
-                ARCHIVE DESTINATION lib
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
     endif ()
 endif ()
