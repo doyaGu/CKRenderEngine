@@ -67,3 +67,7 @@ ckre_add_test(material_tests
 ckre_add_test(draw_state_cache_tests
     test_draw_state_cache.cpp
 )
+
+ckre_add_test(ff_uniform_state_tests
+    test_ff_uniform_state.cpp
+)

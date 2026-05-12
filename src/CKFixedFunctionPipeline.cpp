@@ -1273,7 +1273,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packed == 1 ? 19 : 8) : 6) : 0;
 
     const bool fogEnabled = m_CurrentShaderKey.FS.FogEnable;
-    drawParams[8][0] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF) / 255.0f;
+    drawParams[8][0] = CKFFNormalizeAlphaRef(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
     drawParams[8][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC)
         : 0.0f;
