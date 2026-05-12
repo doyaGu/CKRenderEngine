@@ -63,3 +63,7 @@ target_link_libraries(ckdx9_rasterizer_helper_tests PRIVATE
 ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )
+
+ckre_add_test(material_tests
+    test_material.cpp
+)
