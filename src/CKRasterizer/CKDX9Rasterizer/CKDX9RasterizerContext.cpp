@@ -167,6 +167,34 @@ CKDX9PixelShaderDesc::~CKDX9PixelShaderDesc()
     }
 }
 
+static CKDWORD D3D8ZBiasToD3D9DepthBias(CKDWORD Value)
+{
+    union
+    {
+        float FloatValue;
+        CKDWORD DwordValue;
+    } converted;
+
+    converted.FloatValue = static_cast<float>(Value) * -0.000005f;
+    return converted.DwordValue;
+}
+
+CKBOOL GetDX9RenderStateMapping(VXRENDERSTATETYPE State, CKDWORD Value, CKDX9RenderStateMapping &Mapping)
+{
+    switch (State)
+    {
+        case VXRENDERSTATE_ZBIAS:
+            Mapping.State = D3DRS_DEPTHBIAS;
+            Mapping.Value = D3D8ZBiasToD3D9DepthBias(Value);
+            return TRUE;
+
+        default:
+            Mapping.State = static_cast<D3DRENDERSTATETYPE>(State);
+            Mapping.Value = Value;
+            return TRUE;
+    }
+}
+
 CKDX9RasterizerContext::CKDX9RasterizerContext(CKDX9RasterizerDriver *driver) :
     CKRasterizerContext(),
     m_Device(NULL),
@@ -1064,12 +1092,11 @@ CKBOOL CKDX9RasterizerContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD V
     if (m_StateCacheHitMask.IsSet(State))
         return TRUE;
 
-    // Set the actual state in D3D (using translated values if needed)
-    // CKDWORD translatedValue = Value;
-    // if (m_TranslatedRenderStates[State])
-    //     translatedValue = m_TranslatedRenderStates[State][Value];
+    CKDX9RenderStateMapping mapping;
+    if (!GetDX9RenderStateMapping(State, Value, mapping))
+        return FALSE;
 
-    return SUCCEEDED(m_Device->SetRenderState((D3DRENDERSTATETYPE)State, Value));
+    return SUCCEEDED(m_Device->SetRenderState(mapping.State, mapping.Value));
 }
 
 CKBOOL CKDX9RasterizerContext::GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value)
@@ -1456,9 +1483,6 @@ CKBOOL CKDX9RasterizerContext::SetPixelShader(CKDWORD PShaderIndex)
     // Handle the case of setting null shader (disabling programmable pipeline)
     if (PShaderIndex == 0)
     {
-        if (m_CurrentPixelShaderCache == 0)
-            return TRUE; // Already disabled
-
         m_CurrentPixelShaderCache = 0;
         return SUCCEEDED(m_Device->SetPixelShader(NULL));
     }

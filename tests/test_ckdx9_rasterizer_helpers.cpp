@@ -4,6 +4,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #endif
+#include <new>
 #include <string.h>
 #include <type_traits>
 
@@ -285,6 +286,40 @@ void TextureBlendModulateKeepsPlainMultiply()
               "MODULATE color should remain plain texture times diffuse");
     TestCheck(state.AlphaOp == D3DTOP_MODULATE,
               "MODULATE alpha should remain plain texture alpha times diffuse alpha");
+}
+
+void ZBiasUsesD3D8ToD3D9DepthBiasMapping()
+{
+    CKDX9RenderStateMapping mapping;
+    TestCheck(GetDX9RenderStateMapping(VXRENDERSTATE_ZBIAS, 4, mapping),
+              "ZBIAS should have a DX9 render state mapping");
+
+    union
+    {
+        float FloatValue;
+        CKDWORD DwordValue;
+    } expected;
+    expected.FloatValue = -0.000020f;
+
+    TestCheck(mapping.State == D3DRS_DEPTHBIAS,
+              "D3D8 ZBIAS must map to D3D9 DEPTHBIAS");
+    TestCheck(mapping.Value == expected.DwordValue,
+              "D3D8 integer ZBIAS must be scaled to D3D9 float depth bias");
+}
+
+void RasterizerContextConstructorInitializesViewportDepthRange()
+{
+    alignas(CKRasterizerContext) unsigned char storage[sizeof(CKRasterizerContext)];
+    memset(storage, 0xCD, sizeof(storage));
+
+    CKRasterizerContext *context = new (storage) CKRasterizerContext();
+
+    TestCheck(context->m_ViewportData.ViewZMin == 0.0f,
+              "Rasterizer context constructor must initialize viewport min depth to 0");
+    TestCheck(context->m_ViewportData.ViewZMax == 1.0f,
+              "Rasterizer context constructor must initialize viewport max depth to 1");
+
+    context->~CKRasterizerContext();
 }
 
 void SetLightRejectsNullData()
@@ -1104,6 +1139,8 @@ int main()
     tests.Run("Unsupported D3D formats do not create valid texture descs", &UnsupportedD3DFormatDoesNotCreateValidTextureDesc);
     tests.Run("MODULATEALPHA keeps CK2_3D modulation contract", &TextureBlendModulateAlphaKeepsVirtoolsModulateContract);
     tests.Run("MODULATE keeps plain multiply", &TextureBlendModulateKeepsPlainMultiply);
+    tests.Run("ZBIAS maps from D3D8 integer bias to D3D9 depth bias", &ZBiasUsesD3D8ToD3D9DepthBiasMapping);
+    tests.Run("Rasterizer context constructor initializes viewport depth range", &RasterizerContextConstructorInitializesViewportDepthRange);
     tests.Run("SetLight rejects null data", &SetLightRejectsNullData);
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
     tests.Run("Default DX9 depth format keeps stencil available", &DefaultDepthFormatKeepsStencilAvailable);

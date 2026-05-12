@@ -147,6 +147,14 @@ struct CKDX9TextureBlendState
 
 CKBOOL GetDX9TextureBlendState(VXTEXTURE_BLENDMODE Mode, CKDX9TextureBlendState &State);
 
+struct CKDX9RenderStateMapping
+{
+    D3DRENDERSTATETYPE State;
+    CKDWORD Value;
+};
+
+CKBOOL GetDX9RenderStateMapping(VXRENDERSTATETYPE State, CKDWORD Value, CKDX9RenderStateMapping &Mapping);
+
 //------
 
 class CKDX9RasterizerDriver;

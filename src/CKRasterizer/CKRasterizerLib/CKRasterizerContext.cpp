@@ -76,6 +76,13 @@ CKRasterizerContext::CKRasterizerContext()
     m_Antialias = 0;
     m_EnableScreenDump = 0;
 
+    m_ViewportData.ViewX = 0;
+    m_ViewportData.ViewY = 0;
+    m_ViewportData.ViewWidth = 0;
+    m_ViewportData.ViewHeight = 0;
+    m_ViewportData.ViewZMin = 0.0f;
+    m_ViewportData.ViewZMax = 1.0f;
+
     memset(m_StateCache, 0, sizeof(m_StateCache));
     InitDefaultRenderStatesValue();
     FlushRenderStateCache();
