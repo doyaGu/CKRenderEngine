@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "CKDrawStateCache.h"
+#include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
@@ -15,6 +16,14 @@ CKDWORD BlendDst(CKDWORD lo) {
 
 CKDWORD BlendEquation(CKDWORD mid) {
     return mid & 0x7;
+}
+
+CKDWORD BlendSrcAlpha(CKDWORD lo) {
+    return (lo >> 24) & 0xF;
+}
+
+CKDWORD BlendDstAlpha(CKDWORD lo) {
+    return (lo >> 28) & 0xF;
 }
 
 void BlendStateKeepsExplicitSourceColorDestination() {
@@ -46,6 +55,41 @@ void BlendOperationIsEncodedInDrawState() {
               "Blend operation must be encoded in the draw state");
 }
 
+void DrawStateBuilderExpandsBothSourceAlphaBlendModes() {
+    CKDrawStateBuilder builder;
+    CKDrawState state = builder.Blend(VXBLEND_BOTHSRCALPHA, VXBLEND_ZERO).Build();
+
+    TestCheck(BlendSrc(state.Lo) == VXBLEND_SRCALPHA,
+              "BOTHSRCALPHA source must expand to SRCALPHA");
+    TestCheck(BlendDst(state.Lo) == VXBLEND_INVSRCALPHA,
+              "BOTHSRCALPHA destination must expand to INVSRCALPHA");
+
+    CKDrawStateBuilder inverseBuilder;
+    state = inverseBuilder.Blend(VXBLEND_BOTHINVSRCALPHA, VXBLEND_ZERO).Build();
+
+    TestCheck(BlendSrc(state.Lo) == VXBLEND_INVSRCALPHA,
+              "BOTHINVSRCALPHA source must expand to INVSRCALPHA");
+    TestCheck(BlendDst(state.Lo) == VXBLEND_SRCALPHA,
+              "BOTHINVSRCALPHA destination must expand to SRCALPHA");
+}
+
+void DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes() {
+    CKDrawStateBuilder builder;
+    CKDrawState state = builder
+        .BlendSeparate(VXBLEND_BOTHSRCALPHA, VXBLEND_ZERO,
+                       VXBLEND_BOTHINVSRCALPHA, VXBLEND_ZERO)
+        .Build();
+
+    TestCheck(BlendSrc(state.Lo) == VXBLEND_SRCALPHA,
+              "Separate color BOTHSRCALPHA source must expand to SRCALPHA");
+    TestCheck(BlendDst(state.Lo) == VXBLEND_INVSRCALPHA,
+              "Separate color BOTHSRCALPHA destination must expand to INVSRCALPHA");
+    TestCheck(BlendSrcAlpha(state.Lo) == VXBLEND_INVSRCALPHA,
+              "Separate alpha BOTHINVSRCALPHA source must expand to INVSRCALPHA");
+    TestCheck(BlendDstAlpha(state.Lo) == VXBLEND_SRCALPHA,
+              "Separate alpha BOTHINVSRCALPHA destination must expand to SRCALPHA");
+}
+
 } // namespace
 
 int main() {
@@ -54,5 +98,9 @@ int main() {
               &BlendStateKeepsExplicitSourceColorDestination);
     tests.Run("Blend operation is encoded in draw state",
               &BlendOperationIsEncodedInDrawState);
+    tests.Run("Draw state builder expands both-source-alpha blend modes",
+              &DrawStateBuilderExpandsBothSourceAlphaBlendModes);
+    tests.Run("Draw state builder expands separate both-source-alpha blend modes",
+              &DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes);
     return tests.ExitCode();
 }

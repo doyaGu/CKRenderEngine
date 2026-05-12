@@ -398,6 +398,7 @@ public:
     CKDrawStateBuilder &Blend(VXBLEND_MODE SrcColor, VXBLEND_MODE DstColor)
     {
         m_State.Lo &= ~(0xFFFFUL << 16);
+        FixupBlendPair(SrcColor, DstColor);
         m_State.Lo |= CKRST_STATE_BLEND(SrcColor, DstColor);
         return *this;
     }
@@ -406,6 +407,8 @@ public:
                                        VXBLEND_MODE SrcAlpha, VXBLEND_MODE DstAlpha)
     {
         m_State.Lo &= ~(0xFFFFUL << 16);
+        FixupBlendPair(SrcColor, DstColor);
+        FixupBlendPair(SrcAlpha, DstAlpha);
         m_State.Lo |= CKRST_STATE_BLEND_SEPARATE(SrcColor, DstColor, SrcAlpha, DstAlpha);
         return *this;
     }
@@ -464,6 +467,17 @@ public:
     CKDrawState Build() const { return m_State; }
 
 private:
+    static void FixupBlendPair(VXBLEND_MODE &src, VXBLEND_MODE &dst)
+    {
+        if (src == VXBLEND_BOTHSRCALPHA) {
+            src = VXBLEND_SRCALPHA;
+            dst = VXBLEND_INVSRCALPHA;
+        } else if (src == VXBLEND_BOTHINVSRCALPHA) {
+            src = VXBLEND_INVSRCALPHA;
+            dst = VXBLEND_SRCALPHA;
+        }
+    }
+
     CKDrawState m_State;
 };
 
