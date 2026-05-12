@@ -63,3 +63,7 @@ ckre_add_test(simple_mesh_test
 ckre_add_test(material_tests
     test_material.cpp
 )
+
+ckre_add_test(draw_state_cache_tests
+    test_draw_state_cache.cpp
+)
