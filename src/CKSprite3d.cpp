@@ -729,7 +729,6 @@ CKBOOL RCKSprite3D::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // If VX_MOVEABLE_EXTENTSUPTODATE is set (0x20), the object is treated as transparent / already-validated.
     if ((m_MoveableFlags & VX_MOVEABLE_EXTENTSUPTODATE) != 0) {
-        UpdateOrientation(Dev);
         if (m_Callbacks && (Flags & CK_RENDER_CLEARVIEWPORT) == 0) {
             dev->SetWorldTransformationMatrix(m_WorldMatrix);
         }
