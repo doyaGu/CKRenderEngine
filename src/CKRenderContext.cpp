@@ -286,7 +286,10 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
     CK_RENDER_FLAGS resolved = Flags;
     if (frameRateMode & CK_FRAMERATE_SYNC) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
-    } else if (frameRateMode & (CK_FRAMERATE_FREE | CK_FRAMERATE_LIMIT)) {
+    } else if (frameRateMode & CK_FRAMERATE_LIMIT) {
+        // Frame limiting is a timer contract; keep presentation synchronized.
+        resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
+    } else if (frameRateMode & CK_FRAMERATE_FREE) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved & ~CK_RENDER_WAITVBL);
     }
 
