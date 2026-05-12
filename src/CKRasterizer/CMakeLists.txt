@@ -132,19 +132,20 @@ if (CKRE_INSTALL)
     if (CKRE_BUILD_SHARED AND TARGET CKBgfxRasterizer)
         install(TARGETS CKBgfxRasterizer
                 EXPORT CKRenderEngineTargets
-                RUNTIME DESTINATION RenderEngines
-                LIBRARY DESTINATION RenderEngines
-                ARCHIVE DESTINATION lib
+                RUNTIME DESTINATION RenderEngines COMPONENT Runtime
+                LIBRARY DESTINATION RenderEngines COMPONENT Runtime
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
 
         install(FILES ${CKBGFX_RASTERIZER_CONFIG}
                 DESTINATION RenderEngines
+                COMPONENT Runtime
         )
     endif ()
 
     if (TARGET CKBgfxRasterizerStatic)
         install(TARGETS CKBgfxRasterizerStatic
-                ARCHIVE DESTINATION lib
+                ARCHIVE DESTINATION lib COMPONENT Development
         )
     endif ()
 endif ()
