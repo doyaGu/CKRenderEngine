@@ -10,6 +10,7 @@ struct CKFFStageParams
     int AlphaArg2;
     int ResultArg;
     int TexcoordTransformFlags;
+    int SamplerType;
     bool HasTexture;
     vec4 Constant;
 };
@@ -162,6 +163,11 @@ bool ckffSpecFlatShade()
     return ckffSpecBits(ckffSpecDword(5), 15, 1) != 0;
 }
 
+int ckffSpecSamplerType(int stage)
+{
+    return ckffSpecBits(ckffSpecDword(5), 16 + stage * 2, 2);
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
@@ -176,6 +182,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.AlphaArg2 = 0;
     params.ResultArg = 1;
     params.TexcoordTransformFlags = 0;
+    params.SamplerType = ckffSpecSamplerType(stage);
     params.HasTexture = ckffSpecStageHasTexture(stage);
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #else
@@ -189,6 +196,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.AlphaArg2 = int(alphaParams.z);
     params.ResultArg = int(alphaParams.w);
     params.TexcoordTransformFlags = int(colorExtra.z);
+    params.SamplerType = ckffSpecSamplerType(stage);
     params.HasTexture = colorParams.w > 0.5;
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #endif

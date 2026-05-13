@@ -21,6 +21,7 @@ struct CKFFTextureStageOps {
 
 struct CKFFTextureStageSnapshot {
     CKDWORD Texture;
+    CKDWORD TextureFlags;
     CKDWORD States[CKFF_MAX_TEXTURE_STAGE_STATES];
     VxMatrix TextureMatrix;
 };

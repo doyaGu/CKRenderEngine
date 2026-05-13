@@ -61,6 +61,10 @@ static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uni
     if (uniform == u.u_ffSpec) return "u_ffSpec";
     if (uniform == u.u_clipPlanes) return "u_clipPlanes";
     if (uniform == u.u_clipParams) return "u_clipParams";
+    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        if (uniform == u.s_texture[i]) return "s_texture";
+        if (uniform == u.s_textureCube[i]) return "s_textureCube";
+    }
     return "unknown";
 }
 
@@ -89,6 +93,10 @@ static CKDWORD CKFFUniformDebugSlot(const CKFFUniformHandles &u, CKDWORD uniform
     if (uniform == u.u_ffSpec) return 22;
     if (uniform == u.u_clipPlanes) return 23;
     if (uniform == u.u_clipParams) return 24;
+    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        if (uniform == u.s_texture[i]) return 32 + (CKDWORD)i;
+        if (uniform == u.s_textureCube[i]) return 40 + (CKDWORD)i;
+    }
     return 0;
 }
 
@@ -133,6 +141,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_Lights, 0, sizeof(m_Lights));
     memset(m_LightEnabled, 0, sizeof(m_LightEnabled));
     memset(m_TextureHandles, 0, sizeof(m_TextureHandles));
+    memset(m_TextureFlags, 0, sizeof(m_TextureFlags));
     memset(m_StageStates, 0, sizeof(m_StageStates));
     memset(m_UserClipPlanes, 0, sizeof(m_UserClipPlanes));
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
@@ -302,6 +311,7 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
         return;
 
     m_TextureHandles[stage] = 0;
+    m_TextureFlags[stage] = 0;
     memset(m_StageStates[stage], 0, sizeof(m_StageStates[stage]));
     m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
@@ -321,6 +331,7 @@ void CKFixedFunctionPipeline::SaveTextureStage(int stage, CKFFTextureStageSnapsh
         return;
 
     snapshot.Texture = m_TextureHandles[stage];
+    snapshot.TextureFlags = m_TextureFlags[stage];
     memcpy(snapshot.States, m_StageStates[stage], sizeof(snapshot.States));
     snapshot.TextureMatrix = m_TexMatrix[stage];
 }
@@ -330,6 +341,7 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
         return;
 
     m_TextureHandles[stage] = snapshot.Texture;
+    m_TextureFlags[stage] = snapshot.TextureFlags;
     memcpy(m_StageStates[stage], snapshot.States, sizeof(m_StageStates[stage]));
     m_TexMatrix[stage] = snapshot.TextureMatrix;
 }
@@ -479,8 +491,13 @@ void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
 }
 
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
+    SetTexture(stage, textureHandle, textureHandle != 0 ? CKRST_TEXTURE_VALID : 0);
+}
+
+void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     m_TextureHandles[stage] = textureHandle;
+    m_TextureFlags[stage] = textureHandle != 0 ? textureFlags : 0;
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
@@ -1086,6 +1103,10 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         stateDesc.FS.SetStageAlphaArg2(stage, CKFFBaseTextureArg(CKFFResolveStageAlphaArg2(m_StageStates[stage])));
         stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(CKFFResolveStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
         stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
+        if ((m_TextureFlags[stage] & CKRST_TEXTURE_CUBEMAP) != 0)
+            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_CUBE);
+        else if ((m_TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
+            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_DEPTH);
 
         if (colorOp == CKRST_TOP_DISABLE)
             break;
@@ -1429,7 +1450,10 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         if (texture == 0)
             continue;
         CKSamplerDesc sampler = desiredSamplers[i];
-        encoder->SetTexture(i, u.s_texture[i], texture, &sampler);
+        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
+        encoder->SetTexture(cube ? i + CKFF_MAX_TEXTURE_STAGES : i,
+                            cube ? u.s_textureCube[i] : u.s_texture[i],
+                            texture, &sampler);
         if (collectStats)
             ++m_FrameStats.TextureBinds;
     }
@@ -1439,7 +1463,10 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         if (texture == 0)
             continue;
         CKSamplerDesc sampler = desiredSamplers[i];
-        encoder->SetTexture(i, u.s_texture[i], texture, &sampler);
+        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
+        encoder->SetTexture(cube ? i + CKFF_MAX_TEXTURE_STAGES : i,
+                            cube ? u.s_textureCube[i] : u.s_texture[i],
+                            texture, &sampler);
     }
 #endif
 }

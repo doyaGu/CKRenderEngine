@@ -121,6 +121,7 @@ public:
     void SetLight(int index, const CKLightData *light);
     void EnableLight(int index, CKBOOL enable);
     void SetTexture(int stage, CKDWORD textureHandle);
+    void SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags);
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
     void SetUserClipPlane(int index, const VxPlane &plane);
@@ -196,6 +197,7 @@ private:
 
     // Current textures
     CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
+    CKDWORD m_TextureFlags[CKFF_MAX_TEXTURE_STAGES];
     int m_CurrentActiveTextureCount;
     bool m_CurrentLightingEnabled;
     CKDWORD m_AlphaTestPrecision;

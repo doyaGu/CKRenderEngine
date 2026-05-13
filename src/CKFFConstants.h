@@ -101,7 +101,8 @@ struct CKFFUniformHandles {
     CKDWORD u_ffSpec;       // vec4 array: FFP variant specialization dwords mirror
     CKDWORD u_clipPlanes;   // vec4 array: compact enabled user clip planes
     CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
-    CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES]; // samplers
+    CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES];     // 2D samplers
+    CKDWORD s_textureCube[CKFF_MAX_TEXTURE_STAGES]; // cube samplers
 
     CKFFUniformHandles() { memset(this, 0, sizeof(*this)); }
 };

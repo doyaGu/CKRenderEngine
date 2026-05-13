@@ -50,6 +50,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 14, 1};
     case CKFF_SPEC_FLAT_SHADE:
         return {5, 15, 1};
+    case CKFF_SPEC_SAMPLER_TYPE_MASK:
+        return {5, 16, 16};
     default:
         break;
     }

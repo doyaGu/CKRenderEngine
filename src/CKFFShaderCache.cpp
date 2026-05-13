@@ -226,6 +226,13 @@ void CKFFShaderCache::CreateUniforms() {
         m_Uniforms.s_texture[i] = AllocUniformHandle();
         m_Context->CreateUniform(m_Uniforms.s_texture[i], &desc);
     }
+    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "s_textureCube%d", i);
+        desc.Name = name;
+        m_Uniforms.s_textureCube[i] = AllocUniformHandle();
+        m_Context->CreateUniform(m_Uniforms.s_textureCube[i], &desc);
+    }
 }
 
 void CKFFShaderCache::ResolveShaderTarget() {

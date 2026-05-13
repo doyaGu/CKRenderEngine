@@ -16,6 +16,12 @@ enum CKFFVertexBlendMode {
     CKFF_VERTEX_BLEND_TWEEN = 2,
 };
 
+enum CKFFSamplerType {
+    CKFF_SAMPLER_2D = 0,
+    CKFF_SAMPLER_CUBE = 1,
+    CKFF_SAMPLER_DEPTH = 2,
+};
+
 // ============================================================================
 // Vertex State Description
 // ============================================================================
@@ -212,6 +218,7 @@ struct CKFFFSStateDesc {
         uint32_t AlphaArg2 = 0;
         bool ResultIsTemp = false;
         bool ProjectedSampler = false;
+        uint32_t SamplerType = CKFF_SAMPLER_2D;
 
         bool operator==(const Stage &o) const {
             return ColorOp == o.ColorOp &&
@@ -223,7 +230,8 @@ struct CKFFFSStateDesc {
                    AlphaArg1 == o.AlphaArg1 &&
                    AlphaArg2 == o.AlphaArg2 &&
                    ResultIsTemp == o.ResultIsTemp &&
-                   ProjectedSampler == o.ProjectedSampler;
+                   ProjectedSampler == o.ProjectedSampler &&
+                   SamplerType == o.SamplerType;
         }
         bool operator!=(const Stage &o) const { return !(*this == o); }
     };
@@ -273,6 +281,10 @@ struct CKFFFSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].ProjectedSampler = v;
     }
+    void SetStageSamplerType(uint32_t stage, uint32_t type) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].SamplerType = type & 3u;
+    }
 
     uint32_t GetStageColorOp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
@@ -313,6 +325,10 @@ struct CKFFFSStateDesc {
     bool GetStageProjectedSampler(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return false;
         return Stages[stage].ProjectedSampler;
+    }
+    uint32_t GetStageSamplerType(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return CKFF_SAMPLER_2D;
+        return Stages[stage].SamplerType;
     }
 
     // --- Global flags (bits 0-2) ---
