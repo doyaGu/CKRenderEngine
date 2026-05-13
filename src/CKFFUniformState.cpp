@@ -26,13 +26,18 @@ float CKFFPackAlphaFuncPrecision(CKDWORD func, CKDWORD precision) {
 }
 
 CKDWORD CKFFAlphaTestPrecisionForFormat(const VxImageDescEx &desc) {
-    (void)VxImageDesc2PixelFormat(desc);
+    CKDWORD mask = desc.AlphaMask;
+    CKDWORD alphaBits = 0;
+    while (mask != 0) {
+        alphaBits += mask & 1u;
+        mask >>= 1;
+    }
 
-    // Current Virtools/VX render targets are legacy integer color formats, for
-    // which dxvk uses the common 8-bit alpha-test path. Keep the mapping here
-    // so 10/16/float RT precision can be wired in when those formats are
-    // exposed above the rasterizer.
-    return 0;
+    if (alphaBits <= 8)
+        return 0;
+    if (alphaBits >= 16)
+        return 8;
+    return alphaBits - 8;
 }
 
 void CKFFPackColorARGB(CKDWORD color, float outColor[4]) {

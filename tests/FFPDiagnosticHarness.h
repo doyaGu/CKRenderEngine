@@ -4,9 +4,17 @@
 #include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
 
+#include <cstring>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+
+struct FFPTextureBinding {
+    CKDWORD Stage;
+    CKDWORD Uniform;
+    CKDWORD Texture;
+    CKSamplerDesc Sampler;
+};
 
 class FFPDiagnosticDriver : public CKRasterizerDriver {
 public:
@@ -37,6 +45,8 @@ public:
     CKDWORD LastTextureStage = 0;
     CKDWORD LastTextureUniform = 0;
     CKDWORD LastTextureHandle = 0;
+    CKSamplerDesc LastTextureSampler = {};
+    std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
     std::unordered_set<CKDWORD> MatrixUniforms;
@@ -75,10 +85,19 @@ public:
         }
     }
     void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *) override {}
-    void SetTexture(CKDWORD stage, CKDWORD uniform, CKDWORD texture, CKSamplerDesc *) override {
+    void SetTexture(CKDWORD stage, CKDWORD uniform, CKDWORD texture, CKSamplerDesc *sampler) override {
         LastTextureStage = stage;
         LastTextureUniform = uniform;
         LastTextureHandle = texture;
+        memset(&LastTextureSampler, 0, sizeof(LastTextureSampler));
+        if (sampler)
+            LastTextureSampler = *sampler;
+        FFPTextureBinding binding;
+        binding.Stage = stage;
+        binding.Uniform = uniform;
+        binding.Texture = texture;
+        binding.Sampler = LastTextureSampler;
+        TextureBindings.push_back(binding);
         ++TextureBindCount;
     }
     void SetUniform(CKDWORD uniform, const void *data, CKDWORD count) override {

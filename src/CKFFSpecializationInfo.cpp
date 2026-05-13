@@ -52,6 +52,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 15, 1};
     case CKFF_SPEC_SAMPLER_TYPE_MASK:
         return {5, 16, 16};
+    case CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK:
+        return {3, 0, 32};
     default:
         break;
     }
@@ -69,7 +71,9 @@ void CKFFSpecializationInfo::Set(CKFFSpecConstantId id, CKDWORD value) {
     if (layout.BitCount == 0 || layout.DwordOffset >= MaxSpecDwords)
         return;
 
-    const CKDWORD mask = ((1u << layout.BitCount) - 1u) << layout.BitOffset;
+    const CKDWORD mask = layout.BitCount == 32
+        ? 0xFFFFFFFFu
+        : ((1u << layout.BitCount) - 1u) << layout.BitOffset;
     m_Data[layout.DwordOffset] &= ~mask;
     m_Data[layout.DwordOffset] |= (value << layout.BitOffset) & mask;
 }
@@ -79,7 +83,9 @@ CKDWORD CKFFSpecializationInfo::Get(CKFFSpecConstantId id) const {
     if (layout.BitCount == 0 || layout.DwordOffset >= MaxSpecDwords)
         return 0;
 
-    const CKDWORD mask = ((1u << layout.BitCount) - 1u) << layout.BitOffset;
+    const CKDWORD mask = layout.BitCount == 32
+        ? 0xFFFFFFFFu
+        : ((1u << layout.BitCount) - 1u) << layout.BitOffset;
     return (m_Data[layout.DwordOffset] & mask) >> layout.BitOffset;
 }
 

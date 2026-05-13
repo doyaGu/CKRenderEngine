@@ -4,6 +4,7 @@
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
+#include <cmath>
 #include <cstring>
 
 namespace {
@@ -601,6 +602,80 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     ffp.Shutdown();
 }
 
+void VolumeTextureModulateCacheMissDoesNotUseGenericNullSampler() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 91, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG2, CKRST_TA_DIFFUSE);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Volume texture cache miss must not fall back to generic null texture sampling");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "Volume texture cache miss must not bind a texture for a skipped draw");
+
+    ffp.Shutdown();
+}
+
+void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo noCompareSpec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Depth draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        noCompareSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                                (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_DEPTH,
+              "Depth texture must mark stage 0 as depth sampler");
+    TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_NONE,
+              "Depth texture without compare func must keep compare mask empty");
+    TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
+              "Depth texture without compare func must bind a non-compare sampler");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo compareSpec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Depth compare draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        compareSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck((compareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_LEQUAL,
+              "Depth compare func must enter specialization mask");
+    TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
+              "Depth compare func must stay shader-evaluated and bind a non-compare sampler");
+
+    ffp.Shutdown();
+}
+
 void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -646,6 +721,50 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
               "Point sprite vertex 2 must use UV (1,1)");
     TestCheck(uv3[0] == 0.0f && uv3[1] == 1.0f,
               "Point sprite vertex 3 must use UV (0,1)");
+
+    ffp.Shutdown();
+}
+
+void PointSpriteUsesPerVertexPointSize() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    struct PointVertex {
+        float x, y, z;
+        float size;
+    };
+    PointVertex vertex = {0.0f, 0.0f, 0.0f, 6.0f};
+    Vx2DVector uv(0.25f, 0.75f);
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_PSIZE;
+    data.PositionPtr = &vertex;
+    data.PositionStride = sizeof(PointVertex);
+    data.TexCoordPtr = &uv;
+    data.TexCoordStride = sizeof(Vx2DVector);
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(2.0f));
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE_MIN, FloatStageState(1.0f));
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE_MAX, FloatStageState(4.0f));
+
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST, nullptr, 1, &data);
+
+    const CKDWORD stride = 36;
+    TestCheck(context.Encoder.LastVertexBytes.size() == stride * 4,
+              "Per-vertex point sprite must expand to four transient vertices");
+    if (context.Encoder.LastVertexBytes.size() == stride * 4) {
+        float p0[3] = {};
+        float p1[3] = {};
+        memcpy(p0, &context.Encoder.LastVertexBytes[0], sizeof(p0));
+        memcpy(p1, &context.Encoder.LastVertexBytes[stride], sizeof(p1));
+        TestCheck(fabsf(p0[0] + 2.0f) < 0.001f && fabsf(p1[0] - 2.0f) < 0.001f,
+                  "Per-vertex point size must drive sprite width after max clamp");
+        TestCheck(fabsf(p0[1] - p1[1]) < 0.001f,
+                  "Adjacent point sprite corners must stay on the same edge");
+    }
 
     ffp.Shutdown();
 }
@@ -1235,8 +1354,14 @@ int main() {
               &StageConstantDoesNotCreateTextureDependency);
     tests.Run("Cube texture uses cube sampler specialization and binding",
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
+    tests.Run("Volume texture modulate cache miss does not use generic null sampler",
+              &VolumeTextureModulateCacheMissDoesNotUseGenericNullSampler);
+    tests.Run("Depth texture compare func uploads sampler and specialization",
+              &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
+    tests.Run("Point sprite uses per-vertex point size",
+              &PointSpriteUsesPerVertexPointSize);
     tests.Run("POSITIONT texture transform does not upload texture matrix",
               &PositionTTextureTransformDoesNotUploadTextureMatrix);
     tests.Run("Legacy texcoord component count reads only xy",

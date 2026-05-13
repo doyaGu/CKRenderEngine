@@ -11,6 +11,7 @@ struct CKFFStageParams
     int ResultArg;
     int TexcoordTransformFlags;
     int SamplerType;
+    int SamplerCompareFunc;
     bool HasTexture;
     vec4 Constant;
 };
@@ -168,6 +169,11 @@ int ckffSpecSamplerType(int stage)
     return ckffSpecBits(ckffSpecDword(5), 16 + stage * 2, 2);
 }
 
+int ckffSpecSamplerCompareFunc(int stage)
+{
+    return ckffSpecBits(ckffSpecDword(3), stage * 4, 4);
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
@@ -183,6 +189,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.ResultArg = 1;
     params.TexcoordTransformFlags = 0;
     params.SamplerType = ckffSpecSamplerType(stage);
+    params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
     params.HasTexture = ckffSpecStageHasTexture(stage);
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #else
@@ -197,6 +204,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.ResultArg = int(alphaParams.w);
     params.TexcoordTransformFlags = int(colorExtra.z);
     params.SamplerType = ckffSpecSamplerType(stage);
+    params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
     params.HasTexture = colorParams.w > 0.5;
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #endif

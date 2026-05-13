@@ -908,6 +908,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
 
     uint16_t w = (uint16_t)Desc->Format.Width;
     uint16_t h = (uint16_t)Desc->Format.Height;
+    uint16_t d = (uint16_t)std::max<CKDWORD>(1, Desc->Depth);
     if (w == 0 || h == 0)
         return CKERR_INVALIDPARAMETER;
 
@@ -931,6 +932,10 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
         CKDWORD bpp = (Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32;
         CKDWORD rowBytes = (CKDWORD)Data->Width * bpp / 8;
         CKDWORD imgSize = rowBytes * Data->Height;
+        if ((Desc->Flags & CKRST_TEXTURE_VOLUMEMAP) && d > 1)
+            imgSize *= d;
+        if (Data->TotalImageSize != 0)
+            imgSize = Data->TotalImageSize;
         if (pf == _DXT1 || pf == _DXT3 || pf == _DXT5)
             imgSize = Data->TotalImageSize;
         copiedBytes = imgSize;
@@ -941,6 +946,10 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     if (Desc->Flags & CKRST_TEXTURE_CUBEMAP)
     {
         handle = bgfx::createTextureCube(w, hasMips, 1, fmt, texFlags, mem);
+    }
+    else if ((Desc->Flags & CKRST_TEXTURE_VOLUMEMAP) && d > 1)
+    {
+        handle = bgfx::createTexture3D(w, h, d, hasMips, fmt, texFlags, mem);
     }
     else
     {
@@ -955,6 +964,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     rec->Flags = Desc->Flags;
     rec->Width = w;
     rec->Height = h;
+    rec->Depth = d;
     rec->IsDepth = FALSE;
     rec->Format = fmt;
     rec->BitsPerPixel = (Desc->Format.BitsPerPixel > 0) ? Desc->Format.BitsPerPixel :
@@ -1219,6 +1229,7 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
     rec->Flags = Desc->Flags | CKRST_TEXTURE_DEPTHSTENCIL;
     rec->Width = w;
     rec->Height = h;
+    rec->Depth = 1;
     rec->IsDepth = TRUE;
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
@@ -1372,7 +1383,10 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         return CKERR_INVALIDPARAMETER;
 
     bool isCube = (rec->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
-    if (!isCube && Face != 0)
+    bool isVolume = (rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1;
+    if (!isCube && !isVolume && Face != 0)
+        return CKERR_INVALIDPARAMETER;
+    if (isVolume && Face >= rec->Depth)
         return CKERR_INVALIDPARAMETER;
 
     uint16_t x = 0, y = 0;
@@ -1440,6 +1454,8 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
 
     if (isCube)
         bgfx::updateTextureCube(rec->Handle, 0, (uint8_t)Face, (uint8_t)Mip, x, y, w, h, mem);
+    else if (isVolume)
+        bgfx::updateTexture3D(rec->Handle, (uint8_t)Mip, x, y, (uint16_t)Face, w, h, 1, mem);
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
 

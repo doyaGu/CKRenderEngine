@@ -36,6 +36,7 @@ struct CKFFShaderKeyFSStage {
     bool HasTexture;
     bool ProjectedSampler;
     CKDWORD SamplerType;
+    CKDWORD SamplerCompareFunc;
 };
 
 struct CKFFShaderKeyFS {
