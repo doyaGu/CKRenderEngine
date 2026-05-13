@@ -94,7 +94,7 @@ public:
     // Draw state
     virtual void SetState(CKDrawState State);
     virtual void SetStencilRef(CKDWORD Ref);
-    virtual void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask = 0xFF);
+    virtual void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask);
     virtual void SetScissor(const CKRECT *Rect);
     virtual void SetPointSize(float Size);
 
