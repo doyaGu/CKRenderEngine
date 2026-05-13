@@ -90,6 +90,21 @@ void DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes() {
               "Separate alpha BOTHINVSRCALPHA destination must expand to SRCALPHA");
 }
 
+void StencilWriteMaskInvalidatesCachedDrawState() {
+    CKDrawStateCache cache;
+
+    cache.BuildDrawState(VX_TRIANGLELIST);
+    CKDWORD rebuilds = cache.GetBuildRebuilds();
+
+    cache.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
+    cache.BuildDrawState(VX_TRIANGLELIST);
+
+    TestCheck(cache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) == 0x0F,
+              "Stencil write mask must be stored in the render state cache");
+    TestCheck(cache.GetBuildRebuilds() == rebuilds + 1,
+              "Changing stencil write mask must invalidate cached draw state");
+}
+
 } // namespace
 
 int main() {
@@ -102,5 +117,7 @@ int main() {
               &DrawStateBuilderExpandsBothSourceAlphaBlendModes);
     tests.Run("Draw state builder expands separate both-source-alpha blend modes",
               &DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes);
+    tests.Run("Stencil write mask invalidates cached draw state",
+              &StencilWriteMaskInvalidatesCachedDrawState);
     return tests.ExitCode();
 }

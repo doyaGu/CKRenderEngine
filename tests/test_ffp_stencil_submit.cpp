@@ -1,0 +1,784 @@
+#include "CKFixedFunctionPipeline.h"
+#include "CKFFSpecializationInfo.h"
+#include "CKFFUniformState.h"
+#include "FFPDiagnosticHarness.h"
+#include "TestTriangleMultiset.h"
+
+#include <cstring>
+
+namespace {
+
+CKDWORD FloatStageState(float value) {
+    union {
+        float F;
+        CKDWORD D;
+    } u;
+    u.F = value;
+    return u.D;
+}
+
+VXPRIMITIVETYPE DrawStateTopology(const CKDrawState &state) {
+    return (VXPRIMITIVETYPE)((state.Mid >> 6) & 0x7u);
+}
+
+void DrawVertexBufferSubmitsStencilRefAndMasks() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILREF, 0x12);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xF0);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "FFP test draw must submit once");
+    TestCheck(context.Encoder.StencilRefSetCount == 1,
+              "FFP draw must submit stencil ref");
+    TestCheck(context.Encoder.StencilMaskSetCount == 1,
+              "FFP draw must submit stencil masks");
+    TestCheck(context.Encoder.LastStencilRef == 0x12,
+              "FFP draw must forward stencil ref");
+    TestCheck(context.Encoder.LastStencilReadMask == 0xF0,
+              "FFP draw must forward stencil read mask");
+    TestCheck(context.Encoder.LastStencilWriteMask == 0x0F,
+              "FFP draw must forward stencil write mask");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferUploadsAlphaPrecision() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, 0x12345680);
+    ffp.SetAlphaTestPrecision(0x2);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+
+    TestCheck(it != context.Encoder.FloatUniforms.end(),
+              "FFP draw must upload draw params");
+    TestCheck(it->second.size() >= 36,
+              "FFP draw params must contain alpha-test slot");
+    TestCheck(it->second[32] == 0x80,
+              "FFP draw params must upload alpha ref low byte");
+    const CKDWORD alphaFuncPrecision = (CKDWORD)it->second[33];
+    TestCheck((alphaFuncPrecision & 0xFu) == VXCMP_GREATER,
+              "FFP draw params must upload alpha-test compare function");
+    TestCheck(((alphaFuncPrecision >> 4) & 0xFu) == 0x2,
+              "FFP draw params must upload current alpha-test precision");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferSetsFlatShadeSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo gouraudSpec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Gouraud draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        gouraudSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck(gouraudSpec.Get(CKFF_SPEC_FLAT_SHADE) == 0,
+              "Gouraud shade mode must not set flat shade specialization");
+
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo flatSpec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Flat draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        flatSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                           (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck(flatSpec.Get(CKFF_SPEC_FLAT_SHADE) == 1,
+              "Flat shade mode must set flat shade specialization");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferUploadsFogParams() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    const float fogStart = 10.0f;
+    const float fogEnd = 30.0f;
+    const float fogDensity = 0.125f;
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_EXP);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+    ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatStageState(fogStart));
+    ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatStageState(fogEnd));
+    ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, FloatStageState(fogDensity));
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+
+    TestCheck(it != context.Encoder.FloatUniforms.end(),
+              "FFP fog draw must upload draw params");
+    TestCheck(it->second.size() >= 44,
+              "FFP fog draw params must contain fog slot");
+    TestCheck(it->second[40] == fogStart,
+              "FFP fog params must upload fog start");
+    TestCheck(it->second[41] == fogEnd,
+              "FFP fog params must upload fog end");
+    TestCheck(it->second[42] == fogDensity,
+              "FFP fog params must upload fog density");
+    TestCheck(it->second[43] == (float)VXFOG_EXP,
+              "FFP fog params must upload vertex fog mode");
+
+    ffp.Shutdown();
+}
+
+void PositionTFogUsesPositionTShaderKey() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_LINEAR);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITIONT | CKFF_VF_COLOR0 | CKFF_VF_COLOR1, 1);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+    TestCheck(context.Encoder.FloatUniforms.find(matrixUniform) == context.Encoder.FloatUniforms.end(),
+              "POSITIONT draws must not upload transformed 3D matrix uniforms");
+    TestCheck(it != context.Encoder.FloatUniforms.end() && it->second.size() >= 44,
+              "POSITIONT fog draw must upload fog params");
+    TestCheck(it->second[43] == (float)VXFOG_LINEAR,
+              "POSITIONT fog draw must upload vertex fog mode");
+
+    ffp.Shutdown();
+}
+
+void RangeFogChangesSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_LINEAR);
+    ffp.SetRenderState(VXRENDERSTATE_RANGEFOGENABLE, FALSE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo specNoRange;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Non-range fog draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        specNoRange.SetDwords(&context.LastProgramSpecializationDwords[0],
+                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck(specNoRange.Get(CKFF_SPEC_RANGE_FOG) == 0,
+              "Range fog disabled must clear range fog specialization");
+
+    ffp.SetRenderState(VXRENDERSTATE_RANGEFOGENABLE, TRUE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo specRange;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Range fog draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        specRange.SetDwords(&context.LastProgramSpecializationDwords[0],
+                            (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck(specRange.Get(CKFF_SPEC_RANGE_FOG) == 1,
+              "Range fog enabled must set range fog specialization");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferCompactsClipPlaneUniforms() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxPlane plane1;
+    plane1.m_Normal = VxVector(1.0f, 2.0f, 3.0f);
+    plane1.m_D = 4.0f;
+    VxPlane plane3;
+    plane3.m_Normal = VxVector(5.0f, 6.0f, 7.0f);
+    plane3.m_D = 8.0f;
+    ffp.SetUserClipPlane(1, plane1);
+    ffp.SetUserClipPlane(3, plane3);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, (1u << 1) | (1u << 3));
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD planesUniform = ffp.GetShaderCache().GetUniforms().u_clipPlanes;
+    const CKDWORD paramsUniform = ffp.GetShaderCache().GetUniforms().u_clipParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator planes =
+        context.Encoder.FloatUniforms.find(planesUniform);
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(paramsUniform);
+
+    TestCheck(planes != context.Encoder.FloatUniforms.end(),
+              "Enabled clip planes must upload compacted plane uniform");
+    TestCheck(params != context.Encoder.FloatUniforms.end(),
+              "Enabled clip planes must upload clip params uniform");
+    TestCheck(params->second[0] == 2.0f,
+              "Clip params must contain enabled clip plane count");
+    TestCheck(planes->second[0] == 1.0f && planes->second[1] == 2.0f &&
+                  planes->second[2] == 3.0f && planes->second[3] == 4.0f,
+              "First uploaded clip plane must be the lowest enabled index");
+    TestCheck(planes->second[4] == 5.0f && planes->second[5] == 6.0f &&
+                  planes->second[6] == 7.0f && planes->second[7] == 8.0f,
+              "Second uploaded clip plane must be the next enabled index");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferSkipsClipUniformsWhenDisabled() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxPlane plane;
+    plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    plane.m_D = 1.0f;
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD planesUniform = ffp.GetShaderCache().GetUniforms().u_clipPlanes;
+    const CKDWORD paramsUniform = ffp.GetShaderCache().GetUniforms().u_clipParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(paramsUniform);
+    TestCheck(context.Encoder.FloatUniforms.find(planesUniform) == context.Encoder.FloatUniforms.end(),
+              "Disabled clip planes must not upload clip plane uniform");
+    TestCheck(params == context.Encoder.FloatUniforms.end() || params->second[0] == 0.0f,
+              "Disabled clip planes must either skip clip params or upload count zero");
+
+    ffp.Shutdown();
+}
+
+void ResultArgTempClearsOnlyLastActiveStage() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_RESULTARG0, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(1, CKRST_TSS_RESULTARG0, CKRST_TA_TEMP);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "RESULTARG draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
+              "Non-final active stage must preserve RESULTARG=TEMP");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE1_RESULT_IS_TEMP) == 0,
+              "Final active stage must write to current even when RESULTARG=TEMP");
+
+    ffp.Shutdown();
+}
+
+void Modulate4XStaysInTextureStageSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE4X);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "MODULATE4X draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE4X,
+              "MODULATE4X must remain a normal texture-stage specialization op");
+
+    ffp.Shutdown();
+}
+
+void PremodulateStaysInTextureStageSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_PREMODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "PREMODULATE draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_PREMODULATE,
+              "PREMODULATE must remain encoded as the stage color op");
+    TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 0,
+              "Single-stage PREMODULATE draw must keep last active stage at zero");
+
+    ffp.Shutdown();
+}
+
+void NullTextureStagePreservesSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 0);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Null texture draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_SELECTARG1,
+              "Unbound texture stage must keep its original color op");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) == CKRST_TA_TEXTURE,
+              "Unbound texture stage must keep TEXTURE as its color arg");
+    TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 1,
+              "Unbound texture stage must not truncate later active stages");
+
+    ffp.Shutdown();
+}
+
+void StageConstantDoesNotCreateTextureDependency() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 0);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_CONSTANT, 0x80402010u);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Stage constant draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    const CKDWORD stageParamsUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
+        context.Encoder.FloatUniforms.find(stageParamsUniform);
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_SELECTARG1,
+              "D3DTA_CONSTANT must not disable the stage when no texture is bound");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) == CKRST_TA_CONSTANT,
+              "D3DTA_CONSTANT must remain encoded in specialization");
+    TestCheck(stageParams != context.Encoder.FloatUniforms.end() &&
+                  stageParams->second.size() >= 16 &&
+                  stageParams->second[11] == 0x40 / 255.0f &&
+                  stageParams->second[13] == 0x20 / 255.0f &&
+                  stageParams->second[14] == 0x10 / 255.0f &&
+                  stageParams->second[15] == 0x80 / 255.0f,
+              "Stage constant must upload in stage params");
+
+    ffp.Shutdown();
+}
+
+void PointSpriteDrawPrimitiveExpandsToTriangleList() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector position(0.0f, 0.0f, 0.0f);
+    Vx2DVector uv(0.25f, 0.75f);
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
+    data.PositionPtr = &position;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = &uv;
+    data.TexCoordStride = sizeof(Vx2DVector);
+
+    const float pointSize = 2.0f;
+    ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(pointSize));
+
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST, nullptr, 1, &data);
+
+    const CKDWORD stride = 28;
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Point sprite draw must submit once");
+    TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_TRIANGLELIST,
+              "Point sprite draw state must submit triangle-list topology");
+    TestCheck(context.Encoder.LastVertexBytes.size() == stride * 4,
+              "One point sprite must expand to four transient vertices");
+    TestCheck(context.Encoder.LastIndexBytes.size() == sizeof(CKWORD) * 6,
+              "One point sprite must expand to six transient indices");
+
+    float uv0[2], uv1[2], uv2[2], uv3[2];
+    memcpy(uv0, &context.Encoder.LastVertexBytes[12], sizeof(uv0));
+    memcpy(uv1, &context.Encoder.LastVertexBytes[stride + 12], sizeof(uv1));
+    memcpy(uv2, &context.Encoder.LastVertexBytes[stride * 2 + 12], sizeof(uv2));
+    memcpy(uv3, &context.Encoder.LastVertexBytes[stride * 3 + 12], sizeof(uv3));
+    TestCheck(uv0[0] == 0.0f && uv0[1] == 0.0f,
+              "Point sprite vertex 0 must use UV (0,0)");
+    TestCheck(uv1[0] == 1.0f && uv1[1] == 0.0f,
+              "Point sprite vertex 1 must use UV (1,0)");
+    TestCheck(uv2[0] == 1.0f && uv2[1] == 1.0f,
+              "Point sprite vertex 2 must use UV (1,1)");
+    TestCheck(uv3[0] == 0.0f && uv3[1] == 1.0f,
+              "Point sprite vertex 3 must use UV (0,1)");
+
+    ffp.Shutdown();
+}
+
+void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(2, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_PROJECTED);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Projected stage 2 draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck((spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << 2)) != 0,
+              "Stage 2 projected sampler must be encoded in the specialization mask");
+
+    ffp.Shutdown();
+}
+
+void ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(4, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(4, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(4, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_PROJECTED);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Projected stage 4 draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    const CKDWORD stageParamsUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
+        context.Encoder.FloatUniforms.find(stageParamsUniform);
+
+    TestCheck((spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << 4)) == 0,
+              "Stage 4 projected sampler must not be encoded in the 4-bit optimized mask");
+    TestCheck(stageParams != context.Encoder.FloatUniforms.end(),
+              "Stage 4 projected sampler must force runtime stage params");
+    TestCheck(stageParams->second.size() >= 4 * (4 * 4 + 3) &&
+                  stageParams->second[(4 * 4 + 2) * 4 + 2] == (float)CKRST_TTF_PROJECTED,
+              "Stage 4 runtime stage params must preserve projected transform flags");
+
+    ffp.Shutdown();
+}
+
+void DrawUploadsPerStageBumpEnvUniforms() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 100);
+    ffp.SetTexture(1, 101);
+    ffp.SetTexture(2, 102);
+    ffp.SetTexture(3, 103);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVMAT00, FloatStageState(1.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVMAT01, FloatStageState(2.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVMAT10, FloatStageState(3.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVMAT11, FloatStageState(4.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLSCALE, FloatStageState(5.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLOFFSET, FloatStageState(6.0f));
+
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT00, FloatStageState(7.0f));
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT01, FloatStageState(8.0f));
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT10, FloatStageState(9.0f));
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT11, FloatStageState(10.0f));
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVLSCALE, FloatStageState(11.0f));
+    ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVLOFFSET, FloatStageState(12.0f));
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD bumpUniform = ffp.GetShaderCache().GetUniforms().u_bumpEnv;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator bump =
+        context.Encoder.FloatUniforms.find(bumpUniform);
+
+    TestCheck(bump != context.Encoder.FloatUniforms.end(),
+              "Bump env draws must upload bump env uniforms");
+    TestCheck(context.Encoder.UniformCounts[bumpUniform] == CKFF_MAX_TEXTURE_STAGES * 2,
+              "Bump env uniform upload must include every stage");
+    TestCheck(bump->second.size() >= CKFF_MAX_TEXTURE_STAGES * 2 * 4,
+              "Bump env uniform data must contain every stage slot");
+    TestCheck(bump->second[0] == 1.0f && bump->second[1] == 2.0f &&
+                  bump->second[2] == 3.0f && bump->second[3] == 4.0f,
+              "Stage 0 bump env data must occupy slots 0 and 1");
+    TestCheck(bump->second[16] == 7.0f && bump->second[17] == 8.0f &&
+                  bump->second[18] == 9.0f && bump->second[19] == 10.0f,
+              "Stage 2 bump env data must occupy slots 4 and 5");
+
+    ffp.Shutdown();
+}
+
+bool LayoutHasAttrib(const std::vector<CKVertexElementDesc> &elements, CK_VERTEX_ATTRIB attrib) {
+    for (size_t i = 0; i < elements.size(); ++i) {
+        if (elements[i].Attrib == attrib)
+            return true;
+    }
+    return false;
+}
+
+void VertexBlendZeroWeightsUploadsMatrixPalette() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
+
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    TestCheck(context.Encoder.UniformCounts[matrixUniform] >= 6,
+              "Normal vertex blend must upload matrix palette after base matrices");
+
+    ffp.Shutdown();
+}
+
+void VertexBlendWeightFlagsCreateWeightLayout() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    struct Vertex {
+        float Position[3];
+        float Weights[2];
+    } vertices[3] = {};
+
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS2;
+    data.PositionPtr = vertices;
+    data.PositionStride = sizeof(Vertex);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_WEIGHT),
+              "DP weight flags must create a blend weight vertex attribute");
+    TestCheck(!LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_INDICES),
+              "Non-indexed vertex blend must not create blend indices attribute");
+
+    ffp.Shutdown();
+}
+
+void IndexedVertexBlendRequiresIndexLayout() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    struct Vertex {
+        float Position[3];
+        float Weights[2];
+        CKDWORD Indices;
+    } vertices[3] = {};
+
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS2 | CKRST_DP_MATRIXPAL;
+    data.PositionPtr = vertices;
+    data.PositionStride = sizeof(Vertex);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
+    ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_WEIGHT),
+              "Indexed vertex blend must keep blend weight attribute");
+    TestCheck(LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_INDICES),
+              "Indexed vertex blend must create blend indices attribute");
+
+    ffp.Shutdown();
+}
+
+void PositionTVertexBlendDoesNotUploadMatrixPalette() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITIONT | CKFF_VF_BLENDWEIGHT, 1);
+
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    TestCheck(context.Encoder.FloatUniforms.find(matrixUniform) == context.Encoder.FloatUniforms.end(),
+              "POSITIONT vertex blend must not upload 3D matrix palette");
+
+    ffp.Shutdown();
+}
+
+} // namespace
+
+int main() {
+    TestFramework tests;
+    tests.Run("DrawVertexBuffer submits stencil ref and masks",
+              &DrawVertexBufferSubmitsStencilRefAndMasks);
+    tests.Run("DrawVertexBuffer uploads alpha precision",
+              &DrawVertexBufferUploadsAlphaPrecision);
+    tests.Run("DrawVertexBuffer sets flat shade specialization",
+              &DrawVertexBufferSetsFlatShadeSpecialization);
+    tests.Run("DrawVertexBuffer uploads fog params",
+              &DrawVertexBufferUploadsFogParams);
+    tests.Run("POSITIONT fog uses POSITIONT shader key",
+              &PositionTFogUsesPositionTShaderKey);
+    tests.Run("Range fog changes specialization",
+              &RangeFogChangesSpecialization);
+    tests.Run("DrawVertexBuffer compacts clip plane uniforms",
+              &DrawVertexBufferCompactsClipPlaneUniforms);
+    tests.Run("DrawVertexBuffer skips clip uniforms when disabled",
+              &DrawVertexBufferSkipsClipUniformsWhenDisabled);
+    tests.Run("RESULTARG TEMP clears only last active stage",
+              &ResultArgTempClearsOnlyLastActiveStage);
+    tests.Run("MODULATE4X stays in texture stage specialization",
+              &Modulate4XStaysInTextureStageSpecialization);
+    tests.Run("PREMODULATE stays in texture stage specialization",
+              &PremodulateStaysInTextureStageSpecialization);
+    tests.Run("Null texture stage preserves specialization",
+              &NullTextureStagePreservesSpecialization);
+    tests.Run("Stage constant does not create texture dependency",
+              &StageConstantDoesNotCreateTextureDependency);
+    tests.Run("Point sprite DrawPrimitive expands to triangle list",
+              &PointSpriteDrawPrimitiveExpandsToTriangleList);
+    tests.Run("Projected sampler stages zero to three enter specialization mask",
+              &ProjectedSamplerStagesZeroToThreeEnterSpecializationMask);
+    tests.Run("Projected sampler stages four to seven stay in runtime stage params",
+              &ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams);
+    tests.Run("Draw uploads per-stage bump env uniforms",
+              &DrawUploadsPerStageBumpEnvUniforms);
+    tests.Run("Vertex blend zero weights uploads matrix palette",
+              &VertexBlendZeroWeightsUploadsMatrixPalette);
+    tests.Run("Vertex blend weight flags create weight layout",
+              &VertexBlendWeightFlagsCreateWeightLayout);
+    tests.Run("Indexed vertex blend requires index layout",
+              &IndexedVertexBlendRequiresIndexLayout);
+    tests.Run("POSITIONT vertex blend does not upload matrix palette",
+              &PositionTVertexBlendDoesNotUploadMatrixPalette);
+    return tests.ExitCode();
+}
