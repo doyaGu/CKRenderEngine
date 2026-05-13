@@ -86,6 +86,24 @@ bool ckffVsFogEnabled(float runtimeMode)
 #endif
 }
 
+bool ckffVsHasColor0()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS & (1 << 2)) != 0;
+#else
+    return true;
+#endif
+}
+
+bool ckffVsHasColor1()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS & (1 << 3)) != 0;
+#else
+    return true;
+#endif
+}
+
 int ckffVsTexcoordIndex(int stage, int packedIndex)
 {
 #if defined(CKFF_FULL_SPECIALIZED)
@@ -178,8 +196,8 @@ void main()
     v_clipDistance1.zw = vec2(0.0, 0.0);
 #endif
 
-    v_color0 = a_color0;
-    v_color1 = a_color1;
+    v_color0 = ckffVsHasColor0() ? a_color0 : vec4(1.0, 1.0, 1.0, 1.0);
+    v_color1 = ckffVsHasColor1() ? a_color1 : vec4(0.0, 0.0, 0.0, 1.0);
     v_flatColor0 = v_color0;
     v_flatColor1 = v_color1;
 #if defined(CKFF_FULL_SPECIALIZED)
@@ -233,9 +251,9 @@ void main()
     v_texcoord6 = vec4(0.0, 0.0, 0.0, 1.0);
 #endif
 #if defined(CKFF_FULL_SPECIALIZED)
-    float fogFactor = ckffPositionTFogFactor(CKFF_VS_FOG_MODE != 0, a_color1.a);
+    float fogFactor = ckffPositionTFogFactor(CKFF_VS_FOG_MODE != 0, ckffVsHasColor1() ? a_color1.a : 1.0);
 #else
-    float fogFactor = ckffPositionTFogFactor(ckffVsFogEnabled(u_ffDrawParams[10].w), a_color1.a);
+    float fogFactor = ckffPositionTFogFactor(ckffVsFogEnabled(u_ffDrawParams[10].w), ckffVsHasColor1() ? a_color1.a : 1.0);
 #endif
 #if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7
     v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));

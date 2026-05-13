@@ -272,6 +272,24 @@ bool ckffVsVertexBlendIndexed()
 #endif
 }
 
+bool ckffVsHasColor0()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS & (1 << 2)) != 0;
+#else
+    return true;
+#endif
+}
+
+bool ckffVsHasColor1()
+{
+#if defined(CKFF_FULL_SPECIALIZED)
+    return (CKFF_VS_BITS & (1 << 3)) != 0;
+#else
+    return true;
+#endif
+}
+
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
 float ckffBlendWeight(int index, vec3 blendWeight)
 {
@@ -591,11 +609,16 @@ void main()
         litSpecular = matSpecular.rgb * specularAccum;
     }
 
-    v_color0 = clamp(litDiffuse, 0.0, 1.0);
-    v_color0.a = matDiffuse.a;
-    v_color1 = specularOutputEnabled
-        ? vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a)
-        : a_color1;
+    if (lightingEnabled) {
+        v_color0 = clamp(litDiffuse, 0.0, 1.0);
+        v_color0.a = matDiffuse.a;
+        v_color1 = specularOutputEnabled
+            ? vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a)
+            : (ckffVsHasColor1() ? a_color1 : vec4(0.0, 0.0, 0.0, 1.0));
+    } else {
+        v_color0 = ckffVsHasColor0() ? a_color0 : vec4(1.0, 1.0, 1.0, 1.0);
+        v_color1 = ckffVsHasColor1() ? a_color1 : vec4(0.0, 0.0, 0.0, 1.0);
+    }
     v_flatColor0 = v_color0;
     v_flatColor1 = v_color1;
 #if defined(CKFF_FULL_SPECIALIZED)
