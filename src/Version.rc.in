@@ -26,6 +26,7 @@ BEGIN
             VALUE "FileDescription", "@CKRE_RC_DESCRIPTION@"
             VALUE "FileVersion", "@CKRE_RC_VERSION_STRING@\0"
             VALUE "InternalName", "@CKRE_RC_TARGET@\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026\0"
             VALUE "OriginalFilename", "@CKRE_RC_ORIGINAL_FILENAME@\0"
             VALUE "ProductName", "Ballanced"
             VALUE "ProductVersion", "@CKRE_RC_VERSION_STRING@\0"
