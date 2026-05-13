@@ -12,7 +12,12 @@ set(CKDX9_RASTERIZER_HEADERS
 set(_ckre_dx9_targets)
 
 if (CKRE_BUILD_SHARED)
-    add_library(CKDX9Rasterizer SHARED ${CKDX9_RASTERIZER_SOURCES} ${CKDX9_RASTERIZER_HEADERS})
+    set(_ckdx9_version_resource)
+    if (COMMAND ballance_configure_version_resource AND DEFINED BALLANCE_MODULE_VERSION_OVERRIDE)
+        ballance_configure_version_resource(_ckdx9_version_resource CKDX9Rasterizer "DX9 Rasterizer" "CKDX9Rasterizer.dll")
+    endif ()
+
+    add_library(CKDX9Rasterizer SHARED ${CKDX9_RASTERIZER_SOURCES} ${CKDX9_RASTERIZER_HEADERS} ${_ckdx9_version_resource})
     list(APPEND _ckre_dx9_targets CKDX9Rasterizer)
 
     set_target_properties(CKDX9Rasterizer PROPERTIES

@@ -62,6 +62,11 @@ set(CKRE_CONFIG_FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/CK2_3D.ini
 )
 
+set(_ckre_version_resource CK2_3D.rc)
+if (COMMAND ballance_configure_version_resource AND DEFINED BALLANCE_MODULE_VERSION_OVERRIDE)
+    ballance_configure_version_resource(_ckre_version_resource CK2_3D "Render Engine Component" "CK2_3D.dll")
+endif ()
+
 set(CKRE_SOURCES
         CK2_3D.cpp
 
@@ -112,7 +117,7 @@ set(CKRE_SOURCES
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
 
-        CK2_3D.rc
+        ${_ckre_version_resource}
 )
 
 # Add the CKRasterizer subdirectory (shared or static builds)
