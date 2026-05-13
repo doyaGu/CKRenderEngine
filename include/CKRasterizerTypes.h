@@ -68,8 +68,9 @@ struct CKTextureDesc : public CKRasterizerObjectDesc
     CKDWORD Flags;
     VxImageDescEx Format;
     CKDWORD MipMapCount;
+    CKDWORD Depth;
 
-    CKTextureDesc() : Flags(0), MipMapCount(0) {}
+    CKTextureDesc() : Flags(0), MipMapCount(0), Depth(1) {}
     virtual ~CKTextureDesc() {}
 };
 

@@ -67,7 +67,8 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
             a.ResultIsTemp != b.ResultIsTemp ||
             a.HasTexture != b.HasTexture ||
             a.ProjectedSampler != b.ProjectedSampler ||
-            a.SamplerType != b.SamplerType)
+            a.SamplerType != b.SamplerType ||
+            a.SamplerCompareFunc != b.SamplerCompareFunc)
             return false;
     }
     return true;
@@ -104,6 +105,7 @@ size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, stage.HasTexture ? 1u : 0u);
         seed = HashCombine(seed, stage.ProjectedSampler ? 1u : 0u);
         seed = HashCombine(seed, stage.SamplerType);
+        seed = HashCombine(seed, stage.SamplerCompareFunc);
     }
     return seed;
 }
@@ -166,6 +168,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.ResultIsTemp = desc.GetStageResultIsTemp(stage);
         dst.ProjectedSampler = desc.GetStageProjectedSampler(stage);
         dst.SamplerType = desc.GetStageSamplerType(stage);
+        dst.SamplerCompareFunc = desc.GetStageSamplerCompareFunc(stage);
 
         if (dst.ColorOp == 0 || dst.ColorOp == CKRST_TOP_DISABLE)
             break;
@@ -213,6 +216,7 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.Set(CKFF_SPEC_FLAT_SHADE, key.FlatShade ? 1u : 0u);
     CKDWORD projectedSamplerMask = 0;
     CKDWORD samplerTypeMask = 0;
+    CKDWORD samplerCompareFuncMask = 0;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         if (key.Stages[stage].ProjectedSampler)
             projectedSamplerMask |= (1u << stage);
@@ -221,6 +225,9 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         samplerTypeMask |= (key.Stages[stage].SamplerType & 3u) << (stage * 2);
     info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK, samplerTypeMask);
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        samplerCompareFuncMask |= (key.Stages[stage].SamplerCompareFunc & 0xFu) << (stage * 4);
+    info.Set(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK, samplerCompareFuncMask);
 
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];

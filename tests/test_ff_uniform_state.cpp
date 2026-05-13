@@ -6,6 +6,10 @@
 #include "CKVertexLayoutCache.h"
 #include "TestTriangleMultiset.h"
 
+#include <cstring>
+#include <fstream>
+#include <string>
+
 namespace {
 
 CKDWORD FloatStageState(float value) {
@@ -118,6 +122,40 @@ void AlphaTestPrecisionForLegacyFormatsDefaultsToEightBit() {
               "Legacy 16-bit ARGB targets must use the 8-bit alpha-test path");
 }
 
+void AlphaTestPrecisionFollowsRenderTargetAlphaMask() {
+    VxImageDescEx desc;
+    memset(&desc, 0, sizeof(desc));
+
+    desc.AlphaMask = 0;
+    TestCheck(CKFFAlphaTestPrecisionForFormat(desc) == 0,
+              "No alpha mask must keep the 8-bit alpha-test path");
+
+    desc.AlphaMask = 0x000003FF;
+    TestCheck(CKFFAlphaTestPrecisionForFormat(desc) == 2,
+              "10-bit alpha mask must request precision code 2");
+
+    desc.AlphaMask = 0x00007FFF;
+    TestCheck(CKFFAlphaTestPrecisionForFormat(desc) == 7,
+              "15-bit alpha mask must request precision code 7");
+
+    desc.AlphaMask = 0x0000FFFF;
+    TestCheck(CKFFAlphaTestPrecisionForFormat(desc) == 8,
+              "16-bit alpha mask must request precision code 8");
+}
+
+void TextureCombinerTempInitializesAlphaToZero() {
+    std::ifstream shader("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    std::string contents((std::istreambuf_iterator<char>(shader)),
+                         std::istreambuf_iterator<char>());
+
+    TestCheck(!contents.empty(),
+              "FFP fragment shader source must be readable from the test working directory");
+    TestCheck(contents.find("vec4 temp = vec4(0.0, 0.0, 0.0, 0.0)") != std::string::npos,
+              "FFP TEMP register must initialize all channels to zero");
+    TestCheck(contents.find("vec4 temp = vec4(0.0, 0.0, 0.0, 1.0)") == std::string::npos,
+              "FFP TEMP alpha must not initialize to one");
+}
+
 void VertexBlendResolverMatchesDxvkWeightCounts() {
     CKFFVertexBlendState disabled = CKFFResolveVertexBlendState(
         VXVBLEND_DISABLE, FALSE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
@@ -203,6 +241,44 @@ void SamplerTypesPackIntoSpecialization() {
               "Sampler type specialization must pack two bits per stage");
 }
 
+void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(0, CKFF_SAMPLER_VOLUME);
+
+    desc.SetStageColorOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(1, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(1, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(1, CKFF_SAMPLER_DEPTH);
+    desc.SetStageSamplerCompareFunc(1, CKRST_COMPARE_LEQUAL);
+
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 1));
+    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+
+    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME,
+              "Volume sampler type must pack into specialization");
+    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 2) & 0x3u) == CKFF_SAMPLER_DEPTH,
+              "Depth sampler type must remain packed independently");
+    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) >> 4) & 0xFu) == CKRST_COMPARE_LEQUAL,
+              "Depth compare func must pack four bits per stage");
+}
+
+void TextureStageCompareFuncStaysOutOfSamplerDesc() {
+    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
+    CKSamplerDesc sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.CompareFunc == CKRST_COMPARE_NONE,
+              "Texture stage compare func must default to NONE");
+
+    stages[0][CKRST_TSS_COMPAREFUNC] = CKRST_COMPARE_GREATER;
+    sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.CompareFunc == CKRST_COMPARE_NONE,
+              "FFP depth compare is shader-evaluated and must not enable sampler compare");
+}
+
 void TextureBindingMaskSplitsNullTextureShaderKey() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
@@ -267,6 +343,10 @@ int main() {
               &AlphaFuncPrecisionPackSupportsDxvkPrecisionCodes);
     tests.Run("Alpha test precision for legacy formats defaults to eight-bit",
               &AlphaTestPrecisionForLegacyFormatsDefaultsToEightBit);
+    tests.Run("Alpha test precision follows render target alpha mask",
+              &AlphaTestPrecisionFollowsRenderTargetAlphaMask);
+    tests.Run("Texture combiner TEMP initializes alpha to zero",
+              &TextureCombinerTempInitializesAlphaToZero);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
@@ -275,6 +355,10 @@ int main() {
               &DPWeightFlagsAddBlendLayoutFlags);
     tests.Run("Sampler types pack into specialization",
               &SamplerTypesPackIntoSpecialization);
+    tests.Run("Volume sampler and compare func pack into specialization",
+              &VolumeSamplerAndCompareFuncPackIntoSpecialization);
+    tests.Run("Texture stage compare func stays out of sampler desc",
+              &TextureStageCompareFuncStaysOutOfSamplerDesc);
     tests.Run("Texture binding mask splits null texture shader key",
               &TextureBindingMaskSplitsNullTextureShaderKey);
     tests.Run("Texture binding mask ignores stages without texture args",

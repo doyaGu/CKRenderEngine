@@ -66,6 +66,7 @@ static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uni
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
         if (uniform == u.s_texture[i]) return "s_texture";
         if (uniform == u.s_textureCube[i]) return "s_textureCube";
+        if (uniform == u.s_textureVolume[i]) return "s_textureVolume";
     }
     return "unknown";
 }
@@ -99,6 +100,7 @@ static CKDWORD CKFFUniformDebugSlot(const CKFFUniformHandles &u, CKDWORD uniform
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
         if (uniform == u.s_texture[i]) return 32 + (CKDWORD)i;
         if (uniform == u.s_textureCube[i]) return 40 + (CKDWORD)i;
+        if (uniform == u.s_textureVolume[i]) return 48 + (CKDWORD)i;
     }
     return 0;
 }
@@ -1153,8 +1155,11 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
         stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
         if ((m_TextureFlags[stage] & CKRST_TEXTURE_CUBEMAP) != 0)
             stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_CUBE);
+        else if ((m_TextureFlags[stage] & CKRST_TEXTURE_VOLUMEMAP) != 0)
+            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_VOLUME);
         else if ((m_TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
             stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_DEPTH);
+        stateDesc.FS.SetStageSamplerCompareFunc(stage, m_StageStates[stage][CKRST_TSS_COMPAREFUNC]);
 
         if (colorOp == CKRST_TOP_DISABLE)
             break;
@@ -1515,9 +1520,11 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
             continue;
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        encoder->SetTexture(cube ? i + CKFF_MAX_TEXTURE_STAGES : i,
-                            cube ? u.s_textureCube[i] : u.s_texture[i],
-                            texture, &sampler);
+        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
+        const CKDWORD samplerStage = cube ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
+                                       (volume ? u.s_textureVolume[i] : u.s_texture[i]);
+        encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
         if (collectStats)
             ++m_FrameStats.TextureBinds;
     }
@@ -1528,9 +1535,11 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
             continue;
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        encoder->SetTexture(cube ? i + CKFF_MAX_TEXTURE_STAGES : i,
-                            cube ? u.s_textureCube[i] : u.s_texture[i],
-                            texture, &sampler);
+        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
+        const CKDWORD samplerStage = cube ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
+                                       (volume ? u.s_textureVolume[i] : u.s_texture[i]);
+        encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
     }
 #endif
 }

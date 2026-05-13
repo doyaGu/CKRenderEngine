@@ -36,6 +36,43 @@
       }
     },
     {
+      "name": "3d_stage0_select_texture_volume",
+      "vs": "3d",
+      "key": {
+        "vsBits": 1,
+        "vsTexGen": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": false,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "stages": [
+          {
+            "colorOp": 2,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 2,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "hasTexture": true,
+            "samplerType": 3
+          }
+        ]
+      }
+    },
+    {
       "name": "positiont_stage0_modulate",
       "vs": "positiont",
       "key": {

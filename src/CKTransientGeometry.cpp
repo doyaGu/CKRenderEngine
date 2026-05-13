@@ -51,6 +51,35 @@ static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpr
         params.ScaleA, params.ScaleB, params.ScaleC, distance);
 }
 
+static CKDWORD PointSpriteSizeOffset(CKDWORD flags, CKDWORD formatFlags) {
+    if (formatFlags & CKFF_VF_POSITIONT)
+        return 16;
+    if ((formatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX)) != 0)
+        return CKVertexLayoutCache::DPFlagsToBlendRecordSize(flags);
+    return 12;
+}
+
+static CKFFPointSpriteParams PointSpriteParamsForVertex(
+    VxDrawPrimitiveData *data,
+    CKDWORD srcIndex,
+    CKDWORD formatFlags,
+    const CKFFPointSpriteParams &baseParams)
+{
+    CKFFPointSpriteParams params = baseParams;
+    if (!data || !data->PositionPtr || (data->Flags & CKRST_DP_PSIZE) == 0)
+        return params;
+
+    const CKDWORD offset = PointSpriteSizeOffset(data->Flags, formatFlags);
+    if (data->PositionStride < offset + sizeof(float))
+        return params;
+
+    float size = 0.0f;
+    const CKBYTE *src = (const CKBYTE *)data->PositionPtr + srcIndex * data->PositionStride + offset;
+    memcpy(&size, src, sizeof(float));
+    params.Size = size;
+    return params;
+}
+
 float CKTransientGeometry::ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
                                                              CKBOOL scaleEnable,
                                                              float scaleA, float scaleB, float scaleC,
@@ -303,6 +332,7 @@ CKBOOL CKTransientGeometry::Prepare(
             {0.0f, 1.0f}
         };
         for (CKDWORD i = 0; i < vertexCount; ++i) {
+            const CKFFPointSpriteParams vertexParams = PointSpriteParamsForVertex(data, i, formatFlags, params);
             const CKBYTE *src = (const CKBYTE *)data->PositionPtr + i * data->PositionStride;
             float pos3[4] = {};
             if (formatFlags & CKFF_VF_POSITIONT) {
@@ -310,7 +340,7 @@ CKBOOL CKTransientGeometry::Prepare(
                 const float x = pos3[0];
                 const float y = pos3[1];
                 const VxVector center(x, y, pos3[2]);
-                const float half = ComputePointSpriteSize(center, params) * 0.5f;
+                const float half = ComputePointSpriteSize(center, vertexParams) * 0.5f;
                 float corners[4][4] = {
                     {x - half, y - half, pos3[2], pos3[3]},
                     {x + half, y - half, pos3[2], pos3[3]},
@@ -322,7 +352,7 @@ CKBOOL CKTransientGeometry::Prepare(
             } else {
                 memcpy(pos3, src, 12);
                 const VxVector center(pos3[0], pos3[1], pos3[2]);
-                const float half = ComputePointSpriteSize(center, params) * 0.5f;
+                const float half = ComputePointSpriteSize(center, vertexParams) * 0.5f;
                 const VxVector right = cameraRightLocal * half;
                 const VxVector up = cameraUpLocal * half;
                 VxVector cornerVecs[4] = {

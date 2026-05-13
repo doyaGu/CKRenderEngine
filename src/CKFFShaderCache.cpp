@@ -258,6 +258,13 @@ void CKFFShaderCache::CreateUniforms() {
         m_Uniforms.s_textureCube[i] = AllocUniformHandle();
         m_Context->CreateUniform(m_Uniforms.s_textureCube[i], &desc);
     }
+    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "s_textureVolume%d", i);
+        desc.Name = name;
+        m_Uniforms.s_textureVolume[i] = AllocUniformHandle();
+        m_Context->CreateUniform(m_Uniforms.s_textureVolume[i], &desc);
+    }
 }
 
 void CKFFShaderCache::ResolveShaderTarget() {
@@ -287,6 +294,15 @@ CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &ke
     if (!m_UseUberShader)
         return CreateFullSpecializedProgram(key);
     return CreateUberSpecializedProgram(key);
+}
+
+static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+        const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
+        if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_VOLUME)
+            return true;
+    }
+    return false;
 }
 
 CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
@@ -323,6 +339,10 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
                specInfo.Data()[3], specInfo.Data()[4], specInfo.Data()[5],
                specInfo.Data()[6], specInfo.Data()[7], specInfo.Data()[8],
                specInfo.Data()[9]);
+    if (CKFFShaderKeyNeedsVolumeSampler(key)) {
+        CK_LOG("ShaderCache", "Full FFP specialized module cache miss uses volume sampler; no generic fallback is available");
+        return CKFFProgramBinding();
+    }
     return CreateUberSpecializedProgram(key);
 }
 

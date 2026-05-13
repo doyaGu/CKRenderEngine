@@ -387,6 +387,33 @@ static void TestBgfxStencilWriteMaskEncoding()
                 "partial write mask with distinct read mask keeps read mask");
 }
 
+static void TestTextureVolumeDescriptorDefaults()
+{
+    TEST_SECTION("Texture Volume Descriptor Defaults");
+
+    CKTextureDesc desc;
+    TEST_ASSERT(desc.Depth == 1, "texture desc defaults to a single 2D slice");
+
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_VOLUMEMAP;
+    desc.Depth = 4;
+    TEST_ASSERT((desc.Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && desc.Depth == 4,
+                "volume texture desc carries explicit depth");
+}
+
+static void TestSamplerCompareFlags()
+{
+    TEST_SECTION("Sampler Compare Flags");
+
+    CKSamplerDesc sampler = {};
+    sampler.CompareFunc = CKRST_COMPARE_NONE;
+    TEST_ASSERT((CKBgfxSamplerFlags(&sampler) & BGFX_SAMPLER_COMPARE_LEQUAL) == 0,
+                "compare NONE emits no compare flags");
+
+    sampler.CompareFunc = CKRST_COMPARE_LEQUAL;
+    TEST_ASSERT((CKBgfxSamplerFlags(&sampler) & BGFX_SAMPLER_COMPARE_LEQUAL) != 0,
+                "compare LEQUAL emits bgfx compare flag");
+}
+
 // ============================================================================
 // Test 5: Rasterizer start/close lifecycle
 // ============================================================================
@@ -494,6 +521,8 @@ int main()
     TestFillModeTopology();
     TestDrawStateBuilderLayout();
     TestBgfxStencilWriteMaskEncoding();
+    TestTextureVolumeDescriptorDefaults();
+    TestSamplerCompareFlags();
     TestEncoderSlotAtomic();
     TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();

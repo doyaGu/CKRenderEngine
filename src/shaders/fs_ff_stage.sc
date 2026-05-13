@@ -8,6 +8,88 @@ uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
 
+#if defined(CKFF_FULL_SPECIALIZED)
+#ifndef CKFF_FS_STAGE0_SAMPLER_TYPE
+#define CKFF_FS_STAGE0_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE1_SAMPLER_TYPE
+#define CKFF_FS_STAGE1_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE2_SAMPLER_TYPE
+#define CKFF_FS_STAGE2_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE3_SAMPLER_TYPE
+#define CKFF_FS_STAGE3_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE4_SAMPLER_TYPE
+#define CKFF_FS_STAGE4_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE5_SAMPLER_TYPE
+#define CKFF_FS_STAGE5_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE6_SAMPLER_TYPE
+#define CKFF_FS_STAGE6_SAMPLER_TYPE 0
+#endif
+#ifndef CKFF_FS_STAGE7_SAMPLER_TYPE
+#define CKFF_FS_STAGE7_SAMPLER_TYPE 0
+#endif
+#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube0, 8);
+#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume0, 0);
+#else
+SAMPLER2D(s_texture0, 0);
+#endif
+#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube1, 9);
+#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume1, 1);
+#else
+SAMPLER2D(s_texture1, 1);
+#endif
+#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube2, 10);
+#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume2, 2);
+#else
+SAMPLER2D(s_texture2, 2);
+#endif
+#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube3, 11);
+#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume3, 3);
+#else
+SAMPLER2D(s_texture3, 3);
+#endif
+#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube4, 12);
+#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume4, 4);
+#else
+SAMPLER2D(s_texture4, 4);
+#endif
+#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube5, 13);
+#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume5, 5);
+#else
+SAMPLER2D(s_texture5, 5);
+#endif
+#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube6, 14);
+#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume6, 6);
+#else
+SAMPLER2D(s_texture6, 6);
+#endif
+#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube7, 15);
+#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume7, 7);
+#else
+SAMPLER2D(s_texture7, 7);
+#endif
+#else
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
 SAMPLER2D(s_texture2, 2);
@@ -24,6 +106,7 @@ SAMPLERCUBE(s_textureCube4, 12);
 SAMPLERCUBE(s_textureCube5, 13);
 SAMPLERCUBE(s_textureCube6, 14);
 SAMPLERCUBE(s_textureCube7, 15);
+#endif
 
 #include "fs_ff_common.sc"
 
@@ -31,7 +114,113 @@ SAMPLERCUBE(s_textureCube7, 15);
 #define CKFF_FS_ACTIVE_STAGE_COUNT 8
 #endif
 
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
+float compareDepth(float depth, float ref, int func)
+{
+    if (func == 1) return depth < ref ? 1.0 : 0.0;
+    if (func == 2) return depth <= ref ? 1.0 : 0.0;
+    if (func == 3) return depth == ref ? 1.0 : 0.0;
+    if (func == 4) return depth >= ref ? 1.0 : 0.0;
+    if (func == 5) return depth > ref ? 1.0 : 0.0;
+    if (func == 6) return depth != ref ? 1.0 : 0.0;
+    if (func == 7) return 0.0;
+    if (func == 8) return 1.0;
+    return depth;
+}
+
+#if defined(CKFF_FULL_SPECIALIZED)
+#define CKFF_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
+
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+{
+    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    if (stage == 0) {
+#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube0, coord.xyz);
+#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume0, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture0, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 1) {
+#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube1, coord.xyz);
+#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume1, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture1, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 2) {
+#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube2, coord.xyz);
+#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume2, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture2, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 3) {
+#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube3, coord.xyz);
+#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume3, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture3, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 4) {
+#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube4, coord.xyz);
+#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume4, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture4, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 5) {
+#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube5, coord.xyz);
+#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume5, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture5, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 6) {
+#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube6, coord.xyz);
+#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume6, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture6, coord.xy);
+        return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
+    return textureCube(s_textureCube7, coord.xyz);
+#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
+    return texture3D(s_textureVolume7, coord.xyz);
+#else
+    vec4 color = texture2D(s_texture7, coord.xy);
+    return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+}
+#else
+vec4 getVolumeTextureColor(int stage, vec4 coord)
+{
+    // The generic shader already consumes 16 D3D sampler slots for 2D/cube.
+    // Volume sampling is emitted by full-specialized variants instead.
+    return vec4(0.0, 0.0, 0.0, 1.0);
+}
+
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     if (samplerType == 1) {
@@ -44,6 +233,9 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
         if (stage == 6) return textureCube(s_textureCube6, coord.xyz);
         return textureCube(s_textureCube7, coord.xyz);
     }
+    if (samplerType == 3) {
+        return getVolumeTextureColor(stage, coord);
+    }
     vec2 uv = coord.xy;
     vec4 color;
     if (stage == 0) color = texture2D(s_texture0, uv);
@@ -54,9 +246,14 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
     else if (stage == 5) color = texture2D(s_texture5, uv);
     else if (stage == 6) color = texture2D(s_texture6, uv);
     else color = texture2D(s_texture7, uv);
-    if (samplerType == 2) return color.rrrr;
+    if (samplerType == 2) {
+        float depth = color.r;
+        if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));
+        return color.rrrr;
+    }
     return color;
 }
+#endif
 
 vec4 getSampleCoord(vec4 coord, int transformFlags)
 {
@@ -212,7 +409,7 @@ void main()
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, hasTexture);
+        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);

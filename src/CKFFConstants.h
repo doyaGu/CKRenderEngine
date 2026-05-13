@@ -105,6 +105,7 @@ struct CKFFUniformHandles {
     CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
     CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES];     // 2D samplers
     CKDWORD s_textureCube[CKFF_MAX_TEXTURE_STAGES]; // cube samplers
+    CKDWORD s_textureVolume[CKFF_MAX_TEXTURE_STAGES]; // volume samplers
 
     CKFFUniformHandles() { memset(this, 0, sizeof(*this)); }
 };

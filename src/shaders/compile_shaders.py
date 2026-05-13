@@ -186,6 +186,8 @@ def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object
     for index, stage in enumerate(stages[:4]):
         has_texture = index <= last_active_stage and bool(stage["hasTexture"])
         defines.append(f"CKFF_FS_STAGE{index}_HAS_TEXTURE={1 if has_texture else 0}")
+    for index, stage in enumerate(stages):
+        defines.append(f"CKFF_FS_STAGE{index}_SAMPLER_TYPE={int(stage['samplerType']) & 3}")
     for index, dword in enumerate(spec_dwords):
         if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
             raise ValueError(f"FFP specialization dword {index} must be a uint32")
@@ -300,6 +302,7 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
         set_spec_bits(dwords, word, 30, 1, 1 if stage["resultIsTemp"] else 0)
     for stage_index, stage in enumerate(key["stages"]):
         set_spec_bits(dwords, 5, 16 + stage_index * 2, 2, stage["samplerType"])
+        set_spec_bits(dwords, 3, stage_index * 4, 4, stage["samplerCompareFunc"])
 
     set_spec_bits(dwords, 5, 0, 4, projected_sampler_mask)
     return dwords
@@ -322,6 +325,7 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
         "hasTexture": False,
         "projectedSampler": read_bool(stage.get("projectedSampler", False), f"{field}.projectedSampler"),
         "samplerType": read_uint32(stage.get("samplerType", 0), f"{field}.samplerType") & 3,
+        "samplerCompareFunc": read_uint32(stage.get("samplerCompareFunc", 0), f"{field}.samplerCompareFunc") & 0xF,
     }
     normalized["hasTexture"] = read_bool(
         stage.get("hasTexture", ffp_stage_uses_texture(normalized)),
@@ -343,6 +347,7 @@ def default_specialized_stage() -> dict[str, object]:
         "hasTexture": False,
         "projectedSampler": False,
         "samplerType": 0,
+        "samplerCompareFunc": 0,
     }
 
 
@@ -559,6 +564,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"{prefix}.HasTexture = {'true' if stage['hasTexture'] else 'false'};\n")
         f.write(f"{prefix}.ProjectedSampler = {'true' if stage['projectedSampler'] else 'false'};\n")
         f.write(f"{prefix}.SamplerType = {stage['samplerType']};\n")
+        f.write(f"{prefix}.SamplerCompareFunc = {stage['samplerCompareFunc']};\n")
     f.write("    return key;\n")
     f.write("}\n\n")
 
