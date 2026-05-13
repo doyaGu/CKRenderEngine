@@ -22,8 +22,25 @@ set(CKBGFX_RASTERIZER_CONFIG
 
 set(_ckre_bgfx_targets)
 
+function(ckre_configure_rasterizer_version_resource OUT_VAR TARGET_NAME FILE_DESCRIPTION ORIGINAL_FILENAME)
+    set(CKRE_RC_TARGET "${TARGET_NAME}")
+    set(CKRE_RC_DESCRIPTION "${FILE_DESCRIPTION}")
+    set(CKRE_RC_ORIGINAL_FILENAME "${ORIGINAL_FILENAME}")
+    set(_ckre_version_resource "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}Version.generated.rc")
+
+    configure_file(
+            "${PROJECT_SOURCE_DIR}/src/Version.rc.in"
+            "${_ckre_version_resource}"
+            @ONLY
+    )
+
+    set(${OUT_VAR} "${_ckre_version_resource}" PARENT_SCOPE)
+endfunction()
+
 if (CKRE_BUILD_SHARED)
-    add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG})
+    ckre_configure_rasterizer_version_resource(_ckbgfx_version_resource CKBgfxRasterizer "bgfx Rasterizer" "CKBgfxRasterizer.dll")
+
+    add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG} ${_ckbgfx_version_resource})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizer)
 
     if (MSVC)
