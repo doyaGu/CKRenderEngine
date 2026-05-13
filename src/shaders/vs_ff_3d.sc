@@ -552,8 +552,10 @@ void main()
 
                 if (lPos.w > 1.5) {
                     float rho = dot(-toLight, normalize(lDir.xyz));
-                    float spotAtten = clamp((rho - lSpot.y) / max(lSpot.x - lSpot.y, 0.0001), 0.0, 1.0);
-                    atten *= pow(max(spotAtten, 0.0001), lAtten.w);
+                    float spotAtten = pow(clamp((rho - lSpot.y) / max(lSpot.x - lSpot.y, 0.0001), 0.0, 1.0), lAtten.w);
+                    spotAtten = rho <= lSpot.y ? 0.0 : spotAtten;
+                    spotAtten = rho > lSpot.x ? 1.0 : spotAtten;
+                    atten *= spotAtten;
                 }
             }
 
