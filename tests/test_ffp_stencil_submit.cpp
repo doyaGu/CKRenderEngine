@@ -461,6 +461,38 @@ void PremodulateStaysInTextureStageSpecialization() {
     ffp.Shutdown();
 }
 
+void TextureArgModifiersStayInSpecialization() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE);
+    ffp.SetTexture(0, 7);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V | CKRST_DP_STAGE(0), CKFF_VF_POSITION | CKFF_VF_TEXCOORD0, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Texture arg modifier draw must upload specialization dwords");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) ==
+                  CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT),
+              "COMPLEMENT must remain in stage specialization");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_ALPHA_ARG1) ==
+                  CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE),
+              "ALPHAREPLICATE must remain in stage specialization");
+
+    ffp.Shutdown();
+}
+
 void NullTextureStagePreservesSpecialization() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -909,7 +941,7 @@ void LocalViewerDoesNotSplitShaderWhenLightingDisabled() {
     ffp.Shutdown();
 }
 
-void FormatFlagsDriveMaterialSourceSelection() {
+void MaterialSourceUsesDeclaredDPColorStreams() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -930,8 +962,8 @@ void FormatFlagsDriveMaterialSourceSelection() {
               "Material-source draw must upload draw params");
     TestCheck(it != context.Encoder.FloatUniforms.end() &&
                   it->second.size() >= 24 &&
-                  it->second[20] == (float)CKFF_MS_COLOR0,
-              "Hardware vertex format COLOR0 must drive diffuse material source even when dpFlags lacks diffuse");
+                  it->second[20] == (float)CKFF_MS_MATERIAL,
+              "Format COLOR0 alone must not force material diffuse source without DP diffuse data");
 
     ffp.Shutdown();
 }
@@ -966,6 +998,8 @@ int main() {
               &Modulate4XStaysInTextureStageSpecialization);
     tests.Run("PREMODULATE stays in texture stage specialization",
               &PremodulateStaysInTextureStageSpecialization);
+    tests.Run("Texture arg modifiers stay in specialization",
+              &TextureArgModifiersStayInSpecialization);
     tests.Run("Null texture stage preserves specialization",
               &NullTextureStagePreservesSpecialization);
     tests.Run("Stage constant does not create texture dependency",
@@ -992,7 +1026,7 @@ int main() {
               &PositionTVertexBlendDoesNotUploadMatrixPalette);
     tests.Run("LOCALVIEWER does not split shader when lighting disabled",
               &LocalViewerDoesNotSplitShaderWhenLightingDisabled);
-    tests.Run("Format flags drive material source selection",
-              &FormatFlagsDriveMaterialSourceSelection);
+    tests.Run("Material source uses declared DP color streams",
+              &MaterialSourceUsesDeclaredDPColorStreams);
     return tests.ExitCode();
 }
