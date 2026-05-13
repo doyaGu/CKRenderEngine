@@ -506,11 +506,13 @@ void main()
 
 #if defined(CKFF_FULL_SPECIALIZED)
     bool lightingEnabled = (CKFF_VS_BITS & (1 << 13)) != 0;
+    bool specularOutputEnabled = (CKFF_VS_BITS & (1 << 15)) != 0;
     int lightCount = (CKFF_VS_BITS >> 17) & 15;
     vec3 globalAmbient = vec3(0.0, 0.0, 0.0);
 #else
     int rawLightCount = int(u_ffDrawParams[6].x);
     bool lightingEnabled = ckffVsBit(13, rawLightCount >= 0);
+    bool specularOutputEnabled = ckffVsBit(15, u_ffDrawParams[8].z > 0.5);
     int lightCount = ckffVsBits(17, 15, rawLightCount < 0 ? 0 : rawLightCount);
     vec3 globalAmbient = u_ffDrawParams[6].yzw;
 #endif
@@ -589,7 +591,9 @@ void main()
 
     v_color0 = clamp(litDiffuse, 0.0, 1.0);
     v_color0.a = matDiffuse.a;
-    v_color1 = vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a);
+    v_color1 = specularOutputEnabled
+        ? vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a)
+        : a_color1;
     v_flatColor0 = v_color0;
     v_flatColor1 = v_color1;
 #if defined(CKFF_FULL_SPECIALIZED)
