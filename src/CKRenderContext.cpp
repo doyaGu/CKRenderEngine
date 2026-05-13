@@ -1488,7 +1488,13 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         view = m_Current2DView;
     }
     m_FFPipeline.SetViewport(m_ViewportData);
-    VxDrawPrimitiveData drawData = *data;
+    VxDrawPrimitiveData drawData;
+    memset(&drawData, 0, sizeof(drawData));
+    if ((data->Flags & (CKRST_DP_STAGESMASK & ~CKRST_DP_STAGES0)) != 0) {
+        drawData = *data;
+    } else {
+        memcpy(&drawData, data, sizeof(VxDrawPrimitiveDataSimple));
+    }
     drawData.Flags &= ~CKRST_DP_VBUFFER;
     m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
     if (renderStats)
@@ -2662,6 +2668,14 @@ void RCKRenderContext::SetVertexBlendMatrix(CKDWORD Index, const VxMatrix &M) {
 
 void RCKRenderContext::ResetVertexBlendMatrices() {
     m_FFPipeline.ResetVertexBlendMatrices();
+}
+
+void RCKRenderContext::SetTexcoordComponentCount(CKDWORD Stage, CKDWORD Count) {
+    m_FFPipeline.SetTexcoordComponentCount(Stage, Count);
+}
+
+void RCKRenderContext::ResetTexcoordComponentCounts() {
+    m_FFPipeline.ResetTexcoordComponentCounts();
 }
 
 void RCKRenderContext::SetStereoParameters(float EyeSeparation, float FocalLength) {

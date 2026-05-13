@@ -26,14 +26,14 @@ static VxVector TransformDirection(const VxVector &dir, const VxMatrix &matrix) 
         dir.x * matrix[0][2] + dir.y * matrix[1][2] + dir.z * matrix[2][2]);
 }
 
-static CKDWORD TexcoordComponentCount(const VxDrawPrimitiveData *data, int stage) {
-    if (!data || stage < 0 || stage >= CKRST_MAX_STAGES)
+static CKDWORD TexcoordComponentCount(const CKBYTE *texcoordComponentCounts, int stage) {
+    if (!texcoordComponentCounts || stage < 0 || stage >= CKRST_MAX_STAGES)
         return 2;
-    CKDWORD count = data->TexCoordComponents[stage];
+    CKDWORD count = texcoordComponentCounts[stage];
     if (count == 0)
         return 2;
     if (count > 4)
-        return 4;
+        return 2;
     return count;
 }
 
@@ -84,7 +84,8 @@ void CKTransientGeometry::InterleaveVertex(
     CKDWORD formatFlags,
     VxDrawPrimitiveData *data,
     const float *texcoord0Override,
-    const float *positionOverride)
+    const float *positionOverride,
+    const CKBYTE *texcoordComponentCounts)
 {
     CKBYTE *out = (CKBYTE *)dst + dstIndex * stride;
     CKDWORD offset = 0;
@@ -164,7 +165,7 @@ void CKTransientGeometry::InterleaveVertex(
                 texcoord[0] = texcoord0Override[0];
                 texcoord[1] = texcoord0Override[1];
             } else if (src) {
-                const CKDWORD componentCount = TexcoordComponentCount(data, stage);
+                const CKDWORD componentCount = TexcoordComponentCount(texcoordComponentCounts, stage);
                 memcpy(texcoord, (CKBYTE *)src + srcIndex * srcStride, componentCount * sizeof(float));
             }
             memcpy(out + offset, texcoord, sizeof(texcoord));
@@ -236,7 +237,8 @@ CKBOOL CKTransientGeometry::Prepare(
     VxDrawPrimitiveData *data,
     CKDWORD wrapMode,
     CKBOOL pointSprites,
-    const CKFFPointSpriteParams *pointParams)
+    const CKFFPointSpriteParams *pointParams,
+    const CKBYTE *texcoordComponentCounts)
 {
     if (!data || data->VertexCount == 0 || !m_Context || !encoder)
         return FALSE;
@@ -316,7 +318,7 @@ CKBOOL CKTransientGeometry::Prepare(
                     {x - half, y + half, pos3[2], pos3[3]}
                 };
                 for (int j = 0; j < 4; ++j)
-                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j], texcoordComponentCounts);
             } else {
                 memcpy(pos3, src, 12);
                 const VxVector center(pos3[0], pos3[1], pos3[2]);
@@ -336,7 +338,7 @@ CKBOOL CKTransientGeometry::Prepare(
                     {cornerVecs[3].x, cornerVecs[3].y, cornerVecs[3].z}
                 };
                 for (int j = 0; j < 4; ++j)
-                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j]);
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j], texcoordComponentCounts);
             }
 
             CKWORD *out = (CKWORD *)tib.Data + i * 6;
@@ -412,7 +414,7 @@ CKBOOL CKTransientGeometry::Prepare(
 
             for (int j = 0; j < 3; ++j) {
                 InterleaveVertex(tvb.Data, stride, (CKDWORD)(i + j), triangleIndices[i + j],
-                                 formatFlags, data, uv[j]);
+                                 formatFlags, data, uv[j], nullptr, texcoordComponentCounts);
             }
         }
 
@@ -428,7 +430,7 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastVertexBytes = tvb.Size;
 
     // Interleave vertex data into the transient buffer
-    InterleaveVertices(tvb.Data, stride, vertexCount, formatFlags, data);
+    InterleaveVertices(tvb.Data, stride, vertexCount, formatFlags, data, texcoordComponentCounts);
 
     // Bind transient VB
     encoder->SetTransientVertexBuffer(0, &tvb);
@@ -472,10 +474,11 @@ CKBOOL CKTransientGeometry::Prepare(
 
 void CKTransientGeometry::InterleaveVertices(
     void *dst, CKDWORD stride, CKDWORD vertexCount,
-    CKDWORD formatFlags, VxDrawPrimitiveData *data)
+    CKDWORD formatFlags, VxDrawPrimitiveData *data,
+    const CKBYTE *texcoordComponentCounts)
 {
     for (CKDWORD i = 0; i < vertexCount; i++) {
-        InterleaveVertex(dst, stride, i, i, formatFlags, data, nullptr);
+        InterleaveVertex(dst, stride, i, i, formatFlags, data, nullptr, nullptr, texcoordComponentCounts);
     }
 }
 

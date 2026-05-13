@@ -164,6 +164,8 @@ public:
     void SetTextureMatrix(const VxMatrix &M, int Stage = 0) override;
     void SetVertexBlendMatrix(CKDWORD Index, const VxMatrix &M);
     void ResetVertexBlendMatrices();
+    void SetTexcoordComponentCount(CKDWORD Stage, CKDWORD Count);
+    void ResetTexcoordComponentCounts();
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 

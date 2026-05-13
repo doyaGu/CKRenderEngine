@@ -42,7 +42,8 @@ public:
         VxDrawPrimitiveData *data,
         CKDWORD wrapMode = 0,
         CKBOOL pointSprites = FALSE,
-        const CKFFPointSpriteParams *pointParams = nullptr);
+        const CKFFPointSpriteParams *pointParams = nullptr,
+        const CKBYTE *texcoordComponentCounts = nullptr);
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
@@ -65,12 +66,14 @@ public:
     // transient and hardware VB paths so both obey the same missing-attribute
     // default rules.
     static void InterleaveVertices(void *dst, CKDWORD stride, CKDWORD vertexCount,
-                                   CKDWORD formatFlags, VxDrawPrimitiveData *data);
+                                   CKDWORD formatFlags, VxDrawPrimitiveData *data,
+                                   const CKBYTE *texcoordComponentCounts = nullptr);
     static void InterleaveVertex(void *dst, CKDWORD stride, CKDWORD dstIndex,
                                  CKDWORD srcIndex, CKDWORD formatFlags,
                                  VxDrawPrimitiveData *data,
                                  const float *texcoord0Override = nullptr,
-                                 const float *positionOverride = nullptr);
+                                 const float *positionOverride = nullptr,
+                                 const CKBYTE *texcoordComponentCounts = nullptr);
 
 private:
     CKRasterizerContext *m_Context;

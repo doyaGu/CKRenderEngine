@@ -129,6 +129,8 @@ public:
     CKDWORD GetAlphaTestPrecision() const;
     void SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
     void ResetVertexBlendMatrices();
+    void SetTexcoordComponentCount(CKDWORD stage, CKDWORD count);
+    void ResetTexcoordComponentCounts();
     void BeginDebugFrame();
 
     // === Drawing ===
@@ -211,7 +213,7 @@ private:
     CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     float m_Viewport[4];
     VxPlane m_UserClipPlanes[6];
-    CKBYTE m_CurrentTexcoordComponents[CKFF_MAX_TEXTURE_STAGES];
+    CKBYTE m_TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
     // Dirty tracking
     CKDWORD m_DirtyFlags;
@@ -221,7 +223,8 @@ private:
 #endif
 
     // Internal methods
-    CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0);
+    CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0,
+                                        const CKBYTE *texcoordComponentCounts = nullptr);
     CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void UploadUniforms(CKRasterizerEncoder *encoder);

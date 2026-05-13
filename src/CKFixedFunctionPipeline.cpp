@@ -124,12 +124,10 @@ static bool CKFFTextureSetEquals(
     return true;
 }
 
-static CKBYTE CKFFTexcoordComponentCount(CKBYTE count) {
-    if (count == 0)
+static CKBYTE CKFFTexcoordComponentCount(CKDWORD count) {
+    if (count < 1 || count > 4)
         return 2;
-    if (count > 4)
-        return 4;
-    return count;
+    return (CKBYTE)count;
 }
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
@@ -159,7 +157,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_TextureFlags, 0, sizeof(m_TextureFlags));
     memset(m_StageStates, 0, sizeof(m_StageStates));
     memset(m_UserClipPlanes, 0, sizeof(m_UserClipPlanes));
-    memset(m_CurrentTexcoordComponents, 0, sizeof(m_CurrentTexcoordComponents));
+    ResetTexcoordComponentCounts();
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
         m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_Viewport[0] = 2.0f / 800.0f;
@@ -232,6 +230,17 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
         m_VertexBlendMatrixSet[i] = FALSE;
     }
     m_DirtyFlags |= CKFF_DIRTY_MATRICES;
+}
+
+void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD count) {
+    if (stage >= CKFF_MAX_TEXTURE_STAGES)
+        return;
+    m_TexcoordComponentCounts[stage] = CKFFTexcoordComponentCount(count);
+}
+
+void CKFixedFunctionPipeline::ResetTexcoordComponentCounts() {
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_TexcoordComponentCounts[stage] = 2;
 }
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
@@ -563,8 +572,6 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV, data->PositionStride);
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        m_CurrentTexcoordComponents[stage] = CKFFTexcoordComponentCount(data->TexCoordComponents[stage]);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
@@ -605,7 +612,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 #endif
     if (!m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapMode,
-            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams)) {
+            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams,
+            m_TexcoordComponentCounts)) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (debugLogging)
             m_DebugState.LogDrawPrimitivePrepareFailed();
@@ -629,7 +637,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags);
+    CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags, m_TexcoordComponentCounts);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -823,8 +831,6 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 #endif
 
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        m_CurrentTexcoordComponents[stage] = 2;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
@@ -1038,7 +1044,8 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 // Internal methods
 // ============================================================================
 
-CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags) {
+CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
+    CKDWORD dpFlags, CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
     CKFFStateDesc stateDesc;
 
     const bool hasFormat = formatFlags != 0;
@@ -1058,7 +1065,8 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
         stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
-        stateDesc.VS.SetTexcoordComponentCount(stage, m_CurrentTexcoordComponents[stage]);
+        const CKDWORD componentCount = texcoordComponentCounts ? texcoordComponentCounts[stage] : 2;
+        stateDesc.VS.SetTexcoordComponentCount(stage, CKFFTexcoordComponentCount(componentCount));
         if (!positionT) {
             const CKDWORD texgen = (packedTexcoord >> 16) & 0xFFFFu;
             const bool hasTransform = transformFlags != 0;
