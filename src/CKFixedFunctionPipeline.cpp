@@ -1050,30 +1050,22 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     stateDesc.VS.SetVertexBlendCount(vertexBlend.Count);
 
     const CKBOOL colorVertex = m_DrawStateCache.GetRenderState(VXRENDERSTATE_COLORVERTEX);
-    CKDWORD materialStreamFlags = dpFlags;
-    if (hasFormat) {
-        materialStreamFlags = 0;
-        if (stateDesc.VS.GetHasColor0())
-            materialStreamFlags |= CKRST_DP_DIFFUSE;
-        if (stateDesc.VS.GetHasColor1())
-            materialStreamFlags |= CKRST_DP_SPECULAR;
-    }
     const CKDWORD diffuseSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX),
-        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD ambientSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENTFROMVERTEX),
-        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD specularSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARFROMVERTEX),
-        materialStreamFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
+        dpFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
     const CKDWORD emissiveSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX),
-        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
 
     stateDesc.VS.SetDiffuseSource(diffuseSource);
     stateDesc.VS.SetAmbientSource(ambientSource);
@@ -1106,12 +1098,12 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         const CKDWORD alphaOp = CKFFResolveStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
         stateDesc.FS.SetStageColorOp(stage, colorOp);
         stateDesc.FS.SetStageColorArg0(stage, CKFFResolveStageColorArg0(m_StageStates[stage]));
-        stateDesc.FS.SetStageColorArg1(stage, CKFFBaseTextureArg(CKFFResolveStageColorArg1(m_StageStates[stage], hasTexture)));
-        stateDesc.FS.SetStageColorArg2(stage, CKFFBaseTextureArg(CKFFResolveStageColorArg2(m_StageStates[stage])));
+        stateDesc.FS.SetStageColorArg1(stage, CKFFResolveStageColorArg1(m_StageStates[stage], hasTexture));
+        stateDesc.FS.SetStageColorArg2(stage, CKFFResolveStageColorArg2(m_StageStates[stage]));
         stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
         stateDesc.FS.SetStageAlphaArg0(stage, CKFFResolveStageAlphaArg0(m_StageStates[stage]));
-        stateDesc.FS.SetStageAlphaArg1(stage, CKFFBaseTextureArg(CKFFResolveStageAlphaArg1(m_StageStates[stage], hasTexture)));
-        stateDesc.FS.SetStageAlphaArg2(stage, CKFFBaseTextureArg(CKFFResolveStageAlphaArg2(m_StageStates[stage])));
+        stateDesc.FS.SetStageAlphaArg1(stage, CKFFResolveStageAlphaArg1(m_StageStates[stage], hasTexture));
+        stateDesc.FS.SetStageAlphaArg2(stage, CKFFResolveStageAlphaArg2(m_StageStates[stage]));
         stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(CKFFResolveStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
         stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
         if ((m_TextureFlags[stage] & CKRST_TEXTURE_CUBEMAP) != 0)
