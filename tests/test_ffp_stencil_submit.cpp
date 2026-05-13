@@ -810,7 +810,7 @@ void PositionTTextureTransformDoesNotUploadTextureMatrix() {
     ffp.Shutdown();
 }
 
-void TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW() {
+void LegacyTexcoordComponentCountReadsOnlyXY() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -829,12 +829,49 @@ void TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW() {
     data.PositionStride = sizeof(VxVector);
     data.TexCoordPtr = texcoords;
     data.TexCoordStride = sizeof(texcoords[0]);
-    data.TexCoordComponents[0] = 4;
 
     ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
 
     TestCheck(LayoutAttribCount(context.LastVertexLayoutElements, CKRST_ATTRIB_TEXCOORD0) == 4,
-              "Explicit 4-component texcoords must create a float4 transient layout");
+              "Legacy texcoords must still use the canonical float4 transient layout");
+    TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
+              "Transient vertex bytes must contain position and float4 texcoord");
+    if (context.Encoder.LastVertexBytes.size() >= 28) {
+        float packed[4] = {};
+        memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
+        TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
+                      packed[2] == 0.0f && packed[3] == 0.0f,
+                  "Default DrawPrimitive texcoords must read only legacy xy components");
+    }
+
+    ffp.Shutdown();
+}
+
+void PipelineTexcoordComponentCountPreservesSourceZW() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {};
+    float texcoords[3][4] = {
+        {0.25f, 0.50f, 0.75f, 1.25f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+
+    ffp.SetTexcoordComponentCount(0, 4);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(LayoutAttribCount(context.LastVertexLayoutElements, CKRST_ATTRIB_TEXCOORD0) == 4,
+              "Explicit 4-component texcoords must keep the float4 transient layout");
     TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
               "Transient vertex bytes must contain position and float4 texcoord");
     if (context.Encoder.LastVertexBytes.size() >= 28) {
@@ -842,7 +879,94 @@ void TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW() {
         memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
         TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
                       packed[2] == 0.75f && packed[3] == 1.25f,
-                  "Transient float4 texcoords must preserve source z/w components");
+                  "Pipeline texcoord component state must preserve source z/w components");
+    }
+
+    ffp.Shutdown();
+}
+
+void InvalidTexcoordComponentCountFallsBackToLegacyXY() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {};
+    float texcoords[3][4] = {
+        {0.25f, 0.50f, 0.75f, 1.25f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+
+    ffp.SetTexcoordComponentCount(0, 5);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
+              "Invalid texcoord count draw must produce transient bytes");
+    if (context.Encoder.LastVertexBytes.size() >= 28) {
+        float packed[4] = {};
+        memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
+        TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
+                      packed[2] == 0.0f && packed[3] == 0.0f,
+                  "Invalid texcoord component count must fall back to legacy xy");
+    }
+
+    ffp.SetTexcoordComponentCount(0, 0);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
+              "Zero texcoord count draw must produce transient bytes");
+    if (context.Encoder.LastVertexBytes.size() >= 28) {
+        float packed[4] = {};
+        memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
+        TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
+                      packed[2] == 0.0f && packed[3] == 0.0f,
+                  "Zero texcoord component count must fall back to legacy xy");
+    }
+
+    ffp.Shutdown();
+}
+
+void SimpleDrawPrimitiveDataUsesLegacyTexcoordPath() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {};
+    float texcoords[3][4] = {
+        {0.25f, 0.50f, 0.75f, 1.25f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+    VxDrawPrimitiveDataSimple data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0,
+                      (VxDrawPrimitiveData *)&data);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "VxDrawPrimitiveDataSimple cast path must submit normally");
+    TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
+              "Simple draw data path must produce transient bytes");
+    if (context.Encoder.LastVertexBytes.size() >= 28) {
+        float packed[4] = {};
+        memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
+        TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
+                      packed[2] == 0.0f && packed[3] == 0.0f,
+                  "Simple draw data path must not read extended texcoord metadata");
     }
 
     ffp.Shutdown();
@@ -1115,8 +1239,14 @@ int main() {
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
     tests.Run("POSITIONT texture transform does not upload texture matrix",
               &PositionTTextureTransformDoesNotUploadTextureMatrix);
-    tests.Run("Texcoord component count creates float4 layout and preserves source zw",
-              &TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW);
+    tests.Run("Legacy texcoord component count reads only xy",
+              &LegacyTexcoordComponentCountReadsOnlyXY);
+    tests.Run("Pipeline texcoord component count preserves source zw",
+              &PipelineTexcoordComponentCountPreservesSourceZW);
+    tests.Run("Invalid texcoord component count falls back to legacy xy",
+              &InvalidTexcoordComponentCountFallsBackToLegacyXY);
+    tests.Run("Simple DrawPrimitive data uses legacy texcoord path",
+              &SimpleDrawPrimitiveDataUsesLegacyTexcoordPath);
     tests.Run("Projected sampler stages zero to three enter specialization mask",
               &ProjectedSamplerStagesZeroToThreeEnterSpecializationMask);
     tests.Run("Projected sampler stages four to seven stay in runtime stage params",
