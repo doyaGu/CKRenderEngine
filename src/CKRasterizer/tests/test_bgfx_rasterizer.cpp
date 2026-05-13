@@ -7,6 +7,7 @@
 #include <cassert>
 
 #include "CKBgfxRasterizer.h"
+#include "CKBgfxInternal.h"
 
 // Pull in bgfx defines for PT mask constants
 #include <bgfx/defines.h>
@@ -32,44 +33,6 @@ static int g_FailCount = 0;
 #define TEST_SECTION(name) printf("\n[%s]\n", name)
 
 // ============================================================================
-// ToBgfxState is static in the .cpp, so we replicate the PT-extraction logic
-// here to test the CKDrawState -> bgfx state mapping.
-// We use the same bit layout as CKDrawStateBuilder.
-// ============================================================================
-
-// Replicate just the fill-mode / topology extraction logic from ToBgfxState
-static uint64_t ExtractPTBits(CKDrawState State)
-{
-    uint64_t bgfxState = 0;
-    CKDWORD lo = State.Lo;
-    CKDWORD mid = State.Mid;
-
-    CKDWORD fillMode = (lo >> 12) & 0x3;
-    if (fillMode == 1)
-    {
-        bgfxState |= BGFX_STATE_PT_LINES;
-    }
-    else if (fillMode == 2)
-    {
-        bgfxState |= BGFX_STATE_PT_POINTS;
-    }
-    else
-    {
-        CKDWORD pt = (mid >> 6) & 0x7;
-        switch (pt)
-        {
-        case VX_POINTLIST:     bgfxState |= BGFX_STATE_PT_POINTS; break;
-        case VX_LINELIST:      bgfxState |= BGFX_STATE_PT_LINES; break;
-        case VX_LINESTRIP:     bgfxState |= BGFX_STATE_PT_LINESTRIP; break;
-        case VX_TRIANGLESTRIP: bgfxState |= BGFX_STATE_PT_TRISTRIP; break;
-        default: break;
-        }
-    }
-
-    return bgfxState & BGFX_STATE_PT_MASK;
-}
-
-// ============================================================================
 // Test 1: Fill mode / topology interaction
 // ============================================================================
 
@@ -82,7 +45,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_SOLID).Topology(VX_TRIANGLELIST);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == 0, "solid + trianglelist => no PT bits");
     }
 
@@ -91,7 +54,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_SOLID).Topology(VX_LINELIST);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_LINES, "solid + linelist => PT_LINES");
     }
 
@@ -100,7 +63,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_SOLID).Topology(VX_POINTLIST);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_POINTS, "solid + pointlist => PT_POINTS");
     }
 
@@ -109,7 +72,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_SOLID).Topology(VX_TRIANGLESTRIP);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_TRISTRIP, "solid + tristrip => PT_TRISTRIP");
     }
 
@@ -118,7 +81,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_SOLID).Topology(VX_LINESTRIP);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_LINESTRIP, "solid + linestrip => PT_LINESTRIP");
     }
 
@@ -127,7 +90,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_WIREFRAME).Topology(VX_TRIANGLELIST);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_LINES, "wireframe + trianglelist => PT_LINES (overridden)");
     }
 
@@ -136,7 +99,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_WIREFRAME).Topology(VX_TRIANGLESTRIP);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_LINES, "wireframe + tristrip => PT_LINES (overridden)");
     }
 
@@ -145,7 +108,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_POINT).Topology(VX_TRIANGLELIST);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_POINTS, "point + trianglelist => PT_POINTS (overridden)");
     }
 
@@ -154,7 +117,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_POINT).Topology(VX_LINESTRIP);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         TEST_ASSERT(pt == BGFX_STATE_PT_POINTS, "point + linestrip => PT_POINTS (overridden)");
     }
 
@@ -163,7 +126,7 @@ static void TestFillModeTopology()
         CKDrawStateBuilder b;
         b.Fill(VXFILL_WIREFRAME).Topology(VX_TRIANGLESTRIP);
         CKDrawState s = b.Build();
-        uint64_t pt = ExtractPTBits(s);
+        uint64_t pt = CKBgfxState(s) & BGFX_STATE_PT_MASK;
         // Old code would produce PT_LINES | PT_TRISTRIP = 0x0003... (PT_LINESTRIP)
         // New code produces only PT_LINES
         TEST_ASSERT(pt == BGFX_STATE_PT_LINES, "no spurious bit collision from fill+topology");
@@ -365,6 +328,65 @@ static void TestDrawStateBuilderLayout()
     }
 }
 
+static CKDWORD ExtractStencilRef(uint32_t stencil)
+{
+    return (stencil & BGFX_STENCIL_FUNC_REF_MASK) >> BGFX_STENCIL_FUNC_REF_SHIFT;
+}
+
+static CKDWORD ExtractStencilRMask(uint32_t stencil)
+{
+    return (stencil & BGFX_STENCIL_FUNC_RMASK_MASK) >> BGFX_STENCIL_FUNC_RMASK_SHIFT;
+}
+
+static void TestBgfxStencilWriteMaskEncoding()
+{
+    TEST_SECTION("Bgfx Stencil Write Mask Encoding");
+
+    CKDrawState enabled = CKDrawStateBuilder()
+        .Stencil(TRUE, VXCMP_ALWAYS,
+                 VXSTENCILOP_REPLACE, VXSTENCILOP_INCRSAT, VXSTENCILOP_DECRSAT)
+        .Build();
+
+    uint32_t full = CKBgfxBuildFrontStencil(enabled, 0xAB, 0xFF, 0xFF);
+    TEST_ASSERT(full != BGFX_STENCIL_NONE, "enabled stencil produces bgfx stencil state");
+    TEST_ASSERT(ExtractStencilRef(full) == 0xAB, "full write mask keeps low 8-bit ref");
+    TEST_ASSERT(ExtractStencilRMask(full) == 0xFF, "read mask is encoded separately");
+
+    uint32_t disabled = CKBgfxBuildFrontStencil(CKDrawState(), 0xAB, 0xFF, 0xFF);
+    TEST_ASSERT(disabled == BGFX_STENCIL_NONE, "disabled stencil clears bgfx stencil state");
+
+    CKDrawState disabledWithBackOps = CKDrawStateBuilder()
+        .Stencil(FALSE, VXCMP_ALWAYS,
+                 VXSTENCILOP_REPLACE, VXSTENCILOP_INCRSAT, VXSTENCILOP_DECRSAT)
+        .StencilBack(VXCMP_ALWAYS,
+                     VXSTENCILOP_REPLACE, VXSTENCILOP_INCRSAT, VXSTENCILOP_DECRSAT)
+        .Build();
+    TEST_ASSERT(CKBgfxBuildFrontStencil(disabledWithBackOps, 0xAB, 0xFF, 0xFF) == BGFX_STENCIL_NONE,
+                "disabled stencil clears front state even if ops are present");
+    TEST_ASSERT(CKBgfxBuildBackStencil(disabledWithBackOps, 0xAB, 0xFF, 0xFF) == BGFX_STENCIL_NONE,
+                "disabled stencil clears back state even if back ops are present");
+
+    uint32_t noWrite = CKBgfxBuildFrontStencil(enabled, 0xAB, 0xFF, 0x00);
+    TEST_ASSERT((noWrite & BGFX_STENCIL_OP_FAIL_S_MASK) == BGFX_STENCIL_OP_FAIL_S_KEEP,
+                "writeMask zero forces stencil fail op to KEEP");
+    TEST_ASSERT((noWrite & BGFX_STENCIL_OP_FAIL_Z_MASK) == BGFX_STENCIL_OP_FAIL_Z_KEEP,
+                "writeMask zero forces depth fail op to KEEP");
+    TEST_ASSERT((noWrite & BGFX_STENCIL_OP_PASS_Z_MASK) == BGFX_STENCIL_OP_PASS_Z_KEEP,
+                "writeMask zero forces pass op to KEEP");
+
+    uint32_t masked = CKBgfxBuildFrontStencil(enabled, 0xAB, 0x0F, 0x0F);
+    TEST_ASSERT(ExtractStencilRef(masked) == 0x0B,
+                "matching read/write mask constrains ref to writable bits");
+    TEST_ASSERT(ExtractStencilRMask(masked) == 0x0F,
+                "matching read/write mask keeps compare mask");
+
+    uint32_t partial = CKBgfxBuildFrontStencil(enabled, 0xAB, 0xF0, 0x0F);
+    TEST_ASSERT(ExtractStencilRef(partial) == 0xAB,
+                "partial write mask with distinct read mask keeps compare ref");
+    TEST_ASSERT(ExtractStencilRMask(partial) == 0xF0,
+                "partial write mask with distinct read mask keeps read mask");
+}
+
 // ============================================================================
 // Test 5: Rasterizer start/close lifecycle
 // ============================================================================
@@ -471,6 +493,7 @@ int main()
 
     TestFillModeTopology();
     TestDrawStateBuilderLayout();
+    TestBgfxStencilWriteMaskEncoding();
     TestEncoderSlotAtomic();
     TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();

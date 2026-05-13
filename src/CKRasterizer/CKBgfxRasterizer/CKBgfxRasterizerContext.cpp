@@ -1,5 +1,4 @@
 #include "CKBgfxRasterizer.h"
-#include "CKBgfxConfig.h"
 #include "CKBgfxInternal.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -10,7 +9,6 @@
 #include <bgfx/platform.h>
 #include <algorithm>
 #include <cstdarg>
-#include <cstdlib>
 #include <cstring>
 
 static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
@@ -33,29 +31,6 @@ static uint32_t FirstDword(const void *data, uint32_t size)
     if (data && size >= sizeof(value))
         memcpy(&value, data, sizeof(value));
     return value;
-}
-
-static int CKBgfxConfigPositiveInt(const char *section, const char *name, int fallback)
-{
-    const int value = CKBgfxConfigInt(section, name, fallback);
-    return value > 0 ? value : fallback;
-}
-
-static uint32_t CKBgfxMsaaResetFlags(CKDWORD samples)
-{
-    if (samples >= 16) return BGFX_RESET_MSAA_X16;
-    if (samples >= 8)  return BGFX_RESET_MSAA_X8;
-    if (samples >= 4)  return BGFX_RESET_MSAA_X4;
-    if (samples >= 2)  return BGFX_RESET_MSAA_X2;
-    return BGFX_RESET_NONE;
-}
-
-static uint32_t CKBgfxBuildResetFlags(CKBOOL vsync, CKDWORD samples)
-{
-    uint32_t flags = CKBgfxMsaaResetFlags(samples);
-    if (vsync)
-        flags |= BGFX_RESET_VSYNC;
-    return flags;
 }
 
 // ===========================================================================
@@ -95,451 +70,6 @@ static void DestroyAllRecords(XArray<RecordT *> &arr)
     for (int i = 0; i < arr.Size(); ++i)
         DestroyRecord(arr[i]);
     arr.Clear();
-}
-
-// ===========================================================================
-// Helper: CK_UNIFORM_TYPE -> bgfx::UniformType::Enum
-// ===========================================================================
-
-static bgfx::UniformType::Enum ToBgfxUniformType(CK_UNIFORM_TYPE type)
-{
-    switch (type)
-    {
-    case CKRST_UNIFORM_FLOAT1:
-    case CKRST_UNIFORM_FLOAT2:
-    case CKRST_UNIFORM_FLOAT3:
-    case CKRST_UNIFORM_FLOAT4:  return bgfx::UniformType::Vec4;
-    case CKRST_UNIFORM_MATRIX4: return bgfx::UniformType::Mat4;
-    case CKRST_UNIFORM_SAMPLER: return bgfx::UniformType::Sampler;
-    default:                    return bgfx::UniformType::Vec4;
-    }
-}
-
-// ===========================================================================
-// Helper: CK_VERTEX_ATTRIB -> bgfx::Attrib::Enum
-// ===========================================================================
-
-static bgfx::Attrib::Enum ToBgfxAttrib(CK_VERTEX_ATTRIB attrib)
-{
-    switch (attrib)
-    {
-    case CKRST_ATTRIB_POSITION:  return bgfx::Attrib::Position;
-    case CKRST_ATTRIB_NORMAL:    return bgfx::Attrib::Normal;
-    case CKRST_ATTRIB_TANGENT:   return bgfx::Attrib::Tangent;
-    case CKRST_ATTRIB_COLOR0:    return bgfx::Attrib::Color0;
-    case CKRST_ATTRIB_COLOR1:    return bgfx::Attrib::Color1;
-    case CKRST_ATTRIB_TEXCOORD0: return bgfx::Attrib::TexCoord0;
-    case CKRST_ATTRIB_TEXCOORD1: return bgfx::Attrib::TexCoord1;
-    case CKRST_ATTRIB_TEXCOORD2: return bgfx::Attrib::TexCoord2;
-    case CKRST_ATTRIB_TEXCOORD3: return bgfx::Attrib::TexCoord3;
-    case CKRST_ATTRIB_TEXCOORD4: return bgfx::Attrib::TexCoord4;
-    case CKRST_ATTRIB_TEXCOORD5: return bgfx::Attrib::TexCoord5;
-    case CKRST_ATTRIB_TEXCOORD6: return bgfx::Attrib::TexCoord6;
-    case CKRST_ATTRIB_TEXCOORD7: return bgfx::Attrib::TexCoord7;
-    default:                     return bgfx::Attrib::Position;
-    }
-}
-
-// ===========================================================================
-// Helper: CK_VERTEX_ATTRIB_TYPE -> bgfx::AttribType::Enum
-// ===========================================================================
-
-static bgfx::AttribType::Enum ToBgfxAttribType(CK_VERTEX_ATTRIB_TYPE type)
-{
-    switch (type)
-    {
-    case CKRST_ATTRIBTYPE_FLOAT:  return bgfx::AttribType::Float;
-    case CKRST_ATTRIBTYPE_UINT8:  return bgfx::AttribType::Uint8;
-    case CKRST_ATTRIBTYPE_INT16:  return bgfx::AttribType::Int16;
-    default:                      return bgfx::AttribType::Float;
-    }
-}
-
-// ===========================================================================
-// Helper: VX_PIXELFORMAT -> bgfx::TextureFormat::Enum
-// ===========================================================================
-
-static bgfx::TextureFormat::Enum ToBgfxTextureFormat(VX_PIXELFORMAT pf)
-{
-    switch (pf)
-    {
-    case _32_ARGB8888: return bgfx::TextureFormat::BGRA8;
-    case _32_RGB888:   return bgfx::TextureFormat::BGRA8;
-    case _32_BGRA8888: return bgfx::TextureFormat::BGRA8;
-    case _32_ABGR8888: return bgfx::TextureFormat::RGBA8;
-    case _24_RGB888:   return bgfx::TextureFormat::RGB8;
-    case _24_BGR888:   return bgfx::TextureFormat::RGB8;
-    case _16_RGB565:
-    case _16_BGR565:   return bgfx::TextureFormat::R5G6B5;
-    case _16_RGB555:
-    case _16_BGR555:   return bgfx::TextureFormat::RGB5A1;
-    case _16_ARGB1555:
-    case _16_ABGR1555: return bgfx::TextureFormat::RGB5A1;
-    case _16_ARGB4444:
-    case _16_ABGR4444: return bgfx::TextureFormat::RGBA4;
-    case _DXT1:        return bgfx::TextureFormat::BC1;
-    case _DXT3:        return bgfx::TextureFormat::BC2;
-    case _DXT5:        return bgfx::TextureFormat::BC3;
-    default:           return bgfx::TextureFormat::BGRA8;
-    }
-}
-
-// ===========================================================================
-// Helper: CK_DEPTH_FORMAT -> bgfx::TextureFormat::Enum
-// ===========================================================================
-
-static bgfx::TextureFormat::Enum ToBgfxDepthFormat(CK_DEPTH_FORMAT fmt)
-{
-    switch (fmt)
-    {
-    case CKRST_DEPTHFMT_D16:    return bgfx::TextureFormat::D16;
-    case CKRST_DEPTHFMT_D24:    return bgfx::TextureFormat::D24;
-    case CKRST_DEPTHFMT_D24S8:  return bgfx::TextureFormat::D24S8;
-    case CKRST_DEPTHFMT_D32F:   return bgfx::TextureFormat::D32F;
-    default:                    return bgfx::TextureFormat::D24S8;
-    }
-}
-
-// ===========================================================================
-// Helper: build bgfx sampler flags from CKSamplerDesc
-// ===========================================================================
-
-static uint32_t ToBgfxSamplerFlags(CKSamplerDesc *s)
-{
-    if (!s)
-        return BGFX_SAMPLER_NONE;
-
-    uint32_t flags = 0;
-
-    switch (s->MinFilter)
-    {
-    case CKRST_FILTER_NEAREST:     flags |= BGFX_SAMPLER_MIN_POINT; break;
-    case CKRST_FILTER_ANISOTROPIC: flags |= BGFX_SAMPLER_MIN_ANISOTROPIC; break;
-    default: break;
-    }
-
-    switch (s->MagFilter)
-    {
-    case CKRST_FILTER_NEAREST:     flags |= BGFX_SAMPLER_MAG_POINT; break;
-    case CKRST_FILTER_ANISOTROPIC: flags |= BGFX_SAMPLER_MAG_ANISOTROPIC; break;
-    default: break;
-    }
-
-    switch (s->MipFilter)
-    {
-    case CKRST_FILTER_NEAREST:
-    case CKRST_FILTER_MIPNEAREST:  flags |= BGFX_SAMPLER_MIP_POINT; break;
-    default: break;
-    }
-
-    switch (s->AddressU)
-    {
-    case CKRST_ADDRESS_MIRROR: flags |= BGFX_SAMPLER_U_MIRROR; break;
-    case CKRST_ADDRESS_CLAMP:  flags |= BGFX_SAMPLER_U_CLAMP; break;
-    case CKRST_ADDRESS_BORDER: flags |= BGFX_SAMPLER_U_BORDER; break;
-    default: break;
-    }
-
-    switch (s->AddressV)
-    {
-    case CKRST_ADDRESS_MIRROR: flags |= BGFX_SAMPLER_V_MIRROR; break;
-    case CKRST_ADDRESS_CLAMP:  flags |= BGFX_SAMPLER_V_CLAMP; break;
-    case CKRST_ADDRESS_BORDER: flags |= BGFX_SAMPLER_V_BORDER; break;
-    default: break;
-    }
-
-    switch (s->AddressW)
-    {
-    case CKRST_ADDRESS_MIRROR: flags |= BGFX_SAMPLER_W_MIRROR; break;
-    case CKRST_ADDRESS_CLAMP:  flags |= BGFX_SAMPLER_W_CLAMP; break;
-    case CKRST_ADDRESS_BORDER: flags |= BGFX_SAMPLER_W_BORDER; break;
-    default: break;
-    }
-
-    if (s->CompareFunc != CKRST_COMPARE_NONE)
-    {
-        switch (s->CompareFunc)
-        {
-        case CKRST_COMPARE_LESS:     flags |= BGFX_SAMPLER_COMPARE_LESS; break;
-        case CKRST_COMPARE_LEQUAL:   flags |= BGFX_SAMPLER_COMPARE_LEQUAL; break;
-        case CKRST_COMPARE_EQUAL:    flags |= BGFX_SAMPLER_COMPARE_EQUAL; break;
-        case CKRST_COMPARE_GEQUAL:   flags |= BGFX_SAMPLER_COMPARE_GEQUAL; break;
-        case CKRST_COMPARE_GREATER:  flags |= BGFX_SAMPLER_COMPARE_GREATER; break;
-        case CKRST_COMPARE_NOTEQUAL: flags |= BGFX_SAMPLER_COMPARE_NOTEQUAL; break;
-        case CKRST_COMPARE_NEVER:    flags |= BGFX_SAMPLER_COMPARE_NEVER; break;
-        case CKRST_COMPARE_ALWAYS:   flags |= BGFX_SAMPLER_COMPARE_ALWAYS; break;
-        default: break;
-        }
-    }
-
-    if (s->BorderColor != 0)
-        flags |= BGFX_SAMPLER_BORDER_COLOR(s->BorderColor & 0xF);
-
-    return flags;
-}
-
-// ===========================================================================
-// Helper: VXBLEND_MODE factor -> bgfx blend factor constant
-// ===========================================================================
-
-static uint64_t ToBgfxBlendFactor(CKDWORD vx)
-{
-    switch (vx) {
-    case VXBLEND_ZERO:        return BGFX_STATE_BLEND_ZERO;
-    case VXBLEND_ONE:         return BGFX_STATE_BLEND_ONE;
-    case VXBLEND_SRCCOLOR:    return BGFX_STATE_BLEND_SRC_COLOR;
-    case VXBLEND_INVSRCCOLOR: return BGFX_STATE_BLEND_INV_SRC_COLOR;
-    case VXBLEND_SRCALPHA:    return BGFX_STATE_BLEND_SRC_ALPHA;
-    case VXBLEND_INVSRCALPHA: return BGFX_STATE_BLEND_INV_SRC_ALPHA;
-    case VXBLEND_DESTALPHA:   return BGFX_STATE_BLEND_DST_ALPHA;
-    case VXBLEND_INVDESTALPHA:return BGFX_STATE_BLEND_INV_DST_ALPHA;
-    case VXBLEND_DESTCOLOR:   return BGFX_STATE_BLEND_DST_COLOR;
-    case VXBLEND_INVDESTCOLOR:return BGFX_STATE_BLEND_INV_DST_COLOR;
-    case VXBLEND_SRCALPHASAT: return BGFX_STATE_BLEND_SRC_ALPHA_SAT;
-    default:                  return BGFX_STATE_BLEND_ONE;
-    }
-}
-
-// ===========================================================================
-// Helper: VXBLENDOP -> bgfx blend equation constant
-// ===========================================================================
-
-static uint64_t ToBgfxBlendEquation(CKDWORD op)
-{
-    switch (op) {
-    case VXBLENDOP_ADD:         return BGFX_STATE_BLEND_EQUATION_ADD;
-    case VXBLENDOP_SUBTRACT:    return BGFX_STATE_BLEND_EQUATION_SUB;
-    case VXBLENDOP_REVSUBTRACT: return BGFX_STATE_BLEND_EQUATION_REVSUB;
-    case VXBLENDOP_MIN:         return BGFX_STATE_BLEND_EQUATION_MIN;
-    case VXBLENDOP_MAX:         return BGFX_STATE_BLEND_EQUATION_MAX;
-    default:                    return BGFX_STATE_BLEND_EQUATION_ADD;
-    }
-}
-
-// ===========================================================================
-// Helper: VXCMPFUNC -> bgfx stencil test constant
-// ===========================================================================
-
-static uint32_t ToBgfxStencilTest(CKDWORD func)
-{
-    switch (func) {
-    case VXCMP_NEVER:        return BGFX_STENCIL_TEST_NEVER;
-    case VXCMP_LESS:         return BGFX_STENCIL_TEST_LESS;
-    case VXCMP_EQUAL:        return BGFX_STENCIL_TEST_EQUAL;
-    case VXCMP_LESSEQUAL:    return BGFX_STENCIL_TEST_LEQUAL;
-    case VXCMP_GREATER:      return BGFX_STENCIL_TEST_GREATER;
-    case VXCMP_NOTEQUAL:     return BGFX_STENCIL_TEST_NOTEQUAL;
-    case VXCMP_GREATEREQUAL: return BGFX_STENCIL_TEST_GEQUAL;
-    case VXCMP_ALWAYS:       return BGFX_STENCIL_TEST_ALWAYS;
-    default:                 return BGFX_STENCIL_TEST_ALWAYS;
-    }
-}
-
-// ===========================================================================
-// Helper: VXSTENCILOP -> bgfx stencil op constants (for each of the 3 slots)
-// ===========================================================================
-
-static uint32_t ToBgfxStencilFailS(CKDWORD op)
-{
-    switch (op) {
-    case VXSTENCILOP_KEEP:    return BGFX_STENCIL_OP_FAIL_S_KEEP;
-    case VXSTENCILOP_ZERO:    return BGFX_STENCIL_OP_FAIL_S_ZERO;
-    case VXSTENCILOP_REPLACE: return BGFX_STENCIL_OP_FAIL_S_REPLACE;
-    case VXSTENCILOP_INCRSAT: return BGFX_STENCIL_OP_FAIL_S_INCRSAT;
-    case VXSTENCILOP_DECRSAT: return BGFX_STENCIL_OP_FAIL_S_DECRSAT;
-    case VXSTENCILOP_INVERT:  return BGFX_STENCIL_OP_FAIL_S_INVERT;
-    case VXSTENCILOP_INCR:    return BGFX_STENCIL_OP_FAIL_S_INCR;
-    case VXSTENCILOP_DECR:    return BGFX_STENCIL_OP_FAIL_S_DECR;
-    default:                  return BGFX_STENCIL_OP_FAIL_S_KEEP;
-    }
-}
-
-static uint32_t ToBgfxStencilFailZ(CKDWORD op)
-{
-    switch (op) {
-    case VXSTENCILOP_KEEP:    return BGFX_STENCIL_OP_FAIL_Z_KEEP;
-    case VXSTENCILOP_ZERO:    return BGFX_STENCIL_OP_FAIL_Z_ZERO;
-    case VXSTENCILOP_REPLACE: return BGFX_STENCIL_OP_FAIL_Z_REPLACE;
-    case VXSTENCILOP_INCRSAT: return BGFX_STENCIL_OP_FAIL_Z_INCRSAT;
-    case VXSTENCILOP_DECRSAT: return BGFX_STENCIL_OP_FAIL_Z_DECRSAT;
-    case VXSTENCILOP_INVERT:  return BGFX_STENCIL_OP_FAIL_Z_INVERT;
-    case VXSTENCILOP_INCR:    return BGFX_STENCIL_OP_FAIL_Z_INCR;
-    case VXSTENCILOP_DECR:    return BGFX_STENCIL_OP_FAIL_Z_DECR;
-    default:                  return BGFX_STENCIL_OP_FAIL_Z_KEEP;
-    }
-}
-
-static uint32_t ToBgfxStencilPassZ(CKDWORD op)
-{
-    switch (op) {
-    case VXSTENCILOP_KEEP:    return BGFX_STENCIL_OP_PASS_Z_KEEP;
-    case VXSTENCILOP_ZERO:    return BGFX_STENCIL_OP_PASS_Z_ZERO;
-    case VXSTENCILOP_REPLACE: return BGFX_STENCIL_OP_PASS_Z_REPLACE;
-    case VXSTENCILOP_INCRSAT: return BGFX_STENCIL_OP_PASS_Z_INCRSAT;
-    case VXSTENCILOP_DECRSAT: return BGFX_STENCIL_OP_PASS_Z_DECRSAT;
-    case VXSTENCILOP_INVERT:  return BGFX_STENCIL_OP_PASS_Z_INVERT;
-    case VXSTENCILOP_INCR:    return BGFX_STENCIL_OP_PASS_Z_INCR;
-    case VXSTENCILOP_DECR:    return BGFX_STENCIL_OP_PASS_Z_DECR;
-    default:                  return BGFX_STENCIL_OP_PASS_Z_KEEP;
-    }
-}
-
-// ===========================================================================
-// Helper: translate CKDrawState -> bgfx uint64_t state
-// ===========================================================================
-
-static uint64_t ToBgfxState(CKDrawState State)
-{
-    uint64_t bgfxState = 0;
-    CKDWORD lo = State.Lo;
-
-    if (lo & CKRST_STATE_WRITE_R) bgfxState |= BGFX_STATE_WRITE_R;
-    if (lo & CKRST_STATE_WRITE_G) bgfxState |= BGFX_STATE_WRITE_G;
-    if (lo & CKRST_STATE_WRITE_B) bgfxState |= BGFX_STATE_WRITE_B;
-    if (lo & CKRST_STATE_WRITE_A) bgfxState |= BGFX_STATE_WRITE_A;
-
-    if (lo & CKRST_STATE_DEPTH_TEST)
-    {
-        CKDWORD depthFunc = (lo >> 6) & 0xF;
-        switch (depthFunc)
-        {
-        case VXCMP_LESS:         bgfxState |= BGFX_STATE_DEPTH_TEST_LESS; break;
-        case VXCMP_LESSEQUAL:    bgfxState |= BGFX_STATE_DEPTH_TEST_LEQUAL; break;
-        case VXCMP_EQUAL:        bgfxState |= BGFX_STATE_DEPTH_TEST_EQUAL; break;
-        case VXCMP_GREATEREQUAL: bgfxState |= BGFX_STATE_DEPTH_TEST_GEQUAL; break;
-        case VXCMP_GREATER:      bgfxState |= BGFX_STATE_DEPTH_TEST_GREATER; break;
-        case VXCMP_NOTEQUAL:     bgfxState |= BGFX_STATE_DEPTH_TEST_NOTEQUAL; break;
-        case VXCMP_NEVER:        bgfxState |= BGFX_STATE_DEPTH_TEST_NEVER; break;
-        case VXCMP_ALWAYS:       bgfxState |= BGFX_STATE_DEPTH_TEST_ALWAYS; break;
-        default:                 bgfxState |= BGFX_STATE_DEPTH_TEST_LESS; break;
-        }
-    }
-
-    if (lo & CKRST_STATE_DEPTH_WRITE)
-        bgfxState |= BGFX_STATE_WRITE_Z;
-
-    CKDWORD cullMode = (lo >> 10) & 0x3;
-    if (cullMode == 1) bgfxState |= BGFX_STATE_CULL_CW;
-    else if (cullMode == 2) bgfxState |= BGFX_STATE_CULL_CCW;
-
-    if (lo & CKRST_STATE_MSAA)
-        bgfxState |= BGFX_STATE_MSAA;
-
-    if (lo & CKRST_STATE_ALPHA_COVERAGE)
-        bgfxState |= BGFX_STATE_BLEND_ALPHA_TO_COVERAGE;
-
-    CKDWORD blendSrc = (lo >> 16) & 0xF;
-    CKDWORD blendDst = (lo >> 20) & 0xF;
-    CKDWORD blendSrcA = (lo >> 24) & 0xF;
-    CKDWORD blendDstA = (lo >> 28) & 0xF;
-    if (blendSrc != 0)
-    {
-        if (blendSrcA != 0)
-        {
-            bgfxState |= BGFX_STATE_BLEND_FUNC_SEPARATE(
-                ToBgfxBlendFactor(blendSrc), ToBgfxBlendFactor(blendDst),
-                ToBgfxBlendFactor(blendSrcA), ToBgfxBlendFactor(blendDstA));
-        }
-        else
-        {
-            bgfxState |= BGFX_STATE_BLEND_FUNC(
-                ToBgfxBlendFactor(blendSrc), ToBgfxBlendFactor(blendDst));
-        }
-    }
-
-    CKDWORD mid = State.Mid;
-
-    CKDWORD blendEq = mid & 0x7;
-    CKDWORD blendEqA = (mid >> 3) & 0x7;
-    if (blendEq != 0)
-    {
-        if (blendEqA != 0)
-            bgfxState |= BGFX_STATE_BLEND_EQUATION_SEPARATE(
-                ToBgfxBlendEquation(blendEq), ToBgfxBlendEquation(blendEqA));
-        else
-            bgfxState |= BGFX_STATE_BLEND_EQUATION(ToBgfxBlendEquation(blendEq));
-    }
-
-    // Fill mode overrides topology: wireframe forces LINES, point forces POINTS
-    CKDWORD fillMode = (lo >> 12) & 0x3;
-    if (fillMode == 1)
-    {
-        bgfxState |= BGFX_STATE_PT_LINES;
-    }
-    else if (fillMode == 2)
-    {
-        bgfxState |= BGFX_STATE_PT_POINTS;
-    }
-    else
-    {
-        CKDWORD pt = (mid >> 6) & 0x7;
-        switch (pt)
-        {
-        case VX_POINTLIST:     bgfxState |= BGFX_STATE_PT_POINTS; break;
-        case VX_LINELIST:      bgfxState |= BGFX_STATE_PT_LINES; break;
-        case VX_LINESTRIP:     bgfxState |= BGFX_STATE_PT_LINESTRIP; break;
-        case VX_TRIANGLESTRIP: bgfxState |= BGFX_STATE_PT_TRISTRIP; break;
-        default: break;
-        }
-    }
-
-    CKDWORD hi = State.Hi;
-    if (hi & CKRST_STATE_FRONT_CCW)
-        bgfxState |= BGFX_STATE_FRONT_CCW;
-
-    return bgfxState;
-}
-
-// ===========================================================================
-// Helper: build bgfx front stencil uint32_t from CKDrawState Mid word
-// ===========================================================================
-
-static uint32_t ToBgfxFrontStencil(CKDrawState State, CKDWORD ref, CKDWORD readMask)
-{
-    CKDWORD mid = State.Mid;
-    if (!(mid & CKRST_STENCIL_ENABLE))
-        return BGFX_STENCIL_NONE;
-
-    CKDWORD func   = (mid >> 10) & 0xF;
-    CKDWORD failOp = (mid >> 14) & 0xF;
-    CKDWORD zfailOp = (mid >> 18) & 0xF;
-    CKDWORD passOp = (mid >> 22) & 0xF;
-
-    uint32_t stencil = 0;
-    stencil |= ToBgfxStencilTest(func);
-    stencil |= ToBgfxStencilFailS(failOp);
-    stencil |= ToBgfxStencilFailZ(zfailOp);
-    stencil |= ToBgfxStencilPassZ(passOp);
-    stencil |= BGFX_STENCIL_FUNC_REF(ref);
-    stencil |= BGFX_STENCIL_FUNC_RMASK(readMask);
-
-    return stencil;
-}
-
-// ===========================================================================
-// Helper: build bgfx back stencil uint32_t from CKDrawState Hi word
-// ===========================================================================
-
-static uint32_t ToBgfxBackStencil(CKDrawState State, CKDWORD ref, CKDWORD readMask)
-{
-    CKDWORD hi = State.Hi;
-    CKDWORD func    = hi & 0xF;
-    CKDWORD failOp  = (hi >> 4) & 0xF;
-    CKDWORD zfailOp = (hi >> 8) & 0xF;
-    CKDWORD passOp  = (hi >> 12) & 0xF;
-
-    if (func == 0 && failOp == 0 && zfailOp == 0 && passOp == 0)
-        return BGFX_STENCIL_NONE;
-
-    uint32_t stencil = 0;
-    stencil |= ToBgfxStencilTest(func);
-    stencil |= ToBgfxStencilFailS(failOp);
-    stencil |= ToBgfxStencilFailZ(zfailOp);
-    stencil |= ToBgfxStencilPassZ(passOp);
-    stencil |= BGFX_STENCIL_FUNC_REF(ref);
-    stencil |= BGFX_STENCIL_FUNC_RMASK(readMask);
-
-    return stencil;
 }
 
 // ===========================================================================
@@ -592,10 +122,11 @@ static void ApplyBgfxState(bgfx::Encoder *encoder, uint64_t bgfxState)
 }
 
 static void ApplyStencil(bgfx::Encoder *encoder, CKDrawState state,
-                         CKDWORD ref, CKDWORD readMask)
+                         CKDWORD ref, CKDWORD readMask, CKDWORD writeMask)
 {
-    uint32_t fstencil = ToBgfxFrontStencil(state, ref, readMask);
-    uint32_t bstencil = ToBgfxBackStencil(state, ref, readMask);
+    writeMask &= 0xFF;
+    uint32_t fstencil = CKBgfxBuildFrontStencil(state, ref, readMask, writeMask);
+    uint32_t bstencil = CKBgfxBuildBackStencil(state, ref, readMask, writeMask);
     if (encoder)
         encoder->setStencil(fstencil, bstencil);
     else
@@ -605,20 +136,20 @@ static void ApplyStencil(bgfx::Encoder *encoder, CKDrawState state,
 void CKBgfxEncoder::SetState(CKDrawState State)
 {
     m_CachedDrawState = State;
-    m_CachedBgfxState = ToBgfxState(State);
+    m_CachedBgfxState = CKBgfxState(State);
 
     uint64_t finalState = m_CachedBgfxState;
     if (m_PointSize > 0)
         finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
     ApplyBgfxState(m_Encoder, finalState);
-    ApplyStencil(m_Encoder, State, m_StencilRef, m_StencilReadMask);
+    ApplyStencil(m_Encoder, State, m_StencilRef, m_StencilReadMask, m_StencilWriteMask);
 }
 
 void CKBgfxEncoder::SetStencilRef(CKDWORD Ref)
 {
     m_StencilRef = Ref & 0xFF;
     if (m_CachedDrawState.Mid & CKRST_STENCIL_ENABLE)
-        ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask);
+        ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask, m_StencilWriteMask);
 }
 
 void CKBgfxEncoder::SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask)
@@ -626,7 +157,7 @@ void CKBgfxEncoder::SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask)
     m_StencilReadMask = ReadMask & 0xFF;
     m_StencilWriteMask = WriteMask & 0xFF;
     if (m_CachedDrawState.Mid & CKRST_STENCIL_ENABLE)
-        ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask);
+        ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask, m_StencilWriteMask);
 }
 
 void CKBgfxEncoder::SetScissor(const CKRECT *Rect)
@@ -825,7 +356,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     }
     if (!uniRec || !bgfx::isValid(textureHandle))
         return;
-    uint32_t flags = ToBgfxSamplerFlags(Sampler);
+    uint32_t flags = CKBgfxSamplerFlags(Sampler);
     if (m_Encoder)
         m_Encoder->setTexture((uint8_t)Stage, uniRec->Handle, textureHandle, flags);
     else
@@ -1383,7 +914,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     bool hasMips = Desc->MipMapCount > 1;
 
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
-    bgfx::TextureFormat::Enum fmt = ToBgfxTextureFormat(pf);
+    bgfx::TextureFormat::Enum fmt = CKBgfxTextureFormat(pf);
 
     uint64_t texFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE;
     if (Desc->Flags & CKRST_TEXTURE_RENDERTARGET)
@@ -1548,7 +1079,7 @@ CKERROR CKBgfxRasterizerContext::CreateUniform(CKDWORD Uniform, CKUniformDesc *D
     if (!m_BgfxInitialized || !Desc || Uniform == 0 || !Desc->Name)
         return CKERR_INVALIDPARAMETER;
 
-    bgfx::UniformType::Enum bgfxType = ToBgfxUniformType(Desc->Type);
+    bgfx::UniformType::Enum bgfxType = CKBgfxUniformType(Desc->Type);
     uint16_t num = (uint16_t)(Desc->Count > 0 ? Desc->Count : 1);
     bgfx::UniformHandle handle = bgfx::createUniform(Desc->Name, bgfxType, num);
     if (!bgfx::isValid(handle))
@@ -1580,9 +1111,9 @@ CKERROR CKBgfxRasterizerContext::CreateVertexLayout(CKDWORD Layout,
     {
         CKVertexElementDesc &elem = Desc->Elements[i];
         bgfxLayout.add(
-            ToBgfxAttrib(elem.Attrib),
+            CKBgfxAttrib(elem.Attrib),
             elem.Count,
-            ToBgfxAttribType(elem.Type),
+            CKBgfxAttribType(elem.Type),
             elem.Normalized ? true : false);
     }
     if (Desc->Stride[0] > 0)
@@ -1674,7 +1205,7 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
 
     uint16_t w = (uint16_t)Desc->Width;
     uint16_t h = (uint16_t)Desc->Height;
-    bgfx::TextureFormat::Enum fmt = ToBgfxDepthFormat(Desc->DepthFormat);
+    bgfx::TextureFormat::Enum fmt = CKBgfxDepthFormat(Desc->DepthFormat);
     bool hasMips = Desc->MipMapCount > 1;
 
     uint64_t texFlags = BGFX_TEXTURE_RT_WRITE_ONLY;
