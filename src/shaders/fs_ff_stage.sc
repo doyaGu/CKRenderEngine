@@ -7,8 +7,6 @@ uniform vec4 u_ffDrawParams[12];
 uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
-uniform vec4 u_clipPlanes[6];
-uniform vec4 u_clipParams;
 
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
@@ -31,9 +29,6 @@ SAMPLERCUBE(s_textureCube7, 15);
 
 #ifndef CKFF_FS_ACTIVE_STAGE_COUNT
 #define CKFF_FS_ACTIVE_STAGE_COUNT 8
-#endif
-#ifndef CKFF_FS_USES_CLIP_PLANES
-#define CKFF_FS_USES_CLIP_PLANES 1
 #endif
 
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
@@ -164,22 +159,6 @@ bool alphaPass(float alpha, int func)
 
 void main()
 {
-#if defined(CKFF_FULL_SPECIALIZED)
-    #if CKFF_FS_USES_CLIP_PLANES
-        int clipCount = int(u_clipParams.x);
-        for (int clipIndex = 0; clipIndex < 6; ++clipIndex) {
-            if (clipIndex >= clipCount) break;
-            if (dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0) discard;
-        }
-    #endif
-#else
-    int clipCount = int(u_clipParams.x);
-    for (int clipIndex = 0; clipIndex < 6; ++clipIndex) {
-        if (clipIndex >= clipCount) break;
-        if (dot(v_clipPos, u_clipPlanes[clipIndex]) < 0.0) discard;
-    }
-#endif
-
     bool flatShade = ckffSpecIsOptimized() && ckffSpecFlatShade();
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
     vec4 specular = flatShade ? v_flatColor1 : v_color1;

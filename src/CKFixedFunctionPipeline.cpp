@@ -1121,7 +1121,7 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         stateDesc.FS.SetAlphaTestEnabled(true);
         stateDesc.FS.SetAlphaFunc(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
     }
-    stateDesc.FS.SetClipEnabled(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
+    stateDesc.VS.SetVertexClipping(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
 
     return stateDesc;
 }
@@ -1388,7 +1388,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     CKFFClipPlaneUniform clip;
     const CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
-    if (!fullSpecialized || m_CurrentShaderKey.FS.ClipEnable) {
+    if (!fullSpecialized || ((m_CurrentShaderKey.VS.Bits & (1ull << 34)) != 0)) {
         if (clipMask != 0) {
             CKFFPackClipPlaneUniforms(m_UserClipPlanes, clipMask, clip);
             UploadUniform(encoder, u.u_clipPlanes, clip.Planes, 6);

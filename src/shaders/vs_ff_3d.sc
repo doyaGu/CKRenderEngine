@@ -1,9 +1,16 @@
+#ifndef CKFF_VS_CLIP_DISTANCE
+#define CKFF_VS_CLIP_DISTANCE 0
+#endif
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
 $input a_position, a_normal, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #else
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #endif
+#if CKFF_VS_CLIP_DISTANCE
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos, v_clipDistance0, v_clipDistance1
+#else
 $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+#endif
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -13,6 +20,10 @@ uniform mat4 u_texMatrix[8];
 uniform vec4 u_ffDrawParams[19];
 uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[32];
+#if CKFF_VS_CLIP_DISTANCE
+uniform vec4 u_clipPlanes[6];
+uniform vec4 u_clipParams;
+#endif
 
 #if defined(CKFF_FULL_SPECIALIZED)
 #ifndef CKFF_VS_BITS
@@ -410,6 +421,16 @@ void main()
         v_clipPos = mul(u_ffMatrices[1], localPos);
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
     }
+#endif
+#if CKFF_VS_CLIP_DISTANCE
+    int clipCount = int(u_clipParams.x);
+    v_clipDistance0.x = clipCount > 0 ? dot(v_clipPos, u_clipPlanes[0]) : 0.0;
+    v_clipDistance0.y = clipCount > 1 ? dot(v_clipPos, u_clipPlanes[1]) : 0.0;
+    v_clipDistance0.z = clipCount > 2 ? dot(v_clipPos, u_clipPlanes[2]) : 0.0;
+    v_clipDistance0.w = clipCount > 3 ? dot(v_clipPos, u_clipPlanes[3]) : 0.0;
+    v_clipDistance1.x = clipCount > 4 ? dot(v_clipPos, u_clipPlanes[4]) : 0.0;
+    v_clipDistance1.y = clipCount > 5 ? dot(v_clipPos, u_clipPlanes[5]) : 0.0;
+    v_clipDistance1.zw = vec2(0.0, 0.0);
 #endif
 #if CKFF_VS_NEEDS_VIEW_SPACE
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
