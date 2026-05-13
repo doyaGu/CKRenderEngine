@@ -44,6 +44,8 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
     if (formatFlags & CKFF_VF_POSITION)  stride += 12; // float3
     if (formatFlags & CKFF_VF_POSITIONT) stride += 16; // float4 XYZRHW
     if (formatFlags & CKFF_VF_NORMAL)    stride += 12; // float3
+    if (formatFlags & CKFF_VF_BLENDWEIGHT) stride += 12; // float3 blend weights
+    if (formatFlags & CKFF_VF_BLENDINDEX)  stride += 4;  // uint8x4 blend indices
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if (formatFlags & CKFF_VF_TEXCOORD(stage))
             stride += 8; // float2
@@ -54,6 +56,32 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
 }
 
 CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV) {
+    return DPFlagsToFormatFlags(dpFlags, hasNormal, hasUV, 0);
+}
+
+CKDWORD CKVertexLayoutCache::DPFlagsToBlendWeightCount(CKDWORD dpFlags) {
+    CKDWORD weightCount = 0;
+    const CKDWORD weightFlags = dpFlags & CKRST_DP_WEIGHTMASK;
+    if (weightFlags & CKRST_DP_WEIGHTS1) weightCount = 1;
+    if (weightFlags & CKRST_DP_WEIGHTS2) weightCount = 2;
+    if (weightFlags & CKRST_DP_WEIGHTS3) weightCount = 3;
+    if (weightFlags & CKRST_DP_WEIGHTS4) weightCount = 4;
+    if (weightFlags & CKRST_DP_WEIGHTS5) weightCount = 5;
+    return weightCount > 3 ? 3 : weightCount;
+}
+
+CKDWORD CKVertexLayoutCache::DPFlagsToBlendIndexOffset(CKDWORD dpFlags) {
+    return 12 + DPFlagsToBlendWeightCount(dpFlags) * 4;
+}
+
+CKDWORD CKVertexLayoutCache::DPFlagsToBlendRecordSize(CKDWORD dpFlags) {
+    CKDWORD size = DPFlagsToBlendIndexOffset(dpFlags);
+    if (dpFlags & CKRST_DP_MATRIXPAL)
+        size += 4;
+    return size;
+}
+
+CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride) {
     CKDWORD flags = 0;
     const bool transformed = (dpFlags & CKRST_DP_TRANSFORM) != 0;
 
@@ -73,6 +101,17 @@ CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNorma
         activeTextureCount = 1;
     for (int stage = 1; stage < activeTextureCount; ++stage) {
         flags |= CKFF_VF_TEXCOORD(stage);
+    }
+
+    const CKDWORD weightFlags = dpFlags & CKRST_DP_WEIGHTMASK;
+    if (transformed && weightFlags != 0) {
+        const bool indexed = (dpFlags & CKRST_DP_MATRIXPAL) != 0;
+        CKDWORD requiredStride = DPFlagsToBlendRecordSize(dpFlags);
+        if (positionStride == 0 || positionStride >= requiredStride) {
+            flags |= CKFF_VF_BLENDWEIGHT;
+            if (indexed)
+                flags |= CKFF_VF_BLENDINDEX;
+        }
     }
 
     return flags;
@@ -119,6 +158,26 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Stream = 0;
         count++;
         offset += 12;
+    }
+    if (formatFlags & CKFF_VF_BLENDWEIGHT) {
+        elements[count].Attrib = CKRST_ATTRIB_WEIGHT;
+        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+        elements[count].Count = 3;
+        elements[count].Normalized = FALSE;
+        elements[count].Offset = offset;
+        elements[count].Stream = 0;
+        count++;
+        offset += 12;
+    }
+    if (formatFlags & CKFF_VF_BLENDINDEX) {
+        elements[count].Attrib = CKRST_ATTRIB_INDICES;
+        elements[count].Type = CKRST_ATTRIBTYPE_UINT8;
+        elements[count].Count = 4;
+        elements[count].Normalized = FALSE;
+        elements[count].Offset = offset;
+        elements[count].Stream = 0;
+        count++;
+        offset += 4;
     }
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if (formatFlags & CKFF_VF_TEXCOORD(stage)) {

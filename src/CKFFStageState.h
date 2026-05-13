@@ -54,6 +54,7 @@ enum CKFFShaderSemantic {
     CKFF_SHADER_SEMANTIC_ARG_TFACTOR,
     CKFF_SHADER_SEMANTIC_ARG_SPECULAR,
     CKFF_SHADER_SEMANTIC_ARG_TEMP,
+    CKFF_SHADER_SEMANTIC_ARG_CONSTANT,
     CKFF_SHADER_SEMANTIC_ARG_COMPLEMENT,
     CKFF_SHADER_SEMANTIC_ARG_ALPHAREPLICATE,
     CKFF_SHADER_SEMANTIC_RESULT_CURRENT,
@@ -88,6 +89,8 @@ CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage);
 
 CK_ADDRESS_MODE CKFFTranslateAddressMode(CKDWORD mode);
 void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]);
+void CKFFPackBumpEnvUniforms(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
+                             float outBumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4]);
 Vx2DVector CKFFEvaluateBumpEnvTexcoord(const Vx2DVector &baseUv,
                                        const VxColor &bumpValue,
                                        const float bumpEnv[2][4]);
@@ -96,6 +99,7 @@ float CKFFEvaluateBumpEnvLuminance(const VxColor &bumpValue,
 CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
                                                  CKBOOL indexed,
                                                  CKDWORD formatFlags);
+CKDWORD CKFFExplicitVertexBlendWeightCount(CKDWORD vertexBlend);
 int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags);
 int CKFFResolveActiveTextureCount(CKDWORD dpFlags,
                                   const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],

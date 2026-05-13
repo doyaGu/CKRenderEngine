@@ -43,6 +43,10 @@ public:
 
     // Compute format flags from VxDrawPrimitiveData CKRST_DP_* flags
     static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV);
+    static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride);
+    static CKDWORD DPFlagsToBlendWeightCount(CKDWORD dpFlags);
+    static CKDWORD DPFlagsToBlendIndexOffset(CKDWORD dpFlags);
+    static CKDWORD DPFlagsToBlendRecordSize(CKDWORD dpFlags);
 
     // Get the stride for a given format flags combination
     static CKDWORD ComputeStride(CKDWORD formatFlags);

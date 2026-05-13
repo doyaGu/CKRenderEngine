@@ -96,6 +96,10 @@ static bool CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b) {
     return a.Lo == b.Lo && a.Mid == b.Mid && a.Hi == b.Hi;
 }
 
+static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs) {
+    return (CKDWORD)((vs.Bits >> 35) & 3u);
+}
+
 static bool CKFFTextureSetEquals(
     CKDWORD aCount, const CKDWORD *a,
     CKDWORD bCount, const CKDWORD *b)
@@ -112,7 +116,7 @@ static bool CKFFTextureSetEquals(
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
-      m_CurrentLightingEnabled(false), m_DirtyFlags(CKFF_DIRTY_ALL) {
+      m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
     m_DiagnosticConfig.StatsEnabled = settings.Enabled;
@@ -178,6 +182,15 @@ void CKFixedFunctionPipeline::Shutdown() {
 void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps) {
     m_DisableTextureFiltering = DisableTextureFiltering;
     m_DisableMipmaps = DisableMipmaps;
+}
+
+void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
+    m_AlphaTestPrecision = precision & 0xFu;
+    m_DirtyFlags |= CKFF_DIRTY_ALPHATEST;
+}
+
+CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
+    return m_AlphaTestPrecision;
 }
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
@@ -500,7 +513,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
-    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
+    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV, data->PositionStride);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
@@ -1080,6 +1093,7 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
 
     stateDesc.FS.SetSpecularAdd(specular != 0);
     stateDesc.FS.SetFogEnabled(fogEnable != 0);
+    stateDesc.FS.SetFlatShade(m_DrawStateCache.GetRenderState(VXRENDERSTATE_SHADEMODE) == VXSHADE_FLAT);
 
     CKBOOL alphaTest = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
     if (alphaTest) {
@@ -1142,6 +1156,19 @@ bool CKFixedFunctionPipeline::CurrentShaderUsesTexFactor() const {
     return false;
 }
 
+bool CKFixedFunctionPipeline::CurrentShaderUsesStageConstant() const {
+    const CKDWORD lastStage = m_CurrentShaderKey.FS.LastActiveTextureStage;
+    for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        const CKFFShaderKeyFSStage &s = m_CurrentShaderKey.FS.Stages[stage];
+        const CKDWORD args[] = { s.ColorArg0, s.ColorArg1, s.ColorArg2, s.AlphaArg0, s.AlphaArg1, s.AlphaArg2 };
+        for (CKDWORD arg : args) {
+            if (CKFFBaseTextureArg(arg) == CKRST_TA_CONSTANT)
+                return true;
+        }
+    }
+    return false;
+}
+
 bool CKFixedFunctionPipeline::CurrentShaderUsesMaterialUniform() const {
     if (m_CurrentShaderKey.VS.GetHasPositionT())
         return false;
@@ -1178,6 +1205,8 @@ bool CKFixedFunctionPipeline::CurrentShaderUsesViewSpaceUniforms() const {
         return true;
 
     const uint64_t bits = m_CurrentShaderKey.VS.Bits;
+    if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+        return true;
     if ((bits & (1ull << 13)) != 0)
         return true;
 
@@ -1205,6 +1234,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     VxMatrix modelViewProj;
     if (!positionT) {
         const bool viewSpaceUniforms = CurrentShaderUsesViewSpaceUniforms();
+        const bool vertexBlend = CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
         if (viewSpaceUniforms) {
             Vx3DMultiplyMatrix4(modelView, m_View, m_World);
             Vx3DInverseMatrix(normalMatrix, modelView);
@@ -1212,12 +1242,18 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         }
         Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
         Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
-        VxMatrix matrices[4];
-        matrices[0] = modelViewProj;
+        VxMatrix matrices[8];
+        matrices[0] = vertexBlend ? m_Projection : modelViewProj;
         matrices[1] = m_World;
         matrices[2] = modelView;
         matrices[3] = normalMatrix;
-        UploadUniform(encoder, u.u_ffMatrices, matrices, viewSpaceUniforms ? 4 : 2);
+        if (vertexBlend) {
+            matrices[4] = modelView;
+            matrices[5] = m_View;
+            matrices[6] = m_View;
+            matrices[7] = m_View;
+        }
+        UploadUniform(encoder, u.u_ffMatrices, matrices, vertexBlend ? 8 : (viewSpaceUniforms ? 4 : 2));
     }
     const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
     if (texMatrixCount > 0)
@@ -1246,6 +1282,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     memcpy(drawParams[3], m_Material.Emissive, sizeof(drawParams[3]));
     drawParams[4][0] = m_Material.Power;
     memcpy(drawParams[5], m_MaterialSource, sizeof(drawParams[5]));
+    drawParams[7][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
     if (shaderUsesLighting) {
         CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
         float ambientColorF[4];
@@ -1256,7 +1293,6 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         drawParams[6][3] = ambientColorF[2];
         drawParams[7][0] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
         drawParams[7][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
-        drawParams[7][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
         drawParams[7][3] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f;
         if (packed == 1) {
             memcpy(drawParams[12], viewLights[0].Position, sizeof(drawParams[12]));
@@ -1273,9 +1309,9 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packed == 1 ? 19 : 8) : 6) : 0;
 
     const bool fogEnabled = m_CurrentShaderKey.FS.FogEnable;
-    drawParams[8][0] = CKFFNormalizeAlphaRef(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
+    drawParams[8][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
     drawParams[8][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
-        ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC)
+        ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
         : 0.0f;
     drawParams[8][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
     drawParams[8][3] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f;
@@ -1303,29 +1339,27 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     }
     if (fragmentParamCount > 0)
         drawParamCount = std::max<CKDWORD>(drawParamCount, 8 + fragmentParamCount);
+    if (!fullSpecialized && !positionT && fogEnabled)
+        drawParamCount = std::max<CKDWORD>(drawParamCount, 8);
     if (drawParamCount > 0)
         UploadUniform(encoder, u.u_ffDrawParams, drawParams, drawParamCount);
 
     if (CurrentShaderUsesBumpEnv()) {
-        float bumpEnv[2][4] = {};
-        for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-            const CKDWORD op = m_StageStates[stage][CKRST_TSS_OP];
-            if (op == CKRST_TOP_BUMPENVMAP || op == CKRST_TOP_BUMPENVMAPLUMINANCE) {
-                CKFFPackBumpEnvUniform(m_StageStates[stage], bumpEnv);
-                break;
-            }
-        }
-        UploadUniform(encoder, u.u_bumpEnv, bumpEnv, 2);
+        float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
+        CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
+        UploadUniform(encoder, u.u_bumpEnv, bumpEnv, CKFF_MAX_TEXTURE_STAGES * 2);
     }
 
     if (positionT)
         UploadUniform(encoder, u.u_viewport, m_Viewport, 1);
 
-    if (!fullSpecialized) {
+    if (!fullSpecialized || CurrentShaderUsesStageConstant()) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
         UploadUniform(encoder, u.u_stageParams, stageParams.Values, CKFF_MAX_TEXTURE_STAGES * 4);
+    }
 
+    if (!fullSpecialized) {
         CKFFSpecUniform ffSpec;
         CKFFPackSpecializationDwords(m_CurrentProgramBinding.Specialization, ffSpec);
         UploadUniform(encoder, u.u_ffSpec, ffSpec.Values, CKFFSpecializationInfo::MaxSpecDwords);

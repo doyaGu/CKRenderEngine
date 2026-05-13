@@ -124,6 +124,8 @@ public:
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
     void SetUserClipPlane(int index, const VxPlane &plane);
+    void SetAlphaTestPrecision(CKDWORD precision);
+    CKDWORD GetAlphaTestPrecision() const;
     void BeginDebugFrame();
 
     // === Drawing ===
@@ -196,6 +198,7 @@ private:
     CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
     int m_CurrentActiveTextureCount;
     bool m_CurrentLightingEnabled;
+    CKDWORD m_AlphaTestPrecision;
     float m_MaterialSource[4];
 
     // Texture stage state
@@ -219,6 +222,7 @@ private:
     CKDWORD CurrentTextureMatrixUploadCount() const;
     bool CurrentShaderUsesBumpEnv() const;
     bool CurrentShaderUsesTexFactor() const;
+    bool CurrentShaderUsesStageConstant() const;
     bool CurrentShaderUsesMaterialUniform() const;
     bool CurrentShaderUsesViewSpaceUniforms() const;
     void BindTextures(CKRasterizerEncoder *encoder);
