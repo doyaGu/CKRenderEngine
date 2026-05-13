@@ -1089,6 +1089,8 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     if (fogEnable) {
         CKDWORD vertexFogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE);
         CKDWORD pixelFogMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE);
+        if (pixelFogMode != VXFOG_NONE)
+            vertexFogMode = VXFOG_NONE;
         stateDesc.VS.SetFogMode(vertexFogMode);
         stateDesc.VS.SetRangeFog(m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
         stateDesc.FS.SetVertexFogMode(vertexFogMode);
@@ -1311,6 +1313,10 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         }
     }
 
+    const bool fogEnabled = m_CurrentShaderKey.FS.FogEnable;
+    const CKDWORD vertexFogMode = fogEnabled ? m_CurrentShaderKey.FS.VertexFogMode : 0;
+    const CKDWORD pixelFogMode = fogEnabled ? m_CurrentShaderKey.FS.PixelFogMode : 0;
+
     float drawParams[19][4];
     memset(drawParams, 0, sizeof(drawParams));
     memcpy(drawParams[0], m_Material.Diffuse, sizeof(drawParams[0]));
@@ -1331,7 +1337,6 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         drawParams[7][0] = m_CurrentLightingEnabled &&
                             m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
         drawParams[7][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
-        drawParams[7][3] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f;
         if (packed == 1) {
             memcpy(drawParams[12], viewLights[0].Position, sizeof(drawParams[12]));
             memcpy(drawParams[13], viewLights[0].Direction, sizeof(drawParams[13]));
@@ -1346,13 +1351,12 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     const bool shaderUsesVertexParams = !positionT && (!fullSpecialized || shaderUsesLighting || CurrentShaderUsesMaterialUniform());
     CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packed == 1 ? 19 : 8) : 6) : 0;
 
-    const bool fogEnabled = m_CurrentShaderKey.FS.FogEnable;
     drawParams[8][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
     drawParams[8][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
         : 0.0f;
     drawParams[8][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
-    drawParams[8][3] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f;
+    drawParams[8][3] = (float)pixelFogMode;
 
     CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
     CKFFPackColorARGB(tf, drawParams[9]);
@@ -1360,7 +1364,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     drawParams[10][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
     drawParams[10][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
     drawParams[10][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
-    drawParams[10][3] = fogEnabled ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE) : 0.0f;
+    drawParams[10][3] = (float)vertexFogMode;
 
     CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
     CKFFPackColorARGB(fogColor, drawParams[11]);

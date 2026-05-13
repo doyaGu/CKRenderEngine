@@ -136,7 +136,7 @@ void DrawVertexBufferUploadsFogParams() {
     const float fogDensity = 0.125f;
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_EXP);
-    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_NONE);
     ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatStageState(fogStart));
     ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatStageState(fogEnd));
     ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, FloatStageState(fogDensity));
@@ -227,6 +227,48 @@ void RangeFogChangesSpecialization() {
                             (CKDWORD)context.LastProgramSpecializationDwords.size());
     TestCheck(specRange.Get(CKFF_SPEC_RANGE_FOG) == 1,
               "Range fog enabled must set range fog specialization");
+
+    ffp.Shutdown();
+}
+
+void PixelFogOverridesVertexFogMode() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_EXP);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Pixel fog draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+
+    TestCheck(spec.Get(CKFF_SPEC_VERTEX_FOG_MODE) == VXFOG_NONE,
+              "Pixel fog must clear vertex fog specialization");
+    TestCheck(spec.Get(CKFF_SPEC_PIXEL_FOG_MODE) == VXFOG_LINEAR,
+              "Pixel fog must keep the pixel fog specialization");
+    TestCheck(it != context.Encoder.FloatUniforms.end() &&
+                  it->second.size() >= 44 &&
+                  it->second[35] == (float)VXFOG_LINEAR &&
+                  it->second[43] == (float)VXFOG_NONE,
+              "Pixel fog draw params must clear vertex fog mode and preserve pixel fog mode");
+    TestCheck(it != context.Encoder.FloatUniforms.end() &&
+                  it->second.size() >= 32 &&
+                  it->second[31] == 0.0f,
+              "Pixel fog mode must not leak into the inline-light flag");
 
     ffp.Shutdown();
 }
@@ -910,6 +952,8 @@ int main() {
               &PositionTFogUsesPositionTShaderKey);
     tests.Run("Range fog changes specialization",
               &RangeFogChangesSpecialization);
+    tests.Run("Pixel fog overrides vertex fog mode",
+              &PixelFogOverridesVertexFogMode);
     tests.Run("DrawVertexBuffer compacts clip plane uniforms",
               &DrawVertexBufferCompactsClipPlaneUniforms);
     tests.Run("DrawVertexBuffer skips clip uniforms when disabled",
