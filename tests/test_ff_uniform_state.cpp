@@ -203,6 +203,50 @@ void SamplerTypesPackIntoSpecialization() {
               "Sampler type specialization must pack two bits per stage");
 }
 
+void TextureBindingMaskSplitsNullTextureShaderKey() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+
+    CKFFShaderKeyFS nullKey = CKFFBuildShaderKeyFS(desc, 0);
+    CKFFShaderKeyFS boundKey = CKFFBuildShaderKeyFS(desc, 1u << 0);
+
+    TestCheck(nullKey != boundKey,
+              "Texture binding mask must split null texture and bound texture shader keys");
+}
+
+void TextureBindingMaskIgnoresStagesWithoutTextureArgs() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_DIFFUSE);
+    desc.SetStageColorArg2(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_DIFFUSE);
+    desc.SetStageAlphaArg2(0, CKRST_TA_TEXTURE);
+
+    CKFFShaderKeyFS nullKey = CKFFBuildShaderKeyFS(desc, 0);
+    CKFFShaderKeyFS boundKey = CKFFBuildShaderKeyFS(desc, 1u << 0);
+
+    TestCheck(nullKey == boundKey,
+              "Texture binding mask must not split keys when active ops do not use texture args");
+}
+
+void TextureBindingMaskIgnoresInactiveStages() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_DISABLE);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_DISABLE);
+    desc.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+
+    CKFFShaderKeyFS nullKey = CKFFBuildShaderKeyFS(desc, 0);
+    CKFFShaderKeyFS boundKey = CKFFBuildShaderKeyFS(desc, 1u << 0);
+
+    TestCheck(nullKey == boundKey,
+              "Texture binding mask must not split disabled stage keys");
+}
+
 } // namespace
 
 int main() {
@@ -231,5 +275,11 @@ int main() {
               &DPWeightFlagsAddBlendLayoutFlags);
     tests.Run("Sampler types pack into specialization",
               &SamplerTypesPackIntoSpecialization);
+    tests.Run("Texture binding mask splits null texture shader key",
+              &TextureBindingMaskSplitsNullTextureShaderKey);
+    tests.Run("Texture binding mask ignores stages without texture args",
+              &TextureBindingMaskIgnoresStagesWithoutTextureArgs);
+    tests.Run("Texture binding mask ignores inactive stages",
+              &TextureBindingMaskIgnoresInactiveStages);
     return tests.ExitCode();
 }

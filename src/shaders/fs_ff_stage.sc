@@ -1,4 +1,4 @@
-$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -163,7 +163,7 @@ void main()
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
     vec4 specular = flatShade ? v_flatColor1 : v_color1;
     vec4 current = diffuse;
-    vec4 temp = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 temp = vec4(0.0, 0.0, 0.0, 0.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
     int previousColorOp = 0;
 
@@ -257,7 +257,7 @@ void main()
     bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
     if (fogEnabled) {
         int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_ffDrawParams[8].w);
-        float fogFactor = computePixelFogFactor(abs(v_clipPos.z), pixelFogMode, v_texcoord7Fog.z);
+        float fogFactor = computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);
         current.rgb = mix(u_ffDrawParams[11].rgb, current.rgb, fogFactor);
     }
     gl_FragColor = clamp(current, 0.0, 1.0);

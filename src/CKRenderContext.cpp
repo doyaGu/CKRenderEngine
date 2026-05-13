@@ -2656,6 +2656,14 @@ void RCKRenderContext::SetTextureMatrix(const VxMatrix &M, int Stage) {
     m_FFPipeline.SetTransform((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + Stage), M);
 }
 
+void RCKRenderContext::SetVertexBlendMatrix(CKDWORD Index, const VxMatrix &M) {
+    m_FFPipeline.SetVertexBlendMatrix(Index, M);
+}
+
+void RCKRenderContext::ResetVertexBlendMatrices() {
+    m_FFPipeline.ResetVertexBlendMatrices();
+}
+
 void RCKRenderContext::SetStereoParameters(float EyeSeparation, float FocalLength) {
     // IDA: 0x10068093
     m_EyeSeparation = EyeSeparation;

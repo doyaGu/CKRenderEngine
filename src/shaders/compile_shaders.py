@@ -140,6 +140,31 @@ def ffp_stage_uses_arg(stages: list[dict[str, object]], base_arg: int) -> bool:
     return False
 
 
+def ffp_stage_args_mask(op: int) -> int:
+    if op == 1:
+        return 0
+    if op == 2 or op == 17:
+        return 0b010
+    if op == 3:
+        return 0b100
+    if op == 25 or op == 26:
+        return 0b111
+    return 0b110
+
+
+def ffp_op_uses_texture(stage: dict[str, object], op_field: str, arg_prefix: str) -> bool:
+    mask = ffp_stage_args_mask(int(stage[op_field]))
+    return (
+        ((mask & 0b001) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg0"])) == 2) or
+        ((mask & 0b010) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg1"])) == 2) or
+        ((mask & 0b100) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg2"])) == 2)
+    )
+
+
+def ffp_stage_uses_texture(stage: dict[str, object]) -> bool:
+    return ffp_op_uses_texture(stage, "colorOp", "color") or ffp_op_uses_texture(stage, "alphaOp", "alpha")
+
+
 def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object]) -> list[str]:
     if len(spec_dwords) != 10:
         raise ValueError("FFP specialized shader payload must contain exactly 10 dwords")
@@ -159,11 +184,8 @@ def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object
         f"CKFF_FS_USES_TEXFACTOR={1 if uses_texfactor else 0}",
     ]
     for index, stage in enumerate(stages[:4]):
-        uses_texture = index <= last_active_stage and any(
-            ffp_stage_arg_base(int(stage[field])) == 2
-            for field in ("colorArg0", "colorArg1", "colorArg2", "alphaArg0", "alphaArg1", "alphaArg2")
-        )
-        defines.append(f"CKFF_FS_STAGE{index}_HAS_TEXTURE={1 if uses_texture else 0}")
+        has_texture = index <= last_active_stage and bool(stage["hasTexture"])
+        defines.append(f"CKFF_FS_STAGE{index}_HAS_TEXTURE={1 if has_texture else 0}")
     for index, dword in enumerate(spec_dwords):
         if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
             raise ValueError(f"FFP specialization dword {index} must be a uint32")
@@ -287,7 +309,7 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
     if not isinstance(stage, dict):
         raise ValueError(f"{field} must be an object")
 
-    return {
+    normalized = {
         "colorOp": read_uint32(stage.get("colorOp"), f"{field}.colorOp"),
         "colorArg0": read_uint32(stage.get("colorArg0"), f"{field}.colorArg0"),
         "colorArg1": read_uint32(stage.get("colorArg1"), f"{field}.colorArg1"),
@@ -297,9 +319,14 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
         "alphaArg1": read_uint32(stage.get("alphaArg1"), f"{field}.alphaArg1"),
         "alphaArg2": read_uint32(stage.get("alphaArg2"), f"{field}.alphaArg2"),
         "resultIsTemp": read_bool(stage.get("resultIsTemp"), f"{field}.resultIsTemp"),
+        "hasTexture": False,
         "projectedSampler": read_bool(stage.get("projectedSampler", False), f"{field}.projectedSampler"),
         "samplerType": read_uint32(stage.get("samplerType", 0), f"{field}.samplerType") & 3,
     }
+    normalized["hasTexture"] = read_bool(
+        stage.get("hasTexture", ffp_stage_uses_texture(normalized)),
+        f"{field}.hasTexture")
+    return normalized
 
 
 def default_specialized_stage() -> dict[str, object]:
@@ -313,6 +340,7 @@ def default_specialized_stage() -> dict[str, object]:
         "alphaArg1": 0,
         "alphaArg2": 0,
         "resultIsTemp": False,
+        "hasTexture": False,
         "projectedSampler": False,
         "samplerType": 0,
     }
@@ -528,6 +556,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"{prefix}.AlphaArg1 = {stage['alphaArg1']}u;\n")
         f.write(f"{prefix}.AlphaArg2 = {stage['alphaArg2']}u;\n")
         f.write(f"{prefix}.ResultIsTemp = {'true' if stage['resultIsTemp'] else 'false'};\n")
+        f.write(f"{prefix}.HasTexture = {'true' if stage['hasTexture'] else 'false'};\n")
         f.write(f"{prefix}.ProjectedSampler = {'true' if stage['projectedSampler'] else 'false'};\n")
         f.write(f"{prefix}.SamplerType = {stage['samplerType']};\n")
     f.write("    return key;\n")

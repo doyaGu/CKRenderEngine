@@ -26,6 +26,17 @@ static VxVector TransformDirection(const VxVector &dir, const VxMatrix &matrix) 
         dir.x * matrix[0][2] + dir.y * matrix[1][2] + dir.z * matrix[2][2]);
 }
 
+static CKDWORD TexcoordComponentCount(const VxDrawPrimitiveData *data, int stage) {
+    if (!data || stage < 0 || stage >= CKRST_MAX_STAGES)
+        return 2;
+    CKDWORD count = data->TexCoordComponents[stage];
+    if (count == 0)
+        return 2;
+    if (count > 4)
+        return 4;
+    return count;
+}
+
 static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpriteParams &params) {
     float distance = 0.0f;
     if (params.ScaleEnable) {
@@ -148,14 +159,16 @@ void CKTransientGeometry::InterleaveVertex(
                 srcStride = data->TexCoordStrides[stage - 1];
             }
 
+            float texcoord[4] = {};
             if (stage == 0 && texcoord0Override) {
-                memcpy(out + offset, texcoord0Override, 8);
+                texcoord[0] = texcoord0Override[0];
+                texcoord[1] = texcoord0Override[1];
             } else if (src) {
-                memcpy(out + offset, (CKBYTE *)src + srcIndex * srcStride, 8);
-            } else {
-                memset(out + offset, 0, 8);
+                const CKDWORD componentCount = TexcoordComponentCount(data, stage);
+                memcpy(texcoord, (CKBYTE *)src + srcIndex * srcStride, componentCount * sizeof(float));
             }
-            offset += 8;
+            memcpy(out + offset, texcoord, sizeof(texcoord));
+            offset += 16;
         }
     }
 

@@ -623,7 +623,7 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
 
     ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST, nullptr, 1, &data);
 
-    const CKDWORD stride = 28;
+    const CKDWORD stride = 36;
     TestCheck(context.Encoder.SubmitCount == 1,
               "Point sprite draw must submit once");
     TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_TRIANGLELIST,
@@ -777,6 +777,77 @@ bool LayoutHasAttrib(const std::vector<CKVertexElementDesc> &elements, CK_VERTEX
     return false;
 }
 
+CKDWORD LayoutAttribCount(const std::vector<CKVertexElementDesc> &elements, CK_VERTEX_ATTRIB attrib) {
+    for (size_t i = 0; i < elements.size(); ++i) {
+        if (elements[i].Attrib == attrib)
+            return elements[i].Count;
+    }
+    return 0;
+}
+
+void PositionTTextureTransformDoesNotUploadTextureMatrix() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    const CKDWORD texMatrixUniform = ffp.GetShaderCache().GetUniforms().u_texMatrix;
+    context.Encoder.MatrixUniforms.insert(texMatrixUniform);
+
+    VxMatrix texMatrix;
+    texMatrix.Identity();
+    texMatrix[0][0] = 2.0f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+
+    TestCheck(context.Encoder.FloatUniforms.find(texMatrixUniform) == context.Encoder.FloatUniforms.end(),
+              "POSITIONT texture transform flags must not upload or use texture matrices");
+
+    ffp.Shutdown();
+}
+
+void TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {};
+    float texcoords[3][4] = {
+        {0.25f, 0.50f, 0.75f, 1.25f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f}
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+    data.TexCoordComponents[0] = 4;
+
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    TestCheck(LayoutAttribCount(context.LastVertexLayoutElements, CKRST_ATTRIB_TEXCOORD0) == 4,
+              "Explicit 4-component texcoords must create a float4 transient layout");
+    TestCheck(context.Encoder.LastVertexBytes.size() >= 28,
+              "Transient vertex bytes must contain position and float4 texcoord");
+    if (context.Encoder.LastVertexBytes.size() >= 28) {
+        float packed[4] = {};
+        memcpy(packed, &context.Encoder.LastVertexBytes[12], sizeof(packed));
+        TestCheck(packed[0] == 0.25f && packed[1] == 0.50f &&
+                      packed[2] == 0.75f && packed[3] == 1.25f,
+                  "Transient float4 texcoords must preserve source z/w components");
+    }
+
+    ffp.Shutdown();
+}
+
 void VertexBlendZeroWeightsUploadsMatrixPalette() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -789,8 +860,11 @@ void VertexBlendZeroWeightsUploadsMatrixPalette() {
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
 
     const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
-    TestCheck(context.Encoder.UniformCounts[matrixUniform] >= 6,
-              "Normal vertex blend must upload matrix palette after base matrices");
+    const CKDWORD paletteUniform = ffp.GetShaderCache().GetUniforms().u_vertexBlendMatrices;
+    TestCheck(context.Encoder.UniformCounts[matrixUniform] == 4,
+              "Normal vertex blend must keep base matrices separate from matrix palette");
+    TestCheck(context.Encoder.UniformCounts[paletteUniform] == CKFF_VERTEX_BLEND_MATRIX_COUNT,
+              "Normal vertex blend must upload the dedicated matrix palette uniform");
 
     ffp.Shutdown();
 }
@@ -810,8 +884,8 @@ void VertexBlendUploadsWorldMatrixPaletteForClipPlanes() {
     ffp.SetTransform(VXMATRIX_WORLD, world);
     ffp.SetTransform(VXMATRIX_VIEW, view);
 
-    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
-    context.Encoder.MatrixUniforms.insert(matrixUniform);
+    const CKDWORD paletteUniform = ffp.GetShaderCache().GetUniforms().u_vertexBlendMatrices;
+    context.Encoder.MatrixUniforms.insert(paletteUniform);
 
     VxPlane plane;
     plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
@@ -825,12 +899,43 @@ void VertexBlendUploadsWorldMatrixPaletteForClipPlanes() {
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
 
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator matrices =
-        context.Encoder.FloatUniforms.find(matrixUniform);
-    TestCheck(matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 80,
+        context.Encoder.FloatUniforms.find(paletteUniform);
+    TestCheck(matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 64,
               "Vertex blend with clip planes must upload matrix palette");
-    if (matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 80) {
-        TestCheck(matrices->second[64] == 2.0f,
-                  "Vertex blend clip planes must use world-space blend palette, not model-view palette");
+    if (matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 64) {
+        TestCheck(matrices->second[0] == 2.0f,
+                  "Default blend palette slot 0 must use the current world matrix");
+    }
+
+    ffp.Shutdown();
+}
+
+void VertexBlendUploadsExplicitMatrixPaletteSlot() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxMatrix palette;
+    palette.Identity();
+    palette[1][1] = 4.0f;
+    ffp.SetVertexBlendMatrix(1, palette);
+
+    const CKDWORD paletteUniform = ffp.GetShaderCache().GetUniforms().u_vertexBlendMatrices;
+    context.Encoder.MatrixUniforms.insert(paletteUniform);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
+
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator matrices =
+        context.Encoder.FloatUniforms.find(paletteUniform);
+    TestCheck(matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 32,
+              "Explicit vertex blend palette must upload dedicated palette uniform");
+    if (matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 32) {
+        TestCheck(matrices->second[16 + 5] == 4.0f,
+                  "Explicit vertex blend palette slot 1 must be preserved");
     }
 
     ffp.Shutdown();
@@ -1008,6 +1113,10 @@ int main() {
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
+    tests.Run("POSITIONT texture transform does not upload texture matrix",
+              &PositionTTextureTransformDoesNotUploadTextureMatrix);
+    tests.Run("Texcoord component count creates float4 layout and preserves source zw",
+              &TexcoordComponentCountCreatesFloat4LayoutAndPreservesSourceZW);
     tests.Run("Projected sampler stages zero to three enter specialization mask",
               &ProjectedSamplerStagesZeroToThreeEnterSpecializationMask);
     tests.Run("Projected sampler stages four to seven stay in runtime stage params",
@@ -1018,6 +1127,8 @@ int main() {
               &VertexBlendZeroWeightsUploadsMatrixPalette);
     tests.Run("Vertex blend uploads world matrix palette for clip planes",
               &VertexBlendUploadsWorldMatrixPaletteForClipPlanes);
+    tests.Run("Vertex blend uploads explicit matrix palette slot",
+              &VertexBlendUploadsExplicitMatrixPaletteSlot);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
     tests.Run("Indexed vertex blend requires index layout",
