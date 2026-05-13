@@ -1,4 +1,23 @@
 file(MAKE_DIRECTORY "${CKRE_GENERATED_INCLUDE_DIR}")
+
+if (DEFINED CKRE_VERSION_OVERRIDE)
+    if (NOT CKRE_VERSION_OVERRIDE MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR "CKRE_VERSION_OVERRIDE must be a numeric four-part version")
+    endif ()
+    string(REPLACE "." ";" _ckre_version_parts "${CKRE_VERSION_OVERRIDE}")
+    list(GET _ckre_version_parts 0 CKRE_RC_VERSION_MAJOR)
+    list(GET _ckre_version_parts 1 CKRE_RC_VERSION_MINOR)
+    list(GET _ckre_version_parts 2 CKRE_RC_VERSION_PATCH)
+    list(GET _ckre_version_parts 3 CKRE_RC_VERSION_TWEAK)
+    set(CKRE_RC_VERSION_STRING "${CKRE_VERSION_OVERRIDE}")
+else ()
+    set(CKRE_RC_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
+    set(CKRE_RC_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
+    set(CKRE_RC_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+    set(CKRE_RC_VERSION_TWEAK 0)
+    set(CKRE_RC_VERSION_STRING "${PROJECT_VERSION}.0")
+endif ()
+
 configure_file(Version.h.in "${CKRE_VERSION_HEADER}" @ONLY)
 
 set(CKRE_PUBLIC_HEADERS
@@ -63,9 +82,6 @@ set(CKRE_CONFIG_FILES
 )
 
 set(_ckre_version_resource CK2_3D.rc)
-if (COMMAND ballance_configure_version_resource AND DEFINED BALLANCE_MODULE_VERSION_OVERRIDE)
-    ballance_configure_version_resource(_ckre_version_resource CK2_3D "Render Engine Component" "CK2_3D.dll")
-endif ()
 
 set(CKRE_SOURCES
         CK2_3D.cpp

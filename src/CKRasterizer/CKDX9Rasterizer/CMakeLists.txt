@@ -11,10 +11,36 @@ set(CKDX9_RASTERIZER_HEADERS
 
 set(_ckre_dx9_targets)
 
+function(ckre_configure_rasterizer_version_resource OUT_VAR TARGET_NAME FILE_DESCRIPTION ORIGINAL_FILENAME)
+    if (NOT CKRE_VERSION_OVERRIDE MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR "CKRE_VERSION_OVERRIDE must be a numeric four-part version")
+    endif ()
+
+    string(REPLACE "." ";" _ckre_version_parts "${CKRE_VERSION_OVERRIDE}")
+    list(GET _ckre_version_parts 0 CKRE_RC_VERSION_MAJOR)
+    list(GET _ckre_version_parts 1 CKRE_RC_VERSION_MINOR)
+    list(GET _ckre_version_parts 2 CKRE_RC_VERSION_PATCH)
+    list(GET _ckre_version_parts 3 CKRE_RC_VERSION_TWEAK)
+
+    set(CKRE_RC_VERSION_STRING "${CKRE_VERSION_OVERRIDE}")
+    set(CKRE_RC_TARGET "${TARGET_NAME}")
+    set(CKRE_RC_DESCRIPTION "${FILE_DESCRIPTION}")
+    set(CKRE_RC_ORIGINAL_FILENAME "${ORIGINAL_FILENAME}")
+    set(_ckre_version_resource "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}Version.generated.rc")
+
+    configure_file(
+            "${PROJECT_SOURCE_DIR}/src/Version.rc.in"
+            "${_ckre_version_resource}"
+            @ONLY
+    )
+
+    set(${OUT_VAR} "${_ckre_version_resource}" PARENT_SCOPE)
+endfunction()
+
 if (CKRE_BUILD_SHARED)
     set(_ckdx9_version_resource)
-    if (COMMAND ballance_configure_version_resource AND DEFINED BALLANCE_MODULE_VERSION_OVERRIDE)
-        ballance_configure_version_resource(_ckdx9_version_resource CKDX9Rasterizer "DX9 Rasterizer" "CKDX9Rasterizer.dll")
+    if (DEFINED CKRE_VERSION_OVERRIDE)
+        ckre_configure_rasterizer_version_resource(_ckdx9_version_resource CKDX9Rasterizer "DX9 Rasterizer" "CKDX9Rasterizer.dll")
     endif ()
 
     add_library(CKDX9Rasterizer SHARED ${CKDX9_RASTERIZER_SOURCES} ${CKDX9_RASTERIZER_HEADERS} ${_ckdx9_version_resource})
