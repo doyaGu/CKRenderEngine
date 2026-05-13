@@ -58,10 +58,10 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
     return color;
 }
 
-vec2 getSampleCoord(vec4 coord, int transformFlags)
+vec4 getSampleCoord(vec4 coord, int transformFlags)
 {
-    if ((transformFlags & 0x100) == 0) return coord.xy;
-    return coord.xy / (abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w);
+    if ((transformFlags & 0x100) == 0) return coord;
+    return coord / (abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w);
 }
 
 float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
@@ -203,16 +203,15 @@ void main()
         else if (stage == 6) stageCoord = v_texcoord6;
         else if (stage == 7) stageCoord = v_texcoord7Fog;
 
-        vec2 stageUv = getSampleCoord(stageCoord, stageParams.TexcoordTransformFlags);
+        vec4 sampleCoord = getSampleCoord(stageCoord, stageParams.TexcoordTransformFlags);
 
         if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {
             vec2 bump = previousTexture.xy;
             int bumpBase = (stage - 1) * 2;
-            stageUv.x += dot(u_bumpEnv[bumpBase].xy, bump);
-            stageUv.y += dot(u_bumpEnv[bumpBase].zw, bump);
+            sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump);
+            sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 sampleCoord = vec4(stageUv, stageCoord.zw);
         vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
