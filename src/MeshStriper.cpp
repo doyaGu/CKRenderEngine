@@ -168,7 +168,13 @@ int MeshStriper::TrackStrip(
 }
 
 CKDWORD MeshStriper::ComputeBestStrip(CKDWORD seedFace, CKBYTE *usedGlobal, int faceCount) {
+    if (!usedGlobal || faceCount <= 0)
+        return 0;
+
     const XArray<MeshAdjacency::Face> &faces = m_Adj.GetFaces();
+    if (seedFace >= (CKDWORD) faces.Size())
+        return 0;
+
     const MeshAdjacency::Face &seed = faces[(int) seedFace];
 
     CKDWORD v87[3] = {seed.vertices[1], seed.vertices[0], seed.vertices[2]};
