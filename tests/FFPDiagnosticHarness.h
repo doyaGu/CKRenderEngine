@@ -4,6 +4,7 @@
 #include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
 
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -38,6 +39,7 @@ public:
     CKDWORD LastTextureHandle = 0;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
+    std::unordered_set<CKDWORD> MatrixUniforms;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
@@ -83,7 +85,10 @@ public:
         if (!data)
             return;
         const float *values = static_cast<const float *>(data);
-        FloatUniforms[uniform].assign(values, values + count * 4);
+        const CKDWORD floatCount = MatrixUniforms.find(uniform) != MatrixUniforms.end()
+            ? count * 16
+            : count * 4;
+        FloatUniforms[uniform].assign(values, values + floatCount);
         UniformCounts[uniform] = count;
     }
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}

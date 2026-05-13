@@ -397,7 +397,7 @@ void main()
     bool vertexBlendActive = vertexBlendMode == 1;
     if (vertexBlendActive) {
         float remainingWeight = 1.0;
-        vec4 blendedPos = vec4_splat(0.0);
+        vec4 blendedWorldPos = vec4_splat(0.0);
         vec3 blendedNormal = vec3_splat(0.0);
         for (int blendSlot = 0; blendSlot < 4; ++blendSlot) {
             if (blendSlot <= vertexBlendCount) {
@@ -407,14 +407,14 @@ void main()
                     remainingWeight -= weight;
                 }
                 mat4 blendMatrix = ckffBlendMatrix(ckffBlendIndex(blendSlot, a_indices));
-                blendedPos += mul(blendMatrix, localPos) * weight;
+                blendedWorldPos += mul(blendMatrix, localPos) * weight;
                 blendedNormal += mul(blendMatrix, vec4(a_normal, 0.0)).xyz * weight;
             }
         }
-        viewPos = blendedPos;
-        viewNormal = blendedNormal;
-        gl_Position = mul(u_ffMatrices[0], viewPos);
-        v_clipPos = mul(u_ffMatrices[1], localPos);
+        viewPos = mul(u_ffMatrices[2], blendedWorldPos);
+        viewNormal = mul(u_ffMatrices[3], vec4(blendedNormal, 0.0)).xyz;
+        gl_Position = mul(u_ffMatrices[0], blendedWorldPos);
+        v_clipPos = blendedWorldPos;
     } else {
 #endif
         gl_Position = mul(u_ffMatrices[0], localPos);

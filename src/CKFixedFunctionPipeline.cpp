@@ -1251,6 +1251,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
 
     VxMatrix modelView;
     VxMatrix normalMatrix;
+    VxMatrix viewNormalMatrix;
     VxMatrix viewProj;
     VxMatrix modelViewProj;
     if (!positionT) {
@@ -1260,19 +1261,25 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
             Vx3DMultiplyMatrix4(modelView, m_View, m_World);
             Vx3DInverseMatrix(normalMatrix, modelView);
             Vx3DTransposeMatrix(normalMatrix, normalMatrix);
+            if (vertexBlend) {
+                Vx3DInverseMatrix(viewNormalMatrix, m_View);
+                Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
+            }
         }
         Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
         Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
+        VxMatrix identity;
+        identity.Identity();
         VxMatrix matrices[8];
-        matrices[0] = vertexBlend ? m_Projection : modelViewProj;
+        matrices[0] = vertexBlend ? viewProj : modelViewProj;
         matrices[1] = m_World;
-        matrices[2] = modelView;
-        matrices[3] = normalMatrix;
+        matrices[2] = vertexBlend ? m_View : modelView;
+        matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
         if (vertexBlend) {
-            matrices[4] = modelView;
-            matrices[5] = m_View;
-            matrices[6] = m_View;
-            matrices[7] = m_View;
+            matrices[4] = m_World;
+            matrices[5] = identity;
+            matrices[6] = identity;
+            matrices[7] = identity;
         }
         UploadUniform(encoder, u.u_ffMatrices, matrices, vertexBlend ? 8 : (viewSpaceUniforms ? 4 : 2));
     }
