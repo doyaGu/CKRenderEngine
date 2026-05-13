@@ -1,5 +1,12 @@
 $input a_position, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
+#ifndef CKFF_VS_CLIP_DISTANCE
+#define CKFF_VS_CLIP_DISTANCE 0
+#endif
+#if CKFF_VS_CLIP_DISTANCE
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos, v_clipDistance0, v_clipDistance1
+#else
 $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+#endif
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -8,6 +15,10 @@ uniform vec4 u_viewport;
 uniform vec4 u_ffDrawParams[12];
 uniform vec4 u_stageParams[32];
 uniform mat4 u_texMatrix[8];
+#if CKFF_VS_CLIP_DISTANCE
+uniform vec4 u_clipPlanes[6];
+uniform vec4 u_clipParams;
+#endif
 
 #if defined(CKFF_FULL_SPECIALIZED)
 #ifndef CKFF_VS_FOG_MODE
@@ -156,6 +167,16 @@ void main()
     float clipY = a_position.y * u_viewport.y + u_viewport.w;
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
     v_clipPos = vec4(a_position.xyz, 1.0);
+#if CKFF_VS_CLIP_DISTANCE
+    int clipCount = int(u_clipParams.x);
+    v_clipDistance0.x = clipCount > 0 ? dot(v_clipPos, u_clipPlanes[0]) : 0.0;
+    v_clipDistance0.y = clipCount > 1 ? dot(v_clipPos, u_clipPlanes[1]) : 0.0;
+    v_clipDistance0.z = clipCount > 2 ? dot(v_clipPos, u_clipPlanes[2]) : 0.0;
+    v_clipDistance0.w = clipCount > 3 ? dot(v_clipPos, u_clipPlanes[3]) : 0.0;
+    v_clipDistance1.x = clipCount > 4 ? dot(v_clipPos, u_clipPlanes[4]) : 0.0;
+    v_clipDistance1.y = clipCount > 5 ? dot(v_clipPos, u_clipPlanes[5]) : 0.0;
+    v_clipDistance1.zw = vec2(0.0, 0.0);
+#endif
 
     v_color0 = a_color0;
     v_color1 = a_color1;

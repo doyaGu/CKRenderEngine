@@ -119,14 +119,20 @@ public:
     FFPDiagnosticEncoder Encoder;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
+    const void *LastVertexShaderCode = nullptr;
+    CKDWORD LastVertexShaderCodeSize = 0;
     std::vector<CKDWORD> LastProgramSpecializationDwords;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
 
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
     CKERROR CreateTexture(CKDWORD, CKTextureDesc *, const VxImageDescEx *) override { return CK_OK; }
-    CKERROR CreateShader(CKDWORD, CKShaderDesc *) override {
+    CKERROR CreateShader(CKDWORD, CKShaderDesc *desc) override {
         ++CreatedShaderCount;
+        if (desc && desc->Stage == CKRST_SHADER_VERTEX) {
+            LastVertexShaderCode = desc->Code;
+            LastVertexShaderCodeSize = desc->CodeSize;
+        }
         return CK_OK;
     }
     CKERROR CreateProgram(CKDWORD, CKProgramDesc *desc) override {

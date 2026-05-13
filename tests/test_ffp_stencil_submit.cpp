@@ -302,6 +302,35 @@ void DrawVertexBufferSkipsClipUniformsWhenDisabled() {
     ffp.Shutdown();
 }
 
+void ClipPlanesUseDedicatedVertexShaderVariant() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const void *defaultVertexShaderCode = context.LastVertexShaderCode;
+
+    VxPlane plane;
+    plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    plane.m_D = 1.0f;
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1u);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(defaultVertexShaderCode != nullptr,
+              "Default draw must create a vertex shader");
+    TestCheck(context.LastVertexShaderCode != nullptr &&
+                  context.LastVertexShaderCode != defaultVertexShaderCode,
+              "Clip plane draw must use a dedicated vertex shader variant");
+
+    ffp.Shutdown();
+}
+
 void ResultArgTempClearsOnlyLastActiveStage() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -788,6 +817,8 @@ int main() {
               &DrawVertexBufferCompactsClipPlaneUniforms);
     tests.Run("DrawVertexBuffer skips clip uniforms when disabled",
               &DrawVertexBufferSkipsClipUniformsWhenDisabled);
+    tests.Run("Clip planes use dedicated vertex shader variant",
+              &ClipPlanesUseDedicatedVertexShaderVariant);
     tests.Run("RESULTARG TEMP clears only last active stage",
               &ResultArgTempClearsOnlyLastActiveStage);
     tests.Run("MODULATE4X stays in texture stage specialization",

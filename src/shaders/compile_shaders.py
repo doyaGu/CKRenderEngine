@@ -21,9 +21,20 @@ from pathlib import Path
 
 SHADERS = [
     {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d"},
+    {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_clip",
+     "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont"},
+    {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont_clip",
+     "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage"},
 ]
+
+
+def shader_by_name(name: str) -> dict[str, object]:
+    for shader in SHADERS:
+        if shader["name"] == name:
+            return shader
+    raise KeyError(name)
 
 BACKENDS = [
     {"name": "dx11", "platform": "windows", "profile": "s_5_0"},
@@ -146,7 +157,6 @@ def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object
         f"CKFF_FS_ACTIVE_STAGE_COUNT={((spec_dwords[4] >> 16) & 7) + 1}",
         f"CKFF_FS_USES_BUMP_ENV={1 if uses_bump_env else 0}",
         f"CKFF_FS_USES_TEXFACTOR={1 if uses_texfactor else 0}",
-        f"CKFF_FS_USES_CLIP_PLANES={1 if key.get('clipEnable', False) else 0}",
     ]
     for index, stage in enumerate(stages[:4]):
         uses_texture = index <= last_active_stage and any(
@@ -166,6 +176,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
     vs_bits = key["vsBits"]
     defines = [
         "CKFF_FULL_SPECIALIZED=1",
+        f"CKFF_VS_CLIP_DISTANCE={(vs_bits >> 34) & 1}",
         f"CKFF_VS_BITS={vs_bits & 0xffffffff}",
         f"CKFF_VS_DIFFUSE_SOURCE={(vs_bits >> 25) & 3}",
         f"CKFF_VS_AMBIENT_SOURCE={(vs_bits >> 27) & 3}",
@@ -195,7 +206,7 @@ def sanitize_identifier(value: str) -> str:
 
 
 def specialization_identifier(spec_dwords: list[int], key: dict[str, object] | None = None) -> str:
-    payload_obj = {"specDwords": spec_dwords, "clipEnable": bool(key.get("clipEnable", False)) if key else False}
+    payload_obj = {"specDwords": spec_dwords, "clipEnable": False}
     payload = json.dumps(payload_obj, sort_keys=True, separators=(",", ":")).encode("ascii")
     return "spec_" + hashlib.sha1(payload).hexdigest()[:16]
 
@@ -367,7 +378,6 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
         "vertexFogMode": vertex_fog_mode if fog_enable else 0,
         "pixelFogMode": pixel_fog_mode if fog_enable else 0,
         "rangeFog": read_bool(key.get("rangeFog", False), f"{field}.rangeFog") if fog_enable else False,
-        "clipEnable": read_bool(key.get("clipEnable", False), f"{field}.clipEnable"),
         "stages": normalized_stages,
     }
 
@@ -507,7 +517,6 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
     f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
     f.write(f"    key.FS.RangeFog = {'true' if key['rangeFog'] else 'false'};\n")
-    f.write(f"    key.FS.ClipEnable = {'true' if key.get('clipEnable', False) else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")
@@ -649,7 +658,7 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
         for variant in vs_variants:
             ident = variant["vsIdentifier"]
             suffix = "positiont" if variant["vs"] == "positiont" else "3d"
-            shader = SHADERS[1] if variant["vs"] == "positiont" else SHADERS[0]
+            shader = shader_by_name("vs_ff_positiont") if variant["vs"] == "positiont" else shader_by_name("vs_ff_3d")
             bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_vs_ff_{suffix}.bin"
             bin_path.parent.mkdir(parents=True, exist_ok=True)
             run_shaderc(shaderc, script_dir, shader, backend, bin_path, ffp_specialized_vs_defines(variant))
@@ -659,7 +668,7 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
             ident = variant["fsIdentifier"]
             bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin"
             bin_path.parent.mkdir(parents=True, exist_ok=True)
-            run_shaderc(shaderc, script_dir, SHADERS[2], backend, bin_path, variant["defines"])
+            run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, variant["defines"])
             header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
             write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
 
@@ -703,7 +712,7 @@ def main() -> int:
             for shader in SHADERS:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
-                run_shaderc(shaderc, script_dir, shader, backend, bin_path)
+                run_shaderc(shaderc, script_dir, shader, backend, bin_path, shader.get("defines"))
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())

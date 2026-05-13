@@ -8,16 +8,24 @@
 #include <cstring>
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
+#include "shaders/generated/dx11/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
+#include "shaders/generated/dx12/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
+#include "shaders/generated/spirv/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
+#include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 
 struct CKFFShaderBlobSet {
@@ -25,8 +33,12 @@ struct CKFFShaderBlobSet {
     const char *Name;
     const unsigned char *VS3D;
     unsigned int VS3DSize;
+    const unsigned char *VS3DClip;
+    unsigned int VS3DClipSize;
     const unsigned char *VSPositionT;
     unsigned int VSPositionTSize;
+    const unsigned char *VSPositionTClip;
+    unsigned int VSPositionTClipSize;
     const unsigned char *FSStage;
     unsigned int FSStageSize;
 };
@@ -34,19 +46,27 @@ struct CKFFShaderBlobSet {
 static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_DX11, "dx11",
      s_dx11_vs_ff_3d, sizeof(s_dx11_vs_ff_3d),
+     s_dx11_vs_ff_3d_clip, sizeof(s_dx11_vs_ff_3d_clip),
      s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
+     s_dx11_vs_ff_positiont_clip, sizeof(s_dx11_vs_ff_positiont_clip),
      s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage)},
     {CKRST_SHADER_PROFILE_DX12, "dx12",
      s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
+     s_dx12_vs_ff_3d_clip, sizeof(s_dx12_vs_ff_3d_clip),
      s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
+     s_dx12_vs_ff_positiont_clip, sizeof(s_dx12_vs_ff_positiont_clip),
      s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage)},
     {CKRST_SHADER_PROFILE_SPIRV, "spirv",
      s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
+     s_spirv_vs_ff_3d_clip, sizeof(s_spirv_vs_ff_3d_clip),
      s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
+     s_spirv_vs_ff_positiont_clip, sizeof(s_spirv_vs_ff_positiont_clip),
      s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage)},
     {CKRST_SHADER_PROFILE_GLSL, "glsl",
      s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
+     s_glsl_vs_ff_3d_clip, sizeof(s_glsl_vs_ff_3d_clip),
      s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
+     s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
      s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage)},
 };
 
@@ -307,14 +327,20 @@ CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShade
         return CKFFProgramBinding();
 
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
-    const unsigned char *vsData = key.VS.GetHasPositionT() ? set->VSPositionT : set->VS3D;
-    const unsigned int vsSize = key.VS.GetHasPositionT() ? set->VSPositionTSize : set->VS3DSize;
+    const bool positionT = key.VS.GetHasPositionT();
+    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
+    const unsigned char *vsData = positionT
+        ? (clipDistance ? set->VSPositionTClip : set->VSPositionT)
+        : (clipDistance ? set->VS3DClip : set->VS3D);
+    const unsigned int vsSize = positionT
+        ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
+        : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
     CKDWORD program = CreateProgramFromBinary(
         m_Target, vsData, vsSize, set->FSStage, set->FSStageSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP variant program: %u backend=%s ubershader=%u positionT=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
-               program, set->Name, m_UseUberShader ? 1u : 0u, key.VS.GetHasPositionT() ? 1u : 0u,
+               "FFP variant program: %u backend=%s ubershader=%u positionT=%u clip=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
+               program, set->Name, m_UseUberShader ? 1u : 0u, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
                key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
                key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
                key.FS.FogEnable ? 1u : 0u);

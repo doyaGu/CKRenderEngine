@@ -250,7 +250,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -385,7 +384,6 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -520,7 +518,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -655,7 +652,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -790,7 +786,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -925,7 +920,6 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1060,7 +1054,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1195,7 +1188,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 26u;
     key.FS.Stages[0].ColorArg0 = 3u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1330,7 +1322,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1465,7 +1456,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1600,7 +1590,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1735,7 +1724,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1870,7 +1858,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 23u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2005,7 +1992,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2140,7 +2126,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2275,7 +2260,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2410,7 +2394,6 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2545,7 +2528,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2680,7 +2662,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2815,7 +2796,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -2950,7 +2930,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3085,7 +3064,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3220,7 +3198,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3355,7 +3332,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3490,7 +3466,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3625,7 +3600,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -3760,7 +3734,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3895,7 +3868,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4030,7 +4002,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4165,7 +4136,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -4300,7 +4270,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4435,7 +4404,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -4570,7 +4538,6 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4705,7 +4672,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4840,7 +4806,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4975,7 +4940,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -5110,7 +5074,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5245,7 +5208,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -5380,7 +5342,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5515,7 +5476,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5650,7 +5610,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5785,7 +5744,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5920,7 +5878,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -6055,7 +6012,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6190,7 +6146,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6325,7 +6280,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 13u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6460,7 +6414,6 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
-    key.FS.ClipEnable = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
