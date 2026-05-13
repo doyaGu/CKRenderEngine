@@ -1037,7 +1037,8 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     m_CurrentLightingEnabled = stateDesc.VS.GetLightingEnabled();
     stateDesc.VS.SetSpecularEnabled(specular != 0);
     stateDesc.VS.SetNormalizeNormals(normalize != 0);
-    stateDesc.VS.SetLocalViewer(m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) != 0);
+    stateDesc.VS.SetLocalViewer(stateDesc.VS.GetLightingEnabled() &&
+                                m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) != 0);
     stateDesc.VS.SetLightCount(stateDesc.VS.GetLightingEnabled() ? m_ActiveLightCount : 0);
 
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
@@ -1049,22 +1050,30 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
     stateDesc.VS.SetVertexBlendCount(vertexBlend.Count);
 
     const CKBOOL colorVertex = m_DrawStateCache.GetRenderState(VXRENDERSTATE_COLORVERTEX);
+    CKDWORD materialStreamFlags = dpFlags;
+    if (hasFormat) {
+        materialStreamFlags = 0;
+        if (stateDesc.VS.GetHasColor0())
+            materialStreamFlags |= CKRST_DP_DIFFUSE;
+        if (stateDesc.VS.GetHasColor1())
+            materialStreamFlags |= CKRST_DP_SPECULAR;
+    }
     const CKDWORD diffuseSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX),
-        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD ambientSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENTFROMVERTEX),
-        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
     const CKDWORD specularSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARFROMVERTEX),
-        dpFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
+        materialStreamFlags, CKRST_DP_SPECULAR, CKFF_MS_COLOR1);
     const CKDWORD emissiveSource = CKFFResolveMaterialSource(
         stateDesc.VS.GetLightingEnabled(), colorVertex,
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_EMISSIVEFROMVERTEX),
-        dpFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
+        materialStreamFlags, CKRST_DP_DIFFUSE, CKFF_MS_COLOR0);
 
     stateDesc.VS.SetDiffuseSource(diffuseSource);
     stateDesc.VS.SetAmbientSource(ambientSource);
@@ -1319,7 +1328,8 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         drawParams[6][1] = ambientColorF[0];
         drawParams[6][2] = ambientColorF[1];
         drawParams[6][3] = ambientColorF[2];
-        drawParams[7][0] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
+        drawParams[7][0] = m_CurrentLightingEnabled &&
+                            m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
         drawParams[7][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
         drawParams[7][3] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) ? (float)m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) : 0.0f;
         if (packed == 1) {

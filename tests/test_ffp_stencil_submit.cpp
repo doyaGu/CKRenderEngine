@@ -838,6 +838,62 @@ void PositionTVertexBlendDoesNotUploadMatrixPalette() {
     ffp.Shutdown();
 }
 
+void LocalViewerDoesNotSplitShaderWhenLightingDisabled() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_LOCALVIEWER, FALSE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL, 1);
+    const void *nonLocalViewerShader = context.LastVertexShaderCode;
+    const CKDWORD createdPrograms = context.CreatedProgramCount;
+
+    ffp.SetRenderState(VXRENDERSTATE_LOCALVIEWER, TRUE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL, 1);
+
+    TestCheck(nonLocalViewerShader != nullptr,
+              "Lighting-disabled draw must create a vertex shader");
+    TestCheck(context.LastVertexShaderCode == nonLocalViewerShader,
+              "LOCALVIEWER must not split the vertex shader key when lighting is disabled");
+    TestCheck(context.CreatedProgramCount == createdPrograms,
+              "LOCALVIEWER must not create a new FFP program when lighting is disabled");
+
+    ffp.Shutdown();
+}
+
+void FormatFlagsDriveMaterialSourceSelection() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_COLORVERTEX, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX, TRUE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_COLOR0, 1);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+
+    TestCheck(it != context.Encoder.FloatUniforms.end(),
+              "Material-source draw must upload draw params");
+    TestCheck(it != context.Encoder.FloatUniforms.end() &&
+                  it->second.size() >= 24 &&
+                  it->second[20] == (float)CKFF_MS_COLOR0,
+              "Hardware vertex format COLOR0 must drive diffuse material source even when dpFlags lacks diffuse");
+
+    ffp.Shutdown();
+}
+
 } // namespace
 
 int main() {
@@ -890,5 +946,9 @@ int main() {
               &IndexedVertexBlendRequiresIndexLayout);
     tests.Run("POSITIONT vertex blend does not upload matrix palette",
               &PositionTVertexBlendDoesNotUploadMatrixPalette);
+    tests.Run("LOCALVIEWER does not split shader when lighting disabled",
+              &LocalViewerDoesNotSplitShaderWhenLightingDisabled);
+    tests.Run("Format flags drive material source selection",
+              &FormatFlagsDriveMaterialSourceSelection);
     return tests.ExitCode();
 }
