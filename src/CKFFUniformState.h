@@ -23,7 +23,10 @@ struct CKFFClipPlaneUniform {
 };
 
 float CKFFReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE state, float fallback);
+CKBYTE CKFFAlphaRefByte(CKDWORD alphaRef);
 float CKFFNormalizeAlphaRef(CKDWORD alphaRef);
+float CKFFPackAlphaFuncPrecision(CKDWORD func, CKDWORD precision);
+CKDWORD CKFFAlphaTestPrecisionForFormat(const VxImageDescEx &desc);
 void CKFFPackColorARGB(CKDWORD color, float outColor[4]);
 CKDWORD CKFFResolveMaterialSource(CKBOOL lighting,
                                   CKBOOL colorVertex,

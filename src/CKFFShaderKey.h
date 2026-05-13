@@ -47,6 +47,7 @@ struct CKFFShaderKeyFS {
     bool FogEnable;
     bool RangeFog;
     bool ClipEnable;
+    bool FlatShade;
 
     CKFFShaderKeyFS();
 

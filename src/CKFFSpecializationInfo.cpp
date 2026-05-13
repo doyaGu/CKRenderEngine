@@ -48,6 +48,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 12, 2};
     case CKFF_SPEC_RANGE_FOG:
         return {5, 14, 1};
+    case CKFF_SPEC_FLAT_SHADE:
+        return {5, 15, 1};
     default:
         break;
     }

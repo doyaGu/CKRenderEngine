@@ -11,6 +11,7 @@ struct CKFFStageParams
     int ResultArg;
     int TexcoordTransformFlags;
     bool HasTexture;
+    vec4 Constant;
 };
 
 #if defined(CKFF_FULL_SPECIALIZED)
@@ -156,6 +157,11 @@ bool ckffSpecRangeFog()
     return ckffSpecBits(ckffSpecDword(5), 14, 1) != 0;
 }
 
+bool ckffSpecFlatShade()
+{
+    return ckffSpecBits(ckffSpecDword(5), 15, 1) != 0;
+}
+
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
@@ -171,6 +177,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.ResultArg = 1;
     params.TexcoordTransformFlags = 0;
     params.HasTexture = ckffSpecStageHasTexture(stage);
+    params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #else
     params.ColorOp = int(colorParams.x);
     params.ColorArg0 = int(colorExtra.x);
@@ -183,6 +190,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.ResultArg = int(alphaParams.w);
     params.TexcoordTransformFlags = int(colorExtra.z);
     params.HasTexture = colorParams.w > 0.5;
+    params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #endif
 
     if (stage < 4 && ckffSpecIsOptimized()) {

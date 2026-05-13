@@ -95,7 +95,7 @@ void CKFFShaderCache::CreateUniforms() {
 
     desc.Type = CKRST_UNIFORM_MATRIX4;
     desc.Name = (char *)"u_ffMatrices";
-    desc.Count = 4;
+    desc.Count = 8;
     m_Uniforms.u_ffMatrices = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ffMatrices, &desc);
 
@@ -188,7 +188,7 @@ void CKFFShaderCache::CreateUniforms() {
     m_Context->CreateUniform(m_Uniforms.u_alphaParams, &desc);
 
     desc.Name = (char *)"u_bumpEnv";
-    desc.Count = 2;
+    desc.Count = CKFF_MAX_TEXTURE_STAGES * 2;
     m_Uniforms.u_bumpEnv = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_bumpEnv, &desc);
 

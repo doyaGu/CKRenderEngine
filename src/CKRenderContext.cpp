@@ -36,6 +36,7 @@
 #include "RCKMaterial.h"
 #include "RCKSprite3D.h"
 #include "CKFixedFunctionPipeline.h"
+#include "CKFFUniformState.h"
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
@@ -2550,6 +2551,11 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
 
     if (texture) {
         m_TargetTexture = (RCKTexture *) texture;
+        VxImageDescEx targetDesc;
+        if (m_TargetTexture->GetVideoTextureDesc(targetDesc))
+            m_FFPipeline.SetAlphaTestPrecision(CKFFAlphaTestPrecisionForFormat(targetDesc));
+        else
+            m_FFPipeline.SetAlphaTestPrecision(0);
 
         m_Settings.m_Rect.left = 0;
         m_Settings.m_Rect.top = 0;
@@ -2566,6 +2572,9 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     }
 
     m_TargetTexture = nullptr;
+    VxImageDescEx backbufferDesc;
+    VxPixelFormat2ImageDesc(GetPixelFormat(), backbufferDesc);
+    m_FFPipeline.SetAlphaTestPrecision(CKFFAlphaTestPrecisionForFormat(backbufferDesc));
     m_CubeMapFace = CKRST_CUBEFACE_XPOS;
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, 0);

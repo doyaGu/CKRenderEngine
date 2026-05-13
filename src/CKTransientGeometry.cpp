@@ -114,6 +114,28 @@ void CKTransientGeometry::InterleaveVertex(
         offset += 12;
     }
 
+    if (formatFlags & CKFF_VF_BLENDWEIGHT) {
+        float weights[3] = {};
+        const CKDWORD weightCount = CKVertexLayoutCache::DPFlagsToBlendWeightCount(data->Flags);
+        if (data->PositionPtr && data->PositionStride >= 12 + weightCount * 4) {
+            const CKBYTE *src = (const CKBYTE *)data->PositionPtr + srcIndex * data->PositionStride + 12;
+            memcpy(weights, src, weightCount * 4);
+        }
+        memcpy(out + offset, weights, 12);
+        offset += 12;
+    }
+
+    if (formatFlags & CKFF_VF_BLENDINDEX) {
+        CKDWORD indices = 0;
+        const CKDWORD indexOffset = CKVertexLayoutCache::DPFlagsToBlendIndexOffset(data->Flags);
+        if (data->PositionPtr && data->PositionStride >= indexOffset + 4) {
+            const CKBYTE *src = (const CKBYTE *)data->PositionPtr + srcIndex * data->PositionStride + indexOffset;
+            memcpy(&indices, src, 4);
+        }
+        memcpy(out + offset, &indices, 4);
+        offset += 4;
+    }
+
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if (formatFlags & CKFF_VF_TEXCOORD(stage)) {
             const void *src = nullptr;
@@ -212,7 +234,7 @@ CKBOOL CKTransientGeometry::Prepare(
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
-        data->Flags, hasNormal, hasUV);
+        data->Flags, hasNormal, hasUV, data->PositionStride);
 
     CKDWORD stride = 0;
     CKDWORD layoutHandle = m_LayoutCache->GetLayout(formatFlags, &stride);

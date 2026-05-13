@@ -1,9 +1,10 @@
-$input v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
+#include "ff_fog_common.sc"
 
 uniform vec4 u_ffDrawParams[12];
-uniform vec4 u_bumpEnv[2];
+uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
 uniform vec4 u_clipPlanes[6];
@@ -49,28 +50,22 @@ vec2 getSampleCoord(vec4 coord, int transformFlags)
 float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
 {
     if (mode == 0) return vertexFogFactor;
-    if (mode == 1) {
-        float denom = max(u_ffDrawParams[10].y - u_ffDrawParams[10].x, 0.0001);
-        return clamp((u_ffDrawParams[10].y - depth) / denom, 0.0, 1.0);
-    }
-    if (mode == 2) return clamp(exp(-(u_ffDrawParams[10].z * depth)), 0.0, 1.0);
-    float e = u_ffDrawParams[10].z * depth;
-    return clamp(exp(-(e * e)), 0.0, 1.0);
+    return ckffFogFactor(depth, mode, u_ffDrawParams[10]);
 }
 
 vec4 applyArgModifiers(vec4 value, int arg)
 {
-    if ((arg & 0x20) != 0) {
-        value.rgb = value.aaa;
-    }
     if ((arg & 0x10) != 0) {
         value.rgb = 1.0 - value.rgb;
         value.a = 1.0 - value.a;
     }
+    if ((arg & 0x20) != 0) {
+        value = value.aaaa;
+    }
     return value;
 }
 
-vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specular, vec4 temp)
+vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specular, vec4 temp, vec4 stageConstant)
 {
     int baseArg = arg & ~(0x10 | 0x20);
     vec4 value = current;
@@ -80,6 +75,7 @@ vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specula
     else if (baseArg == 3) value = u_ffDrawParams[9];
     else if (baseArg == 4) value = specular;
     else if (baseArg == 5) value = temp;
+    else if (baseArg == 6) value = stageConstant;
     return applyArgModifiers(value, arg);
 }
 
@@ -89,8 +85,8 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 2) return a;
     if (op == 3) return b;
     if (op == 4) return a * b;
-    if (op == 5) return clamp(a * b * 2.0, 0.0, 1.0);
-    if (op == 6) return clamp(a * b * 4.0, 0.0, 1.0);
+    if (op == 5) return a * b * 2.0;
+    if (op == 6) return a * b * 4.0;
     if (op == 7) return clamp(a + b, 0.0, 1.0);
     if (op == 8) return clamp(a + b - 0.5, 0.0, 1.0);
     if (op == 9) return clamp((a + b - 0.5) * 2.0, 0.0, 1.0);
@@ -101,7 +97,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 14) return mix(b, a, u_ffDrawParams[9].a);
     if (op == 15) return clamp(a + b * (1.0 - textureColor.a), 0.0, 1.0);
     if (op == 16) return mix(b, a, current.a);
-    if (op == 17) return a * b;
+    if (op == 17) return current;
     if (op == 18) return clamp(a + vec4_splat(a.a) * b, 0.0, 1.0);
     if (op == 19) return clamp(a * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 20) return clamp(a + (1.0 - a.a) * b, 0.0, 1.0);
@@ -119,14 +115,28 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
 bool alphaPass(float alpha, int func)
 {
     float ref = u_ffDrawParams[8].x;
+    int alphaPrecision = func / 16;
+    func = func - alphaPrecision * 16;
+    float alphaTestValue = alpha;
+    if (alphaPrecision != 15) {
+        alphaPrecision = min(alphaPrecision, 8);
+        float precisionScale = exp2(float(8 + alphaPrecision));
+        float factor = precisionScale - 1.0;
+        float refScale = exp2(float(alphaPrecision));
+        float refWrap = exp2(float(8 - alphaPrecision));
+        alphaTestValue = round(alpha * factor);
+        ref = floor(ref) * refScale + floor(floor(ref) / refWrap);
+    } else {
+        ref = ref / 255.0;
+    }
     if (func == 0 || func == 8) return true;
     if (func == 1) return false;
-    if (func == 2) return alpha < ref;
-    if (func == 3) return abs(alpha - ref) < 0.0001;
-    if (func == 4) return alpha <= ref;
-    if (func == 5) return alpha > ref;
-    if (func == 6) return abs(alpha - ref) >= 0.0001;
-    if (func == 7) return alpha >= ref;
+    if (func == 2) return alphaTestValue < ref;
+    if (func == 3) return alphaTestValue == ref;
+    if (func == 4) return alphaTestValue <= ref;
+    if (func == 5) return alphaTestValue > ref;
+    if (func == 6) return alphaTestValue != ref;
+    if (func == 7) return alphaTestValue >= ref;
     return true;
 }
 
@@ -148,7 +158,10 @@ void main()
     }
 #endif
 
-    vec4 current = v_color0;
+    bool flatShade = ckffSpecIsOptimized() && ckffSpecFlatShade();
+    vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
+    vec4 specular = flatShade ? v_flatColor1 : v_color1;
+    vec4 current = diffuse;
     vec4 temp = vec4(0.0, 0.0, 0.0, 1.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
     int previousColorOp = 0;
@@ -165,8 +178,8 @@ void main()
 #if defined(CKFF_FULL_SPECIALIZED)
         vec4 colorParams = vec4_splat(0.0);
         vec4 alphaParams = vec4_splat(0.0);
-        vec4 colorExtra = vec4_splat(0.0);
-        vec4 alphaExtra = vec4_splat(0.0);
+        vec4 colorExtra = u_stageParams[stage * 4 + 2];
+        vec4 alphaExtra = u_stageParams[stage * 4 + 3];
 #else
         vec4 colorParams = u_stageParams[stage * 4 + 0];
         vec4 alphaParams = u_stageParams[stage * 4 + 1];
@@ -193,25 +206,27 @@ void main()
 
         if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {
             vec2 bump = previousTexture.xy;
-            stageUv.x += dot(u_bumpEnv[0].xy, bump);
-            stageUv.y += dot(u_bumpEnv[0].zw, bump);
+            int bumpBase = (stage - 1) * 2;
+            stageUv.x += dot(u_bumpEnv[bumpBase].xy, bump);
+            stageUv.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
         vec4 texColor = getTextureColor(stage, stageUv, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
-            float lum = clamp(previousTexture.z * u_bumpEnv[1].x + u_bumpEnv[1].y, 0.0, 1.0);
+            int bumpBase = (stage - 1) * 2;
+            float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);
             texColor *= lum;
         }
-        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, v_color0, v_color1, temp);
-        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, v_color0, v_color1, temp);
-        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, v_color0, v_color1, temp);
-        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, v_color0, v_color1, temp);
-        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, v_color0, v_color1, temp);
-        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, v_color0, v_color1, temp);
+        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant);
 
         vec4 stageResult = current;
-        vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, v_color0, texColor);
-        vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, v_color0, texColor);
+        vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor);
+        vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, diffuse, texColor);
         stageResult.rgb = colorResult.rgb;
         stageResult.a = alphaResult.a;
         if (colorOp == 24) {
@@ -231,7 +246,7 @@ void main()
 
     bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_ffDrawParams[8].z > 0.5);
     if (specularEnabled) {
-        current.rgb += v_color1.rgb;
+        current.rgb += specular.rgb;
     }
     if (ckffSpecIsOptimized()) {
         if (ckffSpecAlphaTestEnabled() && !alphaPass(current.a, ckffSpecAlphaFunc())) discard;

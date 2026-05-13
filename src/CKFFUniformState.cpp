@@ -14,7 +14,25 @@ float CKFFReadFloatRenderState(const CKDrawStateCache &cache, VXRENDERSTATETYPE 
 }
 
 float CKFFNormalizeAlphaRef(CKDWORD alphaRef) {
-    return (float)(alphaRef & 0xFFu) / 255.0f;
+    return (float)CKFFAlphaRefByte(alphaRef) / 255.0f;
+}
+
+CKBYTE CKFFAlphaRefByte(CKDWORD alphaRef) {
+    return (CKBYTE)(alphaRef & 0xFFu);
+}
+
+float CKFFPackAlphaFuncPrecision(CKDWORD func, CKDWORD precision) {
+    return (float)((func & 0xFu) | ((precision & 0xFu) << 4));
+}
+
+CKDWORD CKFFAlphaTestPrecisionForFormat(const VxImageDescEx &desc) {
+    (void)VxImageDesc2PixelFormat(desc);
+
+    // Current Virtools/VX render targets are legacy integer color formats, for
+    // which dxvk uses the common 8-bit alpha-test path. Keep the mapping here
+    // so 10/16/float RT precision can be wired in when those formats are
+    // exposed above the rasterizer.
+    return 0;
 }
 
 void CKFFPackColorARGB(CKDWORD color, float outColor[4]) {
@@ -25,6 +43,20 @@ void CKFFPackColorARGB(CKDWORD color, float outColor[4]) {
     outColor[1] = (float)ColorGetGreen(color) / 255.0f;
     outColor[2] = (float)ColorGetBlue(color) / 255.0f;
     outColor[3] = (float)ColorGetAlpha(color) / 255.0f;
+}
+
+static void CKFFPackStageConstantUniforms(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
+                                          float outConstants[CKFF_MAX_TEXTURE_STAGES][4]) {
+    if (!outConstants)
+        return;
+
+    memset(outConstants, 0, sizeof(float) * CKFF_MAX_TEXTURE_STAGES * 4);
+    if (!stageStates)
+        return;
+
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        CKFFPackColorARGB(stageStates[stage][CKRST_TSS_CONSTANT], outConstants[stage]);
+    }
 }
 
 CKDWORD CKFFResolveMaterialSource(CKBOOL lighting,
@@ -56,6 +88,9 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     if (!stageStates)
         return;
 
+    float stageConstants[CKFF_MAX_TEXTURE_STAGES][4] = {};
+    CKFFPackStageConstantUniforms(stageStates, stageConstants);
+
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < activeTextureCount;
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
@@ -70,7 +105,11 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
         outParams.Values[stage * 4 + 2][0] = (float)CKFFResolveStageColorArg0(stageStates[stage]);
         outParams.Values[stage * 4 + 2][1] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         outParams.Values[stage * 4 + 2][2] = (float)stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
+        outParams.Values[stage * 4 + 2][3] = stageConstants[stage][0];
         outParams.Values[stage * 4 + 3][0] = (float)CKFFResolveStageAlphaArg0(stageStates[stage]);
+        outParams.Values[stage * 4 + 3][1] = stageConstants[stage][1];
+        outParams.Values[stage * 4 + 3][2] = stageConstants[stage][2];
+        outParams.Values[stage * 4 + 3][3] = stageConstants[stage][3];
     }
 }
 

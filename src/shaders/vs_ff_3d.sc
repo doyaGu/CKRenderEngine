@@ -1,9 +1,14 @@
+#if CKFF_VS_VERTEX_BLEND_MODE != 0
+$input a_position, a_normal, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
+#else
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+#endif
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
+#include "ff_fog_common.sc"
 
-uniform mat4 u_ffMatrices[4];
+uniform mat4 u_ffMatrices[8];
 uniform mat4 u_texMatrix[8];
 uniform vec4 u_ffDrawParams[19];
 uniform vec4 u_lights[56];
@@ -115,7 +120,7 @@ uniform vec4 u_stageParams[32];
 #ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
 #define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
 #endif
-#if ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
+#if ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
 #else
 #define CKFF_VS_NEEDS_VIEW_SPACE 0
@@ -247,17 +252,42 @@ int ckffVsVertexBlendCount()
 #endif
 }
 
-float computeFog(float depth, vec4 params)
+bool ckffVsVertexBlendIndexed()
 {
-    int mode = ckffVsFogMode(params.w);
-    if (mode == 0) return 1.0;
-    if (mode == 1) return clamp(exp(-(params.z * depth)), 0.0, 1.0);
-    if (mode == 2) {
-        float e = params.z * depth;
-        return clamp(exp(-(e * e)), 0.0, 1.0);
-    }
-    return clamp((params.y - depth) / max(params.y - params.x, 0.0001), 0.0, 1.0);
+#if defined(CKFF_FULL_SPECIALIZED)
+    return CKFF_VS_VERTEX_BLEND_INDEXED != 0;
+#else
+    return false;
+#endif
 }
+
+#if CKFF_VS_VERTEX_BLEND_MODE != 0
+float ckffBlendWeight(int index, vec3 blendWeight)
+{
+    if (index == 0) return blendWeight.x;
+    if (index == 1) return blendWeight.y;
+    if (index == 2) return blendWeight.z;
+    return 0.0;
+}
+
+int ckffBlendIndex(int index, uvec4 blendIndices)
+{
+    if (!ckffVsVertexBlendIndexed())
+        return index;
+    if (index == 0) return int(blendIndices.x);
+    if (index == 1) return int(blendIndices.y);
+    if (index == 2) return int(blendIndices.z);
+    return int(blendIndices.w);
+}
+
+mat4 ckffBlendMatrix(int index)
+{
+    if (index == 1) return u_ffMatrices[5];
+    if (index == 2) return u_ffMatrices[6];
+    if (index == 3) return u_ffMatrices[7];
+    return u_ffMatrices[4];
+}
+#endif
 
 vec4 selectMaterialSource(int slot, float source, vec4 materialValue, vec4 color0, vec4 color1)
 {
@@ -296,7 +326,7 @@ vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, 
         float m = length(refl + vec3(0.0, 0.0, 1.0)) * 2.0;
         return vec4(refl.xy / max(m, 0.0001) + 0.5, 0.0, 1.0);
     }
-    int declaredCount = ckffVsTexcoordComponentCount(stage);
+    int declaredCount = ckffVsTexcoordComponentCount(index & 7);
     vec4 result = vec4(selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7), 0.0, 1.0);
     if (declaredCount <= 1) result.y = 0.0;
     if (declaredCount <= 2) result.z = 0.0;
@@ -320,9 +350,12 @@ vec4 transformTexcoord(int stage, vec4 coord)
     bool applyTransform = count > 1 && count <= 4;
 
     int generation = ckffVsTexGenMode(stage, packedIndex);
-    int declaredCount = ckffVsTexcoordComponentCount(stage);
-    if (generation == 0 && applyTransform && declaredCount < 3) {
-        coord.z = 1.0;
+    int inputIndex = ckffVsTexcoordIndex(stage, packedIndex);
+    int declaredCount = ckffVsTexcoordComponentCount(inputIndex & 7);
+    if (generation == 0 && applyTransform && declaredCount >= 1 && declaredCount < count) {
+        if (declaredCount == 1) coord.y = 1.0;
+        else if (declaredCount == 2) coord.z = 1.0;
+        else if (declaredCount == 3) coord.w = 1.0;
     }
 
     vec4 transformed = applyTransform ? mul(u_texMatrix[stage], coord) : coord;
@@ -346,17 +379,48 @@ void main()
     vec4 localPos = vec4(a_position.xyz, 1.0);
     int vertexBlendMode = ckffVsVertexBlendMode();
     int vertexBlendCount = ckffVsVertexBlendCount();
-    if (vertexBlendMode != 0 && vertexBlendCount > 0) {
-        localPos = localPos;
-    }
-    gl_Position = mul(u_ffMatrices[0], localPos);
-    v_clipPos = mul(u_ffMatrices[1], localPos);
 
     vec4 viewPos;
     vec3 viewNormal;
+#if CKFF_VS_VERTEX_BLEND_MODE != 0
+    bool vertexBlendActive = vertexBlendMode == 1;
+    if (vertexBlendActive) {
+        float remainingWeight = 1.0;
+        vec4 blendedPos = vec4_splat(0.0);
+        vec3 blendedNormal = vec3_splat(0.0);
+        for (int blendSlot = 0; blendSlot < 4; ++blendSlot) {
+            if (blendSlot <= vertexBlendCount) {
+                float weight = remainingWeight;
+                if (blendSlot != vertexBlendCount) {
+                    weight = ckffBlendWeight(blendSlot, a_weight);
+                    remainingWeight -= weight;
+                }
+                mat4 blendMatrix = ckffBlendMatrix(ckffBlendIndex(blendSlot, a_indices));
+                blendedPos += mul(blendMatrix, localPos) * weight;
+                blendedNormal += mul(blendMatrix, vec4(a_normal, 0.0)).xyz * weight;
+            }
+        }
+        viewPos = blendedPos;
+        viewNormal = blendedNormal;
+        gl_Position = mul(u_ffMatrices[0], viewPos);
+        v_clipPos = mul(u_ffMatrices[1], localPos);
+    } else {
+#endif
+        gl_Position = mul(u_ffMatrices[0], localPos);
+        v_clipPos = mul(u_ffMatrices[1], localPos);
+#if CKFF_VS_VERTEX_BLEND_MODE != 0
+    }
+#endif
 #if CKFF_VS_NEEDS_VIEW_SPACE
+#if CKFF_VS_VERTEX_BLEND_MODE != 0
+    if (!vertexBlendActive) {
+        viewPos = mul(u_ffMatrices[2], localPos);
+        viewNormal = mul(u_ffMatrices[3], vec4(a_normal, 0.0)).xyz;
+    }
+#else
     viewPos = mul(u_ffMatrices[2], localPos);
     viewNormal = mul(u_ffMatrices[3], vec4(a_normal, 0.0)).xyz;
+#endif
 #if defined(CKFF_FULL_SPECIALIZED)
     if ((CKFF_VS_BITS & (1 << 14)) != 0) {
         viewNormal = normalize(viewNormal);
@@ -505,6 +569,8 @@ void main()
     v_color0 = clamp(litDiffuse, 0.0, 1.0);
     v_color0.a = matDiffuse.a;
     v_color1 = vec4(clamp(litSpecular, 0.0, 1.0), a_color1.a);
+    v_flatColor0 = v_color0;
+    v_flatColor1 = v_color1;
 #if defined(CKFF_FULL_SPECIALIZED)
     int tc0 = ckffVsTexcoordIndex(0, 0);
     int tc1 = ckffVsTexcoordIndex(1, 0);
@@ -562,12 +628,14 @@ void main()
 #endif
 #if defined(CKFF_FULL_SPECIALIZED)
 #if CKFF_VS_FOG_MODE != 0
-    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_ffDrawParams[10]);
+    float fogDepth = ((CKFF_VS_BITS & (1 << 23)) != 0) ? length(viewPos.xyz) : abs(viewPos.z);
+    v_texcoord7Fog.z = ckffFogFactor(fogDepth, CKFF_VS_FOG_MODE, u_ffDrawParams[10]);
 #else
     v_texcoord7Fog.z = 1.0;
 #endif
 #else
-    v_texcoord7Fog.z = computeFog(abs(viewPos.z), u_ffDrawParams[10]);
+    float fogDepth = ckffVsBit(23, u_ffDrawParams[7].z > 0.5) ? length(viewPos.xyz) : abs(viewPos.z);
+    v_texcoord7Fog.z = ckffFogFactor(fogDepth, ckffVsFogMode(u_ffDrawParams[10].w), u_ffDrawParams[10]);
 #endif
 }
 

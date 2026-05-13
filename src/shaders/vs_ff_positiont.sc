@@ -1,7 +1,8 @@
 $input a_position, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
 
 #include "bgfx_shader.sh"
+#include "ff_fog_common.sc"
 
 uniform vec4 u_viewport;
 uniform vec4 u_ffDrawParams[12];
@@ -158,6 +159,8 @@ void main()
 
     v_color0 = a_color0;
     v_color1 = a_color1;
+    v_flatColor0 = v_color0;
+    v_flatColor1 = v_color1;
 #if defined(CKFF_FULL_SPECIALIZED)
     int tc0 = ckffVsTexcoordIndex(0, 0);
     int tc1 = ckffVsTexcoordIndex(1, 0);
@@ -209,9 +212,9 @@ void main()
     v_texcoord6 = vec4(0.0, 0.0, 0.0, 1.0);
 #endif
 #if defined(CKFF_FULL_SPECIALIZED)
-    float fogFactor = CKFF_VS_FOG_MODE != 0 ? a_color1.a : 1.0;
+    float fogFactor = ckffPositionTFogFactor(CKFF_VS_FOG_MODE != 0, a_color1.a);
 #else
-    float fogFactor = ckffVsFogEnabled(u_ffDrawParams[10].w) ? a_color1.a : 1.0;
+    float fogFactor = ckffPositionTFogFactor(ckffVsFogEnabled(u_ffDrawParams[10].w), a_color1.a);
 #endif
 #if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 7
     v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
