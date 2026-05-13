@@ -28,13 +28,26 @@ public:
     CKDWORD LastProgram = 0;
     CKDWORD SubmitCount = 0;
     CKDWORD TextureBindCount = 0;
+    CKDWORD StencilRefSetCount = 0;
+    CKDWORD StencilMaskSetCount = 0;
+    CKDWORD LastStencilRef = 0;
+    CKDWORD LastStencilReadMask = 0;
+    CKDWORD LastStencilWriteMask = 0;
     std::vector<CKBYTE> LastVertexBytes;
+    std::vector<CKBYTE> LastIndexBytes;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
     void SetState(CKDrawState State) override { LastState = State; }
-    void SetStencilRef(CKDWORD) override {}
-    void SetStencilMask(CKDWORD, CKDWORD) override {}
+    void SetStencilRef(CKDWORD Ref) override {
+        LastStencilRef = Ref;
+        ++StencilRefSetCount;
+    }
+    void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask) override {
+        LastStencilReadMask = ReadMask;
+        LastStencilWriteMask = WriteMask;
+        ++StencilMaskSetCount;
+    }
     void SetScissor(const CKRECT *) override {}
     void SetPointSize(float) override {}
     void SetTransform(CKDWORD, CKDWORD) override {}
@@ -49,7 +62,13 @@ public:
             LastVertexBytes.assign(begin, begin + buffer->Size);
         }
     }
-    void SetTransientIndexBuffer(CKTransientIndexBuffer *) override {}
+    void SetTransientIndexBuffer(CKTransientIndexBuffer *buffer) override {
+        LastIndexBytes.clear();
+        if (buffer && buffer->Data && buffer->Size > 0) {
+            const CKBYTE *begin = static_cast<const CKBYTE *>(buffer->Data);
+            LastIndexBytes.assign(begin, begin + buffer->Size);
+        }
+    }
     void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *) override {}
     void SetTexture(CKDWORD, CKDWORD, CKDWORD, CKSamplerDesc *) override { ++TextureBindCount; }
     void SetUniform(CKDWORD uniform, const void *data, CKDWORD count) override {
@@ -93,6 +112,7 @@ public:
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     std::vector<CKDWORD> LastProgramSpecializationDwords;
+    std::vector<CKVertexElementDesc> LastVertexLayoutElements;
 
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
@@ -113,11 +133,14 @@ public:
     CKERROR CreateUniform(CKDWORD, CKUniformDesc *) override { return CK_OK; }
     CKERROR CreateVertexLayout(CKDWORD layout, CKVertexLayoutDesc *desc) override {
         CKDWORD stride = 0;
+        LastVertexLayoutElements.clear();
         if (desc) {
             for (int i = 0; i < CKRST_MAX_VERTEX_STREAMS; ++i) {
                 if (desc->Stride[i] > stride)
                     stride = desc->Stride[i];
             }
+            for (CKDWORD i = 0; i < desc->ElementCount; ++i)
+                LastVertexLayoutElements.push_back(desc->Elements[i]);
         }
         m_LayoutStride[layout] = stride;
         return CK_OK;
