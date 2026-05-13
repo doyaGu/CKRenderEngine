@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "CKFFStageState.h"
+#include "CKFFShaderKey.h"
 #include "CKFFUniformState.h"
 #include "CKVertexLayoutCache.h"
 #include "TestTriangleMultiset.h"
@@ -170,6 +171,38 @@ void DPWeightFlagsAddBlendLayoutFlags() {
               "Matrix palette DP flags must request both weights and indices");
 }
 
+void SamplerTypesPackIntoSpecialization() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(0, CKFF_SAMPLER_CUBE);
+
+    desc.SetStageColorOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(1, CKRST_TA_CURRENT);
+    desc.SetStageAlphaOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(1, CKRST_TA_CURRENT);
+
+    desc.SetStageColorOp(2, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(2, CKRST_TA_CURRENT);
+    desc.SetStageAlphaOp(2, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(2, CKRST_TA_CURRENT);
+
+    desc.SetStageColorOp(3, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(3, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(3, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(3, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(3, CKFF_SAMPLER_DEPTH);
+
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 3));
+    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+
+    TestCheck(spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) ==
+                  (CKFF_SAMPLER_CUBE | (CKFF_SAMPLER_DEPTH << 6)),
+              "Sampler type specialization must pack two bits per stage");
+}
+
 } // namespace
 
 int main() {
@@ -196,5 +229,7 @@ int main() {
               &VertexBlendResolverRejectsMissingIndexedInputAndPositionT);
     tests.Run("DP weight flags add blend layout flags",
               &DPWeightFlagsAddBlendLayoutFlags);
+    tests.Run("Sampler types pack into specialization",
+              &SamplerTypesPackIntoSpecialization);
     return tests.ExitCode();
 }

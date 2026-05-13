@@ -18,6 +18,14 @@ SAMPLER2D(s_texture4, 4);
 SAMPLER2D(s_texture5, 5);
 SAMPLER2D(s_texture6, 6);
 SAMPLER2D(s_texture7, 7);
+SAMPLERCUBE(s_textureCube0, 8);
+SAMPLERCUBE(s_textureCube1, 9);
+SAMPLERCUBE(s_textureCube2, 10);
+SAMPLERCUBE(s_textureCube3, 11);
+SAMPLERCUBE(s_textureCube4, 12);
+SAMPLERCUBE(s_textureCube5, 13);
+SAMPLERCUBE(s_textureCube6, 14);
+SAMPLERCUBE(s_textureCube7, 15);
 
 #include "fs_ff_common.sc"
 
@@ -28,17 +36,31 @@ SAMPLER2D(s_texture7, 7);
 #define CKFF_FS_USES_CLIP_PLANES 1
 #endif
 
-vec4 getTextureColor(int stage, vec2 uv, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    if (stage == 0) return texture2D(s_texture0, uv);
-    if (stage == 1) return texture2D(s_texture1, uv);
-    if (stage == 2) return texture2D(s_texture2, uv);
-    if (stage == 3) return texture2D(s_texture3, uv);
-    if (stage == 4) return texture2D(s_texture4, uv);
-    if (stage == 5) return texture2D(s_texture5, uv);
-    if (stage == 6) return texture2D(s_texture6, uv);
-    return texture2D(s_texture7, uv);
+    if (samplerType == 1) {
+        if (stage == 0) return textureCube(s_textureCube0, coord.xyz);
+        if (stage == 1) return textureCube(s_textureCube1, coord.xyz);
+        if (stage == 2) return textureCube(s_textureCube2, coord.xyz);
+        if (stage == 3) return textureCube(s_textureCube3, coord.xyz);
+        if (stage == 4) return textureCube(s_textureCube4, coord.xyz);
+        if (stage == 5) return textureCube(s_textureCube5, coord.xyz);
+        if (stage == 6) return textureCube(s_textureCube6, coord.xyz);
+        return textureCube(s_textureCube7, coord.xyz);
+    }
+    vec2 uv = coord.xy;
+    vec4 color;
+    if (stage == 0) color = texture2D(s_texture0, uv);
+    else if (stage == 1) color = texture2D(s_texture1, uv);
+    else if (stage == 2) color = texture2D(s_texture2, uv);
+    else if (stage == 3) color = texture2D(s_texture3, uv);
+    else if (stage == 4) color = texture2D(s_texture4, uv);
+    else if (stage == 5) color = texture2D(s_texture5, uv);
+    else if (stage == 6) color = texture2D(s_texture6, uv);
+    else color = texture2D(s_texture7, uv);
+    if (samplerType == 2) return color.rrrr;
+    return color;
 }
 
 vec2 getSampleCoord(vec4 coord, int transformFlags)
@@ -211,7 +233,8 @@ void main()
             stageUv.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = getTextureColor(stage, stageUv, hasTexture);
+        vec4 sampleCoord = vec4(stageUv, stageCoord.zw);
+        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);

@@ -66,7 +66,8 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
             a.AlphaArg1 != b.AlphaArg1 ||
             a.AlphaArg2 != b.AlphaArg2 ||
             a.ResultIsTemp != b.ResultIsTemp ||
-            a.ProjectedSampler != b.ProjectedSampler)
+            a.ProjectedSampler != b.ProjectedSampler ||
+            a.SamplerType != b.SamplerType)
             return false;
     }
     return true;
@@ -102,6 +103,7 @@ size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, stage.AlphaArg2);
         seed = HashCombine(seed, stage.ResultIsTemp ? 1u : 0u);
         seed = HashCombine(seed, stage.ProjectedSampler ? 1u : 0u);
+        seed = HashCombine(seed, stage.SamplerType);
     }
     return seed;
 }
@@ -154,6 +156,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.AlphaArg2 = desc.GetStageAlphaArg2(stage);
         dst.ResultIsTemp = desc.GetStageResultIsTemp(stage);
         dst.ProjectedSampler = desc.GetStageProjectedSampler(stage);
+        dst.SamplerType = desc.GetStageSamplerType(stage);
 
         if (dst.ColorOp == 0 || dst.ColorOp == CKRST_TOP_DISABLE)
             break;
@@ -197,11 +200,15 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.Set(CKFF_SPEC_RANGE_FOG, key.RangeFog ? 1u : 0u);
     info.Set(CKFF_SPEC_FLAT_SHADE, key.FlatShade ? 1u : 0u);
     CKDWORD projectedSamplerMask = 0;
+    CKDWORD samplerTypeMask = 0;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         if (key.Stages[stage].ProjectedSampler)
             projectedSamplerMask |= (1u << stage);
     }
     info.Set(CKFF_SPEC_PROJECTED_SAMPLER_MASK, projectedSamplerMask);
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        samplerTypeMask |= (key.Stages[stage].SamplerType & 3u) << (stage * 2);
+    info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK, samplerTypeMask);
 
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];

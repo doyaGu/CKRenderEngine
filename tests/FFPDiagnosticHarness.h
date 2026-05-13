@@ -33,6 +33,9 @@ public:
     CKDWORD LastStencilRef = 0;
     CKDWORD LastStencilReadMask = 0;
     CKDWORD LastStencilWriteMask = 0;
+    CKDWORD LastTextureStage = 0;
+    CKDWORD LastTextureUniform = 0;
+    CKDWORD LastTextureHandle = 0;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
@@ -70,7 +73,12 @@ public:
         }
     }
     void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *) override {}
-    void SetTexture(CKDWORD, CKDWORD, CKDWORD, CKSamplerDesc *) override { ++TextureBindCount; }
+    void SetTexture(CKDWORD stage, CKDWORD uniform, CKDWORD texture, CKSamplerDesc *) override {
+        LastTextureStage = stage;
+        LastTextureUniform = uniform;
+        LastTextureHandle = texture;
+        ++TextureBindCount;
+    }
     void SetUniform(CKDWORD uniform, const void *data, CKDWORD count) override {
         if (!data)
             return;

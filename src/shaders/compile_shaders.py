@@ -252,7 +252,6 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     set_spec_bits(dwords, 5, 12, 2, key["pixelFogMode"])
     set_spec_bits(dwords, 5, 14, 1, 1 if key["rangeFog"] else 0)
     projected_sampler_mask = 0
-
     for stage_index, stage in enumerate(key["stages"][:4]):
         if stage["projectedSampler"]:
             projected_sampler_mask |= (1 << stage_index)
@@ -266,6 +265,8 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
         set_spec_bits(dwords, word, 20, 5, repack_ffp_arg(stage["alphaArg1"]))
         set_spec_bits(dwords, word, 25, 5, repack_ffp_arg(stage["alphaArg2"]))
         set_spec_bits(dwords, word, 30, 1, 1 if stage["resultIsTemp"] else 0)
+    for stage_index, stage in enumerate(key["stages"]):
+        set_spec_bits(dwords, 5, 16 + stage_index * 2, 2, stage["samplerType"])
 
     set_spec_bits(dwords, 5, 0, 4, projected_sampler_mask)
     return dwords
@@ -286,6 +287,7 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
         "alphaArg2": read_uint32(stage.get("alphaArg2"), f"{field}.alphaArg2"),
         "resultIsTemp": read_bool(stage.get("resultIsTemp"), f"{field}.resultIsTemp"),
         "projectedSampler": read_bool(stage.get("projectedSampler", False), f"{field}.projectedSampler"),
+        "samplerType": read_uint32(stage.get("samplerType", 0), f"{field}.samplerType") & 3,
     }
 
 
@@ -301,6 +303,7 @@ def default_specialized_stage() -> dict[str, object]:
         "alphaArg2": 0,
         "resultIsTemp": False,
         "projectedSampler": False,
+        "samplerType": 0,
     }
 
 
@@ -517,6 +520,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"{prefix}.AlphaArg2 = {stage['alphaArg2']}u;\n")
         f.write(f"{prefix}.ResultIsTemp = {'true' if stage['resultIsTemp'] else 'false'};\n")
         f.write(f"{prefix}.ProjectedSampler = {'true' if stage['projectedSampler'] else 'false'};\n")
+        f.write(f"{prefix}.SamplerType = {stage['samplerType']};\n")
     f.write("    return key;\n")
     f.write("}\n\n")
 

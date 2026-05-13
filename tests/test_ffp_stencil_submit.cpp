@@ -464,6 +464,40 @@ void StageConstantDoesNotCreateTextureDependency() {
     ffp.Shutdown();
 }
 
+void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Cubemap draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_CUBE,
+              "Cubemap texture must mark stage 0 as cube sampler");
+    TestCheck(context.Encoder.TextureBindCount == 1,
+              "Cubemap draw must bind one texture");
+    TestCheck(context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureCube[0],
+              "Cubemap draw must bind the cube sampler uniform");
+    TestCheck(context.Encoder.LastTextureHandle == 77,
+              "Cubemap draw must bind the requested texture handle");
+
+    ffp.Shutdown();
+}
+
 void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -764,6 +798,8 @@ int main() {
               &NullTextureStagePreservesSpecialization);
     tests.Run("Stage constant does not create texture dependency",
               &StageConstantDoesNotCreateTextureDependency);
+    tests.Run("Cube texture uses cube sampler specialization and binding",
+              &CubeTextureUsesCubeSamplerSpecializationAndBinding);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
     tests.Run("Projected sampler stages zero to three enter specialization mask",

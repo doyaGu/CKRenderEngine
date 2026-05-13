@@ -233,7 +233,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
             dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
         }
     }
-    dev->m_FFPipeline.SetTexture(TextureStage, m_ObjectIndex);
+    dev->m_FFPipeline.SetTexture(TextureStage, m_ObjectIndex, m_TextureFlags);
     return result;
 }
 

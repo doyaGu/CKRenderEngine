@@ -261,6 +261,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -271,6 +272,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -281,6 +283,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -291,6 +294,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -301,6 +305,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -311,6 +316,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -321,6 +327,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -331,6 +338,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -388,6 +396,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -398,6 +407,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -408,6 +418,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -418,6 +429,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -428,6 +440,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -438,6 +451,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -448,6 +462,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -458,6 +473,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -515,6 +531,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 7u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 2u;
@@ -525,6 +542,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = true;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -535,6 +553,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -545,6 +564,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -555,6 +575,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -565,6 +586,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -575,6 +597,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -585,6 +608,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -642,6 +666,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -652,6 +677,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -662,6 +688,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -672,6 +699,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -682,6 +710,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -692,6 +721,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -702,6 +732,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -712,6 +743,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -769,6 +801,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -779,6 +812,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -789,6 +823,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -799,6 +834,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -809,6 +845,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -819,6 +856,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -829,6 +867,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -839,6 +878,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -896,6 +936,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -906,6 +947,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -916,6 +958,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -926,6 +969,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -936,6 +980,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -946,6 +991,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -956,6 +1002,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -966,6 +1013,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1023,6 +1071,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1033,6 +1082,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1043,6 +1093,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1053,6 +1104,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1063,6 +1115,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1073,6 +1126,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1083,6 +1137,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1093,6 +1148,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1150,6 +1206,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1160,6 +1217,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1170,6 +1228,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1180,6 +1239,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1190,6 +1250,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1200,6 +1261,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1210,6 +1272,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1220,6 +1283,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1277,6 +1341,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1287,6 +1352,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1297,6 +1363,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1307,6 +1374,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1317,6 +1385,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1327,6 +1396,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1337,6 +1407,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1347,6 +1418,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1404,6 +1476,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1414,6 +1487,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1424,6 +1498,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1434,6 +1509,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1444,6 +1520,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1454,6 +1531,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1464,6 +1542,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1474,6 +1553,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1531,6 +1611,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1541,6 +1622,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1551,6 +1633,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1561,6 +1644,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1571,6 +1655,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1581,6 +1666,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1591,6 +1677,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1601,6 +1688,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1658,6 +1746,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = true;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1668,6 +1757,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1678,6 +1768,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1688,6 +1779,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1698,6 +1790,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1708,6 +1801,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1718,6 +1812,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1728,6 +1823,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1785,6 +1881,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 4u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 2u;
@@ -1795,6 +1892,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1805,6 +1903,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1815,6 +1914,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1825,6 +1925,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1835,6 +1936,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1845,6 +1947,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1855,6 +1958,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -1912,6 +2016,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = true;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -1922,6 +2027,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -1932,6 +2038,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -1942,6 +2049,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -1952,6 +2060,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -1962,6 +2071,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -1972,6 +2082,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -1982,6 +2093,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2039,6 +2151,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = true;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 7u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 1u;
@@ -2049,6 +2162,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2059,6 +2173,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2069,6 +2184,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2079,6 +2195,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2089,6 +2206,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2099,6 +2217,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2109,6 +2228,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2166,6 +2286,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2176,6 +2297,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2186,6 +2308,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2196,6 +2319,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2206,6 +2330,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2216,6 +2341,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2226,6 +2352,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2236,6 +2363,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2293,6 +2421,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2303,6 +2432,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2313,6 +2443,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2323,6 +2454,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2333,6 +2465,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2343,6 +2476,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2353,6 +2487,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2363,6 +2498,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2420,6 +2556,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2430,6 +2567,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2440,6 +2578,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2450,6 +2589,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2460,6 +2600,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2470,6 +2611,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2480,6 +2622,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2490,6 +2633,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2547,6 +2691,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2557,6 +2702,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2567,6 +2713,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2577,6 +2724,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2587,6 +2735,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2597,6 +2746,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2607,6 +2757,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2617,6 +2768,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2674,6 +2826,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2684,6 +2837,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2694,6 +2848,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2704,6 +2859,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2714,6 +2870,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2724,6 +2881,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2734,6 +2892,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2744,6 +2903,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2801,6 +2961,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2811,6 +2972,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2821,6 +2983,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2831,6 +2994,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2841,6 +3005,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2851,6 +3016,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2861,6 +3027,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2871,6 +3038,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -2928,6 +3096,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -2938,6 +3107,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -2948,6 +3118,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -2958,6 +3129,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -2968,6 +3140,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -2978,6 +3151,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -2988,6 +3162,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -2998,6 +3173,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3055,6 +3231,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3065,6 +3242,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3075,6 +3253,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3085,6 +3264,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3095,6 +3275,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3105,6 +3286,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3115,6 +3297,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3125,6 +3308,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3182,6 +3366,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3192,6 +3377,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3202,6 +3388,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3212,6 +3399,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3222,6 +3410,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3232,6 +3421,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3242,6 +3432,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3252,6 +3443,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3309,6 +3501,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3319,6 +3512,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3329,6 +3523,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3339,6 +3534,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3349,6 +3545,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3359,6 +3556,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3369,6 +3567,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3379,6 +3578,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3436,6 +3636,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3446,6 +3647,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3456,6 +3658,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3466,6 +3669,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3476,6 +3680,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3486,6 +3691,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3496,6 +3702,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3506,6 +3713,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3563,6 +3771,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3573,6 +3782,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3583,6 +3793,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3593,6 +3804,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3603,6 +3815,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3613,6 +3826,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3623,6 +3837,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3633,6 +3848,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3690,6 +3906,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3700,6 +3917,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3710,6 +3928,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3720,6 +3939,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3730,6 +3950,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3740,6 +3961,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3750,6 +3972,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3760,6 +3983,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3817,6 +4041,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3827,6 +4052,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3837,6 +4063,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3847,6 +4074,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3857,6 +4085,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3867,6 +4096,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -3877,6 +4107,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -3887,6 +4118,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -3944,6 +4176,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -3954,6 +4187,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -3964,6 +4198,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -3974,6 +4209,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -3984,6 +4220,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -3994,6 +4231,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4004,6 +4242,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4014,6 +4253,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4071,6 +4311,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 4u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 2u;
@@ -4081,6 +4322,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 1u;
     key.FS.Stages[2].ColorArg0 = 1u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4091,6 +4333,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[2].AlphaArg2 = 1u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4101,6 +4344,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4111,6 +4355,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4121,6 +4366,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4131,6 +4377,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4141,6 +4388,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4198,6 +4446,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -4208,6 +4457,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4218,6 +4468,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4228,6 +4479,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4238,6 +4490,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4248,6 +4501,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4258,6 +4512,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4268,6 +4523,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4325,6 +4581,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -4335,6 +4592,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4345,6 +4603,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4355,6 +4614,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4365,6 +4625,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4375,6 +4636,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4385,6 +4647,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4395,6 +4658,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4452,6 +4716,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -4462,6 +4727,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4472,6 +4738,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4482,6 +4749,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4492,6 +4760,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4502,6 +4771,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4512,6 +4782,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4522,6 +4793,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4579,6 +4851,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 4u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 2u;
@@ -4589,6 +4862,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 1u;
     key.FS.Stages[2].ColorArg0 = 1u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4599,6 +4873,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[2].AlphaArg2 = 1u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4609,6 +4884,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4619,6 +4895,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4629,6 +4906,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4639,6 +4917,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4649,6 +4928,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4706,6 +4986,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -4716,6 +4997,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4726,6 +5008,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4736,6 +5019,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4746,6 +5030,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4756,6 +5041,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4766,6 +5052,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4776,6 +5063,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4833,6 +5121,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 4u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 2u;
@@ -4843,6 +5132,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 1u;
     key.FS.Stages[2].ColorArg0 = 1u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4853,6 +5143,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[2].AlphaArg2 = 1u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4863,6 +5154,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -4873,6 +5165,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -4883,6 +5176,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -4893,6 +5187,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -4903,6 +5198,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -4960,6 +5256,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -4970,6 +5267,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -4980,6 +5278,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -4990,6 +5289,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5000,6 +5300,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5010,6 +5311,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5020,6 +5322,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5030,6 +5333,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5087,6 +5391,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5097,6 +5402,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5107,6 +5413,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5117,6 +5424,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5127,6 +5435,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5137,6 +5446,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5147,6 +5457,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5157,6 +5468,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5214,6 +5526,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5224,6 +5537,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5234,6 +5548,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5244,6 +5559,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5254,6 +5570,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5264,6 +5581,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5274,6 +5592,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5284,6 +5603,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5341,6 +5661,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5351,6 +5672,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5361,6 +5683,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5371,6 +5694,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5381,6 +5705,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5391,6 +5716,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5401,6 +5727,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5411,6 +5738,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5468,6 +5796,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5478,6 +5807,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5488,6 +5818,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5498,6 +5829,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5508,6 +5840,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5518,6 +5851,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5528,6 +5862,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5538,6 +5873,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5595,6 +5931,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5605,6 +5942,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5615,6 +5953,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5625,6 +5964,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5635,6 +5975,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5645,6 +5986,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5655,6 +5997,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5665,6 +6008,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5722,6 +6066,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5732,6 +6077,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5742,6 +6088,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5752,6 +6099,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5762,6 +6110,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5772,6 +6121,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5782,6 +6132,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5792,6 +6143,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5849,6 +6201,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5859,6 +6212,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5869,6 +6223,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -5879,6 +6234,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -5889,6 +6245,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -5899,6 +6256,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -5909,6 +6267,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -5919,6 +6278,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -5976,6 +6336,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 1u;
     key.FS.Stages[1].ColorArg0 = 1u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -5986,6 +6347,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 1u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -5996,6 +6358,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -6006,6 +6369,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -6016,6 +6380,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -6026,6 +6391,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -6036,6 +6402,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -6046,6 +6413,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
@@ -6103,6 +6471,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[0].AlphaArg2 = 1u;
     key.FS.Stages[0].ResultIsTemp = false;
     key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
     key.FS.Stages[1].ColorOp = 0u;
     key.FS.Stages[1].ColorArg0 = 0u;
     key.FS.Stages[1].ColorArg1 = 0u;
@@ -6113,6 +6482,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[1].AlphaArg2 = 0u;
     key.FS.Stages[1].ResultIsTemp = false;
     key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
     key.FS.Stages[2].ColorOp = 0u;
     key.FS.Stages[2].ColorArg0 = 0u;
     key.FS.Stages[2].ColorArg1 = 0u;
@@ -6123,6 +6493,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[2].AlphaArg2 = 0u;
     key.FS.Stages[2].ResultIsTemp = false;
     key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
     key.FS.Stages[3].ColorOp = 0u;
     key.FS.Stages[3].ColorArg0 = 0u;
     key.FS.Stages[3].ColorArg1 = 0u;
@@ -6133,6 +6504,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[3].AlphaArg2 = 0u;
     key.FS.Stages[3].ResultIsTemp = false;
     key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
     key.FS.Stages[4].ColorOp = 0u;
     key.FS.Stages[4].ColorArg0 = 0u;
     key.FS.Stages[4].ColorArg1 = 0u;
@@ -6143,6 +6515,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[4].AlphaArg2 = 0u;
     key.FS.Stages[4].ResultIsTemp = false;
     key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
     key.FS.Stages[5].ColorOp = 0u;
     key.FS.Stages[5].ColorArg0 = 0u;
     key.FS.Stages[5].ColorArg1 = 0u;
@@ -6153,6 +6526,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[5].AlphaArg2 = 0u;
     key.FS.Stages[5].ResultIsTemp = false;
     key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
     key.FS.Stages[6].ColorOp = 0u;
     key.FS.Stages[6].ColorArg0 = 0u;
     key.FS.Stages[6].ColorArg1 = 0u;
@@ -6163,6 +6537,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[6].AlphaArg2 = 0u;
     key.FS.Stages[6].ResultIsTemp = false;
     key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
     key.FS.Stages[7].ColorOp = 0u;
     key.FS.Stages[7].ColorArg0 = 0u;
     key.FS.Stages[7].ColorArg1 = 0u;
@@ -6173,6 +6548,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.Stages[7].AlphaArg2 = 0u;
     key.FS.Stages[7].ResultIsTemp = false;
     key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
     return key;
 }
 
