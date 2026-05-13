@@ -721,6 +721,47 @@ void VertexBlendZeroWeightsUploadsMatrixPalette() {
     ffp.Shutdown();
 }
 
+void VertexBlendUploadsWorldMatrixPaletteForClipPlanes() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxMatrix world;
+    world.Identity();
+    world[0][0] = 2.0f;
+    VxMatrix view;
+    view.Identity();
+    view[0][0] = 3.0f;
+    ffp.SetTransform(VXMATRIX_WORLD, world);
+    ffp.SetTransform(VXMATRIX_VIEW, view);
+
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    context.Encoder.MatrixUniforms.insert(matrixUniform);
+
+    VxPlane plane;
+    plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    plane.m_D = 0.0f;
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1u);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
+
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator matrices =
+        context.Encoder.FloatUniforms.find(matrixUniform);
+    TestCheck(matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 80,
+              "Vertex blend with clip planes must upload matrix palette");
+    if (matrices != context.Encoder.FloatUniforms.end() && matrices->second.size() >= 80) {
+        TestCheck(matrices->second[64] == 2.0f,
+                  "Vertex blend clip planes must use world-space blend palette, not model-view palette");
+    }
+
+    ffp.Shutdown();
+}
+
 void VertexBlendWeightFlagsCreateWeightLayout() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -841,6 +882,8 @@ int main() {
               &DrawUploadsPerStageBumpEnvUniforms);
     tests.Run("Vertex blend zero weights uploads matrix palette",
               &VertexBlendZeroWeightsUploadsMatrixPalette);
+    tests.Run("Vertex blend uploads world matrix palette for clip planes",
+              &VertexBlendUploadsWorldMatrixPaletteForClipPlanes);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
     tests.Run("Indexed vertex blend requires index layout",
