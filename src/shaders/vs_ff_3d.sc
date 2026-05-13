@@ -7,15 +7,16 @@ $input a_position, a_normal, a_indices, a_weight, a_texcoord0, a_texcoord1, a_te
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #endif
 #if CKFF_VS_CLIP_DISTANCE
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos, v_clipDistance0, v_clipDistance1
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
 #else
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos
 #endif
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 
 uniform mat4 u_ffMatrices[8];
+uniform mat4 u_vertexBlendMatrices[4];
 uniform mat4 u_texMatrix[8];
 uniform vec4 u_ffDrawParams[19];
 uniform vec4 u_lights[56];
@@ -311,10 +312,10 @@ int ckffBlendIndex(int index, uvec4 blendIndices)
 
 mat4 ckffBlendMatrix(int index)
 {
-    if (index == 1) return u_ffMatrices[5];
-    if (index == 2) return u_ffMatrices[6];
-    if (index == 3) return u_ffMatrices[7];
-    return u_ffMatrices[4];
+    if (index == 1) return u_vertexBlendMatrices[1];
+    if (index == 2) return u_vertexBlendMatrices[2];
+    if (index == 3) return u_vertexBlendMatrices[3];
+    return u_vertexBlendMatrices[0];
 }
 #endif
 
@@ -326,7 +327,7 @@ vec4 selectMaterialSource(int slot, float source, vec4 materialValue, vec4 color
     return materialValue;
 }
 
-vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
+vec4 selectTexcoord(int index, vec4 tc0, vec4 tc1, vec4 tc2, vec4 tc3, vec4 tc4, vec4 tc5, vec4 tc6, vec4 tc7)
 {
     if (index == 1) return tc1;
     if (index == 2) return tc2;
@@ -338,7 +339,7 @@ vec2 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4,
     return tc0;
 }
 
-vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7, vec3 viewPos, vec3 viewNormal)
+vec4 generateTexcoord(int stage, int packedIndex, vec4 tc0, vec4 tc1, vec4 tc2, vec4 tc3, vec4 tc4, vec4 tc5, vec4 tc6, vec4 tc7, vec3 viewPos, vec3 viewNormal)
 {
     int generation = ckffVsTexGenMode(stage, packedIndex);
     int index = ckffVsTexcoordIndex(stage, packedIndex);
@@ -356,7 +357,7 @@ vec4 generateTexcoord(int stage, int packedIndex, vec2 tc0, vec2 tc1, vec2 tc2, 
         return vec4(refl.xy / max(m, 0.0001) + 0.5, 0.0, 1.0);
     }
     int declaredCount = ckffVsTexcoordComponentCount(index & 7);
-    vec4 result = vec4(selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7), 0.0, 1.0);
+    vec4 result = selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7);
     if (declaredCount <= 1) result.y = 0.0;
     if (declaredCount <= 2) result.z = 0.0;
     if (declaredCount <= 3) result.w = 0.0;
@@ -411,6 +412,7 @@ void main()
 
     vec4 viewPos;
     vec3 viewNormal;
+    vec4 worldClipPos;
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
     bool vertexBlendActive = vertexBlendMode == 1;
     if (vertexBlendActive) {
@@ -432,22 +434,24 @@ void main()
         viewPos = mul(u_ffMatrices[2], blendedWorldPos);
         viewNormal = mul(u_ffMatrices[3], vec4(blendedNormal, 0.0)).xyz;
         gl_Position = mul(u_ffMatrices[0], blendedWorldPos);
-        v_clipPos = blendedWorldPos;
+        worldClipPos = blendedWorldPos;
+        v_fogPos = gl_Position;
     } else {
 #endif
         gl_Position = mul(u_ffMatrices[0], localPos);
-        v_clipPos = mul(u_ffMatrices[1], localPos);
+        worldClipPos = mul(u_ffMatrices[1], localPos);
+        v_fogPos = gl_Position;
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
     }
 #endif
 #if CKFF_VS_CLIP_DISTANCE
     int clipCount = int(u_clipParams.x);
-    v_clipDistance0.x = clipCount > 0 ? dot(v_clipPos, u_clipPlanes[0]) : 0.0;
-    v_clipDistance0.y = clipCount > 1 ? dot(v_clipPos, u_clipPlanes[1]) : 0.0;
-    v_clipDistance0.z = clipCount > 2 ? dot(v_clipPos, u_clipPlanes[2]) : 0.0;
-    v_clipDistance0.w = clipCount > 3 ? dot(v_clipPos, u_clipPlanes[3]) : 0.0;
-    v_clipDistance1.x = clipCount > 4 ? dot(v_clipPos, u_clipPlanes[4]) : 0.0;
-    v_clipDistance1.y = clipCount > 5 ? dot(v_clipPos, u_clipPlanes[5]) : 0.0;
+    v_clipDistance0.x = clipCount > 0 ? dot(worldClipPos, u_clipPlanes[0]) : 0.0;
+    v_clipDistance0.y = clipCount > 1 ? dot(worldClipPos, u_clipPlanes[1]) : 0.0;
+    v_clipDistance0.z = clipCount > 2 ? dot(worldClipPos, u_clipPlanes[2]) : 0.0;
+    v_clipDistance0.w = clipCount > 3 ? dot(worldClipPos, u_clipPlanes[3]) : 0.0;
+    v_clipDistance1.x = clipCount > 4 ? dot(worldClipPos, u_clipPlanes[4]) : 0.0;
+    v_clipDistance1.y = clipCount > 5 ? dot(worldClipPos, u_clipPlanes[5]) : 0.0;
     v_clipDistance1.zw = vec2(0.0, 0.0);
 #endif
 #if CKFF_VS_NEEDS_VIEW_SPACE
@@ -526,7 +530,7 @@ void main()
     bool lightingEnabled = (CKFF_VS_BITS & (1 << 13)) != 0;
     bool specularOutputEnabled = (CKFF_VS_BITS & (1 << 15)) != 0;
     int lightCount = (CKFF_VS_BITS >> 17) & 15;
-    vec3 globalAmbient = vec3(0.0, 0.0, 0.0);
+    vec3 globalAmbient = u_ffDrawParams[6].yzw;
 #else
     int rawLightCount = int(u_ffDrawParams[6].x);
     bool lightingEnabled = ckffVsBit(13, rawLightCount >= 0);

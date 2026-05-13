@@ -48,7 +48,7 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
     if (formatFlags & CKFF_VF_BLENDINDEX)  stride += 4;  // uint8x4 blend indices
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if (formatFlags & CKFF_VF_TEXCOORD(stage))
-            stride += 8; // float2
+            stride += 16; // float4
     }
     if (formatFlags & CKFF_VF_COLOR0)    stride += 4;  // uint8x4 normalized
     if (formatFlags & CKFF_VF_COLOR1)    stride += 4;  // uint8x4 normalized
@@ -183,12 +183,12 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         if (formatFlags & CKFF_VF_TEXCOORD(stage)) {
             elements[count].Attrib = TexCoordAttrib(stage);
             elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-            elements[count].Count = 2;
+            elements[count].Count = 4;
             elements[count].Normalized = FALSE;
             elements[count].Offset = offset;
             elements[count].Stream = 0;
             count++;
-            offset += 8;
+            offset += 16;
         }
     }
     if (formatFlags & CKFF_VF_COLOR0) {

@@ -119,6 +119,11 @@ void CKFFShaderCache::CreateUniforms() {
     m_Uniforms.u_ffMatrices = AllocUniformHandle();
     m_Context->CreateUniform(m_Uniforms.u_ffMatrices, &desc);
 
+    desc.Name = (char *)"u_vertexBlendMatrices";
+    desc.Count = CKFF_VERTEX_BLEND_MATRIX_COUNT;
+    m_Uniforms.u_vertexBlendMatrices = AllocUniformHandle();
+    m_Context->CreateUniform(m_Uniforms.u_vertexBlendMatrices, &desc);
+
     desc.Type = CKRST_UNIFORM_FLOAT4;
     desc.Name = (char *)"u_ffDrawParams";
     desc.Count = 19;

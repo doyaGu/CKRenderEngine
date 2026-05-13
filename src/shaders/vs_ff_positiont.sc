@@ -3,9 +3,9 @@ $input a_position, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoor
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
 #if CKFF_VS_CLIP_DISTANCE
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos, v_clipDistance0, v_clipDistance1
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
 #else
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_clipPos
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos
 #endif
 
 #include "bgfx_shader.sh"
@@ -136,17 +136,16 @@ int ckffVsTexTransformFlags(int stage, float runtimeFlags)
 #endif
 }
 
-vec4 selectTexcoord(int index, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3, vec2 tc4, vec2 tc5, vec2 tc6, vec2 tc7)
+vec4 selectTexcoord(int index, vec4 tc0, vec4 tc1, vec4 tc2, vec4 tc3, vec4 tc4, vec4 tc5, vec4 tc6, vec4 tc7)
 {
-    vec2 uv = tc0;
-    if (index == 1) uv = tc1;
-    else if (index == 2) uv = tc2;
-    else if (index == 3) uv = tc3;
-    else if (index == 4) uv = tc4;
-    else if (index == 5) uv = tc5;
-    else if (index == 6) uv = tc6;
-    else if (index == 7) uv = tc7;
-    return vec4(uv, 0.0, 1.0);
+    if (index == 1) return tc1;
+    if (index == 2) return tc2;
+    if (index == 3) return tc3;
+    if (index == 4) return tc4;
+    if (index == 5) return tc5;
+    if (index == 6) return tc6;
+    if (index == 7) return tc7;
+    return tc0;
 }
 
 vec4 transformTexcoord(int stage, vec4 coord)
@@ -160,8 +159,7 @@ vec4 transformTexcoord(int stage, vec4 coord)
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
-    bool applyTransform = count > 1 && count <= 4;
-    vec4 transformed = applyTransform ? mul(u_texMatrix[stage], coord) : coord;
+    vec4 transformed = coord;
     if ((flags & 0x100) != 0) {
         float divisor = count == 1 ? transformed.x
                       : count == 2 ? transformed.y
@@ -184,15 +182,16 @@ void main()
     float clipX = a_position.x * u_viewport.x + u_viewport.z;
     float clipY = a_position.y * u_viewport.y + u_viewport.w;
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
-    v_clipPos = vec4(a_position.xyz, 1.0);
+    vec4 worldClipPos = vec4(a_position.xyz, 1.0);
+    v_fogPos = gl_Position;
 #if CKFF_VS_CLIP_DISTANCE
     int clipCount = int(u_clipParams.x);
-    v_clipDistance0.x = clipCount > 0 ? dot(v_clipPos, u_clipPlanes[0]) : 0.0;
-    v_clipDistance0.y = clipCount > 1 ? dot(v_clipPos, u_clipPlanes[1]) : 0.0;
-    v_clipDistance0.z = clipCount > 2 ? dot(v_clipPos, u_clipPlanes[2]) : 0.0;
-    v_clipDistance0.w = clipCount > 3 ? dot(v_clipPos, u_clipPlanes[3]) : 0.0;
-    v_clipDistance1.x = clipCount > 4 ? dot(v_clipPos, u_clipPlanes[4]) : 0.0;
-    v_clipDistance1.y = clipCount > 5 ? dot(v_clipPos, u_clipPlanes[5]) : 0.0;
+    v_clipDistance0.x = clipCount > 0 ? dot(worldClipPos, u_clipPlanes[0]) : 0.0;
+    v_clipDistance0.y = clipCount > 1 ? dot(worldClipPos, u_clipPlanes[1]) : 0.0;
+    v_clipDistance0.z = clipCount > 2 ? dot(worldClipPos, u_clipPlanes[2]) : 0.0;
+    v_clipDistance0.w = clipCount > 3 ? dot(worldClipPos, u_clipPlanes[3]) : 0.0;
+    v_clipDistance1.x = clipCount > 4 ? dot(worldClipPos, u_clipPlanes[4]) : 0.0;
+    v_clipDistance1.y = clipCount > 5 ? dot(worldClipPos, u_clipPlanes[5]) : 0.0;
     v_clipDistance1.zw = vec2(0.0, 0.0);
 #endif
 

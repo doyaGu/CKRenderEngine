@@ -162,6 +162,8 @@ public:
     VxDrawPrimitiveData *LockCurrentVB(CKDWORD VertexCount) override;
     CKBOOL ReleaseCurrentVB() override;
     void SetTextureMatrix(const VxMatrix &M, int Stage = 0) override;
+    void SetVertexBlendMatrix(CKDWORD Index, const VxMatrix &M);
+    void ResetVertexBlendMatrices();
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 

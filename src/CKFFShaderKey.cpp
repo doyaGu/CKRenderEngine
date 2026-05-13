@@ -65,6 +65,7 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
             a.AlphaArg1 != b.AlphaArg1 ||
             a.AlphaArg2 != b.AlphaArg2 ||
             a.ResultIsTemp != b.ResultIsTemp ||
+            a.HasTexture != b.HasTexture ||
             a.ProjectedSampler != b.ProjectedSampler ||
             a.SamplerType != b.SamplerType)
             return false;
@@ -100,6 +101,7 @@ size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, stage.AlphaArg1);
         seed = HashCombine(seed, stage.AlphaArg2);
         seed = HashCombine(seed, stage.ResultIsTemp ? 1u : 0u);
+        seed = HashCombine(seed, stage.HasTexture ? 1u : 0u);
         seed = HashCombine(seed, stage.ProjectedSampler ? 1u : 0u);
         seed = HashCombine(seed, stage.SamplerType);
     }
@@ -127,9 +129,19 @@ bool CKFFShaderKeyArgUsesTexture(CKDWORD arg) {
     return CKFFBaseTextureArg(arg) == CKRST_TA_TEXTURE;
 }
 
-CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask) {
-    (void)textureBoundMask;
+static bool CKFFShaderKeyOpUsesTexture(CKDWORD op, CKDWORD arg0, CKDWORD arg1, CKDWORD arg2) {
+    const CKDWORD mask = CKFFShaderKeyArgsMask(op);
+    return ((mask & 0b001u) != 0 && CKFFShaderKeyArgUsesTexture(arg0)) ||
+           ((mask & 0b010u) != 0 && CKFFShaderKeyArgUsesTexture(arg1)) ||
+           ((mask & 0b100u) != 0 && CKFFShaderKeyArgUsesTexture(arg2));
+}
 
+static bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage) {
+    return CKFFShaderKeyOpUsesTexture(stage.ColorOp, stage.ColorArg0, stage.ColorArg1, stage.ColorArg2) ||
+           CKFFShaderKeyOpUsesTexture(stage.AlphaOp, stage.AlphaArg0, stage.AlphaArg1, stage.AlphaArg2);
+}
+
+CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask) {
     CKFFShaderKeyFS key;
     key.GlobalSpecularEnable = desc.GetSpecularAdd();
     key.AlphaTestEnable = desc.GetAlphaTestEnabled();
@@ -165,6 +177,9 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
             dst.AlphaOp = CKRST_TOP_SELECTARG1;
             dst.AlphaArg1 = CKRST_TA_DIFFUSE;
         }
+
+        dst.HasTexture = CKFFShaderKeyStageUsesTexture(dst) &&
+                         ((textureBoundMask & (1u << stage)) != 0);
 
         activeCount = stage + 1;
     }

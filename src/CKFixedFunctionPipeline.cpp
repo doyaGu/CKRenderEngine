@@ -12,32 +12,34 @@
 static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uniform) {
     switch (uniform) {
     case 1: return "u_ffMatrices";
-    case 2: return "u_ffDrawParams";
-    case 3: return "u_ffVertexParams";
-    case 4: return "u_ffFragmentParams";
-    case 5: return "u_lights";
-    case 6: return "u_ckModelViewProj";
-    case 7: return "u_ckModel";
-    case 8: return "u_ckModelView";
-    case 9: return "u_ckNormalMatrix";
-    case 10: return "u_texMatrix";
-    case 11: return "u_lightParams";
-    case 12: return "u_material";
-    case 13: return "u_ffParams";
-    case 14: return "u_lightModelParams";
-    case 15: return "u_fogParams";
-    case 16: return "u_fogColor";
-    case 17: return "u_texFactor";
-    case 18: return "u_alphaParams";
-    case 19: return "u_bumpEnv";
-    case 20: return "u_viewport";
-    case 21: return "u_stageParams";
-    case 22: return "u_ffSpec";
-    case 23: return "u_clipPlanes";
-    case 24: return "u_clipParams";
+    case 2: return "u_vertexBlendMatrices";
+    case 3: return "u_ffDrawParams";
+    case 4: return "u_ffVertexParams";
+    case 5: return "u_ffFragmentParams";
+    case 6: return "u_lights";
+    case 7: return "u_ckModelViewProj";
+    case 8: return "u_ckModel";
+    case 9: return "u_ckModelView";
+    case 10: return "u_ckNormalMatrix";
+    case 11: return "u_texMatrix";
+    case 12: return "u_lightParams";
+    case 13: return "u_material";
+    case 14: return "u_ffParams";
+    case 15: return "u_lightModelParams";
+    case 16: return "u_fogParams";
+    case 17: return "u_fogColor";
+    case 18: return "u_texFactor";
+    case 19: return "u_alphaParams";
+    case 20: return "u_bumpEnv";
+    case 21: return "u_viewport";
+    case 22: return "u_stageParams";
+    case 23: return "u_ffSpec";
+    case 24: return "u_clipPlanes";
+    case 25: return "u_clipParams";
     default: break;
     }
     if (uniform == u.u_ffMatrices) return "u_ffMatrices";
+    if (uniform == u.u_vertexBlendMatrices) return "u_vertexBlendMatrices";
     if (uniform == u.u_ffDrawParams) return "u_ffDrawParams";
     if (uniform == u.u_ffVertexParams) return "u_ffVertexParams";
     if (uniform == u.u_ffFragmentParams) return "u_ffFragmentParams";
@@ -70,29 +72,30 @@ static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uni
 
 static CKDWORD CKFFUniformDebugSlot(const CKFFUniformHandles &u, CKDWORD uniform) {
     if (uniform == u.u_ffMatrices) return 1;
-    if (uniform == u.u_ffDrawParams) return 2;
-    if (uniform == u.u_ffVertexParams) return 3;
-    if (uniform == u.u_ffFragmentParams) return 4;
-    if (uniform == u.u_lights) return 5;
-    if (uniform == u.u_ckModelViewProj) return 6;
-    if (uniform == u.u_ckModel) return 7;
-    if (uniform == u.u_ckModelView) return 8;
-    if (uniform == u.u_ckNormalMatrix) return 9;
-    if (uniform == u.u_texMatrix) return 10;
-    if (uniform == u.u_lightParams) return 11;
-    if (uniform == u.u_material) return 12;
-    if (uniform == u.u_ffParams) return 13;
-    if (uniform == u.u_lightModelParams) return 14;
-    if (uniform == u.u_fogParams) return 15;
-    if (uniform == u.u_fogColor) return 16;
-    if (uniform == u.u_texFactor) return 17;
-    if (uniform == u.u_alphaParams) return 18;
-    if (uniform == u.u_bumpEnv) return 19;
-    if (uniform == u.u_viewport) return 20;
-    if (uniform == u.u_stageParams) return 21;
-    if (uniform == u.u_ffSpec) return 22;
-    if (uniform == u.u_clipPlanes) return 23;
-    if (uniform == u.u_clipParams) return 24;
+    if (uniform == u.u_vertexBlendMatrices) return 2;
+    if (uniform == u.u_ffDrawParams) return 3;
+    if (uniform == u.u_ffVertexParams) return 4;
+    if (uniform == u.u_ffFragmentParams) return 5;
+    if (uniform == u.u_lights) return 6;
+    if (uniform == u.u_ckModelViewProj) return 7;
+    if (uniform == u.u_ckModel) return 8;
+    if (uniform == u.u_ckModelView) return 9;
+    if (uniform == u.u_ckNormalMatrix) return 10;
+    if (uniform == u.u_texMatrix) return 11;
+    if (uniform == u.u_lightParams) return 12;
+    if (uniform == u.u_material) return 13;
+    if (uniform == u.u_ffParams) return 14;
+    if (uniform == u.u_lightModelParams) return 15;
+    if (uniform == u.u_fogParams) return 16;
+    if (uniform == u.u_fogColor) return 17;
+    if (uniform == u.u_texFactor) return 18;
+    if (uniform == u.u_alphaParams) return 19;
+    if (uniform == u.u_bumpEnv) return 20;
+    if (uniform == u.u_viewport) return 21;
+    if (uniform == u.u_stageParams) return 22;
+    if (uniform == u.u_ffSpec) return 23;
+    if (uniform == u.u_clipPlanes) return 24;
+    if (uniform == u.u_clipParams) return 25;
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
         if (uniform == u.s_texture[i]) return 32 + (CKDWORD)i;
         if (uniform == u.s_textureCube[i]) return 40 + (CKDWORD)i;
@@ -121,6 +124,14 @@ static bool CKFFTextureSetEquals(
     return true;
 }
 
+static CKBYTE CKFFTexcoordComponentCount(CKBYTE count) {
+    if (count == 0)
+        return 2;
+    if (count > 4)
+        return 4;
+    return count;
+}
+
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
@@ -137,6 +148,10 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     Vx3DMatrixIdentity(m_Projection);
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++)
         Vx3DMatrixIdentity(m_TexMatrix[i]);
+    for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
+        Vx3DMatrixIdentity(m_VertexBlendMatrices[i]);
+        m_VertexBlendMatrixSet[i] = FALSE;
+    }
     ResetMaterial();
     memset(m_Lights, 0, sizeof(m_Lights));
     memset(m_LightEnabled, 0, sizeof(m_LightEnabled));
@@ -144,6 +159,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_TextureFlags, 0, sizeof(m_TextureFlags));
     memset(m_StageStates, 0, sizeof(m_StageStates));
     memset(m_UserClipPlanes, 0, sizeof(m_UserClipPlanes));
+    memset(m_CurrentTexcoordComponents, 0, sizeof(m_CurrentTexcoordComponents));
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
         m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_Viewport[0] = 2.0f / 800.0f;
@@ -200,6 +216,22 @@ void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
 
 CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
     return m_AlphaTestPrecision;
+}
+
+void CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
+    if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT)
+        return;
+    m_VertexBlendMatrices[index] = matrix;
+    m_VertexBlendMatrixSet[index] = TRUE;
+    m_DirtyFlags |= CKFF_DIRTY_MATRICES;
+}
+
+void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
+    for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
+        Vx3DMatrixIdentity(m_VertexBlendMatrices[i]);
+        m_VertexBlendMatrixSet[i] = FALSE;
+    }
+    m_DirtyFlags |= CKFF_DIRTY_MATRICES;
 }
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
@@ -531,6 +563,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV, data->PositionStride);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_CurrentTexcoordComponents[stage] = CKFFTexcoordComponentCount(data->TexCoordComponents[stage]);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
@@ -789,6 +823,8 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 #endif
 
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_CurrentTexcoordComponents[stage] = 2;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
@@ -1022,6 +1058,7 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(CKDWORD dpFlags, CK
         const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
         stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
+        stateDesc.VS.SetTexcoordComponentCount(stage, m_CurrentTexcoordComponents[stage]);
         if (!positionT) {
             const CKDWORD texgen = (packedTexcoord >> 16) & 0xFFFFu;
             const bool hasTransform = transformFlags != 0;
@@ -1145,6 +1182,8 @@ void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shad
 }
 
 CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount() const {
+    if (m_CurrentShaderKey.VS.GetHasPositionT())
+        return 0;
     CKDWORD count = 0;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKDWORD flags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
@@ -1271,20 +1310,24 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         }
         Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
         Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
-        VxMatrix identity;
-        identity.Identity();
-        VxMatrix matrices[8];
+        VxMatrix matrices[4];
         matrices[0] = vertexBlend ? viewProj : modelViewProj;
         matrices[1] = m_World;
         matrices[2] = vertexBlend ? m_View : modelView;
         matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
         if (vertexBlend) {
-            matrices[4] = m_World;
-            matrices[5] = identity;
-            matrices[6] = identity;
-            matrices[7] = identity;
+            VxMatrix identity;
+            identity.Identity();
+            VxMatrix palette[CKFF_VERTEX_BLEND_MATRIX_COUNT];
+            for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
+                if (m_VertexBlendMatrixSet[i])
+                    palette[i] = m_VertexBlendMatrices[i];
+                else
+                    palette[i] = (i == 0) ? m_World : identity;
+            }
+            UploadUniform(encoder, u.u_vertexBlendMatrices, palette, CKFF_VERTEX_BLEND_MATRIX_COUNT);
         }
-        UploadUniform(encoder, u.u_ffMatrices, matrices, vertexBlend ? 8 : (viewSpaceUniforms ? 4 : 2));
+        UploadUniform(encoder, u.u_ffMatrices, matrices, viewSpaceUniforms ? 4 : 2);
     }
     const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
     if (texMatrixCount > 0)

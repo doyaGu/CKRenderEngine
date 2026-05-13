@@ -127,6 +127,8 @@ public:
     void SetUserClipPlane(int index, const VxPlane &plane);
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
+    void SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
+    void ResetVertexBlendMatrices();
     void BeginDebugFrame();
 
     // === Drawing ===
@@ -186,6 +188,8 @@ private:
     VxMatrix m_View;
     VxMatrix m_Projection;
     VxMatrix m_TexMatrix[CKFF_MAX_TEXTURE_STAGES];
+    VxMatrix m_VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
+    CKBOOL m_VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
 
     // Current material
     CKFFMaterialData m_Material;
@@ -207,6 +211,7 @@ private:
     CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     float m_Viewport[4];
     VxPlane m_UserClipPlanes[6];
+    CKBYTE m_CurrentTexcoordComponents[CKFF_MAX_TEXTURE_STAGES];
 
     // Dirty tracking
     CKDWORD m_DirtyFlags;

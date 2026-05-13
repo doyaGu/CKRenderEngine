@@ -8,6 +8,7 @@
 #define CKFF_MAX_LIGHTS         8
 #define CKFF_MAX_TEXTURE_STAGES 8
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
+#define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
 
 // ============================================================================
 // Light data for shader upload (view-space)
@@ -79,6 +80,7 @@ struct CKFFUniformHandles {
     // u_modelViewProj, u_viewProj automatically via SetViewTransform/SetTransform.
     CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
     CKDWORD u_ffMatrices;   // mat4 array: MVP/projection, model, modelView, normal, blend worldView[4]
+    CKDWORD u_vertexBlendMatrices; // mat4 array: fixed-function vertex blend world matrix palette
     CKDWORD u_ffDrawParams; // vec4 array: vertex params[0..7], fragment params[8..11], inline light[12..18]
     CKDWORD u_ffVertexParams; // vec4 array: material[5], material sources, light params, light model params
     CKDWORD u_ffFragmentParams; // vec4 array: alpha, texfactor, fog params, fog color
