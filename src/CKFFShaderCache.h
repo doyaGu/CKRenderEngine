@@ -72,6 +72,7 @@ private:
     CKFFProgramBinding CreateVariantProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateUberSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateFullSpecializedProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding CreateVolumeSamplerLayoutProgram(const CKFFShaderKey &key);
     CKDWORD CreateProgramFromBinary(
         const CKShaderTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,
