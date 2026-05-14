@@ -81,6 +81,9 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
+static CKDWORD CKFFShaderKeyVolumeSamplerMask(const CKFFShaderKey &key);
+static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key);
+
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
       m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
@@ -293,16 +296,23 @@ void CKFFShaderCache::ResolveShaderTarget() {
 CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
     if (!m_UseUberShader)
         return CreateFullSpecializedProgram(key);
+    if (CKFFShaderKeyNeedsVolumeSampler(key))
+        return CreateVolumeSamplerLayoutProgram(key);
     return CreateUberSpecializedProgram(key);
 }
 
-static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
+static CKDWORD CKFFShaderKeyVolumeSamplerMask(const CKFFShaderKey &key) {
+    CKDWORD mask = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
         if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_VOLUME)
-            return true;
+            mask |= 1u << stage;
     }
-    return false;
+    return mask;
+}
+
+static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
+    return CKFFShaderKeyVolumeSamplerMask(key) != 0;
 }
 
 CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
@@ -340,10 +350,43 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
                specInfo.Data()[6], specInfo.Data()[7], specInfo.Data()[8],
                specInfo.Data()[9]);
     if (CKFFShaderKeyNeedsVolumeSampler(key)) {
-        CK_LOG("ShaderCache", "Full FFP specialized module cache miss uses volume sampler; no generic fallback is available");
-        return CKFFProgramBinding();
+        CK_LOG("ShaderCache", "Full FFP specialized module cache miss uses volume sampler; falling back to volume sampler layout shader");
+        return CreateVolumeSamplerLayoutProgram(key);
     }
     return CreateUberSpecializedProgram(key);
+}
+
+CKFFProgramBinding CKFFShaderCache::CreateVolumeSamplerLayoutProgram(const CKFFShaderKey &key) {
+    const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
+    if (!set)
+        return CKFFProgramBinding();
+
+    const CKDWORD volumeMask = CKFFShaderKeyVolumeSamplerMask(key);
+    CKFFVolumeSamplerModule module;
+    if (!CKFFFindVolumeSamplerModule(volumeMask, m_Target.Profile, module)) {
+        CK_LOG_FMT("ShaderCache",
+                   "No FFP volume sampler layout module: backend=%s mask=0x%02X",
+                   set->Name, volumeMask);
+        return CKFFProgramBinding();
+    }
+
+    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
+    const bool positionT = key.VS.GetHasPositionT();
+    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
+    const unsigned char *vsData = positionT
+        ? (clipDistance ? set->VSPositionTClip : set->VSPositionT)
+        : (clipDistance ? set->VS3DClip : set->VS3D);
+    const unsigned int vsSize = positionT
+        ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
+        : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
+    CKDWORD program = CreateProgramFromBinary(
+        m_Target, vsData, vsSize, module.FSData, module.FSSize, specInfo);
+
+    CK_LOG_FMT("ShaderCache",
+               "FFP volume sampler layout program: %u backend=%s mask=0x%02X positionT=%u clip=%u lastStage=%u",
+               program, set->Name, volumeMask, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               key.FS.LastActiveTextureStage);
+    return CKFFProgramBinding(program, false, specInfo);
 }
 
 CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShaderKey &key) {

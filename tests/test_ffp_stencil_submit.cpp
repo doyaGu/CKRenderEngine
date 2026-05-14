@@ -602,7 +602,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     ffp.Shutdown();
 }
 
-void VolumeTextureModulateCacheMissDoesNotUseGenericNullSampler() {
+void VolumeTextureModulateCacheMissUsesVolumeLayoutShader() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -620,10 +620,142 @@ void VolumeTextureModulateCacheMissDoesNotUseGenericNullSampler() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "Volume texture cache miss must not fall back to generic null texture sampling");
-    TestCheck(context.Encoder.TextureBindCount == 0,
-              "Volume texture cache miss must not bind a texture for a skipped draw");
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Volume layout draw must submit runtime specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Volume texture cache miss must draw through a volume layout shader");
+    TestCheck((spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE) &&
+              ((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME),
+              "Volume layout shader must keep runtime stage op and volume sampler specialization");
+    TestCheck(context.Encoder.TextureBindCount == 1,
+              "Volume layout draw must bind one texture");
+    TestCheck(context.Encoder.LastTextureStage == 0 &&
+              context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[0],
+              "Volume stage 0 must bind slot 0 and s_textureVolume0");
+
+    ffp.Shutdown();
+}
+
+void VolumeTextureStageSevenBindsVolumeSampler() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    for (CKDWORD stage = 0; stage < 7; ++stage) {
+        ffp.SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+        ffp.SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+        ffp.SetTextureStageState(stage, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    }
+    ffp.SetTexture(7, 107, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(7, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(7, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(7, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(7, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(7, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Volume stage 7 must submit through a volume layout shader");
+    TestCheck(context.Encoder.TextureBindCount == 1,
+              "Volume stage 7 draw must bind one texture");
+    TestCheck(context.Encoder.LastTextureStage == 7 &&
+              context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[7],
+              "Volume stage 7 must bind slot 7 and s_textureVolume7");
+
+    ffp.Shutdown();
+}
+
+void VolumeAndCubeTexturesBindIndependentSamplerSlots() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 201, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.SetTexture(1, 202, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool sawVolume = false;
+    bool sawCube = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 0 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
+            sawVolume = true;
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[1] && binding.Texture == 202)
+            sawCube = true;
+    }
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Volume + cube layout draw must submit");
+    TestCheck(sawVolume && sawCube,
+              "Volume stage 0 and cube stage 1 must bind independent sampler slots");
+
+    ffp.Shutdown();
+}
+
+void MultipleVolumeTexturesBindEachVolumeSampler() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 301, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.SetTexture(2, 302, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(2, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(2, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool sawStage0 = false;
+    bool sawStage2 = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 0 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 301)
+            sawStage0 = true;
+        if (binding.Stage == 2 && binding.Uniform == u.s_textureVolume[2] && binding.Texture == 302)
+            sawStage2 = true;
+    }
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Multi-volume layout draw must submit");
+    TestCheck(sawStage0 && sawStage2,
+              "Multiple volume stages must bind their matching volume sampler uniforms");
 
     ffp.Shutdown();
 }
@@ -1354,8 +1486,14 @@ int main() {
               &StageConstantDoesNotCreateTextureDependency);
     tests.Run("Cube texture uses cube sampler specialization and binding",
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
-    tests.Run("Volume texture modulate cache miss does not use generic null sampler",
-              &VolumeTextureModulateCacheMissDoesNotUseGenericNullSampler);
+    tests.Run("Volume texture modulate cache miss uses volume layout shader",
+              &VolumeTextureModulateCacheMissUsesVolumeLayoutShader);
+    tests.Run("Volume texture stage seven binds volume sampler",
+              &VolumeTextureStageSevenBindsVolumeSampler);
+    tests.Run("Volume and cube textures bind independent sampler slots",
+              &VolumeAndCubeTexturesBindIndependentSamplerSlots);
+    tests.Run("Multiple volume textures bind each volume sampler",
+              &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",

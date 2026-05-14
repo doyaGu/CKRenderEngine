@@ -51,6 +51,7 @@ PROFILE_ENUMS = {
 }
 
 FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
+VOLUME_SAMPLER_LAYOUT_MASKS = list(range(1, 256))
 
 
 def _exe_name(name: str) -> str:
@@ -515,6 +516,21 @@ def specialized_vs_var_name(backend: dict[str, str], variant: dict[str, object])
     return f"s_{backend['name']}_ffp_{variant['vsIdentifier']}_vs_ff_{suffix}"
 
 
+def volume_sampler_layout_identifier(volume_mask: int) -> str:
+    return f"volume_{volume_mask:02x}"
+
+
+def volume_sampler_layout_var_name(backend: dict[str, str], volume_mask: int) -> str:
+    return f"s_{backend['name']}_ffp_{volume_sampler_layout_identifier(volume_mask)}_fs_ff_stage"
+
+
+def volume_sampler_layout_defines(volume_mask: int) -> list[str]:
+    return [
+        "CKFF_TYPED_SAMPLER_LAYOUT=1",
+        f"CKFF_VOLUME_SAMPLER_MASK={volume_mask & 0xff}",
+    ]
+
+
 def unique_specialized_fs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
     unique: dict[str, dict[str, object]] = {}
     for variant in variants:
@@ -597,7 +613,8 @@ def write_specialized_module_function(f, backend: dict[str, str], variant: dict[
 
 
 def write_specialized_module_table(generated_dir: Path, backends: list[dict[str, str]],
-                                   variants: list[dict[str, object]]) -> None:
+                                   variants: list[dict[str, object]],
+                                   volume_masks: list[int]) -> None:
     path = generated_dir / "CKFFSpecializedModuleTable.generated.h"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
@@ -617,6 +634,9 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
             for variant in unique_specialized_fs_variants(variants):
                 ident = variant["fsIdentifier"]
                 f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
+            for volume_mask in volume_masks:
+                ident = volume_sampler_layout_identifier(volume_mask)
+                f.write(f"#include \"shaders/generated/{backend_name}/volume/{ident}_fs_ff_stage.bin.h\"\n")
         f.write("\n")
 
         for variant in variants:
@@ -636,6 +656,16 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
         f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;\n")
         f.write("static const std::size_t g_CKFFSpecializedModuleCount = "
                 "sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);\n")
+        f.write("\nstatic const CKFFVolumeSamplerModuleEntry g_CKFFVolumeSamplerModuleEntries[] = {\n")
+        for backend in backends:
+            for volume_mask in volume_masks:
+                var_name = volume_sampler_layout_var_name(backend, volume_mask)
+                f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, {volume_mask}u, "
+                        f"{{ {var_name}, sizeof({var_name}) }} }},\n")
+        f.write("};\n\n")
+        f.write("static const CKFFVolumeSamplerModuleEntry *g_CKFFVolumeSamplerModules = g_CKFFVolumeSamplerModuleEntries;\n")
+        f.write("static const std::size_t g_CKFFVolumeSamplerModuleCount = "
+                "sizeof(g_CKFFVolumeSamplerModuleEntries) / sizeof(g_CKFFVolumeSamplerModuleEntries[0]);\n")
 
 
 def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object]]:
@@ -685,10 +715,12 @@ def validate_specialized_variants(variants: list[dict[str, object]]) -> None:
 
 def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
                                  tmp_dir: Path, backends: list[dict[str, str]],
-                                 variants: list[dict[str, object]]) -> None:
+                                 variants: list[dict[str, object]],
+                                 volume_masks: list[int]) -> None:
     vs_variants = unique_specialized_vs_variants(variants)
     fs_variants = unique_specialized_fs_variants(variants)
     clean_stale_specialized_headers(generated_dir, backends, vs_variants, fs_variants)
+    clean_stale_volume_layout_headers(generated_dir, backends, volume_masks)
     for backend in backends:
         for variant in vs_variants:
             ident = variant["vsIdentifier"]
@@ -706,6 +738,14 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
             run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, variant["defines"])
             header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
             write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
+        for volume_mask in volume_masks:
+            ident = volume_sampler_layout_identifier(volume_mask)
+            bin_path = tmp_dir / backend["name"] / "volume" / f"{ident}_fs_ff_stage.bin"
+            bin_path.parent.mkdir(parents=True, exist_ok=True)
+            run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend,
+                        bin_path, volume_sampler_layout_defines(volume_mask))
+            header = generated_dir / backend["name"] / "volume" / f"{ident}_fs_ff_stage.bin.h"
+            write_header(header, volume_sampler_layout_var_name(backend, volume_mask), bin_path.read_bytes())
 
 
 def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str, str]],
@@ -724,6 +764,19 @@ def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str
                 header.unlink()
 
 
+def clean_stale_volume_layout_headers(generated_dir: Path, backends: list[dict[str, str]],
+                                      volume_masks: list[int]) -> None:
+    expected = {f"{volume_sampler_layout_identifier(volume_mask)}_fs_ff_stage.bin.h"
+                for volume_mask in volume_masks}
+    for backend in backends:
+        volume_dir = generated_dir / backend["name"] / "volume"
+        if not volume_dir.is_dir():
+            continue
+        for header in volume_dir.glob("*.bin.h"):
+            if header.name not in expected:
+                header.unlink()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compile CK2_3D fixed-function shaders with bgfx shaderc."
@@ -738,9 +791,11 @@ def main() -> int:
     shaderc = find_shaderc(args.shaderc)
     selected = [b for b in BACKENDS if not args.backend or b["name"] in args.backend]
     specialized_variants = load_specialized_variant_manifest(script_dir)
+    volume_masks = VOLUME_SAMPLER_LAYOUT_MASKS
 
     print(f"Using shaderc: {shaderc}")
     print(f"FFP specialized variants: {len(specialized_variants)}")
+    print(f"FFP volume sampler layouts: {len(volume_masks)}")
     with tempfile.TemporaryDirectory(prefix="ck2_3d_shaders_") as tmp:
         tmp_dir = Path(tmp)
         for backend in selected:
@@ -751,8 +806,9 @@ def main() -> int:
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())
-        compile_specialized_variants(shaderc, script_dir, generated_dir, tmp_dir, selected, specialized_variants)
-        write_specialized_module_table(generated_dir, selected, specialized_variants)
+        compile_specialized_variants(shaderc, script_dir, generated_dir, tmp_dir, selected,
+                                     specialized_variants, volume_masks)
+        write_specialized_module_table(generated_dir, selected, specialized_variants, volume_masks)
 
     print("All shaders compiled successfully.")
     return 0

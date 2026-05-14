@@ -267,6 +267,42 @@ void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
               "Depth compare func must pack four bits per stage");
 }
 
+void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(0, CKFF_SAMPLER_VOLUME);
+
+    for (CKDWORD stage = 1; stage < 7; ++stage) {
+        desc.SetStageColorOp(stage, CKRST_TOP_SELECTARG1);
+        desc.SetStageColorArg1(stage, CKRST_TA_CURRENT);
+        desc.SetStageAlphaOp(stage, CKRST_TOP_SELECTARG1);
+        desc.SetStageAlphaArg1(stage, CKRST_TA_CURRENT);
+    }
+
+    desc.SetStageColorArg1(2, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaArg1(2, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(2, CKFF_SAMPLER_VOLUME);
+
+    desc.SetStageColorOp(7, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(7, CKRST_TA_TEXTURE);
+    desc.SetStageAlphaOp(7, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(7, CKRST_TA_TEXTURE);
+    desc.SetStageSamplerType(7, CKFF_SAMPLER_VOLUME);
+
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 2) | (1u << 7));
+    CKDWORD volumeMask = 0;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (key.Stages[stage].HasTexture && key.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME)
+            volumeMask |= 1u << stage;
+    }
+
+    TestCheck(volumeMask == ((1u << 0) | (1u << 2) | (1u << 7)),
+              "Volume layout mask must be derivable from active shader key stages");
+}
+
 void TextureStageCompareFuncStaysOutOfSamplerDesc() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKSamplerDesc sampler = CKFFBuildSamplerDesc(stages[0]);
@@ -357,6 +393,8 @@ int main() {
               &SamplerTypesPackIntoSpecialization);
     tests.Run("Volume sampler and compare func pack into specialization",
               &VolumeSamplerAndCompareFuncPackIntoSpecialization);
+    tests.Run("Volume sampler mask can be derived from shader key",
+              &VolumeSamplerMaskCanBeDerivedFromShaderKey);
     tests.Run("Texture stage compare func stays out of sampler desc",
               &TextureStageCompareFuncStaysOutOfSamplerDesc);
     tests.Run("Texture binding mask splits null texture shader key",
