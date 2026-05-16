@@ -8,10 +8,6 @@ uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
 
-#ifndef CKFF_VOLUME_SAMPLER_MASK
-#define CKFF_VOLUME_SAMPLER_MASK 0
-#endif
-
 #if defined(CKFF_FULL_SPECIALIZED)
 #ifndef CKFF_FS_STAGE0_SAMPLER_TYPE
 #define CKFF_FS_STAGE0_SAMPLER_TYPE 0
@@ -40,108 +36,76 @@ uniform vec4 u_ffSpec[10];
 #if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube0, 8);
 #elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume0, 0);
+SAMPLER3D(s_textureVolume0, 8);
 #else
 SAMPLER2D(s_texture0, 0);
 #endif
 #if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube1, 9);
 #elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume1, 1);
+SAMPLER3D(s_textureVolume1, 9);
 #else
 SAMPLER2D(s_texture1, 1);
 #endif
 #if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube2, 10);
 #elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume2, 2);
+SAMPLER3D(s_textureVolume2, 10);
 #else
 SAMPLER2D(s_texture2, 2);
 #endif
 #if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube3, 11);
 #elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume3, 3);
+SAMPLER3D(s_textureVolume3, 11);
 #else
 SAMPLER2D(s_texture3, 3);
 #endif
 #if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube4, 12);
 #elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume4, 4);
+SAMPLER3D(s_textureVolume4, 12);
 #else
 SAMPLER2D(s_texture4, 4);
 #endif
 #if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube5, 13);
 #elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume5, 5);
+SAMPLER3D(s_textureVolume5, 13);
 #else
 SAMPLER2D(s_texture5, 5);
 #endif
 #if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube6, 14);
 #elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume6, 6);
+SAMPLER3D(s_textureVolume6, 14);
 #else
 SAMPLER2D(s_texture6, 6);
 #endif
 #if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube7, 15);
 #elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume7, 7);
+SAMPLER3D(s_textureVolume7, 15);
 #else
 SAMPLER2D(s_texture7, 7);
 #endif
-#elif defined(CKFF_TYPED_SAMPLER_LAYOUT)
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x01) != 0
-SAMPLER3D(s_textureVolume0, 0);
-#else
+#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)
 SAMPLER2D(s_texture0, 0);
-SAMPLERCUBE(s_textureCube0, 8);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x02) != 0
-SAMPLER3D(s_textureVolume1, 1);
-#else
 SAMPLER2D(s_texture1, 1);
-SAMPLERCUBE(s_textureCube1, 9);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x04) != 0
-SAMPLER3D(s_textureVolume2, 2);
-#else
 SAMPLER2D(s_texture2, 2);
-SAMPLERCUBE(s_textureCube2, 10);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x08) != 0
-SAMPLER3D(s_textureVolume3, 3);
-#else
 SAMPLER2D(s_texture3, 3);
-SAMPLERCUBE(s_textureCube3, 11);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x10) != 0
-SAMPLER3D(s_textureVolume4, 4);
-#else
 SAMPLER2D(s_texture4, 4);
-SAMPLERCUBE(s_textureCube4, 12);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x20) != 0
-SAMPLER3D(s_textureVolume5, 5);
-#else
 SAMPLER2D(s_texture5, 5);
-SAMPLERCUBE(s_textureCube5, 13);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x40) != 0
-SAMPLER3D(s_textureVolume6, 6);
-#else
 SAMPLER2D(s_texture6, 6);
-SAMPLERCUBE(s_textureCube6, 14);
-#endif
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x80) != 0
-SAMPLER3D(s_textureVolume7, 7);
-#else
 SAMPLER2D(s_texture7, 7);
-SAMPLERCUBE(s_textureCube7, 15);
-#endif
+SAMPLER3D(s_textureVolume0, 8);
+SAMPLER3D(s_textureVolume1, 9);
+SAMPLER3D(s_textureVolume2, 10);
+SAMPLER3D(s_textureVolume3, 11);
+SAMPLER3D(s_textureVolume4, 12);
+SAMPLER3D(s_textureVolume5, 13);
+SAMPLER3D(s_textureVolume6, 14);
+SAMPLER3D(s_textureVolume7, 15);
 #else
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
@@ -265,97 +229,48 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bo
     return CKFF_DEPTH_TEXTURE_COLOR(color);
 #endif
 }
-#elif defined(CKFF_TYPED_SAMPLER_LAYOUT)
+#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)
+vec4 getVolumeTextureColor(int stage, vec4 coord)
+{
+    if (stage == 0) return texture3D(s_textureVolume0, coord.xyz);
+    if (stage == 1) return texture3D(s_textureVolume1, coord.xyz);
+    if (stage == 2) return texture3D(s_textureVolume2, coord.xyz);
+    if (stage == 3) return texture3D(s_textureVolume3, coord.xyz);
+    if (stage == 4) return texture3D(s_textureVolume4, coord.xyz);
+    if (stage == 5) return texture3D(s_textureVolume5, coord.xyz);
+    if (stage == 6) return texture3D(s_textureVolume6, coord.xyz);
+    return texture3D(s_textureVolume7, coord.xyz);
+}
+
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    if (stage == 0) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x01) != 0
-        return texture3D(s_textureVolume0, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube0, coord.xyz);
-        vec4 color = texture2D(s_texture0, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
+    if (samplerType == 1) {
+        // The volume runtime layout uses slots 8..15 for 3D samplers.
+        // Arbitrary cube+volume mixes require an exact full-specialized shader.
+        return vec4(0.0, 0.0, 0.0, 1.0);
     }
-    if (stage == 1) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x02) != 0
-        return texture3D(s_textureVolume1, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube1, coord.xyz);
-        vec4 color = texture2D(s_texture1, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
+    if (samplerType == 3) {
+        return getVolumeTextureColor(stage, coord);
     }
-    if (stage == 2) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x04) != 0
-        return texture3D(s_textureVolume2, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube2, coord.xyz);
-        vec4 color = texture2D(s_texture2, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
+    vec2 uv = coord.xy;
+    vec4 color;
+    if (stage == 0) color = texture2D(s_texture0, uv);
+    else if (stage == 1) color = texture2D(s_texture1, uv);
+    else if (stage == 2) color = texture2D(s_texture2, uv);
+    else if (stage == 3) color = texture2D(s_texture3, uv);
+    else if (stage == 4) color = texture2D(s_texture4, uv);
+    else if (stage == 5) color = texture2D(s_texture5, uv);
+    else if (stage == 6) color = texture2D(s_texture6, uv);
+    else color = texture2D(s_texture7, uv);
+    if (samplerType == 2) {
+        float depth = color.r;
+        if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));
+        return color.rrrr;
     }
-    if (stage == 3) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x08) != 0
-        return texture3D(s_textureVolume3, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube3, coord.xyz);
-        vec4 color = texture2D(s_texture3, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
-    }
-    if (stage == 4) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x10) != 0
-        return texture3D(s_textureVolume4, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube4, coord.xyz);
-        vec4 color = texture2D(s_texture4, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
-    }
-    if (stage == 5) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x20) != 0
-        return texture3D(s_textureVolume5, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube5, coord.xyz);
-        vec4 color = texture2D(s_texture5, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
-    }
-    if (stage == 6) {
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x40) != 0
-        return texture3D(s_textureVolume6, coord.xyz);
-#else
-        if (samplerType == 1) return textureCube(s_textureCube6, coord.xyz);
-        vec4 color = texture2D(s_texture6, coord.xy);
-        if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
-        return color;
-#endif
-    }
-#if (CKFF_VOLUME_SAMPLER_MASK & 0x80) != 0
-    return texture3D(s_textureVolume7, coord.xyz);
-#else
-    if (samplerType == 1) return textureCube(s_textureCube7, coord.xyz);
-    vec4 color = texture2D(s_texture7, coord.xy);
-    if (samplerType == 2) return compareFunc != 0 ? vec4_splat(compareDepth(color.r, coord.z, compareFunc)) : color.rrrr;
     return color;
-#endif
 }
 #else
-vec4 getVolumeTextureColor(int stage, vec4 coord)
-{
-    // The generic shader already consumes 16 D3D sampler slots for 2D/cube.
-    // Volume sampling is emitted by full-specialized variants instead.
-    return vec4(0.0, 0.0, 0.0, 1.0);
-}
-
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
@@ -370,7 +285,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bo
         return textureCube(s_textureCube7, coord.xyz);
     }
     if (samplerType == 3) {
-        return getVolumeTextureColor(stage, coord);
+        return vec4(0.0, 0.0, 0.0, 1.0);
     }
     vec2 uv = coord.xy;
     vec4 color;

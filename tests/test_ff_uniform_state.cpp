@@ -300,7 +300,7 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
     }
 
     TestCheck(volumeMask == ((1u << 0) | (1u << 2) | (1u << 7)),
-              "Volume layout mask must be derivable from active shader key stages");
+              "Volume sampler mask must be derivable from active shader key stages");
 }
 
 void TextureStageCompareFuncStaysOutOfSamplerDesc() {
