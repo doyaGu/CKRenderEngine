@@ -1,13 +1,6 @@
 #include "CKBgfxRasterizer.h"
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#elif defined(CKRE_ENABLE_SDL3)
 #include <SDL3/SDL.h>
-#endif
 
 #include <new>
 
@@ -19,27 +12,6 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     m_DriverIndex = 0;
     m_Desc = "bgfx Driver";
 
-#ifdef _WIN32
-    DEVMODEA dm;
-    memset(&dm, 0, sizeof(dm));
-    dm.dmSize = sizeof(dm);
-
-    int modeIndex = 0;
-    while (EnumDisplaySettingsA(NULL, modeIndex, &dm))
-    {
-        if (dm.dmBitsPerPel >= 16 && dm.dmPelsWidth >= 640 && dm.dmPelsHeight >= 400)
-        {
-            VxDisplayMode vdm;
-            vdm.Width = (int)dm.dmPelsWidth;
-            vdm.Height = (int)dm.dmPelsHeight;
-            vdm.Bpp = (int)dm.dmBitsPerPel;
-            vdm.RefreshRate = (int)dm.dmDisplayFrequency;
-            if (!m_DisplayModes.IsHere(vdm))
-                m_DisplayModes.PushBack(vdm);
-        }
-        ++modeIndex;
-    }
-#elif defined(CKRE_ENABLE_SDL3)
     int displayCount = 0;
     SDL_DisplayID *displays = SDL_GetDisplays(&displayCount);
     for (int displayIndex = 0; displays && displayIndex < displayCount; ++displayIndex)
@@ -63,7 +35,6 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
         SDL_free(modes);
     }
     SDL_free(displays);
-#endif
 
     if (m_DisplayModes.Size() == 0)
     {

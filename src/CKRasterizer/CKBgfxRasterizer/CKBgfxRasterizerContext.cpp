@@ -2,10 +2,8 @@
 #include "CKBgfxInternal.h"
 
 #include <bgfx/platform.h>
-#if CKRE_ENABLE_SDL3
 #include <SDL3/SDL.h>
 #include <stdint.h>
-#endif
 #include <algorithm>
 #include <cstdarg>
 #include <cstring>
@@ -32,7 +30,6 @@ static uint32_t FirstDword(const void *data, uint32_t size)
     return value;
 }
 
-#if CKRE_ENABLE_SDL3
 static void *CKBgfxSdlPointerProperty(SDL_PropertiesID props, const char *name)
 {
     return SDL_GetPointerProperty(props, name, NULL);
@@ -75,7 +72,6 @@ static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &pla
     return false;
 #endif
 }
-#endif
 
 // ===========================================================================
 // Helper: ensure slot array is large enough and return pointer at index
@@ -699,14 +695,10 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     bgfx::Init init;
     init.type = requestedRenderer;
-#if CKRE_ENABLE_SDL3
     if (!CKBgfxFillSDLPlatformData(Window, init.platformData)) {
         CKBgfxLogf("Init", "failed to extract SDL native window data window=%p", Window);
         return FALSE;
     }
-#else
-    init.platformData.nwh = (void *)Window;
-#endif
     init.resolution.width = Width;
     init.resolution.height = Height;
     init.resolution.reset = m_ResetFlags;
