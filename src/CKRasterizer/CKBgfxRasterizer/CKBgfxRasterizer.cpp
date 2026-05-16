@@ -2,6 +2,14 @@
 
 #include <new>
 
+#if defined(_WIN32)
+#define CK_BGFX_RASTERIZER_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__) || defined(__clang__)
+#define CK_BGFX_RASTERIZER_EXPORT __attribute__((visibility("default")))
+#else
+#define CK_BGFX_RASTERIZER_EXPORT
+#endif
+
 CKBgfxRasterizer::CKBgfxRasterizer() {}
 
 CKBgfxRasterizer::~CKBgfxRasterizer()
@@ -56,7 +64,7 @@ static void CKBgfxRasterizerClose(CKRasterizer *rst)
 #ifdef CK_LIB
 void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info)
 #else
-extern "C" __declspec(dllexport) void CKRasterizerGetInfo(CKRasterizerInfo *info)
+extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *info)
 #endif
 {
     if (!info)

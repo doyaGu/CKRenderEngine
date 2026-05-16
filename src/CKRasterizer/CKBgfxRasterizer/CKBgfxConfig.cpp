@@ -1,21 +1,34 @@
 #include "CKBgfxConfig.h"
 #include "VxConfiguration.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#include <strings.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#ifndef MAX_PATH
+#define MAX_PATH 260
+#endif
 
 static const char *kCKBgfxConfigFile = "CKBgfxRasterizer.ini";
 static const char *kCKBgfxConfigSection = "CKBgfxRasterizer";
 
 static int CKBgfxConfigStricmp(const char *a, const char *b)
 {
+#ifdef _WIN32
     return _stricmp(a, b);
+#else
+    return strcasecmp(a, b);
+#endif
 }
 
 static bool CKBgfxConfigParseBool(const char *value, bool fallback)
@@ -51,6 +64,7 @@ static bool CKBgfxLoadConfigFile(VxConfiguration &config, const char *path)
 static void CKBgfxLoadConfig(VxConfiguration &config)
 {
     char path[MAX_PATH] = {0};
+#ifdef _WIN32
     HMODULE hMod = NULL;
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            (LPCSTR)&CKBgfxLoadConfig, &hMod)) {
@@ -62,6 +76,19 @@ static void CKBgfxLoadConfig(VxConfiguration &config)
                 return;
         }
     }
+#else
+    Dl_info info;
+    if (dladdr((void *)&CKBgfxLoadConfig, &info) && info.dli_fname) {
+        strncpy(path, info.dli_fname, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+        char *last = strrchr(path, '/');
+        if (last) {
+            snprintf(last + 1, sizeof(path) - (size_t)(last + 1 - path), "%s", kCKBgfxConfigFile);
+            if (CKBgfxLoadConfigFile(config, path))
+                return;
+        }
+    }
+#endif
 
     CKBgfxLoadConfigFile(config, kCKBgfxConfigFile);
 }
@@ -84,7 +111,7 @@ bool CKBgfxConfigString(const char *section, const char *name, char *buffer, CKD
 
     buffer[0] = '\0';
     char sectionPath[256] = {0};
-    if (sprintf_s(sectionPath, "%s.%s", kCKBgfxConfigSection, section) < 0)
+    if (snprintf(sectionPath, sizeof(sectionPath), "%s.%s", kCKBgfxConfigSection, section) < 0)
         return false;
 
     VxConfigurationSection *configSection = CKBgfxGetConfig()->GetSubSection(sectionPath, TRUE);
@@ -99,7 +126,8 @@ bool CKBgfxConfigString(const char *section, const char *name, char *buffer, CKD
     if (!value || value[0] == '\0')
         return false;
 
-    strncpy_s(buffer, bufferSize, value, _TRUNCATE);
+    strncpy(buffer, value, bufferSize - 1);
+    buffer[bufferSize - 1] = '\0';
     return buffer[0] != '\0';
 }
 

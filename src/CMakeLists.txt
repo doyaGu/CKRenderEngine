@@ -163,9 +163,11 @@ set(CKRE_SOURCES
         CKRenderPipeline.cpp
         CKFrustumCuller.cpp
         CKRenderSettings.cpp
-
-        CK2_3D.rc
 )
+
+if (WIN32)
+    list(APPEND CKRE_SOURCES CK2_3D.rc)
+endif ()
 
 if (CKRE_ENABLE_DEBUG_LOGGER)
     list(APPEND CKRE_SOURCES CKDebugLogger.cpp CKException.cpp)
@@ -252,6 +254,13 @@ function(ckre_configure_target TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
 
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
+    target_compile_definitions(${TARGET_NAME} PRIVATE CKRE_ENABLE_SDL3=$<IF:$<BOOL:${CKRE_ENABLE_SDL3}>,1,0>)
+    if (CKRE_ENABLE_SDL3)
+        target_link_libraries(${TARGET_NAME} PRIVATE SDL3::SDL3)
+    endif ()
+    if (CMAKE_DL_LIBS)
+        target_link_libraries(${TARGET_NAME} PRIVATE ${CMAKE_DL_LIBS})
+    endif ()
 
     set_target_properties(${TARGET_NAME} PROPERTIES
             VERSION ${PROJECT_VERSION}

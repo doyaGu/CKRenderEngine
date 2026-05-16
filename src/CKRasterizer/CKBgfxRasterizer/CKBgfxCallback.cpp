@@ -1,14 +1,35 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+
+#ifndef _WIN32
+#ifndef _TRUNCATE
+#define _TRUNCATE ((size_t)-1)
+#endif
+static int fopen_s(FILE **file, const char *path, const char *mode)
+{
+    *file = fopen(path, mode);
+    return *file ? 0 : 1;
+}
+
+static int _vsnprintf_s(char *buffer, size_t size, size_t, const char *format, va_list args)
+{
+    return vsnprintf(buffer, size, format, args);
+}
+
+static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int result = _vsnprintf_s(buffer, size, truncate, format, args);
+    va_end(args);
+    return result;
+}
+#endif
 
 static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
                        uint32_t pitch, const void *data, bool yflip)

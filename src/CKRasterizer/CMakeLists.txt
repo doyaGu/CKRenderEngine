@@ -38,7 +38,10 @@ function(ckre_configure_rasterizer_version_resource OUT_VAR TARGET_NAME FILE_DES
 endfunction()
 
 if (CKRE_BUILD_SHARED)
-    ckre_configure_rasterizer_version_resource(_ckbgfx_version_resource CKBgfxRasterizer "bgfx Rasterizer" "CKBgfxRasterizer.dll")
+    set(_ckbgfx_version_resource)
+    if (WIN32)
+        ckre_configure_rasterizer_version_resource(_ckbgfx_version_resource CKBgfxRasterizer "bgfx Rasterizer" "CKBgfxRasterizer.dll")
+    endif ()
 
     add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG} ${_ckbgfx_version_resource})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizer)
@@ -94,6 +97,13 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
             bimg
             bx
     )
+    target_compile_definitions(${_ckre_bgfx_target} PRIVATE CKRE_ENABLE_SDL3=$<IF:$<BOOL:${CKRE_ENABLE_SDL3}>,1,0>)
+    if (CKRE_ENABLE_SDL3)
+        target_link_libraries(${_ckre_bgfx_target} PRIVATE SDL3::SDL3)
+    endif ()
+    if (CMAKE_DL_LIBS)
+        target_link_libraries(${_ckre_bgfx_target} PRIVATE ${CMAKE_DL_LIBS})
+    endif ()
 endforeach ()
 
 # Tests

@@ -2,10 +2,19 @@
 
 #include "CKRenderConfig.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+typedef int LONG;
+#ifndef WINAPI
+#define WINAPI
+#endif
+#define EXCEPTION_CONTINUE_SEARCH 0
+struct EXCEPTION_POINTERS;
+#endif
 
 #if CKRE_ENABLE_DEBUG_LOGGER
 
