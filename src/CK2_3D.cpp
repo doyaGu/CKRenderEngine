@@ -1,10 +1,15 @@
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
@@ -59,6 +64,40 @@ XClassArray<CKRasterizerInfo> g_RasterizersInfo;
 
 void ReleaseRasterizers();
 
+static void CKRenderEngineModulePath(char *moduleName, size_t moduleNameSize)
+{
+    if (!moduleName || moduleNameSize == 0)
+        return;
+
+    moduleName[0] = '\0';
+#ifdef _WIN32
+    VxGetModuleFileName(g_DllHandle, moduleName, moduleNameSize);
+#else
+    Dl_info info;
+    if (dladdr((void *)&CKRenderEngineModulePath, &info) && info.dli_fname) {
+        strncpy(moduleName, info.dli_fname, moduleNameSize - 1);
+        moduleName[moduleNameSize - 1] = '\0';
+    }
+#endif
+}
+
+static const char *CKRenderEngineRasterizerMask(const char *name)
+{
+#if defined(_WIN32)
+    static char buffer[128];
+    snprintf(buffer, sizeof(buffer), "*%sRasterizer.dll", name);
+    return buffer;
+#elif defined(__APPLE__)
+    static char buffer[128];
+    snprintf(buffer, sizeof(buffer), "*%sRasterizer.dylib", name);
+    return buffer;
+#else
+    static char buffer[128];
+    snprintf(buffer, sizeof(buffer), "*%sRasterizer.so", name);
+    return buffer;
+#endif
+}
+
 void RegisterRasterizer(const char *dll) {
     if (!dll || *dll == '\0')
         return;
@@ -99,14 +138,14 @@ void EnumerateRasterizers() {
         g_RasterizersInfo.PushBack(info);
 #else
         char moduleName[MAX_PATH];
-        VxGetModuleFileName(g_DllHandle, moduleName, MAX_PATH);
+        CKRenderEngineModulePath(moduleName, MAX_PATH);
         CKPathSplitter ps(moduleName);
 
         XString dir = ps.GetDrive();
         dir << ps.GetDir();
 
         // Search for DX8 rasterizers
-        CKDirectoryParser dp8(dir.Str(), "*DX8Rasterizer.dll", TRUE);
+        CKDirectoryParser dp8(dir.Str(), CKRenderEngineRasterizerMask("DX8"), TRUE);
         const char *file = dp8.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -114,7 +153,7 @@ void EnumerateRasterizers() {
         }
 
         // Search for DX9 rasterizers
-        CKDirectoryParser dp9(dir.Str(), "*DX9Rasterizer.dll", TRUE);
+        CKDirectoryParser dp9(dir.Str(), CKRenderEngineRasterizerMask("DX9"), TRUE);
         file = dp9.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -122,7 +161,7 @@ void EnumerateRasterizers() {
         }
 
         // Search for OpenGL rasterizers
-        CKDirectoryParser dpGL(dir.Str(), "*GLRasterizer.dll", TRUE);
+        CKDirectoryParser dpGL(dir.Str(), CKRenderEngineRasterizerMask("GL"), TRUE);
         file = dpGL.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -130,7 +169,7 @@ void EnumerateRasterizers() {
         }
 
         // Search for bgfx rasterizers
-        CKDirectoryParser dpBgfx(dir.Str(), "*BgfxRasterizer.dll", TRUE);
+        CKDirectoryParser dpBgfx(dir.Str(), CKRenderEngineRasterizerMask("Bgfx"), TRUE);
         file = dpBgfx.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
@@ -224,7 +263,7 @@ void ReleaseRasterizers() {
     }
 }
 
-#if !defined(CK_LIB)
+#if !defined(CK_LIB) && defined(_WIN32)
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     switch (fdwReason) {
@@ -241,4 +280,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     return TRUE;
 }
 
-#endif // CK_LIB
+#endif // !CK_LIB && _WIN32

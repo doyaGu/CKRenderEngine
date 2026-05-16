@@ -80,7 +80,9 @@ if (CKRE_ENABLE_SDL3 AND NOT TARGET SDL3::SDL3)
 endif ()
 
 # Enable RC language for resource files
-enable_language(RC)
+if (WIN32)
+    enable_language(RC)
+endif ()
 
 # =============================================================================
 # C++ standard

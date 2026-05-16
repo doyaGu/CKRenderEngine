@@ -1,12 +1,11 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-
 #include <bgfx/platform.h>
+#if CKRE_ENABLE_SDL3
+#include <SDL3/SDL.h>
+#include <stdint.h>
+#endif
 #include <algorithm>
 #include <cstdarg>
 #include <cstring>
@@ -32,6 +31,51 @@ static uint32_t FirstDword(const void *data, uint32_t size)
         memcpy(&value, data, sizeof(value));
     return value;
 }
+
+#if CKRE_ENABLE_SDL3
+static void *CKBgfxSdlPointerProperty(SDL_PropertiesID props, const char *name)
+{
+    return SDL_GetPointerProperty(props, name, NULL);
+}
+
+static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &platformData)
+{
+    SDL_Window *window = static_cast<SDL_Window *>(Window);
+    if (!window)
+        return false;
+
+    SDL_PropertiesID props = SDL_GetWindowProperties(window);
+    if (!props)
+        return false;
+
+#if defined(_WIN32)
+    platformData.nwh = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER);
+    return platformData.nwh != NULL;
+#elif defined(__APPLE__)
+    platformData.nwh = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER);
+    return platformData.nwh != NULL;
+#elif defined(__linux__)
+    void *waylandSurface = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER);
+    if (waylandSurface) {
+        platformData.ndt = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER);
+        platformData.nwh = waylandSurface;
+        platformData.type = bgfx::NativeWindowHandleType::Wayland;
+        return platformData.ndt != NULL;
+    }
+
+    const Sint64 x11Window = SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+    if (x11Window != 0) {
+        platformData.ndt = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER);
+        platformData.nwh = reinterpret_cast<void *>(static_cast<uintptr_t>(x11Window));
+        return platformData.ndt != NULL;
+    }
+
+    return false;
+#else
+    return false;
+#endif
+}
+#endif
 
 // ===========================================================================
 // Helper: ensure slot array is large enough and return pointer at index
@@ -629,11 +673,11 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     if (Width <= 0 || Height <= 0)
     {
-        RECT rc = {0, 0,
-                   CKBgfxConfigPositiveInt("Renderer", "FallbackWidth", 640),
-                   CKBgfxConfigPositiveInt("Renderer", "FallbackHeight", 480)};
+        CKRECT rc = {0, 0,
+                     CKBgfxConfigPositiveInt("Renderer", "FallbackWidth", 640),
+                     CKBgfxConfigPositiveInt("Renderer", "FallbackHeight", 480)};
         if (Window)
-            ::GetClientRect((HWND)Window, &rc);
+            VxGetClientRect(Window, &rc);
         Width = rc.right - rc.left;
         Height = rc.bottom - rc.top;
     }
@@ -655,7 +699,14 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     bgfx::Init init;
     init.type = requestedRenderer;
+#if CKRE_ENABLE_SDL3
+    if (!CKBgfxFillSDLPlatformData(Window, init.platformData)) {
+        CKBgfxLogf("Init", "failed to extract SDL native window data window=%p", Window);
+        return FALSE;
+    }
+#else
     init.platformData.nwh = (void *)Window;
+#endif
     init.resolution.width = Width;
     init.resolution.height = Height;
     init.resolution.reset = m_ResetFlags;
@@ -1099,8 +1150,8 @@ CKERROR CKBgfxRasterizerContext::CreateUniform(CKDWORD Uniform, CKUniformDesc *D
     rec->Handle = handle;
     rec->Type = Desc->Type;
     rec->Count = Desc->Count;
-    rec->Name[0] = '\0';
-    strncpy_s(rec->Name, Desc->Name, _TRUNCATE);
+    strncpy(rec->Name, Desc->Name, sizeof(rec->Name) - 1);
+    rec->Name[sizeof(rec->Name) - 1] = '\0';
 
     CKBgfxUniformRecord *&slot = EnsureSlot(m_Uniforms, Uniform);
     DestroyRecord(slot);
@@ -2193,7 +2244,8 @@ void CKBgfxRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Inf
     bgfx::UniformInfo bgfxInfo;
     bgfx::getUniformInfo(handle, bgfxInfo);
 
-    strncpy_s(Info->Name, bgfxInfo.name, _TRUNCATE);
+    strncpy(Info->Name, bgfxInfo.name, sizeof(Info->Name) - 1);
+    Info->Name[sizeof(Info->Name) - 1] = '\0';
     Info->Count = bgfxInfo.num;
 
     switch (bgfxInfo.type)

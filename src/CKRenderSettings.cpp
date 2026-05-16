@@ -2,15 +2,24 @@
 #include "VxConfiguration.h"
 #include "VxMath.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#include <strings.h>
+#endif
 
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#ifndef MAX_PATH
+#define MAX_PATH 260
+#endif
 
 const char *kRenderSettingsFile = "CK2_3D.ini";
 const char *kRenderSettingsSection = "CK2_3D";
@@ -53,7 +62,11 @@ static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) 
 }
 
 static int CKRenderSettingsStricmp(const char *a, const char *b) {
+#ifdef _WIN32
     return _stricmp(a, b);
+#else
+    return strcasecmp(a, b);
+#endif
 }
 
 static bool CKRenderSettingsCopyString(char *buffer, CKDWORD bufferSize, const char *value) {
@@ -64,7 +77,8 @@ static bool CKRenderSettingsCopyString(char *buffer, CKDWORD bufferSize, const c
     if (!value || value[0] == '\0')
         return false;
 
-    strncpy_s(buffer, bufferSize, value, _TRUNCATE);
+    strncpy(buffer, value, bufferSize - 1);
+    buffer[bufferSize - 1] = '\0';
     return buffer[0] != '\0';
 }
 
@@ -79,6 +93,7 @@ static bool CKRenderSettingsLoadFile(VxConfiguration &config, const char *path) 
 
 static void CKRenderSettingsLoad(VxConfiguration &config) {
     char path[MAX_PATH] = {0};
+#ifdef _WIN32
     HMODULE hMod = NULL;
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            (LPCSTR)&CKRenderSettingsLoad, &hMod)) {
@@ -90,6 +105,19 @@ static void CKRenderSettingsLoad(VxConfiguration &config) {
                 return;
         }
     }
+#else
+    Dl_info info;
+    if (dladdr((void *)&CKRenderSettingsLoad, &info) && info.dli_fname) {
+        strncpy(path, info.dli_fname, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+        char *last = strrchr(path, '/');
+        if (last) {
+            snprintf(last + 1, sizeof(path) - (size_t)(last + 1 - path), "%s", kRenderSettingsFile);
+            if (CKRenderSettingsLoadFile(config, path))
+                return;
+        }
+    }
+#endif
 
     CKRenderSettingsLoadFile(config, kRenderSettingsFile);
 }
@@ -168,8 +196,8 @@ static bool CKRenderSettingsStringByName(const char *section, const char *name, 
         configSection = CKRenderSettingsGetConfig()->GetSubSection(kRenderSettingsSection, TRUE);
     } else {
         char sectionPath[256] = {0};
-        if (sprintf_s(sectionPath, "%s.%s", kRenderSettingsSection, section) < 0)
-            return false;
+    if (snprintf(sectionPath, sizeof(sectionPath), "%s.%s", kRenderSettingsSection, section) < 0)
+        return false;
         configSection = CKRenderSettingsGetConfig()->GetSubSection(sectionPath, TRUE);
     }
     if (!configSection)
@@ -307,9 +335,12 @@ void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const 
         return;
 
     g_RenderSettingsOverrides[index].Used = true;
-    strncpy_s(g_RenderSettingsOverrides[index].Section, sectionName, _TRUNCATE);
-    strncpy_s(g_RenderSettingsOverrides[index].Name, name, _TRUNCATE);
-    strncpy_s(g_RenderSettingsOverrides[index].Value, value, _TRUNCATE);
+    strncpy(g_RenderSettingsOverrides[index].Section, sectionName, sizeof(g_RenderSettingsOverrides[index].Section) - 1);
+    g_RenderSettingsOverrides[index].Section[sizeof(g_RenderSettingsOverrides[index].Section) - 1] = '\0';
+    strncpy(g_RenderSettingsOverrides[index].Name, name, sizeof(g_RenderSettingsOverrides[index].Name) - 1);
+    g_RenderSettingsOverrides[index].Name[sizeof(g_RenderSettingsOverrides[index].Name) - 1] = '\0';
+    strncpy(g_RenderSettingsOverrides[index].Value, value, sizeof(g_RenderSettingsOverrides[index].Value) - 1);
+    g_RenderSettingsOverrides[index].Value[sizeof(g_RenderSettingsOverrides[index].Value) - 1] = '\0';
     ++g_RenderSettingsGeneration;
 }
 

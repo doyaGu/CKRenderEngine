@@ -1,20 +1,58 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#else
+#include <dlfcn.h>
+#include <strings.h>
+#endif
 
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
+#ifndef MAX_PATH
+#define MAX_PATH 260
+#endif
+
+#ifndef _WIN32
+#ifndef _TRUNCATE
+#define _TRUNCATE ((size_t)-1)
+#endif
+static int fopen_s(FILE **file, const char *path, const char *mode)
+{
+    *file = fopen(path, mode);
+    return *file ? 0 : 1;
+}
+
+static int _vsnprintf_s(char *buffer, size_t size, size_t, const char *format, va_list args)
+{
+    return vsnprintf(buffer, size, format, args);
+}
+
+static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int result = _vsnprintf_s(buffer, size, truncate, format, args);
+    va_end(args);
+    return result;
+}
+#endif
+
 static FILE *g_BgfxLogFile = nullptr;
 
 static bool CKBgfxLogNameEquals(const char *lhs, const char *rhs)
 {
+#ifdef _WIN32
     return lhs && rhs && _stricmp(lhs, rhs) == 0;
+#else
+    return lhs && rhs && strcasecmp(lhs, rhs) == 0;
+#endif
 }
 
 static CKBgfxDebugConfig CKBgfxReadDebugSettings()
@@ -95,6 +133,7 @@ static FILE *CKBgfxGetLogFile()
 {
     if (!g_BgfxLogFile) {
         char path[MAX_PATH] = {0};
+#ifdef _WIN32
         HMODULE hMod = nullptr;
         if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                (LPCSTR)&CKBgfxGetLogFile, &hMod)) {
@@ -105,6 +144,18 @@ static FILE *CKBgfxGetLogFile()
         }
         if (path[0] == '\0')
             strcpy_s(path, "CKBgfx_Trace.log");
+#else
+        Dl_info info;
+        if (dladdr((void *)&CKBgfxGetLogFile, &info) && info.dli_fname) {
+            strncpy(path, info.dli_fname, sizeof(path) - 1);
+            path[sizeof(path) - 1] = '\0';
+            char *last = strrchr(path, '/');
+            if (last)
+                snprintf(last + 1, sizeof(path) - (size_t)(last + 1 - path), "%s", "CKBgfx_Trace.log");
+        }
+        if (path[0] == '\0')
+            strncpy(path, "CKBgfx_Trace.log", sizeof(path) - 1);
+#endif
         fopen_s(&g_BgfxLogFile, path, "w");
     }
     return g_BgfxLogFile;
@@ -130,8 +181,13 @@ void CKBgfxLogf(const char *tag, const char *fmt, ...)
     _vsnprintf_s(msg + n, sizeof(msg) - n, _TRUNCATE, fmt, args);
     va_end(args);
 
+#ifdef _WIN32
     OutputDebugStringA(msg);
     OutputDebugStringA("\n");
+#else
+    fputs(msg, stderr);
+    fputc('\n', stderr);
+#endif
 
     if (CKBgfxFileLogEnabled()) {
         FILE *f = CKBgfxGetLogFile();
@@ -172,15 +228,15 @@ bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
 {
     char value[32] = {0};
     if (!CKBgfxConfigString("Renderer", "Backend", value, (CKDWORD)sizeof(value)) ||
-        _stricmp(value, "auto") == 0)
+        CKBgfxLogNameEquals(value, "auto"))
         return bgfx::RendererType::Count;
-    if (_stricmp(value, "d3d11") == 0 || _stricmp(value, "direct3d11") == 0)
+    if (CKBgfxLogNameEquals(value, "d3d11") || CKBgfxLogNameEquals(value, "direct3d11"))
         return bgfx::RendererType::Direct3D11;
-    if (_stricmp(value, "d3d12") == 0 || _stricmp(value, "direct3d12") == 0)
+    if (CKBgfxLogNameEquals(value, "d3d12") || CKBgfxLogNameEquals(value, "direct3d12"))
         return bgfx::RendererType::Direct3D12;
-    if (_stricmp(value, "vulkan") == 0)
+    if (CKBgfxLogNameEquals(value, "vulkan"))
         return bgfx::RendererType::Vulkan;
-    if (_stricmp(value, "opengl") == 0 || _stricmp(value, "gl") == 0)
+    if (CKBgfxLogNameEquals(value, "opengl") || CKBgfxLogNameEquals(value, "gl"))
         return bgfx::RendererType::OpenGL;
 
     CKBgfxLogf("Init", "unknown Renderer/Backend='%s', falling back to auto", value);
