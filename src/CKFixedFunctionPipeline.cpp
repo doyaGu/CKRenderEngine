@@ -1521,7 +1521,7 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
         const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = cube ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerStage = (cube || volume) ? i + CKFF_MAX_TEXTURE_STAGES : i;
         const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
                                        (volume ? u.s_textureVolume[i] : u.s_texture[i]);
         encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
@@ -1536,7 +1536,7 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
         const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = cube ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerStage = (cube || volume) ? i + CKFF_MAX_TEXTURE_STAGES : i;
         const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
                                        (volume ? u.s_textureVolume[i] : u.s_texture[i]);
         encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
