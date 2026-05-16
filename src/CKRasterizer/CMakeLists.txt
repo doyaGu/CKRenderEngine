@@ -97,10 +97,7 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
             bimg
             bx
     )
-    target_compile_definitions(${_ckre_bgfx_target} PRIVATE CKRE_ENABLE_SDL3=$<IF:$<BOOL:${CKRE_ENABLE_SDL3}>,1,0>)
-    if (CKRE_ENABLE_SDL3)
-        target_link_libraries(${_ckre_bgfx_target} PRIVATE SDL3::SDL3)
-    endif ()
+    target_link_libraries(${_ckre_bgfx_target} PRIVATE SDL3::SDL3)
     if (CMAKE_DL_LIBS)
         target_link_libraries(${_ckre_bgfx_target} PRIVATE ${CMAKE_DL_LIBS})
     endif ()
