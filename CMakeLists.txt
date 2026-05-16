@@ -37,6 +37,7 @@ option(CKRE_GENERATE_SHADERS "Regenerate CK2_3D bgfx fixed-function shader heade
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
+option(CKRE_ENABLE_SDL3 "Build with SDL3 window backend integration" OFF)
 option(CKRE_ENABLE_DIAGNOSTICS "Enable optional CK2_3D diagnostic code unless a category overrides it" OFF)
 option(CKRE_ENABLE_DEBUG_LOGGER "Enable CK2_3D internal diagnostic logger support" ${CKRE_ENABLE_DIAGNOSTICS})
 option(CKRE_ENABLE_RENDER_STATS "Enable frame traversal and render wrapper timing diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
@@ -70,8 +71,12 @@ set(CKRE_VERSION_HEADER "${CKRE_GENERATED_INCLUDE_DIR}/Version.h")
 # =============================================================================
 # Platform check
 # =============================================================================
-if (NOT WIN32)
-    message(FATAL_ERROR "[CKRenderEngine] Only Windows platform is supported")
+if (NOT WIN32 AND NOT CKRE_ENABLE_SDL3)
+    message(FATAL_ERROR "[CKRenderEngine] Only Windows platform is supported without CKRE_ENABLE_SDL3")
+endif ()
+
+if (CKRE_ENABLE_SDL3 AND NOT TARGET SDL3::SDL3)
+    find_package(SDL3 CONFIG REQUIRED)
 endif ()
 
 # Enable RC language for resource files
