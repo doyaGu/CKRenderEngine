@@ -602,7 +602,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     ffp.Shutdown();
 }
 
-void VolumeTextureModulateCacheMissUsesVolumeLayoutShader() {
+void VolumeTextureModulateCacheMissUsesUberShader() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -622,20 +622,20 @@ void VolumeTextureModulateCacheMissUsesVolumeLayoutShader() {
 
     CKFFSpecializationInfo spec;
     TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Volume layout draw must submit runtime specialization data");
+              "Volume draw must submit runtime specialization data");
     if (!context.LastProgramSpecializationDwords.empty())
         spec.SetDwords(&context.LastProgramSpecializationDwords[0],
                        (CKDWORD)context.LastProgramSpecializationDwords.size());
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume texture cache miss must draw through a volume layout shader");
+              "Volume texture cache miss must draw through the runtime shader");
     TestCheck((spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE) &&
               ((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME),
-              "Volume layout shader must keep runtime stage op and volume sampler specialization");
+              "Volume runtime shader must keep runtime stage op and volume sampler specialization");
     TestCheck(context.Encoder.TextureBindCount == 1,
-              "Volume layout draw must bind one texture");
-    TestCheck(context.Encoder.LastTextureStage == 0 &&
+              "Volume runtime draw must bind one texture");
+    TestCheck(context.Encoder.LastTextureStage == 8 &&
               context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[0],
-              "Volume stage 0 must bind slot 0 and s_textureVolume0");
+              "Volume stage 0 must bind slot 8 and s_textureVolume0");
 
     ffp.Shutdown();
 }
@@ -664,17 +664,17 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume stage 7 must submit through a volume layout shader");
+              "Volume stage 7 must submit through the runtime shader");
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Volume stage 7 draw must bind one texture");
-    TestCheck(context.Encoder.LastTextureStage == 7 &&
+    TestCheck(context.Encoder.LastTextureStage == 15 &&
               context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[7],
-              "Volume stage 7 must bind slot 7 and s_textureVolume7");
+              "Volume stage 7 must bind slot 15 and s_textureVolume7");
 
     ffp.Shutdown();
 }
 
-void VolumeAndCubeTexturesBindIndependentSamplerSlots() {
+void VolumeAndCubeCacheMissDoesNotUseUnsafeRuntimeFallback() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -698,19 +698,10 @@ void VolumeAndCubeTexturesBindIndependentSamplerSlots() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
-    bool sawVolume = false;
-    bool sawCube = false;
-    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 0 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
-            sawVolume = true;
-        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[1] && binding.Texture == 202)
-            sawCube = true;
-    }
-    TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume + cube layout draw must submit");
-    TestCheck(sawVolume && sawCube,
-              "Volume stage 0 and cube stage 1 must bind independent sampler slots");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Volume + cube cache miss must not submit through a lossy runtime shader");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "Volume + cube cache miss must not bind textures after shader selection fails");
 
     ffp.Shutdown();
 }
@@ -747,13 +738,13 @@ void MultipleVolumeTexturesBindEachVolumeSampler() {
     bool sawStage0 = false;
     bool sawStage2 = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 0 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 301)
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 301)
             sawStage0 = true;
-        if (binding.Stage == 2 && binding.Uniform == u.s_textureVolume[2] && binding.Texture == 302)
+        if (binding.Stage == 10 && binding.Uniform == u.s_textureVolume[2] && binding.Texture == 302)
             sawStage2 = true;
     }
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Multi-volume layout draw must submit");
+              "Multi-volume runtime draw must submit");
     TestCheck(sawStage0 && sawStage2,
               "Multiple volume stages must bind their matching volume sampler uniforms");
 
@@ -1486,12 +1477,12 @@ int main() {
               &StageConstantDoesNotCreateTextureDependency);
     tests.Run("Cube texture uses cube sampler specialization and binding",
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
-    tests.Run("Volume texture modulate cache miss uses volume layout shader",
-              &VolumeTextureModulateCacheMissUsesVolumeLayoutShader);
+    tests.Run("Volume texture modulate cache miss uses runtime shader",
+              &VolumeTextureModulateCacheMissUsesUberShader);
     tests.Run("Volume texture stage seven binds volume sampler",
               &VolumeTextureStageSevenBindsVolumeSampler);
-    tests.Run("Volume and cube textures bind independent sampler slots",
-              &VolumeAndCubeTexturesBindIndependentSamplerSlots);
+    tests.Run("Volume and cube cache miss does not use unsafe runtime fallback",
+              &VolumeAndCubeCacheMissDoesNotUseUnsafeRuntimeFallback);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",

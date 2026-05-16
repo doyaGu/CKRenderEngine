@@ -12,21 +12,25 @@
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
 
 struct CKFFShaderBlobSet {
     CK_SHADER_PROFILE Profile;
@@ -41,6 +45,8 @@ struct CKFFShaderBlobSet {
     unsigned int VSPositionTClipSize;
     const unsigned char *FSStage;
     unsigned int FSStageSize;
+    const unsigned char *FSStageVolume;
+    unsigned int FSStageVolumeSize;
 };
 
 static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
@@ -49,25 +55,29 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
      s_dx11_vs_ff_3d_clip, sizeof(s_dx11_vs_ff_3d_clip),
      s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
      s_dx11_vs_ff_positiont_clip, sizeof(s_dx11_vs_ff_positiont_clip),
-     s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage)},
+     s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage),
+     s_dx11_fs_ff_stage_volume, sizeof(s_dx11_fs_ff_stage_volume)},
     {CKRST_SHADER_PROFILE_DX12, "dx12",
      s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
      s_dx12_vs_ff_3d_clip, sizeof(s_dx12_vs_ff_3d_clip),
      s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
      s_dx12_vs_ff_positiont_clip, sizeof(s_dx12_vs_ff_positiont_clip),
-     s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage)},
+     s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage),
+     s_dx12_fs_ff_stage_volume, sizeof(s_dx12_fs_ff_stage_volume)},
     {CKRST_SHADER_PROFILE_SPIRV, "spirv",
      s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
      s_spirv_vs_ff_3d_clip, sizeof(s_spirv_vs_ff_3d_clip),
      s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
      s_spirv_vs_ff_positiont_clip, sizeof(s_spirv_vs_ff_positiont_clip),
-     s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage)},
+     s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage),
+     s_spirv_fs_ff_stage_volume, sizeof(s_spirv_fs_ff_stage_volume)},
     {CKRST_SHADER_PROFILE_GLSL, "glsl",
      s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
      s_glsl_vs_ff_3d_clip, sizeof(s_glsl_vs_ff_3d_clip),
      s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
      s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
-     s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage)},
+     s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage),
+     s_glsl_fs_ff_stage_volume, sizeof(s_glsl_fs_ff_stage_volume)},
 };
 
 static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
@@ -81,8 +91,8 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
-static CKDWORD CKFFShaderKeyVolumeSamplerMask(const CKFFShaderKey &key);
 static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key);
+static bool CKFFShaderKeyNeedsCubeSampler(const CKFFShaderKey &key);
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
@@ -296,23 +306,32 @@ void CKFFShaderCache::ResolveShaderTarget() {
 CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
     if (!m_UseUberShader)
         return CreateFullSpecializedProgram(key);
-    if (CKFFShaderKeyNeedsVolumeSampler(key))
+    if (CKFFShaderKeyNeedsVolumeSampler(key)) {
+        if (CKFFShaderKeyNeedsCubeSampler(key)) {
+            CK_LOG("ShaderCache", "FFP cube+volume sampler mix requires a full-specialized shader");
+            return CKFFProgramBinding();
+        }
         return CreateVolumeSamplerLayoutProgram(key);
+    }
     return CreateUberSpecializedProgram(key);
 }
 
-static CKDWORD CKFFShaderKeyVolumeSamplerMask(const CKFFShaderKey &key) {
-    CKDWORD mask = 0;
+static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
         if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_VOLUME)
-            mask |= 1u << stage;
+            return true;
     }
-    return mask;
+    return false;
 }
 
-static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
-    return CKFFShaderKeyVolumeSamplerMask(key) != 0;
+static bool CKFFShaderKeyNeedsCubeSampler(const CKFFShaderKey &key) {
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+        const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
+        if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_CUBE)
+            return true;
+    }
+    return false;
 }
 
 CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
@@ -350,7 +369,10 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
                specInfo.Data()[6], specInfo.Data()[7], specInfo.Data()[8],
                specInfo.Data()[9]);
     if (CKFFShaderKeyNeedsVolumeSampler(key)) {
-        CK_LOG("ShaderCache", "Full FFP specialized module cache miss uses volume sampler; falling back to volume sampler layout shader");
+        if (CKFFShaderKeyNeedsCubeSampler(key)) {
+            CK_LOG("ShaderCache", "Full FFP specialized module cache miss has cube+volume sampler mix; no safe runtime fallback");
+            return CKFFProgramBinding();
+        }
         return CreateVolumeSamplerLayoutProgram(key);
     }
     return CreateUberSpecializedProgram(key);
@@ -360,15 +382,6 @@ CKFFProgramBinding CKFFShaderCache::CreateVolumeSamplerLayoutProgram(const CKFFS
     const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
     if (!set)
         return CKFFProgramBinding();
-
-    const CKDWORD volumeMask = CKFFShaderKeyVolumeSamplerMask(key);
-    CKFFVolumeSamplerModule module;
-    if (!CKFFFindVolumeSamplerModule(volumeMask, m_Target.Profile, module)) {
-        CK_LOG_FMT("ShaderCache",
-                   "No FFP volume sampler layout module: backend=%s mask=0x%02X",
-                   set->Name, volumeMask);
-        return CKFFProgramBinding();
-    }
 
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const bool positionT = key.VS.GetHasPositionT();
@@ -380,11 +393,11 @@ CKFFProgramBinding CKFFShaderCache::CreateVolumeSamplerLayoutProgram(const CKFFS
         ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
         : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
     CKDWORD program = CreateProgramFromBinary(
-        m_Target, vsData, vsSize, module.FSData, module.FSSize, specInfo);
+        m_Target, vsData, vsSize, set->FSStageVolume, set->FSStageVolumeSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP volume sampler layout program: %u backend=%s mask=0x%02X positionT=%u clip=%u lastStage=%u",
-               program, set->Name, volumeMask, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               "FFP volume sampler program: %u backend=%s positionT=%u clip=%u lastStage=%u",
+               program, set->Name, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
                key.FS.LastActiveTextureStage);
     return CKFFProgramBinding(program, false, specInfo);
 }
