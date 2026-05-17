@@ -4,6 +4,52 @@
 
 #include <new>
 
+static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height, int bpp, int refreshRate)
+{
+    if (width < 640 || height < 400)
+        return;
+    if (refreshRate <= 0)
+        refreshRate = 60;
+
+    VxDisplayMode mode;
+    mode.Width = width;
+    mode.Height = height;
+    mode.Bpp = bpp;
+    mode.RefreshRate = refreshRate;
+    if (!displayModes.IsHere(mode))
+        displayModes.PushBack(mode);
+}
+
+static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, const SDL_DisplayMode *mode)
+{
+    if (!mode)
+        return;
+
+    int refreshRate = mode->refresh_rate > 0.0f ? (int)(mode->refresh_rate + 0.5f) : 60;
+    AddDisplayMode(displayModes, mode->w, mode->h, 32, refreshRate);
+}
+
+static void AddCompatibleDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height)
+{
+    AddDisplayMode(displayModes, width, height, 16, 60);
+    AddDisplayMode(displayModes, width, height, 32, 60);
+}
+
+static int CompareDisplayModes(const void *lhs, const void *rhs)
+{
+    const VxDisplayMode &a = *(const VxDisplayMode *)lhs;
+    const VxDisplayMode &b = *(const VxDisplayMode *)rhs;
+    if (a.Width != b.Width)
+        return a.Width < b.Width ? -1 : 1;
+    if (a.Height != b.Height)
+        return a.Height < b.Height ? -1 : 1;
+    if (a.Bpp != b.Bpp)
+        return a.Bpp < b.Bpp ? -1 : 1;
+    if (a.RefreshRate != b.RefreshRate)
+        return a.RefreshRate < b.RefreshRate ? -1 : 1;
+    return 0;
+}
+
 CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
 {
     m_Owner = owner;
@@ -16,35 +62,41 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     SDL_DisplayID *displays = SDL_GetDisplays(&displayCount);
     for (int displayIndex = 0; displays && displayIndex < displayCount; ++displayIndex)
     {
+        AddDisplayMode(m_DisplayModes, SDL_GetCurrentDisplayMode(displays[displayIndex]));
+        AddDisplayMode(m_DisplayModes, SDL_GetDesktopDisplayMode(displays[displayIndex]));
+
         int modeCount = 0;
         SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(displays[displayIndex], &modeCount);
         for (int modeIndex = 0; modes && modeIndex < modeCount; ++modeIndex)
-        {
-            const SDL_DisplayMode *mode = modes[modeIndex];
-            if (mode && mode->w >= 640 && mode->h >= 400)
-            {
-                VxDisplayMode vdm;
-                vdm.Width = mode->w;
-                vdm.Height = mode->h;
-                vdm.Bpp = 32;
-                vdm.RefreshRate = mode->refresh_rate > 0.0f ? (int)(mode->refresh_rate + 0.5f) : 60;
-                if (!m_DisplayModes.IsHere(vdm))
-                    m_DisplayModes.PushBack(vdm);
-            }
-        }
+            AddDisplayMode(m_DisplayModes, modes[modeIndex]);
         SDL_free(modes);
     }
     SDL_free(displays);
 
-    if (m_DisplayModes.Size() == 0)
-    {
-        VxDisplayMode fallback;
-        fallback.Width = 640;
-        fallback.Height = 480;
-        fallback.Bpp = 32;
-        fallback.RefreshRate = 60;
-        m_DisplayModes.PushBack(fallback);
-    }
+    static const int compatibleResolutions[][2] = {
+        {640, 480},
+        {800, 600},
+        {1024, 768},
+        {1152, 864},
+        {1280, 720},
+        {1280, 768},
+        {1280, 800},
+        {1280, 960},
+        {1280, 1024},
+        {1360, 768},
+        {1366, 768},
+        {1440, 900},
+        {1600, 900},
+        {1600, 1200},
+        {1680, 1050},
+        {1920, 1080},
+        {1920, 1200},
+        {2560, 1440},
+    };
+    for (int i = 0; i < (int)(sizeof(compatibleResolutions) / sizeof(compatibleResolutions[0])); ++i)
+        AddCompatibleDisplayMode(m_DisplayModes, compatibleResolutions[i][0], compatibleResolutions[i][1]);
+
+    m_DisplayModes.Sort(CompareDisplayModes);
 
     CKTextureDesc texDesc;
     texDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
