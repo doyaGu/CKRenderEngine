@@ -73,6 +73,22 @@ static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &pla
 #endif
 }
 
+static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscreen,
+                                              int &width, int &height)
+{
+    if (!Fullscreen || !Window)
+        return;
+
+    SDL_Window *window = static_cast<SDL_Window *>(Window);
+    int windowW = 0;
+    int windowH = 0;
+    SDL_GetWindowSize(window, &windowW, &windowH);
+    if (windowW > 0 && windowH > 0) {
+        width = windowW;
+        height = windowH;
+    }
+}
+
 // ===========================================================================
 // Helper: ensure slot array is large enough and return pointer at index
 // ===========================================================================
@@ -683,6 +699,8 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     if (Height <= 0)
         Height = CKBgfxConfigPositiveInt("Renderer", "FallbackHeight", 480);
 
+    CKBgfxResolveFullscreenWindowSize(Window, Fullscreen, Width, Height);
+
     m_Width = Width;
     m_Height = Height;
     m_Bpp = (Bpp > 0) ? Bpp : 32;
@@ -750,6 +768,8 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
         return FALSE;
     if (Width <= 0 || Height <= 0)
         return FALSE;
+
+    CKBgfxResolveFullscreenWindowSize(m_Window, m_Fullscreen, Width, Height);
 
     m_PosX = PosX;
     m_PosY = PosY;
