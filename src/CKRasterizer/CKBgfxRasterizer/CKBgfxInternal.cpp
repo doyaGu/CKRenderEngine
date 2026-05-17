@@ -207,6 +207,7 @@ const char *CKBgfxRendererTypeName(bgfx::RendererType::Enum type)
     case bgfx::RendererType::Vulkan:     return "Vulkan";
     case bgfx::RendererType::OpenGL:     return "OpenGL";
     case bgfx::RendererType::OpenGLES:   return "OpenGLES";
+    case bgfx::RendererType::Metal:      return "Metal";
     case bgfx::RendererType::Noop:       return "Noop";
     default:                             return "Auto";
     }
@@ -220,6 +221,7 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
     case bgfx::RendererType::Vulkan:     return CKRST_SHADER_PROFILE_SPIRV;
     case bgfx::RendererType::OpenGL:
     case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_GLSL;
+    case bgfx::RendererType::Metal:      return CKRST_SHADER_PROFILE_MSL;
     default:                             return CKRST_SHADER_PROFILE_UNKNOWN;
     }
 }
@@ -238,6 +240,8 @@ bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
         return bgfx::RendererType::Vulkan;
     if (CKBgfxLogNameEquals(value, "opengl") || CKBgfxLogNameEquals(value, "gl"))
         return bgfx::RendererType::OpenGL;
+    if (CKBgfxLogNameEquals(value, "metal") || CKBgfxLogNameEquals(value, "msl"))
+        return bgfx::RendererType::Metal;
 
     CKBgfxLogf("Init", "unknown Renderer/Backend='%s', falling back to auto", value);
     return bgfx::RendererType::Count;

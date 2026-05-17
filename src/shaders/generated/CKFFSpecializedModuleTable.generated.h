@@ -217,6 +217,60 @@
 #include "shaders/generated/glsl/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_f133e0400be749bf_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_1c60dac25096903c_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_ce02d6d46e6c7ac1_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_9e850820648282bc_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_9925dd08e6fc459a_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_21b183a77e9ff6a5_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_31d7612e754f4127_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_f83f8992b4d8ed55_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_07c93ef8e5341421_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_d272bb09f55ec479_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_7393382955c5a4f6_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_24f841b88052a4f7_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_1a64215ad5798c12_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_a244484e6ba06066_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_7a5a612ffc72181f_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_1bc5505805eb9532_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_85775de1c116ae12_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_03dacb1374bee3a6_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_bb662103fad5f946_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_3fbbf96919e6f473_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_dea7638c57cd3ee5_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_8a0b7c8068b26e0e_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_1a286fd7980402f1_vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_b855a3fb9a141822_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_bdf8bb2c05ef21c7_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_00c92b1bcbce4d8d_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_dbfc4c58d2921002_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_1327e0a2fbf90f0d_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_3d3798e46e5c5cfc_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/vsspec_3030258a85361955_vs_ff_3d.bin.h"
+#include "shaders/generated/metal/specialized/spec_a0bdb770c35c1cfc_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_dd318d88ba5ea36a_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_c1283c151d45f696_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_02f87956686cb7e6_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_1c2018fc242e594d_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_5f0a7494767299c3_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_6b61727c636ff35d_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_7becdd03c8c59163_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_b5a02118801dd138_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_bca37de0ec984ac7_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_0a6fc87827d83027_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_1b854eceaa9fc32d_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_8532c0d362563a28_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_bfdce629825ea3dd_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_16e3c3c8ed217658_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_9a52f235c05b7a1c_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_d144a37cf6bddf75_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_647f98ef76b2a9b8_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     CKFFShaderKey key;
@@ -9338,6 +9392,486 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_level_capture_13_3d_stag
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_select_texture_volume() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_dd318d88ba5ea36a_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_dd318d88ba5ea36a_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_select_texture_volume();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_caf15ee4a3d88195_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_caf15ee4a3d88195_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage1_add_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_c1283c151d45f696_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_c1283c151d45f696_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_add_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_alpha_test() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_02f87956686cb7e6_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_02f87956686cb7e6_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_alpha_test();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_fog() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_2f7b829250345295_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_2f7b829250345295_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1c2018fc242e594d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1c2018fc242e594d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_fog();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_positiont_stage0_modulate_fog() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_f133e0400be749bf_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_f133e0400be749bf_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_1c2018fc242e594d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1c2018fc242e594d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_positiont_stage0_modulate_fog();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_transform() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1c60dac25096903c_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1c60dac25096903c_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_transform();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_lerp_multiplyadd_arg0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_5f0a7494767299c3_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_5f0a7494767299c3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_lerp_multiplyadd_arg0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texgen_reflection() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_ce02d6d46e6c7ac1_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_ce02d6d46e6c7ac1_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texgen_reflection();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_lit_one_light() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_9e850820648282bc_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_9e850820648282bc_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_lit_one_light();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_diffuse_color0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_9925dd08e6fc459a_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_9925dd08e6fc459a_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_diffuse_color0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_count3_projected() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_21b183a77e9ff6a5_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_21b183a77e9ff6a5_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_6b61727c636ff35d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_6b61727c636ff35d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_count3_projected();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage1_bump_luminance() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_7becdd03c8c59163_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_7becdd03c8c59163_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_bump_luminance();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_count4_projected() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_31d7612e754f4127_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_31d7612e754f4127_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_6b61727c636ff35d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_6b61727c636ff35d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_modulate_texcoord_count4_projected();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage1_temp_result_routing() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_6a7cbb03996d991b_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_b5a02118801dd138_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_b5a02118801dd138_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage1_temp_result_routing();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_vertex_blend_normal_key() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_f83f8992b4d8ed55_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_f83f8992b4d8ed55_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_vertex_blend_normal_key();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_variant_3d_stage0_vertex_blend_tween_key() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_07c93ef8e5341421_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_07c93ef8e5341421_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a0bdb770c35c1cfc_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_variant_3d_stage0_vertex_blend_tween_key();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_00_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_d272bb09f55ec479_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_d272bb09f55ec479_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_00_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_01_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_7393382955c5a4f6_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_7393382955c5a4f6_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_01_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_02_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_24f841b88052a4f7_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_24f841b88052a4f7_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_02_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_03_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_03_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_04_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_a244484e6ba06066_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_a244484e6ba06066_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_04_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_05_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_7a5a612ffc72181f_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_7a5a612ffc72181f_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_05_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_06_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_8532c0d362563a28_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_8532c0d362563a28_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_06_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_07_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_24f841b88052a4f7_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_24f841b88052a4f7_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_07_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_08_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_7393382955c5a4f6_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_7393382955c5a4f6_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_16e3c3c8ed217658_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_16e3c3c8ed217658_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_08_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_09_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_85775de1c116ae12_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_85775de1c116ae12_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_09_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_10_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_03dacb1374bee3a6_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_03dacb1374bee3a6_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_10_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_11_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_bb662103fad5f946_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_bb662103fad5f946_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_d144a37cf6bddf75_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_d144a37cf6bddf75_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_11_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_12_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_12_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_13_3d_stage1() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_3fbbf96919e6f473_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_3fbbf96919e6f473_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_647f98ef76b2a9b8_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_647f98ef76b2a9b8_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_13_3d_stage1();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_14_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_14_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_player_capture_15_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1bc5505805eb9532_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_player_capture_15_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_00_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_dea7638c57cd3ee5_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_dea7638c57cd3ee5_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_00_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_01_3d_stage1() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_8a0b7c8068b26e0e_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_8a0b7c8068b26e0e_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_fdd25d700d27bae3_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_fdd25d700d27bae3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_01_3d_stage1();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_02_positiont_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1a286fd7980402f1_vs_ff_positiont;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1a286fd7980402f1_vs_ff_positiont);
+    module.FSData = s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_02_positiont_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_03_3d_stage1() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_b855a3fb9a141822_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_b855a3fb9a141822_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_fdd25d700d27bae3_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_fdd25d700d27bae3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_03_3d_stage1();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_04_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_bdf8bb2c05ef21c7_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_bdf8bb2c05ef21c7_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_04_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_05_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_00c92b1bcbce4d8d_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_00c92b1bcbce4d8d_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_05_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_06_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_06_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_07_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_bdf8bb2c05ef21c7_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_bdf8bb2c05ef21c7_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_07_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_08_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_dea7638c57cd3ee5_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_dea7638c57cd3ee5_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_08_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_09_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1327e0a2fbf90f0d_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1327e0a2fbf90f0d_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_09_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_10_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_3d3798e46e5c5cfc_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_3d3798e46e5c5cfc_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_8532c0d362563a28_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_8532c0d362563a28_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_10_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_11_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_3030258a85361955_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_3030258a85361955_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_11_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_12_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_1a64215ad5798c12_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_3666770847402ccb_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_3666770847402ccb_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_12_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_metal_level_capture_13_3d_stage0() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_metal_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d;
+    module.VSSize = sizeof(s_metal_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d);
+    module.FSData = s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_level_capture_13_3d_stage0();
+    return module;
+}
+
 static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(), CKFFSpecializedModule_dx11_variant_3d_stage0_select_texture_volume() },
@@ -9531,6 +10065,54 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_11_3d_stage0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_12_3d_stage0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_13_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(), CKFFSpecializedModule_metal_variant_3d_stage0_select_texture_volume() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_positiont_stage0_modulate(), CKFFSpecializedModule_metal_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage1_add_specular(), CKFFSpecializedModule_metal_variant_3d_stage1_add_specular() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_alpha_test() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_fog(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_fog() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_positiont_stage0_modulate_fog(), CKFFSpecializedModule_metal_positiont_stage0_modulate_fog() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_transform(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_transform() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(), CKFFSpecializedModule_metal_variant_3d_stage0_lerp_multiplyadd_arg0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflection(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texgen_reflection() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_lit_one_light() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color0(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_diffuse_color0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_count3_projected(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_count3_projected() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage1_bump_luminance(), CKFFSpecializedModule_metal_variant_3d_stage1_bump_luminance() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_count4_projected(), CKFFSpecializedModule_metal_variant_3d_stage0_modulate_texcoord_count4_projected() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage1_temp_result_routing(), CKFFSpecializedModule_metal_variant_3d_stage1_temp_result_routing() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_key(), CKFFSpecializedModule_metal_variant_3d_stage0_vertex_blend_normal_key() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key(), CKFFSpecializedModule_metal_variant_3d_stage0_vertex_blend_tween_key() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_00_3d_stage0(), CKFFSpecializedModule_metal_player_capture_00_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_01_3d_stage0(), CKFFSpecializedModule_metal_player_capture_01_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_02_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_02_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_03_3d_stage0(), CKFFSpecializedModule_metal_player_capture_03_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_04_3d_stage0(), CKFFSpecializedModule_metal_player_capture_04_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_05_3d_stage0(), CKFFSpecializedModule_metal_player_capture_05_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_06_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_06_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_07_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_07_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_08_3d_stage0(), CKFFSpecializedModule_metal_player_capture_08_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_09_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_09_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_10_3d_stage0(), CKFFSpecializedModule_metal_player_capture_10_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_11_3d_stage0(), CKFFSpecializedModule_metal_player_capture_11_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_12_3d_stage0(), CKFFSpecializedModule_metal_player_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_13_3d_stage1(), CKFFSpecializedModule_metal_player_capture_13_3d_stage1() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_14_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_14_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_player_capture_15_positiont_stage0(), CKFFSpecializedModule_metal_player_capture_15_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_00_3d_stage0(), CKFFSpecializedModule_metal_level_capture_00_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_01_3d_stage1(), CKFFSpecializedModule_metal_level_capture_01_3d_stage1() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_02_positiont_stage0(), CKFFSpecializedModule_metal_level_capture_02_positiont_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_03_3d_stage1(), CKFFSpecializedModule_metal_level_capture_03_3d_stage1() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_04_3d_stage0(), CKFFSpecializedModule_metal_level_capture_04_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_05_3d_stage0(), CKFFSpecializedModule_metal_level_capture_05_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_06_3d_stage0(), CKFFSpecializedModule_metal_level_capture_06_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_07_3d_stage0(), CKFFSpecializedModule_metal_level_capture_07_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_08_3d_stage0(), CKFFSpecializedModule_metal_level_capture_08_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_09_3d_stage0(), CKFFSpecializedModule_metal_level_capture_09_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_10_3d_stage0(), CKFFSpecializedModule_metal_level_capture_10_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_metal_level_capture_11_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_metal_level_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_metal_level_capture_13_3d_stage0() },
 };
 
 static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;
