@@ -31,6 +31,12 @@
 #include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/metal/vs_ff_3d.bin.h"
+#include "shaders/generated/metal/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/metal/vs_ff_positiont.bin.h"
+#include "shaders/generated/metal/vs_ff_positiont_clip.bin.h"
+#include "shaders/generated/metal/fs_ff_stage.bin.h"
+#include "shaders/generated/metal/fs_ff_stage_volume.bin.h"
 
 struct CKFFShaderBlobSet {
     CK_SHADER_PROFILE Profile;
@@ -78,6 +84,13 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
      s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
      s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage),
      s_glsl_fs_ff_stage_volume, sizeof(s_glsl_fs_ff_stage_volume)},
+    {CKRST_SHADER_PROFILE_MSL, "metal",
+     s_metal_vs_ff_3d, sizeof(s_metal_vs_ff_3d),
+     s_metal_vs_ff_3d_clip, sizeof(s_metal_vs_ff_3d_clip),
+     s_metal_vs_ff_positiont, sizeof(s_metal_vs_ff_positiont),
+     s_metal_vs_ff_positiont_clip, sizeof(s_metal_vs_ff_positiont_clip),
+     s_metal_fs_ff_stage, sizeof(s_metal_fs_ff_stage),
+     s_metal_fs_ff_stage_volume, sizeof(s_metal_fs_ff_stage_volume)},
 };
 
 static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)

@@ -43,6 +43,7 @@ BACKENDS = [
     {"name": "dx12", "platform": "windows", "profile": "s_6_0"},
     {"name": "spirv", "platform": "linux", "profile": "spirv"},
     {"name": "glsl", "platform": "linux", "profile": "150"},
+    {"name": "metal", "platform": "osx", "profile": "metal"},
 ]
 
 PROFILE_ENUMS = {
@@ -50,6 +51,7 @@ PROFILE_ENUMS = {
     "dx12": "CKRST_SHADER_PROFILE_DX12",
     "spirv": "CKRST_SHADER_PROFILE_SPIRV",
     "glsl": "CKRST_SHADER_PROFILE_GLSL",
+    "metal": "CKRST_SHADER_PROFILE_MSL",
 }
 
 FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
