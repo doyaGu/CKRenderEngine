@@ -495,6 +495,26 @@ static void TestOpenGLAutoMipPolicy()
                 "one mip request creates a base-level texture");
     TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(4, full, TRUE, FALSE) == TRUE,
                 "explicit mip requests still allocate a mip chain");
+
+    TEST_ASSERT(CKBgfxImageRowBytes(4, 32) == 16,
+                "row byte helper derives uncompressed pitch from width and bpp");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 0) == 16,
+                "zero pitch falls back to tight rows");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 20) == 20,
+                "explicit padded pitch is preserved");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 64) == 16,
+                "uncompressed total image size is normalized back to row pitch");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 2, 32, 128) == 64,
+                "region total image size recovers the original source pitch");
+
+    TEST_ASSERT(CKBgfxResolveAutoMipUpdateAction(TRUE, 1, TRUE, TRUE) == CKBGFX_AUTOMIP_UPDATE_PROMOTE,
+                "full auto-mip update promotes base texture to a complete mip chain");
+    TEST_ASSERT(CKBgfxResolveAutoMipUpdateAction(TRUE, full, TRUE, FALSE) == CKBGFX_AUTOMIP_UPDATE_DEMOTE,
+                "unsupported full auto-mip update demotes incomplete mip chain");
+    TEST_ASSERT(CKBgfxResolveAutoMipUpdateAction(TRUE, full, FALSE, FALSE) == CKBGFX_AUTOMIP_UPDATE_KEEP,
+                "partial auto-mip update keeps existing mip chain instead of clearing texture content");
+    TEST_ASSERT(CKBgfxResolveAutoMipUpdateAction(FALSE, full, FALSE, FALSE) == CKBGFX_AUTOMIP_UPDATE_NONE,
+                "non-auto textures do not use auto-mip update actions");
 }
 
 // ============================================================================

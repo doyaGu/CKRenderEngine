@@ -335,6 +335,39 @@ bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT fmt)
     }
 }
 
+CKDWORD CKBgfxImageRowBytes(CKDWORD width, CKDWORD bitsPerPixel)
+{
+    if (bitsPerPixel == 0 || (bitsPerPixel % 8) != 0)
+        return 0;
+    uint64_t rowBytes = (uint64_t)width * (uint64_t)bitsPerPixel / 8;
+    return rowBytes > 0xffffffffu ? 0 : (CKDWORD)rowBytes;
+}
+
+CKDWORD CKBgfxResolveImagePitch(CKDWORD width, CKDWORD height,
+                                CKDWORD bitsPerPixel, CKDWORD pitchOrImageSize)
+{
+    const CKDWORD rowBytes = CKBgfxImageRowBytes(width, bitsPerPixel);
+    if (rowBytes == 0)
+        return 0;
+    if (pitchOrImageSize == 0)
+        return rowBytes;
+    if (pitchOrImageSize < rowBytes)
+        return rowBytes;
+
+    // VxImageDescEx aliases BytesPerLine and TotalImageSize. Some legacy
+    // upload paths fill the uncompressed total size into the same field.
+    const uint64_t tightImageSize = (uint64_t)rowBytes * (uint64_t)height;
+    if (height > 1 &&
+        (uint64_t)pitchOrImageSize >= tightImageSize &&
+        (pitchOrImageSize % height) == 0) {
+        const CKDWORD candidatePitch = pitchOrImageSize / height;
+        if (candidatePitch >= rowBytes)
+            return candidatePitch;
+    }
+
+    return pitchOrImageSize;
+}
+
 CKDWORD CKBgfxTextureMipCount(CKDWORD width, CKDWORD height, CKDWORD depth)
 {
     CKDWORD count = 1;
@@ -362,6 +395,26 @@ CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD requestedMipCount,
         return autoMipDataAvailable ? TRUE : FALSE;
 
     return requestedMipCount > 1 ? TRUE : FALSE;
+}
+
+CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL requestedAutoMips,
+                                                           CKDWORD currentMipCount,
+                                                           CKBOOL fullBaseUpdate,
+                                                           CKBOOL canGenerateFullMipChain)
+{
+    if (!requestedAutoMips)
+        return CKBGFX_AUTOMIP_UPDATE_NONE;
+
+    if (!fullBaseUpdate)
+        return CKBGFX_AUTOMIP_UPDATE_KEEP;
+
+    if (canGenerateFullMipChain && currentMipCount <= 1)
+        return CKBGFX_AUTOMIP_UPDATE_PROMOTE;
+
+    if (!canGenerateFullMipChain && currentMipCount > 1)
+        return CKBGFX_AUTOMIP_UPDATE_DEMOTE;
+
+    return CKBGFX_AUTOMIP_UPDATE_KEEP;
 }
 
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)

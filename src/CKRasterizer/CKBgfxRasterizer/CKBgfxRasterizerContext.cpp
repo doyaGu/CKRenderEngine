@@ -56,8 +56,8 @@ static CKBYTE *CKBgfxCreateGeneratedMipMap(const VxImageDescEx &src, VxImageDesc
     dst.Width = (src.Width > 1) ? (src.Width >> 1) : 1;
     dst.Height = (src.Height > 1) ? (src.Height >> 1) : 1;
     dst.BytesPerLine = dst.Width * dst.BitsPerPixel / 8;
-    dst.TotalImageSize = dst.BytesPerLine * dst.Height;
-    dst.Image = new CKBYTE[dst.TotalImageSize];
+    const CKDWORD imageSize = (CKDWORD)dst.BytesPerLine * (CKDWORD)dst.Height;
+    dst.Image = new CKBYTE[imageSize];
     VxDoBlit(src, dst);
     return (CKBYTE *)dst.Image;
 }
@@ -95,6 +95,85 @@ static bool CKBgfxCanUseGeneratedMipChain(CKDWORD flags,
     if (CKBgfxIsCompressedTextureFormat(fmt))
         return false;
     return CKBgfxCanGenerateMipMaps(data);
+}
+
+static void CKBgfxResetAutoMipBaseCache(CKBgfxTextureRecord *rec)
+{
+    if (!rec)
+        return;
+    delete[] rec->AutoMipBaseDesc.Image;
+    rec->AutoMipBaseDesc = VxImageDescEx();
+    rec->AutoMipBaseValid = FALSE;
+}
+
+static bool CKBgfxEnsureAutoMipBaseCache(CKBgfxTextureRecord *rec,
+                                          const VxImageDescEx *formatDesc)
+{
+    if (!rec || !formatDesc)
+        return false;
+
+    const CKDWORD bpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : (CKDWORD)formatDesc->BitsPerPixel;
+    const CKDWORD pitch = CKBgfxImageRowBytes(rec->Width, bpp);
+    if (pitch == 0 || rec->Height == 0)
+        return false;
+
+    const CKDWORD imageSize = pitch * rec->Height;
+    if (rec->AutoMipBaseDesc.Image &&
+        rec->AutoMipBaseDesc.Width == (int)rec->Width &&
+        rec->AutoMipBaseDesc.Height == (int)rec->Height &&
+        rec->AutoMipBaseDesc.BitsPerPixel == (int)bpp &&
+        rec->AutoMipBaseDesc.BytesPerLine == (int)pitch) {
+        return true;
+    }
+
+    CKBYTE *image = new CKBYTE[imageSize];
+    memset(image, 0, imageSize);
+
+    delete[] rec->AutoMipBaseDesc.Image;
+    rec->AutoMipBaseDesc.Set(*formatDesc);
+    rec->AutoMipBaseDesc.Width = (int)rec->Width;
+    rec->AutoMipBaseDesc.Height = (int)rec->Height;
+    rec->AutoMipBaseDesc.BitsPerPixel = (int)bpp;
+    rec->AutoMipBaseDesc.BytesPerLine = (int)pitch;
+    rec->AutoMipBaseDesc.ColorMap = NULL;
+    rec->AutoMipBaseDesc.Image = image;
+    rec->AutoMipBaseValid = FALSE;
+    return true;
+}
+
+static bool CKBgfxUpdateAutoMipBaseCache(CKBgfxTextureRecord *rec,
+                                          const VxImageDescEx *data,
+                                          uint16_t x, uint16_t y,
+                                          uint16_t width, uint16_t height)
+{
+    if (!rec || !data || !data->Image)
+        return false;
+    if (!CKBgfxEnsureAutoMipBaseCache(rec, data))
+        return false;
+
+    const CKDWORD bpp = rec->AutoMipBaseDesc.BitsPerPixel;
+    const CKDWORD bytesPerPixel = bpp / 8;
+    if (bytesPerPixel == 0)
+        return false;
+    if ((CKDWORD)x + width > rec->Width || (CKDWORD)y + height > rec->Height)
+        return false;
+
+    const CKDWORD dstPitch = (CKDWORD)rec->AutoMipBaseDesc.BytesPerLine;
+    const CKDWORD rowBytes = (CKDWORD)width * bytesPerPixel;
+    const CKDWORD srcPitch = CKBgfxResolveImagePitch(
+        width, height, bpp,
+        data->BytesPerLine > 0 ? (CKDWORD)data->BytesPerLine : 0);
+    if (srcPitch == 0)
+        return false;
+    CKBYTE *dst = rec->AutoMipBaseDesc.Image + y * dstPitch + x * bytesPerPixel;
+    const CKBYTE *src = (const CKBYTE *)data->Image;
+    for (uint16_t row = 0; row < height; ++row)
+        memcpy(dst + row * dstPitch, src + row * srcPitch, rowBytes);
+
+    if (x == 0 && y == 0 && width == rec->Width && height == rec->Height)
+        rec->AutoMipBaseValid = TRUE;
+
+    return rec->AutoMipBaseValid != FALSE;
 }
 
 static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
@@ -1618,21 +1697,26 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                fullBase2DUpdate &&
                                CKBgfxCanUseGeneratedMipChain(rec->Flags, rec->Format, rec->Depth, Data);
 
-    if (rec->RequestedAutoMips && Mip == 0 && Face == 0) {
-        if (canGenerateAutoMips && rec->MipCount <= 1) {
+    CKBgfxAutoMipUpdateAction autoMipAction = CKBgfxResolveAutoMipUpdateAction(
+        rec->RequestedAutoMips, rec->MipCount,
+        fullBase2DUpdate ? TRUE : FALSE,
+        canGenerateAutoMips ? TRUE : FALSE);
+    if (Mip == 0 && Face == 0) {
+        if (autoMipAction == CKBGFX_AUTOMIP_UPDATE_PROMOTE) {
             if (!CKBgfxRecreateTexture2D(rec, true) &&
                 CKBgfxDebugSettings().Log.Textures) {
                 CKBgfxLogf("UpdateTexture",
                            "id=%u failed to recreate OpenGL auto-mip texture with mips",
                            Texture);
             }
-        } else if (!canGenerateAutoMips && rec->MipCount > 1) {
+        } else if (autoMipAction == CKBGFX_AUTOMIP_UPDATE_DEMOTE) {
             if (!CKBgfxRecreateTexture2D(rec, false) &&
                 CKBgfxDebugSettings().Log.Textures) {
                 CKBgfxLogf("UpdateTexture",
                            "id=%u failed to recreate OpenGL auto-mip texture without mips",
                            Texture);
             }
+            CKBgfxResetAutoMipBaseCache(rec);
         }
     }
 
@@ -1655,8 +1739,12 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     else
     {
         CKDWORD bpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : 32;
-        CKDWORD rowBytes = (CKDWORD)w * bpp / 8;
-        CKDWORD pitch = (Data->BytesPerLine > 0) ? (CKDWORD)Data->BytesPerLine : rowBytes;
+        CKDWORD rowBytes = CKBgfxImageRowBytes(w, bpp);
+        CKDWORD pitch = CKBgfxResolveImagePitch(
+            w, h, bpp,
+            Data->BytesPerLine > 0 ? (CKDWORD)Data->BytesPerLine : 0);
+        if (rowBytes == 0 || pitch == 0)
+            return CKERR_INVALIDPARAMETER;
         if (CKBgfxDebugSettings().Log.Textures &&
             s_UpdateTextureLogCount < 120) {
             uint32_t sampleSize = pitch * h;
@@ -1689,8 +1777,16 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
 
-    if (canGenerateAutoMips && rec->MipCount > 1) {
-        if (!CKBgfxUpdateGeneratedMipMaps(rec, Data) &&
+    if (rec->RequestedAutoMips &&
+        Mip == 0 &&
+        Face == 0 &&
+        !compressed &&
+        !isCube &&
+        !isVolume &&
+        rec->MipCount > 1) {
+        const bool cacheValid = CKBgfxUpdateAutoMipBaseCache(rec, Data, x, y, w, h);
+        if (cacheValid &&
+            !CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc) &&
             CKBgfxDebugSettings().Log.Textures) {
             CKBgfxLogf("UpdateTexture",
                        "id=%u failed to generate complete OpenGL auto-mip chain",
