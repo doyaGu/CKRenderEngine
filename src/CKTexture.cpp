@@ -126,6 +126,37 @@ static CKBYTE *ConvertTextureImage(const VxImageDescEx &src, const VxImageDescEx
     return converted;
 }
 
+static CKDWORD CalculateMipMapCount(CKDWORD width, CKDWORD height) {
+    CKDWORD count = 1;
+    while (width > 1 || height > 1) {
+        width = (width > 1) ? (width >> 1) : 1;
+        height = (height > 1) ? (height >> 1) : 1;
+        ++count;
+    }
+    return count;
+}
+
+static CKBOOL CanGenerateMipMaps(const VxImageDescEx &desc) {
+    return desc.Width > 0 &&
+           desc.Height > 0 &&
+           desc.BitsPerPixel > 0 &&
+           (desc.BitsPerPixel % 8) == 0;
+}
+
+static CKBYTE *CreateGeneratedMipMap(const VxImageDescEx &src, VxImageDescEx &dst) {
+    if (!CanGenerateMipMaps(src))
+        return nullptr;
+
+    dst = src;
+    dst.Width = (src.Width > 1) ? (src.Width >> 1) : 1;
+    dst.Height = (src.Height > 1) ? (src.Height >> 1) : 1;
+    dst.BytesPerLine = dst.Width * dst.BitsPerPixel / 8;
+    dst.TotalImageSize = dst.BytesPerLine * dst.Height;
+    dst.Image = new CKBYTE[dst.TotalImageSize];
+    VxDoBlit(src, dst);
+    return (CKBYTE *)dst.Image;
+}
+
 CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
     int oldWidth = GetWidth();
     int oldHeight = GetHeight();
@@ -294,13 +325,32 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
                 return FALSE;
         }
         // Upload texture data via v2 API
-        if (m_MipMaps && m_MipMapLevel) {
+        if (m_MipMaps && m_MipMapLevel > 1) {
             m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
             int mipCount = m_MipMaps->Size();
+            if (mipCount > (int)m_MipMapLevel - 1)
+                mipCount = (int)m_MipMapLevel - 1;
             for (int i = 0; i < mipCount; ++i) {
                 VxImageDescEx *mipmap = m_MipMaps->At(i);
                 m_RasterizerContext->UpdateTexture(m_ObjectIndex, i + 1, 0, nullptr, mipmap);
             }
+            result = TRUE;
+        } else if (m_MipMapLevel > 1) {
+            m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
+
+            VxImageDescEx previous = uploadDesc;
+            CKBYTE *previousGenerated = nullptr;
+            for (CKDWORD level = 1; level < m_MipMapLevel; ++level) {
+                VxImageDescEx mipDesc;
+                CKBYTE *generated = CreateGeneratedMipMap(previous, mipDesc);
+                delete[] previousGenerated;
+                previousGenerated = generated;
+                if (!generated)
+                    break;
+                m_RasterizerContext->UpdateTexture(m_ObjectIndex, level, 0, nullptr, &mipDesc);
+                previous = mipDesc;
+            }
+            delete[] previousGenerated;
             result = TRUE;
         } else {
             m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc);
@@ -379,6 +429,16 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
         desc.Format.GreenMask = 0x03E0;
         desc.Format.BlueMask = 0x001F;
         desc.Flags |= CKRST_TEXTURE_ALPHA;
+    }
+
+    if (desc.MipMapCount != 0) {
+        if (m_MipMaps && m_MipMaps->Size() > 0) {
+            desc.MipMapCount = (CKDWORD)m_MipMaps->Size() + 1;
+        } else if (CanGenerateMipMaps(desc.Format)) {
+            desc.MipMapCount = CalculateMipMapCount(desc.Format.Width, desc.Format.Height);
+        } else {
+            desc.MipMapCount = 1;
+        }
     }
 
     if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) == CK_OK) {
