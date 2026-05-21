@@ -133,13 +133,13 @@ SAMPLERCUBE(s_textureCube7, 15);
 
 float compareDepth(float depth, float ref, int func)
 {
-    if (func == 1) return depth < ref ? 1.0 : 0.0;
-    if (func == 2) return depth <= ref ? 1.0 : 0.0;
+    if (func == 1) return 0.0;
+    if (func == 2) return depth < ref ? 1.0 : 0.0;
     if (func == 3) return depth == ref ? 1.0 : 0.0;
-    if (func == 4) return depth >= ref ? 1.0 : 0.0;
+    if (func == 4) return depth <= ref ? 1.0 : 0.0;
     if (func == 5) return depth > ref ? 1.0 : 0.0;
     if (func == 6) return depth != ref ? 1.0 : 0.0;
-    if (func == 7) return 0.0;
+    if (func == 7) return depth >= ref ? 1.0 : 0.0;
     if (func == 8) return 1.0;
     return depth;
 }
