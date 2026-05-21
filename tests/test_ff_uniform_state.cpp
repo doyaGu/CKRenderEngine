@@ -178,6 +178,18 @@ void DepthTextureCompareUsesVxCompareOrdering() {
               "VXCMP_ALWAYS must always pass shader depth compares");
 }
 
+void Runtime3DVertexShaderKeepsAdditionalTexcoordsActive() {
+    std::ifstream shader("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
+    std::string contents((std::istreambuf_iterator<char>(shader)),
+                         std::istreambuf_iterator<char>());
+
+    TestCheck(!contents.empty(),
+              "FFP 3D vertex shader source must be readable from the test working directory");
+    TestCheck(contents.find("#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT") != std::string::npos &&
+                  contents.find("#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8") != std::string::npos,
+              "Runtime 3D vertex shader must output texcoords beyond stage 0 for SPIR-V cache misses");
+}
+
 void VertexBlendResolverMatchesDxvkWeightCounts() {
     CKFFVertexBlendState disabled = CKFFResolveVertexBlendState(
         VXVBLEND_DISABLE, FALSE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
@@ -447,6 +459,8 @@ int main() {
               &TextureCombinerTempInitializesAlphaToZero);
     tests.Run("Depth texture compare uses VX compare ordering",
               &DepthTextureCompareUsesVxCompareOrdering);
+    tests.Run("Runtime 3D vertex shader keeps additional texcoords active",
+              &Runtime3DVertexShaderKeepsAdditionalTexcoordsActive);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",

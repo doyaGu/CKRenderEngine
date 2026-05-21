@@ -129,9 +129,6 @@ uniform vec4 u_clipParams;
 #ifndef CKFF_VS_TEXFLAGS7
 #define CKFF_VS_TEXFLAGS7 0
 #endif
-#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
-#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
-#endif
 #if ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
 #else
@@ -139,6 +136,10 @@ uniform vec4 u_clipParams;
 #endif
 #else
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
+#endif
+
+#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
+#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
 #endif
 
 int ckffVsTexGenMode(int stage, int packedIndex)
@@ -692,4 +693,3 @@ void main()
     v_texcoord7Fog.z = ckffFogFactor(fogDepth, ckffVsFogMode(u_ffDrawParams[10].w), u_ffDrawParams[10]);
 #endif
 }
-
