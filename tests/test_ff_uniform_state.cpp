@@ -22,6 +22,68 @@ CKDWORD FloatStageState(float value) {
     return u.D;
 }
 
+std::string ReadTextFile(const char *path) {
+    std::ifstream file(path);
+    return std::string((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+}
+
+std::string::size_type FindFullSpecializedBlockEnd(const std::string &contents) {
+    const std::string blockStart = "#if defined(CKFF_FULL_SPECIALIZED)";
+    std::string::size_type lineStart = contents.find(blockStart);
+    if (lineStart == std::string::npos)
+        return std::string::npos;
+
+    int depth = 0;
+    while (lineStart != std::string::npos) {
+        std::string::size_type lineEnd = contents.find('\n', lineStart);
+        if (lineEnd == std::string::npos)
+            lineEnd = contents.size();
+
+        std::string::size_type first = lineStart;
+        while (first < lineEnd && (contents[first] == ' ' || contents[first] == '\t'))
+            ++first;
+
+        if (contents.compare(first, 3, "#if") == 0) {
+            ++depth;
+        } else if (contents.compare(first, 6, "#endif") == 0) {
+            --depth;
+            if (depth == 0)
+                return first;
+        }
+
+        lineStart = lineEnd == contents.size() ? std::string::npos : lineEnd + 1;
+    }
+
+    return std::string::npos;
+}
+
+void RuntimeVertexShaderKeepsAdditionalTexcoordsActive(const char *path,
+                                                       const char *readErrorMessage) {
+    const std::string contents = ReadTextFile(path);
+    const std::string defaultGuard = "#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT";
+    const std::string defaultDefine = "#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8";
+    const std::string firstTexcoordUse = "#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1";
+
+    TestCheck(!contents.empty(), readErrorMessage);
+
+    const std::string::size_type specializedEnd = FindFullSpecializedBlockEnd(contents);
+    const std::string::size_type guardPos = contents.find(defaultGuard);
+    const std::string::size_type definePos = contents.find(defaultDefine, guardPos);
+    const std::string::size_type usePos = contents.find(firstTexcoordUse);
+
+    TestCheck(specializedEnd != std::string::npos,
+              "Runtime vertex shader test must find the CKFF_FULL_SPECIALIZED block");
+    TestCheck(guardPos != std::string::npos && definePos != std::string::npos,
+              "Runtime vertex shader must define a default active texcoord count");
+    TestCheck(usePos != std::string::npos,
+              "Runtime vertex shader test must find texcoord output gating");
+    TestCheck(specializedEnd < guardPos,
+              "Runtime vertex shader active texcoord default must be visible outside CKFF_FULL_SPECIALIZED");
+    TestCheck(definePos < usePos,
+              "Runtime vertex shader active texcoord default must precede texcoord output gating");
+}
+
 void BumpEnvUniformsPackEachStageIndependently() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
@@ -145,9 +207,7 @@ void AlphaTestPrecisionFollowsRenderTargetAlphaMask() {
 }
 
 void TextureCombinerTempInitializesAlphaToZero() {
-    std::ifstream shader("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
-    std::string contents((std::istreambuf_iterator<char>(shader)),
-                         std::istreambuf_iterator<char>());
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -158,9 +218,7 @@ void TextureCombinerTempInitializesAlphaToZero() {
 }
 
 void DepthTextureCompareUsesVxCompareOrdering() {
-    std::ifstream shader("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
-    std::string contents((std::istreambuf_iterator<char>(shader)),
-                         std::istreambuf_iterator<char>());
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -176,6 +234,18 @@ void DepthTextureCompareUsesVxCompareOrdering() {
               "VXCMP_GREATEREQUAL must use greater-or-equal shader depth compare");
     TestCheck(contents.find("if (func == 8) return 1.0") != std::string::npos,
               "VXCMP_ALWAYS must always pass shader depth compares");
+}
+
+void Runtime3DVertexShaderKeepsAdditionalTexcoordsActive() {
+    RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
+        "Source/RenderEngine/src/shaders/vs_ff_3d.sc",
+        "FFP 3D vertex shader source must be readable from the test working directory");
+}
+
+void RuntimePositionTVertexShaderKeepsAdditionalTexcoordsActive() {
+    RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
+        "Source/RenderEngine/src/shaders/vs_ff_positiont.sc",
+        "FFP POSITIONT vertex shader source must be readable from the test working directory");
 }
 
 void VertexBlendResolverMatchesDxvkWeightCounts() {
@@ -447,6 +517,10 @@ int main() {
               &TextureCombinerTempInitializesAlphaToZero);
     tests.Run("Depth texture compare uses VX compare ordering",
               &DepthTextureCompareUsesVxCompareOrdering);
+    tests.Run("Runtime 3D vertex shader keeps additional texcoords active",
+              &Runtime3DVertexShaderKeepsAdditionalTexcoordsActive);
+    tests.Run("Runtime POSITIONT vertex shader keeps additional texcoords active",
+              &RuntimePositionTVertexShaderKeepsAdditionalTexcoordsActive);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
