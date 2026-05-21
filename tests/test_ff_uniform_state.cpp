@@ -157,6 +157,27 @@ void TextureCombinerTempInitializesAlphaToZero() {
               "FFP TEMP alpha must not initialize to one");
 }
 
+void DepthTextureCompareUsesVxCompareOrdering() {
+    std::ifstream shader("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    std::string contents((std::istreambuf_iterator<char>(shader)),
+                         std::istreambuf_iterator<char>());
+
+    TestCheck(!contents.empty(),
+              "FFP fragment shader source must be readable from the test working directory");
+    TestCheck(contents.find("if (func == 1) return 0.0") != std::string::npos,
+              "VXCMP_NEVER must always fail shader depth compares");
+    TestCheck(contents.find("if (func == 2) return depth < ref ? 1.0 : 0.0") != std::string::npos,
+              "VXCMP_LESS must use strict less-than shader depth compare");
+    TestCheck(contents.find("if (func == 3) return depth == ref ? 1.0 : 0.0") != std::string::npos,
+              "VXCMP_EQUAL must use equality shader depth compare");
+    TestCheck(contents.find("if (func == 4) return depth <= ref ? 1.0 : 0.0") != std::string::npos,
+              "VXCMP_LESSEQUAL must use less-or-equal shader depth compare");
+    TestCheck(contents.find("if (func == 7) return depth >= ref ? 1.0 : 0.0") != std::string::npos,
+              "VXCMP_GREATEREQUAL must use greater-or-equal shader depth compare");
+    TestCheck(contents.find("if (func == 8) return 1.0") != std::string::npos,
+              "VXCMP_ALWAYS must always pass shader depth compares");
+}
+
 void VertexBlendResolverMatchesDxvkWeightCounts() {
     CKFFVertexBlendState disabled = CKFFResolveVertexBlendState(
         VXVBLEND_DISABLE, FALSE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
@@ -424,6 +445,8 @@ int main() {
               &AlphaTestPrecisionFollowsRenderTargetAlphaMask);
     tests.Run("Texture combiner TEMP initializes alpha to zero",
               &TextureCombinerTempInitializesAlphaToZero);
+    tests.Run("Depth texture compare uses VX compare ordering",
+              &DepthTextureCompareUsesVxCompareOrdering);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
