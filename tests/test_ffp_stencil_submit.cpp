@@ -1595,7 +1595,7 @@ void RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent() {
               "BeginFrame must leave the stencil-clear view idle until requested");
 
     const CKDWORD touchCountAfterBegin = context.Encoder.TouchCount;
-    const bool queued = pipeline.ClearStencilAfterOpaque(viewport, 7);
+    const bool queued = pipeline.QueueStencilClearBeforeTransparent(viewport, 7);
     TestCheck(queued, "Mid-frame stencil clear must queue while the frame is active");
     TestCheck(!context.ViewClears.empty() &&
                   context.ViewClears.back().View == CKRP_VIEW_STENCIL_CLEAR,
