@@ -37,6 +37,12 @@ bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB Attrib);
 bgfx::AttribType::Enum CKBgfxAttribType(CK_VERTEX_ATTRIB_TYPE Type);
 bgfx::TextureFormat::Enum CKBgfxTextureFormat(VX_PIXELFORMAT Format);
 bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT Format);
+CKDWORD CKBgfxTextureMipCount(CKDWORD Width, CKDWORD Height, CKDWORD Depth);
+CKBOOL CKBgfxIsAutoMipRequest(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
+CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD RequestedMipCount,
+                                         CKDWORD FullMipCount,
+                                         CKBOOL OpenGL,
+                                         CKBOOL AutoMipDataAvailable);
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *Sampler);
 uint64_t CKBgfxState(CKDrawState State);
 

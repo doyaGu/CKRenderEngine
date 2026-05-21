@@ -85,7 +85,7 @@ struct CKBgfxTextureRecord {
     CKDWORD Height;
     CKDWORD Depth;
     CKBOOL IsDepth;
-    CKBOOL AutoGenerateMips;
+    CKBOOL RequestedAutoMips;
     CKDWORD MipCount;
     bgfx::TextureFormat::Enum Format;
     CKDWORD BitsPerPixel;

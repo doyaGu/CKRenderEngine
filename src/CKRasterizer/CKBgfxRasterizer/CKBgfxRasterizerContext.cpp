@@ -37,24 +37,6 @@ static bool CKBgfxIsOpenGLRenderer()
            type == bgfx::RendererType::OpenGLES;
 }
 
-static CKDWORD CKBgfxTextureMipCount(CKDWORD width, CKDWORD height, CKDWORD depth)
-{
-    CKDWORD count = 1;
-    while (width > 1 || height > 1 || depth > 1) {
-        width = (width > 1) ? (width >> 1) : 1;
-        height = (height > 1) ? (height >> 1) : 1;
-        depth = (depth > 1) ? (depth >> 1) : 1;
-        ++count;
-    }
-    return count;
-}
-
-static bool CKBgfxIsAutoMipRequest(CKDWORD requestedMipCount, CKDWORD fullMipCount)
-{
-    return requestedMipCount == (CKDWORD)-1 ||
-           requestedMipCount > fullMipCount;
-}
-
 static bool CKBgfxCanGenerateMipMaps(const VxImageDescEx *desc)
 {
     return desc &&
@@ -78,6 +60,97 @@ static CKBYTE *CKBgfxCreateGeneratedMipMap(const VxImageDescEx &src, VxImageDesc
     dst.Image = new CKBYTE[dst.TotalImageSize];
     VxDoBlit(src, dst);
     return (CKBYTE *)dst.Image;
+}
+
+static uint64_t CKBgfxTextureFlagsFromDescFlags(CKDWORD flags)
+{
+    uint64_t texFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE;
+    if (flags & CKRST_TEXTURE_RENDERTARGET)
+        texFlags |= BGFX_TEXTURE_RT;
+    if (flags & CKRST_TEXTURE_READBACK)
+        texFlags |= BGFX_TEXTURE_READ_BACK;
+    if (flags & CKRST_TEXTURE_COMPUTE_WRITE)
+        texFlags |= BGFX_TEXTURE_COMPUTE_WRITE;
+    return texFlags;
+}
+
+static bool CKBgfxIsCompressedTextureFormat(bgfx::TextureFormat::Enum fmt)
+{
+    return fmt == bgfx::TextureFormat::BC1 ||
+           fmt == bgfx::TextureFormat::BC2 ||
+           fmt == bgfx::TextureFormat::BC3;
+}
+
+static bool CKBgfxCanUseGeneratedMipChain(CKDWORD flags,
+                                           bgfx::TextureFormat::Enum fmt,
+                                           CKDWORD depth,
+                                           const VxImageDescEx *data)
+{
+    const bool isCube = (flags & CKRST_TEXTURE_CUBEMAP) != 0;
+    const bool isVolume = (flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && depth > 1;
+    if (isCube || isVolume)
+        return false;
+    if (flags & (CKRST_TEXTURE_RENDERTARGET | CKRST_TEXTURE_DEPTHSTENCIL))
+        return false;
+    if (CKBgfxIsCompressedTextureFormat(fmt))
+        return false;
+    return CKBgfxCanGenerateMipMaps(data);
+}
+
+static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
+{
+    if (!rec)
+        return false;
+    if ((rec->Flags & CKRST_TEXTURE_CUBEMAP) != 0 ||
+        ((rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1))
+        return false;
+
+    bgfx::TextureHandle handle = bgfx::createTexture2D(
+        (uint16_t)rec->Width, (uint16_t)rec->Height, hasMips, 1,
+        rec->Format, CKBgfxTextureFlagsFromDescFlags(rec->Flags), NULL);
+    if (!bgfx::isValid(handle))
+        return false;
+
+    if (bgfx::isValid(rec->Handle))
+        bgfx::destroy(rec->Handle);
+    rec->Handle = handle;
+    rec->MipCount = hasMips ? CKBgfxTextureMipCount(rec->Width, rec->Height, 1) : 1;
+    return true;
+}
+
+static CKBOOL CKBgfxUpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
+                                           const VxImageDescEx *data)
+{
+    if (!rec || rec->MipCount <= 1)
+        return TRUE;
+    if (!CKBgfxCanGenerateMipMaps(data))
+        return FALSE;
+
+    VxImageDescEx previous = *data;
+    CKBYTE *previousGenerated = NULL;
+    CKBOOL complete = TRUE;
+    for (CKDWORD level = 1; level < rec->MipCount; ++level) {
+        VxImageDescEx mipDesc;
+        CKBYTE *generated = CKBgfxCreateGeneratedMipMap(previous, mipDesc);
+        delete[] previousGenerated;
+        previousGenerated = generated;
+        if (!generated) {
+            complete = FALSE;
+            break;
+        }
+
+        uint16_t mipW = (uint16_t)mipDesc.Width;
+        uint16_t mipH = (uint16_t)mipDesc.Height;
+        CKDWORD mipBpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : (CKDWORD)mipDesc.BitsPerPixel;
+        CKDWORD mipRowBytes = mipDesc.BytesPerLine > 0
+            ? (CKDWORD)mipDesc.BytesPerLine
+            : (CKDWORD)mipW * mipBpp / 8;
+        const bgfx::Memory *mipMem = bgfx::copy(mipDesc.Image, mipRowBytes * mipH);
+        bgfx::updateTexture2D(rec->Handle, 0, (uint8_t)level, 0, 0, mipW, mipH, mipMem);
+        previous = mipDesc;
+    }
+    delete[] previousGenerated;
+    return complete;
 }
 
 static void *CKBgfxSdlPointerProperty(SDL_PropertiesID props, const char *name)
@@ -1027,27 +1100,23 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     if (w == 0 || h == 0)
         return CKERR_INVALIDPARAMETER;
 
-    CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, d);
-    CKBOOL autoGenerateMips = CKBgfxIsOpenGLRenderer() &&
-                              CKBgfxIsAutoMipRequest(Desc->MipMapCount, fullMipCount);
-    if (autoGenerateMips)
-        Desc->MipMapCount = fullMipCount;
-    bool hasMips = Desc->MipMapCount > 1;
-
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
     bgfx::TextureFormat::Enum fmt = CKBgfxTextureFormat(pf);
+    CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, d);
+    CKDWORD requestedMipCount = Desc->MipMapCount;
+    CKBOOL openGL = CKBgfxIsOpenGLRenderer() ? TRUE : FALSE;
+    CKBOOL requestedAutoMips = (openGL && CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount)) ? TRUE : FALSE;
+    CKBOOL autoMipDataAvailable = (requestedAutoMips &&
+                                   CKBgfxCanUseGeneratedMipChain(Desc->Flags, fmt, d, Data)) ? TRUE : FALSE;
+    bool hasMips = CKBgfxShouldCreateTextureMipChain(
+        requestedMipCount, fullMipCount, openGL, autoMipDataAvailable) == TRUE;
+    bool uploadInitialAfterCreate = hasMips && autoMipDataAvailable && Data && Data->Image;
 
-    uint64_t texFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE;
-    if (Desc->Flags & CKRST_TEXTURE_RENDERTARGET)
-        texFlags |= BGFX_TEXTURE_RT;
-    if (Desc->Flags & CKRST_TEXTURE_READBACK)
-        texFlags |= BGFX_TEXTURE_READ_BACK;
-    if (Desc->Flags & CKRST_TEXTURE_COMPUTE_WRITE)
-        texFlags |= BGFX_TEXTURE_COMPUTE_WRITE;
+    uint64_t texFlags = CKBgfxTextureFlagsFromDescFlags(Desc->Flags);
 
     const bgfx::Memory *mem = NULL;
     CKDWORD copiedBytes = 0;
-    if (Data && Data->Image)
+    if (Data && Data->Image && !uploadInitialAfterCreate)
     {
         CKDWORD bpp = (Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32;
         CKDWORD rowBytes = (CKDWORD)Data->Width * bpp / 8;
@@ -1086,7 +1155,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     rec->Height = h;
     rec->Depth = d;
     rec->IsDepth = FALSE;
-    rec->AutoGenerateMips = autoGenerateMips;
+    rec->RequestedAutoMips = requestedAutoMips;
     rec->MipCount = hasMips ? fullMipCount : 1;
     rec->Format = fmt;
     rec->BitsPerPixel = (Desc->Format.BitsPerPixel > 0) ? Desc->Format.BitsPerPixel :
@@ -1099,12 +1168,21 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     if (CKBgfxDebugSettings().Log.Textures &&
         s_CreateTextureLogCount < 80) {
         CKBgfxLogf("CreateTexture",
-                 "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u mips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
+                 "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u requestedMips=%u actualMips=%u autoMips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
                  Texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
-                 (int)pf, (int)fmt, rec->BitsPerPixel, Desc->MipMapCount, copiedBytes,
+                 (int)pf, (int)fmt, rec->BitsPerPixel, requestedMipCount,
+                 rec->MipCount, requestedAutoMips, copiedBytes,
                  FirstDword(Data ? Data->Image : nullptr, copiedBytes),
                  SampleBytesChecksum(Data ? Data->Image : nullptr, copiedBytes));
         s_CreateTextureLogCount++;
+    }
+
+    if (uploadInitialAfterCreate) {
+        CKERROR uploadResult = UpdateTexture(Texture, 0, 0, NULL, Data);
+        if (uploadResult != CK_OK) {
+            DeleteObject(Texture, CKRST_OBJ_TEXTURE);
+            return uploadResult;
+        }
     }
 
     return CK_OK;
@@ -1353,7 +1431,7 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
     rec->Height = h;
     rec->Depth = 1;
     rec->IsDepth = TRUE;
-    rec->AutoGenerateMips = FALSE;
+    rec->RequestedAutoMips = FALSE;
     rec->MipCount = hasMips ? CKBgfxTextureMipCount(w, h, 1) : 1;
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
@@ -1529,9 +1607,37 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         h = (uint16_t)Data->Height;
     }
 
-    bool compressed = (rec->Format == bgfx::TextureFormat::BC1
-                    || rec->Format == bgfx::TextureFormat::BC2
-                    || rec->Format == bgfx::TextureFormat::BC3);
+    bool compressed = CKBgfxIsCompressedTextureFormat(rec->Format);
+    bool fullBase2DUpdate = Mip == 0 &&
+                            Face == 0 &&
+                            Region == NULL &&
+                            !compressed &&
+                            !isCube &&
+                            !isVolume;
+    bool canGenerateAutoMips = rec->RequestedAutoMips &&
+                               fullBase2DUpdate &&
+                               CKBgfxCanUseGeneratedMipChain(rec->Flags, rec->Format, rec->Depth, Data);
+
+    if (rec->RequestedAutoMips && Mip == 0 && Face == 0) {
+        if (canGenerateAutoMips && rec->MipCount <= 1) {
+            if (!CKBgfxRecreateTexture2D(rec, true) &&
+                CKBgfxDebugSettings().Log.Textures) {
+                CKBgfxLogf("UpdateTexture",
+                           "id=%u failed to recreate OpenGL auto-mip texture with mips",
+                           Texture);
+            }
+        } else if (!canGenerateAutoMips && rec->MipCount > 1) {
+            if (!CKBgfxRecreateTexture2D(rec, false) &&
+                CKBgfxDebugSettings().Log.Textures) {
+                CKBgfxLogf("UpdateTexture",
+                           "id=%u failed to recreate OpenGL auto-mip texture without mips",
+                           Texture);
+            }
+        }
+    }
+
+    if (Mip >= rec->MipCount)
+        return CKERR_INVALIDPARAMETER;
 
     const bgfx::Memory *mem = NULL;
     if (compressed)
@@ -1583,35 +1689,13 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
 
-    if (rec->AutoGenerateMips &&
-        Mip == 0 &&
-        Face == 0 &&
-        Region == NULL &&
-        !compressed &&
-        !isCube &&
-        !isVolume &&
-        rec->MipCount > 1 &&
-        CKBgfxCanGenerateMipMaps(Data))
-    {
-        VxImageDescEx previous = *Data;
-        CKBYTE *previousGenerated = NULL;
-        for (CKDWORD level = 1; level < rec->MipCount; ++level) {
-            VxImageDescEx mipDesc;
-            CKBYTE *generated = CKBgfxCreateGeneratedMipMap(previous, mipDesc);
-            delete[] previousGenerated;
-            previousGenerated = generated;
-            if (!generated)
-                break;
-
-            uint16_t mipW = (uint16_t)mipDesc.Width;
-            uint16_t mipH = (uint16_t)mipDesc.Height;
-            CKDWORD mipBpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : (CKDWORD)mipDesc.BitsPerPixel;
-            CKDWORD mipRowBytes = (CKDWORD)mipW * mipBpp / 8;
-            const bgfx::Memory *mipMem = bgfx::copy(mipDesc.Image, mipRowBytes * mipH);
-            bgfx::updateTexture2D(rec->Handle, 0, (uint8_t)level, 0, 0, mipW, mipH, mipMem);
-            previous = mipDesc;
+    if (canGenerateAutoMips && rec->MipCount > 1) {
+        if (!CKBgfxUpdateGeneratedMipMaps(rec, Data) &&
+            CKBgfxDebugSettings().Log.Textures) {
+            CKBgfxLogf("UpdateTexture",
+                       "id=%u failed to generate complete OpenGL auto-mip chain",
+                       Texture);
         }
-        delete[] previousGenerated;
     }
 
     return CK_OK;

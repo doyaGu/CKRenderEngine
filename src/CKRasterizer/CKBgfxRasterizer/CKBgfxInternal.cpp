@@ -335,6 +335,35 @@ bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT fmt)
     }
 }
 
+CKDWORD CKBgfxTextureMipCount(CKDWORD width, CKDWORD height, CKDWORD depth)
+{
+    CKDWORD count = 1;
+    while (width > 1 || height > 1 || depth > 1) {
+        width = (width > 1) ? (width >> 1) : 1;
+        height = (height > 1) ? (height >> 1) : 1;
+        depth = (depth > 1) ? (depth >> 1) : 1;
+        ++count;
+    }
+    return count;
+}
+
+CKBOOL CKBgfxIsAutoMipRequest(CKDWORD requestedMipCount, CKDWORD fullMipCount)
+{
+    return (requestedMipCount == (CKDWORD)-1 ||
+            requestedMipCount > fullMipCount) ? TRUE : FALSE;
+}
+
+CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD requestedMipCount,
+                                          CKDWORD fullMipCount,
+                                          CKBOOL openGL,
+                                          CKBOOL autoMipDataAvailable)
+{
+    if (openGL && CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount))
+        return autoMipDataAvailable ? TRUE : FALSE;
+
+    return requestedMipCount > 1 ? TRUE : FALSE;
+}
+
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
 {
     if (!s)

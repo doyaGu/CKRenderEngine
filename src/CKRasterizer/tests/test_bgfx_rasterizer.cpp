@@ -470,6 +470,33 @@ static void TestSamplerCompareFlags()
                 "compare LEQUAL emits bgfx compare flag");
 }
 
+static void TestOpenGLAutoMipPolicy()
+{
+    TEST_SECTION("OpenGL Auto Mip Policy");
+
+    CKDWORD full = CKBgfxTextureMipCount(256, 128, 1);
+    TEST_ASSERT(full == 9, "full mip count follows largest texture dimension");
+    TEST_ASSERT(CKBgfxIsAutoMipRequest((CKDWORD)-1, full) == TRUE,
+                "legacy -1 mip count requests automatic mipmaps");
+    TEST_ASSERT(CKBgfxIsAutoMipRequest(full + 1, full) == TRUE,
+                "oversized mip count requests automatic mipmaps");
+    TEST_ASSERT(CKBgfxIsAutoMipRequest(4, full) == FALSE,
+                "explicit in-range mip count is not automatic");
+
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, FALSE) == FALSE,
+                "OpenGL defers automatic mips until data can populate the full chain");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, TRUE) == TRUE,
+                "OpenGL creates automatic mip chain when complete data is available");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, FALSE, FALSE) == TRUE,
+                "non-OpenGL preserves legacy automatic mip allocation");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(0, full, TRUE, TRUE) == FALSE,
+                "zero mip request creates a base-level texture");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(1, full, TRUE, TRUE) == FALSE,
+                "one mip request creates a base-level texture");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(4, full, TRUE, FALSE) == TRUE,
+                "explicit mip requests still allocate a mip chain");
+}
+
 // ============================================================================
 // Test 5: Rasterizer start/close lifecycle
 // ============================================================================
@@ -587,6 +614,7 @@ int main()
     TestBgfxStencilWriteMaskEncoding();
     TestTextureVolumeDescriptorDefaults();
     TestSamplerCompareFlags();
+    TestOpenGLAutoMipPolicy();
     TestEncoderSlotAtomic();
     TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();
