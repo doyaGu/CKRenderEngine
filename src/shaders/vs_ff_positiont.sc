@@ -72,9 +72,10 @@ uniform vec4 u_clipParams;
 #ifndef CKFF_VS_TEXFLAGS7
 #define CKFF_VS_TEXFLAGS7 0
 #endif
+#endif
+
 #ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
 #define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8
-#endif
 #endif
 
 bool ckffVsFogEnabled(float runtimeMode)
@@ -261,4 +262,3 @@ void main()
 #endif
     v_texcoord7Fog.z = fogFactor;
 }
-
