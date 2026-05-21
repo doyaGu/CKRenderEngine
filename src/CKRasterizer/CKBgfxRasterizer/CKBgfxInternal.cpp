@@ -417,6 +417,27 @@ CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL requestedAutoM
     return CKBGFX_AUTOMIP_UPDATE_KEEP;
 }
 
+CKBOOL CKBgfxSamplerWantsMipMaps(const CKSamplerDesc *s)
+{
+    if (!s)
+        return TRUE;
+
+    switch (s->MipFilter)
+    {
+    case CKRST_FILTER_NONE:
+        return FALSE;
+    case CKRST_FILTER_NEAREST:
+    case CKRST_FILTER_MIPNEAREST:
+    case CKRST_FILTER_MIPLINEAR:
+    case CKRST_FILTER_LINEARMIPNEAREST:
+    case CKRST_FILTER_LINEARMIPLINEAR:
+    case CKRST_FILTER_ANISOTROPIC:
+        return TRUE;
+    default:
+        return TRUE;
+    }
+}
+
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
 {
     if (!s)

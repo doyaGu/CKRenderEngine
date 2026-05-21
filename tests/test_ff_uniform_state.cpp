@@ -315,6 +315,28 @@ void TextureStageCompareFuncStaysOutOfSamplerDesc() {
               "FFP depth compare is shader-evaluated and must not enable sampler compare");
 }
 
+void TextureFilterLinearDoesNotRequestMipSampling() {
+    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
+
+    stages[0][CKRST_TSS_MINFILTER] = VXTEXTUREFILTER_LINEAR;
+    CKSamplerDesc sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  sampler.MipFilter == CKRST_FILTER_NONE,
+              "VXTEXTUREFILTER_LINEAR must mean bilinear base-level sampling");
+
+    stages[0][CKRST_TSS_MINFILTER] = VXTEXTUREFILTER_NEAREST;
+    sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.MinFilter == CKRST_FILTER_NEAREST &&
+                  sampler.MipFilter == CKRST_FILTER_NONE,
+              "VXTEXTUREFILTER_NEAREST must not request mip sampling");
+
+    stages[0][CKRST_TSS_MINFILTER] = VXTEXTUREFILTER_LINEARMIPLINEAR;
+    sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  sampler.MipFilter == CKRST_FILTER_LINEAR,
+              "VXTEXTUREFILTER_LINEARMIPLINEAR must keep trilinear mip sampling");
+}
+
 void TextureBindingMaskSplitsNullTextureShaderKey() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
@@ -397,6 +419,8 @@ int main() {
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
     tests.Run("Texture stage compare func stays out of sampler desc",
               &TextureStageCompareFuncStaysOutOfSamplerDesc);
+    tests.Run("Texture filter linear does not request mip sampling",
+              &TextureFilterLinearDoesNotRequestMipSampling);
     tests.Run("Texture binding mask splits null texture shader key",
               &TextureBindingMaskSplitsNullTextureShaderKey);
     tests.Run("Texture binding mask ignores stages without texture args",

@@ -58,6 +58,7 @@ CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL RequestedAutoM
                                                            CKDWORD CurrentMipCount,
                                                            CKBOOL FullBaseUpdate,
                                                            CKBOOL CanGenerateFullMipChain);
+CKBOOL CKBgfxSamplerWantsMipMaps(const CKSamplerDesc *Sampler);
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *Sampler);
 uint64_t CKBgfxState(CKDrawState State);
 

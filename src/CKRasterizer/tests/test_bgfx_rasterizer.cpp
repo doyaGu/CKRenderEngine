@@ -468,6 +468,14 @@ static void TestSamplerCompareFlags()
     sampler.CompareFunc = CKRST_COMPARE_LEQUAL;
     TEST_ASSERT((CKBgfxSamplerFlags(&sampler) & BGFX_SAMPLER_COMPARE_LEQUAL) != 0,
                 "compare LEQUAL emits bgfx compare flag");
+
+    sampler = {};
+    sampler.MipFilter = CKRST_FILTER_NONE;
+    TEST_ASSERT(CKBgfxSamplerWantsMipMaps(&sampler) == FALSE,
+                "explicit no-mip sampler requests base-level sampling");
+    sampler.MipFilter = CKRST_FILTER_LINEARMIPLINEAR;
+    TEST_ASSERT(CKBgfxSamplerWantsMipMaps(&sampler) == TRUE,
+                "trilinear sampler requests mip sampling");
 }
 
 static void TestOpenGLAutoMipPolicy()
