@@ -34,7 +34,9 @@ public:
     // End the frame: release encoder, call Frame()
     void EndFrame(CKRST_FRAME_SYNC_MODE syncMode);
 
-    CKBOOL ClearStencilAfterOpaque(const CKRECT &viewport, CKDWORD stencil);
+    // Queue a stencil-only clear in a dedicated view that sorts after opaque
+    // scene draws and before transparent draws.
+    CKBOOL QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil);
 
     // Access the current encoder (valid between BeginFrame/EndFrame)
     CKRasterizerEncoder *GetEncoder() const { return m_Encoder; }

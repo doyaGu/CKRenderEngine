@@ -128,7 +128,7 @@ void CKRenderPipeline::BeginFrame(
         m_Encoder->Touch(CKRP_VIEW_CLEAR);
 }
 
-CKBOOL CKRenderPipeline::ClearStencilAfterOpaque(const CKRECT &viewport, CKDWORD stencil)
+CKBOOL CKRenderPipeline::QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil)
 {
     if (!m_Context || !m_Encoder)
         return FALSE;
