@@ -13,9 +13,10 @@ class CKRasterizerEncoder;
 #define CKRP_VIEW_BACKGROUND2D 1
 #define CKRP_VIEW_RENDERFIRST3D 2
 #define CKRP_VIEW_OPAQUE3D     3
-#define CKRP_VIEW_TRANSPARENT  4
-#define CKRP_VIEW_FOREGROUND2D 5
-#define CKRP_VIEW_COUNT        6
+#define CKRP_VIEW_STENCIL_CLEAR 4
+#define CKRP_VIEW_TRANSPARENT  5
+#define CKRP_VIEW_FOREGROUND2D 6
+#define CKRP_VIEW_COUNT        7
 
 class CKRenderPipeline {
 public:
@@ -33,6 +34,8 @@ public:
     // End the frame: release encoder, call Frame()
     void EndFrame(CKRST_FRAME_SYNC_MODE syncMode);
 
+    CKBOOL ClearStencilAfterOpaque(const CKRECT &viewport, CKDWORD stencil);
+
     // Access the current encoder (valid between BeginFrame/EndFrame)
     CKRasterizerEncoder *GetEncoder() const { return m_Encoder; }
 
@@ -41,6 +44,7 @@ public:
     CKRenderView GetBackground2DView() const { return CKRP_VIEW_BACKGROUND2D; }
     CKRenderView GetRenderFirst3DView() const { return CKRP_VIEW_RENDERFIRST3D; }
     CKRenderView GetOpaqueView() const       { return CKRP_VIEW_OPAQUE3D; }
+    CKRenderView GetStencilClearView() const { return CKRP_VIEW_STENCIL_CLEAR; }
     CKRenderView GetTransparentView() const  { return CKRP_VIEW_TRANSPARENT; }
     CKRenderView GetForeground2DView() const { return CKRP_VIEW_FOREGROUND2D; }
 
