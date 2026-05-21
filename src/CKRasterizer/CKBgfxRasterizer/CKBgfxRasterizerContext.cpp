@@ -30,6 +30,56 @@ static uint32_t FirstDword(const void *data, uint32_t size)
     return value;
 }
 
+static bool CKBgfxIsOpenGLRenderer()
+{
+    bgfx::RendererType::Enum type = bgfx::getRendererType();
+    return type == bgfx::RendererType::OpenGL ||
+           type == bgfx::RendererType::OpenGLES;
+}
+
+static CKDWORD CKBgfxTextureMipCount(CKDWORD width, CKDWORD height, CKDWORD depth)
+{
+    CKDWORD count = 1;
+    while (width > 1 || height > 1 || depth > 1) {
+        width = (width > 1) ? (width >> 1) : 1;
+        height = (height > 1) ? (height >> 1) : 1;
+        depth = (depth > 1) ? (depth >> 1) : 1;
+        ++count;
+    }
+    return count;
+}
+
+static bool CKBgfxIsAutoMipRequest(CKDWORD requestedMipCount, CKDWORD fullMipCount)
+{
+    return requestedMipCount == (CKDWORD)-1 ||
+           requestedMipCount > fullMipCount;
+}
+
+static bool CKBgfxCanGenerateMipMaps(const VxImageDescEx *desc)
+{
+    return desc &&
+           desc->Image &&
+           desc->Width > 0 &&
+           desc->Height > 0 &&
+           desc->BitsPerPixel > 0 &&
+           (desc->BitsPerPixel % 8) == 0;
+}
+
+static CKBYTE *CKBgfxCreateGeneratedMipMap(const VxImageDescEx &src, VxImageDescEx &dst)
+{
+    if (!CKBgfxCanGenerateMipMaps(&src))
+        return NULL;
+
+    dst = src;
+    dst.Width = (src.Width > 1) ? (src.Width >> 1) : 1;
+    dst.Height = (src.Height > 1) ? (src.Height >> 1) : 1;
+    dst.BytesPerLine = dst.Width * dst.BitsPerPixel / 8;
+    dst.TotalImageSize = dst.BytesPerLine * dst.Height;
+    dst.Image = new CKBYTE[dst.TotalImageSize];
+    VxDoBlit(src, dst);
+    return (CKBYTE *)dst.Image;
+}
+
 static void *CKBgfxSdlPointerProperty(SDL_PropertiesID props, const char *name)
 {
     return SDL_GetPointerProperty(props, name, NULL);
@@ -977,6 +1027,11 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     if (w == 0 || h == 0)
         return CKERR_INVALIDPARAMETER;
 
+    CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, d);
+    CKBOOL autoGenerateMips = CKBgfxIsOpenGLRenderer() &&
+                              CKBgfxIsAutoMipRequest(Desc->MipMapCount, fullMipCount);
+    if (autoGenerateMips)
+        Desc->MipMapCount = fullMipCount;
     bool hasMips = Desc->MipMapCount > 1;
 
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
@@ -1031,6 +1086,8 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     rec->Height = h;
     rec->Depth = d;
     rec->IsDepth = FALSE;
+    rec->AutoGenerateMips = autoGenerateMips;
+    rec->MipCount = hasMips ? fullMipCount : 1;
     rec->Format = fmt;
     rec->BitsPerPixel = (Desc->Format.BitsPerPixel > 0) ? Desc->Format.BitsPerPixel :
                          ((Data && Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32);
@@ -1296,6 +1353,8 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
     rec->Height = h;
     rec->Depth = 1;
     rec->IsDepth = TRUE;
+    rec->AutoGenerateMips = FALSE;
+    rec->MipCount = hasMips ? CKBgfxTextureMipCount(w, h, 1) : 1;
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
 
@@ -1523,6 +1582,37 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         bgfx::updateTexture3D(rec->Handle, (uint8_t)Mip, x, y, (uint16_t)Face, w, h, 1, mem);
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
+
+    if (rec->AutoGenerateMips &&
+        Mip == 0 &&
+        Face == 0 &&
+        Region == NULL &&
+        !compressed &&
+        !isCube &&
+        !isVolume &&
+        rec->MipCount > 1 &&
+        CKBgfxCanGenerateMipMaps(Data))
+    {
+        VxImageDescEx previous = *Data;
+        CKBYTE *previousGenerated = NULL;
+        for (CKDWORD level = 1; level < rec->MipCount; ++level) {
+            VxImageDescEx mipDesc;
+            CKBYTE *generated = CKBgfxCreateGeneratedMipMap(previous, mipDesc);
+            delete[] previousGenerated;
+            previousGenerated = generated;
+            if (!generated)
+                break;
+
+            uint16_t mipW = (uint16_t)mipDesc.Width;
+            uint16_t mipH = (uint16_t)mipDesc.Height;
+            CKDWORD mipBpp = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : (CKDWORD)mipDesc.BitsPerPixel;
+            CKDWORD mipRowBytes = (CKDWORD)mipW * mipBpp / 8;
+            const bgfx::Memory *mipMem = bgfx::copy(mipDesc.Image, mipRowBytes * mipH);
+            bgfx::updateTexture2D(rec->Handle, 0, (uint8_t)level, 0, 0, mipW, mipH, mipMem);
+            previous = mipDesc;
+        }
+        delete[] previousGenerated;
+    }
 
     return CK_OK;
 }
