@@ -16,6 +16,14 @@ struct FFPTextureBinding {
     CKSamplerDesc Sampler;
 };
 
+struct FFPViewClearRecord {
+    CKRenderView View;
+    CKDWORD Flags;
+    CKDWORD Color;
+    float Z;
+    CKDWORD Stencil;
+};
+
 class FFPDiagnosticDriver : public CKRasterizerDriver {
 public:
     CKERROR GetShaderTarget(CKShaderTargetDesc *target) const override {
@@ -36,6 +44,8 @@ public:
     CKDrawState LastState = {};
     CKDWORD LastProgram = 0;
     CKDWORD SubmitCount = 0;
+    CKDWORD TouchCount = 0;
+    CKRenderView LastTouchedView = 0;
     CKDWORD TextureBindCount = 0;
     CKDWORD StencilRefSetCount = 0;
     CKDWORD StencilMaskSetCount = 0;
@@ -128,7 +138,10 @@ public:
     }
     void Dispatch(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD) override {}
     void DispatchIndirect(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD) override {}
-    void Touch(CKRenderView) override {}
+    void Touch(CKRenderView view) override {
+        LastTouchedView = view;
+        ++TouchCount;
+    }
     void Blit(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, const CKRECT *) override {}
 };
 
@@ -147,6 +160,7 @@ public:
     CKDWORD LastVertexShaderCodeSize = 0;
     std::vector<CKDWORD> LastProgramSpecializationDwords;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
+    std::vector<FFPViewClearRecord> ViewClears;
 
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
@@ -212,7 +226,11 @@ public:
     CKERROR SetViewName(CKRenderView, CKSTRING) override { return CK_OK; }
     CKERROR SetViewRect(CKRenderView, const CKRECT &) override { return CK_OK; }
     CKERROR SetViewScissor(CKRenderView, const CKRECT *) override { return CK_OK; }
-    CKERROR SetViewClear(CKRenderView, CKDWORD, CKDWORD, float, CKDWORD) override { return CK_OK; }
+    CKERROR SetViewClear(CKRenderView view, CKDWORD flags, CKDWORD color, float z, CKDWORD stencil) override {
+        FFPViewClearRecord record = { view, flags, color, z, stencil };
+        ViewClears.push_back(record);
+        return CK_OK;
+    }
     CKERROR SetViewTransform(CKRenderView, const VxMatrix *, const VxMatrix *) override { return CK_OK; }
     CKERROR SetViewFrameBuffer(CKRenderView, CKDWORD) override { return CK_OK; }
     CKERROR SetViewMode(CKRenderView, CK_VIEW_MODE) override { return CK_OK; }

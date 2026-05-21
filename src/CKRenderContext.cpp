@@ -553,6 +553,19 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
         m_StencilFreeMask = Stencil;
     }
 
+    const bool stencilOnlyClear =
+        (clearFlags & CKRST_CTXCLEAR_STENCIL) &&
+        !(clearFlags & (CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH));
+    if (stencilOnlyClear && m_FFPipeline.GetRenderPipeline().IsInFrame()) {
+        CKRECT viewRect;
+        viewRect.left = m_ViewportData.ViewX;
+        viewRect.top = m_ViewportData.ViewY;
+        viewRect.right = m_ViewportData.ViewX + m_ViewportData.ViewWidth;
+        viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
+        if (m_FFPipeline.GetRenderPipeline().ClearStencilAfterOpaque(viewRect, Stencil))
+            return CK_OK;
+    }
+
     CKDWORD clearColor = 0;
     if (frameLog)
         CK_LOG("Clear", "getting background material");
@@ -2551,6 +2564,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, m_TargetFrameBuffer);
     }
@@ -2586,6 +2600,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
 
