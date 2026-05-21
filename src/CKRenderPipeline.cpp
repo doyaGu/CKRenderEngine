@@ -20,6 +20,7 @@ void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
         m_Context->SetViewName(CKRP_VIEW_BACKGROUND2D, (CKSTRING)"background2d");
         m_Context->SetViewName(CKRP_VIEW_RENDERFIRST3D, (CKSTRING)"renderfirst3d");
         m_Context->SetViewName(CKRP_VIEW_OPAQUE3D, (CKSTRING)"opaque3d");
+        m_Context->SetViewName(CKRP_VIEW_STENCIL_CLEAR, (CKSTRING)"stencil-clear");
         m_Context->SetViewName(CKRP_VIEW_TRANSPARENT, (CKSTRING)"transparent3d");
         m_Context->SetViewName(CKRP_VIEW_FOREGROUND2D, (CKSTRING)"foreground2d");
 
@@ -30,6 +31,7 @@ void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
         m_Context->SetViewMode(CKRP_VIEW_BACKGROUND2D, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_RENDERFIRST3D, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_OPAQUE3D, CKRST_VIEWMODE_SEQUENTIAL);
+        m_Context->SetViewMode(CKRP_VIEW_STENCIL_CLEAR, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_TRANSPARENT, CKRST_VIEWMODE_SEQUENTIAL);
         m_Context->SetViewMode(CKRP_VIEW_FOREGROUND2D, CKRST_VIEWMODE_SEQUENTIAL);
     }
@@ -106,11 +108,15 @@ void CKRenderPipeline::BeginFrame(
     m_Context->SetViewRect(CKRP_VIEW_OPAQUE3D, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_OPAQUE3D, &view, &proj);
 
-    // View 4: Transparent 3D
+    // View 4: optional mid-frame stencil clear before transparent draws
+    m_Context->SetViewRect(CKRP_VIEW_STENCIL_CLEAR, viewport);
+    m_Context->SetViewClear(CKRP_VIEW_STENCIL_CLEAR, 0, 0, 1.0f, 0);
+
+    // View 5: Transparent 3D
     m_Context->SetViewRect(CKRP_VIEW_TRANSPARENT, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_TRANSPARENT, &view, &proj);
 
-    // View 5: Foreground 2D
+    // View 6: Foreground 2D
     m_Context->SetViewRect(CKRP_VIEW_FOREGROUND2D, viewport);
     m_Context->SetViewTransform(CKRP_VIEW_FOREGROUND2D, &identity, &m_OrthoProj);
 
@@ -120,6 +126,17 @@ void CKRenderPipeline::BeginFrame(
     // Touch clear view to ensure it's processed even with no draws
     if (m_Encoder)
         m_Encoder->Touch(CKRP_VIEW_CLEAR);
+}
+
+CKBOOL CKRenderPipeline::ClearStencilAfterOpaque(const CKRECT &viewport, CKDWORD stencil)
+{
+    if (!m_Context || !m_Encoder)
+        return FALSE;
+
+    m_Context->SetViewRect(CKRP_VIEW_STENCIL_CLEAR, viewport);
+    m_Context->SetViewClear(CKRP_VIEW_STENCIL_CLEAR, CKRST_CTXCLEAR_STENCIL, 0, 1.0f, stencil);
+    m_Encoder->Touch(CKRP_VIEW_STENCIL_CLEAR);
+    return TRUE;
 }
 
 void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {

@@ -1,6 +1,7 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFSpecializationInfo.h"
 #include "CKFFUniformState.h"
+#include "CKRenderPipeline.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -1555,6 +1556,66 @@ void MaterialSourceUsesDeclaredDPColorStreams() {
     ffp.Shutdown();
 }
 
+void RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKRenderPipeline pipeline;
+    pipeline.Init(&context);
+
+    CKRECT viewport;
+    viewport.left = 0;
+    viewport.top = 0;
+    viewport.right = 64;
+    viewport.bottom = 64;
+
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+
+    pipeline.BeginFrame(viewport,
+                        CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
+                        0x11223344, 1.0f,
+                        identity, identity);
+
+    TestCheck(context.ViewClears.size() >= 2,
+              "BeginFrame must configure frame-start and idle stencil-clear views");
+    TestCheck(context.ViewClears[0].View == CKRP_VIEW_CLEAR,
+              "Frame-start clear must use the clear view");
+    TestCheck(context.ViewClears[0].Flags == (CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH),
+              "Frame-start clear flags must not be overwritten by later stencil clears");
+
+    bool foundIdleStencilClear = false;
+    for (size_t i = 0; i < context.ViewClears.size(); ++i) {
+        if (context.ViewClears[i].View == CKRP_VIEW_STENCIL_CLEAR &&
+            context.ViewClears[i].Flags == 0) {
+            foundIdleStencilClear = true;
+            break;
+        }
+    }
+    TestCheck(foundIdleStencilClear,
+              "BeginFrame must leave the stencil-clear view idle until requested");
+
+    const CKDWORD touchCountAfterBegin = context.Encoder.TouchCount;
+    const bool queued = pipeline.ClearStencilAfterOpaque(viewport, 7);
+    TestCheck(queued, "Mid-frame stencil clear must queue while the frame is active");
+    TestCheck(!context.ViewClears.empty() &&
+                  context.ViewClears.back().View == CKRP_VIEW_STENCIL_CLEAR,
+              "Mid-frame stencil clear must target the dedicated stencil-clear view");
+    TestCheck(!context.ViewClears.empty() &&
+                  context.ViewClears.back().Flags == CKRST_CTXCLEAR_STENCIL,
+              "Mid-frame stencil clear must clear only stencil");
+    TestCheck(!context.ViewClears.empty() &&
+                  context.ViewClears.back().Stencil == 7,
+              "Mid-frame stencil clear must preserve the requested stencil value");
+    TestCheck(context.Encoder.TouchCount == touchCountAfterBegin + 1 &&
+                  context.Encoder.LastTouchedView == CKRP_VIEW_STENCIL_CLEAR,
+              "Mid-frame stencil clear must touch the dedicated view");
+    TestCheck(CKRP_VIEW_OPAQUE3D < CKRP_VIEW_STENCIL_CLEAR &&
+                  CKRP_VIEW_STENCIL_CLEAR < CKRP_VIEW_TRANSPARENT,
+              "Dedicated stencil-clear view must sort between opaque and transparent views");
+
+    pipeline.EndFrame(CKRST_FRAME_SYNC_IMMEDIATE);
+}
+
 } // namespace
 
 int main() {
@@ -1643,5 +1704,7 @@ int main() {
               &LocalViewerDoesNotSplitShaderWhenLightingDisabled);
     tests.Run("Material source uses declared DP color streams",
               &MaterialSourceUsesDeclaredDPColorStreams);
+    tests.Run("Render pipeline queues stencil clear between opaque and transparent",
+              &RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent);
     return tests.ExitCode();
 }
