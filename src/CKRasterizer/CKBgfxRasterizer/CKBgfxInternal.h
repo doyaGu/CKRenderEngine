@@ -37,12 +37,27 @@ bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB Attrib);
 bgfx::AttribType::Enum CKBgfxAttribType(CK_VERTEX_ATTRIB_TYPE Type);
 bgfx::TextureFormat::Enum CKBgfxTextureFormat(VX_PIXELFORMAT Format);
 bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT Format);
+CKDWORD CKBgfxImageRowBytes(CKDWORD Width, CKDWORD BitsPerPixel);
+CKDWORD CKBgfxResolveImagePitch(CKDWORD Width, CKDWORD Height,
+                                CKDWORD BitsPerPixel, CKDWORD PitchOrImageSize);
 CKDWORD CKBgfxTextureMipCount(CKDWORD Width, CKDWORD Height, CKDWORD Depth);
 CKBOOL CKBgfxIsAutoMipRequest(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
 CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD RequestedMipCount,
                                          CKDWORD FullMipCount,
                                          CKBOOL OpenGL,
                                          CKBOOL AutoMipDataAvailable);
+
+typedef enum CKBgfxAutoMipUpdateAction {
+    CKBGFX_AUTOMIP_UPDATE_NONE = 0,
+    CKBGFX_AUTOMIP_UPDATE_KEEP,
+    CKBGFX_AUTOMIP_UPDATE_PROMOTE,
+    CKBGFX_AUTOMIP_UPDATE_DEMOTE,
+} CKBgfxAutoMipUpdateAction;
+
+CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL RequestedAutoMips,
+                                                           CKDWORD CurrentMipCount,
+                                                           CKBOOL FullBaseUpdate,
+                                                           CKBOOL CanGenerateFullMipChain);
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *Sampler);
 uint64_t CKBgfxState(CKDrawState State);
 

@@ -79,6 +79,18 @@ struct CKBgfxIndexBufferRecord {
 };
 
 struct CKBgfxTextureRecord {
+    CKBgfxTextureRecord()
+        : Handle(BGFX_INVALID_HANDLE), Flags(0), Width(0), Height(0), Depth(1),
+          IsDepth(FALSE), RequestedAutoMips(FALSE), MipCount(1),
+          Format(bgfx::TextureFormat::Count), BitsPerPixel(0),
+          AutoMipBaseValid(FALSE) {}
+
+    ~CKBgfxTextureRecord()
+    {
+        delete[] AutoMipBaseDesc.Image;
+        AutoMipBaseDesc.Image = NULL;
+    }
+
     bgfx::TextureHandle Handle;
     CKDWORD Flags;
     CKDWORD Width;
@@ -89,6 +101,8 @@ struct CKBgfxTextureRecord {
     CKDWORD MipCount;
     bgfx::TextureFormat::Enum Format;
     CKDWORD BitsPerPixel;
+    VxImageDescEx AutoMipBaseDesc;
+    CKBOOL AutoMipBaseValid;
 };
 
 struct CKBgfxFrameBufferRecord {
