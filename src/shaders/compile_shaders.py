@@ -195,7 +195,7 @@ def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object
     for index, dword in enumerate(spec_dwords):
         if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
             raise ValueError(f"FFP specialization dword {index} must be a uint32")
-        defines.append(f"CKFF_SPEC_DWORD{index}={dword}")
+        defines.append(f"CKFF_SPEC_DWORD{index}=0x{dword:08x}u")
     return defines
 
 
@@ -290,6 +290,7 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     set_spec_bits(dwords, 5, 10, 2, key["vertexFogMode"])
     set_spec_bits(dwords, 5, 12, 2, key["pixelFogMode"])
     set_spec_bits(dwords, 5, 14, 1, 1 if key["rangeFog"] else 0)
+    set_spec_bits(dwords, 5, 15, 1, 1 if key["flatShade"] else 0)
     projected_sampler_mask = 0
     for stage_index, stage in enumerate(key["stages"][:4]):
         if stage["projectedSampler"]:
@@ -415,6 +416,7 @@ def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
         "vertexFogMode": vertex_fog_mode if fog_enable else 0,
         "pixelFogMode": pixel_fog_mode if fog_enable else 0,
         "rangeFog": read_bool(key.get("rangeFog", False), f"{field}.rangeFog") if fog_enable else False,
+        "flatShade": read_bool(key.get("flatShade", False), f"{field}.flatShade"),
         "stages": normalized_stages,
     }
 
@@ -554,6 +556,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
     f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
     f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
     f.write(f"    key.FS.RangeFog = {'true' if key['rangeFog'] else 'false'};\n")
+    f.write(f"    key.FS.FlatShade = {'true' if key['flatShade'] else 'false'};\n")
     for index, stage in enumerate(key["stages"]):
         prefix = f"    key.FS.Stages[{index}]"
         f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")

@@ -70,30 +70,33 @@ bool ckffSpecIsOptimized()
 #endif
 }
 
-int ckffSpecDword(int index)
+uint ckffSpecDword(int index)
 {
 #if defined(CKFF_FULL_SPECIALIZED)
-    if (index == 0) return CKFF_SPEC_DWORD0;
-    if (index == 1) return CKFF_SPEC_DWORD1;
-    if (index == 2) return CKFF_SPEC_DWORD2;
-    if (index == 3) return CKFF_SPEC_DWORD3;
-    if (index == 4) return CKFF_SPEC_DWORD4;
-    if (index == 5) return CKFF_SPEC_DWORD5;
-    if (index == 6) return CKFF_SPEC_DWORD6;
-    if (index == 7) return CKFF_SPEC_DWORD7;
-    if (index == 8) return CKFF_SPEC_DWORD8;
-    if (index == 9) return CKFF_SPEC_DWORD9;
-    return 0;
+    if (index == 0) return uint(CKFF_SPEC_DWORD0);
+    if (index == 1) return uint(CKFF_SPEC_DWORD1);
+    if (index == 2) return uint(CKFF_SPEC_DWORD2);
+    if (index == 3) return uint(CKFF_SPEC_DWORD3);
+    if (index == 4) return uint(CKFF_SPEC_DWORD4);
+    if (index == 5) return uint(CKFF_SPEC_DWORD5);
+    if (index == 6) return uint(CKFF_SPEC_DWORD6);
+    if (index == 7) return uint(CKFF_SPEC_DWORD7);
+    if (index == 8) return uint(CKFF_SPEC_DWORD8);
+    if (index == 9) return uint(CKFF_SPEC_DWORD9);
+    return uint(0);
 #else
     vec4 b = u_ffSpec[index];
-    return int(b.x) | (int(b.y) << 8) | (int(b.z) << 16) | (int(b.w) << 24);
+    return (uint(b.x) & uint(255)) |
+           ((uint(b.y) & uint(255)) << uint(8)) |
+           ((uint(b.z) & uint(255)) << uint(16)) |
+           ((uint(b.w) & uint(255)) << uint(24));
 #endif
 }
 
-int ckffSpecBits(int word, int offset, int bits)
+int ckffSpecBits(uint word, int offset, int bits)
 {
-    int mask = (1 << bits) - 1;
-    return (word >> offset) & mask;
+    uint mask = (uint(1) << uint(bits)) - uint(1);
+    return int((word >> uint(offset)) & mask);
 }
 
 int ckffUnpackSpecArg(int arg)
@@ -210,7 +213,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
 #endif
 
     if (stage < 4 && ckffSpecIsOptimized()) {
-        int word = ckffSpecDword(6 + stage);
+        uint word = ckffSpecDword(6 + stage);
         params.ColorOp = ckffSpecBits(word, 0, 5);
         params.ColorArg0 = ckffUnpackSpecArg(ckffSpecBits(ckffSpecDword(1), stage * 5, 5));
         params.ColorArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 5, 5));
