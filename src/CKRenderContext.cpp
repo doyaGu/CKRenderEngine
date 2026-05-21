@@ -556,13 +556,16 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     const bool stencilOnlyClear =
         (clearFlags & CKRST_CTXCLEAR_STENCIL) &&
         !(clearFlags & (CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH));
+    // ShadowStencil issues this from the post-opaque callback path. bgfx clear
+    // state is view-scoped, so route only in-frame stencil-only clears through
+    // the dedicated view that sorts before transparent geometry.
     if (stencilOnlyClear && m_FFPipeline.GetRenderPipeline().IsInFrame()) {
         CKRECT viewRect;
         viewRect.left = m_ViewportData.ViewX;
         viewRect.top = m_ViewportData.ViewY;
         viewRect.right = m_ViewportData.ViewX + m_ViewportData.ViewWidth;
         viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
-        if (m_FFPipeline.GetRenderPipeline().ClearStencilAfterOpaque(viewRect, Stencil))
+        if (m_FFPipeline.GetRenderPipeline().QueueStencilClearBeforeTransparent(viewRect, Stencil))
             return CK_OK;
     }
 
