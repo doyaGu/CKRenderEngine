@@ -3,6 +3,7 @@
 #include "CKFFStageState.h"
 #include "CKFFShaderKey.h"
 #include "CKFFUniformState.h"
+#include "CKFixedFunctionPipeline.h"
 #include "CKVertexLayoutCache.h"
 #include "TestTriangleMultiset.h"
 
@@ -337,6 +338,24 @@ void TextureFilterLinearDoesNotRequestMipSampling() {
               "VXTEXTUREFILTER_LINEARMIPLINEAR must keep trilinear mip sampling");
 }
 
+void DisableMipmapsForcesBaseLevelSampling() {
+    CKFixedFunctionPipeline ffp;
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEARMIPLINEAR);
+    ffp.SetRenderOptions(FALSE, TRUE);
+
+    CKSamplerDesc sampler = ffp.BuildSamplerDesc(0);
+    TestCheck(sampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  sampler.MipFilter == CKRST_FILTER_NONE,
+              "DisableMipmap must disable mip sampling without changing minification filtering");
+
+    ffp.SetRenderOptions(TRUE, TRUE);
+    sampler = ffp.BuildSamplerDesc(0);
+    TestCheck(sampler.MinFilter == CKRST_FILTER_NEAREST &&
+                  sampler.MagFilter == CKRST_FILTER_NEAREST &&
+                  sampler.MipFilter == CKRST_FILTER_NONE,
+              "DisableMipmap must still disable mip sampling when texture filtering is disabled");
+}
+
 void TextureBindingMaskSplitsNullTextureShaderKey() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
@@ -421,6 +440,8 @@ int main() {
               &TextureStageCompareFuncStaysOutOfSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",
               &TextureFilterLinearDoesNotRequestMipSampling);
+    tests.Run("DisableMipmap forces base-level sampling",
+              &DisableMipmapsForcesBaseLevelSampling);
     tests.Run("Texture binding mask splits null texture shader key",
               &TextureBindingMaskSplitsNullTextureShaderKey);
     tests.Run("Texture binding mask ignores stages without texture args",
