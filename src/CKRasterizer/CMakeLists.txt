@@ -20,6 +20,23 @@ set(CKBGFX_RASTERIZER_CONFIG
         ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer/CKBgfxRasterizer.ini
 )
 
+function(ckre_apply_apple_gcc_bgfx_compiler TARGET_NAME)
+    if (NOT TARGET ${TARGET_NAME})
+        return()
+    endif ()
+
+    set_target_properties(${TARGET_NAME} PROPERTIES
+            CXX_COMPILER_LAUNCHER "/bin/sh;${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer/CKBgfxAppleClangLauncher.sh"
+    )
+    target_link_libraries(${TARGET_NAME} PUBLIC c++)
+endfunction()
+
+if (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    ckre_apply_apple_gcc_bgfx_compiler(bx)
+    ckre_apply_apple_gcc_bgfx_compiler(bimg)
+    ckre_apply_apple_gcc_bgfx_compiler(bgfx)
+endif ()
+
 set(_ckre_bgfx_targets)
 
 function(ckre_configure_rasterizer_version_resource OUT_VAR TARGET_NAME FILE_DESCRIPTION ORIGINAL_FILENAME)
