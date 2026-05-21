@@ -11,6 +11,8 @@
 
 // Pull in bgfx defines for PT mask constants
 #include <bgfx/defines.h>
+#include <bgfx/platform.h>
+#include <SDL3/SDL.h>
 
 // ============================================================================
 // Test infrastructure
@@ -86,6 +88,17 @@ static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
             return false;
     }
     return true;
+}
+
+static bool TestBgfxRendererSupported(bgfx::RendererType::Enum renderer)
+{
+    bgfx::RendererType::Enum supported[bgfx::RendererType::Count];
+    uint8_t count = bgfx::getSupportedRenderers((uint8_t)bgfx::RendererType::Count, supported);
+    for (uint8_t i = 0; i < count; ++i) {
+        if (supported[i] == renderer)
+            return true;
+    }
+    return false;
 }
 
 // ============================================================================
@@ -575,6 +588,51 @@ static void TestEncoderSlotReuse()
 }
 
 // ============================================================================
+// Test 7: SDL platform data matches the bgfx context backend
+// ============================================================================
+
+static void TestSdlPlatformDataForRenderer()
+{
+    TEST_SECTION("SDL Platform Data For Renderer");
+
+#if defined(__APPLE__)
+    TEST_ASSERT(SDL_InitSubSystem(SDL_INIT_VIDEO), "SDL video subsystem initializes");
+    SDL_Window *window = SDL_CreateWindow("bgfx-platform-data-test", 64, 64, SDL_WINDOW_HIDDEN);
+    TEST_ASSERT(window != nullptr, "hidden SDL window is created");
+    if (!window) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return;
+    }
+
+    bgfx::PlatformData platformData = {};
+    TEST_ASSERT(CKBgfxFillSDLPlatformDataForRenderer((WIN_HANDLE)window,
+                                                     bgfx::RendererType::OpenGL,
+                                                     platformData),
+                "OpenGL platform data is available");
+    TEST_ASSERT(platformData.nwh == window,
+                "OpenGL SDL context receives SDL_Window as nwh");
+
+    platformData = {};
+    TEST_ASSERT(CKBgfxFillSDLPlatformDataForRenderer((WIN_HANDLE)window,
+                                                     bgfx::RendererType::Metal,
+                                                     platformData),
+                "Metal request platform data is available");
+    if (TestBgfxRendererSupported(bgfx::RendererType::Metal)) {
+        TEST_ASSERT(platformData.nwh != nullptr && platformData.nwh != window,
+                    "Metal receives the native Cocoa window handle");
+    } else {
+        TEST_ASSERT(platformData.nwh == window,
+                    "unsupported Metal request follows OpenGL fallback SDL window");
+    }
+
+    SDL_DestroyWindow(window);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+#else
+    TEST_ASSERT(true, "platform-specific check skipped");
+#endif
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -591,6 +649,7 @@ int main()
     TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();
     TestEncoderSlotReuse();
+    TestSdlPlatformDataForRenderer();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);

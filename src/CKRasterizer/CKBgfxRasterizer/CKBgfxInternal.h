@@ -4,6 +4,7 @@
 #include "CKRasterizer.h"
 
 #include <bgfx/bgfx.h>
+#include <bgfx/platform.h>
 
 struct CKBgfxLogConfig {
     bool File;
@@ -31,6 +32,9 @@ const char *CKBgfxRendererTypeName(bgfx::RendererType::Enum type);
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);
 bgfx::RendererType::Enum CKBgfxParseRequestedRenderer();
 uint32_t CKBgfxBuildResetFlags(CKBOOL VSync, CKDWORD Samples);
+bool CKBgfxFillSDLPlatformDataForRenderer(WIN_HANDLE Window,
+                                          bgfx::RendererType::Enum renderer,
+                                          bgfx::PlatformData &platformData);
 
 bgfx::UniformType::Enum CKBgfxUniformType(CK_UNIFORM_TYPE Type);
 bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB Attrib);
