@@ -97,6 +97,50 @@ static bool CKBgfxCanUseGeneratedMipChain(CKDWORD flags,
     return CKBgfxCanGenerateMipMaps(data);
 }
 
+static void CKBgfxDestroySamplerBaseHandle(CKBgfxTextureRecord *rec)
+{
+    if (!rec)
+        return;
+    if (bgfx::isValid(rec->SamplerBaseHandle)) {
+        bgfx::destroy(rec->SamplerBaseHandle);
+        rec->SamplerBaseHandle = BGFX_INVALID_HANDLE;
+    }
+    rec->SamplerBaseValid = FALSE;
+}
+
+static bool CKBgfxCanUseSamplerBaseHandle(const CKBgfxTextureRecord *rec)
+{
+    if (!rec || !CKBgfxIsOpenGLRenderer())
+        return false;
+    if (rec->MipCount <= 1 || rec->IsDepth)
+        return false;
+    if ((rec->Flags & CKRST_TEXTURE_CUBEMAP) != 0)
+        return false;
+    if ((rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1)
+        return false;
+    if (CKBgfxIsCompressedTextureFormat(rec->Format))
+        return false;
+    return true;
+}
+
+static bool CKBgfxEnsureSamplerBaseHandle(CKBgfxTextureRecord *rec)
+{
+    if (!CKBgfxCanUseSamplerBaseHandle(rec))
+        return false;
+    if (bgfx::isValid(rec->SamplerBaseHandle))
+        return true;
+
+    bgfx::TextureHandle handle = bgfx::createTexture2D(
+        (uint16_t)rec->Width, (uint16_t)rec->Height, false, 1,
+        rec->Format, CKBgfxTextureFlagsFromDescFlags(rec->Flags), NULL);
+    if (!bgfx::isValid(handle))
+        return false;
+
+    rec->SamplerBaseHandle = handle;
+    rec->SamplerBaseValid = FALSE;
+    return true;
+}
+
 static void CKBgfxResetAutoMipBaseCache(CKBgfxTextureRecord *rec)
 {
     if (!rec)
@@ -194,6 +238,8 @@ static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
         bgfx::destroy(rec->Handle);
     rec->Handle = handle;
     rec->MipCount = hasMips ? CKBgfxTextureMipCount(rec->Width, rec->Height, 1) : 1;
+    if (!hasMips)
+        CKBgfxDestroySamplerBaseHandle(rec);
     return true;
 }
 
@@ -602,12 +648,21 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
     bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
+    bool usingSamplerBase = false;
+    if (texRec &&
+        !CKBgfxSamplerWantsMipMaps(Sampler) &&
+        texRec->SamplerBaseValid &&
+        bgfx::isValid(texRec->SamplerBaseHandle)) {
+        textureHandle = texRec->SamplerBaseHandle;
+        usingSamplerBase = true;
+    }
     if (CKBgfxDebugSettings().Log.TextureBindings &&
         s_SetTextureLogCount < 80) {
         CKBgfxLogf("SetTexture",
-                 "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u size=%ux%u fmt=%d sampler=%p",
+                 "stage=%u uniform=%u texture=%u uni=%p tex=%p texIdx=%u base=%u size=%ux%u fmt=%d sampler=%p",
                  Stage, Uniform, Texture, (void *)uniRec, (void *)texRec,
                  bgfx::isValid(textureHandle) ? textureHandle.idx : 0xffff,
+                 usingSamplerBase ? 1u : 0u,
                  texRec ? texRec->Width : 0,
                  texRec ? texRec->Height : 0,
                  texRec ? (int)texRec->Format : -1,
@@ -1724,6 +1779,15 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         return CKERR_INVALIDPARAMETER;
 
     const bgfx::Memory *mem = NULL;
+    const bool updateSamplerBase =
+        Mip == 0 &&
+        Face == 0 &&
+        !isCube &&
+        !isVolume &&
+        !compressed &&
+        (fullBase2DUpdate || rec->SamplerBaseValid) &&
+        CKBgfxEnsureSamplerBaseHandle(rec);
+    const bgfx::Memory *samplerBaseMem = NULL;
     if (compressed)
     {
         CKDWORD imgSize = Data->TotalImageSize;
@@ -1761,12 +1825,19 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         if (pitch == rowBytes)
         {
             mem = bgfx::copy(Data->Image, rowBytes * h);
+            if (updateSamplerBase)
+                samplerBaseMem = bgfx::copy(Data->Image, rowBytes * h);
         }
         else
         {
             mem = bgfx::alloc(rowBytes * h);
             for (uint16_t row = 0; row < h; ++row)
                 memcpy(mem->data + row * rowBytes, (CKBYTE *)Data->Image + row * pitch, rowBytes);
+            if (updateSamplerBase) {
+                samplerBaseMem = bgfx::alloc(rowBytes * h);
+                for (uint16_t row = 0; row < h; ++row)
+                    memcpy(samplerBaseMem->data + row * rowBytes, (CKBYTE *)Data->Image + row * pitch, rowBytes);
+            }
         }
     }
 
@@ -1776,6 +1847,12 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         bgfx::updateTexture3D(rec->Handle, (uint8_t)Mip, x, y, (uint16_t)Face, w, h, 1, mem);
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
+
+    if (samplerBaseMem) {
+        bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0, x, y, w, h, samplerBaseMem);
+        if (fullBase2DUpdate)
+            rec->SamplerBaseValid = TRUE;
+    }
 
     if (rec->RequestedAutoMips &&
         Mip == 0 &&

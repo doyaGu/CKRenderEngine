@@ -313,9 +313,12 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
 
     switch (min) {
     case VXTEXTUREFILTER_NEAREST:
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_NONE;
+        break;
     case VXTEXTUREFILTER_MIPNEAREST:
         desc.MinFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_MIPNEAREST;
         break;
     case VXTEXTUREFILTER_MIPLINEAR:
         desc.MinFilter = CKRST_FILTER_NEAREST;
@@ -336,7 +339,7 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     case VXTEXTUREFILTER_LINEAR:
     default:
         desc.MinFilter = CKRST_FILTER_LINEAR;
-        desc.MipFilter = CKRST_FILTER_LINEAR;
+        desc.MipFilter = CKRST_FILTER_NONE;
         break;
     }
 
