@@ -1637,9 +1637,9 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
     if (m_DisableTextureFiltering) {
         desc.MinFilter = CKRST_FILTER_NEAREST;
         desc.MagFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = m_DisableMipmaps ? CKRST_FILTER_NONE : CKRST_FILTER_NEAREST;
     } else if (m_DisableMipmaps) {
-        desc.MipFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = CKRST_FILTER_NONE;
     }
     return desc;
 }
