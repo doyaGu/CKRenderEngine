@@ -35,8 +35,50 @@ static void *CKBgfxSdlPointerProperty(SDL_PropertiesID props, const char *name)
     return SDL_GetPointerProperty(props, name, NULL);
 }
 
-static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &platformData)
+static bool CKBgfxRendererSupported(bgfx::RendererType::Enum renderer)
 {
+    if (renderer == bgfx::RendererType::Count)
+        return false;
+
+    bgfx::RendererType::Enum supported[bgfx::RendererType::Count];
+    const uint8_t count = bgfx::getSupportedRenderers((uint8_t)bgfx::RendererType::Count, supported);
+    for (uint8_t i = 0; i < count; ++i) {
+        if (supported[i] == renderer)
+            return true;
+    }
+    return false;
+}
+
+static bool CKBgfxAppleRendererUsesSdlGlContext(bgfx::RendererType::Enum renderer)
+{
+#if defined(__APPLE__)
+    if (renderer == bgfx::RendererType::OpenGL ||
+        renderer == bgfx::RendererType::OpenGLES)
+        return true;
+
+    const bool rendererMayFallback =
+        renderer == bgfx::RendererType::Count ||
+        !CKBgfxRendererSupported(renderer);
+    if (!rendererMayFallback)
+        return false;
+
+    const bool hasOpenGL =
+        CKBgfxRendererSupported(bgfx::RendererType::OpenGL) ||
+        CKBgfxRendererSupported(bgfx::RendererType::OpenGLES);
+    const bool hasMetal = CKBgfxRendererSupported(bgfx::RendererType::Metal);
+    return hasOpenGL && !hasMetal;
+#else
+    (void)renderer;
+    return false;
+#endif
+}
+
+bool CKBgfxFillSDLPlatformDataForRenderer(WIN_HANDLE Window,
+                                          bgfx::RendererType::Enum renderer,
+                                          bgfx::PlatformData &platformData)
+{
+    platformData = bgfx::PlatformData();
+
     SDL_Window *window = static_cast<SDL_Window *>(Window);
     if (!window)
         return false;
@@ -49,6 +91,11 @@ static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &pla
     platformData.nwh = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER);
     return platformData.nwh != NULL;
 #elif defined(__APPLE__)
+    if (CKBgfxAppleRendererUsesSdlGlContext(renderer)) {
+        platformData.nwh = window;
+        return true;
+    }
+
     platformData.nwh = CKBgfxSdlPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER);
     return platformData.nwh != NULL;
 #elif defined(__linux__)
@@ -713,7 +760,7 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     bgfx::Init init;
     init.type = requestedRenderer;
-    if (!CKBgfxFillSDLPlatformData(Window, init.platformData)) {
+    if (!CKBgfxFillSDLPlatformDataForRenderer(Window, requestedRenderer, init.platformData)) {
         CKBgfxLogf("Init", "failed to extract SDL native window data window=%p", Window);
         return FALSE;
     }
@@ -1925,12 +1972,16 @@ CKRasterizerEncoder *CKBgfxRasterizerContext::BeginEncoder()
                 expected, TRUE, std::memory_order_acq_rel, std::memory_order_relaxed))
         {
             m_Encoders[i].m_Context = this;
+#if BGFX_CONFIG_MULTITHREADED
             m_Encoders[i].m_Encoder = bgfx::begin(true);
             if (!m_Encoders[i].m_Encoder) {
                 m_Encoders[i].m_Context = NULL;
                 m_Encoders[i].m_Active.store(FALSE, std::memory_order_release);
                 return NULL;
             }
+#else
+            m_Encoders[i].m_Encoder = NULL;
+#endif
             m_Encoders[i].m_StencilRef = 0;
             m_Encoders[i].m_StencilReadMask = 0xFF;
             m_Encoders[i].m_StencilWriteMask = 0xFF;
