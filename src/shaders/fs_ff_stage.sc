@@ -3,7 +3,7 @@ $input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1,
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 
-uniform vec4 u_ffDrawParams[12];
+uniform vec4 u_ffDrawParams[19];
 uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
@@ -405,6 +405,59 @@ bool alphaPass(float alpha, int func)
     return true;
 }
 
+#if defined(CKFF_FULL_SPECIALIZED)
+#define CKFF_APPLY_STAGE_CONST(STAGE_INDEX, STAGE_COORD_EXPR) \
+    if (stagesEnabled) { \
+        vec4 colorParams = vec4_splat(0.0); \
+        vec4 alphaParams = vec4_splat(0.0); \
+        vec4 colorExtra = u_stageParams[(STAGE_INDEX) * 4 + 2]; \
+        vec4 alphaExtra = u_stageParams[(STAGE_INDEX) * 4 + 3]; \
+        CKFFStageParams stageParams = ckffReadStageParams((STAGE_INDEX), colorParams, alphaParams, colorExtra, alphaExtra); \
+        int colorOp = stageParams.ColorOp; \
+        int alphaOp = stageParams.AlphaOp; \
+        bool hasTexture = stageParams.HasTexture; \
+        if (colorOp == 1) { \
+            stagesEnabled = false; \
+        } else { \
+            vec4 sampleCoord = getSampleCoord((STAGE_COORD_EXPR), stageParams.TexcoordTransformFlags); \
+            if ((STAGE_INDEX) != 0 && (previousColorOp == 22 || previousColorOp == 23)) { \
+                vec2 bump = previousTexture.xy; \
+                int bumpBase = ((STAGE_INDEX) - 1) * 2; \
+                sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump); \
+                sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump); \
+            } \
+            vec4 texColor = getTextureColor((STAGE_INDEX), sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, hasTexture); \
+            if ((STAGE_INDEX) != 0 && previousColorOp == 23) { \
+                int bumpBase = ((STAGE_INDEX) - 1) * 2; \
+                float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0); \
+                texColor *= lum; \
+            } \
+            vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            vec4 stageResult = current; \
+            vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor); \
+            vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, diffuse, texColor); \
+            stageResult.rgb = colorResult.rgb; \
+            stageResult.a = alphaResult.a; \
+            if (colorOp == 24) { \
+                stageResult = colorResult; \
+            } \
+            int resultArg = stageParams.ResultArg; \
+            if (resultArg == 5) { \
+                temp = stageResult; \
+            } else { \
+                current = stageResult; \
+            } \
+            previousTexture = texColor; \
+            previousColorOp = colorOp; \
+        } \
+    }
+#endif
+
 void main()
 {
     bool flatShade = ckffSpecIsOptimized() && ckffSpecFlatShade();
@@ -416,25 +469,26 @@ void main()
     int previousColorOp = 0;
 
 #if defined(CKFF_FULL_SPECIALIZED)
-    for (int stage = 0; stage < CKFF_FS_ACTIVE_STAGE_COUNT; ++stage) {
+    bool stagesEnabled = true;
+    CKFF_APPLY_STAGE_CONST(0, v_texcoord0);
+#if CKFF_FS_ACTIVE_STAGE_COUNT > 1
+    CKFF_APPLY_STAGE_CONST(1, v_texcoord1);
+#endif
+#if CKFF_FS_ACTIVE_STAGE_COUNT > 2
+    CKFF_APPLY_STAGE_CONST(2, v_texcoord2);
+#endif
+#if CKFF_FS_ACTIVE_STAGE_COUNT > 3
+    CKFF_APPLY_STAGE_CONST(3, v_texcoord3);
+#endif
+#undef CKFF_APPLY_STAGE_CONST
 #else
     for (int stage = 0; stage < 8; ++stage) {
-#endif
-#if !defined(CKFF_FULL_SPECIALIZED)
         if (ckffSpecIsOptimized() && stage > ckffSpecLastActiveTextureStage()) break;
-#endif
 
-#if defined(CKFF_FULL_SPECIALIZED)
-        vec4 colorParams = vec4_splat(0.0);
-        vec4 alphaParams = vec4_splat(0.0);
-        vec4 colorExtra = u_stageParams[stage * 4 + 2];
-        vec4 alphaExtra = u_stageParams[stage * 4 + 3];
-#else
         vec4 colorParams = u_stageParams[stage * 4 + 0];
         vec4 alphaParams = u_stageParams[stage * 4 + 1];
         vec4 colorExtra = u_stageParams[stage * 4 + 2];
         vec4 alphaExtra = u_stageParams[stage * 4 + 3];
-#endif
         CKFFStageParams stageParams = ckffReadStageParams(stage, colorParams, alphaParams, colorExtra, alphaExtra);
         int colorOp = stageParams.ColorOp;
         int alphaOp = stageParams.AlphaOp;
@@ -492,6 +546,7 @@ void main()
         previousTexture = texColor;
         previousColorOp = colorOp;
     }
+#endif
 
     bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_ffDrawParams[8].z > 0.5);
     if (specularEnabled) {
@@ -505,9 +560,10 @@ void main()
     bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
     if (fogEnabled) {
         int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_ffDrawParams[8].w);
-        float fogFactor = computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);
+        float fogFactor = pixelFogMode == 0
+            ? v_texcoord7Fog.z
+            : computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);
         current.rgb = mix(u_ffDrawParams[11].rgb, current.rgb, fogFactor);
     }
     gl_FragColor = clamp(current, 0.0, 1.0);
 }
-

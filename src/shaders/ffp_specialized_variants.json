@@ -3833,6 +3833,818 @@
       }
     },
     {
+      "name": "opengl_intro_positiont_stage0_modulate_alpha_test",
+      "vs": "positiont",
+      "specDwords": [
+        1,
+        33,
+        33,
+        0,
+        0,
+        176,
+        2183267396,
+        33588225,
+        0,
+        0
+      ],
+      "key": {
+        "vsBits": 33607708,
+        "vsTexcoordDeclMask": 4793490,
+        "vsTexGen": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "vsTexCoordIndex": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "vsTexTransformFlags": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": true,
+        "alphaTestEnable": true,
+        "alphaFunc": 5,
+        "fogEnable": false,
+        "vertexFogMode": 0,
+        "pixelFogMode": 0,
+        "rangeFog": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": false
+          },
+          {
+            "colorOp": 1,
+            "colorArg0": 1,
+            "colorArg1": 0,
+            "colorArg2": 1,
+            "alphaOp": 1,
+            "alphaArg0": 1,
+            "alphaArg1": 0,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "opengl_intro_positiont_stage0_disable",
+      "vs": "positiont",
+      "specDwords": [
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        2181071873,
+        0,
+        0,
+        0
+      ],
+      "key": {
+        "vsBits": 33607708,
+        "vsTexcoordDeclMask": 4793490,
+        "vsTexGen": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "vsTexCoordIndex": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "vsTexTransformFlags": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": true,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "vertexFogMode": 0,
+        "pixelFogMode": 0,
+        "rangeFog": false,
+        "stages": [
+          {
+            "colorOp": 1,
+            "colorArg0": 1,
+            "colorArg1": 0,
+            "colorArg2": 1,
+            "alphaOp": 1,
+            "alphaArg0": 1,
+            "alphaArg1": 0,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "opengl_intro_positiont_stage0_modulate",
+      "vs": "positiont",
+      "specDwords": [
+        1,
+        33,
+        33,
+        0,
+        0,
+        0,
+        2183267396,
+        33588225,
+        0,
+        0
+      ],
+      "key": {
+        "vsBits": 33607708,
+        "vsTexcoordDeclMask": 4793490,
+        "vsTexGen": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "vsTexCoordIndex": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "vsTexTransformFlags": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "lastActiveTextureStage": 0,
+        "globalSpecularEnable": true,
+        "alphaTestEnable": false,
+        "alphaFunc": 0,
+        "fogEnable": false,
+        "vertexFogMode": 0,
+        "pixelFogMode": 0,
+        "rangeFog": false,
+        "stages": [
+          {
+            "colorOp": 4,
+            "colorArg0": 1,
+            "colorArg1": 2,
+            "colorArg2": 1,
+            "alphaOp": 4,
+            "alphaArg0": 1,
+            "alphaArg1": 2,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": false
+          },
+          {
+            "colorOp": 1,
+            "colorArg0": 1,
+            "colorArg1": 0,
+            "colorArg2": 1,
+            "alphaOp": 1,
+            "alphaArg0": 1,
+            "alphaArg1": 0,
+            "alphaArg2": 1,
+            "resultIsTemp": false,
+            "projectedSampler": false
+          }
+        ]
+      }
+    },
+    {
+          "name": "opengl_menu_3d_stage0_modulate_fog_specular",
+          "vs": "3d",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 1113636893,
+                "globalSpecularEnable": true,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": true,
+                "vertexFogMode": 3,
+                "flatShade": false,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_3d_stage0_modulate_fog_flat",
+          "vs": "3d",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 39862301,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": true,
+                "vertexFogMode": 3,
+                "flatShade": true,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_positiont_stage0_modulate_alpha_test_flat",
+          "vs": "positiont",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 33574940,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": true,
+                "alphaFunc": 5,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "flatShade": true,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_positiont_stage0_disable",
+          "vs": "positiont",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 33574940,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "flatShade": false,
+                "stages": [
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_positiont_stage0_modulate",
+          "vs": "positiont",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 33574940,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "flatShade": false,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_positiont_stage0_modulate_flat",
+          "vs": "positiont",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 1107316764,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "flatShade": true,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_menu_3d_stage0_modulate_specular",
+          "vs": "3d",
+          "key": {
+                "vsBits": 1107345437,
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "globalSpecularEnable": true,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "flatShade": false,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
+          "name": "opengl_intro_positiont_stage0_modulate_alpha_test_flat",
+          "vs": "positiont",
+          "key": {
+                "vsBits": 33607708,
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "globalSpecularEnable": true,
+                "alphaTestEnable": true,
+                "alphaFunc": 5,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "flatShade": true,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
       "name": "level_capture_13_3d_stage0",
       "vs": "3d",
       "specDwords": [
