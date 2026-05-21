@@ -799,6 +799,122 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
     ffp.Shutdown();
 }
 
+void LegacyStageBlendZeroTerminatesStaleMultitextureState() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[4] = {
+        VxVector(-1.0f, -1.0f, 0.0f),
+        VxVector( 1.0f, -1.0f, 0.0f),
+        VxVector( 1.0f,  1.0f, 0.0f),
+        VxVector(-1.0f,  1.0f, 0.0f)
+    };
+    Vx2DVector uvs[4] = {
+        Vx2DVector(0.0f, 0.0f),
+        Vx2DVector(1.0f, 0.0f),
+        Vx2DVector(1.0f, 1.0f),
+        Vx2DVector(0.0f, 1.0f)
+    };
+    CKDWORD colors[4] = {
+        0x80FFFFFFu,
+        0x80FFFFFFu,
+        0x80FFFFFFu,
+        0x80FFFFFFu
+    };
+    CKWORD indices[6] = {0, 1, 2, 0, 2, 3};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 4;
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = uvs;
+    data.TexCoordStride = sizeof(Vx2DVector);
+    data.ColorPtr = colors;
+    data.ColorStride = sizeof(CKDWORD);
+
+    ffp.SetTexture(0, 101);
+    ffp.SetTexture(1, 202);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.SetTexture(0, 303);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+    ffp.SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
+
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, indices, 6, &data);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Particle-like draw must submit once");
+    TestCheck(context.Encoder.TextureBindCount == 1,
+              "STAGEBLEND zero on stage 1 must suppress stale stage 1 texture binding");
+    TestCheck(context.Encoder.LastTextureStage == 0 &&
+                  context.Encoder.LastTextureHandle == 303,
+              "Particle-like draw must bind only its current stage 0 texture");
+
+    ffp.Shutdown();
+}
+
+void LegacyTextureMapBlendClearsExplicitStageOps() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {
+        VxVector(-1.0f, -1.0f, 0.0f),
+        VxVector( 1.0f, -1.0f, 0.0f),
+        VxVector( 0.0f,  1.0f, 0.0f)
+    };
+    Vx2DVector uvs[3] = {
+        Vx2DVector(0.0f, 0.0f),
+        Vx2DVector(1.0f, 0.0f),
+        Vx2DVector(0.5f, 1.0f)
+    };
+    CKDWORD colors[3] = {
+        0x80FFFFFFu,
+        0x80FFFFFFu,
+        0x80FFFFFFu
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = uvs;
+    data.TexCoordStride = sizeof(Vx2DVector);
+    data.ColorPtr = colors;
+    data.ColorStride = sizeof(CKDWORD);
+
+    ffp.SetTexture(0, 101);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+    ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
+
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Legacy texture-map blend draw must submit specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE,
+              "TEXTUREMAPBLEND must restore legacy modulate color op over stale explicit op");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_ALPHA_OP) == CKRST_TOP_MODULATE,
+              "TEXTUREMAPBLEND must restore legacy modulate alpha op over stale explicit op");
+
+    ffp.Shutdown();
+}
+
 void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -1487,6 +1603,10 @@ int main() {
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
+    tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",
+              &LegacyStageBlendZeroTerminatesStaleMultitextureState);
+    tests.Run("Legacy TEXTUREMAPBLEND clears explicit stage ops",
+              &LegacyTextureMapBlendClearsExplicitStageOps);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
     tests.Run("Point sprite uses per-vertex point size",

@@ -349,6 +349,21 @@ void CKFixedFunctionPipeline::SetColorWriteMask(CKDWORD mask) {
     m_DrawStateCache.SetColorWriteMask(mask);
 }
 
+static void ClearExplicitTextureCombineState(CKDWORD *stageState) {
+    if (!stageState)
+        return;
+
+    stageState[CKRST_TSS_OP] = 0;
+    stageState[CKRST_TSS_ARG1] = 0;
+    stageState[CKRST_TSS_ARG2] = 0;
+    stageState[CKRST_TSS_AOP] = 0;
+    stageState[CKRST_TSS_AARG1] = 0;
+    stageState[CKRST_TSS_AARG2] = 0;
+    stageState[CKRST_TSS_COLORARG0] = 0;
+    stageState[CKRST_TSS_ALPHAARG0] = 0;
+    stageState[CKRST_TSS_RESULTARG0] = 0;
+}
+
 void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
@@ -392,7 +407,34 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
+
+    if (type == CKRST_TSS_STAGEBLEND && value == 0 && stage > 0) {
+        DisableTextureStagesFrom(stage);
+        return;
+    }
+
     m_StageStates[stage][(int)type] = value;
+
+    if (type == CKRST_TSS_TEXTUREMAPBLEND) {
+        ClearExplicitTextureCombineState(m_StageStates[stage]);
+    } else if (type == CKRST_TSS_STAGEBLEND) {
+        CKDWORD colorOp = 0;
+        CKDWORD colorArg1 = 0;
+        CKDWORD colorArg2 = 0;
+        CKDWORD alphaOp = 0;
+        CKDWORD alphaArg1 = 0;
+        CKDWORD alphaArg2 = 0;
+        if (CKFFStageBlendToTextureOps(value,
+                                       colorOp, colorArg1, colorArg2,
+                                       alphaOp, alphaArg1, alphaArg2)) {
+            m_StageStates[stage][CKRST_TSS_OP] = colorOp;
+            m_StageStates[stage][CKRST_TSS_ARG1] = colorArg1;
+            m_StageStates[stage][CKRST_TSS_ARG2] = colorArg2;
+            m_StageStates[stage][CKRST_TSS_AOP] = alphaOp;
+            m_StageStates[stage][CKRST_TSS_AARG1] = alphaArg1;
+            m_StageStates[stage][CKRST_TSS_AARG2] = alphaArg2;
+        }
+    }
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
