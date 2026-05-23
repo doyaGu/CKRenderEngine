@@ -26,7 +26,7 @@ endif ()
 # Project options
 # =============================================================================
 set(_ckre_generate_shaders_default ON)
-if (MINGW)
+if (NOT WIN32)
     set(_ckre_generate_shaders_default OFF)
 endif ()
 
