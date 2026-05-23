@@ -41,6 +41,10 @@ set_target_properties(CKRasterizerLib PROPERTIES
         FOLDER "Rasterizer"
 )
 
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CKRE_BUILD_SHARED)
+    set_target_properties(CKRasterizerLib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif ()
+
 if (CKRE_INSTALL)
     install(TARGETS CKRasterizerLib
             EXPORT CKRenderEngineTargets
