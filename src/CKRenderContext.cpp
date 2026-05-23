@@ -1245,10 +1245,7 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
         }
         m_Settings.m_Rect.right = SizeX;
         m_Settings.m_Rect.bottom = SizeY;
-        m_ViewportData.ViewX = 0;
-        m_ViewportData.ViewY = 0;
-        m_ViewportData.ViewWidth = SizeX;
-        m_ViewportData.ViewHeight = SizeY;
+        SetFullViewport(&m_ViewportData, SizeX, SizeY);
         m_ProjectionUpdated = FALSE;
     }
 
