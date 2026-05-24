@@ -6,8 +6,6 @@
 
 static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height, int bpp, int refreshRate)
 {
-    if (width < 640 || height < 400)
-        return;
     if (refreshRate <= 0)
         refreshRate = 60;
 
@@ -74,6 +72,7 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     SDL_free(displays);
 
     static const int compatibleResolutions[][2] = {
+        {320, 240},
         {640, 480},
         {800, 600},
         {1024, 768},
