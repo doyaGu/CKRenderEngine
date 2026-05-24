@@ -43,6 +43,10 @@ std::string ReadTextFile(const char *path) {
             return contents;
 
         contents = read(std::string("../../") + relativePath);
+        if (!contents.empty())
+            return contents;
+
+        contents = read(std::string("../../../") + relativePath);
     }
 
     return contents;
