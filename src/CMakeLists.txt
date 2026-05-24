@@ -199,14 +199,14 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 
-if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND TARGET shaderc)
+if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)
     set(CKRE_SHADER_STAMP "${CMAKE_CURRENT_BINARY_DIR}/CK2_3D_shaders.stamp")
     add_custom_command(OUTPUT "${CKRE_SHADER_STAMP}"
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
-                    --shaderc $<TARGET_FILE:shaderc>
+                    --shaderc "${CKRE_SHADERC_COMMAND}"
             COMMAND "${CMAKE_COMMAND}" -E touch "${CKRE_SHADER_STAMP}"
-            DEPENDS shaderc ${CKRE_SHADER_SOURCES}
+            DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
             COMMENT "Generating CK2_3D bgfx fixed-function shaders"
             VERBATIM

@@ -8,6 +8,8 @@ endif ()
 project(CKRenderEngine VERSION 0.1.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(CKREShaderc)
 
 # =============================================================================
 # Determine if this is a top-level project
@@ -236,7 +238,9 @@ endif ()
 # =============================================================================
 # Build library
 # =============================================================================
+ckre_prepare_shaderc()
 add_subdirectory(deps)
+ckre_resolve_shaderc()
 add_subdirectory(src)
 
 # =============================================================================
