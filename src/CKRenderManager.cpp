@@ -76,8 +76,8 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
 
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
     // Initialize options
-    m_TextureVideoFormat.Set("TextureVideoFormat", _16_ARGB1555);
-    m_SpriteVideoFormat.Set("SpriteVideoFormat", _16_ARGB1555);
+    m_TextureVideoFormat.Set("TextureVideoFormat", _32_ARGB8888);
+    m_SpriteVideoFormat.Set("SpriteVideoFormat", _32_ARGB8888);
     m_Options.PushBack(&m_TextureVideoFormat);
     m_Options.PushBack(&m_SpriteVideoFormat);
 
@@ -96,7 +96,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_TextureCacheManagement.Set("TextureCacheManagement", TRUE);
     m_Options.PushBack(&m_TextureCacheManagement);
 
-    m_UseIndexBuffers.Set("UseIndexBuffers", FALSE);
+    m_UseIndexBuffers.Set("UseIndexBuffers", TRUE);
     m_Options.PushBack(&m_UseIndexBuffers);
 
     m_ForceLinearFog.Set("ForceLinearFog", FALSE);

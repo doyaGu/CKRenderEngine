@@ -53,8 +53,20 @@ static void OverridesReadEveryLegacyRootOption() {
     CKRenderSettingsClearOverridesForTests();
 }
 
+static void ModernDefaultsPreferFullQualityRenderPath() {
+    CKRenderSettingsClearOverridesForTests();
+
+    TestCheck(CKRenderSettingsGetDword(CKRenderSettingsSection::Root, "UseIndexBuffers", 0) == 1,
+              "default CK2_3D settings should enable index buffers");
+    TestCheck(CKRenderSettingsGetPixelFormat(CKRenderSettingsSection::Root, "TextureVideoFormat", UNKNOWN_PF) == _32_ARGB8888,
+              "default CK2_3D settings should use 32-bit texture video format");
+    TestCheck(CKRenderSettingsGetPixelFormat(CKRenderSettingsSection::Root, "SpriteVideoFormat", UNKNOWN_PF) == _32_ARGB8888,
+              "default CK2_3D settings should use 32-bit sprite video format");
+}
+
 int main() {
     TestFramework tests;
     tests.Run("CK2_3D root settings parse legacy options", &OverridesReadEveryLegacyRootOption);
+    tests.Run("CK2_3D defaults prefer the full quality render path", &ModernDefaultsPreferFullQualityRenderPath);
     return tests.ExitCode();
 }
