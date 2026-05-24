@@ -2785,6 +2785,10 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         return CKERR_CANCREATERENDERCONTEXT;
     }
 
+    width = m_RasterizerContext->m_Width;
+    height = m_RasterizerContext->m_Height;
+    SetFullViewport(&m_ViewportData, width, height);
+
     // Initialize the fixed-function pipeline
     m_FFPipeline.Init(m_RasterizerContext);
     ApplyRenderOptions();
