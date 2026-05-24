@@ -140,6 +140,80 @@ public:
     bool adapterIdentifierCalled;
 };
 
+class FakeLowResolutionModeD3D9 : public FakeFormatD3D9
+{
+public:
+    HRESULT STDMETHODCALLTYPE GetAdapterIdentifier(UINT, DWORD, D3DADAPTER_IDENTIFIER9 *identifier)
+    {
+        if (identifier)
+            memset(identifier, 0, sizeof(*identifier));
+        return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetAdapterDisplayMode(UINT, D3DDISPLAYMODE *mode)
+    {
+        if (!mode)
+            return D3DERR_INVALIDCALL;
+
+        mode->Width = 800;
+        mode->Height = 600;
+        mode->RefreshRate = 60;
+        mode->Format = D3DFMT_X8R8G8B8;
+        return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetDeviceCaps(UINT, D3DDEVTYPE, D3DCAPS9 *caps)
+    {
+        if (!caps)
+            return D3DERR_INVALIDCALL;
+
+        memset(caps, 0, sizeof(*caps));
+        caps->MaxTextureWidth = 2048;
+        caps->MaxTextureHeight = 2048;
+        caps->MaxTextureAspectRatio = 2048;
+        caps->MaxTextureBlendStages = 4;
+        caps->MaxSimultaneousTextures = 4;
+        caps->MaxActiveLights = 8;
+        return D3D_OK;
+    }
+
+    UINT STDMETHODCALLTYPE GetAdapterModeCount(UINT, D3DFORMAT format)
+    {
+        return format == D3DFMT_X8R8G8B8 ? 1 : 0;
+    }
+
+    HRESULT STDMETHODCALLTYPE EnumAdapterModes(UINT, D3DFORMAT format, UINT index, D3DDISPLAYMODE *mode)
+    {
+        if (format != D3DFMT_X8R8G8B8 || index != 0 || !mode)
+            return D3DERR_INVALIDCALL;
+
+        mode->Width = 320;
+        mode->Height = 240;
+        mode->RefreshRate = 75;
+        mode->Format = D3DFMT_X8R8G8B8;
+        return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE CheckDeviceType(UINT, D3DDEVTYPE, D3DFORMAT adapterFormat,
+                                              D3DFORMAT backBufferFormat, BOOL)
+    {
+        return adapterFormat == D3DFMT_X8R8G8B8 && backBufferFormat == D3DFMT_X8R8G8B8
+                   ? D3D_OK
+                   : D3DERR_NOTAVAILABLE;
+    }
+
+    HRESULT STDMETHODCALLTYPE CheckDeviceFormat(UINT, D3DDEVTYPE, D3DFORMAT adapterFormat,
+                                                DWORD Usage, D3DRESOURCETYPE RType, D3DFORMAT checkFormat)
+    {
+        if (adapterFormat != D3DFMT_X8R8G8B8 || Usage != 0 || RType != D3DRTYPE_TEXTURE)
+            return D3DERR_NOTAVAILABLE;
+
+        return (checkFormat == D3DFMT_X8R8G8B8 || checkFormat == D3DFMT_A8R8G8B8)
+                   ? D3D_OK
+                   : D3DERR_NOTAVAILABLE;
+    }
+};
+
 class FakeDepthStencilD3D9 : public FakeFormatD3D9
 {
 public:
@@ -381,6 +455,36 @@ void InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery()
               "InitializeCaps must validate adapter indices before querying D3D");
 
     rasterizer.m_D3D9 = NULL;
+#endif
+}
+
+void InitializeCapsKeepsLowResolutionDisplayModes()
+{
+#if !defined(_WIN32)
+    return;
+#else
+    FakeLowResolutionModeD3D9 fakeD3D9;
+    CKDX9Rasterizer rasterizer;
+    rasterizer.m_D3D9 = &fakeD3D9;
+
+    CKDX9RasterizerDriver driver(&rasterizer);
+    TestCheck(driver.InitializeCaps(0, D3DDEVTYPE_HAL) == TRUE,
+              "InitializeCaps should succeed with a valid fake DX9 adapter");
+
+    bool foundLowResolutionMode = false;
+    for (int i = 0; i < driver.m_DisplayModes.Size(); ++i)
+    {
+        const VxDisplayMode &mode = driver.m_DisplayModes[i];
+        if (mode.Width == 320 && mode.Height == 240 && mode.Bpp == 32 && mode.RefreshRate == 75)
+        {
+            foundLowResolutionMode = true;
+            break;
+        }
+    }
+
+    rasterizer.m_D3D9 = NULL;
+    TestCheck(foundLowResolutionMode,
+              "DX9 mode enumeration should keep all device-supported display modes");
 #endif
 }
 
@@ -1145,6 +1249,7 @@ int main()
     tests.Run("SetLight rejects out-of-range index", &SetLightRejectsOutOfRangeIndex);
     tests.Run("Default DX9 depth format keeps stencil available", &DefaultDepthFormatKeepsStencilAvailable);
     tests.Run("InitializeCaps rejects negative adapter indices", &InitializeCapsRejectsNegativeAdapterIndexBeforeD3DQuery);
+    tests.Run("InitializeCaps keeps low resolution display modes", &InitializeCapsKeepsLowResolutionDisplayModes);
     tests.Run("2D render target textures use one sampleable resource", &RenderTargetTextureUsesSingleSampleableResource);
     tests.Run("Resized 2D mipmap upload stays within target buffer", &ResizedTextureMipmapUploadStaysWithinTargetBuffer);
     tests.Run("Resized cube mipmap upload stays within target buffer", &ResizedCubeMipmapUploadStaysWithinTargetBuffer);

@@ -86,32 +86,28 @@ CKBOOL CKDX9RasterizerDriver::InitializeCaps(int AdapterIndex, D3DDEVTYPE DevTyp
              D3DDISPLAYMODE displayMode;
              if (SUCCEEDED(pD3D->EnumAdapterModes(adapter, format, mode, &displayMode)))
              {
-                 // Filter out low-resolution modes
-                 if (displayMode.Width >= 640 && displayMode.Height >= 400)
+                 // Check if the device can render to this format
+                 if (SUCCEEDED(pD3D->CheckDeviceType(adapter, DevType, displayMode.Format, displayMode.Format, FALSE)))
                  {
-                     // Check if the device can render to this format
-                     if (SUCCEEDED(pD3D->CheckDeviceType(adapter, DevType, displayMode.Format, displayMode.Format, FALSE)))
-                     {
-                         // Add supported format if not already in list
-                         if (!m_RenderFormats.IsHere(displayMode.Format))
-                             m_RenderFormats.PushBack(displayMode.Format);
+                     // Add supported format if not already in list
+                     if (!m_RenderFormats.IsHere(displayMode.Format))
+                         m_RenderFormats.PushBack(displayMode.Format);
 
-                         // Convert to Virtools display mode format
-                         VX_PIXELFORMAT pf = D3DFormatToVxPixelFormat(displayMode.Format);
-                         VxImageDescEx desc;
-                         VxPixelFormat2ImageDesc(pf, desc);
+                     // Convert to Virtools display mode format
+                     VX_PIXELFORMAT pf = D3DFormatToVxPixelFormat(displayMode.Format);
+                     VxImageDescEx desc;
+                     VxPixelFormat2ImageDesc(pf, desc);
 
-                         VxDisplayMode dm = {
-                             (int)displayMode.Width,
-                             (int)displayMode.Height,
-                             desc.BitsPerPixel,
-                             (int)displayMode.RefreshRate
-                         };
+                     VxDisplayMode dm = {
+                         (int)displayMode.Width,
+                         (int)displayMode.Height,
+                         desc.BitsPerPixel,
+                         (int)displayMode.RefreshRate
+                     };
 
-                         // Add display mode if not already in list
-                         if (!m_DisplayModes.IsHere(dm))
-                             m_DisplayModes.PushBack(dm);
-                     }
+                     // Add display mode if not already in list
+                     if (!m_DisplayModes.IsHere(dm))
+                         m_DisplayModes.PushBack(dm);
                  }
              }
          }
