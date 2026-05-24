@@ -1,11 +1,58 @@
 #include "CKBgfxRasterizer.h"
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#endif
 
 #include <new>
+
+static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height, int bpp, int refreshRate)
+{
+    if (width < 640 || height < 400)
+        return;
+    if (refreshRate <= 0)
+        refreshRate = 60;
+
+    VxDisplayMode mode;
+    mode.Width = width;
+    mode.Height = height;
+    mode.Bpp = bpp;
+    mode.RefreshRate = refreshRate;
+    if (!displayModes.IsHere(mode))
+        displayModes.PushBack(mode);
+}
+
+#ifdef _WIN32
+static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, const DEVMODEA &mode)
+{
+    AddDisplayMode(displayModes, (int)mode.dmPelsWidth, (int)mode.dmPelsHeight,
+                   (int)mode.dmBitsPerPel, (int)mode.dmDisplayFrequency);
+}
+#endif
+
+static void AddCompatibleDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height)
+{
+    AddDisplayMode(displayModes, width, height, 16, 60);
+    AddDisplayMode(displayModes, width, height, 32, 60);
+}
+
+static int CompareDisplayModes(const void *lhs, const void *rhs)
+{
+    const VxDisplayMode &a = *(const VxDisplayMode *)lhs;
+    const VxDisplayMode &b = *(const VxDisplayMode *)rhs;
+    if (a.Width != b.Width)
+        return a.Width < b.Width ? -1 : 1;
+    if (a.Height != b.Height)
+        return a.Height < b.Height ? -1 : 1;
+    if (a.Bpp != b.Bpp)
+        return a.Bpp < b.Bpp ? -1 : 1;
+    if (a.RefreshRate != b.RefreshRate)
+        return a.RefreshRate < b.RefreshRate ? -1 : 1;
+    return 0;
+}
 
 CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
 {
@@ -15,6 +62,7 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     m_DriverIndex = 0;
     m_Desc = "bgfx Driver";
 
+#ifdef _WIN32
     DEVMODEA dm;
     memset(&dm, 0, sizeof(dm));
     dm.dmSize = sizeof(dm);
@@ -22,28 +70,35 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     int modeIndex = 0;
     while (EnumDisplaySettingsA(NULL, modeIndex, &dm))
     {
-        if (dm.dmBitsPerPel >= 16 && dm.dmPelsWidth >= 640 && dm.dmPelsHeight >= 400)
-        {
-            VxDisplayMode vdm;
-            vdm.Width = (int)dm.dmPelsWidth;
-            vdm.Height = (int)dm.dmPelsHeight;
-            vdm.Bpp = (int)dm.dmBitsPerPel;
-            vdm.RefreshRate = (int)dm.dmDisplayFrequency;
-            if (!m_DisplayModes.IsHere(vdm))
-                m_DisplayModes.PushBack(vdm);
-        }
+        AddDisplayMode(m_DisplayModes, dm);
         ++modeIndex;
     }
+#endif
 
-    if (m_DisplayModes.Size() == 0)
-    {
-        VxDisplayMode fallback;
-        fallback.Width = 640;
-        fallback.Height = 480;
-        fallback.Bpp = 32;
-        fallback.RefreshRate = 60;
-        m_DisplayModes.PushBack(fallback);
-    }
+    static const int compatibleResolutions[][2] = {
+        {640, 480},
+        {800, 600},
+        {1024, 768},
+        {1152, 864},
+        {1280, 720},
+        {1280, 768},
+        {1280, 800},
+        {1280, 960},
+        {1280, 1024},
+        {1360, 768},
+        {1366, 768},
+        {1440, 900},
+        {1600, 900},
+        {1600, 1200},
+        {1680, 1050},
+        {1920, 1080},
+        {1920, 1200},
+        {2560, 1440},
+    };
+    for (int i = 0; i < (int)(sizeof(compatibleResolutions) / sizeof(compatibleResolutions[0])); ++i)
+        AddCompatibleDisplayMode(m_DisplayModes, compatibleResolutions[i][0], compatibleResolutions[i][1]);
+
+    m_DisplayModes.Sort(CompareDisplayModes);
 
     CKTextureDesc texDesc;
     texDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;

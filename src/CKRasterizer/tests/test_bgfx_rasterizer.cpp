@@ -32,6 +32,62 @@ static int g_FailCount = 0;
 
 #define TEST_SECTION(name) printf("\n[%s]\n", name)
 
+static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+{
+    for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
+        const VxDisplayMode &mode = driver->m_DisplayModes[i];
+        if (mode.Width == width &&
+            mode.Height == height &&
+            mode.Bpp == bpp &&
+            mode.RefreshRate == refreshRate) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static int CountDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+{
+    int count = 0;
+    for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
+        const VxDisplayMode &mode = driver->m_DisplayModes[i];
+        if (mode.Width == width &&
+            mode.Height == height &&
+            mode.Bpp == bpp &&
+            mode.RefreshRate == refreshRate) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
+{
+    for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {
+        const VxDisplayMode &prev = driver->m_DisplayModes[i - 1];
+        const VxDisplayMode &cur = driver->m_DisplayModes[i];
+        if (prev.Width != cur.Width) {
+            if (prev.Width > cur.Width)
+                return false;
+            continue;
+        }
+        if (prev.Height != cur.Height) {
+            if (prev.Height > cur.Height)
+                return false;
+            continue;
+        }
+        if (prev.Bpp != cur.Bpp) {
+            if (prev.Bpp > cur.Bpp)
+                return false;
+            continue;
+        }
+        if (prev.RefreshRate > cur.RefreshRate)
+            return false;
+    }
+    return true;
+}
+
 // ============================================================================
 // Test 1: Fill mode / topology interaction
 // ============================================================================
@@ -433,6 +489,14 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(driver != NULL, "driver exists after start");
     TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
+    TEST_ASSERT(HasDisplayMode(driver, 640, 480, 32, 60), "bgfx driver includes default 640x480 mode");
+    TEST_ASSERT(HasDisplayMode(driver, 800, 600, 32, 60), "bgfx driver includes compatible 800x600x32 mode");
+    TEST_ASSERT(HasDisplayMode(driver, 800, 600, 16, 60), "bgfx driver includes legacy 800x600x16 alias");
+    TEST_ASSERT(HasDisplayMode(driver, 1024, 768, 32, 60), "bgfx driver includes compatible 1024x768 mode");
+    TEST_ASSERT(HasDisplayMode(driver, 1280, 720, 32, 60), "bgfx driver includes compatible 1280x720 mode");
+    TEST_ASSERT(HasDisplayMode(driver, 1920, 1080, 32, 60), "bgfx driver includes compatible 1920x1080 mode");
+    TEST_ASSERT(DisplayModesAreSorted(driver), "bgfx display modes are sorted for screen-mode grouping");
+    TEST_ASSERT(CountDisplayMode(driver, 800, 600, 32, 60) == 1, "bgfx display mode list de-duplicates compatible modes");
 
     rasterizer.Close();
     TEST_ASSERT(rasterizer.GetDriverCount() == 0, "close removes driver");
