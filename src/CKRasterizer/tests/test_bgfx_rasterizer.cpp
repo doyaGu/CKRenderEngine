@@ -489,6 +489,7 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(driver != NULL, "driver exists after start");
     TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
+    TEST_ASSERT(HasDisplayMode(driver, 320, 240, 32, 60), "bgfx driver keeps low resolution display modes");
     TEST_ASSERT(HasDisplayMode(driver, 640, 480, 32, 60), "bgfx driver includes default 640x480 mode");
     TEST_ASSERT(HasDisplayMode(driver, 800, 600, 32, 60), "bgfx driver includes compatible 800x600x32 mode");
     TEST_ASSERT(HasDisplayMode(driver, 800, 600, 16, 60), "bgfx driver includes legacy 800x600x16 alias");
