@@ -235,6 +235,7 @@ typedef enum CK_DEPTH_FORMAT {
 // ---------------------------------------------------------------------------
 
 typedef enum CK_FILTER_MODE {
+    CKRST_FILTER_NONE             = 0,
     CKRST_FILTER_NEAREST          = 1,
     CKRST_FILTER_LINEAR           = 2,
     CKRST_FILTER_MIPNEAREST       = 3,
