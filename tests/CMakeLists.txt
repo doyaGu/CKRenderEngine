@@ -33,6 +33,12 @@ function(ckre_add_test TARGET_NAME)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     )
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../src/CK2_3D.ini"
+        "$<TARGET_FILE_DIR:${TARGET_NAME}>/CK2_3D.ini"
+        VERBATIM
+    )
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
 endfunction()
 
@@ -74,4 +80,8 @@ ckre_add_test(ff_uniform_state_tests
 
 ckre_add_test(ffp_stencil_submit_tests
     test_ffp_stencil_submit.cpp
+)
+
+ckre_add_test(render_settings_tests
+    test_render_settings.cpp
 )
