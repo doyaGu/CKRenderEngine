@@ -23,9 +23,33 @@ CKDWORD FloatStageState(float value) {
 }
 
 std::string ReadTextFile(const char *path) {
-    std::ifstream file(path);
-    return std::string((std::istreambuf_iterator<char>(file)),
-                       std::istreambuf_iterator<char>());
+    auto read = [](const std::string &candidate) {
+        std::ifstream file(candidate.c_str());
+        return std::string((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    };
+
+    std::string contents = read(path);
+    if (!contents.empty())
+        return contents;
+
+    const char *sourcePrefix = "Source/RenderEngine/";
+    const size_t sourcePrefixLen = std::strlen(sourcePrefix);
+    if (std::strncmp(path, sourcePrefix, sourcePrefixLen) == 0) {
+        const char *relativePath = path + sourcePrefixLen;
+
+        contents = read(relativePath);
+        if (!contents.empty())
+            return contents;
+
+        contents = read(std::string("../../") + relativePath);
+        if (!contents.empty())
+            return contents;
+
+        contents = read(std::string("../../../") + relativePath);
+    }
+
+    return contents;
 }
 
 std::string::size_type FindFullSpecializedBlockEnd(const std::string &contents) {
