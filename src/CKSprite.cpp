@@ -12,6 +12,20 @@
 
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;
 
+static CKBOOL IsSupportedObjectVideoFormat(VX_PIXELFORMAT format) {
+    return format > UNKNOWN_PF && format <= _32_X8L8V8U8;
+}
+
+static VX_PIXELFORMAT ResolveObjectVideoFormat(VX_PIXELFORMAT requested, VX_PIXELFORMAT fallback) {
+    if (IsSupportedObjectVideoFormat(requested))
+        return requested;
+
+    if (IsSupportedObjectVideoFormat(fallback))
+        return fallback;
+
+    return _32_ARGB8888;
+}
+
 static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx *desc) {
     VxImageDescEx *best = nullptr;
     int minDiff = 64;
@@ -357,19 +371,15 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     spriteDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_SPRITE | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     spriteDesc.MipMapCount = 0;
 
-    VxPixelFormat2ImageDesc(m_VideoFormat, spriteDesc.Format);
+    RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    const VX_PIXELFORMAT videoFormat = ResolveObjectVideoFormat(
+        m_VideoFormat,
+        rm ? static_cast<VX_PIXELFORMAT>(rm->m_SpriteVideoFormat.Value) : UNKNOWN_PF);
+
+    VxPixelFormat2ImageDesc(videoFormat, spriteDesc.Format);
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
         FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
-    }
-
-    // Handle UNKNOWN_PF - use ARGB1555 format
-    if (m_VideoFormat == UNKNOWN_PF) {
-        spriteDesc.Format.BitsPerPixel = 16;
-        spriteDesc.Format.AlphaMask = 0x8000;
-        spriteDesc.Format.RedMask = 0x7C00;
-        spriteDesc.Format.GreenMask = 0x3E0;
-        spriteDesc.Format.BlueMask = 0x1F;
     }
 
     if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &spriteDesc, nullptr) == CK_OK) {

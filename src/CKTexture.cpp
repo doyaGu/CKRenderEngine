@@ -13,6 +13,20 @@ static CKBOOL HasAlphaFormat(const VxImageDescEx &desc) {
     return desc.AlphaMask != 0 || desc.Flags >= 0x13;
 }
 
+static CKBOOL IsSupportedObjectVideoFormat(VX_PIXELFORMAT format) {
+    return format > UNKNOWN_PF && format <= _32_X8L8V8U8;
+}
+
+static VX_PIXELFORMAT ResolveObjectVideoFormat(VX_PIXELFORMAT requested, VX_PIXELFORMAT fallback) {
+    if (IsSupportedObjectVideoFormat(requested))
+        return requested;
+
+    if (IsSupportedObjectVideoFormat(fallback))
+        return fallback;
+
+    return _32_ARGB8888;
+}
+
 static CKBOOL IsPowerOfTwo(CKDWORD x) {
     return x && !(x & (x - 1));
 }
@@ -351,35 +365,31 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
         desc.Flags |= CKRST_TEXTURE_CUBEMAP;
     }
 
+    const VX_PIXELFORMAT videoFormat = ResolveObjectVideoFormat(
+        m_DesiredVideoFormat,
+        static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value));
+
     // Check for bump map format
-    if (m_DesiredVideoFormat >= _16_V8U8 && m_DesiredVideoFormat <= _32_X8L8V8U8)
+    if (videoFormat >= _16_V8U8 && videoFormat <= _32_X8L8V8U8)
         desc.Flags |= CKRST_TEXTURE_BUMPDUDV;
 
     // Set format based on desired video format. bgfx can sample the source
     // texture formats directly, so only use the legacy requested format when
     // the source does not describe a usable pixel layout.
-    if (desc.Format.BitsPerPixel <= 0 && m_DesiredVideoFormat != UNKNOWN_PF) {
-        VxPixelFormat2ImageDesc(m_DesiredVideoFormat, desc.Format);
-
-        // If no alpha format and we need alpha, find nearest format with alpha
-        if (!HasAlphaFormat(desc.Format)) {
-            if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 ||
-                (Clamping && (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
-                FindNearestFormatWithAlpha(dev->m_RasterizerDriver, desc.Format);
-            }
-        }
-
-        if (HasAlphaFormat(desc.Format))
-            desc.Flags |= CKRST_TEXTURE_ALPHA;
-    } else if (desc.Format.BitsPerPixel <= 0) {
-        // Default format: 16-bit ARGB1555
-        desc.Format.BitsPerPixel = 16;
-        desc.Format.AlphaMask = 0x8000;
-        desc.Format.RedMask = 0x7C00;
-        desc.Format.GreenMask = 0x03E0;
-        desc.Format.BlueMask = 0x001F;
-        desc.Flags |= CKRST_TEXTURE_ALPHA;
+    if (desc.Format.BitsPerPixel <= 0) {
+        VxPixelFormat2ImageDesc(videoFormat, desc.Format);
     }
+
+    // If no alpha format and we need alpha, find nearest format with alpha
+    if (!HasAlphaFormat(desc.Format)) {
+        if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 ||
+            (Clamping && (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
+            FindNearestFormatWithAlpha(dev->m_RasterizerDriver, desc.Format);
+        }
+    }
+
+    if (HasAlphaFormat(desc.Format))
+        desc.Flags |= CKRST_TEXTURE_ALPHA;
 
     if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) == CK_OK) {
         m_MipMapLevel = desc.MipMapCount;
@@ -846,8 +856,11 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
 
-        if (m_DesiredVideoFormat > _32_X8L8V8U8) {
-            m_DesiredVideoFormat = _16_ARGB1555;
+        if (!IsSupportedObjectVideoFormat(m_DesiredVideoFormat)) {
+            RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+            m_DesiredVideoFormat = ResolveObjectVideoFormat(
+                m_DesiredVideoFormat,
+                rm ? static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value) : UNKNOWN_PF);
         }
     }
 
