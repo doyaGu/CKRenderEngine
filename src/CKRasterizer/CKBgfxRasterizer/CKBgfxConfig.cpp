@@ -1,23 +1,14 @@
 #include "CKBgfxConfig.h"
+#include "CKBgfxInternal.h"
 #include "VxConfiguration.h"
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#else
-#include <dlfcn.h>
+#ifndef _WIN32
 #include <strings.h>
 #endif
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-#ifndef MAX_PATH
-#define MAX_PATH 260
-#endif
 
 static const char *kCKBgfxConfigFile = "CKBgfxRasterizer.ini";
 static const char *kCKBgfxConfigSection = "CKBgfxRasterizer";
@@ -63,32 +54,9 @@ static bool CKBgfxLoadConfigFile(VxConfiguration &config, const char *path)
 
 static void CKBgfxLoadConfig(VxConfiguration &config)
 {
-    char path[MAX_PATH] = {0};
-#ifdef _WIN32
-    HMODULE hMod = NULL;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           (LPCSTR)&CKBgfxLoadConfig, &hMod)) {
-        GetModuleFileNameA(hMod, path, MAX_PATH);
-        char *last = strrchr(path, '\\');
-        if (last) {
-            strcpy_s(last + 1, MAX_PATH - (last + 1 - path), kCKBgfxConfigFile);
-            if (CKBgfxLoadConfigFile(config, path))
-                return;
-        }
-    }
-#else
-    Dl_info info;
-    if (dladdr((void *)&CKBgfxLoadConfig, &info) && info.dli_fname) {
-        strncpy(path, info.dli_fname, sizeof(path) - 1);
-        path[sizeof(path) - 1] = '\0';
-        char *last = strrchr(path, '/');
-        if (last) {
-            snprintf(last + 1, sizeof(path) - (size_t)(last + 1 - path), "%s", kCKBgfxConfigFile);
-            if (CKBgfxLoadConfigFile(config, path))
-                return;
-        }
-    }
-#endif
+    XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxLoadConfig, kCKBgfxConfigFile);
+    if (path.Length() > 0 && CKBgfxLoadConfigFile(config, path.CStr()))
+        return;
 
     CKBgfxLoadConfigFile(config, kCKBgfxConfigFile);
 }
