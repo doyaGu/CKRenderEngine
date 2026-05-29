@@ -10,6 +10,7 @@
 #include "CKPluginManager.h"
 #include "CKRasterizer.h"
 #include "CKException.h"
+#include "VxWindowFunctions.h"
 
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
@@ -59,6 +60,17 @@ XClassArray<CKRasterizerInfo> g_RasterizersInfo;
 
 void ReleaseRasterizers();
 
+static XString CKRenderEngineModulePath()
+{
+    return VxGetModuleFileName((INSTANCE_HANDLE)g_DllHandle);
+}
+
+static const char *CKRenderEngineRasterizerMask(const char *name)
+{
+    static char buffer[128];
+    snprintf(buffer, sizeof(buffer), "*%sRasterizer.dll", name);
+    return buffer;
+}
 void RegisterRasterizer(const char *dll) {
     if (!dll || *dll == '\0')
         return;
@@ -98,9 +110,8 @@ void EnumerateRasterizers() {
         info.DllName = "CKBgfxRasterizer";
         g_RasterizersInfo.PushBack(info);
 #else
-        char moduleName[MAX_PATH];
-        VxGetModuleFileName(g_DllHandle, moduleName, MAX_PATH);
-        CKPathSplitter ps(moduleName);
+        XString moduleName = CKRenderEngineModulePath();
+        CKPathSplitter ps(moduleName.CStr());
 
         XString dir = ps.GetDrive();
         dir << ps.GetDir();

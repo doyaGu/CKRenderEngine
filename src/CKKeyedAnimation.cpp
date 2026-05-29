@@ -315,19 +315,19 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
     CK_OBJECTCREATION_OPTIONS options = dynamicFlag ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
 
     // Create name for the merged animation
-    char buffer[_MAX_PATH];
     CKSTRING otherName = otherAnim->GetName();
     CKSTRING thisName = GetName();
 
     if (!otherName)
         otherName = "";
+
+    XString mergedName;
     if (thisName)
-        sprintf(buffer, "%s+%s", thisName, otherName);
-    else
-        sprintf(buffer, "%s+%s", "", otherName);
+        mergedName << thisName;
+    mergedName << "+" << otherName;
 
     // Create a new keyed animation object
-    RCKKeyedAnimation *merged = (RCKKeyedAnimation *) m_Context->CreateObject(CKCID_KEYEDANIMATION, buffer, options, nullptr);
+    RCKKeyedAnimation *merged = (RCKKeyedAnimation *) m_Context->CreateObject(CKCID_KEYEDANIMATION, mergedName.CStr(), options, nullptr);
     if (!merged)
         return nullptr;
 
