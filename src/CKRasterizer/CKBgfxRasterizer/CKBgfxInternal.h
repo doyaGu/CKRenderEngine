@@ -26,6 +26,7 @@ void CKBgfxLogf(const char *tag, const char *fmt, ...);
 bool CKBgfxLogEnabled(const char *name, bool fallback);
 void CKBgfxCloseLogFile();
 int CKBgfxConfigPositiveInt(const char *section, const char *name, int fallback);
+XString CKBgfxModuleSiblingFile(const void *address, const char *file);
 
 const char *CKBgfxRendererTypeName(bgfx::RendererType::Enum type);
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);

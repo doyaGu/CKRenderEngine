@@ -1,5 +1,6 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
+#include "VxWindowFunctions.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -14,10 +15,6 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
-
-#ifndef MAX_PATH
-#define MAX_PATH 260
-#endif
 
 #ifndef _WIN32
 #ifndef _TRUNCATE
@@ -45,6 +42,45 @@ static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *f
 #endif
 
 static FILE *g_BgfxLogFile = nullptr;
+
+static XString CKBgfxSiblingFile(const char *path, const char *file)
+{
+    if (!path || !file)
+        return "";
+
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *last = slash;
+    if (!last || (backslash && backslash > last))
+        last = backslash;
+    if (!last)
+        return file;
+
+    XString sibling(path, (int)(last - path + 1));
+    sibling << file;
+    return sibling;
+}
+
+#ifdef _WIN32
+XString CKBgfxModuleSiblingFile(const void *address, const char *file)
+{
+    HMODULE hMod = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)address, &hMod))
+        return "";
+
+    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)hMod);
+    return CKBgfxSiblingFile(modulePath.CStr(), file);
+}
+#else
+XString CKBgfxModuleSiblingFile(const void *address, const char *file)
+{
+    Dl_info info;
+    if (dladdr(address, &info) && info.dli_fname)
+        return CKBgfxSiblingFile(info.dli_fname, file);
+    return "";
+}
+#endif
 
 static bool CKBgfxLogNameEquals(const char *lhs, const char *rhs)
 {
@@ -132,31 +168,10 @@ static bool CKBgfxFileLogEnabled()
 static FILE *CKBgfxGetLogFile()
 {
     if (!g_BgfxLogFile) {
-        char path[MAX_PATH] = {0};
-#ifdef _WIN32
-        HMODULE hMod = nullptr;
-        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               (LPCSTR)&CKBgfxGetLogFile, &hMod)) {
-            GetModuleFileNameA(hMod, path, MAX_PATH);
-            char *last = strrchr(path, '\\');
-            if (last)
-                strcpy_s(last + 1, MAX_PATH - (last + 1 - path), "CKBgfx_Trace.log");
-        }
-        if (path[0] == '\0')
-            strcpy_s(path, "CKBgfx_Trace.log");
-#else
-        Dl_info info;
-        if (dladdr((void *)&CKBgfxGetLogFile, &info) && info.dli_fname) {
-            strncpy(path, info.dli_fname, sizeof(path) - 1);
-            path[sizeof(path) - 1] = '\0';
-            char *last = strrchr(path, '/');
-            if (last)
-                snprintf(last + 1, sizeof(path) - (size_t)(last + 1 - path), "%s", "CKBgfx_Trace.log");
-        }
-        if (path[0] == '\0')
-            strncpy(path, "CKBgfx_Trace.log", sizeof(path) - 1);
-#endif
-        fopen_s(&g_BgfxLogFile, path, "w");
+        XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxGetLogFile, "CKBgfx_Trace.log");
+        if (path.Length() == 0)
+            path = "CKBgfx_Trace.log";
+        fopen_s(&g_BgfxLogFile, path.CStr(), "w");
     }
     return g_BgfxLogFile;
 }
