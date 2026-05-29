@@ -29,6 +29,35 @@ struct CKRenderSettingsOverride {
 static CKRenderSettingsOverride g_RenderSettingsOverrides[kRenderSettingsOverrideCount] = {};
 static CKDWORD g_RenderSettingsGeneration = 1;
 
+static XString CKRenderSettingsSiblingFile(const char *path, const char *file)
+{
+    if (!path || !file)
+        return "";
+
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *last = slash;
+    if (!last || (backslash && backslash > last))
+        last = backslash;
+    if (!last)
+        return file;
+
+    XString sibling(path, (int)(last - path + 1));
+    sibling << file;
+    return sibling;
+}
+
+static XString CKRenderSettingsModuleSiblingFile(const void *address, const char *file)
+{
+    HMODULE hMod = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)address, &hMod))
+        return "";
+
+    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)hMod);
+    return CKRenderSettingsSiblingFile(modulePath.CStr(), file);
+}
+
 static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) {
     switch (section) {
     case CKRenderSettingsSection::Root:
@@ -78,18 +107,9 @@ static bool CKRenderSettingsLoadFile(VxConfiguration &config, const char *path) 
 }
 
 static void CKRenderSettingsLoad(VxConfiguration &config) {
-    char path[MAX_PATH] = {0};
-    HMODULE hMod = NULL;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           (LPCSTR)&CKRenderSettingsLoad, &hMod)) {
-        GetModuleFileNameA(hMod, path, MAX_PATH);
-        char *last = strrchr(path, '\\');
-        if (last) {
-            strcpy_s(last + 1, MAX_PATH - (last + 1 - path), kRenderSettingsFile);
-            if (CKRenderSettingsLoadFile(config, path))
-                return;
-        }
-    }
+    XString path = CKRenderSettingsModuleSiblingFile((const void *)&CKRenderSettingsLoad, kRenderSettingsFile);
+    if (path.Length() > 0 && CKRenderSettingsLoadFile(config, path.CStr()))
+        return;
 
     CKRenderSettingsLoadFile(config, kRenderSettingsFile);
 }
@@ -217,6 +237,36 @@ static CKDWORD CKRenderSettingsDwordByName(const char *section, const char *name
 
 bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize) {
     return CKRenderSettingsStringByName(CKRenderSettingsSectionName(section), name, buffer, bufferSize);
+}
+
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value) {
+    value = "";
+
+    char overrideValue[kRenderSettingsOverrideValueSize] = {0};
+    const char *sectionName = CKRenderSettingsSectionName(section);
+    if (CKRenderSettingsOverrideString(sectionName, name, overrideValue, (CKDWORD)sizeof(overrideValue))) {
+        value = overrideValue;
+        return true;
+    }
+
+    VxConfigurationSection *configSection = nullptr;
+    if (!sectionName || sectionName[0] == '\0') {
+        configSection = CKRenderSettingsGetConfig()->GetSubSection(kRenderSettingsSection, TRUE);
+    } else {
+        char sectionPath[256] = {0};
+        if (snprintf(sectionPath, sizeof(sectionPath), "%s.%s", kRenderSettingsSection, sectionName) < 0)
+            return false;
+        configSection = CKRenderSettingsGetConfig()->GetSubSection(sectionPath, TRUE);
+    }
+    if (!configSection)
+        return false;
+
+    VxConfigurationEntry *entry = configSection->GetEntry(name);
+    if (!entry)
+        return false;
+
+    value = entry->GetValue();
+    return true;
 }
 
 bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback) {

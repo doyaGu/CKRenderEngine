@@ -1,4 +1,5 @@
 #include "CKBgfxConfig.h"
+#include "CKBgfxInternal.h"
 #include "VxConfiguration.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -50,18 +51,9 @@ static bool CKBgfxLoadConfigFile(VxConfiguration &config, const char *path)
 
 static void CKBgfxLoadConfig(VxConfiguration &config)
 {
-    char path[MAX_PATH] = {0};
-    HMODULE hMod = NULL;
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           (LPCSTR)&CKBgfxLoadConfig, &hMod)) {
-        GetModuleFileNameA(hMod, path, MAX_PATH);
-        char *last = strrchr(path, '\\');
-        if (last) {
-            strcpy_s(last + 1, MAX_PATH - (last + 1 - path), kCKBgfxConfigFile);
-            if (CKBgfxLoadConfigFile(config, path))
-                return;
-        }
-    }
+    XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxLoadConfig, kCKBgfxConfigFile);
+    if (path.Length() > 0 && CKBgfxLoadConfigFile(config, path.CStr()))
+        return;
 
     CKBgfxLoadConfigFile(config, kCKBgfxConfigFile);
 }

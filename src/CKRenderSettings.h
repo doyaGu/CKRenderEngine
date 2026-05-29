@@ -3,6 +3,7 @@
 
 #include "CKRenderConfig.h"
 #include "CKTypes.h"
+#include "XString.h"
 
 enum class CKRenderSettingsSection {
     Root,
@@ -18,6 +19,7 @@ enum class CKRenderSettingsSection {
 bool CKRenderSettingsParseBool(const char *value, bool fallback);
 
 bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize);
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value);
 bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback);
 int CKRenderSettingsGetInt(CKRenderSettingsSection section, const char *name, int fallback);
 CKDWORD CKRenderSettingsGetDword(CKRenderSettingsSection section, const char *name, CKDWORD fallback);
@@ -29,6 +31,10 @@ public:
 
     bool GetString(const char *name, char *buffer, CKDWORD bufferSize) const {
         return CKRenderSettingsGetString(m_Section, name, buffer, bufferSize);
+    }
+
+    bool GetString(const char *name, XString &value) const {
+        return CKRenderSettingsGetString(m_Section, name, value);
     }
 
     bool GetBool(const char *name, bool fallback) const {

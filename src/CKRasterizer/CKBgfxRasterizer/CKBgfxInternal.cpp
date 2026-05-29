@@ -1,5 +1,6 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
+#include "VxWindowFunctions.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -11,6 +12,35 @@
 #include <cstring>
 
 static FILE *g_BgfxLogFile = nullptr;
+
+static XString CKBgfxSiblingFile(const char *path, const char *file)
+{
+    if (!path || !file)
+        return "";
+
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *last = slash;
+    if (!last || (backslash && backslash > last))
+        last = backslash;
+    if (!last)
+        return file;
+
+    XString sibling(path, (int)(last - path + 1));
+    sibling << file;
+    return sibling;
+}
+
+XString CKBgfxModuleSiblingFile(const void *address, const char *file)
+{
+    HMODULE hMod = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)address, &hMod))
+        return "";
+
+    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)hMod);
+    return CKBgfxSiblingFile(modulePath.CStr(), file);
+}
 
 static bool CKBgfxLogNameEquals(const char *lhs, const char *rhs)
 {
@@ -94,18 +124,10 @@ static bool CKBgfxFileLogEnabled()
 static FILE *CKBgfxGetLogFile()
 {
     if (!g_BgfxLogFile) {
-        char path[MAX_PATH] = {0};
-        HMODULE hMod = nullptr;
-        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               (LPCSTR)&CKBgfxGetLogFile, &hMod)) {
-            GetModuleFileNameA(hMod, path, MAX_PATH);
-            char *last = strrchr(path, '\\');
-            if (last)
-                strcpy_s(last + 1, MAX_PATH - (last + 1 - path), "CKBgfx_Trace.log");
-        }
-        if (path[0] == '\0')
-            strcpy_s(path, "CKBgfx_Trace.log");
-        fopen_s(&g_BgfxLogFile, path, "w");
+        XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxGetLogFile, "CKBgfx_Trace.log");
+        if (path.Length() == 0)
+            path = "CKBgfx_Trace.log";
+        fopen_s(&g_BgfxLogFile, path.CStr(), "w");
     }
     return g_BgfxLogFile;
 }
