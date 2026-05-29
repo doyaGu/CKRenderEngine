@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CKRenderConfig.h"
+#include "XString.h"
 
 #if CKRE_ENABLE_DEBUG_LOGGER
 
@@ -37,7 +38,7 @@ private:
     void OpenFileIfNeeded();
     bool IsOutputEnabled() const { return m_OutputEnabled; }
 
-    char m_LogFilePath[MAX_PATH];
+    XString m_LogFilePath;
     bool m_OutputEnabled;
     bool m_DebuggerEnabled;
     bool m_FileEnabled;

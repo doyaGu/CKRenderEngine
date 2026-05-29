@@ -1,5 +1,6 @@
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
+#include "VxWindowFunctions.h"
 
 #include <cstdarg>
 #include <cstring>
@@ -8,6 +9,33 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+
+static XString CKDebugLoggerSiblingFile(const char *path, const char *file) {
+    if (!path || !file)
+        return "";
+
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *last = slash;
+    if (!last || (backslash && backslash > last))
+        last = backslash;
+    if (!last)
+        return file;
+
+    XString sibling(path, (int)(last - path + 1));
+    sibling << file;
+    return sibling;
+}
+
+static XString CKDebugLoggerModuleSiblingFile(const void *address, const char *file) {
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCSTR>(address), &module))
+        return "";
+
+    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)module);
+    return CKDebugLoggerSiblingFile(modulePath.CStr(), file);
+}
 
 CKDebugLogger &CKDebugLogger::Instance() {
     static CKDebugLogger instance;
@@ -24,32 +52,14 @@ CKDebugLogger::CKDebugLogger()
       m_FileEnabled(true),
       m_File(nullptr) {
     InitializeCriticalSection(&m_CriticalSection);
-    m_LogFilePath[0] = '\0';
 
-    char modulePath[MAX_PATH] = {0};
-    HMODULE module = nullptr;
+    m_LogFilePath = CKDebugLoggerModuleSiblingFile((const void *)&CKDebugLogger::Instance, "CK2_3D_Debug.log");
+    if (m_LogFilePath.Length() == 0)
+        m_LogFilePath = "CK2_3D_Debug.log";
 
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCSTR>(&CKDebugLogger::Instance), &module)) {
-        if (GetModuleFileNameA(module, modulePath, MAX_PATH) > 0) {
-            char drive[_MAX_DRIVE] = {0};
-            char dir[_MAX_DIR] = {0};
-            _splitpath_s(modulePath, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
-
-            char logPath[MAX_PATH] = {0};
-            _makepath_s(logPath, MAX_PATH, drive, dir, "CK2_3D_Debug", "log");
-            strncpy_s(m_LogFilePath, MAX_PATH, logPath, _TRUNCATE);
-        }
-    }
-
-    if (m_LogFilePath[0] == '\0') {
-        strncpy_s(m_LogFilePath, MAX_PATH, "CK2_3D_Debug.log", _TRUNCATE);
-    }
-
-    char configPath[MAX_PATH] = {0};
-    if (CKRenderDebugSettings().GetString("LogPath", configPath, MAX_PATH)) {
-        strncpy_s(m_LogFilePath, MAX_PATH, configPath, _TRUNCATE);
-    }
+    XString configPath;
+    if (CKRenderDebugSettings().GetString("LogPath", configPath))
+        m_LogFilePath = configPath;
 }
 
 CKDebugLogger::~CKDebugLogger() {
@@ -95,7 +105,7 @@ void CKDebugLogger::SetLogFilePath(const char *path) {
     }
 
     EnterCriticalSection(&m_CriticalSection);
-    strncpy_s(m_LogFilePath, MAX_PATH, path, _TRUNCATE);
+    m_LogFilePath = path;
     if (m_File) {
         fclose(m_File);
         m_File = nullptr;
@@ -180,5 +190,5 @@ void CKDebugLogger::OpenFileIfNeeded() {
         return;
     }
 
-    fopen_s(&m_File, m_LogFilePath, "w");
+    fopen_s(&m_File, m_LogFilePath.CStr(), "w");
 }
