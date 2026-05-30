@@ -1014,25 +1014,43 @@ void RCKRenderManager::RegisterDefaultEffects() {
         typeDesc->dwFlags |= CKPARAMETERTYPE_HIDDEN;
 
     // Register TexgenReferential structure: (TexGen, Referential)
+    XArray<CKGUID> texgenRefGuids;
+    texgenRefGuids.PushBack(CKPGUID_TEXGENEFFECT);
+    texgenRefGuids.PushBack(CKPGUID_3DENTITY);
     pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, "TexgenReferential",
                              "TexGen,Referential",
-                             CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
+                             texgenRefGuids);
 
     // Register Combine2Textures structure: (Combine, TexGen, Referential)
+    XArray<CKGUID> combine2TexGuids;
+    combine2TexGuids.PushBack(CKPGUID_TEXCOMBINE);
+    combine2TexGuids.PushBack(CKPGUID_TEXGENEFFECT);
+    combine2TexGuids.PushBack(CKPGUID_3DENTITY);
     pm->RegisterNewStructure(CKPGUID_COMBINE2TEX, "Combine 2 Textures",
                              "Combine,TexGen,Referential",
-                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
+                             combine2TexGuids);
 
     // Register Combine3Textures structure: (Combine1, TexGen1, Ref1, Combine2, TexGen2, Ref2)
+    XArray<CKGUID> combine3TexGuids;
+    combine3TexGuids.PushBack(CKPGUID_TEXCOMBINE);
+    combine3TexGuids.PushBack(CKPGUID_TEXGENEFFECT);
+    combine3TexGuids.PushBack(CKPGUID_3DENTITY);
+    combine3TexGuids.PushBack(CKPGUID_TEXCOMBINE);
+    combine3TexGuids.PushBack(CKPGUID_TEXGENEFFECT);
+    combine3TexGuids.PushBack(CKPGUID_3DENTITY);
     pm->RegisterNewStructure(CKPGUID_COMBINE3TEX, "Combine 3 Textures",
                              "Combine1,TexGen1,Ref1,Combine2,TexGen2,Ref2",
-                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY,
-                             CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
+                             combine3TexGuids);
 
     // Register BumpmapParameters structure: (Amplitude, EnvMap Combine, EnvMap TexGen, EnvMap Referential)
+    XArray<CKGUID> bumpmapParamGuids;
+    bumpmapParamGuids.PushBack(CKPGUID_FLOAT);
+    bumpmapParamGuids.PushBack(CKPGUID_TEXCOMBINE);
+    bumpmapParamGuids.PushBack(CKPGUID_TEXGENEFFECT);
+    bumpmapParamGuids.PushBack(CKPGUID_3DENTITY);
     pm->RegisterNewStructure(CKPGUID_BUMPMAPPARAM, "Bumpmap Parameters",
                              "Amplitude,EnvMap Combine,EnvMap TexGen,EnvMap Referential",
-                             CKPGUID_FLOAT, CKPGUID_TEXCOMBINE, CKPGUID_TEXGENEFFECT, CKPGUID_3DENTITY);
+                             bumpmapParamGuids);
 }
 
 // =====================================================
