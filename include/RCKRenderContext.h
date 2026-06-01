@@ -11,6 +11,9 @@
 class RCKMaterial;
 class RCK3dEntity;
 class RCKSprite3D;
+struct CKDrawAnnotation;
+struct CKDrawAnnotationObjectRef;
+struct CKDrawAnnotationState;
 
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
     UserDrawPrimitiveDataClass();
@@ -321,6 +324,19 @@ public:
     // Total: 956 bytes (0x3BC)
 
     void OnClearAll();
+    void SetDrawAnnotation(const CKDrawAnnotation *annotation);
+    void ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
+                             CKRenderView view,
+                             VXPRIMITIVETYPE primitiveType,
+                             CKDWORD indexCount,
+                             CKDWORD vertexCount);
+    CKBOOL ConsumeDrawAnnotation(CKDrawAnnotation *annotation,
+                                 CKRenderView view,
+                                 VXPRIMITIVETYPE primitiveType,
+                                 CKDWORD indexCount,
+                                 CKDWORD vertexCount);
+    void SetDrawCallbackObject(const CKDrawAnnotationObjectRef *object);
+    CKBOOL GetDrawCallbackObject(CKDrawAnnotationObjectRef *object);
 
     // Fixed-function pipeline (v2 rendering)
     CKFixedFunctionPipeline m_FFPipeline;
@@ -329,6 +345,7 @@ public:
     VxPlane m_UserClipPlanes[6];
     CKRenderView m_Current2DView;
     CKRenderView m_Current3DView;
+    CKDrawAnnotationState *m_DrawAnnotationState;
 };
 
 #endif // RCKRENDERCONTEXT_H
