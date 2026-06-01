@@ -69,16 +69,24 @@ static void FfpRuntimeOptionsDoNotLiveUnderDebugStats() {
 
     TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
               "SortOpaqueObjects must default off until packet path is proven profitable");
+    TestCheck(CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", false),
+              "InstanceOpaqueObjects must default on for explicit opaque packet sorting");
 
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "SortOpaqueObjects", "0");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "InstanceOpaqueObjects", "0");
     const CKRenderDiagnosticsConfig &diagnostics = CKRenderDiagnosticsSettings();
 
     TestCheck(!diagnostics.FFPStats.Any(),
-              "Debug.FFPStats must remain pure diagnostics even if SortOpaqueObjects is present");
+              "Debug.FFPStats must remain pure diagnostics even if FFP runtime options are present");
+    TestCheck(CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true),
+              "Debug.FFPStats must not override FFP.InstanceOpaqueObjects");
 
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "SortOpaqueObjects", "0");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "InstanceOpaqueObjects", "0");
     TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
               "SortOpaqueObjects must be read from the FFP runtime section");
+    TestCheck(!CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true),
+              "InstanceOpaqueObjects must be read from the FFP runtime section");
 
     CKRenderSettingsClearOverridesForTests();
 }

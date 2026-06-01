@@ -43,6 +43,10 @@ struct BenchResult {
     CKDWORD UniformCount;
     CKDWORD VertexBufferCount;
     CKDWORD IndexBufferCount;
+    CKDWORD InstanceBufferCount;
+    CKDWORD InstanceCount;
+    CKDWORD InstanceBytes;
+    CKDWORD SubmitSavedEstimate;
     CKDWORD AdaptiveSamples;
     CKDWORD AdaptiveBypasses;
     CKDWORD AdaptiveSavedBindEstimate;
@@ -134,6 +138,12 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
     result.UniformCount = context.Encoder.UniformSetCount;
     result.VertexBufferCount = context.Encoder.VertexBufferSetCount;
     result.IndexBufferCount = context.Encoder.IndexBufferSetCount;
+    result.InstanceBufferCount = context.Encoder.TransientInstanceSetCount;
+    result.InstanceCount = context.Encoder.TotalInstanceCount;
+    result.InstanceBytes = context.Encoder.TotalInstanceBytes;
+    result.SubmitSavedEstimate = totalDraws > result.SubmitCount
+        ? totalDraws - result.SubmitCount
+        : 0;
 
     ffp.Shutdown();
     return result;
@@ -144,7 +154,7 @@ static void PrintBenchResult(const BenchScenario *scenario,
                              const BenchResult *packet)
 {
     printf("%s\n", scenario->Name);
-    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
+    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
            immediate->UsPerDraw,
            immediate->DrawUsPerDraw,
            immediate->FlushUsPerDraw,
@@ -154,10 +164,14 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)immediate->UniformCount,
            (unsigned long)immediate->VertexBufferCount,
            (unsigned long)immediate->IndexBufferCount,
+           (unsigned long)immediate->InstanceBufferCount,
+           (unsigned long)immediate->InstanceCount,
+           (unsigned long)immediate->InstanceBytes,
+           (unsigned long)immediate->SubmitSavedEstimate,
            (unsigned long)immediate->AdaptiveSamples,
            (unsigned long)immediate->AdaptiveBypasses,
            (unsigned long)immediate->AdaptiveSavedBindEstimate);
-    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
+    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
            packet->UsPerDraw,
            packet->DrawUsPerDraw,
            packet->FlushUsPerDraw,
@@ -167,6 +181,10 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)packet->UniformCount,
            (unsigned long)packet->VertexBufferCount,
            (unsigned long)packet->IndexBufferCount,
+           (unsigned long)packet->InstanceBufferCount,
+           (unsigned long)packet->InstanceCount,
+           (unsigned long)packet->InstanceBytes,
+           (unsigned long)packet->SubmitSavedEstimate,
            (unsigned long)packet->AdaptiveSamples,
            (unsigned long)packet->AdaptiveBypasses,
            (unsigned long)packet->AdaptiveSavedBindEstimate);
