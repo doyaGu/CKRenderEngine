@@ -3399,6 +3399,8 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
 
     // Handle render callbacks
     if (m_RenderCallbacks) {
+        CKFFOpaquePacketGuard packetGuard(rc->m_FFPipeline);
+
         // Pre-render callbacks - m_PreCallBacks is at offset 0 of CKCallbacksContainer
         // sub_1002C220 returns (End - Begin) / 12, i.e. element count
         int preCount = m_RenderCallbacks->m_PreCallBacks.Size();
@@ -4013,6 +4015,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         renderChannels = ((ent->m_MoveableFlags & VX_MOVEABLE_RENDERCHANNELS) != 0) && renderChannels;
     }
 
+    CKFFOpaquePacketGuard packetGuard(rc->m_FFPipeline, renderChannels);
+
     const int renderVertexCount = m_ProgressiveMesh ? ClampPMVertexCount(this, GetVerticesRendered()) : vertexCount;
 
     // Setup VxDrawPrimitiveData (matches IDA setup; strides are based on SDK structs)
@@ -4383,6 +4387,11 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             ++CKRenderPerfCurrent().AlphaGroups;
     }
     RCKMaterial *mat = group->m_Material;
+    CKBOOL orderedCallbacks = ((m_SubMeshCallbacks &&
+                                (m_SubMeshCallbacks->m_PreCallBacks.Size() > 0 ||
+                                 m_SubMeshCallbacks->m_PostCallBacks.Size() > 0)) ||
+                               (mat && mat->GetCallback(nullptr)));
+    CKFFOpaquePacketGuard packetGuard(dev->m_FFPipeline, orderedCallbacks);
     int groupIndex = -1;
     for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
         if (m_MaterialGroups[i] == group) {
