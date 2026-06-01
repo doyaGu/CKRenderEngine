@@ -64,9 +64,29 @@ static void ModernDefaultsPreferFullQualityRenderPath() {
               "default CK2_3D settings should use 32-bit sprite video format");
 }
 
+static void FfpRuntimeOptionsDoNotLiveUnderDebugStats() {
+    CKRenderSettingsClearOverridesForTests();
+
+    TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
+              "SortOpaqueObjects must default off until packet path is proven profitable");
+
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "SortOpaqueObjects", "0");
+    const CKRenderDiagnosticsConfig &diagnostics = CKRenderDiagnosticsSettings();
+
+    TestCheck(!diagnostics.FFPStats.Any(),
+              "Debug.FFPStats must remain pure diagnostics even if SortOpaqueObjects is present");
+
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "SortOpaqueObjects", "0");
+    TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
+              "SortOpaqueObjects must be read from the FFP runtime section");
+
+    CKRenderSettingsClearOverridesForTests();
+}
+
 int main() {
     TestFramework tests;
     tests.Run("CK2_3D root settings parse legacy options", &OverridesReadEveryLegacyRootOption);
     tests.Run("CK2_3D defaults prefer the full quality render path", &ModernDefaultsPreferFullQualityRenderPath);
+    tests.Run("FFP runtime options do not live under Debug.FFPStats", &FfpRuntimeOptionsDoNotLiveUnderDebugStats);
     return tests.ExitCode();
 }
