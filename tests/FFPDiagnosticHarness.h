@@ -48,11 +48,14 @@ private:
 class FFPDiagnosticEncoder : public CKRasterizerEncoder {
 public:
     CKDrawState LastState = {};
+    CKDWORD StateSetCount = 0;
     CKDWORD LastProgram = 0;
     CKDWORD SubmitCount = 0;
     CKDWORD TouchCount = 0;
     CKRenderView LastTouchedView = 0;
     CKDWORD TextureBindCount = 0;
+    CKDWORD UniformSetCount = 0;
+    CKDWORD MatrixUniformSetCount = 0;
     CKDWORD StencilRefSetCount = 0;
     CKDWORD StencilMaskSetCount = 0;
     CKDWORD LastStencilRef = 0;
@@ -62,6 +65,12 @@ public:
     CKDWORD LastTextureUniform = 0;
     CKDWORD LastTextureHandle = 0;
     CKSamplerDesc LastTextureSampler = {};
+    CKDWORD VertexBufferSetCount = 0;
+    CKDWORD IndexBufferSetCount = 0;
+    CKDWORD SubmitFlags[32] = {};
+    CKRenderView SubmitViews[32] = {};
+    CKDWORD VertexBufferOrder[32] = {};
+    CKDWORD IndexBufferOrder[32] = {};
     std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
@@ -69,7 +78,10 @@ public:
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
-    void SetState(CKDrawState State) override { LastState = State; }
+    void SetState(CKDrawState State) override {
+        LastState = State;
+        ++StateSetCount;
+    }
     void SetStencilRef(CKDWORD Ref) override {
         LastStencilRef = Ref;
         ++StencilRefSetCount;
@@ -83,8 +95,16 @@ public:
     void SetPointSize(float) override {}
     void SetTransform(CKDWORD, CKDWORD) override {}
     void SetVertexLayout(CKDWORD) override {}
-    void SetVertexBuffer(CKDWORD, CKDWORD, CKDWORD, CKDWORD) override {}
-    void SetIndexBuffer(CKDWORD, CKDWORD, CKDWORD) override {}
+    void SetVertexBuffer(CKDWORD, CKDWORD buffer, CKDWORD, CKDWORD) override {
+        if (VertexBufferSetCount < 32)
+            VertexBufferOrder[VertexBufferSetCount] = buffer;
+        ++VertexBufferSetCount;
+    }
+    void SetIndexBuffer(CKDWORD buffer, CKDWORD, CKDWORD) override {
+        if (IndexBufferSetCount < 32)
+            IndexBufferOrder[IndexBufferSetCount] = buffer;
+        ++IndexBufferSetCount;
+    }
     void SetInstanceBuffer(CKDWORD, CKDWORD, CKDWORD, CKDWORD) override {}
     void SetTransientVertexBuffer(CKDWORD, CKTransientVertexBuffer *buffer) override {
         LastVertexBytes.clear();
@@ -119,6 +139,9 @@ public:
     void SetUniform(CKDWORD uniform, const void *data, CKDWORD count) override {
         if (!data)
             return;
+        ++UniformSetCount;
+        if (MatrixUniforms.find(uniform) != MatrixUniforms.end())
+            ++MatrixUniformSetCount;
         const float *values = static_cast<const float *>(data);
         const CKDWORD floatCount = MatrixUniforms.find(uniform) != MatrixUniforms.end()
             ? count * 16
@@ -130,7 +153,11 @@ public:
     void SetComputeImage(CKDWORD, CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetCondition(CKDWORD, CKBOOL) override {}
     void SetMarker(CKSTRING) override {}
-    void Submit(CKRenderView, CKDWORD program, CKDWORD, CKDWORD) override {
+    void Submit(CKRenderView view, CKDWORD program, CKDWORD, CKDWORD flags) override {
+        if (SubmitCount < 32) {
+            SubmitViews[SubmitCount] = view;
+            SubmitFlags[SubmitCount] = flags;
+        }
         LastProgram = program;
         ++SubmitCount;
     }
