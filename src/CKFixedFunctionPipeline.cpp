@@ -1,6 +1,7 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKRasterizer.h"
 #include "CKFFUniformState.h"
+#include "CKFFShaderABI.h"
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
@@ -1407,57 +1408,58 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     const CKDWORD vertexFogMode = fogEnabled ? m_CurrentShaderKey.FS.VertexFogMode : 0;
     const CKDWORD pixelFogMode = fogEnabled ? m_CurrentShaderKey.FS.PixelFogMode : 0;
 
-    float drawParams[19][4];
+    float drawParams[CKFF_DRAW_PARAM_VEC4_COUNT][4];
     memset(drawParams, 0, sizeof(drawParams));
     memcpy(drawParams[0], m_Material.Diffuse, sizeof(drawParams[0]));
     memcpy(drawParams[1], m_Material.Ambient, sizeof(drawParams[1]));
     memcpy(drawParams[2], m_Material.Specular, sizeof(drawParams[2]));
     memcpy(drawParams[3], m_Material.Emissive, sizeof(drawParams[3]));
-    drawParams[4][0] = m_Material.Power;
-    memcpy(drawParams[5], m_MaterialSource, sizeof(drawParams[5]));
-    drawParams[7][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = m_Material.Power;
+    memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], m_MaterialSource,
+           sizeof(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES]));
+    drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
     if (shaderUsesLighting) {
         CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
         float ambientColorF[4];
         CKFFPackColorARGB(ambientColor, ambientColorF);
-        drawParams[6][0] = m_CurrentLightingEnabled ? (float)packed : -1.0f;
-        drawParams[6][1] = ambientColorF[0];
-        drawParams[6][2] = ambientColorF[1];
-        drawParams[6][3] = ambientColorF[2];
-        drawParams[7][0] = m_CurrentLightingEnabled &&
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][0] = m_CurrentLightingEnabled ? (float)packed : -1.0f;
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][1] = ambientColorF[0];
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][2] = ambientColorF[1];
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][3] = ambientColorF[2];
+        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][0] = m_CurrentLightingEnabled &&
                             m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
-        drawParams[7][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
+        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
         if (packed == 1) {
-            memcpy(drawParams[12], viewLights[0].Position, sizeof(drawParams[12]));
-            memcpy(drawParams[13], viewLights[0].Direction, sizeof(drawParams[13]));
-            memcpy(drawParams[14], viewLights[0].Diffuse, sizeof(drawParams[14]));
-            memcpy(drawParams[15], viewLights[0].Specular, sizeof(drawParams[15]));
-            memcpy(drawParams[16], viewLights[0].Ambient, sizeof(drawParams[16]));
-            memcpy(drawParams[17], viewLights[0].Attenuation, sizeof(drawParams[17]));
-            memcpy(drawParams[18], viewLights[0].SpotParams, sizeof(drawParams[18]));
-            drawParams[7][3] = 1.0f;
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 0], viewLights[0].Position, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 1], viewLights[0].Direction, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 2], viewLights[0].Diffuse, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 3], viewLights[0].Specular, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 4], viewLights[0].Ambient, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 5], viewLights[0].Attenuation, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 6], viewLights[0].SpotParams, sizeof(drawParams[0]));
+            drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][3] = 1.0f;
         }
     }
     const bool shaderUsesVertexParams = !positionT && (!fullSpecialized || shaderUsesLighting || CurrentShaderUsesMaterialUniform());
     CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packed == 1 ? 19 : 8) : 6) : 0;
 
-    drawParams[8][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
-    drawParams[8][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
+    drawParams[CKFF_DRAW_PARAM_ALPHA][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
+    drawParams[CKFF_DRAW_PARAM_ALPHA][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
         : 0.0f;
-    drawParams[8][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
-    drawParams[8][3] = (float)pixelFogMode;
+    drawParams[CKFF_DRAW_PARAM_ALPHA][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
+    drawParams[CKFF_DRAW_PARAM_ALPHA][3] = (float)pixelFogMode;
 
     CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
-    CKFFPackColorARGB(tf, drawParams[9]);
+    CKFFPackColorARGB(tf, drawParams[CKFF_DRAW_PARAM_TEXTURE_FACTOR]);
 
-    drawParams[10][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
-    drawParams[10][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
-    drawParams[10][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
-    drawParams[10][3] = (float)vertexFogMode;
+    drawParams[CKFF_DRAW_PARAM_FOG][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][3] = (float)vertexFogMode;
 
     CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
-    CKFFPackColorARGB(fogColor, drawParams[11]);
+    CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
 
     CKDWORD fragmentParamCount = 0;
     if (!fullSpecialized) {
@@ -1488,7 +1490,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     if (!fullSpecialized || CurrentShaderUsesStageConstant()) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
-        UploadUniform(encoder, u.u_stageParams, stageParams.Values, CKFF_MAX_TEXTURE_STAGES * 4);
+        UploadUniform(encoder, u.u_stageParams, stageParams.Values, CKFF_STAGE_PARAM_VEC4_COUNT);
     }
 
     if (!fullSpecialized) {
@@ -1563,7 +1565,8 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
         const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = (cube || volume) ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerStage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
+                                                             (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
         const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
                                        (volume ? u.s_textureVolume[i] : u.s_texture[i]);
         encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
@@ -1578,7 +1581,8 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         CKSamplerDesc sampler = desiredSamplers[i];
         const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
         const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = (cube || volume) ? i + CKFF_MAX_TEXTURE_STAGES : i;
+        const CKDWORD samplerStage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
+                                                             (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
         const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
                                        (volume ? u.s_textureVolume[i] : u.s_texture[i]);
         encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);

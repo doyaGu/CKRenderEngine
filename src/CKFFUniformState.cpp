@@ -99,22 +99,27 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < activeTextureCount;
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
-        outParams.Values[stage * 4 + 0][0] = (float)CKFFResolveStageColorOp(stageStates[stage], stageActive, hasTexture);
-        outParams.Values[stage * 4 + 0][1] = (float)CKFFResolveStageColorArg1(stageStates[stage], hasTexture);
-        outParams.Values[stage * 4 + 0][2] = (float)CKFFResolveStageColorArg2(stageStates[stage]);
-        outParams.Values[stage * 4 + 0][3] = hasTexture ? 1.0f : 0.0f;
-        outParams.Values[stage * 4 + 1][0] = (float)CKFFResolveStageAlphaOp(stageStates[stage], stageActive, hasTexture);
-        outParams.Values[stage * 4 + 1][1] = (float)CKFFResolveStageAlphaArg1(stageStates[stage], hasTexture);
-        outParams.Values[stage * 4 + 1][2] = (float)CKFFResolveStageAlphaArg2(stageStates[stage]);
-        outParams.Values[stage * 4 + 1][3] = (float)CKFFResolveStageResultArg(stageStates[stage]);
-        outParams.Values[stage * 4 + 2][0] = (float)CKFFResolveStageColorArg0(stageStates[stage]);
-        outParams.Values[stage * 4 + 2][1] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
-        outParams.Values[stage * 4 + 2][2] = (float)stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
-        outParams.Values[stage * 4 + 2][3] = stageConstants[stage][0];
-        outParams.Values[stage * 4 + 3][0] = (float)CKFFResolveStageAlphaArg0(stageStates[stage]);
-        outParams.Values[stage * 4 + 3][1] = stageConstants[stage][1];
-        outParams.Values[stage * 4 + 3][2] = stageConstants[stage][2];
-        outParams.Values[stage * 4 + 3][3] = stageConstants[stage][3];
+        float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
+        float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];
+        float *colorExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
+        float *alphaExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA_EXTRA)];
+
+        color[0] = (float)CKFFResolveStageColorOp(stageStates[stage], stageActive, hasTexture);
+        color[1] = (float)CKFFResolveStageColorArg1(stageStates[stage], hasTexture);
+        color[2] = (float)CKFFResolveStageColorArg2(stageStates[stage]);
+        color[3] = hasTexture ? 1.0f : 0.0f;
+        alpha[0] = (float)CKFFResolveStageAlphaOp(stageStates[stage], stageActive, hasTexture);
+        alpha[1] = (float)CKFFResolveStageAlphaArg1(stageStates[stage], hasTexture);
+        alpha[2] = (float)CKFFResolveStageAlphaArg2(stageStates[stage]);
+        alpha[3] = (float)CKFFResolveStageResultArg(stageStates[stage]);
+        colorExtra[0] = (float)CKFFResolveStageColorArg0(stageStates[stage]);
+        colorExtra[1] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
+        colorExtra[2] = (float)stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
+        colorExtra[3] = stageConstants[stage][0];
+        alphaExtra[0] = (float)CKFFResolveStageAlphaArg0(stageStates[stage]);
+        alphaExtra[1] = stageConstants[stage][1];
+        alphaExtra[2] = stageConstants[stage][2];
+        alphaExtra[3] = stageConstants[stage][3];
     }
 }
 

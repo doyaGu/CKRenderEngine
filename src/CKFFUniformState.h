@@ -3,6 +3,7 @@
 
 #include "CKDrawStateCache.h"
 #include "CKFFConstants.h"
+#include "CKFFShaderABI.h"
 #include "CKFFSpecializationInfo.h"
 #include "CKFFStateDesc.h"
 #include "CKRenderEngineEnums.h"
@@ -10,15 +11,15 @@
 #include "VxMath.h"
 
 struct CKFFStageParamsUniform {
-    float Values[CKFF_MAX_TEXTURE_STAGES * 4][4];
+    float Values[CKFF_STAGE_PARAM_VEC4_COUNT][4];
 };
 
 struct CKFFSpecUniform {
-    float Values[CKFFSpecializationInfo::MaxSpecDwords][4];
+    float Values[CKFF_SPEC_UNIFORM_VEC4_COUNT][4];
 };
 
 struct CKFFClipPlaneUniform {
-    float Planes[6][4];
+    float Planes[CKFF_CLIP_PLANE_COUNT][4];
     float Params[4];
 };
 
