@@ -274,8 +274,10 @@ CKScopedDrawAnnotation::CKScopedDrawAnnotation(RCKRenderContext *Context,
     : m_Context(Context), m_HadPrevious(FALSE)
 {
     CKDrawAnnotationObjectRef ref;
-    if (!m_Context)
+    if (!m_Context || !m_Context->m_DrawAnnotationState) {
+        m_Context = NULL;
         return;
+    }
     m_HadPrevious = m_Context->GetDrawCallbackObject(&m_Previous);
     CKDrawAnnotationSetObject(&ref, (CKObject *)Object);
     m_Context->SetDrawCallbackObject(&ref);
