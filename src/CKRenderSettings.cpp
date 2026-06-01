@@ -66,6 +66,8 @@ static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) 
         return "Debug";
     case CKRenderSettingsSection::DebugFrameLog:
         return "Debug.FrameLog";
+    case CKRenderSettingsSection::DebugDrawMap:
+        return "Debug.DrawMap";
     case CKRenderSettingsSection::DebugRenderStats:
         return "Debug.RenderStats";
     case CKRenderSettingsSection::DebugFFPStats:
@@ -299,6 +301,15 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
     config.FrameLog.CameraAttach = frameLog.GetBool("CameraAttach", false);
     config.FrameLog.PresentSync = frameLog.GetBool("PresentSync", false);
     config.FrameLog.RenderedSceneCamera = frameLog.GetBool("RenderedSceneCamera", false);
+
+    const CKRenderSettingsView drawMap = CKRenderDrawMapSettings();
+    config.DrawMap.Enabled = drawMap.GetBool("Enabled", false);
+    config.DrawMap.Submits = drawMap.GetBool("Submits", false);
+    config.DrawMap.Resources = drawMap.GetBool("Resources", false);
+    config.DrawMap.Views = drawMap.GetBool("Views", false);
+    config.DrawMap.Markers = drawMap.GetBool("Markers", false);
+    config.DrawMap.Frame = drawMap.GetBool("Frame", false);
+    config.DrawMap.Summary = drawMap.GetBool("Summary", false);
 
     config.RenderStats.Enabled = CKRenderRenderStatsSettings().GetBool("Enabled", false);
 
