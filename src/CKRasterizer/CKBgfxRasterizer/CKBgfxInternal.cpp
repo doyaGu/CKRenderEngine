@@ -114,9 +114,6 @@ static CKBgfxDebugConfig CKBgfxReadDebugSettings()
     config.Log.TextureBindings = CKBgfxConfigBool("Debug.Log", "TextureBindings", false);
     config.Log.Uniforms = CKBgfxConfigBool("Debug.Log", "Uniforms", false);
     config.Log.PresentSync = CKBgfxConfigBool("Debug.Log", "PresentSync", false);
-    config.Log.DrawMap = CKBgfxConfigBool("Debug.Log", "DrawMap", false);
-    config.Log.DrawMapStrict = CKBgfxConfigBool("Debug.Log", "DrawMapStrict", false);
-    config.Log.DrawMapSummary = CKBgfxConfigBool("Debug.Log", "DrawMapSummary", true);
 
     return config;
 }
@@ -137,9 +134,6 @@ bool CKBgfxLogEnabled(const char *name, bool fallback)
     if (CKBgfxLogNameEquals(name, "TextureBindings")) return log.TextureBindings;
     if (CKBgfxLogNameEquals(name, "Uniforms")) return log.Uniforms;
     if (CKBgfxLogNameEquals(name, "PresentSync")) return log.PresentSync;
-    if (CKBgfxLogNameEquals(name, "DrawMap")) return log.DrawMap;
-    if (CKBgfxLogNameEquals(name, "DrawMapStrict")) return log.DrawMapStrict;
-    if (CKBgfxLogNameEquals(name, "DrawMapSummary")) return log.DrawMapSummary;
     return fallback;
 }
 
