@@ -1,5 +1,4 @@
-function(ckre_add_test TARGET_NAME)
-    add_executable(${TARGET_NAME} ${ARGN})
+function(ckre_configure_test_target TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CKRE_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
@@ -39,7 +38,17 @@ function(ckre_add_test TARGET_NAME)
         "$<TARGET_FILE_DIR:${TARGET_NAME}>/CK2_3D.ini"
         VERBATIM
     )
+endfunction()
+
+function(ckre_add_test TARGET_NAME)
+    add_executable(${TARGET_NAME} ${ARGN})
+    ckre_configure_test_target(${TARGET_NAME})
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+endfunction()
+
+function(ckre_add_benchmark TARGET_NAME)
+    add_executable(${TARGET_NAME} ${ARGN})
+    ckre_configure_test_target(${TARGET_NAME})
 endfunction()
 
 ckre_add_test(nvstripifier_tests
@@ -88,4 +97,12 @@ ckre_add_test(draw_annotation_tests
 
 ckre_add_test(render_settings_tests
     test_render_settings.cpp
+)
+
+ckre_add_test(render_packet_queue_tests
+    test_render_packet_queue.cpp
+)
+
+ckre_add_benchmark(render_packet_submit_bench
+    render_packet_submit_bench.cpp
 )
