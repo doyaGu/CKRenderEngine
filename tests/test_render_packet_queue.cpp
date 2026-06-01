@@ -47,6 +47,22 @@ void DrawPacketCandidateWithFormat(CKFixedFunctionPipeline *ffp,
                           77);
 }
 
+void DrawPacketChurnCandidate(CKFixedFunctionPipeline *ffp,
+                              FFPDiagnosticContext *context,
+                              int index)
+{
+    const CKDWORD textureFlags = (index & 1)
+        ? (CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP)
+        : CKRST_TEXTURE_VALID;
+    ffp->SetRenderState(VXRENDERSTATE_CULLMODE,
+                        (index & 1) ? VXCULL_NONE : VXCULL_CCW);
+    ffp->SetTexture(0, 3000 + (CKDWORD)index, textureFlags);
+    DrawPacketCandidateWithFormat(ffp, context, CKRP_VIEW_OPAQUE3D,
+                                  1000 + (CKDWORD)index,
+                                  2000 + (CKDWORD)index,
+                                  CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0));
+}
+
 void SetPacketWorld(CKFixedFunctionPipeline *ffp, float x)
 {
     VxMatrix world;
@@ -231,6 +247,42 @@ void OpaquePacketReplaySplitsStaticAndObjectUniforms()
     ffp.Shutdown();
 }
 
+void OpaquePacketObjectMatricesTrackProjectionChanges()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    context.Encoder.MatrixUniforms.insert(matrixUniform);
+
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+    std::vector<float> firstMatrix = context.Encoder.FloatUniforms[matrixUniform];
+
+    VxMatrix projection;
+    projection.Identity();
+    projection[0][0] = 2.0f;
+    ffp.SetTransform(VXMATRIX_PROJECTION, projection);
+
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+    std::vector<float> secondMatrix = context.Encoder.FloatUniforms[matrixUniform];
+
+    TestCheck(firstMatrix.size() >= 16 && secondMatrix.size() >= 16,
+              "Packet object matrix test must capture matrix uniform payloads");
+    TestCheck(firstMatrix[0] != secondMatrix[0],
+              "Packet object matrices must reflect projection changes");
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.RenderPacketViewProjectionRebuilds == 2,
+              "Packet viewProjection cache must rebuild once per changed view/projection state");
+#endif
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketVertexBlendFallsBackImmediate()
 {
     FFPDiagnosticDriver driver;
@@ -287,6 +339,8 @@ void OpaquePacketTextureHandleChangeKeepsStaticPayload()
               "Texture handle comparison scenarios must submit both draws");
     TestCheck(contextA.Encoder.TextureBindCount == 2,
               "Different texture handles must still bind per packet");
+    TestCheck(contextB.Encoder.TextureBindCount == 1,
+              "Same texture set must skip repeated texture bind through the replay hash path");
     TestCheck(contextA.Encoder.UniformSetCount == contextB.Encoder.UniformSetCount,
               "Changing between same-kind non-zero textures must not rebuild static payload");
 
@@ -334,6 +388,61 @@ void OpaquePacketTextureKindChangeRebuildsStaticPayload()
 
     ffpA.Shutdown();
     ffpB.Shutdown();
+}
+
+void OpaquePacketAdaptiveKeepsHighRepeatQueued()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    for (int i = 0; i < 128; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    TestCheck(ffp.HasOpaqueRenderPackets(),
+              "High-repeat adaptive sample must remain queued");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "High-repeat adaptive sample must not flush early");
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 128,
+              "High-repeat adaptive queue must replay all sampled draws");
+    TestCheck(context.Encoder.VertexBufferSetCount == 1 &&
+              context.Encoder.IndexBufferSetCount == 1,
+              "High-repeat adaptive queue must keep repeated buffer bind skips");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketAdaptiveBypassesLowBenefitFrame()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    for (int i = 0; i < 128; ++i)
+        DrawPacketChurnCandidate(&ffp, &context, i);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Low-benefit adaptive sample must flush the sampled queue");
+    TestCheck(context.Encoder.SubmitCount == 128,
+              "Low-benefit adaptive sample must submit the sampled queue once bypass triggers");
+
+    DrawPacketChurnCandidate(&ffp, &context, 128);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Adaptive bypass must keep remaining same-frame opaque draws immediate");
+    TestCheck(context.Encoder.SubmitCount == 129,
+              "Adaptive bypass must submit later same-frame opaque draws immediately");
+    TestCheck(ffp.GetOpaquePacketAdaptiveBypasses() == 1,
+              "Adaptive bypass counter must report the low-benefit frame bypass");
+
+    ffp.Shutdown();
 }
 
 void NonOpaqueVertexBufferDrawFlushesQueuedOpaquePackets()
@@ -391,12 +500,18 @@ int main()
               &OpaquePacketSortUsesStaticUniformsForRuns);
     tests.Run("Opaque packet replay splits static and object uniforms",
               &OpaquePacketReplaySplitsStaticAndObjectUniforms);
+    tests.Run("Opaque packet object matrices track projection changes",
+              &OpaquePacketObjectMatricesTrackProjectionChanges);
     tests.Run("Opaque packet vertex blend falls back immediate",
               &OpaquePacketVertexBlendFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet texture kind change rebuilds static payload",
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
+    tests.Run("Opaque packet adaptive keeps high-repeat queue",
+              &OpaquePacketAdaptiveKeepsHighRepeatQueued);
+    tests.Run("Opaque packet adaptive bypasses low-benefit frame",
+              &OpaquePacketAdaptiveBypassesLowBenefitFrame);
     tests.Run("Non-opaque vertex-buffer draw flushes queued opaque packets",
               &NonOpaqueVertexBufferDrawFlushesQueuedOpaquePackets);
     tests.Run("Opaque vertex-buffer draw without index buffer stays immediate",
