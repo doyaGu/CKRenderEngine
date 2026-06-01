@@ -9,8 +9,29 @@
 #include "CKRasterizer.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
+#include "CKDebugLogger.h"
+#include "CKDrawAnnotation.h"
 
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;
+
+static void CKSpriteSetDrawAnnotation(RCKRenderContext *rctx,
+                                      RCKSprite *sprite,
+                                      VXPRIMITIVETYPE primitiveType,
+                                      CKDWORD indexCount,
+                                      CKDWORD vertexCount) {
+    if (!rctx)
+        return;
+
+    CKDrawAnnotation annotation;
+    CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_SPRITE);
+    annotation.View = rctx->m_Current2DView;
+    annotation.PrimitiveType = primitiveType;
+    annotation.IndexCount = indexCount;
+    annotation.VertexCount = vertexCount;
+    CKDrawAnnotationCopyText(annotation.Path, sizeof(annotation.Path), "SPRITE");
+    CKDrawAnnotationSetObject(&annotation.Object, (CKObject *)sprite);
+    rctx->SetDrawAnnotation(&annotation);
+}
 
 static CKBOOL IsSupportedObjectVideoFormat(VX_PIXELFORMAT format) {
     return format > UNKNOWN_PF && format <= _32_X8L8V8U8;
@@ -352,6 +373,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     positionPtr[2] = 0.0f;
     positionPtr[3] = 1.0f;
 
+    CKSpriteSetDrawAnnotation(rctx, this, VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
     rctx->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 
     return CK_OK;
