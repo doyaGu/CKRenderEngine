@@ -19,10 +19,12 @@
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 #include "CKTransientGeometry.h"
+#include "CKDrawAnnotation.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
 
 #include <climits>
+#include <cstdio>
 
 // External global for transparency update flag
 extern CKBOOL g_UpdateTransparency;
@@ -38,6 +40,36 @@ static void RestoreSceneSpecularState(RCKRenderContext *rc) {
     rc->m_FFPipeline.SetRenderState(
         VXRENDERSTATE_SPECULARENABLE,
         rc->m_RenderManager->m_DisableSpecular.Value != 0 ? FALSE : TRUE);
+}
+
+static void CKMeshSetDrawAnnotation(RCKRenderContext *rc,
+                                    CKSTRING path,
+                                    CKRenderView view,
+                                    CKObject *entity,
+                                    RCKMesh *mesh,
+                                    RCKMaterial *material,
+                                    int groupIndex,
+                                    int primitiveIndex,
+                                    VXPRIMITIVETYPE primitiveType,
+                                    CKDWORD indexCount,
+                                    CKDWORD vertexCount) {
+    if (!rc)
+        return;
+
+    CKDrawAnnotation annotation;
+    CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_MESH);
+    annotation.View = view;
+    annotation.PrimitiveType = primitiveType;
+    annotation.IndexCount = indexCount;
+    annotation.VertexCount = vertexCount;
+    annotation.GroupIndex = groupIndex;
+    annotation.PrimitiveIndex = primitiveIndex;
+    CKDrawAnnotationCopyText(annotation.Path, sizeof(annotation.Path),
+                             path ? path : (CKSTRING)"");
+    CKDrawAnnotationSetObject(&annotation.Entity, entity);
+    CKDrawAnnotationSetObject(&annotation.Mesh, (CKObject *)mesh);
+    CKDrawAnnotationSetObject(&annotation.Material, (CKObject *)material);
+    rc->SetDrawAnnotation(&annotation);
 }
 
 static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, RCKMaterial *mat) {
@@ -4053,6 +4085,17 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
 
             rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            CKMeshSetDrawAnnotation(rc, (CKSTRING)"ZBUF",
+                                    rc->m_Current3DView,
+                                    ent, this, firstMat, -1, 0,
+                                    VX_TRIANGLELIST,
+                                    (CKDWORD)m_FaceVertexIndices.Size(),
+                                    (CKDWORD)dpData.VertexCount);
+            rc->ApplyDrawAnnotation(
+                rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
+                rc->m_Current3DView, VX_TRIANGLELIST,
+                (CKDWORD)m_FaceVertexIndices.Size(),
+                (CKDWORD)dpData.VertexCount);
             rc->m_FFPipeline.DrawPrimitive(
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
                 rc->m_Current3DView, VX_TRIANGLELIST,
@@ -4080,6 +4123,17 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
 
             rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            CKMeshSetDrawAnnotation(rc, (CKSTRING)"STENCIL",
+                                    rc->m_Current3DView,
+                                    ent, this, firstMat, -1, 0,
+                                    VX_TRIANGLELIST,
+                                    (CKDWORD)m_FaceVertexIndices.Size(),
+                                    (CKDWORD)dpData.VertexCount);
+            rc->ApplyDrawAnnotation(
+                rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
+                rc->m_Current3DView, VX_TRIANGLELIST,
+                (CKDWORD)m_FaceVertexIndices.Size(),
+                (CKDWORD)dpData.VertexCount);
             rc->m_FFPipeline.DrawPrimitive(
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
                 rc->m_Current3DView, VX_TRIANGLELIST,
@@ -4329,6 +4383,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             ++CKRenderPerfCurrent().AlphaGroups;
     }
     RCKMaterial *mat = group->m_Material;
+    int groupIndex = -1;
+    for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+        if (m_MaterialGroups[i] == group) {
+            groupIndex = i;
+            break;
+        }
+    }
 
     // Check for pre-render submesh callbacks - sub_1002C220 checks if Size() > 0
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PreCallBacks.Size() > 0) {
@@ -4474,6 +4535,14 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                    box.Max.x, box.Max.y, box.Max.z);
                         ++s_meshContractLogCount;
                     }
+                    CKMeshSetDrawAnnotation(dev, (CKSTRING)"SW", view,
+                                            ent, this, mat, groupIndex, p,
+                                            prim->m_Type,
+                                            (CKDWORD)prim->m_Indices.Size(),
+                                            (CKDWORD)data->VertexCount);
+                    dev->ApplyDrawAnnotation(encoder, view, prim->m_Type,
+                                             (CKDWORD)prim->m_Indices.Size(),
+                                             (CKDWORD)data->VertexCount);
                     dev->m_FFPipeline.DrawPrimitive(
                         encoder, view, prim->m_Type,
                         prim->m_Indices.Begin(), prim->m_Indices.Size(),
@@ -4545,6 +4614,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     }
                     const CKDWORD hwBaseVertex = m_VertexBufferWrapAware ? 0 : group->m_BaseVertex;
                     const CKDWORD hwVertexCount = m_VertexBufferWrapAware ? m_VertexBufferVertexCount : group->m_VertexCount;
+                    CKMeshSetDrawAnnotation(dev, (CKSTRING)"HW", view,
+                                            ent, this, mat, groupIndex, p,
+                                            prim->m_Type,
+                                            indexCount,
+                                            hwVertexCount);
+                    dev->ApplyDrawAnnotation(encoder, view, prim->m_Type,
+                                             indexCount, hwVertexCount);
                     dev->m_FFPipeline.DrawVertexBuffer(
                         encoder, view, prim->m_Type,
                         m_VertexBuffer, ib,
@@ -4692,6 +4768,12 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
             CKRenderPerfCurrent().TotalChannelIndices += (CKDWORD)indexCount;
         }
 
+        CKMeshSetDrawAnnotation(dev, (CKSTRING)"CHANNEL",
+                                dev->m_Current3DView,
+                                ent, this, mat, c, 0,
+                                VX_TRIANGLELIST,
+                                (CKDWORD)indexCount,
+                                (CKDWORD)data->VertexCount);
         dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
 
         // Restore material state exactly
