@@ -458,6 +458,7 @@ private:
     char m_DebugViewName[CKRST_MAX_RENDER_VIEWS][64];
     CKDWORD m_DebugViewOrderGeneration;
     CKBOOL m_DebugViewOrderSequential;
+    CKDWORD m_DebugFlags;
     CKDWORD m_DebugBgfxFlags;
     CKBOOL m_DebugOverlay;
 
