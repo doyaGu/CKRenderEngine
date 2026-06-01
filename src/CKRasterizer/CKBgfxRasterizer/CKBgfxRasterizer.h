@@ -3,9 +3,28 @@
 
 #include "CKRasterizer.h"
 
+#define CKBGFX_DRAWMAP_SOURCE_COUNT 6
+
 #include <atomic>
 #include <mutex>
 #include <bgfx/bgfx.h>
+
+#define CKBGFX_DRAWMAP_HASH_INIT 2166136261u
+
+struct CKBgfxDrawMapVertexBinding {
+    CKDWORD Buffer;
+    CKDWORD Start;
+    CKDWORD Count;
+    CKDWORD BgfxHandle;
+    CKDWORD LayoutHandle;
+};
+
+struct CKBgfxDrawMapTextureBinding {
+    CKDWORD Texture;
+    CKDWORD Uniform;
+    CKDWORD BgfxHandle;
+    CKDWORD SamplerFlags;
+};
 
 class CKBgfxRasterizerDriver;
 class CKBgfxRasterizerContext;
@@ -53,6 +72,9 @@ struct CKBgfxProgramRecord {
     bgfx::ProgramHandle Handle;
     CKDWORD SpecializationDwords[10];
     CKDWORD SpecializationDwordCount;
+    CKDWORD VertexShader;
+    CKDWORD PixelShader;
+    CKDWORD SpecHash;
 };
 
 struct CKBgfxUniformRecord {
@@ -239,6 +261,25 @@ public:
     CKDWORD m_PointSize;
     CKDrawState m_CachedDrawState;
     uint64_t m_CachedBgfxState;
+    char m_LastMarker[512];
+    CKBgfxDrawMapVertexBinding m_DebugVertexBindings[CKRST_MAX_VERTEX_STREAMS];
+    CKBgfxDrawMapTextureBinding m_DebugTextureBindings[CKRST_MAX_TEXTURE_STAGES];
+    CKDWORD m_DebugVertexBindingMask;
+    CKDWORD m_DebugTextureBindingMask;
+    CKDWORD m_DebugIndexBuffer;
+    CKDWORD m_DebugIndexStart;
+    CKDWORD m_DebugIndexCount;
+    CKDWORD m_DebugIndexHandle;
+
+    void TraceSubmit(CKSTRING Kind,
+                     CKRenderView View,
+                     CKDWORD Program,
+                     bgfx::ProgramHandle ProgramHandle,
+                     CKDWORD Depth,
+                     CKDWORD Flags,
+                     CKDWORD Extra0,
+                     CKDWORD Extra1,
+                     CKDWORD Extra2);
 };
 
 // ===========================================================================
@@ -404,11 +445,32 @@ private:
     std::atomic<bool> m_BackbufferReadReady;
 
     CKDWORD m_DebugFrameId;
+    std::atomic<CKDWORD> m_DebugSubmitSerial;
+    std::atomic<CKDWORD> m_DebugViewSubmitSerial[CKRST_MAX_RENDER_VIEWS];
+    std::atomic<CKDWORD> m_DebugMissingAnnotationCount;
+    std::atomic<CKDWORD> m_DebugMarkerOverwriteCount;
+    std::atomic<CKDWORD> m_DebugMarkerStaleCount;
+    std::atomic<CKDWORD> m_DebugInvalidSubmitCount;
+    std::atomic<CKDWORD> m_DebugParsedAnnotationCount;
+    std::atomic<CKDWORD> m_DebugRawPrimitiveCount;
+    std::atomic<CKDWORD> m_DebugSourceSubmitCount[CKBGFX_DRAWMAP_SOURCE_COUNT];
+    CK_VIEW_MODE m_DebugViewMode[CKRST_MAX_RENDER_VIEWS];
+    char m_DebugViewName[CKRST_MAX_RENDER_VIEWS][64];
+    CKDWORD m_DebugViewOrderGeneration;
+    CKBOOL m_DebugViewOrderSequential;
     CKDWORD m_DebugBgfxFlags;
     CKBOOL m_DebugOverlay;
 
     void ConfigureDebug();
     void DrawDebugOverlay();
+    void TraceTextureMap(CKSTRING Event, CKDWORD Texture,
+                         const CKBgfxTextureRecord *Record);
+    void TraceProgramMap(CKSTRING Event, CKDWORD Program,
+                         const CKBgfxProgramRecord *Record);
+    void TraceBufferMap(CKSTRING Event, CKSTRING Kind, CKDWORD Buffer,
+                        CKDWORD BgfxHandle, CKDWORD Layout,
+                        CKDWORD Stride, CKDWORD Count,
+                        CKDWORD Index32, CKDWORD Flags);
 
     XArray<CKBgfxShaderRecord *> m_Shaders;
     XArray<CKBgfxProgramRecord *> m_Programs;

@@ -13,6 +13,9 @@ struct CKBgfxLogConfig {
     bool TextureBindings;
     bool Uniforms;
     bool PresentSync;
+    bool DrawMap;
+    bool DrawMapStrict;
+    bool DrawMapSummary;
 };
 
 struct CKBgfxDebugConfig {
@@ -29,6 +32,7 @@ int CKBgfxConfigPositiveInt(const char *section, const char *name, int fallback)
 XString CKBgfxModuleSiblingFile(const void *address, const char *file);
 
 const char *CKBgfxRendererTypeName(bgfx::RendererType::Enum type);
+const char *CKBgfxShaderProfileName(CK_SHADER_PROFILE profile);
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);
 bgfx::RendererType::Enum CKBgfxParseRequestedRenderer();
 uint32_t CKBgfxBuildResetFlags(CKBOOL VSync, CKDWORD Samples);
