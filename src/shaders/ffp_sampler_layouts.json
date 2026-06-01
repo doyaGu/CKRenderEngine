@@ -1,0 +1,9 @@
+{
+  "layouts": [
+    {
+      "name": "stage0_volume_stage1_cube",
+      "backends": ["dx11", "dx12", "spirv", "glsl", "metal"],
+      "stageTypes": [3, 1, 0, 0, 0, 0, 0, 0]
+    }
+  ]
+}
