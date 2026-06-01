@@ -6,6 +6,7 @@
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
 #include "CKFixedFunctionPipeline.h"
+#include "CKDrawAnnotation.h"
 
 // External function from CKMeshUtils.cpp
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
@@ -16,6 +17,30 @@ static int CompareByZOrder(const void *a, const void *b) {
     CK2dEntity *ent1 = *(CK2dEntity **) a;
     CK2dEntity *ent2 = *(CK2dEntity **) b;
     return ent1->GetZOrder() - ent2->GetZOrder();
+}
+
+static void CK2dSetDrawAnnotation(RCKRenderContext *dev,
+                                  CKSTRING path,
+                                  RCK2dEntity *entity,
+                                  CKObject *material,
+                                  VXPRIMITIVETYPE primitiveType,
+                                  CKDWORD indexCount,
+                                  CKDWORD vertexCount) {
+    if (!dev)
+        return;
+
+    CKDrawAnnotation annotation;
+    CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_2D_ENTITY);
+    annotation.View = dev->m_Current2DView;
+    annotation.PrimitiveType = primitiveType;
+    annotation.IndexCount = indexCount;
+    annotation.VertexCount = vertexCount;
+    annotation.GroupIndex = entity ? entity->GetZOrder() : 0;
+    CKDrawAnnotationCopyText(annotation.Path, sizeof(annotation.Path),
+                             path ? path : (CKSTRING)"");
+    CKDrawAnnotationSetObject(&annotation.Entity, (CKObject *)entity);
+    CKDrawAnnotationSetObject(&annotation.Material, material);
+    dev->SetDrawAnnotation(&annotation);
 }
 
 CK_CLASSID RCK2dEntity::m_ClassID = CKCID_2DENTITY;
@@ -894,6 +919,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         positionPtr[3] = 1.0f;
 
         // Draw quad as triangle fan
+        CK2dSetDrawAnnotation(dev, (CKSTRING)"2D", this, (CKObject *)m_Material,
+                              VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 
         // Restore fog state
@@ -960,6 +987,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         positionPtr[3] = 1.0f;
 
         // Draw filled quad
+        CK2dSetDrawAnnotation(dev, (CKSTRING)"2D_PLACEHOLDER_FILL", this, NULL,
+                              VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
         dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 
         // Draw white outline
@@ -986,6 +1015,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         VxFillStructure(4, colorPtr, data->ColorStride, 4, &whiteColor);
 
         // Draw outline as line strip
+        CK2dSetDrawAnnotation(dev, (CKSTRING)"2D_PLACEHOLDER_OUTLINE", this, NULL,
+                              VX_LINESTRIP, 5, (CKDWORD)data->VertexCount);
         dev->DrawPrimitive(VX_LINESTRIP, indices, 5, data);
 
         // Restore fog state
