@@ -178,6 +178,7 @@ public:
     void SetCondition(CKDWORD Query, CKBOOL Visible) override;
 
     void SetMarker(CKSTRING Name) override;
+    CKBOOL ConsumeMarker(char *Buffer, CKDWORD BufferSize) override;
 
     void Submit(CKRenderView View, CKDWORD Program,
                 CKDWORD Depth, CKDWORD Flags) override;

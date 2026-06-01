@@ -504,6 +504,19 @@ void CKBgfxEncoder::SetMarker(CKSTRING Name)
         m_Encoder->setMarker(Name);
 }
 
+CKBOOL CKBgfxEncoder::ConsumeMarker(char *Buffer, CKDWORD BufferSize)
+{
+    if (!Buffer || BufferSize == 0)
+        return FALSE;
+    Buffer[0] = '\0';
+    if (m_LastMarker[0] == '\0')
+        return FALSE;
+    strncpy(Buffer, m_LastMarker, BufferSize - 1);
+    Buffer[BufferSize - 1] = '\0';
+    m_LastMarker[0] = '\0';
+    return TRUE;
+}
+
 void CKBgfxEncoder::SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
                                           CKDWORD Query, CKDWORD Depth,
                                           CKDWORD Flags)
