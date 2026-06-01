@@ -19,6 +19,13 @@ struct CKFFShaderKeyVS {
     explicit CKFFShaderKeyVS(const CKFFVSStateDesc &desc);
 
     bool GetHasPositionT() const { return (Bits & (1ull << 12)) != 0; }
+    bool GetInstanced() const { return (Bits & (1ull << 40)) != 0; }
+    void SetInstanced(bool v) {
+        if (v)
+            Bits |= (1ull << 40);
+        else
+            Bits &= ~(1ull << 40);
+    }
     bool operator==(const CKFFShaderKeyVS &other) const;
     bool operator!=(const CKFFShaderKeyVS &other) const { return !(*this == other); }
 };

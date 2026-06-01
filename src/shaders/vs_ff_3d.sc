@@ -1,7 +1,12 @@
 #ifndef CKFF_VS_CLIP_DISTANCE
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
-#if CKFF_VS_VERTEX_BLEND_MODE != 0
+#ifndef CKFF_VS_INSTANCED
+#define CKFF_VS_INSTANCED 0
+#endif
+#if CKFF_VS_INSTANCED
+$input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_color0, a_color1, i_data0, i_data1, i_data2, i_data3
+#elif CKFF_VS_VERTEX_BLEND_MODE != 0
 $input a_position, a_normal, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #else
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
@@ -129,13 +134,19 @@ uniform vec4 u_clipParams;
 #ifndef CKFF_VS_TEXFLAGS7
 #define CKFF_VS_TEXFLAGS7 0
 #endif
-#if ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
+#if CKFF_VS_INSTANCED
+#define CKFF_VS_NEEDS_VIEW_SPACE 0
+#elif ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
 #else
 #define CKFF_VS_NEEDS_VIEW_SPACE 0
 #endif
 #else
+#if CKFF_VS_INSTANCED
+#define CKFF_VS_NEEDS_VIEW_SPACE 0
+#else
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
+#endif
 #endif
 
 #ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT
@@ -408,6 +419,12 @@ vec4 transformTexcoord(int stage, vec4 coord)
 void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
+#if CKFF_VS_INSTANCED
+    vec4 a_texcoord4 = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 a_texcoord5 = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 a_texcoord6 = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 a_texcoord7 = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
     int vertexBlendMode = ckffVsVertexBlendMode();
     int vertexBlendCount = ckffVsVertexBlendCount();
 
@@ -439,8 +456,14 @@ void main()
         v_fogPos = gl_Position;
     } else {
 #endif
+#if CKFF_VS_INSTANCED
+        mat4 instanceWorld = mtxFromCols(i_data0, i_data1, i_data2, i_data3);
+        worldClipPos = mul(instanceWorld, localPos);
+        gl_Position = mul(u_ffMatrices[0], worldClipPos);
+#else
         gl_Position = mul(u_ffMatrices[0], localPos);
         worldClipPos = mul(u_ffMatrices[1], localPos);
+#endif
         v_fogPos = gl_Position;
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
     }
