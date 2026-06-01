@@ -82,6 +82,10 @@ ckre_add_test(ffp_stencil_submit_tests
     test_ffp_stencil_submit.cpp
 )
 
+ckre_add_test(draw_annotation_tests
+    test_draw_annotation.cpp
+)
+
 ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )

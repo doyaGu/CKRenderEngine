@@ -26,17 +26,23 @@ struct FFPViewClearRecord {
 
 class FFPDiagnosticDriver : public CKRasterizerDriver {
 public:
+    explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11)
+        : Profile(profile) {}
+
     CKERROR GetShaderTarget(CKShaderTargetDesc *target) const override {
         if (!target)
             return CKERR_INVALIDPARAMETER;
         target->Format = CKRST_SHADER_FORMAT_NATIVE;
-        target->Profile = CKRST_SHADER_PROFILE_DX11;
+        target->Profile = Profile;
         target->Version = 0;
         target->Flags = 0;
         return CK_OK;
     }
 
     CKERROR GetProgrammableCaps(VxProgCapsDesc &) override { return CK_OK; }
+
+private:
+    CK_SHADER_PROFILE Profile;
 };
 
 class FFPDiagnosticEncoder : public CKRasterizerEncoder {

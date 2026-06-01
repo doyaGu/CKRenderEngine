@@ -23,6 +23,19 @@ VXPRIMITIVETYPE DrawStateTopology(const CKDrawState &state) {
     return (VXPRIMITIVETYPE)((state.Mid >> 6) & 0x7u);
 }
 
+struct ShaderProfileCase {
+    CK_SHADER_PROFILE Profile;
+    const char *Name;
+};
+
+static const ShaderProfileCase kSamplerLayoutProfiles[] = {
+    {CKRST_SHADER_PROFILE_DX11, "dx11"},
+    {CKRST_SHADER_PROFILE_DX12, "dx12"},
+    {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
+    {CKRST_SHADER_PROFILE_GLSL, "glsl"},
+    {CKRST_SHADER_PROFILE_MSL, "metal"},
+};
+
 void DrawVertexBufferSubmitsStencilRefAndMasks() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -675,8 +688,8 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
     ffp.Shutdown();
 }
 
-void VolumeAndCubeCacheMissDoesNotUseUnsafeRuntimeFallback() {
-    FFPDiagnosticDriver driver;
+void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE profile) {
+    FFPDiagnosticDriver driver(profile);
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(&context);
@@ -699,12 +712,90 @@ void VolumeAndCubeCacheMissDoesNotUseUnsafeRuntimeFallback() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "Volume + cube cache miss must not submit through a lossy runtime shader");
-    TestCheck(context.Encoder.TextureBindCount == 0,
-              "Volume + cube cache miss must not bind textures after shader selection fails");
+    CKFFSpecializationInfo spec;
+    TestCheck(!context.LastProgramSpecializationDwords.empty(),
+              "Volume + cube fallback must submit runtime specialization data");
+    if (!context.LastProgramSpecializationDwords.empty())
+        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Volume + cube cache miss must draw through the static sampler layout fallback");
+    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME &&
+                  (((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 2) & 0x3u) == CKFF_SAMPLER_CUBE),
+              "Volume + cube fallback must preserve sampler types in runtime specialization data");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE &&
+                  spec.Get(CKFF_SPEC_STAGE1_COLOR_OP) == CKRST_TOP_ADD,
+              "Volume + cube fallback must keep texture stage ops runtime-specialized");
+    TestCheck(context.Encoder.TextureBindCount == 2,
+              "Volume + cube fallback must bind both textures");
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool sawVolume = false;
+    bool sawCube = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
+            sawVolume = true;
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[1] && binding.Texture == 202)
+            sawCube = true;
+    }
+    TestCheck(sawVolume && sawCube,
+              "Volume + cube fallback must bind each texture to the sampler type declared for its stage");
 
     ffp.Shutdown();
+}
+
+void VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback() {
+    for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
+        printf("  profile %s\n", profile.Name);
+        RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(profile.Profile);
+    }
+}
+
+void RunVolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback(CK_SHADER_PROFILE profile) {
+    FFPDiagnosticDriver driver(profile);
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 211, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.SetTexture(2, 212, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_ADD);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(2, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(2, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Non-manifest volume+cube layout must not draw through a lossy runtime fallback");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "Non-manifest volume+cube layout must not bind textures after shader selection fails");
+    TestCheck(context.CreatedProgramCount == 0,
+              "Non-manifest volume+cube layout must not create an unrelated fallback program");
+
+    ffp.Shutdown();
+}
+
+void VolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback() {
+    for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
+        printf("  profile %s\n", profile.Name);
+        RunVolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback(profile.Profile);
+    }
 }
 
 void MultipleVolumeTexturesBindEachVolumeSampler() {
@@ -1658,8 +1749,10 @@ int main() {
               &VolumeTextureModulateCacheMissUsesUberShader);
     tests.Run("Volume texture stage seven binds volume sampler",
               &VolumeTextureStageSevenBindsVolumeSampler);
-    tests.Run("Volume and cube cache miss does not use unsafe runtime fallback",
-              &VolumeAndCubeCacheMissDoesNotUseUnsafeRuntimeFallback);
+    tests.Run("Volume and cube cache miss uses static sampler layout fallback",
+              &VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback);
+    tests.Run("Volume and cube missing static sampler layout does not use lossy fallback",
+              &VolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
