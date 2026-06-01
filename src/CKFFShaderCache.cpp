@@ -12,24 +12,32 @@
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/dx11/vs_ff_3d_instanced.bin.h"
+#include "shaders/generated/dx11/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/dx12/vs_ff_3d_instanced.bin.h"
+#include "shaders/generated/dx12/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/spirv/vs_ff_3d_instanced.bin.h"
+#include "shaders/generated/spirv/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/glsl/vs_ff_3d_instanced.bin.h"
+#include "shaders/generated/glsl/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
@@ -42,6 +50,10 @@ struct CKFFShaderBlobSet {
     unsigned int VS3DSize;
     const unsigned char *VS3DClip;
     unsigned int VS3DClipSize;
+    const unsigned char *VS3DInstanced;
+    unsigned int VS3DInstancedSize;
+    const unsigned char *VS3DInstancedClip;
+    unsigned int VS3DInstancedClipSize;
     const unsigned char *VSPositionT;
     unsigned int VSPositionTSize;
     const unsigned char *VSPositionTClip;
@@ -56,6 +68,8 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_DX11, "dx11",
      s_dx11_vs_ff_3d, sizeof(s_dx11_vs_ff_3d),
      s_dx11_vs_ff_3d_clip, sizeof(s_dx11_vs_ff_3d_clip),
+     s_dx11_vs_ff_3d_instanced, sizeof(s_dx11_vs_ff_3d_instanced),
+     s_dx11_vs_ff_3d_instanced_clip, sizeof(s_dx11_vs_ff_3d_instanced_clip),
      s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
      s_dx11_vs_ff_positiont_clip, sizeof(s_dx11_vs_ff_positiont_clip),
      s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage),
@@ -63,6 +77,8 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_DX12, "dx12",
      s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
      s_dx12_vs_ff_3d_clip, sizeof(s_dx12_vs_ff_3d_clip),
+     s_dx12_vs_ff_3d_instanced, sizeof(s_dx12_vs_ff_3d_instanced),
+     s_dx12_vs_ff_3d_instanced_clip, sizeof(s_dx12_vs_ff_3d_instanced_clip),
      s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
      s_dx12_vs_ff_positiont_clip, sizeof(s_dx12_vs_ff_positiont_clip),
      s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage),
@@ -70,6 +86,8 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_SPIRV, "spirv",
      s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
      s_spirv_vs_ff_3d_clip, sizeof(s_spirv_vs_ff_3d_clip),
+     s_spirv_vs_ff_3d_instanced, sizeof(s_spirv_vs_ff_3d_instanced),
+     s_spirv_vs_ff_3d_instanced_clip, sizeof(s_spirv_vs_ff_3d_instanced_clip),
      s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
      s_spirv_vs_ff_positiont_clip, sizeof(s_spirv_vs_ff_positiont_clip),
      s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage),
@@ -77,6 +95,8 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_GLSL, "glsl",
      s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
      s_glsl_vs_ff_3d_clip, sizeof(s_glsl_vs_ff_3d_clip),
+     s_glsl_vs_ff_3d_instanced, sizeof(s_glsl_vs_ff_3d_instanced),
+     s_glsl_vs_ff_3d_instanced_clip, sizeof(s_glsl_vs_ff_3d_instanced_clip),
      s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
      s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
      s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage),
@@ -97,6 +117,10 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
 static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key);
 static bool CKFFShaderKeyNeedsCubeSampler(const CKFFShaderKey &key);
 static CKDWORD CKFFShaderKeyActiveTextureMask(const CKFFShaderKey &key);
+static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
+                                       const CKFFShaderKey &key,
+                                       const unsigned char **vsData,
+                                       unsigned int *vsSize);
 static void CKFFSamplerLayoutStageTypesString(const CKFFSamplerLayoutKey &layout,
                                               char *buffer,
                                               std::size_t bufferSize);
@@ -356,6 +380,27 @@ static CKDWORD CKFFShaderKeyActiveTextureMask(const CKFFShaderKey &key) {
     return mask;
 }
 
+static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
+                                       const CKFFShaderKey &key,
+                                       const unsigned char **vsData,
+                                       unsigned int *vsSize) {
+    if (!set || !vsData || !vsSize)
+        return;
+    const bool positionT = key.VS.GetHasPositionT();
+    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
+    const bool instanced = key.VS.GetInstanced();
+    if (positionT) {
+        *vsData = clipDistance ? set->VSPositionTClip : set->VSPositionT;
+        *vsSize = clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize;
+    } else if (instanced) {
+        *vsData = clipDistance ? set->VS3DInstancedClip : set->VS3DInstanced;
+        *vsSize = clipDistance ? set->VS3DInstancedClipSize : set->VS3DInstancedSize;
+    } else {
+        *vsData = clipDistance ? set->VS3DClip : set->VS3D;
+        *vsSize = clipDistance ? set->VS3DClipSize : set->VS3DSize;
+    }
+}
+
 static void CKFFSamplerLayoutStageTypesString(const CKFFSamplerLayoutKey &layout,
                                               char *buffer,
                                               std::size_t bufferSize) {
@@ -431,18 +476,17 @@ CKFFProgramBinding CKFFShaderCache::CreateVolumeSamplerLayoutProgram(const CKFFS
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const bool positionT = key.VS.GetHasPositionT();
     const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const unsigned char *vsData = positionT
-        ? (clipDistance ? set->VSPositionTClip : set->VSPositionT)
-        : (clipDistance ? set->VS3DClip : set->VS3D);
-    const unsigned int vsSize = positionT
-        ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
-        : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
+    const bool instanced = key.VS.GetInstanced();
+    const unsigned char *vsData = nullptr;
+    unsigned int vsSize = 0;
+    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
     CKDWORD program = CreateProgramFromBinary(
         m_Target, vsData, vsSize, set->FSStageVolume, set->FSStageVolumeSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP volume sampler program: %u backend=%s positionT=%u clip=%u lastStage=%u",
+               "FFP volume sampler program: %u backend=%s positionT=%u clip=%u instanced=%u lastStage=%u",
                program, set->Name, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               instanced ? 1u : 0u,
                key.FS.LastActiveTextureStage);
     return CKFFProgramBinding(program, false, specInfo);
 }
@@ -471,20 +515,19 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const bool positionT = key.VS.GetHasPositionT();
     const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
+    const bool instanced = key.VS.GetInstanced();
     char stageTypes[32];
     CKFFSamplerLayoutStageTypesString(layout, stageTypes, sizeof(stageTypes));
-    const unsigned char *vsData = positionT
-        ? (clipDistance ? set->VSPositionTClip : set->VSPositionT)
-        : (clipDistance ? set->VS3DClip : set->VS3D);
-    const unsigned int vsSize = positionT
-        ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
-        : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
+    const unsigned char *vsData = nullptr;
+    unsigned int vsSize = 0;
+    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
     CKDWORD program = CreateProgramFromBinary(
         m_Target, vsData, vsSize, module.FSData, module.FSSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP static sampler layout program: %u backend=%s profile=0x%08X positionT=%u clip=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u",
+               "FFP static sampler layout program: %u backend=%s profile=0x%08X positionT=%u clip=%u instanced=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u",
                program, set->Name, m_Target.Profile, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               instanced ? 1u : 0u,
                key.FS.LastActiveTextureStage, CKFFShaderKeyActiveTextureMask(key), layout.Bits,
                stageTypes, CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u);
     return CKFFProgramBinding(program, false, specInfo);
@@ -498,18 +541,17 @@ CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShade
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const bool positionT = key.VS.GetHasPositionT();
     const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const unsigned char *vsData = positionT
-        ? (clipDistance ? set->VSPositionTClip : set->VSPositionT)
-        : (clipDistance ? set->VS3DClip : set->VS3D);
-    const unsigned int vsSize = positionT
-        ? (clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize)
-        : (clipDistance ? set->VS3DClipSize : set->VS3DSize);
+    const bool instanced = key.VS.GetInstanced();
+    const unsigned char *vsData = nullptr;
+    unsigned int vsSize = 0;
+    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
     CKDWORD program = CreateProgramFromBinary(
         m_Target, vsData, vsSize, set->FSStage, set->FSStageSize, specInfo);
 
     CK_LOG_FMT("ShaderCache",
-               "FFP variant program: %u backend=%s ubershader=%u positionT=%u clip=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
+               "FFP variant program: %u backend=%s ubershader=%u positionT=%u clip=%u instanced=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
                program, set->Name, m_UseUberShader ? 1u : 0u, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               instanced ? 1u : 0u,
                key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
                key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
                key.FS.FogEnable ? 1u : 0u);

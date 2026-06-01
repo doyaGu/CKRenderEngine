@@ -23,6 +23,11 @@ SHADERS = [
     {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d"},
     {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_clip",
      "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
+    {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_instanced",
+     "defines": ["CKFF_VS_INSTANCED=1", "CKFF_VS_ACTIVE_TEXCOORD_COUNT=4"]},
+    {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_instanced_clip",
+     "defines": ["CKFF_VS_INSTANCED=1", "CKFF_VS_CLIP_DISTANCE=1",
+                 "CKFF_VS_ACTIVE_TEXCOORD_COUNT=4"]},
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont"},
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont_clip",
      "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
@@ -214,6 +219,7 @@ def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
         f"CKFF_VS_VERTEX_BLEND_MODE={(vs_bits >> 35) & 3}",
         f"CKFF_VS_VERTEX_BLEND_INDEXED={(vs_bits >> 37) & 1}",
         f"CKFF_VS_VERTEX_BLEND_COUNT={(vs_bits >> 38) & 3}",
+        f"CKFF_VS_INSTANCED={(vs_bits >> 40) & 1}",
         f"CKFF_VS_ACTIVE_TEXCOORD_COUNT={int(key['lastActiveTextureStage']) + 1}",
     ]
     for index, value in enumerate(key["vsTexGen"]):
