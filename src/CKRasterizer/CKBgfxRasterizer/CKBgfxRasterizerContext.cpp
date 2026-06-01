@@ -60,6 +60,13 @@ static void CKBgfxCopyDebugText(char *Dst, CKDWORD DstSize, CKSTRING Src)
     Dst[DstSize - 1] = '\0';
 }
 
+static CKBOOL CKBgfxDrawMapChannelEnabled(CKDWORD Flags, CKDWORD Channel)
+{
+    if ((Flags & CKRST_DEBUG_DRAWMAP) == 0)
+        return FALSE;
+    return (Flags & Channel) != 0 ? TRUE : FALSE;
+}
+
 static CKDWORD CKBgfxHashDword(CKDWORD Hash, CKDWORD Value)
 {
     Hash ^= Value;
@@ -854,7 +861,8 @@ void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
     if (rec) ph = rec->Handle;
     else {
         m_Context->m_DebugInvalidSubmitCount.fetch_add(1, std::memory_order_relaxed);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                        CKRST_DEBUG_DRAWMAP_SUBMITS))
             CKBgfxDrawMapTraceSubmitMiss((CKSTRING)"invalid_program",
                                           m_Context->m_DebugFrameId,
                                           0,
@@ -884,7 +892,8 @@ void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
 {
     if (!m_Context)
         return;
-    if (!CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (!CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                     CKRST_DEBUG_DRAWMAP_SUBMITS))
         return;
 
     const CKDWORD submitSerial = m_Context->m_DebugSubmitSerial.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1144,7 +1153,8 @@ void CKBgfxEncoder::SetMarker(CKSTRING Name)
     if (Name) {
         if (m_LastMarker[0] != '\0' && m_Context) {
             m_Context->m_DebugMarkerOverwriteCount.fetch_add(1, std::memory_order_relaxed);
-            if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+            if (CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                            CKRST_DEBUG_DRAWMAP_MARKERS))
                 CKBgfxLogf("MarkerOverwrite",
                            "frame=%u old=\"%s\" new=\"%s\"",
                            m_Context->m_DebugFrameId, m_LastMarker, Name);
@@ -1155,7 +1165,8 @@ void CKBgfxEncoder::SetMarker(CKSTRING Name)
             m_Encoder->setMarker(Name);
         else
             bgfx::setMarker(Name);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                        CKRST_DEBUG_DRAWMAP_MARKERS))
             CKBgfxLogf("Marker", "%s", Name);
     } else {
         m_LastMarker[0] = '\0';
@@ -1172,7 +1183,8 @@ void CKBgfxEncoder::SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
     CKBgfxOcclusionQueryRecord *oq = m_Context->GetOcclusionQuery(Query);
     if (!prog || !oq) {
         m_Context->m_DebugInvalidSubmitCount.fetch_add(1, std::memory_order_relaxed);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                        CKRST_DEBUG_DRAWMAP_SUBMITS))
             CKBgfxDrawMapTraceSubmitMiss(!prog ? (CKSTRING)"invalid_program" : (CKSTRING)"invalid_occlusion_query",
                                           m_Context->m_DebugFrameId,
                                           0,
@@ -1198,7 +1210,8 @@ void CKBgfxEncoder::SubmitIndirect(CKRenderView View, CKDWORD Program,
     CKBgfxIndirectBufferRecord *ib = m_Context->GetIndirectBuffer(IndirectBuffer);
     if (!prog || !ib) {
         m_Context->m_DebugInvalidSubmitCount.fetch_add(1, std::memory_order_relaxed);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_Context->m_DebugFlags,
+                                        CKRST_DEBUG_DRAWMAP_SUBMITS))
             CKBgfxDrawMapTraceSubmitMiss(!prog ? (CKSTRING)"invalid_program" : (CKSTRING)"invalid_indirect_buffer",
                                           m_Context->m_DebugFrameId,
                                           0,
@@ -1256,7 +1269,7 @@ CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
       m_DebugInvalidSubmitCount{0}, m_DebugParsedAnnotationCount{0},
       m_DebugRawPrimitiveCount{0},
       m_DebugViewOrderGeneration(0), m_DebugViewOrderSequential(TRUE),
-      m_DebugBgfxFlags(0), m_DebugOverlay(FALSE),
+      m_DebugFlags(0), m_DebugBgfxFlags(0), m_DebugOverlay(FALSE),
       m_TransformCount{0},
       m_TransientVBCount{0}, m_TransientIBCount{0}, m_TransientInstCount{0}
 {
@@ -1381,13 +1394,19 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     CKBgfxLogf("Init", "renderer requested=%s actual=%s",
                CKBgfxRendererTypeName(requestedRenderer), m_RendererName);
     const CK_SHADER_PROFILE shaderProfile = CKBgfxShaderProfile(actualRenderer);
-    CKBgfxLogf("DrawMap",
-               "enabled=%u strict=%u summary=%u renderer=%s profile=%s sequentialViews=clear,background2d,renderfirst3d,opaque3d,stencil-clear,transparent3d,foreground2d",
-               CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)) ? 1u : 0u,
-               CKBgfxLogEnabled("DrawMapStrict", false) ? 1u : 0u,
-               CKBgfxLogEnabled("DrawMapSummary", true) ? 1u : 0u,
-               m_RendererName,
-               CKBgfxShaderProfileName(shaderProfile));
+    if ((m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 || CKBgfxLogEnabled("Config", false)) {
+        CKBgfxLogf("DrawMap",
+                   "enabled=%u submits=%u resources=%u views=%u markers=%u frame=%u summary=%u renderer=%s profile=%s sequentialViews=clear,background2d,renderfirst3d,opaque3d,stencil-clear,transparent3d,foreground2d",
+                   (m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 ? 1u : 0u,
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_SUBMITS),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_RESOURCES),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_VIEWS),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_MARKERS),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_FRAME),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_SUMMARY),
+                   m_RendererName,
+                   CKBgfxShaderProfileName(shaderProfile));
+    }
     const bgfx::Caps *caps = bgfx::getCaps();
     if (caps) {
         CKBgfxLogf("Init",
@@ -1450,11 +1469,8 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
 void CKBgfxRasterizerContext::ConfigureDebug()
 {
     const CKBgfxDebugConfig &debug = CKBgfxDebugSettings();
-    m_DebugBgfxFlags = debug.BgfxFlags;
     m_DebugOverlay = debug.Overlay ? TRUE : FALSE;
-
-    if (m_DebugBgfxFlags != BGFX_DEBUG_NONE)
-        bgfx::setDebug(m_DebugBgfxFlags);
+    SetDebug(m_DebugFlags);
 
     if (debug.Log.Config ||
         m_DebugBgfxFlags != BGFX_DEBUG_NONE ||
@@ -1531,7 +1547,7 @@ void CKBgfxRasterizerContext::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
                                               const CKBgfxTextureRecord *Record)
 {
     CKBgfxDrawMapTextureTrace trace;
-    if (!CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (!CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_RESOURCES))
         return;
     trace.Event = Event;
     trace.Frame = m_DebugFrameId;
@@ -1558,7 +1574,7 @@ void CKBgfxRasterizerContext::TraceProgramMap(CKSTRING Event, CKDWORD Program,
     char spec[160];
     CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_UNKNOWN;
     CKBgfxDrawMapProgramTrace trace;
-    if (!CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (!CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_RESOURCES))
         return;
     if (m_Driver) {
         CKShaderTargetDesc target;
@@ -1589,7 +1605,7 @@ void CKBgfxRasterizerContext::TraceBufferMap(CKSTRING Event, CKSTRING Kind,
                                              CKDWORD Flags)
 {
     CKBgfxDrawMapBufferTrace trace;
-    if (!CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (!CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_RESOURCES))
         return;
     trace.Event = Event;
     trace.Frame = m_DebugFrameId;
@@ -2463,7 +2479,7 @@ CKERROR CKBgfxRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
     bgfx::setViewName((bgfx::ViewId)View, Name);
     if (View < CKRST_MAX_RENDER_VIEWS) {
         CKBgfxCopyDebugText(m_DebugViewName[View], sizeof(m_DebugViewName[View]), Name);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_VIEWS))
             CKBgfxLogf("ViewMap", "frame=%u view=%u name=%s",
                        m_DebugFrameId, (unsigned)View, m_DebugViewName[View]);
     }
@@ -2564,7 +2580,7 @@ CKERROR CKBgfxRasterizerContext::SetViewMode(CKRenderView View, CK_VIEW_MODE Mod
     bgfx::setViewMode((bgfx::ViewId)View, bgfxMode);
     if (View < CKRST_MAX_RENDER_VIEWS) {
         m_DebugViewMode[View] = Mode;
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_VIEWS))
             CKBgfxLogf("ViewMap", "frame=%u view=%u mode=%s",
                        m_DebugFrameId, (unsigned)View, CKBgfxViewModeName(Mode));
     }
@@ -2587,7 +2603,7 @@ CKERROR CKBgfxRasterizerContext::SetViewOrder(CKRenderView Start, CKWORD Count,
             }
         }
     }
-    if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_VIEWS))
         CKBgfxLogf("ViewMap",
                    "frame=%u orderGen=%u start=%u count=%u sequential=%u orderPtr=%p",
                    m_DebugFrameId,
@@ -2853,7 +2869,7 @@ void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
 
     if (enc->m_LastMarker[0] != '\0') {
         m_DebugMarkerStaleCount.fetch_add(1, std::memory_order_relaxed);
-        if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+        if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_MARKERS))
             CKBgfxLogf("MarkerStale",
                        "frame=%u reason=end_encoder label=\"%s\"",
                        m_DebugFrameId, enc->m_LastMarker);
@@ -2884,7 +2900,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
             }
             if (m_Encoders[i].m_LastMarker[0] != '\0') {
                 m_DebugMarkerStaleCount.fetch_add(1, std::memory_order_relaxed);
-                if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+                if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_MARKERS))
                     CKBgfxLogf("MarkerStale",
                                "frame=%u reason=frame_end label=\"%s\"",
                                m_DebugFrameId, m_Encoders[i].m_LastMarker);
@@ -2914,7 +2930,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
 
     DrawDebugOverlay();
 
-    if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false))) {
+    if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_FRAME)) {
         CKBgfxLogf("FrameMap",
                    "End frame=%u submits=%u parsed=%u missingAnnotations=%u rawPrimitive=%u markerOverwrite=%u markerStale=%u invalidSubmit=%u orderSequential=%u",
                    m_DebugFrameId,
@@ -2926,7 +2942,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
                    m_DebugMarkerStaleCount.load(std::memory_order_relaxed),
                    m_DebugInvalidSubmitCount.load(std::memory_order_relaxed),
                    m_DebugViewOrderSequential ? 1u : 0u);
-        if (CKBgfxLogEnabled("DrawMapSummary", true)) {
+        if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_SUMMARY)) {
             CKBgfxLogf("FrameMap",
                        "Sources frame=%u Mesh=%u 2D=%u Sprite=%u Callback=%u RawPrimitive=%u",
                        m_DebugFrameId,
@@ -2964,7 +2980,7 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
     for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i)
         m_DebugViewSubmitSerial[i].store(0, std::memory_order_relaxed);
 
-    if (CKBgfxLogEnabled("DrawMap", CKBgfxLogEnabled("Trace", false)))
+    if (CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_FRAME))
         CKBgfxLogf("FrameMap", "Begin frame=%u", m_DebugFrameId);
 
     m_TransformCount.store(0, std::memory_order_relaxed);
@@ -3076,13 +3092,17 @@ void CKBgfxRasterizerContext::DbgTextImage(CKWORD X, CKWORD Y,
 
 void CKBgfxRasterizerContext::SetDebug(CKDWORD Flags)
 {
-    uint32_t bgfxFlags = BGFX_DEBUG_NONE;
+    const CKBgfxDebugConfig &debug = CKBgfxDebugSettings();
+    uint32_t bgfxFlags = debug.BgfxFlags;
+    m_DebugFlags = Flags;
     if (Flags & CKRST_DEBUG_WIREFRAME) bgfxFlags |= BGFX_DEBUG_WIREFRAME;
     if (Flags & CKRST_DEBUG_IFH)       bgfxFlags |= BGFX_DEBUG_IFH;
     if (Flags & CKRST_DEBUG_STATS)     bgfxFlags |= BGFX_DEBUG_STATS;
     if (Flags & CKRST_DEBUG_TEXT)      bgfxFlags |= BGFX_DEBUG_TEXT;
     if (Flags & CKRST_DEBUG_PROFILER)  bgfxFlags |= BGFX_DEBUG_PROFILER;
-    bgfx::setDebug(bgfxFlags);
+    m_DebugBgfxFlags = bgfxFlags;
+    if (m_BgfxInitialized)
+        bgfx::setDebug(bgfxFlags);
 }
 
 // ===========================================================================

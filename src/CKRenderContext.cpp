@@ -1315,8 +1315,46 @@ CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
 }
 
 void RCKRenderContext::ApplyRenderOptions() {
-    if (m_RasterizerContext)
+    CKDWORD debugFlags = m_RasterizerDebugFlags;
+    const CKRenderDrawMapConfig &drawMap = CKRenderDiagnosticsSettings().DrawMap;
+    const CKDWORD drawMapMask = CKRST_DEBUG_DRAWMAP |
+                                CKRST_DEBUG_DRAWMAP_SUBMITS |
+                                CKRST_DEBUG_DRAWMAP_RESOURCES |
+                                CKRST_DEBUG_DRAWMAP_VIEWS |
+                                CKRST_DEBUG_DRAWMAP_MARKERS |
+                                CKRST_DEBUG_DRAWMAP_FRAME |
+                                CKRST_DEBUG_DRAWMAP_SUMMARY;
+
+    debugFlags &= ~drawMapMask;
+
+    if (drawMap.Enabled)
+        debugFlags |= CKRST_DEBUG_DRAWMAP;
+    if (drawMap.Submits)
+        debugFlags |= CKRST_DEBUG_DRAWMAP_SUBMITS;
+    if (drawMap.Resources)
+        debugFlags |= CKRST_DEBUG_DRAWMAP_RESOURCES;
+    if (drawMap.Views)
+        debugFlags |= CKRST_DEBUG_DRAWMAP_VIEWS;
+    if (drawMap.Markers)
+        debugFlags |= CKRST_DEBUG_DRAWMAP_MARKERS;
+    if (drawMap.Frame)
+        debugFlags |= CKRST_DEBUG_DRAWMAP_FRAME;
+    if (drawMap.Summary) {
+        debugFlags |= CKRST_DEBUG_DRAWMAP_FRAME;
+        debugFlags |= CKRST_DEBUG_DRAWMAP_SUMMARY;
+    }
+
+    if ((debugFlags & CKRST_DEBUG_DRAWMAP) == 0)
+        debugFlags &= ~drawMapMask;
+
+    m_RasterizerDebugFlags = debugFlags;
+
+    if (m_RasterizerContext) {
         m_RasterizerContext->SetAntialias(m_RenderManager->m_Antialias.Value);
+        m_RasterizerContext->SetDebug(debugFlags);
+    }
+
+    ApplyDrawAnnotationDebugFlags(debugFlags);
 
     m_FFPipeline.SetRenderOptions(
         m_RenderManager->m_DisableFilter.Value != 0,
@@ -1527,6 +1565,20 @@ void RCKRenderContext::SetDrawAnnotation(const CKDrawAnnotation *annotation) {
     CKDrawAnnotationStateSetPending(m_DrawAnnotationState, annotation);
 }
 
+void RCKRenderContext::ApplyDrawAnnotationDebugFlags(CKDWORD DebugFlags) {
+    CKBOOL enabled = (DebugFlags & (CKRST_DEBUG_DRAWMAP_SUBMITS |
+                                    CKRST_DEBUG_DRAWMAP_MARKERS)) != 0;
+    if (enabled) {
+        if (!m_DrawAnnotationState) {
+            m_DrawAnnotationState = new CKDrawAnnotationState;
+            CKDrawAnnotationStateInit(m_DrawAnnotationState);
+        }
+    } else if (m_DrawAnnotationState) {
+        delete m_DrawAnnotationState;
+        m_DrawAnnotationState = nullptr;
+    }
+}
+
 void RCKRenderContext::ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
                                            CKRenderView view,
                                            VXPRIMITIVETYPE primitiveType,
@@ -1534,6 +1586,8 @@ void RCKRenderContext::ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
                                            CKDWORD vertexCount) {
     CKDrawAnnotation annotation;
     char label[CKDRAW_ANNOTATION_LABEL_SIZE];
+    if (!m_DrawAnnotationState)
+        return;
     ConsumeDrawAnnotation(&annotation, view, primitiveType,
                           indexCount, vertexCount);
     if (!encoder)
@@ -2968,6 +3022,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_TimeFpsCalc = 0;
     m_SmoothedFps = 0.0f;
     m_Flags = 0;
+    m_RasterizerDebugFlags = CKRST_DEBUG_NONE;
     m_SceneTraversalCalls = 0;
     m_TargetTexture = nullptr;
     m_TargetFrameBuffer = 0;
@@ -2998,8 +3053,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     Vx3DMatrixIdentity(m_ViewMatrix);
     m_Current2DView = CKRP_VIEW_FOREGROUND2D;
     m_Current3DView = CKRP_VIEW_OPAQUE3D;
-    m_DrawAnnotationState = new CKDrawAnnotationState;
-    CKDrawAnnotationStateInit(m_DrawAnnotationState);
+    m_DrawAnnotationState = nullptr;
 }
 
 RCKRenderContext::~RCKRenderContext() {
@@ -3050,6 +3104,7 @@ CKERROR RCKRenderContext::Copy(CKObject &o, CKDependenciesContext &context) {
 CKBOOL RCKRenderContext::DestroyDevice() {
     // Based on IDA at 0x10067558
     m_DeviceDestroying = TRUE;
+    ApplyDrawAnnotationDebugFlags(CKRST_DEBUG_NONE);
 
     // Notify render manager that device is being destroyed
     if (m_RenderManager)

@@ -325,6 +325,7 @@ public:
 
     void OnClearAll();
     void SetDrawAnnotation(const CKDrawAnnotation *annotation);
+    void ApplyDrawAnnotationDebugFlags(CKDWORD DebugFlags);
     void ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
                              CKRenderView view,
                              VXPRIMITIVETYPE primitiveType,
@@ -345,6 +346,7 @@ public:
     VxPlane m_UserClipPlanes[6];
     CKRenderView m_Current2DView;
     CKRenderView m_Current3DView;
+    CKDWORD m_RasterizerDebugFlags;
     CKDrawAnnotationState *m_DrawAnnotationState;
 };
 
