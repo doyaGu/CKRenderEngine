@@ -11,6 +11,7 @@
 
 #define CKFF_RENDER_PACKET_MIN_SORT_COUNT 64
 #define CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT 128
+#define CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT 128
 
 static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uniform) {
     switch (uniform) {
@@ -343,7 +344,9 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_StaticUniformCachedSerial(0), m_StaticUniformCachedIndex(0),
       m_StaticUniformCacheValid(FALSE), m_OpaquePacketsAlreadySorted(TRUE),
       m_OpaquePacketsSingleKey(TRUE), m_OpaquePacketsHasLastKey(FALSE),
-      m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
+      m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE),
+      m_OpaquePacketAdaptiveBypass(FALSE), m_OpaquePacketAdaptiveSamples(0),
+      m_OpaquePacketAdaptiveBypasses(0), m_OpaquePacketAdaptiveSavedBindEstimate(0) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
     m_DiagnosticConfig.StatsEnabled = settings.Enabled;
@@ -357,6 +360,8 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     Vx3DMatrixIdentity(m_World);
     Vx3DMatrixIdentity(m_View);
     Vx3DMatrixIdentity(m_Projection);
+    Vx3DMatrixIdentity(m_ViewProjection);
+    m_ViewProjectionDirty = TRUE;
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++)
         Vx3DMatrixIdentity(m_TexMatrix[i]);
     for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
@@ -405,7 +410,9 @@ void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     m_TransientGeometry.Init(ctx, &m_VertexLayoutCache);
     m_RenderPipeline.Init(ctx);
     m_DirtyFlags = CKFF_DIRTY_ALL;
+    m_ViewProjectionDirty = TRUE;
     ClearOpaqueRenderPackets();
+    ResetOpaqueRenderPacketFrameState();
 }
 
 void CKFixedFunctionPipeline::Shutdown() {
@@ -728,11 +735,13 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
     case VXMATRIX_VIEW:
         m_View = matrix;
         m_DirtyFlags |= CKFF_DIRTY_MATRICES | CKFF_DIRTY_LIGHTS;
+        m_ViewProjectionDirty = TRUE;
         MarkStaticUniformsDirty();
         break;
     case VXMATRIX_PROJECTION:
         m_Projection = matrix;
         m_DirtyFlags |= CKFF_DIRTY_MATRICES;
+        m_ViewProjectionDirty = TRUE;
         MarkStaticUniformsDirty();
         break;
     default:
@@ -870,6 +879,7 @@ void CKFixedFunctionPipeline::BeginDebugFrame() {
     m_DebugState.BeginFrame();
     LogAndResetFrameStats();
 #endif
+    ResetOpaqueRenderPacketFrameState();
 }
 
 // ============================================================================
@@ -1135,6 +1145,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
             if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
                 ++m_FrameStats.QueuedRenderPackets;
 #endif
+            CheckOpaqueRenderPacketAdaptiveBypass(encoder);
             return;
         }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -1941,7 +1952,18 @@ CKBOOL CKFixedFunctionPipeline::CanBuildPacketObjectUniforms() const
     return TRUE;
 }
 
-CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms) const
+void CKFixedFunctionPipeline::UpdateViewProjectionCache()
+{
+    if (!m_ViewProjectionDirty)
+        return;
+    Vx3DMultiplyMatrix4(m_ViewProjection, m_Projection, m_View);
+    m_ViewProjectionDirty = FALSE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.RenderPacketViewProjectionRebuilds;
+#endif
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms)
 {
     if (!uniforms)
         return FALSE;
@@ -1955,15 +1977,14 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
 
     VxMatrix modelView;
     VxMatrix normalMatrix;
-    VxMatrix viewProj;
     VxMatrix modelViewProj;
     if (viewSpaceUniforms) {
         Vx3DMultiplyMatrix4(modelView, m_View, m_World);
         Vx3DInverseMatrix(normalMatrix, modelView);
         Vx3DTransposeMatrix(normalMatrix, normalMatrix);
     }
-    Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
-    Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
+    UpdateViewProjectionCache();
+    Vx3DMultiplyMatrix4(modelViewProj, m_ViewProjection, m_World);
 
     uniforms->MatrixUniform = u.u_ffMatrices;
     uniforms->MatrixCount = viewSpaceUniforms ? 4 : 2;
@@ -2119,6 +2140,13 @@ void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) c
 
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
 {
+    ++m_OpaquePacketAdaptiveSamples;
+    m_OpaquePacketAdaptiveSavedBindEstimate += EstimateOpaqueRenderPacketSavedBinds(packet);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    m_FrameStats.RenderPacketAdaptiveSamples = m_OpaquePacketAdaptiveSamples;
+    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate = m_OpaquePacketAdaptiveSavedBindEstimate;
+#endif
+
     if (!m_OpaquePacketsHasLastKey) {
         m_OpaquePacketsHasLastKey = TRUE;
         m_OpaquePacketsAlreadySorted = TRUE;
@@ -2133,6 +2161,54 @@ void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &pack
     if (!CKFFRenderPacketSortKeyEquals(m_OpaqueFirstPacketSortKey, packet.SortKey))
         m_OpaquePacketsSingleKey = FALSE;
     m_OpaqueLastPacketSortKey = packet.SortKey;
+}
+
+CKDWORD CKFixedFunctionPipeline::EstimateOpaqueRenderPacketSavedBinds(const CKRenderPacket &packet) const
+{
+    if (m_OpaqueRenderPackets.Size() <= 0)
+        return 0;
+
+    const CKRenderPacket &prev = m_OpaqueRenderPackets[m_OpaqueRenderPackets.Size() - 1];
+    CKDWORD saved = 0;
+    if (CKFFDrawStateEquals(prev.DrawState, packet.DrawState) &&
+        prev.StencilRef == packet.StencilRef &&
+        prev.StencilReadMask == packet.StencilReadMask &&
+        prev.StencilWriteMask == packet.StencilWriteMask)
+        ++saved;
+    if (prev.StaticUniformIndex == packet.StaticUniformIndex)
+        ++saved;
+    if (prev.SortKey.TextureSetHash == packet.SortKey.TextureSetHash &&
+        prev.ActiveTextureCount == packet.ActiveTextureCount)
+        ++saved;
+    if (prev.VertexLayout == packet.VertexLayout &&
+        prev.VertexBuffer == packet.VertexBuffer &&
+        prev.BaseVertex == packet.BaseVertex &&
+        prev.VertexCount == packet.VertexCount)
+        ++saved;
+    if (prev.IndexBuffer == packet.IndexBuffer &&
+        prev.StartIndex == packet.StartIndex &&
+        prev.IndexCount == packet.IndexCount)
+        ++saved;
+    return saved;
+}
+
+CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder)
+{
+    if (m_OpaquePacketAdaptiveBypass)
+        return TRUE;
+    if (m_OpaquePacketAdaptiveSamples != CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
+        return FALSE;
+    if (m_OpaquePacketAdaptiveSavedBindEstimate >=
+        (m_OpaquePacketAdaptiveSamples / 2))
+        return FALSE;
+
+    m_OpaquePacketAdaptiveBypass = TRUE;
+    ++m_OpaquePacketAdaptiveBypasses;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.RenderPacketAdaptiveBypasses;
+#endif
+    FlushOpaqueRenderPackets(encoder, TRUE);
+    return TRUE;
 }
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
@@ -2216,7 +2292,7 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
             ? (double)m_FrameStats.TextureBinds / (double)m_FrameStats.SubmittedDraws
             : 0.0;
         CK_LOG_FMT("FFPStats",
-                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u packetsQueued=%u packetsReplayed=%u packetFallbacks=%u packetFlushes=%u packetUniformOverflow=%u packetRuns=%u packetMaxRun=%u packetSkipState=%u packetSkipTex=%u packetSkipUniform=%u packetStaticUniformUploads=%u packetStaticUniformSkips=%u packetObjectUniformUploads=%u packetObjectUniformSkips=%u packetSkipVB=%u packetSkipIB=%u packetStaticBuilds=%u packetStaticReuses=%u packetStaticInterns=%u packetSortSkips=%u drawStateCacheHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
+                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u packetsQueued=%u packetsReplayed=%u packetFallbacks=%u packetFlushes=%u packetUniformOverflow=%u packetRuns=%u packetMaxRun=%u packetSkipState=%u packetSkipTex=%u packetSkipUniform=%u packetStaticUniformUploads=%u packetStaticUniformSkips=%u packetObjectUniformUploads=%u packetObjectUniformSkips=%u packetSkipVB=%u packetSkipIB=%u packetStaticBuilds=%u packetStaticReuses=%u packetStaticInterns=%u packetSortSkips=%u packetAdaptiveSamples=%u packetAdaptiveBypasses=%u packetAdaptiveSavedBindEstimate=%u packetViewProjRebuilds=%u drawStateCacheHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
                    m_FrameStats.FrameIndex,
                    m_FrameStats.SoftwareDraws,
                    m_FrameStats.HardwareDraws,
@@ -2259,6 +2335,10 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.RenderPacketStaticPayloadReuses,
                    m_FrameStats.RenderPacketStaticPayloadInterns,
                    m_FrameStats.RenderPacketSortSkips,
+                   m_FrameStats.RenderPacketAdaptiveSamples,
+                   m_FrameStats.RenderPacketAdaptiveBypasses,
+                   m_FrameStats.RenderPacketAdaptiveSavedBindEstimate,
+                   m_FrameStats.RenderPacketViewProjectionRebuilds,
                    m_FrameStats.DrawStateCacheHits,
                    m_FrameStats.DrawStateRebuilds,
                    m_FrameStats.TransientVertexBytes,
@@ -2331,6 +2411,8 @@ CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView vi
                                                                  CKDWORD vertexLayout) const
 {
     if (!m_OpaqueSortingEnabled || !m_OpaquePacketAllowed)
+        return FALSE;
+    if (m_OpaquePacketAdaptiveBypass)
         return FALSE;
     if (!m_Context || !vb || !ib || !vertexLayout)
         return FALSE;
@@ -2481,6 +2563,19 @@ void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
     memset(&m_OpaqueLastPacketSortKey, 0, sizeof(m_OpaqueLastPacketSortKey));
 }
 
+void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
+{
+    m_OpaquePacketAdaptiveBypass = FALSE;
+    m_OpaquePacketAdaptiveSamples = 0;
+    m_OpaquePacketAdaptiveBypasses = 0;
+    m_OpaquePacketAdaptiveSavedBindEstimate = 0;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    m_FrameStats.RenderPacketAdaptiveSamples = 0;
+    m_FrameStats.RenderPacketAdaptiveBypasses = 0;
+    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate = 0;
+#endif
+}
+
 void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
 {
     const int count = m_OpaqueRenderPackets.Size();
@@ -2614,7 +2709,8 @@ void CKFixedFunctionPipeline::ReplayVertexBufferPacket(CKRasterizerEncoder *enco
     }
 
     CKBOOL sameTextures = cache->HasTextures &&
-                          cache->ActiveTextureCount == packet.ActiveTextureCount;
+                          cache->ActiveTextureCount == packet.ActiveTextureCount &&
+                          cache->TextureSetHash == packet.SortKey.TextureSetHash;
     if (sameTextures) {
         for (CKDWORD i = 0; i < packet.ActiveTextureCount; ++i) {
             if (!CKFFRenderPacketTextureEquals(cache->Textures[i], packet.Textures[i])) {
@@ -2636,6 +2732,7 @@ void CKFixedFunctionPipeline::ReplayVertexBufferPacket(CKRasterizerEncoder *enco
 #endif
         }
         cache->ActiveTextureCount = packet.ActiveTextureCount;
+        cache->TextureSetHash = packet.SortKey.TextureSetHash;
         for (CKDWORD i = 0; i < packet.ActiveTextureCount; ++i)
             cache->Textures[i] = packet.Textures[i];
         cache->HasTextures = TRUE;
@@ -2682,7 +2779,8 @@ void CKFixedFunctionPipeline::ReplayVertexBufferPacket(CKRasterizerEncoder *enco
 #endif
 }
 
-void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder)
+void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
+                                                       CKBOOL forceDirectReplay)
 {
     if (!HasOpaqueRenderPackets())
         return;
@@ -2694,7 +2792,8 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     }
 
     const int packetCount = m_OpaqueRenderPackets.Size();
-    const CKBOOL directReplay = (packetCount < 2 ||
+    const CKBOOL directReplay = (forceDirectReplay ||
+                                 packetCount < 2 ||
                                  packetCount < CKFF_RENDER_PACKET_MIN_SORT_COUNT ||
                                  m_OpaquePacketsSingleKey ||
                                  m_OpaquePacketsAlreadySorted) ? TRUE : FALSE;
