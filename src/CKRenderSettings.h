@@ -9,6 +9,7 @@ enum class CKRenderSettingsSection {
     Root,
     Debug,
     DebugFrameLog,
+    DebugDrawMap,
     DebugRenderStats,
     DebugFFPStats,
     DebugFFPLog,
@@ -73,6 +74,10 @@ inline CKRenderSettingsView CKRenderFrameLogSettings() {
     return CKRenderSettings(CKRenderSettingsSection::DebugFrameLog);
 }
 
+inline CKRenderSettingsView CKRenderDrawMapSettings() {
+    return CKRenderSettings(CKRenderSettingsSection::DebugDrawMap);
+}
+
 inline CKRenderSettingsView CKRenderRenderStatsSettings() {
     return CKRenderSettings(CKRenderSettingsSection::DebugRenderStats);
 }
@@ -106,6 +111,21 @@ struct CKRenderFrameLogConfig {
 
 struct CKRenderRenderStatsConfig {
     bool Enabled;
+};
+
+struct CKRenderDrawMapConfig {
+    bool Enabled;
+    bool Submits;
+    bool Resources;
+    bool Views;
+    bool Markers;
+    bool Frame;
+    bool Summary;
+
+    bool Any() const {
+        return Enabled || Submits || Resources || Views ||
+               Markers || Frame || Summary;
+    }
 };
 
 struct CKRenderFFPStatsConfig {
@@ -142,6 +162,7 @@ struct CKRenderMeshLogConfig {
 
 struct CKRenderDiagnosticsConfig {
     CKRenderFrameLogConfig FrameLog;
+    CKRenderDrawMapConfig DrawMap;
     CKRenderRenderStatsConfig RenderStats;
     CKRenderFFPStatsConfig FFPStats;
     CKRenderFFPLogConfig FFPLog;

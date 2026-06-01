@@ -13,9 +13,6 @@ struct CKBgfxLogConfig {
     bool TextureBindings;
     bool Uniforms;
     bool PresentSync;
-    bool DrawMap;
-    bool DrawMapStrict;
-    bool DrawMapSummary;
 };
 
 struct CKBgfxDebugConfig {
