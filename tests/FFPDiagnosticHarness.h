@@ -65,9 +65,15 @@ public:
     CKRenderView SubmitViews[32] = {};
     CKDWORD VertexBufferOrder[32] = {};
     CKDWORD IndexBufferOrder[32] = {};
+    CKDWORD TransientInstanceSetCount = 0;
+    CKDWORD LastInstanceCount = 0;
+    CKDWORD LastInstanceStride = 0;
+    CKDWORD TotalInstanceCount = 0;
+    CKDWORD TotalInstanceBytes = 0;
     std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
+    std::vector<CKBYTE> LastInstanceBytes;
     std::unordered_set<CKDWORD> MatrixUniforms;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
@@ -114,7 +120,20 @@ public:
             LastIndexBytes.assign(begin, begin + buffer->Size);
         }
     }
-    void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *) override {}
+    void SetTransientInstanceBuffer(CKDWORD, CKTransientInstanceBuffer *buffer) override {
+        ++TransientInstanceSetCount;
+        LastInstanceBytes.clear();
+        LastInstanceCount = 0;
+        LastInstanceStride = 0;
+        if (buffer && buffer->Data && buffer->Size > 0) {
+            const CKBYTE *begin = static_cast<const CKBYTE *>(buffer->Data);
+            LastInstanceBytes.assign(begin, begin + buffer->Size);
+            LastInstanceCount = buffer->InstanceCount;
+            LastInstanceStride = buffer->Stride;
+            TotalInstanceCount += buffer->InstanceCount;
+            TotalInstanceBytes += buffer->Size;
+        }
+    }
     void SetTexture(CKDWORD stage, CKDWORD uniform, CKDWORD texture, CKSamplerDesc *sampler) override {
         LastTextureStage = stage;
         LastTextureUniform = uniform;
@@ -181,6 +200,8 @@ public:
     }
 
     FFPDiagnosticEncoder Encoder;
+    CKBOOL AllowTransientInstanceBuffer = TRUE;
+    CKBOOL FailTransientInstanceBuffer = FALSE;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     const void *LastVertexShaderCode = nullptr;
@@ -286,10 +307,27 @@ public:
         buffer->Index32 = index32;
         return TRUE;
     }
-    CKBOOL AllocTransientInstanceBuffer(CKTransientInstanceBuffer *, CKDWORD, CKDWORD) override { return FALSE; }
+    CKBOOL AllocTransientInstanceBuffer(CKTransientInstanceBuffer *buffer, CKDWORD instanceCount, CKDWORD layout) override {
+        if (!AllowTransientInstanceBuffer || FailTransientInstanceBuffer)
+            return FALSE;
+        const CKDWORD stride = m_LayoutStride[layout];
+        TestCheck(stride > 0, "FFP diagnostic context must know transient instance stride");
+        m_InstanceStorage.assign(instanceCount * stride, 0);
+        buffer->Data = m_InstanceStorage.data();
+        buffer->Size = (CKDWORD)m_InstanceStorage.size();
+        buffer->StartInstance = 0;
+        buffer->InstanceCount = instanceCount;
+        buffer->Stride = stride;
+        buffer->Layout = layout;
+        return TRUE;
+    }
     CKDWORD GetAvailTransientVertexBuffer(CKDWORD vertexCount, CKDWORD) override { return vertexCount; }
     CKDWORD GetAvailTransientIndexBuffer(CKDWORD indexCount, CKBOOL) override { return indexCount; }
-    CKDWORD GetAvailTransientInstanceBuffer(CKDWORD, CKDWORD) override { return 0; }
+    CKDWORD GetAvailTransientInstanceBuffer(CKDWORD instanceCount, CKDWORD layout) override {
+        if (!AllowTransientInstanceBuffer || FailTransientInstanceBuffer)
+            return 0;
+        return m_LayoutStride[layout] > 0 ? instanceCount : 0;
+    }
     CKRasterizerEncoder *BeginEncoder() override { return &Encoder; }
     void EndEncoder(CKRasterizerEncoder *) override {}
     CKERROR Frame(CKRST_FRAME_SYNC_MODE) override { return CK_OK; }
@@ -299,6 +337,7 @@ private:
     std::unordered_map<CKDWORD, CKDWORD> m_LayoutStride;
     std::vector<CKBYTE> m_VertexStorage;
     std::vector<CKBYTE> m_IndexStorage;
+    std::vector<CKBYTE> m_InstanceStorage;
 };
 
 #endif // CKRE_FFP_DIAGNOSTIC_HARNESS_H
