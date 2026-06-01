@@ -288,6 +288,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     if (renderStats)
         sectionStart = CKRenderPerfNow();
     rc->m_FFPipeline.BeginDebugFrame();
+    rc->m_FFPipeline.FlushOpaqueRenderPackets();
     rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
     if (renderStats)
         CKRenderPerfAddSection(CKRPS_BEGIN_FRAME, CKRenderPerfElapsedUs(sectionStart));
@@ -362,6 +363,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rm->m_SceneGraphRootNode.RenderTransparentObjects(rc, renderFlags);
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_OPAQUE_TRAVERSAL, CKRenderPerfElapsedUs(sectionStart));
+
+        rc->m_FFPipeline.FlushOpaqueRenderPackets();
 
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
 

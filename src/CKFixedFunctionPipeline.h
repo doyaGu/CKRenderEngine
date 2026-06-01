@@ -54,6 +54,29 @@ struct CKFFFrameStats {
     CKDWORD ConsecutiveVertexBufferRepeats;
     CKDWORD ConsecutiveIndexBufferRepeats;
     CKDWORD ConsecutiveWorldMatrixRepeats;
+    CKDWORD QueuedRenderPackets;
+    CKDWORD ReplayedRenderPackets;
+    CKDWORD RenderPacketFallbacks;
+    CKDWORD RenderPacketFlushes;
+    CKDWORD RenderPacketUniformOverflows;
+    CKDWORD RenderPacketSkippedStates;
+    CKDWORD RenderPacketSkippedTextures;
+    CKDWORD RenderPacketSkippedUniforms;
+    CKDWORD RenderPacketStaticUniformUploads;
+    CKDWORD RenderPacketStaticUniformSkips;
+    CKDWORD RenderPacketObjectUniformUploads;
+    CKDWORD RenderPacketObjectUniformSkips;
+    CKDWORD RenderPacketSkippedVertexBuffers;
+    CKDWORD RenderPacketSkippedIndexBuffers;
+    CKDWORD RenderPacketRuns;
+    CKDWORD RenderPacketMaxRunLength;
+    CKDWORD RenderPacketStaticPayloadBuilds;
+    CKDWORD RenderPacketStaticPayloadReuses;
+    CKDWORD RenderPacketStaticPayloadInterns;
+    CKDWORD RenderPacketSortSkips;
+    double RenderPacketBuildUs;
+    double RenderPacketSortUs;
+    double RenderPacketReplayUs;
     CKDWORD DrawStateCacheHits;
     CKDWORD DrawStateRebuilds;
     CKDWORD TransientVertexBytes;
@@ -93,6 +116,119 @@ struct CKFFDiagnosticConfig {
     int StatsInterval;
 };
 #endif
+
+#define CKFF_RENDER_PACKET_MAX_UNIFORMS 16
+#define CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S 192
+#define CKFF_RENDER_PACKET_MARKER_SIZE 512
+
+struct CKFFRenderPacketUniformEntry {
+    CKDWORD Uniform;
+    CKDWORD Offset;
+    CKDWORD Count;
+    CKDWORD Vec4Count;
+};
+
+struct CKFFRenderPacketUniformPayload {
+    CKDWORD EntryCount;
+    CKDWORD Vec4Count;
+    CKDWORD Hash;
+    CKFFRenderPacketUniformEntry Entries[CKFF_RENDER_PACKET_MAX_UNIFORMS];
+    float Values[CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S][4];
+};
+
+struct CKFFUniformSink {
+    CKRasterizerEncoder *Encoder;
+    CKFFRenderPacketUniformPayload *StaticPayload;
+    CKFFRenderPacketUniformPayload *ObjectPayload;
+    CKBOOL EmitStatic;
+    CKBOOL EmitObject;
+    CKBOOL Failed;
+};
+
+struct CKFFRenderPacketTextureBinding {
+    CKDWORD Stage;
+    CKDWORD Uniform;
+    CKDWORD Texture;
+    CKDWORD TextureFlags;
+    CKSamplerDesc Sampler;
+};
+
+struct CKRenderPacketObjectUniforms {
+    CKDWORD MatrixUniform;
+    CKDWORD MatrixCount;
+    VxMatrix Matrices[4];
+};
+
+struct CKRenderPacketSortKey {
+    CKDWORD Program;
+    CKDWORD DrawStateLo;
+    CKDWORD DrawStateMid;
+    CKDWORD DrawStateHi;
+    CKDWORD StencilRef;
+    CKDWORD StencilReadMask;
+    CKDWORD StencilWriteMask;
+    CKDWORD StaticUniformHash;
+    CKDWORD TextureSetHash;
+    CKDWORD ActiveTextureCount;
+    CKDWORD VertexLayout;
+    CKDWORD VertexBuffer;
+    CKDWORD BaseVertex;
+    CKDWORD VertexCount;
+    CKDWORD IndexBuffer;
+    CKDWORD StartIndex;
+    CKDWORD IndexCount;
+};
+
+struct CKRenderPacket {
+    CKDWORD Serial;
+    CKRenderView View;
+    VXPRIMITIVETYPE Type;
+    CKDWORD Program;
+    CKDWORD Depth;
+    CKDrawState DrawState;
+    CKDWORD StencilRef;
+    CKDWORD StencilReadMask;
+    CKDWORD StencilWriteMask;
+    CKDWORD VertexLayout;
+    CKDWORD VertexBuffer;
+    CKDWORD IndexBuffer;
+    CKDWORD BaseVertex;
+    CKDWORD VertexCount;
+    CKDWORD StartIndex;
+    CKDWORD IndexCount;
+    CKDWORD ActiveTextureCount;
+    CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
+    CKDWORD StaticUniformIndex;
+    CKRenderPacketObjectUniforms ObjectUniforms;
+    CKRenderPacketSortKey SortKey;
+    VxMatrix World;
+    char Marker[CKFF_RENDER_PACKET_MARKER_SIZE];
+};
+
+struct CKRenderPacketReplayCache {
+    CKBOOL HasState;
+    CKBOOL HasStencil;
+    CKBOOL HasTextures;
+    CKBOOL HasStaticUniforms;
+    CKBOOL HasObjectUniforms;
+    CKBOOL HasVertexLayout;
+    CKBOOL HasVertexBuffer;
+    CKBOOL HasIndexBuffer;
+    CKDrawState DrawState;
+    CKDWORD StencilRef;
+    CKDWORD StencilReadMask;
+    CKDWORD StencilWriteMask;
+    CKDWORD ActiveTextureCount;
+    CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
+    CKDWORD StaticUniformIndex;
+    CKDWORD VertexLayout;
+    CKDWORD VertexBuffer;
+    CKDWORD BaseVertex;
+    CKDWORD VertexCount;
+    CKDWORD IndexBuffer;
+    CKDWORD StartIndex;
+    CKDWORD IndexCount;
+};
 
 class CKFixedFunctionPipeline {
 public:
@@ -146,6 +282,12 @@ public:
                           CKDWORD startIndex, CKDWORD indexCount,
                           CKDWORD dpFlags, CKDWORD formatFlags,
                           CKDWORD vertexLayout);
+
+    CKBOOL HasOpaqueRenderPackets() const { return m_OpaqueRenderPackets.Size() > 0; }
+    void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr);
+    void SetOpaqueSortingEnabled(CKBOOL enabled) { m_OpaqueSortingEnabled = enabled; }
+    void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePacketAllowed = allowed; }
+    CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePacketAllowed; }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -227,8 +369,21 @@ private:
                                         const CKBYTE *texcoordComponentCounts = nullptr);
     CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
+    void MarkStaticUniformsDirty();
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
+    CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
+                       CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
+    void EmitUniformPayloads(CKFFUniformSink *sink);
+    CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
+                                CKFFRenderPacketUniformPayload *objectPayload);
+    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload);
+    CKBOOL BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload);
+    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms) const;
+    CKBOOL CanBuildPacketObjectUniforms() const;
+    void UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
+                                    const CKRenderPacketObjectUniforms &uniforms);
+    void UploadUniformPayload(CKRasterizerEncoder *encoder, const CKFFRenderPacketUniformPayload &payload);
     CKDWORD CurrentTextureMatrixUploadCount() const;
     bool CurrentShaderUsesBumpEnv() const;
     bool CurrentShaderUsesTexFactor() const;
@@ -239,6 +394,48 @@ private:
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
     float ComputeDepthKey() const;
+    CKBOOL CanQueueOpaqueVertexBufferPacket(CKRenderView view, VXPRIMITIVETYPE type,
+                                            CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout) const;
+    CKBOOL BuildVertexBufferPacket(CKRasterizerEncoder *encoder,
+                                   CKRenderPacket *packet, CKRenderView view,
+                                   VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                                   CKDWORD baseVertex, CKDWORD vertexCount,
+                                   CKDWORD startIndex, CKDWORD indexCount,
+                                   CKDWORD dpFlags, CKDWORD formatFlags,
+                                   CKDWORD vertexLayout);
+    void SubmitVertexBufferPacketImmediate(CKRasterizerEncoder *encoder, CKRenderView view,
+                                           VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                                           CKDWORD baseVertex, CKDWORD vertexCount,
+                                           CKDWORD startIndex, CKDWORD indexCount,
+                                           CKDWORD dpFlags, CKDWORD formatFlags,
+                                           CKDWORD vertexLayout);
+    void ReplayVertexBufferPacket(CKRasterizerEncoder *encoder,
+                                  const CKRenderPacket &packet,
+                                  CKRenderPacketReplayCache *cache,
+                                  CKBOOL lastPacket);
+    void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
+    void ClearOpaqueRenderPackets();
+    CKDWORD InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload);
+    const CKFFRenderPacketUniformPayload &GetStaticUniformPayload(CKDWORD index) const;
+    void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
+    void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
+    CKDWORD HashPacketUniformPayload(const CKFFRenderPacketUniformPayload &payload) const;
+    CKDWORD HashPacketTextureSet(const CKRenderPacket &packet) const;
+
+    XArray<CKRenderPacket> m_OpaqueRenderPackets;
+    XArray<CKFFRenderPacketUniformPayload> m_OpaqueStaticUniformPayloads;
+    CKDWORD m_OpaqueRenderPacketSerial;
+    CKDWORD m_StaticUniformDirtySerial;
+    CKDWORD m_StaticUniformCachedSerial;
+    CKDWORD m_StaticUniformCachedIndex;
+    CKBOOL m_StaticUniformCacheValid;
+    CKBOOL m_OpaquePacketsAlreadySorted;
+    CKBOOL m_OpaquePacketsSingleKey;
+    CKBOOL m_OpaquePacketsHasLastKey;
+    CKRenderPacketSortKey m_OpaqueFirstPacketSortKey;
+    CKRenderPacketSortKey m_OpaqueLastPacketSortKey;
+    CKBOOL m_OpaqueSortingEnabled;
+    CKBOOL m_OpaquePacketAllowed;
 };
 
 class CKFFStateGuard {
@@ -277,6 +474,22 @@ private:
     CKFixedFunctionPipeline *m_Pipeline;
     VXRENDERSTATETYPE m_State;
     CKDWORD m_Value;
+};
+
+class CKFFOpaquePacketGuard {
+public:
+    CKFFOpaquePacketGuard(CKFixedFunctionPipeline &pipeline, CKBOOL active = TRUE);
+    ~CKFFOpaquePacketGuard();
+
+    CKFFOpaquePacketGuard(const CKFFOpaquePacketGuard &) = delete;
+    CKFFOpaquePacketGuard &operator=(const CKFFOpaquePacketGuard &) = delete;
+
+    void Restore();
+    void Dismiss();
+
+private:
+    CKFixedFunctionPipeline *m_Pipeline;
+    CKBOOL m_SavedAllowed;
 };
 
 #endif // CKFIXEDFUNCTIONPIPELINE_H

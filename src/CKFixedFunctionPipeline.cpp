@@ -6,9 +6,11 @@
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
+
+#define CKFF_RENDER_PACKET_MIN_SORT_COUNT 64
+#define CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT 128
 
 static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uniform) {
     switch (uniform) {
@@ -127,6 +129,206 @@ static bool CKFFTextureSetEquals(
     return true;
 }
 
+static CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash)
+{
+    const CKBYTE *bytes = (const CKBYTE *)data;
+    for (CKDWORD i = 0; i < size; ++i) {
+        hash ^= (CKDWORD)bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static CKDWORD CKFFStaticTextureFlags(CKDWORD flags)
+{
+    return flags & (CKRST_TEXTURE_CUBEMAP |
+                    CKRST_TEXTURE_VOLUMEMAP |
+                    CKRST_TEXTURE_DEPTHSTENCIL);
+}
+
+static CKBOOL CKFFSamplerEquals(const CKSamplerDesc &a, const CKSamplerDesc &b)
+{
+    return memcmp(&a, &b, sizeof(CKSamplerDesc)) == 0 ? TRUE : FALSE;
+}
+
+static CKBOOL CKFFRenderPacketTextureEquals(const CKFFRenderPacketTextureBinding &a,
+                                            const CKFFRenderPacketTextureBinding &b)
+{
+    if (a.Stage != b.Stage || a.Uniform != b.Uniform ||
+        a.Texture != b.Texture || a.TextureFlags != b.TextureFlags)
+        return FALSE;
+    return CKFFSamplerEquals(a.Sampler, b.Sampler);
+}
+
+static CKBOOL CKFFRenderPacketUniformPayloadEquals(const CKFFRenderPacketUniformPayload &a,
+                                                   const CKFFRenderPacketUniformPayload &b)
+{
+    if (a.Hash != b.Hash || a.EntryCount != b.EntryCount || a.Vec4Count != b.Vec4Count)
+        return FALSE;
+    if (a.EntryCount > 0 &&
+        memcmp(a.Entries, b.Entries, a.EntryCount * sizeof(CKFFRenderPacketUniformEntry)) != 0)
+        return FALSE;
+    if (a.Vec4Count > 0 &&
+        memcmp(a.Values, b.Values, a.Vec4Count * sizeof(float) * 4) != 0)
+        return FALSE;
+    return TRUE;
+}
+
+static int CKFFCompareDword(CKDWORD a, CKDWORD b)
+{
+    if (a < b)
+        return -1;
+    if (a > b)
+        return 1;
+    return 0;
+}
+
+static int CKFFCompareRenderPacketSortKey(const CKRenderPacketSortKey &a,
+                                          const CKRenderPacketSortKey &b)
+{
+    int cmp = CKFFCompareDword(a.Program, b.Program);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.DrawStateLo, b.DrawStateLo);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.DrawStateMid, b.DrawStateMid);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.DrawStateHi, b.DrawStateHi);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.StencilRef, b.StencilRef);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.StencilReadMask, b.StencilReadMask);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.StencilWriteMask, b.StencilWriteMask);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.StaticUniformHash, b.StaticUniformHash);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.TextureSetHash, b.TextureSetHash);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.ActiveTextureCount, b.ActiveTextureCount);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.VertexLayout, b.VertexLayout);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.VertexBuffer, b.VertexBuffer);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.BaseVertex, b.BaseVertex);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.VertexCount, b.VertexCount);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.IndexBuffer, b.IndexBuffer);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.StartIndex, b.StartIndex);
+    if (cmp)
+        return cmp;
+    return CKFFCompareDword(a.IndexCount, b.IndexCount);
+}
+
+static CKBOOL CKFFRenderPacketSortKeyEquals(const CKRenderPacketSortKey &a,
+                                            const CKRenderPacketSortKey &b)
+{
+    return CKFFCompareRenderPacketSortKey(a, b) == 0 ? TRUE : FALSE;
+}
+
+static int CKFFCompareDrawState(const CKDrawState &a, const CKDrawState &b)
+{
+    int cmp = CKFFCompareDword(a.Lo, b.Lo);
+    if (cmp)
+        return cmp;
+    cmp = CKFFCompareDword(a.Mid, b.Mid);
+    if (cmp)
+        return cmp;
+    return CKFFCompareDword(a.Hi, b.Hi);
+}
+
+static int CKFFComparePacketTextureSet(const CKRenderPacket &a,
+                                       const CKRenderPacket &b)
+{
+    int cmp = CKFFCompareDword(a.ActiveTextureCount, b.ActiveTextureCount);
+    if (cmp)
+        return cmp;
+    for (CKDWORD i = 0; i < a.ActiveTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        cmp = CKFFCompareDword(a.Textures[i].Stage, b.Textures[i].Stage);
+        if (cmp)
+            return cmp;
+        cmp = CKFFCompareDword(a.Textures[i].Texture, b.Textures[i].Texture);
+        if (cmp)
+            return cmp;
+        cmp = CKFFCompareDword(a.Textures[i].Uniform, b.Textures[i].Uniform);
+        if (cmp)
+            return cmp;
+        cmp = CKFFCompareDword(a.Textures[i].TextureFlags, b.Textures[i].TextureFlags);
+        if (cmp)
+            return cmp;
+        cmp = memcmp(&a.Textures[i].Sampler, &b.Textures[i].Sampler, sizeof(CKSamplerDesc));
+        if (cmp < 0)
+            return -1;
+        if (cmp > 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int CKFFCompareRenderPacket(const CKRenderPacket &a,
+                                   const CKRenderPacket &b)
+{
+    int cmp = CKFFCompareRenderPacketSortKey(a.SortKey, b.SortKey);
+    if (cmp)
+        return cmp;
+    return CKFFCompareDword(a.Serial, b.Serial);
+}
+
+static CKBOOL CKFFRenderPacketSameRunKey(const CKRenderPacket &a,
+                                         const CKRenderPacket &b)
+{
+    return CKFFRenderPacketSortKeyEquals(a.SortKey, b.SortKey);
+}
+
+static CKBOOL CKFFRenderPacketAddUniform(CKFFRenderPacketUniformPayload *payload,
+                                         CKDWORD uniform,
+                                         const void *data,
+                                         CKDWORD count,
+                                         CKDWORD vec4Count)
+{
+    if (!payload || !data || count == 0)
+        return TRUE;
+    if (payload->EntryCount >= CKFF_RENDER_PACKET_MAX_UNIFORMS)
+        return FALSE;
+    if (payload->Vec4Count + vec4Count > CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S)
+        return FALSE;
+
+    CKFFRenderPacketUniformEntry &entry = payload->Entries[payload->EntryCount];
+    entry.Uniform = uniform;
+    entry.Offset = payload->Vec4Count;
+    entry.Count = count;
+    entry.Vec4Count = vec4Count;
+    memcpy(&payload->Values[payload->Vec4Count][0], data, vec4Count * sizeof(float) * 4);
+    ++payload->EntryCount;
+    payload->Vec4Count += vec4Count;
+    return TRUE;
+}
+
+static CKBOOL CKFFRenderPacketAddUniform(CKFFRenderPacketUniformPayload *payload,
+                                         CKDWORD uniform,
+                                         const void *data,
+                                         CKDWORD count)
+{
+    return CKFFRenderPacketAddUniform(payload, uniform, data, count, count);
+}
+
 static CKBYTE CKFFTexcoordComponentCount(CKDWORD count) {
     if (count < 1 || count > 4)
         return 2;
@@ -136,13 +338,21 @@ static CKBYTE CKFFTexcoordComponentCount(CKDWORD count) {
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
-      m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL) {
+      m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
+      m_OpaqueRenderPacketSerial(0), m_StaticUniformDirtySerial(1),
+      m_StaticUniformCachedSerial(0), m_StaticUniformCachedIndex(0),
+      m_StaticUniformCacheValid(FALSE), m_OpaquePacketsAlreadySorted(TRUE),
+      m_OpaquePacketsSingleKey(TRUE), m_OpaquePacketsHasLastKey(FALSE),
+      m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
     m_DiagnosticConfig.StatsEnabled = settings.Enabled;
     m_DiagnosticConfig.UniformHistEnabled = settings.UniformHistogram;
     m_DiagnosticConfig.StatsInterval = settings.Interval;
 #endif
+    memset(&m_OpaqueFirstPacketSortKey, 0, sizeof(m_OpaqueFirstPacketSortKey));
+    memset(&m_OpaqueLastPacketSortKey, 0, sizeof(m_OpaqueLastPacketSortKey));
+    m_OpaqueSortingEnabled = CKRenderFFPSettings().GetBool("SortOpaqueObjects", false) ? TRUE : FALSE;
 
     Vx3DMatrixIdentity(m_World);
     Vx3DMatrixIdentity(m_View);
@@ -195,9 +405,11 @@ void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     m_TransientGeometry.Init(ctx, &m_VertexLayoutCache);
     m_RenderPipeline.Init(ctx);
     m_DirtyFlags = CKFF_DIRTY_ALL;
+    ClearOpaqueRenderPackets();
 }
 
 void CKFixedFunctionPipeline::Shutdown() {
+    ClearOpaqueRenderPackets();
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
     m_ShaderCache.Shutdown();
@@ -211,8 +423,12 @@ void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, C
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
-    m_AlphaTestPrecision = precision & 0xFu;
+    precision &= 0xFu;
+    if (m_AlphaTestPrecision == precision)
+        return;
+    m_AlphaTestPrecision = precision;
     m_DirtyFlags |= CKFF_DIRTY_ALPHATEST;
+    MarkStaticUniformsDirty();
 }
 
 CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
@@ -301,11 +517,44 @@ void CKFFRenderStateGuard::Dismiss() {
     m_Pipeline = nullptr;
 }
 
+CKFFOpaquePacketGuard::CKFFOpaquePacketGuard(CKFixedFunctionPipeline &pipeline, CKBOOL active)
+    : m_Pipeline(active ? &pipeline : nullptr),
+      m_SavedAllowed(active ? pipeline.GetOpaqueRenderPacketsAllowed() : TRUE) {
+    if (m_Pipeline) {
+        m_Pipeline->FlushOpaqueRenderPackets();
+        m_Pipeline->SetOpaqueRenderPacketsAllowed(FALSE);
+    }
+}
+
+CKFFOpaquePacketGuard::~CKFFOpaquePacketGuard() {
+    Restore();
+}
+
+void CKFFOpaquePacketGuard::Restore() {
+    if (!m_Pipeline)
+        return;
+    m_Pipeline->SetOpaqueRenderPacketsAllowed(m_SavedAllowed);
+    m_Pipeline = nullptr;
+}
+
+void CKFFOpaquePacketGuard::Dismiss() {
+    m_Pipeline = nullptr;
+}
+
 // ============================================================================
 // State tracking
 // ============================================================================
 
+void CKFixedFunctionPipeline::MarkStaticUniformsDirty()
+{
+    ++m_StaticUniformDirtySerial;
+    if (m_StaticUniformDirtySerial == 0)
+        ++m_StaticUniformDirtySerial;
+}
+
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
+    if (m_DrawStateCache.GetRenderState(state) == value)
+        return;
     m_DrawStateCache.SetRenderState(state, value);
 
     switch (state) {
@@ -332,6 +581,7 @@ void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD va
     default:
         break;
     }
+    MarkStaticUniformsDirty();
 }
 
 CKDWORD CKFixedFunctionPipeline::GetRenderState(VXRENDERSTATETYPE state) const {
@@ -375,6 +625,7 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
     Vx3DMatrixIdentity(m_TexMatrix[stage]);
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
@@ -403,11 +654,14 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
     m_TextureFlags[stage] = snapshot.TextureFlags;
     memcpy(m_StageStates[stage], snapshot.States, sizeof(m_StageStates[stage]));
     m_TexMatrix[stage] = snapshot.TextureMatrix;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
+    if (m_StageStates[stage][(int)type] == value)
+        return;
 
     if (type == CKRST_TSS_STAGEBLEND && value == 0 && stage > 0) {
         DisableTextureStagesFrom(stage);
@@ -436,6 +690,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
             m_StageStates[stage][CKRST_TSS_AARG2] = alphaArg2;
         }
     }
+    MarkStaticUniformsDirty();
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
@@ -454,12 +709,14 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     m_Viewport[1] = -2.0f / h;
     m_Viewport[2] = -1.0f - (2.0f * x / w);
     m_Viewport[3] = 1.0f + (2.0f * y / h);
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetUserClipPlane(int index, const VxPlane &plane) {
     if (index < 0 || index >= 6)
         return;
     m_UserClipPlanes[index] = plane;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix) {
@@ -471,16 +728,20 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
     case VXMATRIX_VIEW:
         m_View = matrix;
         m_DirtyFlags |= CKFF_DIRTY_MATRICES | CKFF_DIRTY_LIGHTS;
+        MarkStaticUniformsDirty();
         break;
     case VXMATRIX_PROJECTION:
         m_Projection = matrix;
         m_DirtyFlags |= CKFF_DIRTY_MATRICES;
+        MarkStaticUniformsDirty();
         break;
     default:
         if (type >= VXMATRIX_TEXTURE0 && type <= VXMATRIX_TEXTURE7) {
             int idx = type - VXMATRIX_TEXTURE0;
-            if (idx < CKFF_MAX_TEXTURE_STAGES)
+            if (idx < CKFF_MAX_TEXTURE_STAGES) {
                 m_TexMatrix[idx] = matrix;
+                MarkStaticUniformsDirty();
+            }
         }
         break;
     }
@@ -497,6 +758,7 @@ void CKFixedFunctionPipeline::ResetMaterial() {
     m_Material.Ambient[2] = 1.0f;
     m_Material.Ambient[3] = 1.0f;
     m_DirtyFlags |= CKFF_DIRTY_MATERIAL;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
@@ -519,6 +781,7 @@ void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
     m_Material.Emissive[3] = mat->Emissive.a;
     m_Material.Power = mat->SpecularPower;
     m_DirtyFlags |= CKFF_DIRTY_MATERIAL;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
@@ -563,6 +826,7 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
     dst.SpotParams[3] = 0.0f;
 
     m_DirtyFlags |= CKFF_DIRTY_LIGHTS;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
@@ -574,6 +838,7 @@ void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
         if (m_LightEnabled[i]) m_ActiveLightCount++;
     }
     m_DirtyFlags |= CKFF_DIRTY_LIGHTS;
+    MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
@@ -582,8 +847,17 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
 
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
+    const CKDWORD normalizedFlags = textureHandle != 0 ? textureFlags : 0;
+    if (m_TextureHandles[stage] == textureHandle && m_TextureFlags[stage] == normalizedFlags)
+        return;
+    const CKBOOL oldHasTexture = m_TextureHandles[stage] != 0 ? TRUE : FALSE;
+    const CKBOOL newHasTexture = textureHandle != 0 ? TRUE : FALSE;
+    const CKDWORD oldStaticFlags = CKFFStaticTextureFlags(m_TextureFlags[stage]);
+    const CKDWORD newStaticFlags = CKFFStaticTextureFlags(normalizedFlags);
     m_TextureHandles[stage] = textureHandle;
-    m_TextureFlags[stage] = textureHandle != 0 ? textureFlags : 0;
+    m_TextureFlags[stage] = normalizedFlags;
+    if (oldHasTexture != newHasTexture || oldStaticFlags != newStaticFlags)
+        MarkStaticUniformsDirty();
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
@@ -608,6 +882,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     VxDrawPrimitiveData *data)
 {
     if (!encoder || !data || data->VertexCount == 0) return;
+    if (HasOpaqueRenderPackets())
+        FlushOpaqueRenderPackets(encoder);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats)
@@ -838,6 +1114,45 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 }
 
 void CKFixedFunctionPipeline::DrawVertexBuffer(
+    CKRasterizerEncoder *encoder, CKRenderView view,
+    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+    CKDWORD baseVertex, CKDWORD vertexCount,
+    CKDWORD startIndex, CKDWORD indexCount,
+    CKDWORD dpFlags, CKDWORD formatFlags,
+    CKDWORD vertexLayout)
+{
+    if (CanQueueOpaqueVertexBufferPacket(view, type, vb, ib, vertexLayout)) {
+        CKRenderPacket packet;
+        memset(&packet, 0, sizeof(packet));
+        if (BuildVertexBufferPacket(encoder, &packet, view, type, vb, ib,
+                                    baseVertex, vertexCount,
+                                    startIndex, indexCount,
+                                    dpFlags, formatFlags,
+                                    vertexLayout)) {
+            TrackOpaqueRenderPacket(packet);
+            m_OpaqueRenderPackets.PushBack(packet);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
+                ++m_FrameStats.QueuedRenderPackets;
+#endif
+            return;
+        }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
+            ++m_FrameStats.RenderPacketFallbacks;
+#endif
+    }
+
+    if (HasOpaqueRenderPackets())
+        FlushOpaqueRenderPackets(encoder);
+    SubmitVertexBufferPacketImmediate(encoder, view, type, vb, ib,
+                                      baseVertex, vertexCount,
+                                      startIndex, indexCount,
+                                      dpFlags, formatFlags,
+                                      vertexLayout);
+}
+
+void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     CKRasterizerEncoder *encoder, CKRenderView view,
     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
     CKDWORD baseVertex, CKDWORD vertexCount,
@@ -1340,19 +1655,42 @@ bool CKFixedFunctionPipeline::CurrentShaderUsesViewSpaceUniforms() const {
     return false;
 }
 
-void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
-    if (!encoder) return;
+CKBOOL CKFixedFunctionPipeline::EmitUniform(CKFFUniformSink *sink, CKDWORD uniform,
+                                            const void *data, CKDWORD count,
+                                            CKDWORD vec4Count, CKBOOL objectUniform)
+{
+    if (!sink || !data || count == 0)
+        return TRUE;
+    if (sink->Encoder)
+        UploadUniform(sink->Encoder, uniform, data, count);
+    if (objectUniform && !sink->EmitObject)
+        return TRUE;
+    if (!objectUniform && !sink->EmitStatic)
+        return TRUE;
+    CKFFRenderPacketUniformPayload *payload = objectUniform ? sink->ObjectPayload : sink->StaticPayload;
+    if (payload && !CKFFRenderPacketAddUniform(payload, uniform, data, count, vec4Count)) {
+        sink->Failed = TRUE;
+        return FALSE;
+    }
+    return TRUE;
+}
 
+void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink)
+{
+    if (!sink)
+        return;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     const bool fullSpecialized = m_CurrentProgramBinding.FullSpecialized;
     const bool positionT = m_CurrentShaderKey.VS.GetHasPositionT();
+    const bool emitStatic = sink->Encoder || sink->EmitStatic;
+    const bool emitObject = sink->Encoder || sink->EmitObject;
 
     VxMatrix modelView;
     VxMatrix normalMatrix;
     VxMatrix viewNormalMatrix;
     VxMatrix viewProj;
     VxMatrix modelViewProj;
-    if (!positionT) {
+    if (emitObject && !positionT) {
         const bool viewSpaceUniforms = CurrentShaderUsesViewSpaceUniforms();
         const bool vertexBlend = CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
         if (viewSpaceUniforms) {
@@ -1381,17 +1719,23 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
                 else
                     palette[i] = (i == 0) ? m_World : identity;
             }
-            UploadUniform(encoder, u.u_vertexBlendMatrices, palette, CKFF_VERTEX_BLEND_MATRIX_COUNT);
+            EmitUniform(sink, u.u_vertexBlendMatrices, palette,
+                        CKFF_VERTEX_BLEND_MATRIX_COUNT,
+                        CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
         }
-        UploadUniform(encoder, u.u_ffMatrices, matrices, viewSpaceUniforms ? 4 : 2);
+        const CKDWORD matrixCount = viewSpaceUniforms ? 4 : 2;
+        EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
     }
+    if (!emitStatic)
+        return;
+
     const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
     if (texMatrixCount > 0)
-        UploadUniform(encoder, u.u_texMatrix, m_TexMatrix, texMatrixCount);
+        EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
 
-    // bgfx uniform bindings are draw state. Since draws submit with
-    // CKRST_DISCARD_ALL, upload the current fixed-function constants for every
-    // draw instead of relying on dirty flags across submissions.
+    // bgfx uniform bindings are draw state. Packet replay can retain static
+    // draw constants across sorted opaque packets, but immediate draws still
+    // upload all constants before each submit.
     int packed = 0;
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
     const bool shaderUsesLighting = !positionT && (!fullSpecialized || ((m_CurrentShaderKey.VS.Bits & (1ull << 13)) != 0));
@@ -1399,9 +1743,8 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
         packed = CKFFPackViewLights(m_Lights, m_LightEnabled, m_ActiveLightCount,
                                     m_CurrentLightingEnabled ? TRUE : FALSE, m_View, viewLights);
 
-        if (packed > 1) {
-            UploadUniform(encoder, u.u_lights, viewLights, packed * 7);
-        }
+        if (packed > 1)
+            EmitUniform(sink, u.u_lights, viewLights, packed * 7, packed * 7, FALSE);
     }
 
     const bool fogEnabled = m_CurrentShaderKey.FS.FogEnable;
@@ -1471,32 +1814,36 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     } else if (m_CurrentShaderKey.FS.AlphaTestEnable) {
         fragmentParamCount = 1;
     }
-    if (fragmentParamCount > 0)
-        drawParamCount = std::max<CKDWORD>(drawParamCount, 8 + fragmentParamCount);
-    if (!fullSpecialized && !positionT && fogEnabled)
-        drawParamCount = std::max<CKDWORD>(drawParamCount, 8);
+    if (fragmentParamCount > 0 && drawParamCount < 8 + fragmentParamCount)
+        drawParamCount = 8 + fragmentParamCount;
+    if (!fullSpecialized && !positionT && fogEnabled && drawParamCount < 8)
+        drawParamCount = 8;
     if (drawParamCount > 0)
-        UploadUniform(encoder, u.u_ffDrawParams, drawParams, drawParamCount);
+        EmitUniform(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
 
     if (CurrentShaderUsesBumpEnv()) {
         float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
         CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
-        UploadUniform(encoder, u.u_bumpEnv, bumpEnv, CKFF_MAX_TEXTURE_STAGES * 2);
+        EmitUniform(sink, u.u_bumpEnv, bumpEnv,
+                    CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
     }
 
     if (positionT)
-        UploadUniform(encoder, u.u_viewport, m_Viewport, 1);
+        EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
 
     if (!fullSpecialized || CurrentShaderUsesStageConstant()) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
-        UploadUniform(encoder, u.u_stageParams, stageParams.Values, CKFF_STAGE_PARAM_VEC4_COUNT);
+        EmitUniform(sink, u.u_stageParams, stageParams.Values,
+                    CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
 
     if (!fullSpecialized) {
         CKFFSpecUniform ffSpec;
         CKFFPackSpecializationDwords(m_CurrentProgramBinding.Specialization, ffSpec);
-        UploadUniform(encoder, u.u_ffSpec, ffSpec.Values, CKFFSpecializationInfo::MaxSpecDwords);
+        EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
+                    CKFFSpecializationInfo::MaxSpecDwords,
+                    CKFFSpecializationInfo::MaxSpecDwords, FALSE);
     }
 
     CKFFClipPlaneUniform clip;
@@ -1504,14 +1851,149 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     if (!fullSpecialized || ((m_CurrentShaderKey.VS.Bits & (1ull << 34)) != 0)) {
         if (clipMask != 0) {
             CKFFPackClipPlaneUniforms(m_UserClipPlanes, clipMask, clip);
-            UploadUniform(encoder, u.u_clipPlanes, clip.Planes, 6);
+            EmitUniform(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
         } else {
             memset(&clip, 0, sizeof(clip));
         }
-        UploadUniform(encoder, u.u_clipParams, clip.Params, 1);
+        EmitUniform(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
     }
+}
 
+void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
+    if (!encoder)
+        return;
+    CKFFUniformSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.Encoder = encoder;
+    sink.EmitStatic = TRUE;
+    sink.EmitObject = TRUE;
+    EmitUniformPayloads(&sink);
     m_DirtyFlags = 0;
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
+                                                     CKFFRenderPacketUniformPayload *objectPayload)
+{
+    if (!staticPayload || !objectPayload)
+        return FALSE;
+    memset(staticPayload, 0, sizeof(CKFFRenderPacketUniformPayload));
+    memset(objectPayload, 0, sizeof(CKFFRenderPacketUniformPayload));
+
+    CKFFUniformSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.StaticPayload = staticPayload;
+    sink.ObjectPayload = objectPayload;
+    sink.EmitStatic = TRUE;
+    sink.EmitObject = TRUE;
+    EmitUniformPayloads(&sink);
+    if (sink.Failed)
+        return FALSE;
+
+    staticPayload->Hash = HashPacketUniformPayload(*staticPayload);
+    objectPayload->Hash = HashPacketUniformPayload(*objectPayload);
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload)
+{
+    if (!payload)
+        return FALSE;
+    memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
+
+    CKFFUniformSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.StaticPayload = payload;
+    sink.EmitStatic = TRUE;
+    sink.EmitObject = FALSE;
+    EmitUniformPayloads(&sink);
+    if (sink.Failed)
+        return FALSE;
+
+    payload->Hash = HashPacketUniformPayload(*payload);
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload)
+{
+    if (!payload)
+        return FALSE;
+    memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
+
+    CKFFUniformSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.ObjectPayload = payload;
+    sink.EmitStatic = FALSE;
+    sink.EmitObject = TRUE;
+    EmitUniformPayloads(&sink);
+    if (sink.Failed)
+        return FALSE;
+
+    payload->Hash = HashPacketUniformPayload(*payload);
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::CanBuildPacketObjectUniforms() const
+{
+    if (m_CurrentShaderKey.VS.GetHasPositionT())
+        return TRUE;
+    if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+        return FALSE;
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms) const
+{
+    if (!uniforms)
+        return FALSE;
+    memset(uniforms, 0, sizeof(CKRenderPacketObjectUniforms));
+
+    if (m_CurrentShaderKey.VS.GetHasPositionT())
+        return TRUE;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const bool viewSpaceUniforms = CurrentShaderUsesViewSpaceUniforms();
+
+    VxMatrix modelView;
+    VxMatrix normalMatrix;
+    VxMatrix viewProj;
+    VxMatrix modelViewProj;
+    if (viewSpaceUniforms) {
+        Vx3DMultiplyMatrix4(modelView, m_View, m_World);
+        Vx3DInverseMatrix(normalMatrix, modelView);
+        Vx3DTransposeMatrix(normalMatrix, normalMatrix);
+    }
+    Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
+    Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
+
+    uniforms->MatrixUniform = u.u_ffMatrices;
+    uniforms->MatrixCount = viewSpaceUniforms ? 4 : 2;
+    uniforms->Matrices[0] = modelViewProj;
+    uniforms->Matrices[1] = m_World;
+    uniforms->Matrices[2] = modelView;
+    uniforms->Matrices[3] = normalMatrix;
+    return TRUE;
+}
+
+void CKFixedFunctionPipeline::UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
+                                                        const CKRenderPacketObjectUniforms &uniforms)
+{
+    if (!encoder || uniforms.MatrixUniform == 0 || uniforms.MatrixCount == 0)
+        return;
+    encoder->SetUniform(uniforms.MatrixUniform, uniforms.Matrices,
+                        uniforms.MatrixCount);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled) {
+        ++m_FrameStats.UniformSets;
+        m_FrameStats.UniformVec4s += uniforms.MatrixCount;
+    }
+    CKDWORD slot = m_DiagnosticConfig.UniformHistEnabled
+        ? CKFFUniformDebugSlot(m_ShaderCache.GetUniforms(), uniforms.MatrixUniform)
+        : 64;
+    if (slot < 64) {
+        ++m_FrameStats.UniformHandleSets[slot];
+        m_FrameStats.UniformHandleVec4s[slot] += uniforms.MatrixCount;
+    }
+#endif
 }
 
 void CKFixedFunctionPipeline::UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count) {
@@ -1531,6 +2013,126 @@ void CKFixedFunctionPipeline::UploadUniform(CKRasterizerEncoder *encoder, CKDWOR
         m_FrameStats.UniformHandleVec4s[slot] += count;
     }
 #endif
+}
+
+void CKFixedFunctionPipeline::UploadUniformPayload(CKRasterizerEncoder *encoder,
+                                                   const CKFFRenderPacketUniformPayload &payload)
+{
+    if (!encoder)
+        return;
+    for (CKDWORD i = 0; i < payload.EntryCount; ++i) {
+        const CKFFRenderPacketUniformEntry &entry = payload.Entries[i];
+        encoder->SetUniform(entry.Uniform, &payload.Values[entry.Offset][0], entry.Count);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled) {
+            ++m_FrameStats.UniformSets;
+            m_FrameStats.UniformVec4s += entry.Count;
+        }
+        CKDWORD slot = m_DiagnosticConfig.UniformHistEnabled
+            ? CKFFUniformDebugSlot(m_ShaderCache.GetUniforms(), entry.Uniform)
+            : 64;
+        if (slot < 64) {
+            ++m_FrameStats.UniformHandleSets[slot];
+            m_FrameStats.UniformHandleVec4s[slot] += entry.Count;
+        }
+#endif
+    }
+}
+
+CKDWORD CKFixedFunctionPipeline::HashPacketUniformPayload(const CKFFRenderPacketUniformPayload &payload) const
+{
+    CKDWORD hash = 2166136261u;
+    hash = CKFFHashBytes(&payload.EntryCount, sizeof(payload.EntryCount), hash);
+    hash = CKFFHashBytes(&payload.Vec4Count, sizeof(payload.Vec4Count), hash);
+    for (CKDWORD i = 0; i < payload.EntryCount; ++i) {
+        hash = CKFFHashBytes(&payload.Entries[i].Uniform, sizeof(CKDWORD), hash);
+        hash = CKFFHashBytes(&payload.Entries[i].Count, sizeof(CKDWORD), hash);
+        hash = CKFFHashBytes(&payload.Entries[i].Vec4Count, sizeof(CKDWORD), hash);
+        hash = CKFFHashBytes(&payload.Values[payload.Entries[i].Offset][0],
+                             payload.Entries[i].Vec4Count * sizeof(float) * 4, hash);
+    }
+    return hash;
+}
+
+CKDWORD CKFixedFunctionPipeline::HashPacketTextureSet(const CKRenderPacket &packet) const
+{
+    CKDWORD hash = 2166136261u;
+    hash = CKFFHashBytes(&packet.ActiveTextureCount, sizeof(packet.ActiveTextureCount), hash);
+    for (CKDWORD i = 0; i < packet.ActiveTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        const CKFFRenderPacketTextureBinding &binding = packet.Textures[i];
+        hash = CKFFHashBytes(&binding.Stage, sizeof(binding.Stage), hash);
+        hash = CKFFHashBytes(&binding.Uniform, sizeof(binding.Uniform), hash);
+        hash = CKFFHashBytes(&binding.Texture, sizeof(binding.Texture), hash);
+        hash = CKFFHashBytes(&binding.TextureFlags, sizeof(binding.TextureFlags), hash);
+        hash = CKFFHashBytes(&binding.Sampler, sizeof(binding.Sampler), hash);
+    }
+    return hash;
+}
+
+CKDWORD CKFixedFunctionPipeline::InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload)
+{
+    const int count = m_OpaqueStaticUniformPayloads.Size();
+    const int scanCount = count < CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT
+        ? count
+        : CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT;
+    for (int i = 0; i < scanCount; ++i) {
+        if (CKFFRenderPacketUniformPayloadEquals(m_OpaqueStaticUniformPayloads[i], payload))
+            return (CKDWORD)i;
+    }
+
+    m_OpaqueStaticUniformPayloads.PushBack(payload);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.RenderPacketStaticPayloadInterns;
+#endif
+    return (CKDWORD)count;
+}
+
+const CKFFRenderPacketUniformPayload &CKFixedFunctionPipeline::GetStaticUniformPayload(CKDWORD index) const
+{
+    return m_OpaqueStaticUniformPayloads[(int)index];
+}
+
+void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) const
+{
+    if (!packet)
+        return;
+
+    memset(&packet->SortKey, 0, sizeof(packet->SortKey));
+    packet->SortKey.Program = packet->Program;
+    packet->SortKey.DrawStateLo = packet->DrawState.Lo;
+    packet->SortKey.DrawStateMid = packet->DrawState.Mid;
+    packet->SortKey.DrawStateHi = packet->DrawState.Hi;
+    packet->SortKey.StencilRef = packet->StencilRef;
+    packet->SortKey.StencilReadMask = packet->StencilReadMask;
+    packet->SortKey.StencilWriteMask = packet->StencilWriteMask;
+    packet->SortKey.StaticUniformHash = GetStaticUniformPayload(packet->StaticUniformIndex).Hash;
+    packet->SortKey.TextureSetHash = HashPacketTextureSet(*packet);
+    packet->SortKey.ActiveTextureCount = packet->ActiveTextureCount;
+    packet->SortKey.VertexLayout = packet->VertexLayout;
+    packet->SortKey.VertexBuffer = packet->VertexBuffer;
+    packet->SortKey.BaseVertex = packet->BaseVertex;
+    packet->SortKey.VertexCount = packet->VertexCount;
+    packet->SortKey.IndexBuffer = packet->IndexBuffer;
+    packet->SortKey.StartIndex = packet->StartIndex;
+    packet->SortKey.IndexCount = packet->IndexCount;
+}
+
+void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
+{
+    if (!m_OpaquePacketsHasLastKey) {
+        m_OpaquePacketsHasLastKey = TRUE;
+        m_OpaquePacketsAlreadySorted = TRUE;
+        m_OpaquePacketsSingleKey = TRUE;
+        m_OpaqueFirstPacketSortKey = packet.SortKey;
+        m_OpaqueLastPacketSortKey = packet.SortKey;
+        return;
+    }
+
+    if (CKFFCompareRenderPacketSortKey(m_OpaqueLastPacketSortKey, packet.SortKey) > 0)
+        m_OpaquePacketsAlreadySorted = FALSE;
+    if (!CKFFRenderPacketSortKeyEquals(m_OpaqueFirstPacketSortKey, packet.SortKey))
+        m_OpaquePacketsSingleKey = FALSE;
+    m_OpaqueLastPacketSortKey = packet.SortKey;
 }
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
@@ -1614,7 +2216,7 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
             ? (double)m_FrameStats.TextureBinds / (double)m_FrameStats.SubmittedDraws
             : 0.0;
         CK_LOG_FMT("FFPStats",
-                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateCacheHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f",
+                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u packetsQueued=%u packetsReplayed=%u packetFallbacks=%u packetFlushes=%u packetUniformOverflow=%u packetRuns=%u packetMaxRun=%u packetSkipState=%u packetSkipTex=%u packetSkipUniform=%u packetStaticUniformUploads=%u packetStaticUniformSkips=%u packetObjectUniformUploads=%u packetObjectUniformSkips=%u packetSkipVB=%u packetSkipIB=%u packetStaticBuilds=%u packetStaticReuses=%u packetStaticInterns=%u packetSortSkips=%u drawStateCacheHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
                    m_FrameStats.FrameIndex,
                    m_FrameStats.SoftwareDraws,
                    m_FrameStats.HardwareDraws,
@@ -1637,6 +2239,26 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.ConsecutiveVertexBufferRepeats,
                    m_FrameStats.ConsecutiveIndexBufferRepeats,
                    m_FrameStats.ConsecutiveWorldMatrixRepeats,
+                   m_FrameStats.QueuedRenderPackets,
+                   m_FrameStats.ReplayedRenderPackets,
+                   m_FrameStats.RenderPacketFallbacks,
+                   m_FrameStats.RenderPacketFlushes,
+                   m_FrameStats.RenderPacketUniformOverflows,
+                   m_FrameStats.RenderPacketRuns,
+                   m_FrameStats.RenderPacketMaxRunLength,
+                   m_FrameStats.RenderPacketSkippedStates,
+                   m_FrameStats.RenderPacketSkippedTextures,
+                   m_FrameStats.RenderPacketSkippedUniforms,
+                   m_FrameStats.RenderPacketStaticUniformUploads,
+                   m_FrameStats.RenderPacketStaticUniformSkips,
+                   m_FrameStats.RenderPacketObjectUniformUploads,
+                   m_FrameStats.RenderPacketObjectUniformSkips,
+                   m_FrameStats.RenderPacketSkippedVertexBuffers,
+                   m_FrameStats.RenderPacketSkippedIndexBuffers,
+                   m_FrameStats.RenderPacketStaticPayloadBuilds,
+                   m_FrameStats.RenderPacketStaticPayloadReuses,
+                   m_FrameStats.RenderPacketStaticPayloadInterns,
+                   m_FrameStats.RenderPacketSortSkips,
                    m_FrameStats.DrawStateCacheHits,
                    m_FrameStats.DrawStateRebuilds,
                    m_FrameStats.TransientVertexBytes,
@@ -1652,7 +2274,10 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.StencilUs,
                    m_FrameStats.LayoutUs,
                    m_FrameStats.BufferBindUs,
-                   m_FrameStats.SubmitUs);
+                   m_FrameStats.SubmitUs,
+                   m_FrameStats.RenderPacketBuildUs,
+                   m_FrameStats.RenderPacketSortUs,
+                   m_FrameStats.RenderPacketReplayUs);
         if (m_DiagnosticConfig.UniformHistEnabled) {
             const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
             for (CKDWORD slot = 0; slot < 64; ++slot) {
@@ -1697,4 +2322,453 @@ float CKFixedFunctionPipeline::ComputeDepthKey() const {
               m_World[3][2] * m_View[2][2] +
               m_View[3][2];
     return z;
+}
+
+CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView view,
+                                                                 VXPRIMITIVETYPE type,
+                                                                 CKDWORD vb,
+                                                                 CKDWORD ib,
+                                                                 CKDWORD vertexLayout) const
+{
+    if (!m_OpaqueSortingEnabled || !m_OpaquePacketAllowed)
+        return FALSE;
+    if (!m_Context || !vb || !ib || !vertexLayout)
+        return FALSE;
+    if (view != CKRP_VIEW_OPAQUE3D || type != VX_TRIANGLELIST)
+        return FALSE;
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
+        return FALSE;
+    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE))
+        return FALSE;
+    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
+        return FALSE;
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE)
+        return FALSE;
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
+        return FALSE;
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
+    CKRasterizerEncoder *encoder,
+    CKRenderPacket *packet, CKRenderView view,
+    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+    CKDWORD baseVertex, CKDWORD vertexCount,
+    CKDWORD startIndex, CKDWORD indexCount,
+    CKDWORD dpFlags, CKDWORD formatFlags,
+    CKDWORD vertexLayout)
+{
+    if (!packet || !vb)
+        return FALSE;
+
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
+    if (collectStats)
+        ++m_FrameStats.HardwareDraws;
+#endif
+
+    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
+    SetCurrentProgramBinding(shaderKey, programBinding);
+    CKDWORD program = programBinding.Program;
+    if (program == 0) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats)
+            ++m_FrameStats.ProgramMisses;
+#endif
+        return FALSE;
+    }
+    if (!CanBuildPacketObjectUniforms())
+        return FALSE;
+
+    memset(packet, 0, sizeof(CKRenderPacket));
+    ++m_OpaqueRenderPacketSerial;
+    if (m_OpaqueRenderPacketSerial == 0)
+        ++m_OpaqueRenderPacketSerial;
+    packet->Serial = m_OpaqueRenderPacketSerial;
+    packet->View = view;
+    packet->Type = type;
+    packet->Program = program;
+    float depth = ComputeDepthKey();
+    packet->Depth = *(CKDWORD *)&depth;
+    packet->DrawState = m_DrawStateCache.BuildDrawState(type);
+    packet->StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
+    packet->StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
+    packet->StencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+    packet->VertexLayout = vertexLayout;
+    packet->VertexBuffer = vb;
+    packet->IndexBuffer = ib;
+    packet->BaseVertex = baseVertex;
+    packet->VertexCount = vertexCount;
+    packet->StartIndex = startIndex;
+    packet->IndexCount = indexCount;
+    packet->World = m_World;
+    if (encoder)
+        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
+    packet->ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
+    if (packet->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        packet->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
+        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
+        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
+        packet->Textures[i].Stage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
+                                                            (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
+        packet->Textures[i].Uniform = cube ? u.s_textureCube[i] :
+                                      (volume ? u.s_textureVolume[i] : u.s_texture[i]);
+        packet->Textures[i].Texture = m_TextureHandles[i];
+        packet->Textures[i].TextureFlags = m_TextureFlags[i];
+        packet->Textures[i].Sampler = BuildSamplerDesc((int)i);
+    }
+
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    double buildTimer = collectStats ? CKRenderPerfNow() : 0.0;
+#endif
+    if (!BuildPacketObjectUniforms(&packet->ObjectUniforms))
+        return FALSE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (collectStats)
+        m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
+#endif
+
+    if (m_StaticUniformCacheValid && m_StaticUniformCachedSerial == m_StaticUniformDirtySerial) {
+        packet->StaticUniformIndex = m_StaticUniformCachedIndex;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats)
+            ++m_FrameStats.RenderPacketStaticPayloadReuses;
+#endif
+    } else {
+        CKFFRenderPacketUniformPayload staticPayload;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats)
+            buildTimer = CKRenderPerfNow();
+#endif
+        if (!BuildStaticUniformPayload(&staticPayload)) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            if (collectStats)
+                ++m_FrameStats.RenderPacketUniformOverflows;
+#endif
+            return FALSE;
+        }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats) {
+            m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
+            ++m_FrameStats.RenderPacketStaticPayloadBuilds;
+        }
+#endif
+        packet->StaticUniformIndex = InternStaticUniformPayload(staticPayload);
+        m_StaticUniformCachedSerial = m_StaticUniformDirtySerial;
+        m_StaticUniformCachedIndex = packet->StaticUniformIndex;
+        m_StaticUniformCacheValid = TRUE;
+    }
+
+    BuildRenderPacketSortKey(packet);
+    return TRUE;
+}
+
+void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
+{
+    m_OpaqueRenderPackets.Resize(0);
+    m_OpaqueStaticUniformPayloads.Resize(0);
+    m_StaticUniformCacheValid = FALSE;
+    m_OpaquePacketsAlreadySorted = TRUE;
+    m_OpaquePacketsSingleKey = TRUE;
+    m_OpaquePacketsHasLastKey = FALSE;
+    memset(&m_OpaqueFirstPacketSortKey, 0, sizeof(m_OpaqueFirstPacketSortKey));
+    memset(&m_OpaqueLastPacketSortKey, 0, sizeof(m_OpaqueLastPacketSortKey));
+}
+
+void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
+{
+    const int count = m_OpaqueRenderPackets.Size();
+    indices.Resize(count);
+    for (int i = 0; i < count; ++i)
+        indices[i] = (CKDWORD)i;
+    if (count < 2)
+        return;
+    if (count < CKFF_RENDER_PACKET_MIN_SORT_COUNT ||
+        m_OpaquePacketsSingleKey ||
+        m_OpaquePacketsAlreadySorted) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketSortSkips;
+#endif
+        return;
+    }
+
+    XArray<CKDWORD> scratch;
+    scratch.Resize(count);
+    for (int width = 1; width < count; width <<= 1) {
+        for (int left = 0; left < count; left += width << 1) {
+            int mid = left + width;
+            int right = left + (width << 1);
+            if (mid > count)
+                mid = count;
+            if (right > count)
+                right = count;
+
+            int a = left;
+            int b = mid;
+            int out = left;
+            while (a < mid && b < right) {
+                const CKRenderPacket &pa = m_OpaqueRenderPackets[(int)indices[a]];
+                const CKRenderPacket &pb = m_OpaqueRenderPackets[(int)indices[b]];
+                if (CKFFCompareRenderPacket(pa, pb) <= 0)
+                    scratch[out++] = indices[a++];
+                else
+                    scratch[out++] = indices[b++];
+            }
+            while (a < mid)
+                scratch[out++] = indices[a++];
+            while (b < right)
+                scratch[out++] = indices[b++];
+        }
+        for (int i = 0; i < count; ++i)
+            indices[i] = scratch[i];
+    }
+}
+
+void CKFixedFunctionPipeline::ReplayVertexBufferPacket(CKRasterizerEncoder *encoder,
+                                                       const CKRenderPacket &packet,
+                                                       CKRenderPacketReplayCache *cache,
+                                                       CKBOOL lastPacket)
+{
+    if (!encoder || !cache)
+        return;
+
+    if (!cache->HasState || !CKFFDrawStateEquals(cache->DrawState, packet.DrawState)) {
+        encoder->SetState(packet.DrawState);
+        cache->DrawState = packet.DrawState;
+        cache->HasState = TRUE;
+    } else {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketSkippedStates;
+#endif
+    }
+
+    if (!cache->HasStencil ||
+        cache->StencilRef != packet.StencilRef ||
+        cache->StencilReadMask != packet.StencilReadMask ||
+        cache->StencilWriteMask != packet.StencilWriteMask) {
+        encoder->SetStencilRef(packet.StencilRef);
+        encoder->SetStencilMask(packet.StencilReadMask, packet.StencilWriteMask);
+        cache->StencilRef = packet.StencilRef;
+        cache->StencilReadMask = packet.StencilReadMask;
+        cache->StencilWriteMask = packet.StencilWriteMask;
+        cache->HasStencil = TRUE;
+    }
+
+    if (packet.VertexLayout &&
+        (!cache->HasVertexLayout || cache->VertexLayout != packet.VertexLayout)) {
+        encoder->SetVertexLayout(packet.VertexLayout);
+        cache->VertexLayout = packet.VertexLayout;
+        cache->HasVertexLayout = TRUE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.VertexLayoutSets;
+#endif
+    }
+
+    if (!cache->HasVertexBuffer ||
+        cache->VertexBuffer != packet.VertexBuffer ||
+        cache->BaseVertex != packet.BaseVertex ||
+        cache->VertexCount != packet.VertexCount) {
+        encoder->SetVertexBuffer(0, packet.VertexBuffer,
+                                 packet.BaseVertex, packet.VertexCount);
+        cache->VertexBuffer = packet.VertexBuffer;
+        cache->BaseVertex = packet.BaseVertex;
+        cache->VertexCount = packet.VertexCount;
+        cache->HasVertexBuffer = TRUE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.VertexBufferSets;
+#endif
+    } else {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketSkippedVertexBuffers;
+#endif
+    }
+
+    if (packet.IndexBuffer) {
+        if (!cache->HasIndexBuffer ||
+            cache->IndexBuffer != packet.IndexBuffer ||
+            cache->StartIndex != packet.StartIndex ||
+            cache->IndexCount != packet.IndexCount) {
+            encoder->SetIndexBuffer(packet.IndexBuffer,
+                                    packet.StartIndex,
+                                    packet.IndexCount);
+            cache->IndexBuffer = packet.IndexBuffer;
+            cache->StartIndex = packet.StartIndex;
+            cache->IndexCount = packet.IndexCount;
+            cache->HasIndexBuffer = TRUE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            ++m_FrameStats.IndexBufferSets;
+#endif
+        } else {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            ++m_FrameStats.RenderPacketSkippedIndexBuffers;
+#endif
+        }
+    } else {
+        cache->HasIndexBuffer = FALSE;
+    }
+
+    CKBOOL sameTextures = cache->HasTextures &&
+                          cache->ActiveTextureCount == packet.ActiveTextureCount;
+    if (sameTextures) {
+        for (CKDWORD i = 0; i < packet.ActiveTextureCount; ++i) {
+            if (!CKFFRenderPacketTextureEquals(cache->Textures[i], packet.Textures[i])) {
+                sameTextures = FALSE;
+                break;
+            }
+        }
+    }
+    if (!sameTextures) {
+        for (CKDWORD i = 0; i < packet.ActiveTextureCount; ++i) {
+            if (packet.Textures[i].Texture == 0)
+                continue;
+            encoder->SetTexture(packet.Textures[i].Stage,
+                                packet.Textures[i].Uniform,
+                                packet.Textures[i].Texture,
+                                (CKSamplerDesc *)&packet.Textures[i].Sampler);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            ++m_FrameStats.TextureBinds;
+#endif
+        }
+        cache->ActiveTextureCount = packet.ActiveTextureCount;
+        for (CKDWORD i = 0; i < packet.ActiveTextureCount; ++i)
+            cache->Textures[i] = packet.Textures[i];
+        cache->HasTextures = TRUE;
+    } else {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketSkippedTextures;
+#endif
+    }
+
+    if (!cache->HasStaticUniforms ||
+        cache->StaticUniformIndex != packet.StaticUniformIndex) {
+        const CKFFRenderPacketUniformPayload &staticUniforms =
+            GetStaticUniformPayload(packet.StaticUniformIndex);
+        UploadUniformPayload(encoder, staticUniforms);
+        cache->StaticUniformIndex = packet.StaticUniformIndex;
+        cache->HasStaticUniforms = TRUE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketStaticUniformUploads;
+#endif
+    } else {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        ++m_FrameStats.RenderPacketSkippedUniforms;
+        ++m_FrameStats.RenderPacketStaticUniformSkips;
+#endif
+    }
+
+    UploadPacketObjectUniforms(encoder, packet.ObjectUniforms);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.RenderPacketObjectUniformUploads;
+#endif
+
+    CKDWORD transformIdx = m_Context->AllocTransform((VxMatrix *)&packet.World, 1);
+    encoder->SetTransform(transformIdx, 1);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.TransformSets;
+#endif
+    if (packet.Marker[0] != '\0')
+        encoder->SetMarker((CKSTRING)packet.Marker);
+    encoder->Submit(packet.View, packet.Program, packet.Depth,
+                    lastPacket ? CKRST_DISCARD_ALL : CKRST_DISCARD_NONE);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.SubmittedDraws;
+    ++m_FrameStats.ReplayedRenderPackets;
+#endif
+}
+
+void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder)
+{
+    if (!HasOpaqueRenderPackets())
+        return;
+    if (!encoder)
+        encoder = m_RenderPipeline.GetEncoder();
+    if (!encoder) {
+        ClearOpaqueRenderPackets();
+        return;
+    }
+
+    const int packetCount = m_OpaqueRenderPackets.Size();
+    const CKBOOL directReplay = (packetCount < 2 ||
+                                 packetCount < CKFF_RENDER_PACKET_MIN_SORT_COUNT ||
+                                 m_OpaquePacketsSingleKey ||
+                                 m_OpaquePacketsAlreadySorted) ? TRUE : FALSE;
+    XArray<CKDWORD> indices;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    double packetTimer = m_DiagnosticConfig.StatsEnabled ? CKRenderPerfNow() : 0.0;
+#endif
+    if (directReplay) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (packetCount > 1)
+            ++m_FrameStats.RenderPacketSortSkips;
+#endif
+    } else {
+        SortOpaqueRenderPackets(indices);
+    }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (m_DiagnosticConfig.StatsEnabled)
+        m_FrameStats.RenderPacketSortUs += CKRenderPerfElapsedUs(packetTimer);
+#endif
+
+    CKRenderPacketReplayCache cache;
+    memset(&cache, 0, sizeof(cache));
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (m_DiagnosticConfig.StatsEnabled) {
+        CKDWORD runCount = 0;
+        CKDWORD currentRun = 0;
+        CKDWORD maxRun = 0;
+        const int replayCount = directReplay ? packetCount : indices.Size();
+        for (int i = 0; i < replayCount; ++i) {
+            const CKRenderPacket &packet = directReplay
+                ? m_OpaqueRenderPackets[i]
+                : m_OpaqueRenderPackets[(int)indices[i]];
+            if (i == 0) {
+                runCount = 1;
+                currentRun = 1;
+            } else {
+                const CKRenderPacket &prevPacket = directReplay
+                    ? m_OpaqueRenderPackets[i - 1]
+                    : m_OpaqueRenderPackets[(int)indices[i - 1]];
+                if (CKFFRenderPacketSameRunKey(prevPacket, packet)) {
+                    ++currentRun;
+                } else {
+                    if (currentRun > maxRun)
+                        maxRun = currentRun;
+                    ++runCount;
+                    currentRun = 1;
+                }
+            }
+        }
+        if (currentRun > maxRun)
+            maxRun = currentRun;
+        m_FrameStats.RenderPacketRuns += runCount;
+        if (maxRun > m_FrameStats.RenderPacketMaxRunLength)
+            m_FrameStats.RenderPacketMaxRunLength = maxRun;
+    }
+#endif
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (m_DiagnosticConfig.StatsEnabled)
+        packetTimer = CKRenderPerfNow();
+#endif
+    const int count = directReplay ? packetCount : indices.Size();
+    for (int i = 0; i < count; ++i) {
+        const CKRenderPacket &packet = directReplay
+            ? m_OpaqueRenderPackets[i]
+            : m_OpaqueRenderPackets[(int)indices[i]];
+        ReplayVertexBufferPacket(encoder, packet, &cache, i + 1 == count ? TRUE : FALSE);
+    }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (m_DiagnosticConfig.StatsEnabled)
+        m_FrameStats.RenderPacketReplayUs += CKRenderPerfElapsedUs(packetTimer);
+#endif
+
+    ClearOpaqueRenderPackets();
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    ++m_FrameStats.RenderPacketFlushes;
+#endif
 }
