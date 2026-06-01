@@ -30,6 +30,7 @@ struct BenchScenario {
     int MeshCount;
     int TextureCount;
     int TextureStep;
+    CKBOOL StateChurn;
 };
 
 struct BenchResult {
@@ -42,6 +43,9 @@ struct BenchResult {
     CKDWORD UniformCount;
     CKDWORD VertexBufferCount;
     CKDWORD IndexBufferCount;
+    CKDWORD AdaptiveSamples;
+    CKDWORD AdaptiveBypasses;
+    CKDWORD AdaptiveSavedBindEstimate;
 };
 
 static void SetupBenchPipeline(CKFixedFunctionPipeline *ffp,
@@ -69,12 +73,20 @@ static void DrawBenchPacket(CKFixedFunctionPipeline *ffp,
     const CKDWORD vb = 1000 + (CKDWORD)meshIndex;
     const CKDWORD ib = 2000 + (CKDWORD)meshIndex;
     const CKDWORD texture = 3000 + (CKDWORD)textureIndex;
+    CKDWORD textureFlags = CKRST_TEXTURE_VALID;
 
     VxMatrix world;
     world.Identity();
     world[3][0] = (float)(drawIndex & 255);
     ffp->SetTransform(VXMATRIX_WORLD, world);
-    ffp->SetTexture(0, texture);
+    if (scenario->StateChurn) {
+        ffp->SetRenderState(VXRENDERSTATE_CULLMODE,
+                            (drawIndex & 1) ? VXCULL_NONE : VXCULL_CCW);
+        textureFlags = (drawIndex & 1)
+            ? (CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP)
+            : CKRST_TEXTURE_VALID;
+    }
+    ffp->SetTexture(0, texture, textureFlags);
     ffp->DrawVertexBuffer(&context->Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
                           vb, ib,
                           0, 3,
@@ -98,6 +110,7 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
     double flushUs = 0.0;
     const double start = BenchNow();
     for (int frame = 0; frame < scenario->Frames; ++frame) {
+        ffp.BeginDebugFrame();
         double phaseStart = BenchNow();
         for (int draw = 0; draw < scenario->DrawsPerFrame; ++draw)
             DrawBenchPacket(&ffp, &context, draw, scenario);
@@ -105,6 +118,9 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
         phaseStart = BenchNow();
         ffp.FlushOpaqueRenderPackets(&context.Encoder);
         flushUs += BenchElapsedUs(phaseStart);
+        result.AdaptiveSamples += ffp.GetOpaquePacketAdaptiveSamples();
+        result.AdaptiveBypasses += ffp.GetOpaquePacketAdaptiveBypasses();
+        result.AdaptiveSavedBindEstimate += ffp.GetOpaquePacketAdaptiveSavedBindEstimate();
     }
     const double elapsedUs = BenchElapsedUs(start);
     const CKDWORD totalDraws = (CKDWORD)(scenario->DrawsPerFrame * scenario->Frames);
@@ -128,7 +144,7 @@ static void PrintBenchResult(const BenchScenario *scenario,
                              const BenchResult *packet)
 {
     printf("%s\n", scenario->Name);
-    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu\n",
+    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
            immediate->UsPerDraw,
            immediate->DrawUsPerDraw,
            immediate->FlushUsPerDraw,
@@ -137,8 +153,11 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)immediate->TextureCount,
            (unsigned long)immediate->UniformCount,
            (unsigned long)immediate->VertexBufferCount,
-           (unsigned long)immediate->IndexBufferCount);
-    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu\n",
+           (unsigned long)immediate->IndexBufferCount,
+           (unsigned long)immediate->AdaptiveSamples,
+           (unsigned long)immediate->AdaptiveBypasses,
+           (unsigned long)immediate->AdaptiveSavedBindEstimate);
+    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
            packet->UsPerDraw,
            packet->DrawUsPerDraw,
            packet->FlushUsPerDraw,
@@ -147,16 +166,20 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)packet->TextureCount,
            (unsigned long)packet->UniformCount,
            (unsigned long)packet->VertexBufferCount,
-           (unsigned long)packet->IndexBufferCount);
+           (unsigned long)packet->IndexBufferCount,
+           (unsigned long)packet->AdaptiveSamples,
+           (unsigned long)packet->AdaptiveBypasses,
+           (unsigned long)packet->AdaptiveSavedBindEstimate);
 }
 
 int main()
 {
     const BenchScenario scenarios[] = {
-        {"low_repeat", 4096, 32, 4096, 4096, 1},
-        {"high_repeat", 4096, 32, 1, 1, 4096},
-        {"multi_material", 4096, 32, 8, 64, 16},
-        {"multi_mesh", 4096, 32, 128, 8, 512},
+        {"low_repeat", 4096, 32, 4096, 4096, 1, FALSE},
+        {"high_repeat", 4096, 32, 1, 1, 4096, FALSE},
+        {"multi_material", 4096, 32, 8, 64, 16, FALSE},
+        {"multi_mesh", 4096, 32, 128, 8, 512, FALSE},
+        {"state_churn_no_benefit", 4096, 32, 4096, 4096, 1, TRUE},
     };
 
     const int scenarioCount = (int)(sizeof(scenarios) / sizeof(scenarios[0]));
