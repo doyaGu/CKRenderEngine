@@ -10,6 +10,7 @@
 #include "CKScene.h"
 #include "CKDependencies.h"
 #include "CKRasterizer.h"
+#include "CKDrawAnnotation.h"
 #include "CKFixedFunctionPipeline.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
@@ -2614,6 +2615,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     
             for (int i = 0; i < m_Callbacks->m_PreCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PreCallBacks[i];
+                CKScopedDrawAnnotation annotationScope(dev, this);
                 ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
             }
 
@@ -2629,6 +2631,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
         // Execute render callback (replaces default rendering) or default render
         if (m_Callbacks->m_Callback) {
+            CKScopedDrawAnnotation annotationScope(dev, this);
             ((CK_RENDEROBJECT_CALLBACK) m_Callbacks->m_Callback->callback)(Dev, (CK3dEntity *) this, m_Callbacks->m_Callback->argument);
         } else if (m_CurrentMesh && (m_CurrentMesh->GetFlags() & VXMESH_VISIBLE) != 0) {
             dev->m_Current3dEntity = this;
@@ -2642,6 +2645,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
     
             for (int i = 0; i < m_Callbacks->m_PostCallBacks.Size(); i++) {
                 VxCallBack &cb = m_Callbacks->m_PostCallBacks[i];
+                CKScopedDrawAnnotation annotationScope(dev, this);
                 ((CK_RENDEROBJECT_CALLBACK) cb.callback)(Dev, (CK3dEntity *) this, cb.argument);
             }
 
