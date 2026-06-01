@@ -1,7 +1,9 @@
 #include <stdio.h>
 
 #include "CKFFStageState.h"
+#include "CKFFShaderABI.h"
 #include "CKFFShaderKey.h"
+#include "CKFFSamplerLayout.h"
 #include "CKFFUniformState.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKVertexLayoutCache.h"
@@ -37,6 +39,22 @@ std::string ReadTextFile(const char *path) {
     const size_t sourcePrefixLen = std::strlen(sourcePrefix);
     if (std::strncmp(path, sourcePrefix, sourcePrefixLen) == 0) {
         const char *relativePath = path + sourcePrefixLen;
+
+        std::string thisFile = __FILE__;
+        std::string::size_type slash = thisFile.find_last_of("/\\");
+        if (slash != std::string::npos) {
+            std::string testsDir = thisFile.substr(0, slash);
+            slash = testsDir.find_last_of("/\\");
+            if (slash != std::string::npos) {
+                contents = read(testsDir.substr(0, slash + 1) + relativePath);
+                if (!contents.empty())
+                    return contents;
+            }
+        }
+
+        contents = read(std::string("../") + path);
+        if (!contents.empty())
+            return contents;
 
         contents = read(relativePath);
         if (!contents.empty())
@@ -147,6 +165,100 @@ void TextureArgModifierRepackRoundTripsBothModifierBits() {
 
     TestCheck(unpacked == arg,
               "Specialization repack/unpack must preserve complement and alpha replicate modifiers");
+}
+
+void ShaderABIConstantsMatchShaderUniformDeclarations() {
+    TestCheck(CKFF_DRAW_PARAM_VEC4_COUNT == 19,
+              "u_ffDrawParams ABI must remain 19 vec4s");
+    TestCheck(CKFF_STAGE_PARAM_VEC4_COUNT == 32,
+              "u_stageParams ABI must remain 32 vec4s");
+    TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFFSpecializationInfo::MaxSpecDwords,
+              "u_ffSpec ABI must mirror the specialization dword count");
+    TestCheck(CKFFStageParamIndex(3, CKFF_STAGE_PARAM_ALPHA_EXTRA) == 15,
+              "Stage parameter index helper must encode four vec4s per stage");
+    TestCheck(CKFFSamplerBindStage(2, CKFF_SAMPLER_2D) == 2,
+              "2D samplers must bind to texture slots 0..7");
+    TestCheck(CKFFSamplerBindStage(2, CKFF_SAMPLER_CUBE) == 10 &&
+                  CKFFSamplerBindStage(2, CKFF_SAMPLER_VOLUME) == 10,
+              "Cube and volume samplers must bind to texture slots 8..15");
+
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    const std::string vs = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
+    TestCheck(fs.find("uniform vec4 u_ffDrawParams[19]") != std::string::npos &&
+                  vs.find("uniform vec4 u_ffDrawParams[19]") != std::string::npos,
+              "Shader sources must declare u_ffDrawParams with the ABI count");
+    TestCheck(fs.find("uniform vec4 u_stageParams[32]") != std::string::npos &&
+                  vs.find("uniform vec4 u_stageParams[32]") != std::string::npos,
+              "Shader sources must declare u_stageParams with the ABI count");
+    TestCheck(fs.find("uniform vec4 u_ffSpec[10]") != std::string::npos,
+              "Fragment shader must declare u_ffSpec with the specialization ABI count");
+}
+
+void StageParamsPackThroughABIIndices() {
+    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
+    CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKFFStageParamsUniform params;
+
+    stages[2][CKRST_TSS_OP] = CKRST_TOP_SELECTARG1;
+    stages[2][CKRST_TSS_ARG1] = CKRST_TA_TEXTURE;
+    stages[2][CKRST_TSS_ARG2] = CKRST_TA_TFACTOR;
+    stages[2][CKRST_TSS_AOP] = CKRST_TOP_SELECTARG2;
+    stages[2][CKRST_TSS_AARG1] = CKRST_TA_CURRENT;
+    stages[2][CKRST_TSS_AARG2] = CKRST_TA_TEXTURE;
+    stages[2][CKRST_TSS_COLORARG0] = CKRST_TA_CONSTANT;
+    stages[2][CKRST_TSS_ALPHAARG0] = CKRST_TA_TEMP;
+    stages[2][CKRST_TSS_TEXCOORDINDEX] = 6;
+    stages[2][CKRST_TSS_TEXTURETRANSFORMFLAGS] = 0x103;
+    stages[2][CKRST_TSS_CONSTANT] = 0x80402010;
+    textures[2] = 77;
+
+    CKFFPackStageParams(stages, textures, 3, params);
+
+    const float *color = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COLOR)];
+    const float *alpha = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_ALPHA)];
+    const float *colorExtra = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COLOR_EXTRA)];
+    const float *alphaExtra = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_ALPHA_EXTRA)];
+
+    TestCheck(color[0] == (float)CKRST_TOP_SELECTARG1 &&
+                  color[1] == (float)CKRST_TA_TEXTURE &&
+                  color[2] == (float)CKRST_TA_TFACTOR &&
+                  color[3] == 1.0f,
+              "Stage color params must pack through the declared ABI slot");
+    TestCheck(alpha[0] == (float)CKRST_TOP_SELECTARG2 &&
+                  alpha[1] == (float)CKRST_TA_CURRENT &&
+                  alpha[2] == (float)CKRST_TA_TEXTURE,
+              "Stage alpha params must pack through the declared ABI slot");
+    TestCheck(colorExtra[0] == (float)CKRST_TA_CONSTANT &&
+                  colorExtra[1] == 6.0f &&
+                  colorExtra[2] == (float)0x103,
+              "Stage color extra params must pack texcoord and transform ABI fields");
+    TestCheck(colorExtra[3] > 0.24f && colorExtra[3] < 0.26f &&
+                  alphaExtra[1] > 0.12f && alphaExtra[1] < 0.13f &&
+                  alphaExtra[2] > 0.06f && alphaExtra[2] < 0.07f &&
+                  alphaExtra[3] > 0.49f && alphaExtra[3] < 0.51f,
+              "Stage constant must pack RGBA into color/alpha extra ABI fields");
+}
+
+void SpecUniformMirrorsSpecializationDwordsAsBytes() {
+    CKFFSpecializationInfo info;
+    info.SetOptimized(true);
+    info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, 1);
+    info.Set(CKFF_SPEC_ALPHA_FUNC, VXCMP_GREATER);
+    info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK,
+             CKFF_SAMPLER_CUBE | (CKFF_SAMPLER_VOLUME << 2));
+
+    CKFFSpecUniform packed;
+    CKFFPackSpecializationDwords(info, packed);
+
+    const CKDWORD *dwords = info.Data();
+    for (CKDWORD i = 0; i < CKFF_SPEC_UNIFORM_VEC4_COUNT; ++i) {
+        CKDWORD unpacked = ((CKDWORD)packed.Values[i][0] & 0xFFu) |
+                           (((CKDWORD)packed.Values[i][1] & 0xFFu) << 8) |
+                           (((CKDWORD)packed.Values[i][2] & 0xFFu) << 16) |
+                           (((CKDWORD)packed.Values[i][3] & 0xFFu) << 24);
+        TestCheck(unpacked == dwords[i],
+                  "u_ffSpec uniform byte mirror must round-trip every specialization dword");
+    }
 }
 
 void PremodulateCoverageIsFallback() {
@@ -419,6 +531,103 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
               "Volume sampler mask must be derivable from active shader key stages");
 }
 
+void SamplerLayoutKeyNormalizesInactiveAndDepthStages() {
+    CKFFShaderKeyFS key;
+    key.Stages[0].HasTexture = true;
+    key.Stages[0].SamplerType = CKFF_SAMPLER_DEPTH;
+    key.Stages[1].HasTexture = false;
+    key.Stages[1].SamplerType = CKFF_SAMPLER_CUBE;
+    key.Stages[2].HasTexture = true;
+    key.Stages[2].SamplerType = CKFF_SAMPLER_VOLUME;
+    key.Stages[3].HasTexture = true;
+    key.Stages[3].SamplerType = CKFF_SAMPLER_CUBE;
+
+    CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key);
+
+    TestCheck(CKFFSamplerLayoutStageType(layout, 0) == CKFF_SAMPLER_2D,
+              "Depth samplers must use the 2D static sampler layout");
+    TestCheck(CKFFSamplerLayoutStageType(layout, 1) == CKFF_SAMPLER_2D,
+              "Inactive stages must not split static sampler layouts");
+    TestCheck(CKFFSamplerLayoutStageType(layout, 2) == CKFF_SAMPLER_VOLUME,
+              "Active volume stages must stay volume in the sampler layout");
+    TestCheck(CKFFSamplerLayoutStageType(layout, 3) == CKFF_SAMPLER_CUBE,
+              "Active cube stages must stay cube in the sampler layout");
+    TestCheck(CKFFSamplerLayoutNeedsCubeSampler(layout) &&
+                  CKFFSamplerLayoutNeedsVolumeSampler(layout) &&
+                  CKFFSamplerLayoutNeedsMixedCubeVolume(layout),
+              "Mixed cube+volume layouts must be detectable from the normalized key");
+}
+
+void FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization() {
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    TestCheck(!contents.empty(),
+              "FFP fragment shader source must be readable from the test working directory");
+
+    const std::string staticLayout = "#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)";
+    const std::string fullSpecialized = "#if defined(CKFF_FULL_SPECIALIZED)";
+    const std::string volumeLayout = "#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)";
+    const std::string::size_type staticPos = contents.find(staticLayout);
+    const std::string::size_type fullPos = contents.find(fullSpecialized);
+    const std::string::size_type volumePos = contents.find(volumeLayout);
+
+    TestCheck(staticPos != std::string::npos,
+              "FFP fragment shader must declare a static sampler layout branch");
+    TestCheck(fullPos != std::string::npos && staticPos != std::string::npos && fullPos < staticPos,
+              "Static sampler layout must be separate from the full-specialized branch");
+    TestCheck(staticPos != std::string::npos && volumePos != std::string::npos && staticPos < volumePos,
+              "Static sampler layout must run before the volume-only runtime layout");
+    TestCheck(contents.find("CKFF_STATIC_DEPTH_TEXTURE_COLOR") != std::string::npos,
+              "Static sampler layout must keep depth compare in the 2D sampling path");
+}
+
+void SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration() {
+    const std::string manifest = ReadTextFile("Source/RenderEngine/src/shaders/ffp_sampler_layouts.json");
+    const std::string script = ReadTextFile("Source/RenderEngine/src/shaders/compile_shaders.py");
+    const std::string generated = ReadTextFile("Source/RenderEngine/src/shaders/generated/CKFFSpecializedModuleTable.generated.h");
+    struct BackendExpectation {
+        const char *Name;
+        const char *Profile;
+    };
+    const BackendExpectation backends[] = {
+        {"dx11", "CKRST_SHADER_PROFILE_DX11"},
+        {"dx12", "CKRST_SHADER_PROFILE_DX12"},
+        {"spirv", "CKRST_SHADER_PROFILE_SPIRV"},
+        {"glsl", "CKRST_SHADER_PROFILE_GLSL"},
+        {"metal", "CKRST_SHADER_PROFILE_MSL"},
+    };
+
+    TestCheck(!manifest.empty(),
+              "FFP sampler layout manifest must be present");
+    TestCheck(manifest.find("\"stageTypes\": [3, 1, 0, 0, 0, 0, 0, 0]") != std::string::npos,
+              "Sampler layout manifest must keep the exact observed volume+cube layout");
+    TestCheck(manifest.find("\"backends\": [\"glsl\"]") == std::string::npos,
+              "Sampler layout manifest must not remain GLSL-only");
+    for (const BackendExpectation &backend : backends) {
+        const std::string manifestName = std::string("\"") + backend.Name + "\"";
+        TestCheck(manifest.find(manifestName) != std::string::npos,
+                  "Sampler layout manifest must list every shader backend");
+    }
+    TestCheck(script.find("load_sampler_layout_manifest") != std::string::npos,
+              "Shader codegen must load sampler layouts from the manifest");
+    TestCheck(script.find("default_sampler_layout_variants") == std::string::npos &&
+                  script.find("itertools.product((0, 1, 3), repeat=4)") == std::string::npos,
+              "Shader codegen must not enumerate first-four mixed sampler layouts by default");
+    TestCheck(script.find("SAMPLER_LAYOUT_SIZE_LIMIT_BYTES") != std::string::npos,
+              "Shader codegen must enforce a small sampler-layout generated size budget");
+    TestCheck(!generated.empty(),
+              "Generated specialized module table must be readable");
+    for (const BackendExpectation &backend : backends) {
+        const std::string includePath = std::string("shaders/generated/") + backend.Name +
+            "/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h";
+        TestCheck(generated.find(includePath) != std::string::npos,
+                  "Generated table must include the exact sampler layout for every backend");
+        TestCheck(generated.find(backend.Profile) != std::string::npos &&
+                      generated.find(std::string("CKFFSamplerLayoutModule_") + backend.Name +
+                                     "_layout_volume_cube_2d_2d_2d_2d_2d_2d") != std::string::npos,
+                  "Generated table must expose a sampler-layout module entry for every profile");
+    }
+}
+
 void TextureStageCompareFuncStaysOutOfSamplerDesc() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKSamplerDesc sampler = CKFFBuildSamplerDesc(stages[0]);
@@ -523,6 +732,12 @@ int main() {
               &BumpEnvUniformsPackEachStageIndependently);
     tests.Run("Texture arg modifier repack round trips both modifier bits",
               &TextureArgModifierRepackRoundTripsBothModifierBits);
+    tests.Run("Shader ABI constants match shader uniform declarations",
+              &ShaderABIConstantsMatchShaderUniformDeclarations);
+    tests.Run("Stage params pack through ABI indices",
+              &StageParamsPackThroughABIIndices);
+    tests.Run("Spec uniform mirrors specialization dwords as bytes",
+              &SpecUniformMirrorsSpecializationDwordsAsBytes);
     tests.Run("PREMODULATE coverage is fallback",
               &PremodulateCoverageIsFallback);
     tests.Run("Alpha ref uses low byte only",
@@ -557,6 +772,12 @@ int main() {
               &VolumeSamplerAndCompareFuncPackIntoSpecialization);
     tests.Run("Volume sampler mask can be derived from shader key",
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
+    tests.Run("Sampler layout key normalizes inactive and depth stages",
+              &SamplerLayoutKeyNormalizesInactiveAndDepthStages);
+    tests.Run("Fragment shader declares static sampler layout without full specialization",
+              &FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization);
+    tests.Run("Sampler layout codegen uses manifest instead of default enumeration",
+              &SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration);
     tests.Run("Texture stage compare func stays out of sampler desc",
               &TextureStageCompareFuncStaysOutOfSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",

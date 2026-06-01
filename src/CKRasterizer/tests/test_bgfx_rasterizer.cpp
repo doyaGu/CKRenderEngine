@@ -8,6 +8,7 @@
 
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
+#include "CKBgfxDrawMapTrace.h"
 
 // Pull in bgfx defines for PT mask constants
 #include <bgfx/defines.h>
@@ -478,6 +479,89 @@ static void TestSamplerCompareFlags()
                 "trilinear sampler requests mip sampling");
 }
 
+static void TestBackendProfileMapping()
+{
+    TEST_SECTION("Backend Profile Mapping");
+
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Direct3D11) == CKRST_SHADER_PROFILE_DX11,
+                "D3D11 renderer maps to dx11 shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Direct3D12) == CKRST_SHADER_PROFILE_DX12,
+                "D3D12 renderer maps to dx12 shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Vulkan) == CKRST_SHADER_PROFILE_SPIRV,
+                "Vulkan renderer maps to SPIR-V shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGL) == CKRST_SHADER_PROFILE_GLSL &&
+                    CKBgfxShaderProfile(bgfx::RendererType::OpenGLES) == CKRST_SHADER_PROFILE_GLSL,
+                "OpenGL renderers map to GLSL shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Metal) == CKRST_SHADER_PROFILE_MSL,
+                "Metal renderer maps to MSL shader profile");
+    TEST_ASSERT(std::strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_SPIRV), "spirv") == 0,
+                "Shader profile name must be stable for diagnostics");
+}
+
+static void TestBgfxStateBackendConventions()
+{
+    TEST_SECTION("Bgfx State Backend Conventions");
+
+    CKDrawState writeDepth = CKDrawStateBuilder()
+        .WriteRGBA(TRUE, FALSE, TRUE, FALSE)
+        .Depth(TRUE, FALSE, VXCMP_GREATER)
+        .Cull(VXCULL_CW)
+        .FrontFaceCCW(TRUE)
+        .Build();
+    uint64_t state = CKBgfxState(writeDepth);
+
+    TEST_ASSERT((state & BGFX_STATE_WRITE_R) != 0 &&
+                    (state & BGFX_STATE_WRITE_G) == 0 &&
+                    (state & BGFX_STATE_WRITE_B) != 0 &&
+                    (state & BGFX_STATE_WRITE_A) == 0,
+                "color write mask maps channel-by-channel");
+    TEST_ASSERT((state & BGFX_STATE_DEPTH_TEST_GREATER) != 0,
+                "VXCMP_GREATER maps to bgfx greater depth test");
+    TEST_ASSERT((state & BGFX_STATE_WRITE_Z) == 0,
+                "disabled depth write clears bgfx WRITE_Z");
+    TEST_ASSERT((state & BGFX_STATE_CULL_CW) != 0,
+                "Virtools CW cull maps to bgfx CW cull");
+    TEST_ASSERT((state & BGFX_STATE_FRONT_CCW) != 0,
+                "explicit front-face CCW bit reaches bgfx state");
+
+    CKDrawState blend = CKDrawStateBuilder()
+        .BlendSeparate(VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA,
+                       VXBLEND_ONE, VXBLEND_ZERO)
+        .BlendEquationSeparate(VXBLENDOP_SUBTRACT, VXBLENDOP_MAX)
+        .Build();
+    state = CKBgfxState(blend);
+    TEST_ASSERT((state & BGFX_STATE_BLEND_MASK) != 0,
+                "separate blend factors produce bgfx blend state");
+    TEST_ASSERT((state & BGFX_STATE_BLEND_EQUATION_MASK) != 0,
+                "separate blend equations produce bgfx equation state");
+}
+
+static void TestSamplerFilterAndAddressConventions()
+{
+    TEST_SECTION("Sampler Filter and Address Conventions");
+
+    CKSamplerDesc sampler = {};
+    sampler.MinFilter = CKRST_FILTER_NEAREST;
+    sampler.MagFilter = CKRST_FILTER_NEAREST;
+    sampler.MipFilter = CKRST_FILTER_MIPNEAREST;
+    sampler.AddressU = CKRST_ADDRESS_MIRROR;
+    sampler.AddressV = CKRST_ADDRESS_CLAMP;
+    sampler.AddressW = CKRST_ADDRESS_BORDER;
+    sampler.BorderColor = 3;
+
+    uint32_t flags = CKBgfxSamplerFlags(&sampler);
+    TEST_ASSERT((flags & BGFX_SAMPLER_MIN_POINT) != 0 &&
+                    (flags & BGFX_SAMPLER_MAG_POINT) != 0 &&
+                    (flags & BGFX_SAMPLER_MIP_POINT) != 0,
+                "nearest min/mag/mip filters map to point sampler flags");
+    TEST_ASSERT((flags & BGFX_SAMPLER_U_MIRROR) != 0 &&
+                    (flags & BGFX_SAMPLER_V_CLAMP) != 0 &&
+                    (flags & BGFX_SAMPLER_W_BORDER) != 0,
+                "U/V/W address modes map independently");
+    TEST_ASSERT((flags & BGFX_SAMPLER_BORDER_COLOR_MASK) == BGFX_SAMPLER_BORDER_COLOR(3),
+                "border color index is preserved in sampler flags");
+}
+
 static void TestOpenGLAutoMipPolicy()
 {
     TEST_SECTION("OpenGL Auto Mip Policy");
@@ -631,6 +715,48 @@ static void TestEncoderSlotReuse()
 }
 
 // ============================================================================
+// Test 7: DrawMap trace contract helpers
+// ============================================================================
+
+static void TestDrawMapTraceContractHelpers()
+{
+    TEST_SECTION("DrawMap Trace Contract Helpers");
+
+    TEST_ASSERT(CKBGFX_DRAWMAP_SCHEMA == 2,
+                "DrawMap submit schema stays at version 2");
+    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_SUBMIT_MAP, "SubmitMap") == 0,
+                "SubmitMap tag is centralized");
+    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_PROGRAM_MAP, "ProgramMap") == 0,
+                "ProgramMap tag is centralized");
+    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_TEXTURE_MAP, "TextureMap") == 0,
+                "TextureMap tag is centralized");
+    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_BUFFER_MAP, "BufferMap") == 0,
+                "BufferMap tag is centralized");
+    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_STATE_MAP, "StateMap") == 0,
+                "StateMap tag is centralized");
+
+    char buffer[128];
+    CKDWORD offset = 0;
+    buffer[0] = '\0';
+
+    TEST_ASSERT(CKBgfxDrawMapAppendTextureBinding(buffer, sizeof(buffer),
+                                                  &offset, 3, 77, 8, 21,
+                                                  0x1234) == TRUE,
+                "texture binding formatter succeeds");
+    TEST_ASSERT(std::strcmp(buffer, " tex3=77:8:21:0x00001234") == 0,
+                "texture binding formatter keeps contract order");
+
+    offset = 0;
+    buffer[0] = '\0';
+    TEST_ASSERT(CKBgfxDrawMapAppendVertexBinding(buffer, sizeof(buffer),
+                                                 &offset, 1, 5, 2, 12, 9,
+                                                 3) == TRUE,
+                "vertex binding formatter succeeds");
+    TEST_ASSERT(std::strcmp(buffer, " vb1=5:2:12:9:3") == 0,
+                "vertex binding formatter keeps contract order");
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -643,11 +769,15 @@ int main()
     TestBgfxStencilWriteMaskEncoding();
     TestTextureVolumeDescriptorDefaults();
     TestSamplerCompareFlags();
+    TestBackendProfileMapping();
+    TestBgfxStateBackendConventions();
+    TestSamplerFilterAndAddressConventions();
     TestOpenGLAutoMipPolicy();
     TestEncoderSlotAtomic();
     TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();
     TestEncoderSlotReuse();
+    TestDrawMapTraceContractHelpers();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);
