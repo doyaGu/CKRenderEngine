@@ -53,7 +53,7 @@ static void CKMeshSetDrawAnnotation(RCKRenderContext *rc,
                                     VXPRIMITIVETYPE primitiveType,
                                     CKDWORD indexCount,
                                     CKDWORD vertexCount) {
-    if (!rc)
+    if (!rc || !rc->m_DrawAnnotationState)
         return;
 
     CKDrawAnnotation annotation;
