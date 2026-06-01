@@ -132,6 +132,7 @@ public:
 
     // Debug markers
     virtual void SetMarker(CKSTRING Name);
+    virtual CKBOOL ConsumeMarker(char *Buffer, CKDWORD BufferSize);
 
     // Submission -- graphics
     virtual void Submit(CKRenderView View, CKDWORD Program,
