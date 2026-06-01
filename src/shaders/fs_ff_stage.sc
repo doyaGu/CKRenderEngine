@@ -89,6 +89,63 @@ SAMPLER3D(s_textureVolume7, 15);
 #else
 SAMPLER2D(s_texture7, 7);
 #endif
+#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
+#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube0, 8);
+#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume0, 8);
+#else
+SAMPLER2D(s_texture0, 0);
+#endif
+#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube1, 9);
+#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume1, 9);
+#else
+SAMPLER2D(s_texture1, 1);
+#endif
+#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube2, 10);
+#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume2, 10);
+#else
+SAMPLER2D(s_texture2, 2);
+#endif
+#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube3, 11);
+#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume3, 11);
+#else
+SAMPLER2D(s_texture3, 3);
+#endif
+#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube4, 12);
+#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume4, 12);
+#else
+SAMPLER2D(s_texture4, 4);
+#endif
+#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube5, 13);
+#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume5, 13);
+#else
+SAMPLER2D(s_texture5, 5);
+#endif
+#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube6, 14);
+#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume6, 14);
+#else
+SAMPLER2D(s_texture6, 6);
+#endif
+#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
+SAMPLERCUBE(s_textureCube7, 15);
+#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
+SAMPLER3D(s_textureVolume7, 15);
+#else
+SAMPLER2D(s_texture7, 7);
+#endif
 #elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
@@ -227,6 +284,91 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bo
 #else
     vec4 color = texture2D(s_texture7, coord.xy);
     return CKFF_DEPTH_TEXTURE_COLOR(color);
+#endif
+}
+#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
+#define CKFF_STATIC_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
+
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+{
+    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    if (stage == 0) {
+#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube0, coord.xyz);
+#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume0, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture0, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 1) {
+#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube1, coord.xyz);
+#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume1, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture1, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 2) {
+#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube2, coord.xyz);
+#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume2, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture2, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 3) {
+#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube3, coord.xyz);
+#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume3, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture3, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 4) {
+#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube4, coord.xyz);
+#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume4, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture4, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 5) {
+#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube5, coord.xyz);
+#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume5, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture5, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+    if (stage == 6) {
+#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
+        return textureCube(s_textureCube6, coord.xyz);
+#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
+        return texture3D(s_textureVolume6, coord.xyz);
+#else
+        vec4 color = texture2D(s_texture6, coord.xy);
+        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
+#endif
+    }
+#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
+    return textureCube(s_textureCube7, coord.xyz);
+#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
+    return texture3D(s_textureVolume7, coord.xyz);
+#else
+    vec4 color = texture2D(s_texture7, coord.xy);
+    return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
 #endif
 }
 #elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)

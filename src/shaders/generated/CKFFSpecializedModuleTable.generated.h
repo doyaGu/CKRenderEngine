@@ -34,6 +34,12 @@
 #include "shaders/generated/dx11/specialized/vsspec_1327e0a2fbf90f0d_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_3d3798e46e5c5cfc_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/vsspec_3030258a85361955_vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_c7496d43fd960e67_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_abb7e5740d3b962d_vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_25e6eedde4b5d8a2_vs_ff_3d.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_5855b5c8b1018a15_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_fb39e4f6bd240d26_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx11/specialized/vsspec_923327ad866030ea_vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/specialized/spec_a0bdb770c35c1cfc_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_dd318d88ba5ea36a_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_c1283c151d45f696_fs_ff_stage.bin.h"
@@ -55,6 +61,11 @@
 #include "shaders/generated/dx11/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_6e3e96b65a6673e3_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -88,6 +99,12 @@
 #include "shaders/generated/dx12/specialized/vsspec_1327e0a2fbf90f0d_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_3d3798e46e5c5cfc_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_3030258a85361955_vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_c7496d43fd960e67_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_abb7e5740d3b962d_vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_25e6eedde4b5d8a2_vs_ff_3d.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_5855b5c8b1018a15_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_fb39e4f6bd240d26_vs_ff_positiont.bin.h"
+#include "shaders/generated/dx12/specialized/vsspec_923327ad866030ea_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/spec_a0bdb770c35c1cfc_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_dd318d88ba5ea36a_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_c1283c151d45f696_fs_ff_stage.bin.h"
@@ -109,6 +126,11 @@
 #include "shaders/generated/dx12/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_6e3e96b65a6673e3_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -142,6 +164,12 @@
 #include "shaders/generated/spirv/specialized/vsspec_1327e0a2fbf90f0d_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_3d3798e46e5c5cfc_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_3030258a85361955_vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_c7496d43fd960e67_vs_ff_positiont.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_abb7e5740d3b962d_vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_25e6eedde4b5d8a2_vs_ff_3d.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_5855b5c8b1018a15_vs_ff_positiont.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_fb39e4f6bd240d26_vs_ff_positiont.bin.h"
+#include "shaders/generated/spirv/specialized/vsspec_923327ad866030ea_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/spec_a0bdb770c35c1cfc_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_dd318d88ba5ea36a_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_c1283c151d45f696_fs_ff_stage.bin.h"
@@ -163,6 +191,11 @@
 #include "shaders/generated/spirv/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_6e3e96b65a6673e3_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -196,6 +229,12 @@
 #include "shaders/generated/glsl/specialized/vsspec_1327e0a2fbf90f0d_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_3d3798e46e5c5cfc_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_3030258a85361955_vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_c7496d43fd960e67_vs_ff_positiont.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_abb7e5740d3b962d_vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_25e6eedde4b5d8a2_vs_ff_3d.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_5855b5c8b1018a15_vs_ff_positiont.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_fb39e4f6bd240d26_vs_ff_positiont.bin.h"
+#include "shaders/generated/glsl/specialized/vsspec_923327ad866030ea_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/spec_a0bdb770c35c1cfc_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_dd318d88ba5ea36a_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_c1283c151d45f696_fs_ff_stage.bin.h"
@@ -217,6 +256,11 @@
 #include "shaders/generated/glsl/specialized/spec_a517938146c6445d_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_fdd25d700d27bae3_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_3666770847402ccb_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_6e3e96b65a6673e3_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     CKFFShaderKey key;
@@ -254,6 +298,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -404,6 +449,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 2u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -554,6 +600,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -704,6 +751,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_add_specular() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -854,6 +902,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_alpha_test() 
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1004,6 +1053,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_fog() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1154,6 +1204,7 @@ static CKFFShaderKey CKFFSpecializedKey_positiont_stage0_modulate_fog() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1304,6 +1355,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_tran
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1454,6 +1506,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_lerp_multiplyadd_arg0(
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 26u;
     key.FS.Stages[0].ColorArg0 = 3u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1604,6 +1657,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texgen_reflec
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1754,6 +1808,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_lit_one_light
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -1904,6 +1959,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_diffuse_color
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2054,6 +2110,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2204,6 +2261,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_bump_luminance() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 23u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2354,6 +2412,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate_texcoord_coun
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2504,6 +2563,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage1_temp_result_routing() 
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2654,6 +2714,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_normal_ke
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2804,6 +2865,7 @@ static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_vertex_blend_tween_key
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -2954,6 +3016,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_00_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3104,6 +3167,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_01_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3254,6 +3318,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_02_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -3404,6 +3469,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_03_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3554,6 +3620,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_04_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3704,6 +3771,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_05_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -3854,6 +3922,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_06_positiont_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4004,6 +4073,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_07_positiont_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4154,6 +4224,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_08_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -4304,6 +4375,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_09_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4454,6 +4526,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_10_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4604,6 +4677,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_11_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -4754,6 +4828,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_12_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -4904,6 +4979,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_13_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = true;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5054,6 +5130,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_14_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -5204,6 +5281,7 @@ static CKFFShaderKey CKFFSpecializedKey_player_capture_15_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5354,6 +5432,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_00_3d_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5504,6 +5583,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_01_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5654,6 +5734,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_02_positiont_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -5804,6 +5885,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_03_3d_stage1() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -5954,6 +6036,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_04_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -6104,6 +6187,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_05_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6254,6 +6338,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_06_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6404,6 +6489,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_07_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6554,6 +6640,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_08_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -6704,6 +6791,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_09_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -6854,6 +6942,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_10_3d_stage0() {
     key.FS.AlphaTestEnable = true;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -7004,6 +7093,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_11_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 4u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -7154,6 +7244,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_12_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 13u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 2u;
@@ -7268,6 +7359,1667 @@ static CKFFSpecializationInfo CKFFSpecializedSpec_level_capture_12_3d_stage0() {
     return info;
 }
 
+static CKFFShaderKey CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33607708ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 5u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = true;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 176u, 2183267396u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_intro_positiont_stage0_disable() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33607708ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 1u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 0u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 1u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 0u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = false;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 0u;
+    key.FS.Stages[1].ColorArg0 = 0u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 0u;
+    key.FS.Stages[1].AlphaOp = 0u;
+    key.FS.Stages[1].AlphaArg0 = 0u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 0u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_intro_positiont_stage0_disable() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 2181071873u, 0u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33607708ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 0u, 2183267396u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_specular() {
+    CKFFShaderKey key;
+    key.VS.Bits = 1113636893ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 3u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = true;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_specular() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 3584u, 2183267396u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_flat() {
+    CKFFShaderKey key;
+    key.VS.Bits = 39862301ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 3u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = true;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = true;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_flat() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 36352u, 35783748u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33574940ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 5u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = true;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = true;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 32944u, 35783748u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_positiont_stage0_disable() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33574940ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 1u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 0u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 1u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 0u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = false;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 0u;
+    key.FS.Stages[1].ColorArg0 = 0u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 0u;
+    key.FS.Stages[1].AlphaOp = 0u;
+    key.FS.Stages[1].AlphaArg0 = 0u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 0u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_positiont_stage0_disable() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 1u, 1u, 0u, 0u, 0u, 33588225u, 0u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33574940ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 0u, 35783748u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_flat() {
+    CKFFShaderKey key;
+    key.VS.Bits = 1107316764ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = false;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = true;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_flat() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 32768u, 35783748u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_specular() {
+    CKFFShaderKey key;
+    key.VS.Bits = 1107345437ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 0u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = false;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_specular() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 0u, 2183267396u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
+static CKFFShaderKey CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFShaderKey key;
+    key.VS.Bits = 33607708ull;
+    key.VS.VertexTexcoordDeclMask = 4793490u;
+    key.VS.TexGen[0] = 0u;
+    key.VS.TexGen[1] = 0u;
+    key.VS.TexGen[2] = 0u;
+    key.VS.TexGen[3] = 0u;
+    key.VS.TexGen[4] = 0u;
+    key.VS.TexGen[5] = 0u;
+    key.VS.TexGen[6] = 0u;
+    key.VS.TexGen[7] = 0u;
+    key.VS.TexCoordIndex[0] = 0u;
+    key.VS.TexCoordIndex[1] = 1u;
+    key.VS.TexCoordIndex[2] = 2u;
+    key.VS.TexCoordIndex[3] = 3u;
+    key.VS.TexCoordIndex[4] = 4u;
+    key.VS.TexCoordIndex[5] = 5u;
+    key.VS.TexCoordIndex[6] = 6u;
+    key.VS.TexCoordIndex[7] = 7u;
+    key.VS.TexTransformFlags[0] = 0u;
+    key.VS.TexTransformFlags[1] = 0u;
+    key.VS.TexTransformFlags[2] = 0u;
+    key.VS.TexTransformFlags[3] = 0u;
+    key.VS.TexTransformFlags[4] = 0u;
+    key.VS.TexTransformFlags[5] = 0u;
+    key.VS.TexTransformFlags[6] = 0u;
+    key.VS.TexTransformFlags[7] = 0u;
+    key.FS.LastActiveTextureStage = 0u;
+    key.FS.AlphaFunc = 5u;
+    key.FS.VertexFogMode = 0u;
+    key.FS.PixelFogMode = 0u;
+    key.FS.GlobalSpecularEnable = true;
+    key.FS.AlphaTestEnable = true;
+    key.FS.FogEnable = false;
+    key.FS.RangeFog = false;
+    key.FS.FlatShade = true;
+    key.FS.Stages[0].ColorOp = 4u;
+    key.FS.Stages[0].ColorArg0 = 1u;
+    key.FS.Stages[0].ColorArg1 = 2u;
+    key.FS.Stages[0].ColorArg2 = 1u;
+    key.FS.Stages[0].AlphaOp = 4u;
+    key.FS.Stages[0].AlphaArg0 = 1u;
+    key.FS.Stages[0].AlphaArg1 = 2u;
+    key.FS.Stages[0].AlphaArg2 = 1u;
+    key.FS.Stages[0].ResultIsTemp = false;
+    key.FS.Stages[0].HasTexture = true;
+    key.FS.Stages[0].ProjectedSampler = false;
+    key.FS.Stages[0].SamplerType = 0;
+    key.FS.Stages[0].SamplerCompareFunc = 0;
+    key.FS.Stages[1].ColorOp = 1u;
+    key.FS.Stages[1].ColorArg0 = 1u;
+    key.FS.Stages[1].ColorArg1 = 0u;
+    key.FS.Stages[1].ColorArg2 = 1u;
+    key.FS.Stages[1].AlphaOp = 1u;
+    key.FS.Stages[1].AlphaArg0 = 1u;
+    key.FS.Stages[1].AlphaArg1 = 0u;
+    key.FS.Stages[1].AlphaArg2 = 1u;
+    key.FS.Stages[1].ResultIsTemp = false;
+    key.FS.Stages[1].HasTexture = false;
+    key.FS.Stages[1].ProjectedSampler = false;
+    key.FS.Stages[1].SamplerType = 0;
+    key.FS.Stages[1].SamplerCompareFunc = 0;
+    key.FS.Stages[2].ColorOp = 0u;
+    key.FS.Stages[2].ColorArg0 = 0u;
+    key.FS.Stages[2].ColorArg1 = 0u;
+    key.FS.Stages[2].ColorArg2 = 0u;
+    key.FS.Stages[2].AlphaOp = 0u;
+    key.FS.Stages[2].AlphaArg0 = 0u;
+    key.FS.Stages[2].AlphaArg1 = 0u;
+    key.FS.Stages[2].AlphaArg2 = 0u;
+    key.FS.Stages[2].ResultIsTemp = false;
+    key.FS.Stages[2].HasTexture = false;
+    key.FS.Stages[2].ProjectedSampler = false;
+    key.FS.Stages[2].SamplerType = 0;
+    key.FS.Stages[2].SamplerCompareFunc = 0;
+    key.FS.Stages[3].ColorOp = 0u;
+    key.FS.Stages[3].ColorArg0 = 0u;
+    key.FS.Stages[3].ColorArg1 = 0u;
+    key.FS.Stages[3].ColorArg2 = 0u;
+    key.FS.Stages[3].AlphaOp = 0u;
+    key.FS.Stages[3].AlphaArg0 = 0u;
+    key.FS.Stages[3].AlphaArg1 = 0u;
+    key.FS.Stages[3].AlphaArg2 = 0u;
+    key.FS.Stages[3].ResultIsTemp = false;
+    key.FS.Stages[3].HasTexture = false;
+    key.FS.Stages[3].ProjectedSampler = false;
+    key.FS.Stages[3].SamplerType = 0;
+    key.FS.Stages[3].SamplerCompareFunc = 0;
+    key.FS.Stages[4].ColorOp = 0u;
+    key.FS.Stages[4].ColorArg0 = 0u;
+    key.FS.Stages[4].ColorArg1 = 0u;
+    key.FS.Stages[4].ColorArg2 = 0u;
+    key.FS.Stages[4].AlphaOp = 0u;
+    key.FS.Stages[4].AlphaArg0 = 0u;
+    key.FS.Stages[4].AlphaArg1 = 0u;
+    key.FS.Stages[4].AlphaArg2 = 0u;
+    key.FS.Stages[4].ResultIsTemp = false;
+    key.FS.Stages[4].HasTexture = false;
+    key.FS.Stages[4].ProjectedSampler = false;
+    key.FS.Stages[4].SamplerType = 0;
+    key.FS.Stages[4].SamplerCompareFunc = 0;
+    key.FS.Stages[5].ColorOp = 0u;
+    key.FS.Stages[5].ColorArg0 = 0u;
+    key.FS.Stages[5].ColorArg1 = 0u;
+    key.FS.Stages[5].ColorArg2 = 0u;
+    key.FS.Stages[5].AlphaOp = 0u;
+    key.FS.Stages[5].AlphaArg0 = 0u;
+    key.FS.Stages[5].AlphaArg1 = 0u;
+    key.FS.Stages[5].AlphaArg2 = 0u;
+    key.FS.Stages[5].ResultIsTemp = false;
+    key.FS.Stages[5].HasTexture = false;
+    key.FS.Stages[5].ProjectedSampler = false;
+    key.FS.Stages[5].SamplerType = 0;
+    key.FS.Stages[5].SamplerCompareFunc = 0;
+    key.FS.Stages[6].ColorOp = 0u;
+    key.FS.Stages[6].ColorArg0 = 0u;
+    key.FS.Stages[6].ColorArg1 = 0u;
+    key.FS.Stages[6].ColorArg2 = 0u;
+    key.FS.Stages[6].AlphaOp = 0u;
+    key.FS.Stages[6].AlphaArg0 = 0u;
+    key.FS.Stages[6].AlphaArg1 = 0u;
+    key.FS.Stages[6].AlphaArg2 = 0u;
+    key.FS.Stages[6].ResultIsTemp = false;
+    key.FS.Stages[6].HasTexture = false;
+    key.FS.Stages[6].ProjectedSampler = false;
+    key.FS.Stages[6].SamplerType = 0;
+    key.FS.Stages[6].SamplerCompareFunc = 0;
+    key.FS.Stages[7].ColorOp = 0u;
+    key.FS.Stages[7].ColorArg0 = 0u;
+    key.FS.Stages[7].ColorArg1 = 0u;
+    key.FS.Stages[7].ColorArg2 = 0u;
+    key.FS.Stages[7].AlphaOp = 0u;
+    key.FS.Stages[7].AlphaArg0 = 0u;
+    key.FS.Stages[7].AlphaArg1 = 0u;
+    key.FS.Stages[7].AlphaArg2 = 0u;
+    key.FS.Stages[7].ResultIsTemp = false;
+    key.FS.Stages[7].HasTexture = false;
+    key.FS.Stages[7].ProjectedSampler = false;
+    key.FS.Stages[7].SamplerType = 0;
+    key.FS.Stages[7].SamplerCompareFunc = 0;
+    return key;
+}
+
+static CKFFSpecializationInfo CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = { 1u, 33u, 33u, 0u, 0u, 32944u, 2183267396u, 33588225u, 0u, 0u };
+    CKFFSpecializationInfo info;
+    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    return info;
+}
+
 static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     CKFFShaderKey key;
     key.VS.Bits = 385055ull;
@@ -7304,6 +9056,7 @@ static CKFFShaderKey CKFFSpecializedKey_level_capture_13_3d_stage0() {
     key.FS.AlphaTestEnable = false;
     key.FS.FogEnable = false;
     key.FS.RangeFog = false;
+    key.FS.FlatShade = false;
     key.FS.Stages[0].ColorOp = 1u;
     key.FS.Stages[0].ColorArg0 = 1u;
     key.FS.Stages[0].ColorArg1 = 0u;
@@ -7888,6 +9641,116 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx11_level_capture_12_3d_stag
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_fog_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d);
+    module.FSData = s_dx11_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_fog_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d);
+    module.FSData = s_dx11_ffp_spec_6e3e96b65a6673e3_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_6e3e96b65a6673e3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_923327ad866030ea_vs_ff_3d;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_923327ad866030ea_vs_ff_3d);
+    module.FSData = s_dx11_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx11_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx11_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
 static CKFFSpecializedModule CKFFSpecializedModule_dx11_level_capture_13_3d_stage0() {
     CKFFSpecializedModule module = {};
     module.VSData = s_dx11_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d;
@@ -8365,6 +10228,116 @@ static CKFFSpecializedModule CKFFSpecializedModule_dx12_level_capture_12_3d_stag
     module.FSData = s_dx12_ffp_spec_3666770847402ccb_fs_ff_stage;
     module.FSSize = sizeof(s_dx12_ffp_spec_3666770847402ccb_fs_ff_stage);
     module.Specialization = CKFFSpecializedSpec_level_capture_12_3d_stage0();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_fog_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d);
+    module.FSData = s_dx12_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_fog_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d);
+    module.FSData = s_dx12_ffp_spec_6e3e96b65a6673e3_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_6e3e96b65a6673e3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_923327ad866030ea_vs_ff_3d;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_923327ad866030ea_vs_ff_3d);
+    module.FSData = s_dx12_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_dx12_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_dx12_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test_flat();
     return module;
 }
 
@@ -8848,6 +10821,116 @@ static CKFFSpecializedModule CKFFSpecializedModule_spirv_level_capture_12_3d_sta
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_fog_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d);
+    module.FSData = s_spirv_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_fog_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d);
+    module.FSData = s_spirv_ffp_spec_6e3e96b65a6673e3_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_6e3e96b65a6673e3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_923327ad866030ea_vs_ff_3d;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_923327ad866030ea_vs_ff_3d);
+    module.FSData = s_spirv_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_spirv_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_spirv_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
 static CKFFSpecializedModule CKFFSpecializedModule_spirv_level_capture_13_3d_stage0() {
     CKFFSpecializedModule module = {};
     module.VSData = s_spirv_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d;
@@ -9328,6 +11411,116 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_level_capture_12_3d_stag
     return module;
 }
 
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate_alpha_test() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_bfdce629825ea3dd_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_bfdce629825ea3dd_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_0a6fc87827d83027_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_0a6fc87827d83027_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_fog_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_abb7e5740d3b962d_vs_ff_3d);
+    module.FSData = s_glsl_ffp_spec_bca37de0ec984ac7_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_bca37de0ec984ac7_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_fog_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_25e6eedde4b5d8a2_vs_ff_3d);
+    module.FSData = s_glsl_ffp_spec_6e3e96b65a6673e3_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_6e3e96b65a6673e3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_fog_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_9e8e5a3b5a0ee2a1_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_disable() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_a517938146c6445d_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_a517938146c6445d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_disable();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_5855b5c8b1018a15_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_9a52f235c05b7a1c_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_9a52f235c05b7a1c_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_fb39e4f6bd240d26_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_3bf7cf5b838e4ed3_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_positiont_stage0_modulate_flat();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_specular() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_923327ad866030ea_vs_ff_3d;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_923327ad866030ea_vs_ff_3d);
+    module.FSData = s_glsl_ffp_spec_1b854eceaa9fc32d_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_1b854eceaa9fc32d_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_menu_3d_stage0_modulate_specular();
+    return module;
+}
+
+static CKFFSpecializedModule CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate_alpha_test_flat() {
+    CKFFSpecializedModule module = {};
+    module.VSData = s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont;
+    module.VSSize = sizeof(s_glsl_ffp_vsspec_c7496d43fd960e67_vs_ff_positiont);
+    module.FSData = s_glsl_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_spec_d9e2b7c25e3bb43a_fs_ff_stage);
+    module.Specialization = CKFFSpecializedSpec_opengl_intro_positiont_stage0_modulate_alpha_test_flat();
+    return module;
+}
+
 static CKFFSpecializedModule CKFFSpecializedModule_glsl_level_capture_13_3d_stage0() {
     CKFFSpecializedModule module = {};
     module.VSData = s_glsl_ffp_vsspec_dbfc4c58d2921002_vs_ff_3d;
@@ -9337,6 +11530,65 @@ static CKFFSpecializedModule CKFFSpecializedModule_glsl_level_capture_13_3d_stag
     module.Specialization = CKFFSpecializedSpec_level_capture_13_3d_stage0();
     return module;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_dx11_variant_3d_stage0_modulate() },
@@ -9386,6 +11638,17 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_level_capture_10_3d_stage0(), CKFFSpecializedModule_dx11_level_capture_10_3d_stage0() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_dx11_level_capture_11_3d_stage0() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_dx11_level_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test(), CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate_alpha_test() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_intro_positiont_stage0_disable(), CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate(), CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_specular(), CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_fog_specular() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_flat(), CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_fog_flat() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate_alpha_test_flat() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_positiont_stage0_disable(), CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate(), CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_flat(), CKFFSpecializedModule_dx11_opengl_menu_positiont_stage0_modulate_flat() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_specular(), CKFFSpecializedModule_dx11_opengl_menu_3d_stage0_modulate_specular() },
+    { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_dx11_opengl_intro_positiont_stage0_modulate_alpha_test_flat() },
     { CKRST_SHADER_PROFILE_DX11, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_dx11_level_capture_13_3d_stage0() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_dx12_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(), CKFFSpecializedModule_dx12_variant_3d_stage0_select_texture_volume() },
@@ -9434,6 +11697,17 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_level_capture_10_3d_stage0(), CKFFSpecializedModule_dx12_level_capture_10_3d_stage0() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_dx12_level_capture_11_3d_stage0() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_dx12_level_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test(), CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate_alpha_test() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_intro_positiont_stage0_disable(), CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate(), CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_specular(), CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_fog_specular() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_flat(), CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_fog_flat() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate_alpha_test_flat() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_positiont_stage0_disable(), CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate(), CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_flat(), CKFFSpecializedModule_dx12_opengl_menu_positiont_stage0_modulate_flat() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_specular(), CKFFSpecializedModule_dx12_opengl_menu_3d_stage0_modulate_specular() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_dx12_opengl_intro_positiont_stage0_modulate_alpha_test_flat() },
     { CKRST_SHADER_PROFILE_DX12, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_dx12_level_capture_13_3d_stage0() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_spirv_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(), CKFFSpecializedModule_spirv_variant_3d_stage0_select_texture_volume() },
@@ -9482,6 +11756,17 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_level_capture_10_3d_stage0(), CKFFSpecializedModule_spirv_level_capture_10_3d_stage0() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_spirv_level_capture_11_3d_stage0() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_spirv_level_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test(), CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate_alpha_test() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_intro_positiont_stage0_disable(), CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate(), CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_specular(), CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_fog_specular() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_flat(), CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_fog_flat() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate_alpha_test_flat() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_positiont_stage0_disable(), CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate(), CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_flat(), CKFFSpecializedModule_spirv_opengl_menu_positiont_stage0_modulate_flat() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_specular(), CKFFSpecializedModule_spirv_opengl_menu_3d_stage0_modulate_specular() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_spirv_opengl_intro_positiont_stage0_modulate_alpha_test_flat() },
     { CKRST_SHADER_PROFILE_SPIRV, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_spirv_level_capture_13_3d_stage0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_modulate(), CKFFSpecializedModule_glsl_variant_3d_stage0_modulate() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_variant_3d_stage0_select_texture_volume(), CKFFSpecializedModule_glsl_variant_3d_stage0_select_texture_volume() },
@@ -9530,8 +11815,64 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_10_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_10_3d_stage0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_11_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_11_3d_stage0() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_12_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_12_3d_stage0() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test(), CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate_alpha_test() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_intro_positiont_stage0_disable(), CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate(), CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_specular(), CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_fog_specular() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_fog_flat(), CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_fog_flat() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate_alpha_test_flat() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_positiont_stage0_disable(), CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_disable() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate(), CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_positiont_stage0_modulate_flat(), CKFFSpecializedModule_glsl_opengl_menu_positiont_stage0_modulate_flat() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_menu_3d_stage0_modulate_specular(), CKFFSpecializedModule_glsl_opengl_menu_3d_stage0_modulate_specular() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_opengl_intro_positiont_stage0_modulate_alpha_test_flat(), CKFFSpecializedModule_glsl_opengl_intro_positiont_stage0_modulate_alpha_test_flat() },
     { CKRST_SHADER_PROFILE_GLSL, CKFFSpecializedKey_level_capture_13_3d_stage0(), CKFFSpecializedModule_glsl_level_capture_13_3d_stage0() },
 };
 
 static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;
 static const std::size_t g_CKFFSpecializedModuleCount = sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);
+
+static CKFFSamplerLayoutKey CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutKey key;
+    key.Bits = 0x0007u;
+    return key;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_dx11_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_dx11_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_dx12_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_dx12_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_spirv_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_spirv_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_glsl_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_glsl_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+
+static const CKFFSamplerLayoutModuleEntry g_CKFFSamplerLayoutModuleEntries[] = {
+    { CKRST_SHADER_PROFILE_DX11, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_dx11_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_dx12_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_spirv_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_glsl_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+};
+
+static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = g_CKFFSamplerLayoutModuleEntries;
+static const std::size_t g_CKFFSamplerLayoutModuleCount = sizeof(g_CKFFSamplerLayoutModuleEntries) / sizeof(g_CKFFSamplerLayoutModuleEntries[0]);
