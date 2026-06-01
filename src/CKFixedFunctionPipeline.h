@@ -78,6 +78,13 @@ struct CKFFFrameStats {
     CKDWORD RenderPacketAdaptiveBypasses;
     CKDWORD RenderPacketAdaptiveSavedBindEstimate;
     CKDWORD RenderPacketViewProjectionRebuilds;
+    CKDWORD RenderPacketInstancedRuns;
+    CKDWORD RenderPacketInstancedPackets;
+    CKDWORD RenderPacketInstancedSubmits;
+    CKDWORD RenderPacketInstanceBufferBytes;
+    CKDWORD RenderPacketInstanceAllocFailures;
+    CKDWORD RenderPacketSubmitSavedEstimate;
+    CKDWORD RenderPacketInstancingFallbacks;
     double RenderPacketBuildUs;
     double RenderPacketSortUs;
     double RenderPacketReplayUs;
@@ -124,6 +131,7 @@ struct CKFFDiagnosticConfig {
 #define CKFF_RENDER_PACKET_MAX_UNIFORMS 16
 #define CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S 192
 #define CKFF_RENDER_PACKET_MARKER_SIZE 512
+#define CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT 4
 
 struct CKFFRenderPacketUniformEntry {
     CKDWORD Uniform;
@@ -206,6 +214,10 @@ struct CKRenderPacket {
     CKRenderPacketObjectUniforms ObjectUniforms;
     CKRenderPacketSortKey SortKey;
     VxMatrix World;
+    VxMatrix ViewProjection;
+    CKDWORD ViewProjectionHash;
+    CKBOOL CanInstance;
+    CKDWORD InstancedProgram;
     char Marker[CKFF_RENDER_PACKET_MARKER_SIZE];
 };
 
@@ -295,6 +307,7 @@ public:
         m_OpaqueSortingEnabled = enabled;
         ResetOpaqueRenderPacketFrameState();
     }
+    void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaqueInstancingEnabled = enabled; }
     void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePacketAllowed = allowed; }
     CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePacketAllowed; }
     CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketAdaptiveSamples; }
@@ -428,6 +441,19 @@ private:
                                   const CKRenderPacket &packet,
                                   CKRenderPacketReplayCache *cache,
                                   CKBOOL lastPacket);
+    CKBOOL ReplayVertexBufferPacketRunInstanced(CKRasterizerEncoder *encoder,
+                                                const XArray<CKDWORD> *indices,
+                                                int start,
+                                                int packetCount,
+                                                CKBOOL directReplay,
+                                                CKRenderPacketReplayCache *cache,
+                                                CKBOOL lastRun);
+    CKBOOL CanInstanceVertexBufferPacket() const;
+    CKBOOL CanInstanceVertexBufferPacketRun(const CKRenderPacket &a,
+                                            const CKRenderPacket &b) const;
+    void BindVertexBufferPacketSharedState(CKRasterizerEncoder *encoder,
+                                           const CKRenderPacket &packet,
+                                           CKRenderPacketReplayCache *cache);
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void ClearOpaqueRenderPackets();
     void ResetOpaqueRenderPacketFrameState();
@@ -450,6 +476,8 @@ private:
     CKBOOL m_OpaquePacketsAlreadySorted;
     CKBOOL m_OpaquePacketsSingleKey;
     CKBOOL m_OpaquePacketsHasLastKey;
+    CKBOOL m_OpaqueInstancingEnabled;
+    CKDWORD m_InstanceLayout;
     CKRenderPacketSortKey m_OpaqueFirstPacketSortKey;
     CKRenderPacketSortKey m_OpaqueLastPacketSortKey;
     CKBOOL m_OpaqueSortingEnabled;
