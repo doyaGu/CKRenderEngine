@@ -81,13 +81,16 @@ set(CKRE_PRIVATE_HEADERS
         CKException.h
         CKFFDebug.h
         CKFFStageState.h
+        CKFFShaderABI.h
         CKFFUniformState.h
         CKFFShaderKey.h
+        CKFFSamplerLayout.h
         CKFFSpecializationInfo.h
         CKFFSpecializedModuleTable.h
         CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
+        CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h
         CKTransientGeometry.h
@@ -157,6 +160,8 @@ set(CKRE_SOURCES
         CKFFSpecializationInfo.cpp
         CKFFSpecializedModuleTable.cpp
         CKFFShaderCache.cpp
+        CKDrawAnnotation.cpp
+        CKDrawAnnotationParser.cpp
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
         CKTransientGeometry.cpp
