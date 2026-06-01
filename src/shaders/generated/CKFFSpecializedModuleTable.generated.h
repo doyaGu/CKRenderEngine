@@ -65,6 +65,7 @@
 #include "shaders/generated/dx11/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx11/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -129,6 +130,7 @@
 #include "shaders/generated/dx12/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/dx12/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -193,6 +195,7 @@
 #include "shaders/generated/spirv/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/spirv/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -257,6 +260,7 @@
 #include "shaders/generated/glsl/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/glsl/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 #include "shaders/generated/metal/specialized/vsspec_6a7cbb03996d991b_vs_ff_3d.bin.h"
 #include "shaders/generated/metal/specialized/vsspec_caf15ee4a3d88195_vs_ff_positiont.bin.h"
 #include "shaders/generated/metal/specialized/vsspec_2f7b829250345295_vs_ff_3d.bin.h"
@@ -321,6 +325,7 @@
 #include "shaders/generated/metal/specialized/spec_9e8e5a3b5a0ee2a1_fs_ff_stage.bin.h"
 #include "shaders/generated/metal/specialized/spec_3bf7cf5b838e4ed3_fs_ff_stage.bin.h"
 #include "shaders/generated/metal/specialized/spec_d9e2b7c25e3bb43a_fs_ff_stage.bin.h"
+#include "shaders/generated/metal/sampler_layout/layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage.bin.h"
 
 static CKFFShaderKey CKFFSpecializedKey_variant_3d_stage0_modulate() {
     CKFFShaderKey key;
@@ -12481,3 +12486,55 @@ static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {
 
 static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;
 static const std::size_t g_CKFFSpecializedModuleCount = sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);
+
+static CKFFSamplerLayoutKey CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutKey key;
+    key.Bits = 0x0007u;
+    return key;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_dx11_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_dx11_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx11_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_dx12_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_dx12_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_dx12_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_spirv_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_spirv_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_spirv_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_glsl_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_glsl_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_glsl_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_metal_layout_volume_cube_2d_2d_2d_2d_2d_2d() {
+    CKFFSamplerLayoutModule module = {};
+    module.FSData = s_metal_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage;
+    module.FSSize = sizeof(s_metal_ffp_layout_volume_cube_2d_2d_2d_2d_2d_2d_fs_ff_stage);
+    return module;
+}
+
+static const CKFFSamplerLayoutModuleEntry g_CKFFSamplerLayoutModuleEntries[] = {
+    { CKRST_SHADER_PROFILE_DX11, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_dx11_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_DX12, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_dx12_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_SPIRV, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_spirv_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_GLSL, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_glsl_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+    { CKRST_SHADER_PROFILE_MSL, CKFFSamplerLayoutKey_layout_volume_cube_2d_2d_2d_2d_2d_2d(), CKFFSamplerLayoutModule_metal_layout_volume_cube_2d_2d_2d_2d_2d_2d() },
+};
+
+static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = g_CKFFSamplerLayoutModuleEntries;
+static const std::size_t g_CKFFSamplerLayoutModuleCount = sizeof(g_CKFFSamplerLayoutModuleEntries) / sizeof(g_CKFFSamplerLayoutModuleEntries[0]);

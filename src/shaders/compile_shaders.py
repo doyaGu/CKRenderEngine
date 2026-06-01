@@ -55,6 +55,8 @@ PROFILE_ENUMS = {
 }
 
 FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
+SAMPLER_LAYOUT_MANIFEST = "ffp_sampler_layouts.json"
+SAMPLER_LAYOUT_SIZE_LIMIT_BYTES = 2 * 1024 * 1024
 
 
 def _exe_name(name: str) -> str:
@@ -521,6 +523,99 @@ def specialized_vs_var_name(backend: dict[str, str], variant: dict[str, object])
     return f"s_{backend['name']}_ffp_{variant['vsIdentifier']}_vs_ff_{suffix}"
 
 
+def sampler_layout_identifier(stage_types: list[int]) -> str:
+    names = {0: "2d", 1: "cube", 3: "volume"}
+    return "layout_" + "_".join(names[value] for value in stage_types)
+
+
+def sampler_layout_fs_var_name(backend: dict[str, str], layout: dict[str, object]) -> str:
+    return f"s_{backend['name']}_ffp_{layout['identifier']}_fs_ff_stage"
+
+
+def sampler_layout_bits(stage_types: list[int]) -> int:
+    bits = 0
+    for index, value in enumerate(stage_types):
+        bits |= (value & 3) << (index * 2)
+    return bits
+
+
+def sampler_layout_defines(stage_types: list[int]) -> list[str]:
+    defines = ["CKFF_STATIC_SAMPLER_LAYOUT=1"]
+    for index, value in enumerate(stage_types):
+        defines.append(f"CKFF_FS_STAGE{index}_SAMPLER_TYPE={value & 3}")
+    return defines
+
+
+def read_sampler_layout_stage_types(value: object, location: str) -> list[int]:
+    if not isinstance(value, list) or len(value) != 8:
+        raise ValueError(f"{location}.stageTypes must be an array of 8 sampler type integers")
+
+    stage_types: list[int] = []
+    for stage, sampler_type in enumerate(value):
+        if not isinstance(sampler_type, int) or sampler_type not in (0, 1, 3):
+            raise ValueError(f"{location}.stageTypes[{stage}] must be 0=2d, 1=cube, or 3=volume")
+        stage_types.append(sampler_type)
+
+    if 1 not in stage_types or 3 not in stage_types:
+        raise ValueError(f"{location}.stageTypes must describe an exact mixed cube+volume layout")
+    return stage_types
+
+
+def read_sampler_layout_backends(value: object, location: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{location}.backends must be a non-empty array")
+
+    backends: list[str] = []
+    seen: set[str] = set()
+    for index, backend in enumerate(value):
+        if not isinstance(backend, str) or backend not in PROFILE_ENUMS:
+            raise ValueError(f"{location}.backends[{index}] must name a supported shader backend")
+        if backend not in seen:
+            backends.append(backend)
+            seen.add(backend)
+    return backends
+
+
+def load_sampler_layout_manifest(script_dir: Path) -> list[dict[str, object]]:
+    manifest_path = script_dir / SAMPLER_LAYOUT_MANIFEST
+    if not manifest_path.exists():
+        return []
+
+    with manifest_path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{SAMPLER_LAYOUT_MANIFEST} must contain a JSON object")
+    entries = payload.get("layouts")
+    if not isinstance(entries, list):
+        raise ValueError(f"{SAMPLER_LAYOUT_MANIFEST} must contain a 'layouts' array")
+
+    layouts_by_bits: dict[int, dict[str, object]] = {}
+    for index, entry in enumerate(entries):
+        location = f"{SAMPLER_LAYOUT_MANIFEST} layouts[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{location} must be an object")
+        stage_types = read_sampler_layout_stage_types(entry.get("stageTypes"), location)
+        backends = read_sampler_layout_backends(entry.get("backends"), location)
+        bits = sampler_layout_bits(stage_types)
+        layout = layouts_by_bits.get(bits)
+        if layout is None:
+            layouts_by_bits[bits] = {
+                "identifier": sampler_layout_identifier(stage_types),
+                "stageTypes": stage_types,
+                "bits": bits,
+                "defines": sampler_layout_defines(stage_types),
+                "backends": backends,
+            }
+        else:
+            merged = list(layout["backends"])
+            for backend in backends:
+                if backend not in merged:
+                    merged.append(backend)
+            layout["backends"] = merged
+
+    return sorted(layouts_by_bits.values(), key=lambda layout: layout["identifier"])
+
+
 def unique_specialized_fs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
     unique: dict[str, dict[str, object]] = {}
     for variant in variants:
@@ -604,15 +699,24 @@ def write_specialized_module_function(f, backend: dict[str, str], variant: dict[
 
 
 def write_specialized_module_table(generated_dir: Path, backends: list[dict[str, str]],
-                                   variants: list[dict[str, object]]) -> None:
+                                   variants: list[dict[str, object]],
+                                   sampler_layouts: list[dict[str, object]]) -> None:
     path = generated_dir / "CKFFSpecializedModuleTable.generated.h"
     path.parent.mkdir(parents=True, exist_ok=True)
+    sampler_layout_entries = [
+        (backend, layout)
+        for backend in backends
+        for layout in sampler_layouts
+        if backend["name"] in layout["backends"]
+    ]
     with path.open("w", encoding="utf-8", newline="\n") as f:
         f.write("// Auto-generated by compile_shaders.py - DO NOT EDIT\n")
         f.write("#pragma once\n\n")
-        if not variants:
+        if not variants and not sampler_layout_entries:
             f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
             f.write("static const std::size_t g_CKFFSpecializedModuleCount = 0;\n")
+            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = nullptr;\n")
+            f.write("static const std::size_t g_CKFFSamplerLayoutModuleCount = 0;\n")
             return
 
         for backend in backends:
@@ -624,6 +728,10 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
             for variant in unique_specialized_fs_variants(variants):
                 ident = variant["fsIdentifier"]
                 f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
+            for layout in sampler_layouts:
+                if backend_name in layout["backends"]:
+                    ident = layout["identifier"]
+                    f.write(f"#include \"shaders/generated/{backend_name}/sampler_layout/{ident}_fs_ff_stage.bin.h\"\n")
         f.write("\n")
 
         for variant in variants:
@@ -640,9 +748,48 @@ def write_specialized_module_table(generated_dir: Path, backends: list[dict[str,
                 f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, CKFFSpecializedKey_{ident}(), "
                         f"CKFFSpecializedModule_{backend['name']}_{ident}() }},\n")
         f.write("};\n\n")
-        f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;\n")
-        f.write("static const std::size_t g_CKFFSpecializedModuleCount = "
-                "sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);\n")
+        if variants:
+            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;\n")
+            f.write("static const std::size_t g_CKFFSpecializedModuleCount = "
+                    "sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);\n\n")
+        else:
+            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
+            f.write("static const std::size_t g_CKFFSpecializedModuleCount = 0;\n\n")
+
+        for layout in sampler_layouts:
+            ident = layout["identifier"]
+            f.write(f"static CKFFSamplerLayoutKey CKFFSamplerLayoutKey_{ident}() {{\n")
+            f.write("    CKFFSamplerLayoutKey key;\n")
+            f.write(f"    key.Bits = 0x{layout['bits']:04x}u;\n")
+            f.write("    return key;\n")
+            f.write("}\n\n")
+        for backend in backends:
+            backend_name = backend["name"]
+            for layout in sampler_layouts:
+                if backend_name not in layout["backends"]:
+                    continue
+                ident = layout["identifier"]
+                var_name = sampler_layout_fs_var_name(backend, layout)
+                f.write(f"static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_{backend_name}_{ident}() {{\n")
+                f.write("    CKFFSamplerLayoutModule module = {};\n")
+                f.write(f"    module.FSData = {var_name};\n")
+                f.write(f"    module.FSSize = sizeof({var_name});\n")
+                f.write("    return module;\n")
+                f.write("}\n\n")
+
+        if sampler_layout_entries:
+            f.write("static const CKFFSamplerLayoutModuleEntry g_CKFFSamplerLayoutModuleEntries[] = {\n")
+            for backend, layout in sampler_layout_entries:
+                ident = layout["identifier"]
+                f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, CKFFSamplerLayoutKey_{ident}(), "
+                        f"CKFFSamplerLayoutModule_{backend['name']}_{ident}() }},\n")
+            f.write("};\n\n")
+            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = g_CKFFSamplerLayoutModuleEntries;\n")
+            f.write("static const std::size_t g_CKFFSamplerLayoutModuleCount = "
+                    "sizeof(g_CKFFSamplerLayoutModuleEntries) / sizeof(g_CKFFSamplerLayoutModuleEntries[0]);\n")
+        else:
+            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = nullptr;\n")
+            f.write("static const std::size_t g_CKFFSamplerLayoutModuleCount = 0;\n")
 
 
 def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object]]:
@@ -692,10 +839,12 @@ def validate_specialized_variants(variants: list[dict[str, object]]) -> None:
 
 def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
                                  tmp_dir: Path, backends: list[dict[str, str]],
-                                 variants: list[dict[str, object]]) -> None:
+                                 variants: list[dict[str, object]],
+                                 sampler_layouts: list[dict[str, object]]) -> None:
     vs_variants = unique_specialized_vs_variants(variants)
     fs_variants = unique_specialized_fs_variants(variants)
     clean_stale_specialized_headers(generated_dir, backends, vs_variants, fs_variants)
+    clean_stale_sampler_layout_headers(generated_dir, BACKENDS, sampler_layouts)
     clean_stale_volume_layout_headers(generated_dir, backends)
     for backend in backends:
         for variant in vs_variants:
@@ -714,6 +863,14 @@ def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir:
             run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, variant["defines"])
             header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
             write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
+        for layout in sampler_layouts:
+            if backend["name"] in layout["backends"]:
+                ident = layout["identifier"]
+                bin_path = tmp_dir / backend["name"] / "sampler_layout" / f"{ident}_fs_ff_stage.bin"
+                bin_path.parent.mkdir(parents=True, exist_ok=True)
+                run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, layout["defines"])
+                header = generated_dir / backend["name"] / "sampler_layout" / f"{ident}_fs_ff_stage.bin.h"
+                write_header(header, sampler_layout_fs_var_name(backend, layout), bin_path.read_bytes())
 
 
 def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str, str]],
@@ -730,6 +887,78 @@ def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str
         for header in specialized_dir.glob("*.bin.h"):
             if header.name not in expected:
                 header.unlink()
+
+
+def clean_stale_sampler_layout_headers(generated_dir: Path, backends: list[dict[str, str]],
+                                       sampler_layouts: list[dict[str, object]]) -> None:
+    expected_by_backend: dict[str, set[str]] = {}
+    for layout in sampler_layouts:
+        header = f"{layout['identifier']}_fs_ff_stage.bin.h"
+        for backend in layout["backends"]:
+            expected_by_backend.setdefault(backend, set()).add(header)
+    for backend in backends:
+        expected = expected_by_backend.get(backend["name"], set())
+        sampler_layout_dir = generated_dir / backend["name"] / "sampler_layout"
+        if not sampler_layout_dir.is_dir():
+            continue
+        if not expected:
+            for header in sampler_layout_dir.glob("*.bin.h"):
+                header.unlink()
+            try:
+                sampler_layout_dir.rmdir()
+            except OSError:
+                pass
+            continue
+        for header in sampler_layout_dir.glob("*.bin.h"):
+            if header.name not in expected:
+                header.unlink()
+
+
+def validate_sampler_layout_headers(generated_dir: Path, selected_backends: list[dict[str, str]],
+                                    all_backends: list[dict[str, str]],
+                                    sampler_layouts: list[dict[str, object]]) -> None:
+    expected_by_backend: dict[str, set[str]] = {}
+    selected_names = {backend["name"] for backend in selected_backends}
+    supported_names = {backend["name"] for backend in all_backends}
+    for layout in sampler_layouts:
+        header = f"{layout['identifier']}_fs_ff_stage.bin.h"
+        for backend in layout["backends"]:
+            expected_by_backend.setdefault(backend, set()).add(header)
+
+    missing: list[str] = []
+    for backend in selected_names:
+        for header in expected_by_backend.get(backend, set()):
+            path = generated_dir / backend / "sampler_layout" / header
+            if not path.is_file():
+                missing.append(path.relative_to(generated_dir).as_posix())
+    if missing:
+        raise RuntimeError("Missing generated sampler-layout headers: " + ", ".join(sorted(missing)))
+
+    unexpected: list[str] = []
+    for sampler_layout_dir in generated_dir.glob("*/sampler_layout"):
+        if not sampler_layout_dir.is_dir():
+            continue
+        backend = sampler_layout_dir.parent.name
+        if backend not in supported_names:
+            continue
+        expected = expected_by_backend.get(backend, set())
+        for header in sampler_layout_dir.glob("*.bin.h"):
+            if header.name not in expected:
+                unexpected.append(header.relative_to(generated_dir).as_posix())
+    if unexpected:
+        raise RuntimeError("Unexpected stale sampler-layout headers: " + ", ".join(sorted(unexpected)))
+
+
+def check_sampler_layout_size_budget(generated_dir: Path) -> None:
+    total = 0
+    for header in generated_dir.glob("*/sampler_layout/*.bin.h"):
+        if header.is_file():
+            total += header.stat().st_size
+    if total > SAMPLER_LAYOUT_SIZE_LIMIT_BYTES:
+        raise RuntimeError(
+            f"Generated sampler-layout headers are {total} bytes; "
+            f"limit is {SAMPLER_LAYOUT_SIZE_LIMIT_BYTES} bytes"
+        )
 
 
 def clean_stale_volume_layout_headers(generated_dir: Path, backends: list[dict[str, str]]) -> None:
@@ -759,9 +988,11 @@ def main() -> int:
     shaderc = find_shaderc(args.shaderc)
     selected = [b for b in BACKENDS if not args.backend or b["name"] in args.backend]
     specialized_variants = load_specialized_variant_manifest(script_dir)
+    sampler_layouts = load_sampler_layout_manifest(script_dir)
 
     print(f"Using shaderc: {shaderc}")
     print(f"FFP specialized variants: {len(specialized_variants)}")
+    print(f"FFP sampler layout variants: {len(sampler_layouts)}")
     with tempfile.TemporaryDirectory(prefix="ck2_3d_shaders_") as tmp:
         tmp_dir = Path(tmp)
         for backend in selected:
@@ -773,8 +1004,10 @@ def main() -> int:
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())
         compile_specialized_variants(shaderc, script_dir, generated_dir, tmp_dir, selected,
-                                     specialized_variants)
-        write_specialized_module_table(generated_dir, selected, specialized_variants)
+                                     specialized_variants, sampler_layouts)
+        validate_sampler_layout_headers(generated_dir, selected, BACKENDS, sampler_layouts)
+        check_sampler_layout_size_budget(generated_dir)
+        write_specialized_module_table(generated_dir, selected, specialized_variants, sampler_layouts)
 
     print("All shaders compiled successfully.")
     return 0

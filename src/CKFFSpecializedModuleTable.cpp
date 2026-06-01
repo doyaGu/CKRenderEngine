@@ -16,3 +16,26 @@ bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
     module = CKFFSpecializedModule{};
     return false;
 }
+
+std::size_t CKFFSpecializedModuleCount() {
+    return g_CKFFSpecializedModuleCount;
+}
+
+bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
+                                 CK_SHADER_PROFILE profile,
+                                 CKFFSamplerLayoutModule &module) {
+    for (std::size_t i = 0; i < g_CKFFSamplerLayoutModuleCount; ++i) {
+        const CKFFSamplerLayoutModuleEntry &entry = g_CKFFSamplerLayoutModules[i];
+        if (entry.Profile == profile && entry.Key == key) {
+            module = entry.Module;
+            return true;
+        }
+    }
+
+    module = CKFFSamplerLayoutModule{};
+    return false;
+}
+
+std::size_t CKFFSamplerLayoutModuleCount() {
+    return g_CKFFSamplerLayoutModuleCount;
+}
