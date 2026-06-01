@@ -37,6 +37,9 @@
 #include "RCKSprite3D.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFUniformState.h"
+#include "CKDrawAnnotation.h"
+
+#include <cstdio>
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
@@ -1509,10 +1512,62 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         memcpy(&drawData, data, sizeof(VxDrawPrimitiveDataSimple));
     }
     drawData.Flags &= ~CKRST_DP_VBUFFER;
+    ApplyDrawAnnotation(encoder, view, pType,
+                        (CKDWORD)indexcount,
+                        (CKDWORD)drawData.VertexCount);
     m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
     if (renderStats)
         CKRenderPerfCurrent().DrawPrimitiveWrapperUs += CKRenderPerfElapsedUs(perfStart);
     return TRUE;
+}
+
+void RCKRenderContext::SetDrawAnnotation(const CKDrawAnnotation *annotation) {
+    if (!m_DrawAnnotationState || !annotation)
+        return;
+    CKDrawAnnotationStateSetPending(m_DrawAnnotationState, annotation);
+}
+
+void RCKRenderContext::ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
+                                           CKRenderView view,
+                                           VXPRIMITIVETYPE primitiveType,
+                                           CKDWORD indexCount,
+                                           CKDWORD vertexCount) {
+    CKDrawAnnotation annotation;
+    char label[CKDRAW_ANNOTATION_LABEL_SIZE];
+    ConsumeDrawAnnotation(&annotation, view, primitiveType,
+                          indexCount, vertexCount);
+    if (!encoder)
+        return;
+    CKDrawAnnotationFormatLabel(&annotation, label, sizeof(label));
+    encoder->SetMarker(label);
+}
+
+CKBOOL RCKRenderContext::ConsumeDrawAnnotation(CKDrawAnnotation *annotation,
+                                               CKRenderView view,
+                                               VXPRIMITIVETYPE primitiveType,
+                                               CKDWORD indexCount,
+                                               CKDWORD vertexCount) {
+    if (!annotation)
+        return FALSE;
+    if (m_DrawAnnotationState &&
+        CKDrawAnnotationStateConsume(m_DrawAnnotationState, annotation))
+        return TRUE;
+    CKDrawAnnotationStateBuildFallback(m_DrawAnnotationState, annotation,
+                                       view, primitiveType,
+                                       indexCount, vertexCount);
+    return FALSE;
+}
+
+void RCKRenderContext::SetDrawCallbackObject(const CKDrawAnnotationObjectRef *object) {
+    if (!m_DrawAnnotationState)
+        return;
+    CKDrawAnnotationStateSetCallbackObject(m_DrawAnnotationState, object);
+}
+
+CKBOOL RCKRenderContext::GetDrawCallbackObject(CKDrawAnnotationObjectRef *object) {
+    if (!m_DrawAnnotationState)
+        return FALSE;
+    return CKDrawAnnotationStateGetCallbackObject(m_DrawAnnotationState, object);
 }
 
 void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data, CK3dEntity *Ref) {
@@ -2943,6 +2998,8 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     Vx3DMatrixIdentity(m_ViewMatrix);
     m_Current2DView = CKRP_VIEW_FOREGROUND2D;
     m_Current3DView = CKRP_VIEW_OPAQUE3D;
+    m_DrawAnnotationState = new CKDrawAnnotationState;
+    CKDrawAnnotationStateInit(m_DrawAnnotationState);
 }
 
 RCKRenderContext::~RCKRenderContext() {
@@ -2959,6 +3016,11 @@ RCKRenderContext::~RCKRenderContext() {
     if (m_RenderedScene) {
         delete m_RenderedScene;
         m_RenderedScene = nullptr;
+    }
+
+    if (m_DrawAnnotationState) {
+        delete m_DrawAnnotationState;
+        m_DrawAnnotationState = nullptr;
     }
 
     // Release the render context mask
