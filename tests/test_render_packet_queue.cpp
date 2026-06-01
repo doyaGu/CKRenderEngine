@@ -3,6 +3,8 @@
 #include "CKFixedFunctionPipeline.h"
 #include "FFPDiagnosticHarness.h"
 
+#include <cstring>
+
 void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
                          FFPDiagnosticContext *context,
                          FFPDiagnosticDriver *driver)
@@ -10,6 +12,7 @@ void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
     (void)driver;
     ffp->Init(context);
     ffp->SetOpaqueSortingEnabled(TRUE);
+    ffp->SetOpaqueInstancingEnabled(FALSE);
     ffp->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     ffp->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
     ffp->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
@@ -445,6 +448,136 @@ void OpaquePacketAdaptiveBypassesLowBenefitFrame()
     ffp.Shutdown();
 }
 
+void OpaquePacketInstancingMergesHighRepeatRun()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+    context.Encoder.MatrixUniforms.insert(ffp.GetShaderCache().GetUniforms().u_ffMatrices);
+
+    for (int i = 0; i < 8; ++i) {
+        SetPacketWorld(&ffp, (float)i);
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    }
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Instanced opaque packet run must collapse repeated mesh draws to one submit");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 1,
+              "Instanced opaque packet run must bind one transient instance buffer");
+    TestCheck(context.Encoder.LastInstanceCount == 8 &&
+              context.Encoder.LastInstanceStride == sizeof(VxMatrix),
+              "Instanced opaque packet run must use one 64-byte world matrix per instance");
+    TestCheck(context.Encoder.LastInstanceBytes.size() >= sizeof(VxMatrix) * 8,
+              "Instanced opaque packet run must upload instance world matrices");
+    if (context.Encoder.LastInstanceBytes.size() >= sizeof(VxMatrix) * 8) {
+        VxMatrix firstMatrix;
+        VxMatrix lastMatrix;
+        memcpy(&firstMatrix, &context.Encoder.LastInstanceBytes[0], sizeof(firstMatrix));
+        memcpy(&lastMatrix, &context.Encoder.LastInstanceBytes[sizeof(VxMatrix) * 7],
+               sizeof(lastMatrix));
+        TestCheck(firstMatrix[3][0] == 0.0f && lastMatrix[3][0] == 7.0f,
+                  "Instanced opaque packet run must preserve per-draw world matrices");
+    }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.RenderPacketInstancedRuns == 1,
+              "Instanced opaque packet diagnostics must report the instanced run");
+    TestCheck(stats.RenderPacketInstancedPackets == 8,
+              "Instanced opaque packet diagnostics must report merged packets");
+    TestCheck(stats.RenderPacketSubmitSavedEstimate == 7,
+              "Instanced opaque packet diagnostics must report submit savings");
+#endif
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketInstancingCanBeDisabled()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(FALSE);
+
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 8,
+              "Disabled opaque instancing must preserve v2.2 per-packet replay");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 0,
+              "Disabled opaque instancing must not bind transient instance data");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketInstancingAllocationFailureFallsBack()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+    context.FailTransientInstanceBuffer = TRUE;
+
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 8,
+              "Transient instance allocation failure must fallback to per-packet replay");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 0,
+              "Transient instance allocation failure must not bind instance data");
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.RenderPacketInstanceAllocFailures == 1,
+              "Allocation failure diagnostics must record the failed instance allocation");
+    TestCheck(stats.RenderPacketInstancingFallbacks == 1,
+              "Allocation failure diagnostics must record the instancing fallback");
+#endif
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketInstancingSplitsViewProjectionRuns()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+
+    for (int i = 0; i < 4; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    VxMatrix projection;
+    projection.Identity();
+    projection[0][0] = 2.0f;
+    ffp.SetTransform(VXMATRIX_PROJECTION, projection);
+
+    for (int i = 0; i < 4; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 2,
+              "Changed viewProjection must split instanced packet runs");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 2,
+              "Changed viewProjection must bind one instance buffer per run");
+
+    ffp.Shutdown();
+}
+
 void NonOpaqueVertexBufferDrawFlushesQueuedOpaquePackets()
 {
     FFPDiagnosticDriver driver;
@@ -512,6 +645,14 @@ int main()
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",
               &OpaquePacketAdaptiveBypassesLowBenefitFrame);
+    tests.Run("Opaque packet instancing merges high-repeat run",
+              &OpaquePacketInstancingMergesHighRepeatRun);
+    tests.Run("Opaque packet instancing can be disabled",
+              &OpaquePacketInstancingCanBeDisabled);
+    tests.Run("Opaque packet instancing allocation failure falls back",
+              &OpaquePacketInstancingAllocationFailureFallsBack);
+    tests.Run("Opaque packet instancing splits viewProjection runs",
+              &OpaquePacketInstancingSplitsViewProjectionRuns);
     tests.Run("Non-opaque vertex-buffer draw flushes queued opaque packets",
               &NonOpaqueVertexBufferDrawFlushesQueuedOpaquePackets);
     tests.Run("Opaque vertex-buffer draw without index buffer stays immediate",
