@@ -74,6 +74,10 @@ struct CKFFFrameStats {
     CKDWORD RenderPacketStaticPayloadReuses;
     CKDWORD RenderPacketStaticPayloadInterns;
     CKDWORD RenderPacketSortSkips;
+    CKDWORD RenderPacketAdaptiveSamples;
+    CKDWORD RenderPacketAdaptiveBypasses;
+    CKDWORD RenderPacketAdaptiveSavedBindEstimate;
+    CKDWORD RenderPacketViewProjectionRebuilds;
     double RenderPacketBuildUs;
     double RenderPacketSortUs;
     double RenderPacketReplayUs;
@@ -219,6 +223,7 @@ struct CKRenderPacketReplayCache {
     CKDWORD StencilReadMask;
     CKDWORD StencilWriteMask;
     CKDWORD ActiveTextureCount;
+    CKDWORD TextureSetHash;
     CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD StaticUniformIndex;
     CKDWORD VertexLayout;
@@ -284,10 +289,17 @@ public:
                           CKDWORD vertexLayout);
 
     CKBOOL HasOpaqueRenderPackets() const { return m_OpaqueRenderPackets.Size() > 0; }
-    void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr);
-    void SetOpaqueSortingEnabled(CKBOOL enabled) { m_OpaqueSortingEnabled = enabled; }
+    void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
+                                  CKBOOL forceDirectReplay = FALSE);
+    void SetOpaqueSortingEnabled(CKBOOL enabled) {
+        m_OpaqueSortingEnabled = enabled;
+        ResetOpaqueRenderPacketFrameState();
+    }
     void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePacketAllowed = allowed; }
     CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePacketAllowed; }
+    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketAdaptiveSamples; }
+    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePacketAdaptiveBypasses; }
+    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePacketAdaptiveSavedBindEstimate; }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -331,9 +343,11 @@ private:
     VxMatrix m_World;
     VxMatrix m_View;
     VxMatrix m_Projection;
+    VxMatrix m_ViewProjection;
     VxMatrix m_TexMatrix[CKFF_MAX_TEXTURE_STAGES];
     VxMatrix m_VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
     CKBOOL m_VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
+    CKBOOL m_ViewProjectionDirty;
 
     // Current material
     CKFFMaterialData m_Material;
@@ -379,8 +393,9 @@ private:
                                 CKFFRenderPacketUniformPayload *objectPayload);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload);
     CKBOOL BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload);
-    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms) const;
+    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms);
     CKBOOL CanBuildPacketObjectUniforms() const;
+    void UpdateViewProjectionCache();
     void UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
                                     const CKRenderPacketObjectUniforms &uniforms);
     void UploadUniformPayload(CKRasterizerEncoder *encoder, const CKFFRenderPacketUniformPayload &payload);
@@ -415,10 +430,13 @@ private:
                                   CKBOOL lastPacket);
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void ClearOpaqueRenderPackets();
+    void ResetOpaqueRenderPacketFrameState();
     CKDWORD InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload);
     const CKFFRenderPacketUniformPayload &GetStaticUniformPayload(CKDWORD index) const;
     void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
     void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
+    CKDWORD EstimateOpaqueRenderPacketSavedBinds(const CKRenderPacket &packet) const;
+    CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
     CKDWORD HashPacketUniformPayload(const CKFFRenderPacketUniformPayload &payload) const;
     CKDWORD HashPacketTextureSet(const CKRenderPacket &packet) const;
 
@@ -436,6 +454,10 @@ private:
     CKRenderPacketSortKey m_OpaqueLastPacketSortKey;
     CKBOOL m_OpaqueSortingEnabled;
     CKBOOL m_OpaquePacketAllowed;
+    CKBOOL m_OpaquePacketAdaptiveBypass;
+    CKDWORD m_OpaquePacketAdaptiveSamples;
+    CKDWORD m_OpaquePacketAdaptiveBypasses;
+    CKDWORD m_OpaquePacketAdaptiveSavedBindEstimate;
 };
 
 class CKFFStateGuard {
