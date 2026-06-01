@@ -26,7 +26,7 @@ static void CK2dSetDrawAnnotation(RCKRenderContext *dev,
                                   VXPRIMITIVETYPE primitiveType,
                                   CKDWORD indexCount,
                                   CKDWORD vertexCount) {
-    if (!dev)
+    if (!dev || !dev->m_DrawAnnotationState)
         return;
 
     CKDrawAnnotation annotation;

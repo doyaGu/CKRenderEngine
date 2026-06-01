@@ -19,7 +19,7 @@ static void CKSpriteSetDrawAnnotation(RCKRenderContext *rctx,
                                       VXPRIMITIVETYPE primitiveType,
                                       CKDWORD indexCount,
                                       CKDWORD vertexCount) {
-    if (!rctx)
+    if (!rctx || !rctx->m_DrawAnnotationState)
         return;
 
     CKDrawAnnotation annotation;
