@@ -76,6 +76,11 @@ void CKRasterizerEncoder::SetMarker(CKSTRING)
 {
 }
 
+CKBOOL CKRasterizerEncoder::ConsumeMarker(char *, CKDWORD)
+{
+    return FALSE;
+}
+
 void CKRasterizerEncoder::Submit(CKRenderView, CKDWORD, CKDWORD, CKDWORD)
 {
 }
