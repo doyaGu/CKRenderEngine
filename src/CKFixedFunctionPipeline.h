@@ -160,7 +160,8 @@ public:
 
     void Init(CKRasterizerContext *ctx);
     void Shutdown();
-    void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps);
+    void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
+                          CKBOOL ForceAnisotropicFiltering = FALSE);
 
     // === State tracking ===
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
@@ -252,6 +253,7 @@ private:
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
     CKBOOL m_DisableMipmaps;
+    CKBOOL m_ForceAnisotropicFiltering;
 
     // Subsystems
     CKFFShaderCache m_ShaderCache;
