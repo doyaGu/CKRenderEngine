@@ -12,6 +12,9 @@
 #define CKFF_RENDER_PACKET_MARKER_SIZE 512
 #define CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT 4
 
+#define CKFF_RENDER_PACKET_RUN_FALLBACK_NONE 0
+#define CKFF_RENDER_PACKET_RUN_FALLBACK_NOT_INSTANCEABLE 1
+
 struct CKFFRenderPacketUniformEntry {
     CKDWORD Uniform;
     CKDWORD Offset;
@@ -117,6 +120,13 @@ struct CKRenderPacketReplayCache {
     CKDWORD IndexCount;
 };
 
+struct CKFFRenderPacketRunPlan {
+    int Start;
+    int Count;
+    CKBOOL Instanced;
+    CKDWORD FallbackReason;
+};
+
 CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b);
 CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash);
 CKDWORD CKFFStaticTextureFlags(CKDWORD flags);
@@ -132,6 +142,8 @@ int CKFFCompareRenderPacket(const CKRenderPacket &a,
                             const CKRenderPacket &b);
 CKBOOL CKFFRenderPacketSameRunKey(const CKRenderPacket &a,
                                   const CKRenderPacket &b);
+CKBOOL CKFFRenderPacketCanInstanceRun(const CKRenderPacket &a,
+                                      const CKRenderPacket &b);
 CKBOOL CKFFRenderPacketAddUniform(CKFFRenderPacketUniformPayload *payload,
                                   CKDWORD uniform,
                                   const void *data,

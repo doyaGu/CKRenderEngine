@@ -39,6 +39,10 @@ public:
 
     CKBOOL IsDirectReplay(CKBOOL forceDirectReplay) const;
     void SortPackets(XArray<CKDWORD> &indices) const;
+    void BuildRunPlans(const XArray<CKDWORD> *indices,
+                       CKBOOL directReplay,
+                       CKBOOL instancingEnabled,
+                       XArray<CKFFRenderPacketRunPlan> &plans) const;
 
 private:
     void TrackPacket(const CKRenderPacket &packet);
