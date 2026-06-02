@@ -539,19 +539,19 @@ void OpaquePacketAdaptiveBypassesLowBenefitFrame()
 
     SetupPacketPipeline(&ffp, &context, &driver);
 
-    for (int i = 0; i < 128; ++i)
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
         DrawPacketChurnCandidate(&ffp, &context, i);
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "Low-benefit adaptive sample must flush the sampled queue");
-    TestCheck(context.Encoder.SubmitCount == 128,
+    TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
               "Low-benefit adaptive sample must submit the sampled queue once bypass triggers");
 
-    DrawPacketChurnCandidate(&ffp, &context, 128);
+    DrawPacketChurnCandidate(&ffp, &context, CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT);
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "Adaptive bypass must keep remaining same-frame opaque draws immediate");
-    TestCheck(context.Encoder.SubmitCount == 129,
+    TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
               "Adaptive bypass must submit later same-frame opaque draws immediately");
     TestCheck(ffp.GetOpaquePacketAdaptiveBypasses() == 1,
               "Adaptive bypass counter must report the low-benefit frame bypass");

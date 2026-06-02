@@ -161,7 +161,9 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass() const
 {
     if (m_AdaptiveBypass)
         return TRUE;
-    if (m_AdaptiveSamples != CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
+    if (m_AdaptiveSamples < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT)
+        return FALSE;
+    if (m_AdaptiveSamples > CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
         return FALSE;
     if (m_AdaptiveSavedBindEstimate >= (m_AdaptiveSamples / 2))
         return FALSE;
