@@ -261,7 +261,7 @@ CKBOOL RCKSprite::SaveImage(CKSTRING Name, int Slot, CKBOOL CKUseFormat) {
 }
 
 CKERROR RCKSprite::Draw(CKRenderContext *dev) {
-    CKRenderFrameCostStatsAddSpriteDraw();
+    CK_FRAME_COST_ADD_SPRITE_DRAW();
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID)
         return CKERR_INVALIDPARAMETER;
 

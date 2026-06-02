@@ -619,7 +619,7 @@ CKBOOL RCK2dEntity::IsClippedToCamera() {
 
 // IDA: 0x1005cce5 - Updates clipped extents (m_VtxPos and m_SrcRect) for rendering
 CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
-    CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
+    CK_FRAME_COST_ADD_2D_ENTITY_UPDATE_EXTENTS();
     RCKRenderContext *rc = (RCKRenderContext *) dev;
 
     // Determine source rect to use
@@ -775,7 +775,7 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
 CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // IDA: 0x1005ed00
     RCKRenderContext *dev = (RCKRenderContext *) context;
-    CKRenderFrameCostStatsAdd2DEntityRender();
+    CK_FRAME_COST_ADD_2D_ENTITY_RENDER();
 
     // Check if hidden by parent hierarchy
     if (m_ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
@@ -833,7 +833,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
 CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
     // IDA: 0x1005e430
     RCKRenderContext *dev = (RCKRenderContext *) context;
-    CKRenderFrameCostStatsAdd2DEntityDraw();
+    CK_FRAME_COST_ADD_2D_ENTITY_DRAW();
 
     if (m_Material) {
         // Save viewport if not clip-to-camera

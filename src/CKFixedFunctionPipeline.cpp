@@ -506,10 +506,10 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
         m_LastViewportData.ViewHeight == viewport.ViewHeight &&
         m_LastViewportData.ViewZMin == viewport.ViewZMin &&
         m_LastViewportData.ViewZMax == viewport.ViewZMax) {
-        CKRenderFrameCostStatsAddViewportSet(TRUE);
+        CK_FRAME_COST_ADD_VIEWPORT_SET(TRUE);
         return;
     }
-    CKRenderFrameCostStatsAddViewportSet(FALSE);
+    CK_FRAME_COST_ADD_VIEWPORT_SET(FALSE);
     m_LastViewportData = viewport;
     m_HasLastViewportData = TRUE;
 
@@ -927,8 +927,8 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         statsStart = CKRenderPerfNow();
 #endif
     encoder->Submit(view, program, *(CKDWORD *)&depth, SubmitDiscardFlags());
-    CKRenderFrameCostStatsAddPrimitiveSubmit();
-    CKRenderFrameCostStatsAddSubmittedDraw();
+    CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
+    CK_FRAME_COST_ADD_SUBMITTED_DRAW();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.SubmitUs += CKRenderPerfElapsedUs(statsStart);
@@ -1220,8 +1220,8 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
         statsStart = CKRenderPerfNow();
 #endif
     encoder->Submit(view, program, *(CKDWORD *)&depth, SubmitDiscardFlags());
-    CKRenderFrameCostStatsAddMeshSubmit();
-    CKRenderFrameCostStatsAddSubmittedDraw();
+    CK_FRAME_COST_ADD_MESH_SUBMIT();
+    CK_FRAME_COST_ADD_SUBMITTED_DRAW();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.SubmitUs += CKRenderPerfElapsedUs(statsStart);
