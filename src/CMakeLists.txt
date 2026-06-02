@@ -174,7 +174,6 @@ set(CKRE_SOURCES
         CKRenderPipeline.cpp
         CKFrustumCuller.cpp
         CKRenderSettings.cpp
-        CKRenderFrameCostStats.cpp
 )
 
 if (WIN32)
@@ -187,6 +186,10 @@ endif ()
 
 if (CKRE_ENABLE_RENDER_STATS)
     list(APPEND CKRE_SOURCES CKRenderPerfStats.cpp)
+endif ()
+
+if (CKRE_ENABLE_FRAME_COST_STATS)
+    list(APPEND CKRE_SOURCES CKRenderFrameCostStats.cpp)
 endif ()
 
 if (CKRE_ENABLE_FFP_DIAGNOSTICS)

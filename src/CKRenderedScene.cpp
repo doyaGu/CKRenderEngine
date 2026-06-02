@@ -188,8 +188,9 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
                            (CKDWORD)m_Cameras.Size(), (CKDWORD)m_Lights.Size());
     CKRenderFrameCostStatsBeginRenderFrame((CKDWORD)m_3DEntities.Size(), (CKDWORD)m_2DEntities.Size(),
                                            (CKDWORD)m_Cameras.Size(), (CKDWORD)m_Lights.Size());
+    const CKBOOL frameCostCollecting = CKRenderFrameCostStatsIsCollecting();
     double sectionStart = renderStats ? CKRenderPerfNow() : 0.0;
-    double frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+    double frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
 
     // --- Phase 1: begin the frame via the FF pipeline ---
     // Build a clear color from the background material diffuse.
@@ -293,7 +294,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         CK_LOG("RenderedScene", "Draw - calling BeginFrame");
     if (renderStats)
         sectionStart = CKRenderPerfNow();
-    frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+    frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
     rc->m_FFPipeline.BeginDebugFrame();
     rc->m_FFPipeline.FlushOpaqueRenderPackets();
     rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
@@ -305,7 +306,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     // --- Default render states via the FF pipeline ---
     if (renderStats)
         sectionStart = CKRenderPerfNow();
-    frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+    frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
     SetDefaultRenderStates(nullptr);
     if (renderStats)
         CKRenderPerfAddSection(CKRPS_DEFAULT_STATES, CKRenderPerfElapsedUs(sectionStart));
@@ -323,7 +324,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Current2DView = CKRP_VIEW_BACKGROUND2D;
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         ((RCK2dEntity *) rm->m_2DRootBack)->Render((CKRenderContext *) rc);
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_BACKGROUND_2D, CKRenderPerfElapsedUs(sectionStart));
@@ -340,7 +341,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     if (!(Flags & CK_RENDER_SKIP3D)) {
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         SetupLights(nullptr);
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_SETUP_LIGHTS, CKRenderPerfElapsedUs(sectionStart));
@@ -351,7 +352,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_DevicePreCallbacksTimeProfiler.Reset();
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         if (rc->m_PreRenderCallBacks.m_PreCallBacks.Size() > 0) {
             VxCallBack *it = rc->m_PreRenderCallBacks.m_PreCallBacks.Begin();
             while (it < rc->m_PreRenderCallBacks.m_PreCallBacks.End()) {
@@ -381,7 +382,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Current3DView = CKRP_VIEW_OPAQUE3D;
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         rm->m_SceneGraphRootNode.RenderTransparentObjects(rc, renderFlags);
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_OPAQUE_TRAVERSAL, CKRenderPerfElapsedUs(sectionStart));
@@ -394,7 +395,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         rc->CallSprite3DBatches();
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_SPRITE3D, CKRenderPerfElapsedUs(sectionStart));
@@ -405,7 +406,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_DevicePostCallbacksTimeProfiler.Reset();
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         if (rc->m_PostRenderCallBacks.m_PostCallBacks.Size() > 0) {
             VxCallBack *it = rc->m_PostRenderCallBacks.m_PostCallBacks.Begin();
             while (it < rc->m_PostRenderCallBacks.m_PostCallBacks.End()) {
@@ -424,7 +425,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Current3DView = CKRP_VIEW_TRANSPARENT;
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         rm->m_SceneGraphRootNode.SortTransparentObjects(rc, renderFlags);
         rc->CallSprite3DBatches();
         if (renderStats)
@@ -460,7 +461,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         if (renderStats)
             sectionStart = CKRenderPerfNow();
-        frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+        frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
         ((RCK2dEntity *) rm->m_2DRootFore)->Render(rc);
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_FOREGROUND_2D, CKRenderPerfElapsedUs(sectionStart));
@@ -478,7 +479,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     rc->m_DevicePostCallbacksTimeProfiler.Reset();
     if (renderStats)
         sectionStart = CKRenderPerfNow();
-    frameCostSectionStart = CKRenderFrameCostStatsIsCollecting() ? CKRenderFrameCostNow() : 0.0;
+    frameCostSectionStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
     if (rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Size() > 0) {
         VxCallBack *it = rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.Begin();
         while (it < rc->m_PostSpriteRenderCallBacks.m_PostCallBacks.End()) {
@@ -859,3 +860,4 @@ void CKRenderedScene::ForceCameraSettingsUpdate() {
     // Update viewport size
     UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
 }
+
