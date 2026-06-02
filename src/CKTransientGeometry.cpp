@@ -286,8 +286,6 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastLayout = layoutHandle;
 
     CKDWORD vertexCount = data->VertexCount;
-    const CKBOOL quadFastPathCandidate = FALSE;
-    const CKBOOL spriteBatchFastPathCandidate = FALSE;
 
     if (pointSprites && primType == VX_POINTLIST && data->PositionPtr) {
         CKFFPointSpriteParams params;
@@ -387,8 +385,7 @@ CKBOOL CKTransientGeometry::Prepare(
 
         encoder->SetTransientVertexBuffer(0, &tvb);
         encoder->SetTransientIndexBuffer(&tib);
-        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
-                                                  m_LastVertexBytes,
+        CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   FALSE);
         return TRUE;
@@ -457,8 +454,7 @@ CKBOOL CKTransientGeometry::Prepare(
         }
 
         encoder->SetTransientVertexBuffer(0, &tvb);
-        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
-                                                  m_LastVertexBytes,
+        CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   primType == VX_TRIANGLEFAN ||
                                                   primType == VX_TRIANGLESTRIP);
@@ -512,12 +508,10 @@ CKBOOL CKTransientGeometry::Prepare(
         encoder->SetTransientIndexBuffer(&tib);
     }
 
-    CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
-                                              m_LastVertexBytes,
+    CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                               m_LastIndexBytes,
                                               primType == VX_TRIANGLEFAN ||
                                               primType == VX_TRIANGLESTRIP);
-    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(spriteBatchFastPathCandidate, FALSE);
     return TRUE;
 }
 

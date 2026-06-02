@@ -34,10 +34,9 @@ static void WarmupAndSampleAggregateOnce() {
     CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
     CKRenderFrameCostStatsAdd2DEntityDraw();
     CKRenderFrameCostStatsAddSpriteDraw();
-    CKRenderFrameCostStatsAddDrawPrimitive(TRUE, FALSE);
+    CKRenderFrameCostStatsAddDrawPrimitive();
     CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
-    CKRenderFrameCostStatsAddTransientPrepare(TRUE, TRUE, 160, 12, FALSE);
-    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(TRUE, TRUE);
+    CKRenderFrameCostStatsAddTransientPrepare(160, 12, FALSE);
     CKRenderFrameCostStatsAddViewportSet(TRUE);
     CKRenderFrameCostStatsAddMaterialSet(TRUE, FALSE, FALSE);
     CKRenderFrameCostStatsAddPrimitiveSubmit();
@@ -51,10 +50,9 @@ static void WarmupAndSampleAggregateOnce() {
     CKRenderFrameCostStatsAddSection(CKRFCS_FOREGROUND_2D, 6.0);
     CKRenderFrameCostStatsAdd2DEntityRender();
     CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
-    CKRenderFrameCostStatsAddDrawPrimitive(TRUE, FALSE);
+    CKRenderFrameCostStatsAddDrawPrimitive();
     CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
-    CKRenderFrameCostStatsAddTransientPrepare(TRUE, FALSE, 160, 12, TRUE);
-    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(TRUE, FALSE);
+    CKRenderFrameCostStatsAddTransientPrepare(160, 12, TRUE);
     CKRenderFrameCostStatsAddViewportSet(FALSE);
     CKRenderFrameCostStatsAddMeshSubmit();
     CKRenderFrameCostStatsAddSubmittedDraw();
@@ -84,19 +82,9 @@ static void WarmupAndSampleAggregateOnce() {
               "FrameCostStats must count 2D render subpaths");
     TestCheck(snapshot.DrawPrimitiveSanitizeCalls == 2,
               "FrameCostStats must count primitive sanitize calls");
-    TestCheck(snapshot.DrawPrimitiveFastPathCandidates == 2 &&
-              snapshot.DrawPrimitiveFastPathHits == 0 &&
-              snapshot.DrawPrimitiveFastPathFallbacks == 2,
-              "FrameCostStats must count sanitized quad candidates as fallbacks");
     TestCheck(snapshot.TransientPrepareCalls == 2 &&
-              snapshot.TransientQuadFastPathCandidates == 2 &&
-              snapshot.TransientQuadFastPathHits == 1 &&
-              snapshot.TransientQuadFastPathFallbacks == 1 &&
-              snapshot.TransientSpriteBatchFastPathCandidates == 2 &&
-              snapshot.TransientSpriteBatchFastPathHits == 1 &&
-              snapshot.TransientSpriteBatchFastPathFallbacks == 1 &&
               snapshot.TransientFanToListConversions == 1,
-              "FrameCostStats must count transient quad fast path results");
+              "FrameCostStats must count transient prepare and fan conversion results");
     TestCheck(snapshot.TransientVertexBytes == 320 &&
               snapshot.TransientIndexBytes == 24,
               "FrameCostStats must aggregate transient buffer bytes");
