@@ -4,6 +4,7 @@
 #include "FFPDiagnosticHarness.h"
 
 #include <cstring>
+#include <math.h>
 
 void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
                          FFPDiagnosticContext *context,
@@ -72,6 +73,57 @@ void SetPacketWorld(CKFixedFunctionPipeline *ffp, float x)
     world.Identity();
     world[3][0] = x;
     ffp->SetTransform(VXMATRIX_WORLD, world);
+}
+
+void SetPacketComplexWorld(CKFixedFunctionPipeline *ffp)
+{
+    VxMatrix world;
+    world.Identity();
+    world[0][0] = 0.0f;
+    world[0][1] = 2.0f;
+    world[1][0] = -3.0f;
+    world[1][1] = 0.0f;
+    world[2][2] = 4.0f;
+    world[3][0] = 5.0f;
+    world[3][1] = -7.0f;
+    world[3][2] = 11.0f;
+    ffp->SetTransform(VXMATRIX_WORLD, world);
+}
+
+void SetPacketProjection(CKFixedFunctionPipeline *ffp)
+{
+    VxMatrix projection;
+    projection.Identity();
+    projection[0][0] = 1.5f;
+    projection[1][1] = 0.5f;
+    projection[2][2] = 2.0f;
+    projection[3][0] = 1.0f;
+    ffp->SetTransform(VXMATRIX_PROJECTION, projection);
+}
+
+CKBOOL PacketMatrixAlmostEqual(const VxMatrix &a, const VxMatrix &b)
+{
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            if (fabs(a[r][c] - b[r][c]) > 0.0001f)
+                return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+void PrepareTexturedPacketCandidate(CKFixedFunctionPipeline *ffp)
+{
+    ffp->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+    ffp->SetTexture(0, 3000, CKRST_TEXTURE_VALID);
+}
+
+void DrawTexturedPacketCandidate(CKFixedFunctionPipeline *ffp,
+                                 FFPDiagnosticContext *context)
+{
+    DrawPacketCandidateWithFormat(ffp, context, CKRP_VIEW_OPAQUE3D,
+                                  100, 200,
+                                  0);
 }
 
 void OpaqueVertexBufferDrawStaysImmediateByDefault()
@@ -284,6 +336,65 @@ void OpaquePacketObjectMatricesTrackProjectionChanges()
 #endif
 
     ffp.Shutdown();
+}
+
+void OpaquePacketInstancedMatrixMatchesObjectUniformMVP()
+{
+    FFPDiagnosticDriver normalDriver;
+    FFPDiagnosticContext normalContext(&normalDriver);
+    CKFixedFunctionPipeline normalFFP;
+    SetupPacketPipeline(&normalFFP, &normalContext, &normalDriver);
+    normalFFP.SetOpaqueInstancingEnabled(FALSE);
+    const CKDWORD matrixUniform = normalFFP.GetShaderCache().GetUniforms().u_ffMatrices;
+    normalContext.Encoder.MatrixUniforms.insert(matrixUniform);
+    SetPacketProjection(&normalFFP);
+    SetPacketComplexWorld(&normalFFP);
+
+    DrawPacketCandidate(&normalFFP, &normalContext, CKRP_VIEW_OPAQUE3D, 100, 200);
+    normalFFP.FlushOpaqueRenderPackets(&normalContext.Encoder);
+
+    std::vector<float> normalMatrices = normalContext.Encoder.FloatUniforms[matrixUniform];
+    TestCheck(normalMatrices.size() >= 32,
+              "Normal packet replay must upload MVP and world matrices");
+
+    FFPDiagnosticDriver instancedDriver;
+    FFPDiagnosticContext instancedContext(&instancedDriver);
+    CKFixedFunctionPipeline instancedFFP;
+    SetupPacketPipeline(&instancedFFP, &instancedContext, &instancedDriver);
+    instancedFFP.SetOpaqueInstancingEnabled(TRUE);
+    instancedContext.Encoder.MatrixUniforms.insert(matrixUniform);
+    SetPacketProjection(&instancedFFP);
+    SetPacketComplexWorld(&instancedFFP);
+
+    for (int i = 0; i < 4; ++i)
+        DrawPacketCandidate(&instancedFFP, &instancedContext, CKRP_VIEW_OPAQUE3D, 100, 200);
+    instancedFFP.FlushOpaqueRenderPackets(&instancedContext.Encoder);
+
+    TestCheck(instancedContext.Encoder.SubmitCount == 1,
+              "Matrix parity fixture must use an instanced packet submit");
+    TestCheck(instancedContext.Encoder.LastInstanceBytes.size() >= sizeof(VxMatrix),
+              "Instanced packet submit must upload at least one world matrix");
+    std::vector<float> instancedMatrices = instancedContext.Encoder.FloatUniforms[matrixUniform];
+    TestCheck(instancedMatrices.size() >= 16,
+              "Instanced packet replay must upload viewProjection matrix");
+
+    if (normalMatrices.size() >= 32 &&
+        instancedMatrices.size() >= 16 &&
+        instancedContext.Encoder.LastInstanceBytes.size() >= sizeof(VxMatrix)) {
+        VxMatrix normalMVP;
+        VxMatrix instancedViewProjection;
+        VxMatrix instancedWorld;
+        VxMatrix instancedMVP;
+        memcpy(&normalMVP, &normalMatrices[0], sizeof(normalMVP));
+        memcpy(&instancedViewProjection, &instancedMatrices[0], sizeof(instancedViewProjection));
+        memcpy(&instancedWorld, &instancedContext.Encoder.LastInstanceBytes[0], sizeof(instancedWorld));
+        Vx3DMultiplyMatrix4(instancedMVP, instancedViewProjection, instancedWorld);
+        TestCheck(PacketMatrixAlmostEqual(normalMVP, instancedMVP),
+                  "Instanced viewProjection/world packing must match normal object uniform MVP for rotation and non-uniform scale");
+    }
+
+    normalFFP.Shutdown();
+    instancedFFP.Shutdown();
 }
 
 void OpaquePacketVertexBlendFallsBackImmediate()
@@ -518,6 +629,93 @@ void OpaquePacketInstancingCanBeDisabled()
     ffp.Shutdown();
 }
 
+void OpaquePacketInstancingRejectsMismatchedSpecializedABI()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    ffp.Init(&context);
+
+    CKFFShaderKey key;
+    key.VS.Bits = 1ull;
+    key.FS.LastActiveTextureStage = 0;
+    key.FS.AlphaFunc = VXCMP_GREATER;
+    key.FS.AlphaTestEnable = true;
+    key.FS.Stages[0].ColorOp = CKRST_TOP_MODULATE;
+    key.FS.Stages[0].ColorArg0 = CKRST_TA_CURRENT;
+    key.FS.Stages[0].ColorArg1 = CKRST_TA_TEXTURE;
+    key.FS.Stages[0].ColorArg2 = CKRST_TA_CURRENT;
+    key.FS.Stages[0].AlphaOp = CKRST_TOP_MODULATE;
+    key.FS.Stages[0].AlphaArg0 = CKRST_TA_CURRENT;
+    key.FS.Stages[0].AlphaArg1 = CKRST_TA_TEXTURE;
+    key.FS.Stages[0].AlphaArg2 = CKRST_TA_CURRENT;
+    key.FS.Stages[0].HasTexture = true;
+
+    CKFFProgramBinding normalBinding = ffp.GetShaderCache().GetProgram(key);
+    CKFFShaderKey instancedKey = key;
+    instancedKey.VS.SetInstanced(true);
+    CKFFProgramBinding instancedBinding = ffp.GetShaderCache().GetProgram(instancedKey);
+
+    TestCheck(normalBinding.Program != 0 && normalBinding.FullSpecialized,
+              "Alpha-test normal shader fixture must hit a full-specialized module");
+    TestCheck(instancedBinding.Program != 0 && !instancedBinding.FullSpecialized,
+              "Alpha-test instanced shader fixture must fallback to the uber-specialized ABI");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketPixelFogDoesNotInstance()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 8,
+              "Pixel fog packet runs must fallback to per-packet replay");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 0,
+              "Pixel fog packet runs must not bind transient instance data");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketRangeFogDoesNotInstance()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_RANGEFOGENABLE, TRUE);
+
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 8,
+              "Range fog packet runs must fallback to per-packet replay");
+    TestCheck(context.Encoder.TransientInstanceSetCount == 0,
+              "Range fog packet runs must not bind transient instance data");
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketInstancingAllocationFailureFallsBack()
 {
     FFPDiagnosticDriver driver;
@@ -635,6 +833,8 @@ int main()
               &OpaquePacketReplaySplitsStaticAndObjectUniforms);
     tests.Run("Opaque packet object matrices track projection changes",
               &OpaquePacketObjectMatricesTrackProjectionChanges);
+    tests.Run("Opaque packet instanced matrix matches object uniform MVP",
+              &OpaquePacketInstancedMatrixMatchesObjectUniformMVP);
     tests.Run("Opaque packet vertex blend falls back immediate",
               &OpaquePacketVertexBlendFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
@@ -649,6 +849,12 @@ int main()
               &OpaquePacketInstancingMergesHighRepeatRun);
     tests.Run("Opaque packet instancing can be disabled",
               &OpaquePacketInstancingCanBeDisabled);
+    tests.Run("Opaque packet instancing rejects mismatched specialized ABI",
+              &OpaquePacketInstancingRejectsMismatchedSpecializedABI);
+    tests.Run("Opaque packet pixel fog does not instance",
+              &OpaquePacketPixelFogDoesNotInstance);
+    tests.Run("Opaque packet range fog does not instance",
+              &OpaquePacketRangeFogDoesNotInstance);
     tests.Run("Opaque packet instancing allocation failure falls back",
               &OpaquePacketInstancingAllocationFailureFallsBack);
     tests.Run("Opaque packet instancing splits viewProjection runs",
