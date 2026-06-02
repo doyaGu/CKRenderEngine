@@ -45,6 +45,7 @@
 #include "RCKTargetLight.h"
 #include "RCKSprite.h"
 #include "RCKSpriteText.h"
+#include "CKRenderFrameCostStats.h"
 
 #ifdef CK_LIB
 #define CKGetPluginInfo CKGet_CK2_3D_PluginInfo
@@ -243,6 +244,21 @@ PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo(int) {
     g_PluginInfo.m_GUID = VIRTOOLS_RENDERENGIEN_GUID;
     g_PluginInfo.m_Summary = "Virtools Default Rendering Engine";
     return &g_PluginInfo;
+}
+
+PLUGIN_EXPORT int CK2_3D_FrameCostStatsIsCollecting() {
+    return CKRenderFrameCostStatsWantsPlayerTiming() ? 1 : 0;
+}
+
+PLUGIN_EXPORT void CK2_3D_FrameCostStatsAddPlayerTiming(double updateUs,
+                                                        double inputUs,
+                                                        double processUs,
+                                                        double renderUs,
+                                                        int processRan,
+                                                        int renderRan) {
+    CKRenderFrameCostStatsAddPlayerTiming(updateUs, inputUs, processUs, renderUs,
+                                          processRan ? TRUE : FALSE,
+                                          renderRan ? TRUE : FALSE);
 }
 
 void ReleaseRasterizers() {

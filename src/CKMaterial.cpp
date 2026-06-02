@@ -31,6 +31,7 @@
 #include "RCKLight.h"
 #include "RCKSprite3D.h"
 #include "CKRenderPerfStats.h"
+#include "CKRenderFrameCostStats.h"
 
 static VX_EFFECTTEXGEN ReadTexGenParameter(CKParameter *parameter) {
     if (!parameter)
@@ -1396,6 +1397,7 @@ VXSHADE_MODE RCKMaterial::GetShadeMode() {
  * @return TRUE if material was successfully set
  */
 CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int TextureStage) {
+    CKRenderFrameCostStatsAddMaterialSet(FALSE, FALSE, FALSE);
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
     if (renderStats)
