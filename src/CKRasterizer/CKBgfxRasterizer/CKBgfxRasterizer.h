@@ -460,6 +460,10 @@ private:
     CKDWORD m_DebugViewOrderGeneration;
     CKBOOL m_DebugViewOrderSequential;
     CKDWORD m_DebugFlags;
+    CKDWORD m_DrawMapFlags;
+    CKBOOL m_DrawMapActive;
+    CKBOOL m_DrawMapSubmitActive;
+    CKBOOL m_DrawMapMarkerCaptureActive;
     CKDWORD m_DebugBgfxFlags;
     CKBOOL m_DebugOverlay;
 
