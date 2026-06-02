@@ -1561,12 +1561,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         view = m_Current2DView;
     }
     m_FFPipeline.SetViewport(m_ViewportData);
-    const CKBOOL fastPathCandidate =
-        pType == VX_TRIANGLEFAN &&
-        indices == nullptr &&
-        indexcount == 4 &&
-        data->VertexCount == 4;
-    CK_FRAME_COST_ADD_DRAW_PRIMITIVE(fastPathCandidate, FALSE);
+    CK_FRAME_COST_ADD_DRAW_PRIMITIVE();
 
     VxDrawPrimitiveData drawData;
     memset(&drawData, 0, sizeof(drawData));
