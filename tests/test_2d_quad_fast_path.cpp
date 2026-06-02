@@ -113,7 +113,7 @@ static CKRenderFrameCostStatsSnapshot EndStatsSample()
 #endif
 }
 
-static void FastPathPacksExpectedQuad()
+static void QuadUsesGenericFanPath()
 {
     QuadFastPathHarness harness;
     VxDrawPrimitiveData data;
@@ -134,24 +134,24 @@ static void FastPathPacksExpectedQuad()
                                        FALSE,
                                        NULL,
                                        NULL) == TRUE,
-              "2D quad fast path prepare should succeed");
+              "2D quad generic prepare should succeed");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathCandidates == 1,
-              "2D quad should be counted as a fast path candidate");
-    TestCheck(stats.TransientQuadFastPathHits == 1,
-              "2D quad should hit the fast path");
+    TestCheck(stats.TransientQuadFastPathCandidates == 0,
+              "2D quad fast path should be disabled by default");
+    TestCheck(stats.TransientQuadFastPathHits == 0,
+              "2D quad must not hit the disabled fast path");
     TestCheck(stats.TransientQuadFastPathFallbacks == 0,
-              "2D quad fast path should not fallback");
-    TestCheck(stats.TransientFanToListConversions == 0,
-              "2D quad fast path should skip generic fan conversion");
+              "disabled 2D quad fast path should not report fallback noise");
+    TestCheck(stats.TransientFanToListConversions == 1,
+              "2D quad should use generic fan conversion");
 #endif
 
     TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 4 * 40,
-              "fast path should write four 40-byte vertices");
+              "generic path should write four 40-byte vertices");
     TestCheck(harness.Context.Encoder.LastIndexBytes.size() == 6 * sizeof(CKWORD),
-              "fast path should write six 16-bit indices");
+              "generic path should write six 16-bit indices");
 
     const CKBYTE *vb = harness.Context.Encoder.LastVertexBytes.data();
     for (int i = 0; i < 4; ++i) {
@@ -160,22 +160,22 @@ static void FastPathPacksExpectedQuad()
                   ReadFloat(vertex + 4) == positions[i * 4 + 1] &&
                   ReadFloat(vertex + 8) == positions[i * 4 + 2] &&
                   ReadFloat(vertex + 12) == positions[i * 4 + 3],
-                  "fast path positionT must match input");
+                  "generic path positionT must match input");
         TestCheck(ReadFloat(vertex + 16) == texcoords[i * 2 + 0] &&
                   ReadFloat(vertex + 20) == texcoords[i * 2 + 1] &&
                   ReadFloat(vertex + 24) == 0.0f &&
                   ReadFloat(vertex + 28) == 0.0f,
-                  "fast path texcoord0 must match generic float4 packing");
+                  "generic path texcoord0 must match float4 packing");
         TestCheck(ReadDword(vertex + 32) == ArgbToAbgr(colors[i]),
-                  "fast path diffuse color must convert ARGB to ABGR");
+                  "generic path diffuse color must convert ARGB to ABGR");
         TestCheck(ReadDword(vertex + 36) == 0xFF000000,
-                  "fast path specular default must match positionT generic path");
+                  "generic path specular default must match positionT default");
     }
 
     const CKWORD *ib = (const CKWORD *)harness.Context.Encoder.LastIndexBytes.data();
     TestCheck(ib[0] == 0 && ib[1] == 1 && ib[2] == 2 &&
               ib[3] == 0 && ib[4] == 2 && ib[5] == 3,
-              "fast path must preserve triangle fan winding");
+              "generic path must preserve triangle fan winding");
 }
 
 static void IndexedQuadFallsBackToGenericPath()
@@ -432,7 +432,7 @@ static void SpriteBatchFastPathRejectsNonBatchShape()
 int main()
 {
     TestFramework tests;
-    tests.Run("2D quad fast path packs expected data", &FastPathPacksExpectedQuad);
+    tests.Run("2D quad uses generic fan path", &QuadUsesGenericFanPath);
     tests.Run("indexed quad falls back", &IndexedQuadFallsBackToGenericPath);
     tests.Run("multistage and stale extended data fall back", &MultistageAndStaleExtendedDataFallBack);
     tests.Run("four-component texcoord quad falls back", &QuadFastPathRejectsFourComponentTexcoords);
