@@ -11,6 +11,7 @@ enum class CKRenderSettingsSection {
     DebugFrameLog,
     DebugDrawMap,
     DebugRenderStats,
+    DebugFrameCostStats,
     DebugFFPStats,
     DebugFFPLog,
     DebugMeshLog,
@@ -82,6 +83,10 @@ inline CKRenderSettingsView CKRenderRenderStatsSettings() {
     return CKRenderSettings(CKRenderSettingsSection::DebugRenderStats);
 }
 
+inline CKRenderSettingsView CKRenderFrameCostStatsSettings() {
+    return CKRenderSettings(CKRenderSettingsSection::DebugFrameCostStats);
+}
+
 inline CKRenderSettingsView CKRenderFFPStatsSettings() {
     return CKRenderSettings(CKRenderSettingsSection::DebugFFPStats);
 }
@@ -111,6 +116,17 @@ struct CKRenderFrameLogConfig {
 
 struct CKRenderRenderStatsConfig {
     bool Enabled;
+};
+
+struct CKRenderFrameCostStatsConfig {
+    bool Enabled;
+    int WarmupFrames;
+    int SampleFrames;
+    char Output[32];
+
+    bool Any() const {
+        return Enabled;
+    }
 };
 
 struct CKRenderDrawMapConfig {
@@ -164,6 +180,7 @@ struct CKRenderDiagnosticsConfig {
     CKRenderFrameLogConfig FrameLog;
     CKRenderDrawMapConfig DrawMap;
     CKRenderRenderStatsConfig RenderStats;
+    CKRenderFrameCostStatsConfig FrameCostStats;
     CKRenderFFPStatsConfig FFPStats;
     CKRenderFFPLogConfig FFPLog;
     CKRenderMeshLogConfig MeshLog;

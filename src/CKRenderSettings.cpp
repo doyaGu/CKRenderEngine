@@ -70,6 +70,8 @@ static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) 
         return "Debug.DrawMap";
     case CKRenderSettingsSection::DebugRenderStats:
         return "Debug.RenderStats";
+    case CKRenderSettingsSection::DebugFrameCostStats:
+        return "Debug.FrameCostStats";
     case CKRenderSettingsSection::DebugFFPStats:
         return "Debug.FFPStats";
     case CKRenderSettingsSection::DebugFFPLog:
@@ -312,6 +314,20 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
     config.DrawMap.Summary = drawMap.GetBool("Summary", false);
 
     config.RenderStats.Enabled = CKRenderRenderStatsSettings().GetBool("Enabled", false);
+
+    const CKRenderSettingsView frameCostStats = CKRenderFrameCostStatsSettings();
+    config.FrameCostStats.Enabled = frameCostStats.GetBool("Enabled", false);
+    config.FrameCostStats.WarmupFrames = frameCostStats.GetInt("WarmupFrames", 120);
+    if (config.FrameCostStats.WarmupFrames < 0)
+        config.FrameCostStats.WarmupFrames = 120;
+    config.FrameCostStats.SampleFrames = frameCostStats.GetInt("SampleFrames", 600);
+    if (config.FrameCostStats.SampleFrames <= 0)
+        config.FrameCostStats.SampleFrames = 600;
+    if (!frameCostStats.GetString("Output", config.FrameCostStats.Output,
+                                  (CKDWORD)sizeof(config.FrameCostStats.Output))) {
+        strncpy(config.FrameCostStats.Output, "log", sizeof(config.FrameCostStats.Output) - 1);
+        config.FrameCostStats.Output[sizeof(config.FrameCostStats.Output) - 1] = '\0';
+    }
 
     const CKRenderSettingsView ffpStats = CKRenderFFPStatsSettings();
     config.FFPStats.Enabled = ffpStats.GetBool("Enabled", false);

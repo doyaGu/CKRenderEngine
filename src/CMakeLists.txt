@@ -100,6 +100,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFrustumCuller.h
         CKRenderSettings.h
         CKRenderPerfStats.h
+        CKRenderFrameCostStats.h
 )
 
 set(CKRE_CONFIG_FILES
@@ -173,6 +174,7 @@ set(CKRE_SOURCES
         CKRenderPipeline.cpp
         CKFrustumCuller.cpp
         CKRenderSettings.cpp
+        CKRenderFrameCostStats.cpp
 
         CK2_3D.rc
 )

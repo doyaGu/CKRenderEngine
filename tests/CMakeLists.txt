@@ -95,6 +95,10 @@ ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )
 
+ckre_add_test(render_frame_cost_stats_tests
+    test_render_frame_cost_stats.cpp
+)
+
 ckre_add_test(render_packet_queue_tests
     test_render_packet_queue.cpp
 )
