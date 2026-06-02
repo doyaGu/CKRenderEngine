@@ -64,6 +64,7 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
+      m_ForceAnisotropicFiltering(FALSE),
       m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
       m_OpaqueInstancingEnabled(TRUE), m_InstanceLayout(0),
       m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
@@ -160,12 +161,15 @@ void CKFixedFunctionPipeline::Shutdown() {
     m_Context = nullptr;
 }
 
-void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps) {
+void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
+                                               CKBOOL ForceAnisotropicFiltering) {
     if (m_DisableTextureFiltering == DisableTextureFiltering &&
-        m_DisableMipmaps == DisableMipmaps)
+        m_DisableMipmaps == DisableMipmaps &&
+        m_ForceAnisotropicFiltering == ForceAnisotropicFiltering)
         return;
     m_DisableTextureFiltering = DisableTextureFiltering;
     m_DisableMipmaps = DisableMipmaps;
+    m_ForceAnisotropicFiltering = ForceAnisotropicFiltering;
     MarkPacketTextureSetDirty();
 }
 
@@ -457,13 +461,14 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
-    if (m_StageStates[stage][(int)type] == value)
-        return;
 
     if (type == CKRST_TSS_STAGEBLEND && value == 0 && stage > 0) {
         DisableTextureStagesFrom(stage);
         return;
     }
+
+    if (m_StageStates[stage][(int)type] == value)
+        return;
 
     m_StageStates[stage][(int)type] = value;
 
@@ -499,17 +504,7 @@ CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTUREST
 }
 
 void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
-    if (m_HasLastViewportData &&
-        m_LastViewportData.ViewX == viewport.ViewX &&
-        m_LastViewportData.ViewY == viewport.ViewY &&
-        m_LastViewportData.ViewWidth == viewport.ViewWidth &&
-        m_LastViewportData.ViewHeight == viewport.ViewHeight &&
-        m_LastViewportData.ViewZMin == viewport.ViewZMin &&
-        m_LastViewportData.ViewZMax == viewport.ViewZMax) {
-        CK_FRAME_COST_ADD_VIEWPORT_SET(TRUE);
-        return;
-    }
-    CK_FRAME_COST_ADD_VIEWPORT_SET(FALSE);
+    CK_FRAME_COST_ADD_VIEWPORT_SET();
     m_LastViewportData = viewport;
     m_HasLastViewportData = TRUE;
 
@@ -2220,6 +2215,10 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
         desc.MipFilter = m_DisableMipmaps ? CKRST_FILTER_NONE : CKRST_FILTER_NEAREST;
     } else if (m_DisableMipmaps) {
         desc.MipFilter = CKRST_FILTER_NONE;
+    } else if (m_ForceAnisotropicFiltering) {
+        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
     }
     return desc;
 }
