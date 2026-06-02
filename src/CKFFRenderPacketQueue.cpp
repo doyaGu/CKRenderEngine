@@ -1,0 +1,300 @@
+#include "CKFFRenderPacketQueue.h"
+
+#include <cstring>
+
+CKFFRenderPacketQueue::CKFFRenderPacketQueue()
+    : m_PacketSerial(0),
+      m_StaticUniformDirtySerial(1),
+      m_StaticUniformCachedSerial(0),
+      m_StaticUniformCachedIndex(0),
+      m_StaticUniformCacheValid(FALSE),
+      m_AlreadySorted(TRUE),
+      m_SingleKey(TRUE),
+      m_HasLastKey(FALSE),
+      m_AdaptiveBypass(FALSE),
+      m_AdaptiveSamples(0),
+      m_AdaptiveBypasses(0),
+      m_AdaptiveSavedBindEstimate(0)
+{
+    memset(&m_FirstPacketSortKey, 0, sizeof(m_FirstPacketSortKey));
+    memset(&m_LastPacketSortKey, 0, sizeof(m_LastPacketSortKey));
+}
+
+void CKFFRenderPacketQueue::Clear()
+{
+    m_Packets.Resize(0);
+    m_StaticUniformPayloads.Resize(0);
+    m_StaticUniformCacheValid = FALSE;
+    m_AlreadySorted = TRUE;
+    m_SingleKey = TRUE;
+    m_HasLastKey = FALSE;
+    memset(&m_FirstPacketSortKey, 0, sizeof(m_FirstPacketSortKey));
+    memset(&m_LastPacketSortKey, 0, sizeof(m_LastPacketSortKey));
+}
+
+void CKFFRenderPacketQueue::ResetFrameState()
+{
+    m_AdaptiveBypass = FALSE;
+    m_AdaptiveSamples = 0;
+    m_AdaptiveBypasses = 0;
+    m_AdaptiveSavedBindEstimate = 0;
+}
+
+CKBOOL CKFFRenderPacketQueue::HasPackets() const
+{
+    return m_Packets.Size() > 0 ? TRUE : FALSE;
+}
+
+int CKFFRenderPacketQueue::GetPacketCount() const
+{
+    return m_Packets.Size();
+}
+
+const CKRenderPacket &CKFFRenderPacketQueue::GetPacket(int index) const
+{
+    return m_Packets[index];
+}
+
+CKRenderPacket &CKFFRenderPacketQueue::GetPacket(int index)
+{
+    return m_Packets[index];
+}
+
+const CKFFRenderPacketUniformPayload &CKFFRenderPacketQueue::GetStaticUniformPayload(CKDWORD index) const
+{
+    return m_StaticUniformPayloads[(int)index];
+}
+
+CKDWORD CKFFRenderPacketQueue::NextSerial()
+{
+    ++m_PacketSerial;
+    if (m_PacketSerial == 0)
+        ++m_PacketSerial;
+    return m_PacketSerial;
+}
+
+void CKFFRenderPacketQueue::MarkStaticUniformsDirty()
+{
+    ++m_StaticUniformDirtySerial;
+    if (m_StaticUniformDirtySerial == 0)
+        ++m_StaticUniformDirtySerial;
+}
+
+CKBOOL CKFFRenderPacketQueue::TryUseCachedStaticUniform(CKDWORD *index) const
+{
+    if (!index)
+        return FALSE;
+    if (!m_StaticUniformCacheValid)
+        return FALSE;
+    if (m_StaticUniformCachedSerial != m_StaticUniformDirtySerial)
+        return FALSE;
+    *index = m_StaticUniformCachedIndex;
+    return TRUE;
+}
+
+void CKFFRenderPacketQueue::CacheStaticUniform(CKDWORD index)
+{
+    m_StaticUniformCachedSerial = m_StaticUniformDirtySerial;
+    m_StaticUniformCachedIndex = index;
+    m_StaticUniformCacheValid = TRUE;
+}
+
+CKDWORD CKFFRenderPacketQueue::InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload,
+                                                         CKBOOL *interned)
+{
+    const int count = m_StaticUniformPayloads.Size();
+    const int scanCount = count < CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT
+        ? count
+        : CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT;
+    if (interned)
+        *interned = FALSE;
+
+    for (int i = 0; i < scanCount; ++i) {
+        if (CKFFRenderPacketUniformPayloadEquals(m_StaticUniformPayloads[i], payload))
+            return (CKDWORD)i;
+    }
+
+    m_StaticUniformPayloads.PushBack(payload);
+    if (interned)
+        *interned = TRUE;
+    return (CKDWORD)count;
+}
+
+void CKFFRenderPacketQueue::BuildSortKey(CKRenderPacket *packet) const
+{
+    if (!packet)
+        return;
+
+    memset(&packet->SortKey, 0, sizeof(packet->SortKey));
+    packet->SortKey.Program = packet->Program;
+    packet->SortKey.DrawStateLo = packet->DrawState.Lo;
+    packet->SortKey.DrawStateMid = packet->DrawState.Mid;
+    packet->SortKey.DrawStateHi = packet->DrawState.Hi;
+    packet->SortKey.StencilRef = packet->StencilRef;
+    packet->SortKey.StencilReadMask = packet->StencilReadMask;
+    packet->SortKey.StencilWriteMask = packet->StencilWriteMask;
+    packet->SortKey.StaticUniformHash =
+        GetStaticUniformPayload(packet->StaticUniformIndex).Hash;
+    packet->SortKey.TextureSetHash = CKFFHashRenderPacketTextureSet(*packet);
+    packet->SortKey.ActiveTextureCount = packet->ActiveTextureCount;
+    packet->SortKey.VertexLayout = packet->VertexLayout;
+    packet->SortKey.VertexBuffer = packet->VertexBuffer;
+    packet->SortKey.BaseVertex = packet->BaseVertex;
+    packet->SortKey.VertexCount = packet->VertexCount;
+    packet->SortKey.IndexBuffer = packet->IndexBuffer;
+    packet->SortKey.StartIndex = packet->StartIndex;
+    packet->SortKey.IndexCount = packet->IndexCount;
+}
+
+void CKFFRenderPacketQueue::AddPacket(const CKRenderPacket &packet)
+{
+    TrackPacket(packet);
+    m_Packets.PushBack(packet);
+}
+
+CKBOOL CKFFRenderPacketQueue::IsAdaptiveBypassed() const
+{
+    return m_AdaptiveBypass;
+}
+
+CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass() const
+{
+    if (m_AdaptiveBypass)
+        return TRUE;
+    if (m_AdaptiveSamples != CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
+        return FALSE;
+    if (m_AdaptiveSavedBindEstimate >= (m_AdaptiveSamples / 2))
+        return FALSE;
+    return TRUE;
+}
+
+void CKFFRenderPacketQueue::MarkAdaptiveBypass()
+{
+    if (!m_AdaptiveBypass)
+        ++m_AdaptiveBypasses;
+    m_AdaptiveBypass = TRUE;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveSamples() const
+{
+    return m_AdaptiveSamples;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveBypasses() const
+{
+    return m_AdaptiveBypasses;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveSavedBindEstimate() const
+{
+    return m_AdaptiveSavedBindEstimate;
+}
+
+CKBOOL CKFFRenderPacketQueue::IsDirectReplay(CKBOOL forceDirectReplay) const
+{
+    const int packetCount = m_Packets.Size();
+    if (forceDirectReplay)
+        return TRUE;
+    if (packetCount < 2)
+        return TRUE;
+    if (packetCount < CKFF_RENDER_PACKET_MIN_SORT_COUNT)
+        return TRUE;
+    if (m_SingleKey)
+        return TRUE;
+    if (m_AlreadySorted)
+        return TRUE;
+    return FALSE;
+}
+
+void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
+{
+    const int count = m_Packets.Size();
+    indices.Resize(count);
+    for (int i = 0; i < count; ++i)
+        indices[i] = (CKDWORD)i;
+    if (count < 2)
+        return;
+    if (IsDirectReplay(FALSE))
+        return;
+
+    XArray<CKDWORD> scratch;
+    scratch.Resize(count);
+    for (int width = 1; width < count; width <<= 1) {
+        for (int left = 0; left < count; left += width << 1) {
+            int mid = left + width;
+            int right = left + (width << 1);
+            if (mid > count)
+                mid = count;
+            if (right > count)
+                right = count;
+
+            int a = left;
+            int b = mid;
+            int out = left;
+            while (a < mid && b < right) {
+                const CKRenderPacket &pa = m_Packets[(int)indices[a]];
+                const CKRenderPacket &pb = m_Packets[(int)indices[b]];
+                if (CKFFCompareRenderPacket(pa, pb) <= 0)
+                    scratch[out++] = indices[a++];
+                else
+                    scratch[out++] = indices[b++];
+            }
+            while (a < mid)
+                scratch[out++] = indices[a++];
+            while (b < right)
+                scratch[out++] = indices[b++];
+        }
+        for (int i = 0; i < count; ++i)
+            indices[i] = scratch[i];
+    }
+}
+
+void CKFFRenderPacketQueue::TrackPacket(const CKRenderPacket &packet)
+{
+    ++m_AdaptiveSamples;
+    m_AdaptiveSavedBindEstimate += EstimateSavedBinds(packet);
+
+    if (!m_HasLastKey) {
+        m_HasLastKey = TRUE;
+        m_AlreadySorted = TRUE;
+        m_SingleKey = TRUE;
+        m_FirstPacketSortKey = packet.SortKey;
+        m_LastPacketSortKey = packet.SortKey;
+        return;
+    }
+
+    if (CKFFCompareRenderPacketSortKey(m_LastPacketSortKey, packet.SortKey) > 0)
+        m_AlreadySorted = FALSE;
+    if (!CKFFRenderPacketSortKeyEquals(m_FirstPacketSortKey, packet.SortKey))
+        m_SingleKey = FALSE;
+    m_LastPacketSortKey = packet.SortKey;
+}
+
+CKDWORD CKFFRenderPacketQueue::EstimateSavedBinds(const CKRenderPacket &packet) const
+{
+    if (m_Packets.Size() <= 0)
+        return 0;
+
+    const CKRenderPacket &prev = m_Packets[m_Packets.Size() - 1];
+    CKDWORD saved = 0;
+    if (CKFFDrawStateEquals(prev.DrawState, packet.DrawState) &&
+        prev.StencilRef == packet.StencilRef &&
+        prev.StencilReadMask == packet.StencilReadMask &&
+        prev.StencilWriteMask == packet.StencilWriteMask)
+        ++saved;
+    if (prev.StaticUniformIndex == packet.StaticUniformIndex)
+        ++saved;
+    if (prev.SortKey.TextureSetHash == packet.SortKey.TextureSetHash &&
+        prev.ActiveTextureCount == packet.ActiveTextureCount)
+        ++saved;
+    if (prev.VertexLayout == packet.VertexLayout &&
+        prev.VertexBuffer == packet.VertexBuffer &&
+        prev.BaseVertex == packet.BaseVertex &&
+        prev.VertexCount == packet.VertexCount)
+        ++saved;
+    if (prev.IndexBuffer == packet.IndexBuffer &&
+        prev.StartIndex == packet.StartIndex &&
+        prev.IndexCount == packet.IndexCount)
+        ++saved;
+    return saved;
+}
