@@ -2375,7 +2375,6 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     XArray<CKFFRenderPacketRunPlan> runPlans;
     m_OpaquePacketQueue.BuildRunPlans(&indices, directReplay, m_OpaqueInstancingEnabled, runPlans);
     const int planCount = runPlans.Size();
-    const int replayCount = directReplay ? packetCount : indices.Size();
     for (int planIndex = 0; planIndex < planCount; ++planIndex) {
         const CKFFRenderPacketRunPlan &plan = runPlans[planIndex];
         const CKBOOL lastPlan = (planIndex + 1 == planCount) ? TRUE : FALSE;
@@ -2387,15 +2386,8 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
             }
         }
 
-        for (int j = 0; j < plan.Count; ++j) {
-            const int orderIndex = plan.Start + j;
-            const int packetIndex = directReplay
-                ? orderIndex
-                : (int)indices[orderIndex];
-            const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
-            CKFFReplayVertexBufferPacket(&replayContext, packet, &cache,
-                                         orderIndex + 1 == replayCount ? TRUE : FALSE);
-        }
+        CKFFReplayVertexBufferPacketRange(&replayContext, &indices, plan.Start, 0,
+                                          plan.Count, directReplay, &cache, lastPlan);
     }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (m_DiagnosticConfig.StatsEnabled)
