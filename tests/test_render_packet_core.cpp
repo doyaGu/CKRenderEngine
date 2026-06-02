@@ -247,6 +247,17 @@ static void AdaptiveRunGateBypassesNoRunSample()
               "no-run sample must not estimate submit savings");
     TestCheck(queue.GetAdaptiveRunBypasses() == 1,
               "run-aware bypass must be counted once");
+    TestCheck(queue.GetAdaptiveCooldownFrames() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
+              "run-aware bypass must start the persistent no-run cooldown");
+    TestCheck(queue.IsAdaptiveCooldownActive() == FALSE,
+              "newly started cooldown must not bypass the current probe frame");
+    queue.ResetFrameState();
+    TestCheck(queue.IsAdaptiveCooldownActive() == TRUE,
+              "persistent cooldown must become active on the next frame");
+    TestCheck(queue.GetAdaptiveCooldownFrames() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
+              "next frame must keep the full cooldown interval");
 }
 
 static void AdaptivePacketOnlyKeepsBindSavingSample()
@@ -261,6 +272,70 @@ static void AdaptivePacketOnlyKeepsBindSavingSample()
               "packet-only adaptive must keep a bind-saving sample even without instance runs");
     TestCheck(queue.GetAdaptiveRunBypasses() == 0,
               "packet-only adaptive must not evaluate the instancing run gate");
+    TestCheck(queue.GetAdaptiveCooldownFrames() == 0,
+              "packet-only adaptive must not start instancing cooldown");
+}
+
+static void AdaptiveFrameEndNoRunStartsCooldown()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < 29; ++i)
+        AddPacket(&queue, i + 1, 1000 + i, 2000 + i, staticUniformIndex);
+
+    TestCheck(queue.EvaluateAdaptiveFrameEnd(TRUE) == TRUE,
+              "frame-end evaluation must catch player-like no-run samples below 32 draws");
+    TestCheck(queue.GetAdaptiveFrameEndEvaluations() == 1,
+              "frame-end evaluation must be counted");
+    TestCheck(queue.GetAdaptiveFrameEndRunBypasses() == 1,
+              "frame-end no-run bypass must be counted");
+    TestCheck(queue.GetAdaptiveSampleMaxRun() == 1,
+              "frame-end no-run sample must report max run one");
+    TestCheck(queue.GetAdaptiveSubmitSavedEstimate() == 0,
+              "frame-end no-run sample must not estimate submit savings");
+    TestCheck(queue.GetAdaptiveCooldownFrames() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
+              "frame-end no-run sample must start cooldown");
+    queue.ResetFrameState();
+    TestCheck(queue.IsAdaptiveCooldownActive() == TRUE,
+              "frame-end cooldown must bypass eligible draws on the next frame");
+}
+
+static void AdaptiveFrameEndHighRepeatClearsCooldown()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < 8; ++i)
+        AddPacket(&queue, i + 1, 100, 200, staticUniformIndex);
+
+    TestCheck(queue.EvaluateAdaptiveFrameEnd(TRUE) == FALSE,
+              "frame-end evaluation must keep high-repeat samples active");
+    TestCheck(queue.GetAdaptiveFrameEndEvaluations() == 1,
+              "high-repeat frame-end evaluation must be counted");
+    TestCheck(queue.GetAdaptiveFrameEndRunBypasses() == 0,
+              "high-repeat frame-end evaluation must not count a bypass");
+    TestCheck(queue.GetAdaptiveSampleMaxRun() == 8,
+              "high-repeat frame-end evaluation must report the instanceable run");
+    TestCheck(queue.GetAdaptiveCooldownFrames() == 0,
+              "high-repeat frame-end evaluation must not start cooldown");
+}
+
+static void AdaptiveFrameEndPacketOnlyDoesNotCooldown()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < 29; ++i)
+        AddPacket(&queue, i + 1, 1000 + i, 2000 + i, staticUniformIndex);
+
+    TestCheck(queue.EvaluateAdaptiveFrameEnd(FALSE) == FALSE,
+              "packet-only mode must not use frame-end instancing cooldown");
+    TestCheck(queue.GetAdaptiveFrameEndEvaluations() == 0,
+              "packet-only mode must not count frame-end run evaluations");
+    TestCheck(queue.GetAdaptiveCooldownFrames() == 0,
+              "packet-only mode must not start persistent cooldown");
 }
 
 static void InstanceRunCompatibilityRequiresExactViewProjection()
@@ -293,6 +368,9 @@ int main()
     tests.Run("AdaptiveRunGateKeepsHighRepeatSample", &AdaptiveRunGateKeepsHighRepeatSample);
     tests.Run("AdaptiveRunGateBypassesNoRunSample", &AdaptiveRunGateBypassesNoRunSample);
     tests.Run("AdaptivePacketOnlyKeepsBindSavingSample", &AdaptivePacketOnlyKeepsBindSavingSample);
+    tests.Run("AdaptiveFrameEndNoRunStartsCooldown", &AdaptiveFrameEndNoRunStartsCooldown);
+    tests.Run("AdaptiveFrameEndHighRepeatClearsCooldown", &AdaptiveFrameEndHighRepeatClearsCooldown);
+    tests.Run("AdaptiveFrameEndPacketOnlyDoesNotCooldown", &AdaptiveFrameEndPacketOnlyDoesNotCooldown);
     tests.Run("InstanceRunCompatibilityRequiresExactViewProjection", &InstanceRunCompatibilityRequiresExactViewProjection);
     return tests.ExitCode();
 }
