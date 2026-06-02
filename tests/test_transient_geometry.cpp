@@ -8,13 +8,13 @@
 
 #include <cstring>
 
-struct QuadFastPathHarness {
+struct TransientGeometryHarness {
     FFPDiagnosticDriver Driver;
     FFPDiagnosticContext Context;
     CKVertexLayoutCache LayoutCache;
     CKTransientGeometry Geometry;
 
-    QuadFastPathHarness()
+    TransientGeometryHarness()
         : Driver(), Context(&Driver), LayoutCache(), Geometry()
     {
         LayoutCache.Init(&Context);
@@ -115,7 +115,7 @@ static CKRenderFrameCostStatsSnapshot EndStatsSample()
 
 static void QuadUsesGenericFanPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     VxDrawPrimitiveData data;
     float positions[16];
     float texcoords[8];
@@ -138,12 +138,8 @@ static void QuadUsesGenericFanPath()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathCandidates == 0,
-              "2D quad fast path should be disabled by default");
-    TestCheck(stats.TransientQuadFastPathHits == 0,
-              "2D quad must not hit the disabled fast path");
-    TestCheck(stats.TransientQuadFastPathFallbacks == 0,
-              "disabled 2D quad fast path should not report fallback noise");
+    TestCheck(stats.TransientPrepareCalls == 1,
+              "2D quad should count one transient prepare");
     TestCheck(stats.TransientFanToListConversions == 1,
               "2D quad should use generic fan conversion");
 #endif
@@ -178,9 +174,9 @@ static void QuadUsesGenericFanPath()
               "generic path must preserve triangle fan winding");
 }
 
-static void IndexedQuadFallsBackToGenericPath()
+static void IndexedTriangleFanUsesGenericPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     VxDrawPrimitiveData data;
     float positions[16];
     float texcoords[8];
@@ -200,16 +196,14 @@ static void IndexedQuadFallsBackToGenericPath()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathHits == 0,
-              "indexed quad must not hit fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "indexed triangle fan should use generic fan conversion");
 #endif
 }
 
-static void MultistageAndStaleExtendedDataFallBack()
+static void ExtendedTexcoordDataUsesGenericPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     VxDrawPrimitiveData data;
     float positions[16];
     float texcoords[8];
@@ -231,8 +225,6 @@ static void MultistageAndStaleExtendedDataFallBack()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathHits == 0,
-              "stale extended texcoord pointer must block fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "stale extended fallback should use generic fan conversion");
 #endif
@@ -252,14 +244,14 @@ static void MultistageAndStaleExtendedDataFallBack()
 
     stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathHits == 0,
-              "multistage quad must not hit fast path");
+    TestCheck(stats.TransientFanToListConversions == 1,
+              "multistage quad should use generic fan conversion");
 #endif
 }
 
-static void QuadFastPathRejectsFourComponentTexcoords()
+static void FourComponentTexcoordQuadUsesGenericPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     VxDrawPrimitiveData data;
     float positions[16];
     float texcoords[16];
@@ -294,8 +286,6 @@ static void QuadFastPathRejectsFourComponentTexcoords()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientQuadFastPathHits == 0,
-              "four-component texcoord quad must not hit fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "four-component texcoord fallback should use generic fan conversion");
 #endif
@@ -335,7 +325,7 @@ static void FillSpriteBatchInput(CKVertex *vertices, int vertexCount)
 
 static void SpriteBatchUsesGenericPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     CKVertex vertices[8];
     CKWORD indices[12] = {
         0, 1, 2, 0, 2, 3,
@@ -360,12 +350,6 @@ static void SpriteBatchUsesGenericPath()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientSpriteBatchFastPathCandidates == 0,
-              "sprite batch fast path should be disabled");
-    TestCheck(stats.TransientSpriteBatchFastPathHits == 0,
-              "sprite batch must not hit the disabled fast path");
-    TestCheck(stats.TransientSpriteBatchFastPathFallbacks == 0,
-              "disabled sprite batch fast path should not report fallback noise");
     TestCheck(stats.TransientFanToListConversions == 0,
               "sprite batch triangle list should not convert topology");
 #endif
@@ -400,9 +384,9 @@ static void SpriteBatchUsesGenericPath()
     }
 }
 
-static void SpriteBatchFastPathRejectsNonBatchShape()
+static void NonBatchTriangleListUsesGenericPath()
 {
-    QuadFastPathHarness harness;
+    TransientGeometryHarness harness;
     CKVertex vertices[8];
     CKWORD indices[9] = {0, 1, 2, 0, 2, 3, 4, 5, 6};
     VxDrawPrimitiveData data;
@@ -424,8 +408,8 @@ static void SpriteBatchFastPathRejectsNonBatchShape()
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
 #if CKRE_ENABLE_FRAME_COST_STATS
-    TestCheck(stats.TransientSpriteBatchFastPathHits == 0,
-              "non-batch triangle list must not hit sprite batch fast path");
+    TestCheck(stats.TransientPrepareCalls == 1,
+              "non-batch triangle list should count one transient prepare");
 #endif
 }
 
@@ -433,10 +417,10 @@ int main()
 {
     TestFramework tests;
     tests.Run("2D quad uses generic fan path", &QuadUsesGenericFanPath);
-    tests.Run("indexed quad falls back", &IndexedQuadFallsBackToGenericPath);
-    tests.Run("multistage and stale extended data fall back", &MultistageAndStaleExtendedDataFallBack);
-    tests.Run("four-component texcoord quad falls back", &QuadFastPathRejectsFourComponentTexcoords);
+    tests.Run("indexed triangle fan uses generic path", &IndexedTriangleFanUsesGenericPath);
+    tests.Run("extended texcoord data uses generic path", &ExtendedTexcoordDataUsesGenericPath);
+    tests.Run("four-component texcoord quad uses generic path", &FourComponentTexcoordQuadUsesGenericPath);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
-    tests.Run("sprite batch fast path rejects non-batch shape", &SpriteBatchFastPathRejectsNonBatchShape);
+    tests.Run("non-batch triangle list uses generic path", &NonBatchTriangleListUsesGenericPath);
     return tests.ExitCode();
 }
