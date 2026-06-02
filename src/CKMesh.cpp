@@ -18,6 +18,7 @@
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
+#include "CKRenderFrameCostStats.h"
 #include "CKTransientGeometry.h"
 #include "CKDrawAnnotation.h"
 #include "MeshStriper.h"
@@ -3377,6 +3378,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
     // Match IDA at 0x1001d852
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    CKRenderFrameCostStatsAddMeshRender();
     if (renderStats)
         ++CKRenderPerfCurrent().MeshRenderCalls;
     RCKRenderContext *rc = (RCKRenderContext *) Dev;
@@ -3986,6 +3988,7 @@ CKBOOL RCKMesh::IsPM() {
 int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    CKRenderFrameCostStatsAddMeshDefault();
     if (renderStats)
         ++CKRenderPerfCurrent().MeshDefaultCalls;
     CKRasterizerContext *rstContext = rc->m_RasterizerContext;
@@ -4381,6 +4384,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+    CKRenderFrameCostStatsAddMeshGroup();
     if (renderStats) {
         ++CKRenderPerfCurrent().MeshGroupCalls;
         if (group && group->m_Material && group->m_Material->IsAlphaTransparent())
