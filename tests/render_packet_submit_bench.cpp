@@ -51,6 +51,10 @@ struct BenchResult {
     CKDWORD AdaptiveSamples;
     CKDWORD AdaptiveBypasses;
     CKDWORD AdaptiveSavedBindEstimate;
+    CKDWORD AdaptiveRunBypasses;
+    CKDWORD AdaptiveSampleRuns;
+    CKDWORD AdaptiveSampleMaxRun;
+    CKDWORD AdaptiveSubmitSavedEstimate;
     CKDWORD QueuedRenderPackets;
     CKDWORD ReplayedRenderPackets;
     CKDWORD RenderPacketFallbacks;
@@ -170,6 +174,11 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
         result.AdaptiveSamples += ffp.GetOpaquePacketAdaptiveSamples();
         result.AdaptiveBypasses += ffp.GetOpaquePacketAdaptiveBypasses();
         result.AdaptiveSavedBindEstimate += ffp.GetOpaquePacketAdaptiveSavedBindEstimate();
+        result.AdaptiveRunBypasses += ffp.GetOpaquePacketAdaptiveRunBypasses();
+        result.AdaptiveSampleRuns += ffp.GetOpaquePacketAdaptiveSampleRuns();
+        if (ffp.GetOpaquePacketAdaptiveSampleMaxRun() > result.AdaptiveSampleMaxRun)
+            result.AdaptiveSampleMaxRun = ffp.GetOpaquePacketAdaptiveSampleMaxRun();
+        result.AdaptiveSubmitSavedEstimate += ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate();
         AddFrameStats(&result, &ffp.GetFrameStats());
     }
     const double elapsedUs = BenchElapsedUs(start);
@@ -222,7 +231,7 @@ static void PrintBenchResult(const BenchScenario *scenario,
                              const BenchResult *packet)
 {
     printf("%s\n", scenario->Name);
-    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu\n",
+    printf("  immediate: us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu adaptiveRunBypass=%lu adaptiveSampleRuns=%lu adaptiveSampleMaxRun=%lu adaptiveSubmitSaved=%lu\n",
            immediate->UsPerDraw,
            immediate->DrawUsPerDraw,
            immediate->FlushUsPerDraw,
@@ -238,8 +247,12 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)immediate->SubmitSavedEstimate,
            (unsigned long)immediate->AdaptiveSamples,
            (unsigned long)immediate->AdaptiveBypasses,
-           (unsigned long)immediate->AdaptiveSavedBindEstimate);
-    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu queued=%lu replayed=%lu fallbacks=%lu flushes=%lu overflows=%lu runs=%lu maxRun=%lu staticBuild=%lu staticReuse=%lu staticIntern=%lu viewProjRebuild=%lu instRuns=%lu instPackets=%lu instSubmits=%lu packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f\n",
+           (unsigned long)immediate->AdaptiveSavedBindEstimate,
+           (unsigned long)immediate->AdaptiveRunBypasses,
+           (unsigned long)immediate->AdaptiveSampleRuns,
+           (unsigned long)immediate->AdaptiveSampleMaxRun,
+           (unsigned long)immediate->AdaptiveSubmitSavedEstimate);
+    printf("  packet:    us/draw=%.3f draw=%.3f flush=%.3f submit=%lu state=%lu texture=%lu uniform=%lu vb=%lu ib=%lu instanceBuffers=%lu instances=%lu instanceBytes=%lu submitSaved=%lu adaptiveSamples=%lu adaptiveBypass=%lu adaptiveSaved=%lu adaptiveRunBypass=%lu adaptiveSampleRuns=%lu adaptiveSampleMaxRun=%lu adaptiveSubmitSaved=%lu queued=%lu replayed=%lu fallbacks=%lu flushes=%lu overflows=%lu runs=%lu maxRun=%lu staticBuild=%lu staticReuse=%lu staticIntern=%lu viewProjRebuild=%lu instRuns=%lu instPackets=%lu instSubmits=%lu packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f\n",
            packet->UsPerDraw,
            packet->DrawUsPerDraw,
            packet->FlushUsPerDraw,
@@ -256,6 +269,10 @@ static void PrintBenchResult(const BenchScenario *scenario,
            (unsigned long)packet->AdaptiveSamples,
            (unsigned long)packet->AdaptiveBypasses,
            (unsigned long)packet->AdaptiveSavedBindEstimate,
+           (unsigned long)packet->AdaptiveRunBypasses,
+           (unsigned long)packet->AdaptiveSampleRuns,
+           (unsigned long)packet->AdaptiveSampleMaxRun,
+           (unsigned long)packet->AdaptiveSubmitSavedEstimate,
            (unsigned long)packet->QueuedRenderPackets,
            (unsigned long)packet->ReplayedRenderPackets,
            (unsigned long)packet->RenderPacketFallbacks,
@@ -287,6 +304,7 @@ int main()
         {"multi_material", 4096, 32, 8, 64, 16, FALSE},
         {"multi_mesh", 4096, 32, 128, 8, 512, FALSE},
         {"state_churn_no_benefit", 4096, 32, 4096, 4096, 1, TRUE},
+        {"player_menu_no_run", 4096, 32, 4096, 1, 4096, FALSE},
     };
 
     const int scenarioCount = (int)(sizeof(scenarios) / sizeof(scenarios[0]));

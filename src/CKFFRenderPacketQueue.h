@@ -32,11 +32,15 @@ public:
 
     void AddPacket(const CKRenderPacket &packet);
     CKBOOL IsAdaptiveBypassed() const;
-    CKBOOL ShouldAdaptiveBypass() const;
+    CKBOOL ShouldAdaptiveBypass(CKBOOL instancingEnabled);
     void MarkAdaptiveBypass();
     CKDWORD GetAdaptiveSamples() const;
     CKDWORD GetAdaptiveBypasses() const;
     CKDWORD GetAdaptiveSavedBindEstimate() const;
+    CKDWORD GetAdaptiveRunBypasses() const;
+    CKDWORD GetAdaptiveSampleRuns() const;
+    CKDWORD GetAdaptiveSampleMaxRun() const;
+    CKDWORD GetAdaptiveSubmitSavedEstimate() const;
 
     CKBOOL IsDirectReplay(CKBOOL forceDirectReplay) const;
     void SortPackets(XArray<CKDWORD> &indices) const;
@@ -51,6 +55,8 @@ public:
 
 private:
     void TrackPacket(const CKRenderPacket &packet);
+    void SortAdaptiveSample(XArray<CKDWORD> &indices) const;
+    void EvaluateAdaptiveSampleRuns();
     CKDWORD EstimateSavedBinds(const CKRenderPacket &packet) const;
     CKDWORD EstimateRepeatBinds(const CKRenderPacket &packet) const;
 
@@ -71,6 +77,11 @@ private:
     CKDWORD m_AdaptiveBypasses;
     CKDWORD m_AdaptiveSavedBindEstimate;
     CKDWORD m_AdaptiveRepeatBindEstimate;
+    CKDWORD m_AdaptiveRunBypasses;
+    CKBOOL m_AdaptiveSampleRunsEvaluated;
+    CKDWORD m_AdaptiveSampleRuns;
+    CKDWORD m_AdaptiveSampleMaxRun;
+    CKDWORD m_AdaptiveSubmitSavedEstimate;
 };
 
 #endif

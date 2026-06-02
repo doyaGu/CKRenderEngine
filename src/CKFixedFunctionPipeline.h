@@ -78,6 +78,10 @@ struct CKFFFrameStats {
     CKDWORD RenderPacketAdaptiveSamples;
     CKDWORD RenderPacketAdaptiveBypasses;
     CKDWORD RenderPacketAdaptiveSavedBindEstimate;
+    CKDWORD RenderPacketAdaptiveRunBypasses;
+    CKDWORD RenderPacketAdaptiveSampleRuns;
+    CKDWORD RenderPacketAdaptiveSampleMaxRun;
+    CKDWORD RenderPacketAdaptiveSubmitSavedEstimate;
     CKDWORD RenderPacketViewProjectionRebuilds;
     CKDWORD RenderPacketInstancedRuns;
     CKDWORD RenderPacketInstancedPackets;
@@ -211,6 +215,10 @@ public:
     CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketQueue.GetAdaptiveSamples(); }
     CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePacketQueue.GetAdaptiveBypasses(); }
     CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSavedBindEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePacketQueue.GetAdaptiveRunBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePacketQueue.GetAdaptiveSampleRuns(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePacketQueue.GetAdaptiveSampleMaxRun(); }
+    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate(); }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -383,6 +391,7 @@ private:
     void ResetOpaqueRenderPacketFrameState();
     CKDWORD InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload);
     void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
+    void InitVertexBufferPacketForCapture(CKRenderPacket *packet) const;
     void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
     CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
 

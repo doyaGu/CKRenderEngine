@@ -15,7 +15,12 @@ CKFFRenderPacketQueue::CKFFRenderPacketQueue()
       m_AdaptiveSamples(0),
       m_AdaptiveBypasses(0),
       m_AdaptiveSavedBindEstimate(0),
-      m_AdaptiveRepeatBindEstimate(0)
+      m_AdaptiveRepeatBindEstimate(0),
+      m_AdaptiveRunBypasses(0),
+      m_AdaptiveSampleRunsEvaluated(FALSE),
+      m_AdaptiveSampleRuns(0),
+      m_AdaptiveSampleMaxRun(0),
+      m_AdaptiveSubmitSavedEstimate(0)
 {
     memset(&m_FirstPacketSortKey, 0, sizeof(m_FirstPacketSortKey));
     memset(&m_LastPacketSortKey, 0, sizeof(m_LastPacketSortKey));
@@ -40,6 +45,11 @@ void CKFFRenderPacketQueue::ResetFrameState()
     m_AdaptiveBypasses = 0;
     m_AdaptiveSavedBindEstimate = 0;
     m_AdaptiveRepeatBindEstimate = 0;
+    m_AdaptiveRunBypasses = 0;
+    m_AdaptiveSampleRunsEvaluated = FALSE;
+    m_AdaptiveSampleRuns = 0;
+    m_AdaptiveSampleMaxRun = 0;
+    m_AdaptiveSubmitSavedEstimate = 0;
 }
 
 CKBOOL CKFFRenderPacketQueue::HasPackets() const
@@ -159,7 +169,7 @@ CKBOOL CKFFRenderPacketQueue::IsAdaptiveBypassed() const
     return m_AdaptiveBypass;
 }
 
-CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass() const
+CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass(CKBOOL instancingEnabled)
 {
     if (m_AdaptiveBypass)
         return TRUE;
@@ -167,6 +177,13 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass() const
         return FALSE;
     if (m_AdaptiveSamples > CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
         return FALSE;
+    if (instancingEnabled) {
+        if (!m_AdaptiveSampleRunsEvaluated)
+            EvaluateAdaptiveSampleRuns();
+        if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+            return TRUE;
+        return FALSE;
+    }
     if (m_AdaptiveRepeatBindEstimate == 0)
         return TRUE;
     if (m_AdaptiveSavedBindEstimate >= (m_AdaptiveSamples / 2))
@@ -179,6 +196,26 @@ void CKFFRenderPacketQueue::MarkAdaptiveBypass()
     if (!m_AdaptiveBypass)
         ++m_AdaptiveBypasses;
     m_AdaptiveBypass = TRUE;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveRunBypasses() const
+{
+    return m_AdaptiveRunBypasses;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveSampleRuns() const
+{
+    return m_AdaptiveSampleRuns;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveSampleMaxRun() const
+{
+    return m_AdaptiveSampleMaxRun;
+}
+
+CKDWORD CKFFRenderPacketQueue::GetAdaptiveSubmitSavedEstimate() const
+{
+    return m_AdaptiveSubmitSavedEstimate;
 }
 
 CKDWORD CKFFRenderPacketQueue::GetAdaptiveSamples() const
@@ -357,6 +394,86 @@ void CKFFRenderPacketQueue::TrackPacket(const CKRenderPacket &packet)
     if (!CKFFRenderPacketSortKeyEquals(m_FirstPacketSortKey, packet.SortKey))
         m_SingleKey = FALSE;
     m_LastPacketSortKey = packet.SortKey;
+}
+
+void CKFFRenderPacketQueue::SortAdaptiveSample(XArray<CKDWORD> &indices) const
+{
+    const int count = m_Packets.Size();
+    indices.Resize(count);
+    for (int i = 0; i < count; ++i)
+        indices[i] = (CKDWORD)i;
+    if (count < 2)
+        return;
+
+    XArray<CKDWORD> scratch;
+    scratch.Resize(count);
+    for (int width = 1; width < count; width <<= 1) {
+        for (int left = 0; left < count; left += width << 1) {
+            int mid = left + width;
+            int right = left + (width << 1);
+            if (mid > count)
+                mid = count;
+            if (right > count)
+                right = count;
+
+            int a = left;
+            int b = mid;
+            int out = left;
+            while (a < mid && b < right) {
+                const CKRenderPacket &pa = m_Packets[(int)indices[a]];
+                const CKRenderPacket &pb = m_Packets[(int)indices[b]];
+                if (CKFFCompareRenderPacket(pa, pb) <= 0)
+                    scratch[out++] = indices[a++];
+                else
+                    scratch[out++] = indices[b++];
+            }
+            while (a < mid)
+                scratch[out++] = indices[a++];
+            while (b < right)
+                scratch[out++] = indices[b++];
+        }
+        for (int i = 0; i < count; ++i)
+            indices[i] = scratch[i];
+    }
+}
+
+void CKFFRenderPacketQueue::EvaluateAdaptiveSampleRuns()
+{
+    m_AdaptiveSampleRunsEvaluated = TRUE;
+    m_AdaptiveSampleRuns = 0;
+    m_AdaptiveSampleMaxRun = 0;
+    m_AdaptiveSubmitSavedEstimate = 0;
+
+    const int count = m_Packets.Size();
+    if (count <= 0)
+        return;
+
+    XArray<CKDWORD> indices;
+    SortAdaptiveSample(indices);
+
+    CKDWORD currentRun = 1;
+    m_AdaptiveSampleRuns = 1;
+    for (int i = 1; i < count; ++i) {
+        const CKRenderPacket &previous = m_Packets[(int)indices[i - 1]];
+        const CKRenderPacket &packet = m_Packets[(int)indices[i]];
+        if (CKFFRenderPacketCanInstanceRun(previous, packet)) {
+            ++currentRun;
+        } else {
+            if (currentRun > m_AdaptiveSampleMaxRun)
+                m_AdaptiveSampleMaxRun = currentRun;
+            if (currentRun >= CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+                m_AdaptiveSubmitSavedEstimate += currentRun - 1;
+            ++m_AdaptiveSampleRuns;
+            currentRun = 1;
+        }
+    }
+
+    if (currentRun > m_AdaptiveSampleMaxRun)
+        m_AdaptiveSampleMaxRun = currentRun;
+    if (currentRun >= CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+        m_AdaptiveSubmitSavedEstimate += currentRun - 1;
+    if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+        ++m_AdaptiveRunBypasses;
 }
 
 CKDWORD CKFFRenderPacketQueue::EstimateSavedBinds(const CKRenderPacket &packet) const

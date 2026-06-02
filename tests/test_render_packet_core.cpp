@@ -210,6 +210,59 @@ static void RunPlansSplitViewProjectionChanges()
               "second viewProjection run should instance four packets");
 }
 
+static void AdaptiveRunGateKeepsHighRepeatSample()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        AddPacket(&queue, i + 1, 100, 200, staticUniformIndex);
+
+    TestCheck(queue.ShouldAdaptiveBypass(TRUE) == FALSE,
+              "instancing adaptive must keep a sample with an instanceable run");
+    TestCheck(queue.GetAdaptiveSampleMaxRun() == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
+              "instancing adaptive must report the sample run length");
+    TestCheck(queue.GetAdaptiveSubmitSavedEstimate() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT - 1,
+              "instancing adaptive must estimate submits saved by the sample run");
+    TestCheck(queue.GetAdaptiveRunBypasses() == 0,
+              "instancing adaptive must not count a run bypass for high-repeat samples");
+}
+
+static void AdaptiveRunGateBypassesNoRunSample()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        AddPacket(&queue, i + 1, 1000 + i, 2000 + i, staticUniformIndex);
+
+    TestCheck(queue.ShouldAdaptiveBypass(TRUE) == TRUE,
+              "instancing adaptive must bypass a sample with no instanceable run");
+    TestCheck(queue.GetAdaptiveSampleRuns() == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
+              "no-run sample must report one run per packet");
+    TestCheck(queue.GetAdaptiveSampleMaxRun() == 1,
+              "no-run sample must report max run length one");
+    TestCheck(queue.GetAdaptiveSubmitSavedEstimate() == 0,
+              "no-run sample must not estimate submit savings");
+    TestCheck(queue.GetAdaptiveRunBypasses() == 1,
+              "run-aware bypass must be counted once");
+}
+
+static void AdaptivePacketOnlyKeepsBindSavingSample()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        AddPacket(&queue, i + 1, 1000 + i, 2000 + i, staticUniformIndex);
+
+    TestCheck(queue.ShouldAdaptiveBypass(FALSE) == FALSE,
+              "packet-only adaptive must keep a bind-saving sample even without instance runs");
+    TestCheck(queue.GetAdaptiveRunBypasses() == 0,
+              "packet-only adaptive must not evaluate the instancing run gate");
+}
+
 static void InstanceRunCompatibilityRequiresExactViewProjection()
 {
     CKFFRenderPacketQueue queue;
@@ -237,6 +290,9 @@ int main()
     tests.Run("RunPlansMergeInstanceCompatiblePackets", &RunPlansMergeInstanceCompatiblePackets);
     tests.Run("RunStatsUseReplayOrder", &RunStatsUseReplayOrder);
     tests.Run("RunPlansSplitViewProjectionChanges", &RunPlansSplitViewProjectionChanges);
+    tests.Run("AdaptiveRunGateKeepsHighRepeatSample", &AdaptiveRunGateKeepsHighRepeatSample);
+    tests.Run("AdaptiveRunGateBypassesNoRunSample", &AdaptiveRunGateBypassesNoRunSample);
+    tests.Run("AdaptivePacketOnlyKeepsBindSavingSample", &AdaptivePacketOnlyKeepsBindSavingSample);
     tests.Run("InstanceRunCompatibilityRequiresExactViewProjection", &InstanceRunCompatibilityRequiresExactViewProjection);
     return tests.ExitCode();
 }

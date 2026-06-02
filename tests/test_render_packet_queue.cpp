@@ -78,6 +78,15 @@ void DrawPacketUniqueBindingCandidate(CKFixedFunctionPipeline *ffp,
                                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0));
 }
 
+void DrawPacketUniqueMeshCandidate(CKFixedFunctionPipeline *ffp,
+                                   FFPDiagnosticContext *context,
+                                   int index)
+{
+    DrawPacketCandidate(ffp, context, CKRP_VIEW_OPAQUE3D,
+                        1000 + (CKDWORD)index,
+                        2000 + (CKDWORD)index);
+}
+
 void SetPacketWorld(CKFixedFunctionPipeline *ffp, float x)
 {
     VxMatrix world;
@@ -592,6 +601,99 @@ void OpaquePacketAdaptiveBypassesNoRepeatBindings()
     ffp.Shutdown();
 }
 
+void OpaquePacketAdaptiveRunGateKeepsHighRepeatQueued()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    TestCheck(ffp.HasOpaqueRenderPackets(),
+              "Run-aware adaptive must keep a sample with an instanceable run queued");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Run-aware adaptive must not flush high-repeat samples early");
+    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
+                  CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
+              "Run-aware adaptive must report the instanceable sample run");
+    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 0,
+              "Run-aware adaptive must not count a bypass for high-repeat samples");
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Run-aware high-repeat sample must still reach instanced replay");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        DrawPacketUniqueMeshCandidate(&ffp, &context, i);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Run-aware adaptive must flush a sampled frame with no instanceable run");
+    TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
+              "Run-aware adaptive bypass must replay sampled packets before bypassing");
+    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 1,
+              "Run-aware adaptive bypass must be counted");
+    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() == 1,
+              "Player-like no-run sample must report max run one");
+    TestCheck(ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate() == 0,
+              "Player-like no-run sample must not estimate submit savings");
+
+    DrawPacketUniqueMeshCandidate(&ffp, &context,
+                                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Run-aware adaptive bypass must keep later same-frame draws immediate");
+    TestCheck(context.Encoder.SubmitCount ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
+              "Later same-frame draw must submit immediately after run-aware bypass");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketAdaptivePacketOnlyIgnoresRunGate()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(FALSE);
+
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        DrawPacketUniqueMeshCandidate(&ffp, &context, i);
+
+    TestCheck(ffp.HasOpaqueRenderPackets(),
+              "Packet-only adaptive must keep bind-saving samples even without instance runs");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Packet-only adaptive must not flush the bind-saving sample early");
+    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 0,
+              "Packet-only adaptive must not count run-gate bypasses");
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
+              "Packet-only adaptive flush must replay the sampled queue");
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketInstancingMergesHighRepeatRun()
 {
     FFPDiagnosticDriver driver;
@@ -880,6 +982,12 @@ int main()
               &OpaquePacketAdaptiveBypassesLowBenefitFrame);
     tests.Run("Opaque packet adaptive bypasses no repeat bindings",
               &OpaquePacketAdaptiveBypassesNoRepeatBindings);
+    tests.Run("Opaque packet adaptive run gate keeps high-repeat queue",
+              &OpaquePacketAdaptiveRunGateKeepsHighRepeatQueued);
+    tests.Run("Opaque packet adaptive run gate bypasses no-run frame",
+              &OpaquePacketAdaptiveRunGateBypassesNoRunFrame);
+    tests.Run("Opaque packet adaptive packet-only ignores run gate",
+              &OpaquePacketAdaptivePacketOnlyIgnoresRunGate);
     tests.Run("Opaque packet instancing merges high-repeat run",
               &OpaquePacketInstancingMergesHighRepeatRun);
     tests.Run("Opaque packet instancing can be disabled",
