@@ -11,7 +11,7 @@
 #include "CKFFDebug.h"
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
-#include "CKFFRenderPacketQueue.h"
+#include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
 #include "CKVertexLayoutCache.h"
@@ -306,9 +306,6 @@ private:
     CKBOOL CanBuildPacketObjectUniforms() const;
     CKDWORD GetPacketObjectUniformRejectReason() const;
     void UpdateViewProjectionCache();
-    void UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
-                                    const CKRenderPacketObjectUniforms &uniforms);
-    void UploadUniformPayload(CKRasterizerEncoder *encoder, const CKFFRenderPacketUniformPayload &payload);
     CKDWORD CurrentTextureMatrixUploadCount() const;
     bool ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const;
     bool ProgramUsesTexFactor(const CKFFProgramContext *programContext) const;
@@ -360,27 +357,12 @@ private:
                                            CKDWORD startIndex, CKDWORD indexCount,
                                            CKDWORD dpFlags, CKDWORD formatFlags,
                                            CKDWORD vertexLayout);
-    void ReplayVertexBufferPacket(CKRasterizerEncoder *encoder,
-                                  const CKRenderPacket &packet,
-                                  CKRenderPacketReplayCache *cache,
-                                  CKBOOL lastPacket);
-    CKBOOL ReplayVertexBufferPacketRunInstanced(CKRasterizerEncoder *encoder,
-                                                const XArray<CKDWORD> *indices,
-                                                int start,
-                                                int packetCount,
-                                                CKBOOL directReplay,
-                                                CKRenderPacketReplayCache *cache,
-                                                CKBOOL lastRun);
     CKBOOL CanInstanceVertexBufferPacket() const;
     CKDWORD GetVertexBufferPacketInstancingRejectReason() const;
-    void BindVertexBufferPacketSharedState(CKRasterizerEncoder *encoder,
-                                           const CKRenderPacket &packet,
-                                           CKRenderPacketReplayCache *cache);
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void ClearOpaqueRenderPackets();
     void ResetOpaqueRenderPacketFrameState();
     CKDWORD InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload);
-    const CKFFRenderPacketUniformPayload &GetStaticUniformPayload(CKDWORD index) const;
     void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
     void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
     CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
