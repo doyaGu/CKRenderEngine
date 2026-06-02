@@ -1,6 +1,7 @@
 #ifndef CK_RENDER_FRAME_COST_STATS_H
 #define CK_RENDER_FRAME_COST_STATS_H
 
+#include "CKRenderConfig.h"
 #include "CKTypes.h"
 
 enum CKRenderFrameCostSection {
@@ -77,6 +78,8 @@ struct CKRenderFrameCostStatsSnapshot {
     CKDWORD SubmittedDraws;
 };
 
+#if CKRE_ENABLE_FRAME_COST_STATS
+
 double CKRenderFrameCostNow();
 double CKRenderFrameCostElapsedUs(double start);
 
@@ -114,9 +117,48 @@ void CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(CKBOOL candidate,
 void CKRenderFrameCostStatsAddPrimitiveSubmit();
 void CKRenderFrameCostStatsAddMeshSubmit();
 void CKRenderFrameCostStatsAddSubmittedDraw();
-
 void CKRenderFrameCostStatsCopySnapshot(CKRenderFrameCostStatsSnapshot *snapshot);
 void CKRenderFrameCostStatsResetForTests();
 void CKRenderFrameCostStatsSetOutputEnabledForTests(CKBOOL enabled);
+
+#else
+
+inline double CKRenderFrameCostNow() { return 0.0; }
+inline double CKRenderFrameCostElapsedUs(double) { return 0.0; }
+
+inline CKBOOL CKRenderFrameCostStatsEnabled() { return FALSE; }
+inline CKBOOL CKRenderFrameCostStatsIsCollecting() { return FALSE; }
+inline CKBOOL CKRenderFrameCostStatsWantsPlayerTiming() { return FALSE; }
+inline void CKRenderFrameCostStatsBeginRenderFrame(CKDWORD, CKDWORD, CKDWORD, CKDWORD) {}
+inline void CKRenderFrameCostStatsEndRenderFrame() {}
+inline void CKRenderFrameCostStatsAddPlayerTiming(double, double, double, double, CKBOOL, CKBOOL) {}
+inline void CKRenderFrameCostStatsAddSection(CKRenderFrameCostSection, double) {}
+inline void CKRenderFrameCostStatsAddDrawPrimitive(CKBOOL, CKBOOL) {}
+inline void CKRenderFrameCostStatsAddViewportSet(CKBOOL) {}
+inline void CKRenderFrameCostStatsAddMaterialSet(CKBOOL, CKBOOL, CKBOOL) {}
+inline void CKRenderFrameCostStatsAddMeshRender() {}
+inline void CKRenderFrameCostStatsAddMeshDefault() {}
+inline void CKRenderFrameCostStatsAddMeshGroup() {}
+inline void CKRenderFrameCostStatsAdd2DEntityRender() {}
+inline void CKRenderFrameCostStatsAdd2DEntityUpdateExtents() {}
+inline void CKRenderFrameCostStatsAdd2DEntityDraw() {}
+inline void CKRenderFrameCostStatsAddSpriteDraw() {}
+inline void CKRenderFrameCostStatsAddDrawPrimitiveSanitize() {}
+inline void CKRenderFrameCostStatsAddTransientPrepare(CKBOOL, CKBOOL, CKDWORD, CKDWORD, CKBOOL) {}
+inline void CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(CKBOOL, CKBOOL) {}
+inline void CKRenderFrameCostStatsAddPrimitiveSubmit() {}
+inline void CKRenderFrameCostStatsAddMeshSubmit() {}
+inline void CKRenderFrameCostStatsAddSubmittedDraw() {}
+inline void CKRenderFrameCostStatsCopySnapshot(CKRenderFrameCostStatsSnapshot *snapshot)
+{
+    if (snapshot) {
+        CKRenderFrameCostStatsSnapshot empty = {};
+        *snapshot = empty;
+    }
+}
+inline void CKRenderFrameCostStatsResetForTests() {}
+inline void CKRenderFrameCostStatsSetOutputEnabledForTests(CKBOOL) {}
+
+#endif
 
 #endif

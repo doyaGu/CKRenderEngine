@@ -86,6 +86,7 @@ static CKDWORD ArgbToAbgr(CKDWORD argb)
 
 static void BeginStatsSample()
 {
+#if CKRE_ENABLE_FRAME_COST_STATS
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "Enabled", "1");
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "WarmupFrames", "0");
@@ -94,16 +95,22 @@ static void BeginStatsSample()
     CKRenderFrameCostStatsResetForTests();
     CKRenderFrameCostStatsSetOutputEnabledForTests(FALSE);
     CKRenderFrameCostStatsBeginRenderFrame(0, 0, 0, 0);
+#endif
 }
 
 static CKRenderFrameCostStatsSnapshot EndStatsSample()
 {
+#if CKRE_ENABLE_FRAME_COST_STATS
     CKRenderFrameCostStatsEndRenderFrame();
     CKRenderFrameCostStatsSnapshot snapshot;
     CKRenderFrameCostStatsCopySnapshot(&snapshot);
     CKRenderSettingsClearOverridesForTests();
     CKRenderFrameCostStatsResetForTests();
     return snapshot;
+#else
+    CKRenderFrameCostStatsSnapshot snapshot = {};
+    return snapshot;
+#endif
 }
 
 static void FastPathPacksExpectedQuad()
@@ -130,6 +137,7 @@ static void FastPathPacksExpectedQuad()
               "2D quad fast path prepare should succeed");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientQuadFastPathCandidates == 1,
               "2D quad should be counted as a fast path candidate");
     TestCheck(stats.TransientQuadFastPathHits == 1,
@@ -138,6 +146,7 @@ static void FastPathPacksExpectedQuad()
               "2D quad fast path should not fallback");
     TestCheck(stats.TransientFanToListConversions == 0,
               "2D quad fast path should skip generic fan conversion");
+#endif
 
     TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 4 * 40,
               "fast path should write four 40-byte vertices");
@@ -190,10 +199,12 @@ static void IndexedQuadFallsBackToGenericPath()
               "indexed quad should still prepare through generic path");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientQuadFastPathHits == 0,
               "indexed quad must not hit fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "indexed triangle fan should use generic fan conversion");
+#endif
 }
 
 static void MultistageAndStaleExtendedDataFallBack()
@@ -219,10 +230,12 @@ static void MultistageAndStaleExtendedDataFallBack()
               "stale extended texcoord pointer should prepare through generic path");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientQuadFastPathHits == 0,
               "stale extended texcoord pointer must block fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "stale extended fallback should use generic fan conversion");
+#endif
 
     InitQuadData(&data, positions, texcoords, colors);
     data.Flags = CKRST_DP_CL_VCT | CKRST_DP_STAGES1;
@@ -238,8 +251,10 @@ static void MultistageAndStaleExtendedDataFallBack()
               "multistage quad should prepare through generic path");
 
     stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientQuadFastPathHits == 0,
               "multistage quad must not hit fast path");
+#endif
 }
 
 static void QuadFastPathRejectsFourComponentTexcoords()
@@ -278,10 +293,12 @@ static void QuadFastPathRejectsFourComponentTexcoords()
               "four-component texcoord quad should prepare through generic path");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientQuadFastPathHits == 0,
               "four-component texcoord quad must not hit fast path");
     TestCheck(stats.TransientFanToListConversions == 1,
               "four-component texcoord fallback should use generic fan conversion");
+#endif
 }
 
 static void InitSpriteBatchData(VxDrawPrimitiveData *data,
@@ -342,6 +359,7 @@ static void SpriteBatchUsesGenericPath()
               "sprite batch generic prepare should succeed");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientSpriteBatchFastPathCandidates == 0,
               "sprite batch fast path should be disabled");
     TestCheck(stats.TransientSpriteBatchFastPathHits == 0,
@@ -350,6 +368,7 @@ static void SpriteBatchUsesGenericPath()
               "disabled sprite batch fast path should not report fallback noise");
     TestCheck(stats.TransientFanToListConversions == 0,
               "sprite batch triangle list should not convert topology");
+#endif
 
     TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 8 * 36,
               "sprite batch generic path should write eight 36-byte vertices");
@@ -404,8 +423,10 @@ static void SpriteBatchFastPathRejectsNonBatchShape()
               "non-batch triangle list should still prepare through generic path");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+#if CKRE_ENABLE_FRAME_COST_STATS
     TestCheck(stats.TransientSpriteBatchFastPathHits == 0,
               "non-batch triangle list must not hit sprite batch fast path");
+#endif
 }
 
 int main()
