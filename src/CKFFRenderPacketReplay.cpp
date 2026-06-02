@@ -1,42 +1,8 @@
 #include "CKFFRenderPacketReplay.h"
+#include "CKFFDebug.h"
 #include "CKRasterizer.h"
 
 #include <cstring>
-
-static CKDWORD CKFFReplayUniformDebugSlot(const CKFFUniformHandles &u, CKDWORD uniform)
-{
-    if (uniform == u.u_ffMatrices) return 1;
-    if (uniform == u.u_vertexBlendMatrices) return 2;
-    if (uniform == u.u_ffDrawParams) return 3;
-    if (uniform == u.u_ffVertexParams) return 4;
-    if (uniform == u.u_ffFragmentParams) return 5;
-    if (uniform == u.u_lights) return 6;
-    if (uniform == u.u_ckModelViewProj) return 7;
-    if (uniform == u.u_ckModel) return 8;
-    if (uniform == u.u_ckModelView) return 9;
-    if (uniform == u.u_ckNormalMatrix) return 10;
-    if (uniform == u.u_texMatrix) return 11;
-    if (uniform == u.u_lightParams) return 12;
-    if (uniform == u.u_material) return 13;
-    if (uniform == u.u_ffParams) return 14;
-    if (uniform == u.u_lightModelParams) return 15;
-    if (uniform == u.u_fogParams) return 16;
-    if (uniform == u.u_fogColor) return 17;
-    if (uniform == u.u_texFactor) return 18;
-    if (uniform == u.u_alphaParams) return 19;
-    if (uniform == u.u_bumpEnv) return 20;
-    if (uniform == u.u_viewport) return 21;
-    if (uniform == u.u_stageParams) return 22;
-    if (uniform == u.u_ffSpec) return 23;
-    if (uniform == u.u_clipPlanes) return 24;
-    if (uniform == u.u_clipParams) return 25;
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        if (uniform == u.s_texture[i]) return 32 + (CKDWORD)i;
-        if (uniform == u.s_textureCube[i]) return 40 + (CKDWORD)i;
-        if (uniform == u.s_textureVolume[i]) return 48 + (CKDWORD)i;
-    }
-    return 0;
-}
 
 static void CKFFReplayIncrement(CKDWORD *counter, CKDWORD amount)
 {
@@ -58,7 +24,7 @@ static void CKFFReplayRecordUniform(CKFFRenderPacketReplayDiagnostics *diagnosti
         diagnostics->Uniforms &&
         diagnostics->UniformHandleSets &&
         diagnostics->UniformHandleVec4s) {
-        CKDWORD slot = CKFFReplayUniformDebugSlot(*diagnostics->Uniforms, uniform);
+        CKDWORD slot = CKFFUniformDebugSlot(*diagnostics->Uniforms, uniform);
         if (slot < 64) {
             ++diagnostics->UniformHandleSets[slot];
             diagnostics->UniformHandleVec4s[slot] += count;
