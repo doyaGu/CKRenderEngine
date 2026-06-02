@@ -154,6 +154,7 @@ set(CKRE_SOURCES
         CKVertexBuffer.cpp
 
         CKFixedFunctionPipeline.cpp
+        CKFFRenderPacket.cpp
         CKFFStageState.cpp
         CKFFUniformState.cpp
         CKFFShaderKey.cpp
