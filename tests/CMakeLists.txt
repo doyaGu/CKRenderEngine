@@ -101,8 +101,8 @@ if (CKRE_ENABLE_FRAME_COST_STATS)
     )
 endif ()
 
-ckre_add_test(render_2d_quad_fast_path_tests
-    test_2d_quad_fast_path.cpp
+ckre_add_test(render_transient_geometry_tests
+    test_transient_geometry.cpp
 )
 
 ckre_add_test(render_packet_queue_tests
