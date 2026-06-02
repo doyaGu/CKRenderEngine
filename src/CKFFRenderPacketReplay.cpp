@@ -205,14 +205,14 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
     CKFFReplayIncrement(context->Diagnostics.ReplayedRenderPackets, 1);
 }
 
-static void CKFFReplayVertexBufferPacketRange(CKFFRenderPacketReplayContext *context,
-                                              const XArray<CKDWORD> *indices,
-                                              int start,
-                                              int offset,
-                                              int packetCount,
-                                              CKBOOL directReplay,
-                                              CKRenderPacketReplayCache *cache,
-                                              CKBOOL lastRange)
+void CKFFReplayVertexBufferPacketRange(CKFFRenderPacketReplayContext *context,
+                                       const XArray<CKDWORD> *indices,
+                                       int start,
+                                       int offset,
+                                       int packetCount,
+                                       CKBOOL directReplay,
+                                       CKRenderPacketReplayCache *cache,
+                                       CKBOOL lastRange)
 {
     if (!context || !context->Queue)
         return;
