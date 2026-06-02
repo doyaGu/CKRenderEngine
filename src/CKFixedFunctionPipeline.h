@@ -11,7 +11,7 @@
 #include "CKFFDebug.h"
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
-#include "CKFFRenderPacket.h"
+#include "CKFFRenderPacketQueue.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
 #include "CKVertexLayoutCache.h"
@@ -191,7 +191,7 @@ public:
                           CKDWORD dpFlags, CKDWORD formatFlags,
                           CKDWORD vertexLayout);
 
-    CKBOOL HasOpaqueRenderPackets() const { return m_OpaqueRenderPackets.Size() > 0; }
+    CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePacketQueue.HasPackets(); }
     void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
                                   CKBOOL forceDirectReplay = FALSE);
     void SetOpaqueSortingEnabled(CKBOOL enabled) {
@@ -201,9 +201,9 @@ public:
     void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaqueInstancingEnabled = enabled; }
     void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePacketAllowed = allowed; }
     CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePacketAllowed; }
-    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketAdaptiveSamples; }
-    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePacketAdaptiveBypasses; }
-    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePacketAdaptiveSavedBindEstimate; }
+    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketQueue.GetAdaptiveSamples(); }
+    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePacketQueue.GetAdaptiveBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSavedBindEstimate(); }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -380,29 +380,13 @@ private:
     const CKFFRenderPacketUniformPayload &GetStaticUniformPayload(CKDWORD index) const;
     void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
     void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
-    CKDWORD EstimateOpaqueRenderPacketSavedBinds(const CKRenderPacket &packet) const;
     CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
 
-    XArray<CKRenderPacket> m_OpaqueRenderPackets;
-    XArray<CKFFRenderPacketUniformPayload> m_OpaqueStaticUniformPayloads;
-    CKDWORD m_OpaqueRenderPacketSerial;
-    CKDWORD m_StaticUniformDirtySerial;
-    CKDWORD m_StaticUniformCachedSerial;
-    CKDWORD m_StaticUniformCachedIndex;
-    CKBOOL m_StaticUniformCacheValid;
-    CKBOOL m_OpaquePacketsAlreadySorted;
-    CKBOOL m_OpaquePacketsSingleKey;
-    CKBOOL m_OpaquePacketsHasLastKey;
+    CKFFRenderPacketQueue m_OpaquePacketQueue;
     CKBOOL m_OpaqueInstancingEnabled;
     CKDWORD m_InstanceLayout;
-    CKRenderPacketSortKey m_OpaqueFirstPacketSortKey;
-    CKRenderPacketSortKey m_OpaqueLastPacketSortKey;
     CKBOOL m_OpaqueSortingEnabled;
     CKBOOL m_OpaquePacketAllowed;
-    CKBOOL m_OpaquePacketAdaptiveBypass;
-    CKDWORD m_OpaquePacketAdaptiveSamples;
-    CKDWORD m_OpaquePacketAdaptiveBypasses;
-    CKDWORD m_OpaquePacketAdaptiveSavedBindEstimate;
 };
 
 class CKFFStateGuard {

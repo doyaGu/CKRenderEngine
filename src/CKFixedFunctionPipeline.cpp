@@ -9,10 +9,6 @@
 #include <cmath>
 #include <cstring>
 
-#define CKFF_RENDER_PACKET_MIN_SORT_COUNT 64
-#define CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT 128
-#define CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT 128
-
 static const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uniform) {
     switch (uniform) {
     case 1: return "u_ffMatrices";
@@ -136,22 +132,14 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
       m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
-      m_OpaqueRenderPacketSerial(0), m_StaticUniformDirtySerial(1),
-      m_StaticUniformCachedSerial(0), m_StaticUniformCachedIndex(0),
-      m_StaticUniformCacheValid(FALSE), m_OpaquePacketsAlreadySorted(TRUE),
-      m_OpaquePacketsSingleKey(TRUE), m_OpaquePacketsHasLastKey(FALSE),
       m_OpaqueInstancingEnabled(TRUE), m_InstanceLayout(0),
-      m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE),
-      m_OpaquePacketAdaptiveBypass(FALSE), m_OpaquePacketAdaptiveSamples(0),
-      m_OpaquePacketAdaptiveBypasses(0), m_OpaquePacketAdaptiveSavedBindEstimate(0) {
+      m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
     m_DiagnosticConfig.StatsEnabled = settings.Enabled;
     m_DiagnosticConfig.UniformHistEnabled = settings.UniformHistogram;
     m_DiagnosticConfig.StatsInterval = settings.Interval;
 #endif
-    memset(&m_OpaqueFirstPacketSortKey, 0, sizeof(m_OpaqueFirstPacketSortKey));
-    memset(&m_OpaqueLastPacketSortKey, 0, sizeof(m_OpaqueLastPacketSortKey));
     m_OpaqueSortingEnabled = CKRenderFFPSettings().GetBool("SortOpaqueObjects", false) ? TRUE : FALSE;
     m_OpaqueInstancingEnabled = CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true) ? TRUE : FALSE;
 
@@ -357,9 +345,7 @@ void CKFFOpaquePacketGuard::Dismiss() {
 
 void CKFixedFunctionPipeline::MarkStaticUniformsDirty()
 {
-    ++m_StaticUniformDirtySerial;
-    if (m_StaticUniformDirtySerial == 0)
-        ++m_StaticUniformDirtySerial;
+    m_OpaquePacketQueue.MarkStaticUniformsDirty();
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
@@ -943,7 +929,6 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
                                     dpFlags, formatFlags,
                                     vertexLayout)) {
             TrackOpaqueRenderPacket(packet);
-            m_OpaqueRenderPackets.PushBack(packet);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
             if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
                 ++m_FrameStats.QueuedRenderPackets;
@@ -1916,118 +1901,43 @@ void CKFixedFunctionPipeline::UploadUniformPayload(CKRasterizerEncoder *encoder,
 
 CKDWORD CKFixedFunctionPipeline::InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload)
 {
-    const int count = m_OpaqueStaticUniformPayloads.Size();
-    const int scanCount = count < CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT
-        ? count
-        : CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT;
-    for (int i = 0; i < scanCount; ++i) {
-        if (CKFFRenderPacketUniformPayloadEquals(m_OpaqueStaticUniformPayloads[i], payload))
-            return (CKDWORD)i;
-    }
-
-    m_OpaqueStaticUniformPayloads.PushBack(payload);
+    CKBOOL interned = FALSE;
+    CKDWORD index = m_OpaquePacketQueue.InternStaticUniformPayload(payload, &interned);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    ++m_FrameStats.RenderPacketStaticPayloadInterns;
+    if (interned)
+        ++m_FrameStats.RenderPacketStaticPayloadInterns;
 #endif
-    return (CKDWORD)count;
+    return index;
 }
 
 const CKFFRenderPacketUniformPayload &CKFixedFunctionPipeline::GetStaticUniformPayload(CKDWORD index) const
 {
-    return m_OpaqueStaticUniformPayloads[(int)index];
+    return m_OpaquePacketQueue.GetStaticUniformPayload(index);
 }
 
 void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) const
 {
-    if (!packet)
-        return;
-
-    memset(&packet->SortKey, 0, sizeof(packet->SortKey));
-    packet->SortKey.Program = packet->Program;
-    packet->SortKey.DrawStateLo = packet->DrawState.Lo;
-    packet->SortKey.DrawStateMid = packet->DrawState.Mid;
-    packet->SortKey.DrawStateHi = packet->DrawState.Hi;
-    packet->SortKey.StencilRef = packet->StencilRef;
-    packet->SortKey.StencilReadMask = packet->StencilReadMask;
-    packet->SortKey.StencilWriteMask = packet->StencilWriteMask;
-    packet->SortKey.StaticUniformHash = GetStaticUniformPayload(packet->StaticUniformIndex).Hash;
-    packet->SortKey.TextureSetHash = CKFFHashRenderPacketTextureSet(*packet);
-    packet->SortKey.ActiveTextureCount = packet->ActiveTextureCount;
-    packet->SortKey.VertexLayout = packet->VertexLayout;
-    packet->SortKey.VertexBuffer = packet->VertexBuffer;
-    packet->SortKey.BaseVertex = packet->BaseVertex;
-    packet->SortKey.VertexCount = packet->VertexCount;
-    packet->SortKey.IndexBuffer = packet->IndexBuffer;
-    packet->SortKey.StartIndex = packet->StartIndex;
-    packet->SortKey.IndexCount = packet->IndexCount;
+    m_OpaquePacketQueue.BuildSortKey(packet);
 }
 
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
 {
-    ++m_OpaquePacketAdaptiveSamples;
-    m_OpaquePacketAdaptiveSavedBindEstimate += EstimateOpaqueRenderPacketSavedBinds(packet);
+    m_OpaquePacketQueue.AddPacket(packet);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    m_FrameStats.RenderPacketAdaptiveSamples = m_OpaquePacketAdaptiveSamples;
-    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate = m_OpaquePacketAdaptiveSavedBindEstimate;
+    m_FrameStats.RenderPacketAdaptiveSamples = m_OpaquePacketQueue.GetAdaptiveSamples();
+    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate =
+        m_OpaquePacketQueue.GetAdaptiveSavedBindEstimate();
 #endif
-
-    if (!m_OpaquePacketsHasLastKey) {
-        m_OpaquePacketsHasLastKey = TRUE;
-        m_OpaquePacketsAlreadySorted = TRUE;
-        m_OpaquePacketsSingleKey = TRUE;
-        m_OpaqueFirstPacketSortKey = packet.SortKey;
-        m_OpaqueLastPacketSortKey = packet.SortKey;
-        return;
-    }
-
-    if (CKFFCompareRenderPacketSortKey(m_OpaqueLastPacketSortKey, packet.SortKey) > 0)
-        m_OpaquePacketsAlreadySorted = FALSE;
-    if (!CKFFRenderPacketSortKeyEquals(m_OpaqueFirstPacketSortKey, packet.SortKey))
-        m_OpaquePacketsSingleKey = FALSE;
-    m_OpaqueLastPacketSortKey = packet.SortKey;
-}
-
-CKDWORD CKFixedFunctionPipeline::EstimateOpaqueRenderPacketSavedBinds(const CKRenderPacket &packet) const
-{
-    if (m_OpaqueRenderPackets.Size() <= 0)
-        return 0;
-
-    const CKRenderPacket &prev = m_OpaqueRenderPackets[m_OpaqueRenderPackets.Size() - 1];
-    CKDWORD saved = 0;
-    if (CKFFDrawStateEquals(prev.DrawState, packet.DrawState) &&
-        prev.StencilRef == packet.StencilRef &&
-        prev.StencilReadMask == packet.StencilReadMask &&
-        prev.StencilWriteMask == packet.StencilWriteMask)
-        ++saved;
-    if (prev.StaticUniformIndex == packet.StaticUniformIndex)
-        ++saved;
-    if (prev.SortKey.TextureSetHash == packet.SortKey.TextureSetHash &&
-        prev.ActiveTextureCount == packet.ActiveTextureCount)
-        ++saved;
-    if (prev.VertexLayout == packet.VertexLayout &&
-        prev.VertexBuffer == packet.VertexBuffer &&
-        prev.BaseVertex == packet.BaseVertex &&
-        prev.VertexCount == packet.VertexCount)
-        ++saved;
-    if (prev.IndexBuffer == packet.IndexBuffer &&
-        prev.StartIndex == packet.StartIndex &&
-        prev.IndexCount == packet.IndexCount)
-        ++saved;
-    return saved;
 }
 
 CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder)
 {
-    if (m_OpaquePacketAdaptiveBypass)
+    if (m_OpaquePacketQueue.IsAdaptiveBypassed())
         return TRUE;
-    if (m_OpaquePacketAdaptiveSamples != CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
-        return FALSE;
-    if (m_OpaquePacketAdaptiveSavedBindEstimate >=
-        (m_OpaquePacketAdaptiveSamples / 2))
+    if (!m_OpaquePacketQueue.ShouldAdaptiveBypass())
         return FALSE;
 
-    m_OpaquePacketAdaptiveBypass = TRUE;
-    ++m_OpaquePacketAdaptiveBypasses;
+    m_OpaquePacketQueue.MarkAdaptiveBypass();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     ++m_FrameStats.RenderPacketAdaptiveBypasses;
 #endif
@@ -2268,10 +2178,7 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
     if (!packet || !programContext)
         return;
 
-    ++m_OpaqueRenderPacketSerial;
-    if (m_OpaqueRenderPacketSerial == 0)
-        ++m_OpaqueRenderPacketSerial;
-    packet->Serial = m_OpaqueRenderPacketSerial;
+    packet->Serial = m_OpaquePacketQueue.NextSerial();
     packet->View = view;
     packet->Type = type;
     packet->Program = programContext->Program;
@@ -2359,8 +2266,7 @@ CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
     if (!packet || !programContext)
         return FALSE;
 
-    if (m_StaticUniformCacheValid && m_StaticUniformCachedSerial == m_StaticUniformDirtySerial) {
-        packet->StaticUniformIndex = m_StaticUniformCachedIndex;
+    if (m_OpaquePacketQueue.TryUseCachedStaticUniform(&packet->StaticUniformIndex)) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.RenderPacketStaticPayloadReuses;
@@ -2384,9 +2290,7 @@ CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
         }
 #endif
         packet->StaticUniformIndex = InternStaticUniformPayload(staticPayload);
-        m_StaticUniformCachedSerial = m_StaticUniformDirtySerial;
-        m_StaticUniformCachedIndex = packet->StaticUniformIndex;
-        m_StaticUniformCacheValid = TRUE;
+        m_OpaquePacketQueue.CacheStaticUniform(packet->StaticUniformIndex);
     }
 
     return TRUE;
@@ -2400,7 +2304,7 @@ CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView vi
 {
     if (!m_OpaqueSortingEnabled || !m_OpaquePacketAllowed)
         return FALSE;
-    if (m_OpaquePacketAdaptiveBypass)
+    if (m_OpaquePacketQueue.IsAdaptiveBypassed())
         return FALSE;
     if (!m_Context || !vb || !ib || !vertexLayout)
         return FALSE;
@@ -2474,22 +2378,12 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
 
 void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
 {
-    m_OpaqueRenderPackets.Resize(0);
-    m_OpaqueStaticUniformPayloads.Resize(0);
-    m_StaticUniformCacheValid = FALSE;
-    m_OpaquePacketsAlreadySorted = TRUE;
-    m_OpaquePacketsSingleKey = TRUE;
-    m_OpaquePacketsHasLastKey = FALSE;
-    memset(&m_OpaqueFirstPacketSortKey, 0, sizeof(m_OpaqueFirstPacketSortKey));
-    memset(&m_OpaqueLastPacketSortKey, 0, sizeof(m_OpaqueLastPacketSortKey));
+    m_OpaquePacketQueue.Clear();
 }
 
 void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
 {
-    m_OpaquePacketAdaptiveBypass = FALSE;
-    m_OpaquePacketAdaptiveSamples = 0;
-    m_OpaquePacketAdaptiveBypasses = 0;
-    m_OpaquePacketAdaptiveSavedBindEstimate = 0;
+    m_OpaquePacketQueue.ResetFrameState();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_FrameStats.RenderPacketAdaptiveSamples = 0;
     m_FrameStats.RenderPacketAdaptiveBypasses = 0;
@@ -2499,51 +2393,7 @@ void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
 
 void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
 {
-    const int count = m_OpaqueRenderPackets.Size();
-    indices.Resize(count);
-    for (int i = 0; i < count; ++i)
-        indices[i] = (CKDWORD)i;
-    if (count < 2)
-        return;
-    if (count < CKFF_RENDER_PACKET_MIN_SORT_COUNT ||
-        m_OpaquePacketsSingleKey ||
-        m_OpaquePacketsAlreadySorted) {
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        ++m_FrameStats.RenderPacketSortSkips;
-#endif
-        return;
-    }
-
-    XArray<CKDWORD> scratch;
-    scratch.Resize(count);
-    for (int width = 1; width < count; width <<= 1) {
-        for (int left = 0; left < count; left += width << 1) {
-            int mid = left + width;
-            int right = left + (width << 1);
-            if (mid > count)
-                mid = count;
-            if (right > count)
-                right = count;
-
-            int a = left;
-            int b = mid;
-            int out = left;
-            while (a < mid && b < right) {
-                const CKRenderPacket &pa = m_OpaqueRenderPackets[(int)indices[a]];
-                const CKRenderPacket &pb = m_OpaqueRenderPackets[(int)indices[b]];
-                if (CKFFCompareRenderPacket(pa, pb) <= 0)
-                    scratch[out++] = indices[a++];
-                else
-                    scratch[out++] = indices[b++];
-            }
-            while (a < mid)
-                scratch[out++] = indices[a++];
-            while (b < right)
-                scratch[out++] = indices[b++];
-        }
-        for (int i = 0; i < count; ++i)
-            indices[i] = scratch[i];
-    }
+    m_OpaquePacketQueue.SortPackets(indices);
 }
 
 CKBOOL CKFixedFunctionPipeline::CanInstanceVertexBufferPacketRun(const CKRenderPacket &a,
@@ -2745,7 +2595,7 @@ CKBOOL CKFixedFunctionPipeline::ReplayVertexBufferPacketRunInstanced(
                 const int packetIndex = directReplay
                     ? start + i
                     : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = m_OpaqueRenderPackets[packetIndex];
+                const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
                 ReplayVertexBufferPacket(encoder, packet, cache,
                                          lastRun && i + 1 == packetCount ? TRUE : FALSE);
             }
@@ -2755,7 +2605,7 @@ CKBOOL CKFixedFunctionPipeline::ReplayVertexBufferPacketRunInstanced(
         const int firstIndex = directReplay
             ? start + pos
             : (int)(*indices)[start + pos];
-        const CKRenderPacket &first = m_OpaqueRenderPackets[firstIndex];
+        const CKRenderPacket &first = m_OpaquePacketQueue.GetPacket(firstIndex);
         CKDWORD instanceCount = (CKDWORD)remaining;
         CKDWORD available = m_Context->GetAvailTransientInstanceBuffer(instanceCount,
                                                                        m_InstanceLayout);
@@ -2772,7 +2622,7 @@ CKBOOL CKFixedFunctionPipeline::ReplayVertexBufferPacketRunInstanced(
                 const int packetIndex = directReplay
                     ? start + i
                     : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = m_OpaqueRenderPackets[packetIndex];
+                const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
                 ReplayVertexBufferPacket(encoder, packet, cache,
                                          lastRun && i + 1 == packetCount ? TRUE : FALSE);
             }
@@ -2793,7 +2643,7 @@ CKBOOL CKFixedFunctionPipeline::ReplayVertexBufferPacketRunInstanced(
                 const int packetIndex = directReplay
                     ? start + i
                     : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = m_OpaqueRenderPackets[packetIndex];
+                const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
                 ReplayVertexBufferPacket(encoder, packet, cache,
                                          lastRun && i + 1 == packetCount ? TRUE : FALSE);
             }
@@ -2804,7 +2654,7 @@ CKBOOL CKFixedFunctionPipeline::ReplayVertexBufferPacketRunInstanced(
             const int packetIndex = directReplay
                 ? start + pos + (int)i
                 : (int)(*indices)[start + pos + (int)i];
-            const CKRenderPacket &packet = m_OpaqueRenderPackets[packetIndex];
+            const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
             CKBYTE *dst = (CKBYTE *)instanceBuffer.Data + instanceBuffer.Stride * i;
             memcpy(dst, &packet.World, sizeof(VxMatrix));
             if (instanceBuffer.Stride > sizeof(VxMatrix))
@@ -2858,12 +2708,8 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
         return;
     }
 
-    const int packetCount = m_OpaqueRenderPackets.Size();
-    const CKBOOL directReplay = (forceDirectReplay ||
-                                 packetCount < 2 ||
-                                 packetCount < CKFF_RENDER_PACKET_MIN_SORT_COUNT ||
-                                 m_OpaquePacketsSingleKey ||
-                                 m_OpaquePacketsAlreadySorted) ? TRUE : FALSE;
+    const int packetCount = m_OpaquePacketQueue.GetPacketCount();
+    const CKBOOL directReplay = m_OpaquePacketQueue.IsDirectReplay(forceDirectReplay);
     XArray<CKDWORD> indices;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     double packetTimer = m_DiagnosticConfig.StatsEnabled ? CKRenderPerfNow() : 0.0;
@@ -2891,15 +2737,15 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
         const int replayCount = directReplay ? packetCount : indices.Size();
         for (int i = 0; i < replayCount; ++i) {
             const CKRenderPacket &packet = directReplay
-                ? m_OpaqueRenderPackets[i]
-                : m_OpaqueRenderPackets[(int)indices[i]];
+                ? m_OpaquePacketQueue.GetPacket(i)
+                : m_OpaquePacketQueue.GetPacket((int)indices[i]);
             if (i == 0) {
                 runCount = 1;
                 currentRun = 1;
             } else {
                 const CKRenderPacket &prevPacket = directReplay
-                    ? m_OpaqueRenderPackets[i - 1]
-                    : m_OpaqueRenderPackets[(int)indices[i - 1]];
+                    ? m_OpaquePacketQueue.GetPacket(i - 1)
+                    : m_OpaquePacketQueue.GetPacket((int)indices[i - 1]);
                 if (CKFFRenderPacketSameRunKey(prevPacket, packet)) {
                     ++currentRun;
                 } else {
@@ -2926,14 +2772,14 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
         const int packetIndex = directReplay
             ? i
             : (int)indices[i];
-        const CKRenderPacket &packet = m_OpaqueRenderPackets[packetIndex];
+        const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
         int runLength = 1;
         if (packet.CanInstance) {
             while (i + runLength < count) {
                 const int nextIndex = directReplay
                     ? i + runLength
                     : (int)indices[i + runLength];
-                const CKRenderPacket &nextPacket = m_OpaqueRenderPackets[nextIndex];
+                const CKRenderPacket &nextPacket = m_OpaquePacketQueue.GetPacket(nextIndex);
                 if (!CanInstanceVertexBufferPacketRun(packet, nextPacket))
                     break;
                 ++runLength;
@@ -2951,7 +2797,7 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
                 const int fallbackIndex = directReplay
                     ? i + j
                     : (int)indices[i + j];
-                const CKRenderPacket &fallbackPacket = m_OpaqueRenderPackets[fallbackIndex];
+                const CKRenderPacket &fallbackPacket = m_OpaquePacketQueue.GetPacket(fallbackIndex);
                 ReplayVertexBufferPacket(encoder, fallbackPacket, &cache,
                                          i + j + 1 == count ? TRUE : FALSE);
             }
