@@ -1979,6 +1979,10 @@ CKBOOL CKFixedFunctionPipeline::CanInstanceVertexBufferPacket() const
         return FALSE;
     if (m_CurrentShaderKey.FS.VertexFogMode != 0)
         return FALSE;
+    if (m_CurrentShaderKey.FS.PixelFogMode != 0)
+        return FALSE;
+    if (m_CurrentShaderKey.FS.RangeFog)
+        return FALSE;
     return TRUE;
 }
 
@@ -2556,7 +2560,8 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
         CKFFShaderKey instancedKey = shaderKey;
         instancedKey.VS.SetInstanced(true);
         CKFFProgramBinding instancedBinding = m_ShaderCache.GetProgram(instancedKey);
-        if (instancedBinding.Program != 0) {
+        if (instancedBinding.Program != 0 &&
+            (!programBinding.FullSpecialized || instancedBinding.FullSpecialized)) {
             packet->CanInstance = TRUE;
             packet->InstancedProgram = instancedBinding.Program;
         }
