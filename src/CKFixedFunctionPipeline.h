@@ -292,23 +292,28 @@ private:
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
-    void EmitUniformPayloads(CKFFUniformSink *sink);
+    void EmitUniformPayloads(CKFFUniformSink *sink,
+                             const CKFFProgramContext *programContext);
     CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
-                                CKFFRenderPacketUniformPayload *objectPayload);
-    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload);
-    CKBOOL BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload);
-    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms);
+                                CKFFRenderPacketUniformPayload *objectPayload,
+                                const CKFFProgramContext *programContext);
+    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
+                                     const CKFFProgramContext *programContext);
+    CKBOOL BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload,
+                                     const CKFFProgramContext *programContext);
+    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
+                                     const CKFFProgramContext *programContext);
     CKBOOL CanBuildPacketObjectUniforms() const;
     void UpdateViewProjectionCache();
     void UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
                                     const CKRenderPacketObjectUniforms &uniforms);
     void UploadUniformPayload(CKRasterizerEncoder *encoder, const CKFFRenderPacketUniformPayload &payload);
     CKDWORD CurrentTextureMatrixUploadCount() const;
-    bool CurrentShaderUsesBumpEnv() const;
-    bool CurrentShaderUsesTexFactor() const;
-    bool CurrentShaderUsesStageConstant() const;
-    bool CurrentShaderUsesMaterialUniform() const;
-    bool CurrentShaderUsesViewSpaceUniforms() const;
+    bool ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const;
+    bool ProgramUsesTexFactor(const CKFFProgramContext *programContext) const;
+    bool ProgramUsesStageConstant(const CKFFProgramContext *programContext) const;
+    bool ProgramUsesMaterialUniform(const CKFFProgramContext *programContext) const;
+    bool ProgramUsesViewSpaceUniforms(const CKFFProgramContext *programContext) const;
     void BindTextures(CKRasterizerEncoder *encoder);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
