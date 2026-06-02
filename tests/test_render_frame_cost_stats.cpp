@@ -37,7 +37,7 @@ static void WarmupAndSampleAggregateOnce() {
     CKRenderFrameCostStatsAddDrawPrimitive();
     CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
     CKRenderFrameCostStatsAddTransientPrepare(160, 12, FALSE);
-    CKRenderFrameCostStatsAddViewportSet(TRUE);
+    CKRenderFrameCostStatsAddViewportSet();
     CKRenderFrameCostStatsAddMaterialSet(TRUE, FALSE, FALSE);
     CKRenderFrameCostStatsAddPrimitiveSubmit();
     CKRenderFrameCostStatsAddSubmittedDraw();
@@ -53,7 +53,7 @@ static void WarmupAndSampleAggregateOnce() {
     CKRenderFrameCostStatsAddDrawPrimitive();
     CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
     CKRenderFrameCostStatsAddTransientPrepare(160, 12, TRUE);
-    CKRenderFrameCostStatsAddViewportSet(FALSE);
+    CKRenderFrameCostStatsAddViewportSet();
     CKRenderFrameCostStatsAddMeshSubmit();
     CKRenderFrameCostStatsAddSubmittedDraw();
     CKRenderFrameCostStatsEndRenderFrame();
@@ -88,8 +88,8 @@ static void WarmupAndSampleAggregateOnce() {
     TestCheck(snapshot.TransientVertexBytes == 320 &&
               snapshot.TransientIndexBytes == 24,
               "FrameCostStats must aggregate transient buffer bytes");
-    TestCheck(snapshot.ViewportSetSkipped == 1,
-              "FrameCostStats must count skipped viewport sets");
+    TestCheck(snapshot.ViewportSetCalls == 2,
+              "FrameCostStats must count viewport sets");
     TestCheck(snapshot.MaterialSetCalls == 1 &&
               snapshot.MaterialNoOpCandidates == 1,
               "FrameCostStats must count material calls");

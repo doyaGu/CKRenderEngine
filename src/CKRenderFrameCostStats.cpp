@@ -197,12 +197,12 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverageDword(s.PrimitiveSubmits),
             CKRenderFrameCostAverageDword(s.MeshSubmits));
     fprintf(file,
-            "[CK2_3D] [FrameCostStats.Primitive] transientPrepare=%u fanToList=%u transientVB=%u transientIB=%u viewportSkip=%u materialSet=%u materialNoOpCandidate=%u\n",
+            "[CK2_3D] [FrameCostStats.Primitive] transientPrepare=%u fanToList=%u transientVB=%u transientIB=%u viewportSet=%u materialSet=%u materialNoOpCandidate=%u\n",
             CKRenderFrameCostAverageDword(s.TransientPrepareCalls),
             CKRenderFrameCostAverageDword(s.TransientFanToListConversions),
             CKRenderFrameCostAverageDword(s.TransientVertexBytes),
             CKRenderFrameCostAverageDword(s.TransientIndexBytes),
-            CKRenderFrameCostAverageDword(s.ViewportSetSkipped),
+            CKRenderFrameCostAverageDword(s.ViewportSetCalls),
             CKRenderFrameCostAverageDword(s.MaterialSetCalls),
             CKRenderFrameCostAverageDword(s.MaterialNoOpCandidates));
     fclose(file);
@@ -289,13 +289,11 @@ void CKRenderFrameCostStatsAddDrawPrimitive()
     ++g_FrameCostStats.Totals.DrawPrimitiveCalls;
 }
 
-void CKRenderFrameCostStatsAddViewportSet(CKBOOL skipped)
+void CKRenderFrameCostStatsAddViewportSet()
 {
     if (!CKRenderFrameCostStatsIsCollecting())
         return;
     ++g_FrameCostStats.Totals.ViewportSetCalls;
-    if (skipped)
-        ++g_FrameCostStats.Totals.ViewportSetSkipped;
 }
 
 void CKRenderFrameCostStatsAddMaterialSet(CKBOOL noOpCandidate,

@@ -102,8 +102,6 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(m_TextureHandles, 0, sizeof(m_TextureHandles));
     memset(m_TextureFlags, 0, sizeof(m_TextureFlags));
     memset(m_StageStates, 0, sizeof(m_StageStates));
-    memset(&m_LastViewportData, 0, sizeof(m_LastViewportData));
-    m_HasLastViewportData = FALSE;
     memset(m_UserClipPlanes, 0, sizeof(m_UserClipPlanes));
     ResetTexcoordComponentCounts();
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
@@ -505,8 +503,6 @@ CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTUREST
 
 void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     CK_FRAME_COST_ADD_VIEWPORT_SET();
-    m_LastViewportData = viewport;
-    m_HasLastViewportData = TRUE;
 
     const float w = viewport.ViewWidth > 0 ? (float)viewport.ViewWidth : 1.0f;
     const float h = viewport.ViewHeight > 0 ? (float)viewport.ViewHeight : 1.0f;
