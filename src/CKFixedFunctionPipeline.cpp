@@ -2305,8 +2305,6 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
     memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
     packet->World = m_World;
     packet->Marker[0] = '\0';
-    if (encoder)
-        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
 }
 
 void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet)
@@ -2495,6 +2493,8 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
     if (!CaptureVertexBufferPacketStaticUniforms(packet, &programContext, collectStats))
         return FALSE;
 
+    if (encoder)
+        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
     BuildRenderPacketSortKey(packet);
     return TRUE;
 }
