@@ -536,8 +536,8 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
-    const CKBOOL frameCostCollecting = CKRenderFrameCostStatsIsCollecting();
-    const double frameCostStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
+    CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
+    CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
     const bool frameLog = FrameLogEnabled();
     if (frameLog)
         CK_LOG("Clear", "enter");
@@ -600,14 +600,13 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 
     if (frameLog)
         CK_LOG("Clear", "done");
-    if (frameCostCollecting)
-        CKRenderFrameCostStatsAddSection(CKRFCS_CLEAR, CKRenderFrameCostElapsedUs(frameCostStart));
+    CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_CLEAR, frameCostStart);
     return CK_OK;
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
-    const CKBOOL frameCostCollecting = CKRenderFrameCostStatsIsCollecting();
-    const double frameCostStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
+    CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
+    CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
     const bool frameLog = FrameLogEnabled();
     if (frameLog)
         CK_LOG("DrawScene", "enter");
@@ -636,8 +635,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
 
     --m_DrawSceneCalls;
 
-    if (frameCostCollecting)
-        CKRenderFrameCostStatsAddSection(CKRFCS_DRAW_SCENE, CKRenderFrameCostElapsedUs(frameCostStart));
+    CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_DRAW_SCENE, frameCostStart);
     return err;
 }
 
@@ -678,11 +676,10 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         // the RTT views so later scene draws in this Virtools frame can sample
         // the updated texture, matching the old SetTargetTexture contract.
         m_FFPipeline.FlushOpaqueRenderPackets();
-        const CKBOOL frameCostCollecting = CKRenderFrameCostStatsIsCollecting();
-        const double frameCostStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
+        CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
+        CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
         m_FFPipeline.GetRenderPipeline().EndFrame(CKRST_FRAME_SYNC_PRESERVE_PRESENT);
-        if (frameCostCollecting)
-            CKRenderFrameCostStatsAddSection(CKRFCS_END_FRAME, CKRenderFrameCostElapsedUs(frameCostStart));
+        CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_END_FRAME, frameCostStart);
     } else {
         // Normal back-to-front path
 
@@ -701,11 +698,10 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         CKRST_FRAME_SYNC_MODE syncMode = waitVbl ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE;
         LogPresentFrameRateContract("BackToFront/EndFrame", inputFlags, renderFlags, timeManager);
         m_FFPipeline.FlushOpaqueRenderPackets();
-        const CKBOOL frameCostCollecting = CKRenderFrameCostStatsIsCollecting();
-        const double frameCostStart = frameCostCollecting ? CKRenderFrameCostNow() : 0.0;
+        CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
+        CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
         m_FFPipeline.GetRenderPipeline().EndFrame(syncMode);
-        if (frameCostCollecting)
-            CKRenderFrameCostStatsAddSection(CKRFCS_END_FRAME, CKRenderFrameCostElapsedUs(frameCostStart));
+        CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_END_FRAME, frameCostStart);
     }
 
     return CK_OK;
@@ -1503,14 +1499,18 @@ CKDWORD RCKRenderContext::GetFogColor() {
 }
 
 CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data) {
+#if CKRE_ENABLE_RENDER_STATS
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
+#endif
     if (!data)
         return FALSE;
     if (data->VertexCount <= 0)
         return FALSE;
+#if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         ++CKRenderPerfCurrent().DrawPrimitiveCalls;
+#endif
 
     // Set lighting mode based on normals
     if ((data->Flags & CKRST_DP_LIGHT) != 0 && data->NormalPtr) {
@@ -1566,7 +1566,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         indices == nullptr &&
         indexcount == 4 &&
         data->VertexCount == 4;
-    CKRenderFrameCostStatsAddDrawPrimitive(fastPathCandidate, FALSE);
+    CK_FRAME_COST_ADD_DRAW_PRIMITIVE(fastPathCandidate, FALSE);
 
     VxDrawPrimitiveData drawData;
     memset(&drawData, 0, sizeof(drawData));
@@ -1576,13 +1576,17 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         memcpy(&drawData, data, sizeof(VxDrawPrimitiveDataSimple));
     }
     drawData.Flags &= ~CKRST_DP_VBUFFER;
-    CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
-    ApplyDrawAnnotation(encoder, view, pType,
-                        (CKDWORD)indexcount,
-                        (CKDWORD)drawData.VertexCount);
+    CK_FRAME_COST_ADD_DRAW_PRIMITIVE_SANITIZE();
+    if (m_DrawAnnotationState) {
+        ApplyDrawAnnotation(encoder, view, pType,
+                            (CKDWORD)indexcount,
+                            (CKDWORD)drawData.VertexCount);
+    }
     m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
+#if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         CKRenderPerfCurrent().DrawPrimitiveWrapperUs += CKRenderPerfElapsedUs(perfStart);
+#endif
     return TRUE;
 }
 

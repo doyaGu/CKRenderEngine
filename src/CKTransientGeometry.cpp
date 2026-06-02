@@ -384,7 +384,7 @@ CKBOOL CKTransientGeometry::Prepare(
                 m_LastIndexBytes = tib.Size;
                 encoder->SetTransientVertexBuffer(0, &tvb);
                 encoder->SetTransientIndexBuffer(&tib);
-                CKRenderFrameCostStatsAddTransientPrepare(TRUE, TRUE,
+                CK_FRAME_COST_ADD_TRANSIENT_PREPARE(TRUE, TRUE,
                                                           m_LastVertexBytes,
                                                           m_LastIndexBytes,
                                                           FALSE);
@@ -491,7 +491,7 @@ CKBOOL CKTransientGeometry::Prepare(
 
         encoder->SetTransientVertexBuffer(0, &tvb);
         encoder->SetTransientIndexBuffer(&tib);
-        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+        CK_FRAME_COST_ADD_TRANSIENT_PREPARE(quadFastPathCandidate, FALSE,
                                                   m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   FALSE);
@@ -561,7 +561,7 @@ CKBOOL CKTransientGeometry::Prepare(
         }
 
         encoder->SetTransientVertexBuffer(0, &tvb);
-        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+        CK_FRAME_COST_ADD_TRANSIENT_PREPARE(quadFastPathCandidate, FALSE,
                                                   m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   primType == VX_TRIANGLEFAN ||
@@ -616,12 +616,12 @@ CKBOOL CKTransientGeometry::Prepare(
         encoder->SetTransientIndexBuffer(&tib);
     }
 
-    CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+    CK_FRAME_COST_ADD_TRANSIENT_PREPARE(quadFastPathCandidate, FALSE,
                                               m_LastVertexBytes,
                                               m_LastIndexBytes,
                                               primType == VX_TRIANGLEFAN ||
                                               primType == VX_TRIANGLESTRIP);
-    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(spriteBatchFastPathCandidate, FALSE);
+    CK_FRAME_COST_ADD_TRANSIENT_SPRITE_BATCH_FAST_PATH(spriteBatchFastPathCandidate, FALSE);
     return TRUE;
 }
 

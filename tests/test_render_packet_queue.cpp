@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "CKFixedFunctionPipeline.h"
+#include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 
 #include <cstring>
@@ -11,6 +12,10 @@ void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
                          FFPDiagnosticDriver *driver)
 {
     (void)driver;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "Enabled", "1");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "Interval", "999999");
+#endif
     ffp->Init(context);
     ffp->SetOpaqueSortingEnabled(TRUE);
     ffp->SetOpaqueInstancingEnabled(FALSE);

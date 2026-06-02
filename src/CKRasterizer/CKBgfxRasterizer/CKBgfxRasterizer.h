@@ -466,6 +466,10 @@ private:
     CKBOOL m_DrawMapMarkerCaptureActive;
     CKDWORD m_DebugBgfxFlags;
     CKBOOL m_DebugOverlay;
+    CKBOOL m_DebugLogPresentSync;
+    CKBOOL m_DebugLogTextureBindings;
+    CKBOOL m_DebugLogTextures;
+    CKBOOL m_DebugLogUniforms;
 
     void ConfigureDebug();
     void DrawDebugOverlay();
