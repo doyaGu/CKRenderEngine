@@ -82,6 +82,10 @@ struct CKFFFrameStats {
     CKDWORD RenderPacketAdaptiveSampleRuns;
     CKDWORD RenderPacketAdaptiveSampleMaxRun;
     CKDWORD RenderPacketAdaptiveSubmitSavedEstimate;
+    CKDWORD RenderPacketAdaptiveCooldownBypasses;
+    CKDWORD RenderPacketAdaptiveCooldownFrames;
+    CKDWORD RenderPacketAdaptiveFrameEndEvaluations;
+    CKDWORD RenderPacketAdaptiveFrameEndRunBypasses;
     CKDWORD RenderPacketViewProjectionRebuilds;
     CKDWORD RenderPacketInstancedRuns;
     CKDWORD RenderPacketInstancedPackets;
@@ -204,7 +208,8 @@ public:
 
     CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePacketQueue.HasPackets(); }
     void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
-                                  CKBOOL forceDirectReplay = FALSE);
+                                  CKBOOL forceDirectReplay = FALSE,
+                                  CKBOOL allowAdaptiveLearning = TRUE);
     void SetOpaqueSortingEnabled(CKBOOL enabled) {
         m_OpaqueSortingEnabled = enabled;
         ResetOpaqueRenderPacketFrameState();
@@ -219,6 +224,10 @@ public:
     CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePacketQueue.GetAdaptiveSampleRuns(); }
     CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePacketQueue.GetAdaptiveSampleMaxRun(); }
     CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePacketQueue.GetAdaptiveCooldownBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePacketQueue.GetAdaptiveCooldownFrames(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePacketQueue.GetAdaptiveFrameEndEvaluations(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePacketQueue.GetAdaptiveFrameEndRunBypasses(); }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -393,6 +402,8 @@ private:
     void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
     void InitVertexBufferPacketForCapture(CKRenderPacket *packet) const;
     void TrackOpaqueRenderPacket(const CKRenderPacket &packet);
+    void TrackOpaqueRenderPacketReject(CKDWORD rejectReason);
+    void UpdateOpaqueRenderPacketAdaptiveStats();
     CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
 
     CKFFRenderPacketQueue m_OpaquePacketQueue;
