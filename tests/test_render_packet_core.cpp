@@ -159,6 +159,30 @@ static void RunPlansMergeInstanceCompatiblePackets()
     }
 }
 
+static void RunStatsUseReplayOrder()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+
+    for (CKDWORD i = 0; i < 80; ++i) {
+        CKDWORD vertexBuffer = (i & 1) ? 300 : 100;
+        CKDWORD indexBuffer = (i & 1) ? 400 : 200;
+        AddPacket(&queue, i + 1, vertexBuffer, indexBuffer, staticUniformIndex);
+    }
+
+    CKDWORD runCount = 0;
+    CKDWORD maxRun = 0;
+    queue.GetRunStats(NULL, TRUE, &runCount, &maxRun);
+    TestCheck(runCount == 80, "direct replay should count alternating keys as separate runs");
+    TestCheck(maxRun == 1, "direct replay should report one-packet alternating runs");
+
+    XArray<CKDWORD> indices;
+    queue.SortPackets(indices);
+    queue.GetRunStats(&indices, FALSE, &runCount, &maxRun);
+    TestCheck(runCount == 2, "sorted replay should group the two packet keys");
+    TestCheck(maxRun == 40, "sorted replay should report the grouped run length");
+}
+
 static void RunPlansSplitViewProjectionChanges()
 {
     CKFFRenderPacketQueue queue;
@@ -211,6 +235,7 @@ int main()
     tests.Run("StaticUniformInterningUsesExactCompare", &StaticUniformInterningUsesExactCompare);
     tests.Run("QueueSortsByPrecomputedKeyAndKeepsStableSerial", &QueueSortsByPrecomputedKeyAndKeepsStableSerial);
     tests.Run("RunPlansMergeInstanceCompatiblePackets", &RunPlansMergeInstanceCompatiblePackets);
+    tests.Run("RunStatsUseReplayOrder", &RunStatsUseReplayOrder);
     tests.Run("RunPlansSplitViewProjectionChanges", &RunPlansSplitViewProjectionChanges);
     tests.Run("InstanceRunCompatibilityRequiresExactViewProjection", &InstanceRunCompatibilityRequiresExactViewProjection);
     return tests.ExitCode();
