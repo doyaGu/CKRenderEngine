@@ -95,9 +95,11 @@ ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )
 
-ckre_add_test(render_frame_cost_stats_tests
-    test_render_frame_cost_stats.cpp
-)
+if (CKRE_ENABLE_FRAME_COST_STATS)
+    ckre_add_test(render_frame_cost_stats_tests
+        test_render_frame_cost_stats.cpp
+    )
+endif ()
 
 ckre_add_test(render_2d_quad_fast_path_tests
     test_2d_quad_fast_path.cpp

@@ -41,6 +41,7 @@ option(CKRE_ENABLE_DIAGNOSTICS "Enable optional CK2_3D diagnostic code unless a 
 option(CKRE_ENABLE_DEBUG_LOGGER "Enable CK2_3D internal diagnostic logger support" ${CKRE_ENABLE_DIAGNOSTICS})
 option(CKRE_ENABLE_RENDER_STATS "Enable frame traversal and render wrapper timing diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
 option(CKRE_ENABLE_FFP_DIAGNOSTICS "Enable fixed-function pipeline stats, uniform histogram, and draw logging diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_FRAME_COST_STATS "Enable low-overhead aggregate frame cost stats support" OFF)
 option(CKRE_ENABLE_FRAME_DIAGNOSTICS "Enable frame, camera, and present-sync diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
 option(CKRE_ENABLE_MESH_DIAGNOSTICS "Enable mesh contract and hardware index diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
 
@@ -49,6 +50,7 @@ function(ckre_apply_diagnostic_definitions TARGET_NAME SCOPE)
             CKRE_ENABLE_DEBUG_LOGGER=$<IF:$<BOOL:${CKRE_ENABLE_DEBUG_LOGGER}>,1,0>
             CKRE_ENABLE_RENDER_STATS=$<IF:$<BOOL:${CKRE_ENABLE_RENDER_STATS}>,1,0>
             CKRE_ENABLE_FFP_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_FFP_DIAGNOSTICS}>,1,0>
+            CKRE_ENABLE_FRAME_COST_STATS=$<IF:$<BOOL:${CKRE_ENABLE_FRAME_COST_STATS}>,1,0>
             CKRE_ENABLE_FRAME_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_FRAME_DIAGNOSTICS}>,1,0>
             CKRE_ENABLE_MESH_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_MESH_DIAGNOSTICS}>,1,0>
     )
@@ -304,6 +306,7 @@ if (CKRE_IS_TOP_LEVEL)
     message(STATUS "  Debug Logger:         ${CKRE_ENABLE_DEBUG_LOGGER}")
     message(STATUS "  Render Stats:         ${CKRE_ENABLE_RENDER_STATS}")
     message(STATUS "  FFP Diagnostics:      ${CKRE_ENABLE_FFP_DIAGNOSTICS}")
+    message(STATUS "  Frame Cost Stats:     ${CKRE_ENABLE_FRAME_COST_STATS}")
     message(STATUS "  Frame Diagnostics:    ${CKRE_ENABLE_FRAME_DIAGNOSTICS}")
     message(STATUS "  Mesh Diagnostics:     ${CKRE_ENABLE_MESH_DIAGNOSTICS}")
     message(STATUS "  Install:              ${CKRE_INSTALL}")
