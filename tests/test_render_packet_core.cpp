@@ -351,6 +351,59 @@ static void InstanceRunCompatibilityRequiresExactViewProjection()
               "same viewProjection hash must still exact-compare matrix data");
 }
 
+static void InstanceRunCompatibilityRequiresExactStaticPayload()
+{
+    CKFFRenderPacketQueue queue;
+    CKBOOL interned = FALSE;
+    CKDWORD firstPayload = InternPayload(&queue, 123, 1.0f, &interned);
+    CKDWORD secondPayload = InternPayload(&queue, 123, 2.0f, &interned);
+    CKRenderPacket first;
+    CKRenderPacket second;
+
+    InitPacket(&first, 1, 100, 200, firstPayload);
+    InitPacket(&second, 2, 100, 200, secondPayload);
+    queue.BuildSortKey(&first);
+    queue.BuildSortKey(&second);
+
+    TestCheck(CKFFRenderPacketSortKeyEquals(first.SortKey, second.SortKey) == TRUE,
+              "static uniform hash collision should produce equal sort keys");
+    TestCheck(CKFFRenderPacketCanInstanceRun(first, second) == FALSE,
+              "instancing must not merge different static payload indices");
+}
+
+static void InstanceRunCompatibilityRequiresExactTextureSet()
+{
+    CKFFRenderPacketQueue queue;
+    CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
+    CKRenderPacket first;
+    CKRenderPacket second;
+
+    InitPacket(&first, 1, 100, 200, staticUniformIndex);
+    InitPacket(&second, 2, 100, 200, staticUniformIndex);
+
+    first.ActiveTextureCount = 1;
+    first.TextureSetHash = 777;
+    first.Textures[0].Stage = 0;
+    first.Textures[0].Uniform = 50;
+    first.Textures[0].Texture = 3000;
+    first.Textures[0].TextureFlags = CKRST_TEXTURE_VALID;
+
+    second.ActiveTextureCount = 1;
+    second.TextureSetHash = 777;
+    second.Textures[0].Stage = 0;
+    second.Textures[0].Uniform = 50;
+    second.Textures[0].Texture = 3001;
+    second.Textures[0].TextureFlags = CKRST_TEXTURE_VALID;
+
+    queue.BuildSortKey(&first);
+    queue.BuildSortKey(&second);
+
+    TestCheck(CKFFRenderPacketSortKeyEquals(first.SortKey, second.SortKey) == TRUE,
+              "texture hash collision should produce equal sort keys");
+    TestCheck(CKFFRenderPacketCanInstanceRun(first, second) == FALSE,
+              "instancing must exact-compare texture bindings");
+}
+
 int main()
 {
     TestFramework tests;
@@ -366,5 +419,7 @@ int main()
     tests.Run("AdaptiveFrameEndHighRepeatClearsCooldown", &AdaptiveFrameEndHighRepeatClearsCooldown);
     tests.Run("AdaptiveFrameEndPacketOnlyDoesNotCooldown", &AdaptiveFrameEndPacketOnlyDoesNotCooldown);
     tests.Run("InstanceRunCompatibilityRequiresExactViewProjection", &InstanceRunCompatibilityRequiresExactViewProjection);
+    tests.Run("InstanceRunCompatibilityRequiresExactStaticPayload", &InstanceRunCompatibilityRequiresExactStaticPayload);
+    tests.Run("InstanceRunCompatibilityRequiresExactTextureSet", &InstanceRunCompatibilityRequiresExactTextureSet);
     return tests.ExitCode();
 }

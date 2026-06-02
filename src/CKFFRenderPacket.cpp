@@ -165,7 +165,7 @@ CKBOOL CKFFRenderPacketSameRunKey(const CKRenderPacket &a,
 }
 
 CKBOOL CKFFRenderPacketCanInstanceRun(const CKRenderPacket &a,
-                                      const CKRenderPacket &b)
+                                       const CKRenderPacket &b)
 {
     if (!a.CanInstance || !b.CanInstance)
         return FALSE;
@@ -173,6 +173,14 @@ CKBOOL CKFFRenderPacketCanInstanceRun(const CKRenderPacket &a,
         return FALSE;
     if (!CKFFRenderPacketSameRunKey(a, b))
         return FALSE;
+    if (a.StaticUniformIndex != b.StaticUniformIndex)
+        return FALSE;
+    if (a.ActiveTextureCount != b.ActiveTextureCount)
+        return FALSE;
+    for (CKDWORD i = 0; i < a.ActiveTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        if (!CKFFRenderPacketTextureEquals(a.Textures[i], b.Textures[i]))
+            return FALSE;
+    }
     if (a.ViewProjectionHash != b.ViewProjectionHash)
         return FALSE;
     return memcmp(&a.ViewProjection, &b.ViewProjection, sizeof(VxMatrix)) == 0 ? TRUE : FALSE;
