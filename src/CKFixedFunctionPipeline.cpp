@@ -2260,9 +2260,10 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
     CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
     CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
-    SetCurrentProgramBinding(shaderKey, programBinding);
-    CKDWORD program = programBinding.Program;
-    if (program == 0) {
+    CKFFProgramContext programContext;
+    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
+    SetCurrentProgramBinding(programContext.ShaderKey, programContext.Binding);
+    if (programContext.Program == 0) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
@@ -2279,7 +2280,7 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
     packet->Serial = m_OpaqueRenderPacketSerial;
     packet->View = view;
     packet->Type = type;
-    packet->Program = program;
+    packet->Program = programContext.Program;
     float depth = ComputeDepthKey();
     packet->Depth = *(CKDWORD *)&depth;
     packet->DrawState = m_DrawStateCache.BuildDrawState(type);
@@ -2326,10 +2327,11 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
         CKFFShaderKey instancedKey = shaderKey;
         instancedKey.VS.SetInstanced(true);
         CKFFProgramBinding instancedBinding = m_ShaderCache.GetProgram(instancedKey);
-        if (instancedBinding.Program != 0 &&
-            (!programBinding.FullSpecialized || instancedBinding.FullSpecialized)) {
+        CKFFProgramContext instancedContext;
+        CKFFInitProgramContext(&instancedContext, instancedKey, instancedBinding);
+        if (CKFFCanUseInstancedProgramForPacket(programContext, instancedContext)) {
             packet->CanInstance = TRUE;
-            packet->InstancedProgram = instancedBinding.Program;
+            packet->InstancedProgram = instancedContext.Program;
         }
     }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS

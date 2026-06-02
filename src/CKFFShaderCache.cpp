@@ -43,6 +43,29 @@
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
 
+void CKFFInitProgramContext(CKFFProgramContext *context,
+                            const CKFFShaderKey &key,
+                            const CKFFProgramBinding &binding)
+{
+    if (!context)
+        return;
+    context->ShaderKey = key;
+    context->Binding = binding;
+    context->Program = binding.Program;
+    context->FullSpecialized = binding.FullSpecialized ? TRUE : FALSE;
+    context->Specialization = binding.Specialization;
+}
+
+CKBOOL CKFFCanUseInstancedProgramForPacket(const CKFFProgramContext &normalContext,
+                                           const CKFFProgramContext &instancedContext)
+{
+    if (normalContext.Program == 0 || instancedContext.Program == 0)
+        return FALSE;
+    if (normalContext.FullSpecialized && !instancedContext.FullSpecialized)
+        return FALSE;
+    return TRUE;
+}
+
 struct CKFFShaderBlobSet {
     CK_SHADER_PROFILE Profile;
     const char *Name;
