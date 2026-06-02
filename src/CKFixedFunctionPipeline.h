@@ -138,6 +138,13 @@ struct CKFFUniformSink {
     CKBOOL Failed;
 };
 
+struct CKFFPacketTextureSetCache {
+    CKBOOL Dirty;
+    CKDWORD ActiveTextureCount;
+    CKDWORD TextureSetHash;
+    CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
+};
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -248,6 +255,7 @@ private:
     VxMatrix m_View;
     VxMatrix m_Projection;
     VxMatrix m_ViewProjection;
+    CKDWORD m_ViewProjectionHash;
     VxMatrix m_TexMatrix[CKFF_MAX_TEXTURE_STAGES];
     VxMatrix m_VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
     CKBOOL m_VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
@@ -264,6 +272,12 @@ private:
     // Current textures
     CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD m_TextureFlags[CKFF_MAX_TEXTURE_STAGES];
+    CKFFPacketTextureSetCache m_PacketTextureSetCache;
+    CKBOOL m_PacketProgramCacheValid;
+    CKDWORD m_PacketProgramCacheDPFlags;
+    CKDWORD m_PacketProgramCacheFormatFlags;
+    int m_PacketProgramCacheActiveTextureCount;
+    CKFFProgramContext m_PacketProgramCacheContext;
     int m_CurrentActiveTextureCount;
     bool m_CurrentLightingEnabled;
     CKDWORD m_AlphaTestPrecision;
@@ -288,6 +302,9 @@ private:
     CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
+    void MarkPacketTextureSetDirty();
+    void MarkPacketProgramDirty();
+    void UpdatePacketTextureSetCache();
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
@@ -331,7 +348,7 @@ private:
                                            CKDWORD startIndex,
                                            CKDWORD indexCount,
                                            CKDWORD vertexLayout);
-    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet) const;
+    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet);
     CKBOOL CaptureVertexBufferPacketObjectUniforms(CKRenderPacket *packet,
                                                    const CKFFProgramContext *programContext);
     void CaptureVertexBufferPacketInstancing(CKRenderPacket *packet,

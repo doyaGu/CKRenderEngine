@@ -137,7 +137,7 @@ void CKFFRenderPacketQueue::BuildSortKey(CKRenderPacket *packet) const
     packet->SortKey.StencilWriteMask = packet->StencilWriteMask;
     packet->SortKey.StaticUniformHash =
         GetStaticUniformPayload(packet->StaticUniformIndex).Hash;
-    packet->SortKey.TextureSetHash = CKFFHashRenderPacketTextureSet(*packet);
+    packet->SortKey.TextureSetHash = packet->TextureSetHash;
     packet->SortKey.ActiveTextureCount = packet->ActiveTextureCount;
     packet->SortKey.VertexLayout = packet->VertexLayout;
     packet->SortKey.VertexBuffer = packet->VertexBuffer;

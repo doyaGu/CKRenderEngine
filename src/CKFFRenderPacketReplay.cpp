@@ -33,16 +33,25 @@ static void CKFFReplayRecordUniform(CKFFRenderPacketReplayDiagnostics *diagnosti
 }
 
 static void CKFFReplayUploadObjectUniforms(CKFFRenderPacketReplayContext *context,
-                                           const CKRenderPacketObjectUniforms &uniforms)
+                                           const CKRenderPacket &packet)
 {
+    const CKRenderPacketObjectUniforms &uniforms = packet.ObjectUniforms;
     if (!context || !context->Encoder ||
         uniforms.MatrixUniform == 0 ||
-        uniforms.MatrixCount == 0)
+        (uniforms.MatrixCount == 0 && !packet.CanInstance))
         return;
-    context->Encoder->SetUniform(uniforms.MatrixUniform, uniforms.Matrices,
-                                 uniforms.MatrixCount);
-    CKFFReplayRecordUniform(&context->Diagnostics, uniforms.MatrixUniform,
-                            uniforms.MatrixCount);
+    if (uniforms.MatrixCount > 0) {
+        context->Encoder->SetUniform(uniforms.MatrixUniform, uniforms.Matrices,
+                                     uniforms.MatrixCount);
+        CKFFReplayRecordUniform(&context->Diagnostics, uniforms.MatrixUniform,
+                                uniforms.MatrixCount);
+    } else {
+        VxMatrix matrices[2];
+        Vx3DMultiplyMatrix4(matrices[0], packet.ViewProjection, packet.World);
+        matrices[1] = packet.World;
+        context->Encoder->SetUniform(uniforms.MatrixUniform, matrices, 2);
+        CKFFReplayRecordUniform(&context->Diagnostics, uniforms.MatrixUniform, 2);
+    }
 }
 
 static void CKFFReplayUploadUniformPayload(CKFFRenderPacketReplayContext *context,
@@ -191,7 +200,7 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
         return;
 
     CKFFBindRenderPacketSharedState(context, packet, cache);
-    CKFFReplayUploadObjectUniforms(context, packet.ObjectUniforms);
+    CKFFReplayUploadObjectUniforms(context, packet);
     CKFFReplayIncrement(context->Diagnostics.RenderPacketObjectUniformUploads, 1);
 
     CKDWORD transformIdx = context->Context->AllocTransform((VxMatrix *)&packet.World, 1);
