@@ -2395,8 +2395,6 @@ CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRende
         return CKFF_RENDER_PACKET_REJECT_SORT_DISABLED;
     if (!m_OpaquePacketAllowed)
         return CKFF_RENDER_PACKET_REJECT_PACKETS_DISALLOWED;
-    if (m_OpaquePacketQueue.IsAdaptiveBypassed())
-        return CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS;
     if (!m_Context)
         return CKFF_RENDER_PACKET_REJECT_NO_CONTEXT;
     if (!vb)
@@ -2419,6 +2417,8 @@ CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRende
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
         return CKFF_RENDER_PACKET_REJECT_INDEXED_VERTEX_BLEND;
+    if (m_OpaquePacketQueue.IsAdaptiveBypassed())
+        return CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS;
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 

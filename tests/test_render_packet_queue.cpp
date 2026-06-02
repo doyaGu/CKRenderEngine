@@ -653,6 +653,8 @@ void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
               "Player-like no-run sample must report max run one");
     TestCheck(ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate() == 0,
               "Player-like no-run sample must not estimate submit savings");
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
+              "Sample-time no-run bypass must not start persistent cooldown");
 
     DrawPacketUniqueMeshCandidate(&ffp, &context,
                                   CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT);
@@ -662,6 +664,42 @@ void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
     TestCheck(context.Encoder.SubmitCount ==
                   CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
               "Later same-frame draw must submit immediately after run-aware bypass");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketAdaptiveSampleBypassDoesNotPersist()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        DrawPacketUniqueMeshCandidate(&ffp, &context, i);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "No-run adaptive sample must bypass the current frame");
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
+              "No-run adaptive sample must not persist cooldown");
+
+    ffp.BeginDebugFrame();
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
+    TestCheck(ffp.HasOpaqueRenderPackets(),
+              "Next frame high-repeat draws must queue after sample-time bypass");
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
+              "Next frame high-repeat run must restore instanced replay immediately");
+    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
+                  CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
+              "Restored high-repeat frame must report an instanceable run");
 
     ffp.Shutdown();
 }
@@ -815,6 +853,33 @@ void OpaquePacketAdaptiveForcedFlushDoesNotStartCooldown()
               "Forced or barrier flush must not start persistent cooldown");
     TestCheck(ffp.GetOpaquePacketAdaptiveFrameEndEvaluations() == 0,
               "Forced or barrier flush must skip frame-end learning");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketCooldownCountsOnlyEligibleDraws()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetOpaqueInstancingEnabled(TRUE);
+
+    for (int i = 0; i < 29; ++i)
+        DrawPacketUniqueMeshCandidate(&ffp, &context, i);
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    ffp.BeginDebugFrame();
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_TRANSPARENT, 100, 200);
+
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownBypasses() == 0,
+              "Cooldown counter must not include non-opaque VB draws");
+
+    DrawPacketUniqueMeshCandidate(&ffp, &context, 0);
+
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownBypasses() == 1,
+              "Cooldown counter must include eligible opaque packet draws");
 
     ffp.Shutdown();
 }
@@ -1111,6 +1176,8 @@ int main()
               &OpaquePacketAdaptiveRunGateKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive run gate bypasses no-run frame",
               &OpaquePacketAdaptiveRunGateBypassesNoRunFrame);
+    tests.Run("Opaque packet adaptive sample bypass does not persist",
+              &OpaquePacketAdaptiveSampleBypassDoesNotPersist);
     tests.Run("Opaque packet adaptive packet-only ignores run gate",
               &OpaquePacketAdaptivePacketOnlyIgnoresRunGate);
     tests.Run("Opaque packet adaptive frame-end no-run starts cooldown",
@@ -1121,6 +1188,8 @@ int main()
               &OpaquePacketAdaptiveFrameEndPacketOnlyDoesNotCooldown);
     tests.Run("Opaque packet adaptive forced flush does not start cooldown",
               &OpaquePacketAdaptiveForcedFlushDoesNotStartCooldown);
+    tests.Run("Opaque packet cooldown counts only eligible draws",
+              &OpaquePacketCooldownCountsOnlyEligibleDraws);
     tests.Run("Opaque packet instancing merges high-repeat run",
               &OpaquePacketInstancingMergesHighRepeatRun);
     tests.Run("Opaque packet instancing can be disabled",

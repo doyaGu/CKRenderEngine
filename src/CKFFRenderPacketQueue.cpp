@@ -203,11 +203,8 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass(CKBOOL instancingEnabled)
     if (instancingEnabled) {
         if (!m_AdaptiveSampleRunsEvaluated)
             EvaluateAdaptiveSampleRuns();
-        if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT) {
-            if (m_AdaptiveSubmitSavedEstimate == 0)
-                StartAdaptiveCooldown();
+        if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
             return TRUE;
-        }
         ClearAdaptiveCooldown();
         return FALSE;
     }
