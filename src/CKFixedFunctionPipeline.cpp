@@ -928,7 +928,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 {
     if (CanQueueOpaqueVertexBufferPacket(view, type, vb, ib, vertexLayout)) {
         CKRenderPacket packet;
-        memset(&packet, 0, sizeof(packet));
+        InitVertexBufferPacketForCapture(&packet);
         if (BuildVertexBufferPacket(encoder, &packet, view, type, vb, ib,
                                     baseVertex, vertexCount,
                                     startIndex, indexCount,
@@ -1888,6 +1888,43 @@ void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) c
     m_OpaquePacketQueue.BuildSortKey(packet);
 }
 
+void CKFixedFunctionPipeline::InitVertexBufferPacketForCapture(CKRenderPacket *packet) const
+{
+    if (!packet)
+        return;
+
+    packet->Serial = 0;
+    packet->View = CKRP_VIEW_OPAQUE3D;
+    packet->Type = VX_TRIANGLELIST;
+    packet->Program = 0;
+    packet->Depth = 0;
+    packet->DrawState.Lo = 0;
+    packet->DrawState.Mid = 0;
+    packet->DrawState.Hi = 0;
+    packet->StencilRef = 0;
+    packet->StencilReadMask = 0;
+    packet->StencilWriteMask = 0;
+    packet->VertexLayout = 0;
+    packet->VertexBuffer = 0;
+    packet->IndexBuffer = 0;
+    packet->BaseVertex = 0;
+    packet->VertexCount = 0;
+    packet->StartIndex = 0;
+    packet->IndexCount = 0;
+    packet->ActiveTextureCount = 0;
+    packet->TextureSetHash = 0;
+    memset(packet->Textures, 0, sizeof(packet->Textures));
+    packet->StaticUniformIndex = 0;
+    memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
+    memset(&packet->SortKey, 0, sizeof(packet->SortKey));
+    packet->World.SetIdentity();
+    packet->ViewProjection.SetIdentity();
+    packet->ViewProjectionHash = 0;
+    packet->CanInstance = FALSE;
+    packet->InstancedProgram = 0;
+    packet->Marker[0] = '\0';
+}
+
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
 {
     m_OpaquePacketQueue.AddPacket(packet);
@@ -1895,6 +1932,14 @@ void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &pack
     m_FrameStats.RenderPacketAdaptiveSamples = m_OpaquePacketQueue.GetAdaptiveSamples();
     m_FrameStats.RenderPacketAdaptiveSavedBindEstimate =
         m_OpaquePacketQueue.GetAdaptiveSavedBindEstimate();
+    m_FrameStats.RenderPacketAdaptiveRunBypasses =
+        m_OpaquePacketQueue.GetAdaptiveRunBypasses();
+    m_FrameStats.RenderPacketAdaptiveSampleRuns =
+        m_OpaquePacketQueue.GetAdaptiveSampleRuns();
+    m_FrameStats.RenderPacketAdaptiveSampleMaxRun =
+        m_OpaquePacketQueue.GetAdaptiveSampleMaxRun();
+    m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate =
+        m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate();
 #endif
 }
 
@@ -1902,12 +1947,20 @@ CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasteriz
 {
     if (m_OpaquePacketQueue.IsAdaptiveBypassed())
         return TRUE;
-    if (!m_OpaquePacketQueue.ShouldAdaptiveBypass())
+    if (!m_OpaquePacketQueue.ShouldAdaptiveBypass(m_OpaqueInstancingEnabled))
         return FALSE;
 
     m_OpaquePacketQueue.MarkAdaptiveBypass();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     ++m_FrameStats.RenderPacketAdaptiveBypasses;
+    m_FrameStats.RenderPacketAdaptiveRunBypasses =
+        m_OpaquePacketQueue.GetAdaptiveRunBypasses();
+    m_FrameStats.RenderPacketAdaptiveSampleRuns =
+        m_OpaquePacketQueue.GetAdaptiveSampleRuns();
+    m_FrameStats.RenderPacketAdaptiveSampleMaxRun =
+        m_OpaquePacketQueue.GetAdaptiveSampleMaxRun();
+    m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate =
+        m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate();
 #endif
     FlushOpaqueRenderPackets(encoder, TRUE);
     return TRUE;
@@ -1993,8 +2046,8 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
         const double texBindsPerDraw = m_FrameStats.SubmittedDraws > 0
             ? (double)m_FrameStats.TextureBinds / (double)m_FrameStats.SubmittedDraws
             : 0.0;
-        CK_LOG_FMT("FFPStats",
-                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u packetsQueued=%u packetsReplayed=%u packetFallbacks=%u packetFlushes=%u packetUniformOverflow=%u packetRuns=%u packetMaxRun=%u packetSkipState=%u packetSkipTex=%u packetSkipUniform=%u packetStaticUniformUploads=%u packetStaticUniformSkips=%u packetObjectUniformUploads=%u packetObjectUniformSkips=%u packetSkipVB=%u packetSkipIB=%u packetStaticBuilds=%u packetStaticReuses=%u packetStaticInterns=%u packetSortSkips=%u packetAdaptiveSamples=%u packetAdaptiveBypasses=%u packetAdaptiveSavedBindEstimate=%u packetViewProjRebuilds=%u packetInstancedRuns=%u packetInstancedPackets=%u packetInstancedSubmits=%u packetInstanceBytes=%u packetInstanceAllocFailures=%u packetSubmitSaved=%u packetInstancingFallbacks=%u drawStateCacheHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
+        CK_LOG_FMT("FFPStats.Core",
+                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u",
                    m_FrameStats.FrameIndex,
                    m_FrameStats.SoftwareDraws,
                    m_FrameStats.HardwareDraws,
@@ -2017,6 +2070,13 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.ConsecutiveVertexBufferRepeats,
                    m_FrameStats.ConsecutiveIndexBufferRepeats,
                    m_FrameStats.ConsecutiveWorldMatrixRepeats,
+                   m_FrameStats.DrawStateCacheHits,
+                   m_FrameStats.DrawStateRebuilds,
+                   m_FrameStats.TransientVertexBytes,
+                   m_FrameStats.TransientIndexBytes);
+        CK_LOG_FMT("FFPStats.Packet",
+                   "frame=%u q=%u replay=%u fb=%u flush=%u overflow=%u runs=%u maxRun=%u skipState=%u skipTex=%u skipUniform=%u staticUp=%u staticSkip=%u objectUp=%u objectSkip=%u skipVB=%u skipIB=%u staticBuild=%u staticReuse=%u staticIntern=%u sortSkip=%u adaptiveSamples=%u adaptiveBypasses=%u adaptiveRunBypasses=%u adaptiveSaved=%u adaptiveSampleRuns=%u adaptiveSampleMaxRun=%u adaptiveSubmitSaved=%u viewProjRebuild=%u instRuns=%u instPackets=%u instSubmits=%u instBytes=%u instAllocFail=%u submitSaved=%u instFallbacks=%u",
+                   m_FrameStats.FrameIndex,
                    m_FrameStats.QueuedRenderPackets,
                    m_FrameStats.ReplayedRenderPackets,
                    m_FrameStats.RenderPacketFallbacks,
@@ -2039,7 +2099,11 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.RenderPacketSortSkips,
                    m_FrameStats.RenderPacketAdaptiveSamples,
                    m_FrameStats.RenderPacketAdaptiveBypasses,
+                   m_FrameStats.RenderPacketAdaptiveRunBypasses,
                    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate,
+                   m_FrameStats.RenderPacketAdaptiveSampleRuns,
+                   m_FrameStats.RenderPacketAdaptiveSampleMaxRun,
+                   m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate,
                    m_FrameStats.RenderPacketViewProjectionRebuilds,
                    m_FrameStats.RenderPacketInstancedRuns,
                    m_FrameStats.RenderPacketInstancedPackets,
@@ -2047,11 +2111,10 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.RenderPacketInstanceBufferBytes,
                    m_FrameStats.RenderPacketInstanceAllocFailures,
                    m_FrameStats.RenderPacketSubmitSavedEstimate,
-                   m_FrameStats.RenderPacketInstancingFallbacks,
-                   m_FrameStats.DrawStateCacheHits,
-                   m_FrameStats.DrawStateRebuilds,
-                   m_FrameStats.TransientVertexBytes,
-                   m_FrameStats.TransientIndexBytes,
+                   m_FrameStats.RenderPacketInstancingFallbacks);
+        CK_LOG_FMT("FFPStats.Timing",
+                   "frame=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
+                   m_FrameStats.FrameIndex,
                    m_FrameStats.PrepareUs,
                    m_FrameStats.StateUs,
                    m_FrameStats.ProgramUs,
@@ -2391,6 +2454,10 @@ void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
     m_FrameStats.RenderPacketAdaptiveSamples = 0;
     m_FrameStats.RenderPacketAdaptiveBypasses = 0;
     m_FrameStats.RenderPacketAdaptiveSavedBindEstimate = 0;
+    m_FrameStats.RenderPacketAdaptiveRunBypasses = 0;
+    m_FrameStats.RenderPacketAdaptiveSampleRuns = 0;
+    m_FrameStats.RenderPacketAdaptiveSampleMaxRun = 0;
+    m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate = 0;
 #endif
 }
 
