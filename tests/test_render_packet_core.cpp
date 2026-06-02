@@ -247,17 +247,11 @@ static void AdaptiveRunGateBypassesNoRunSample()
               "no-run sample must not estimate submit savings");
     TestCheck(queue.GetAdaptiveRunBypasses() == 1,
               "run-aware bypass must be counted once");
-    TestCheck(queue.GetAdaptiveCooldownFrames() ==
-                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
-              "run-aware bypass must start the persistent no-run cooldown");
-    TestCheck(queue.IsAdaptiveCooldownActive() == FALSE,
-              "newly started cooldown must not bypass the current probe frame");
+    TestCheck(queue.GetAdaptiveCooldownFrames() == 0,
+              "sample-time run-aware bypass must not start persistent cooldown");
     queue.ResetFrameState();
-    TestCheck(queue.IsAdaptiveCooldownActive() == TRUE,
-              "persistent cooldown must become active on the next frame");
-    TestCheck(queue.GetAdaptiveCooldownFrames() ==
-                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
-              "next frame must keep the full cooldown interval");
+    TestCheck(queue.IsAdaptiveCooldownActive() == FALSE,
+              "sample-time run-aware bypass must not persist to the next frame");
 }
 
 static void AdaptivePacketOnlyKeepsBindSavingSample()
