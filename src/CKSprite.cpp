@@ -11,6 +11,7 @@
 #include "RCKRenderContext.h"
 #include "CKDebugLogger.h"
 #include "CKDrawAnnotation.h"
+#include "CKRenderFrameCostStats.h"
 
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;
 
@@ -260,6 +261,7 @@ CKBOOL RCKSprite::SaveImage(CKSTRING Name, int Slot, CKBOOL CKUseFormat) {
 }
 
 CKERROR RCKSprite::Draw(CKRenderContext *dev) {
+    CKRenderFrameCostStatsAddSpriteDraw();
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID)
         return CKERR_INVALIDPARAMETER;
 

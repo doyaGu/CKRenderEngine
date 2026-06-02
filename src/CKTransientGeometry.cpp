@@ -2,6 +2,7 @@
 #include "CKVertexLayoutCache.h"
 #include "CKFFConstants.h"
 #include "CKRasterizer.h"
+#include "CKRenderFrameCostStats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -57,6 +58,143 @@ static CKDWORD PointSpriteSizeOffset(CKDWORD flags, CKDWORD formatFlags) {
     if ((formatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX)) != 0)
         return CKVertexLayoutCache::DPFlagsToBlendRecordSize(flags);
     return 12;
+}
+
+static CKBOOL Is2DQuadFastPathCandidate(
+    VXPRIMITIVETYPE primType,
+    CKWORD *indices,
+    int indexCount,
+    VxDrawPrimitiveData *data,
+    CKDWORD wrapMode,
+    CKBOOL pointSprites,
+    CKDWORD formatFlags)
+{
+    const CKDWORD quadFormat =
+        CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0 | CKFF_VF_COLOR1;
+    if (primType != VX_TRIANGLEFAN || indices != nullptr || indexCount != 4)
+        return FALSE;
+    if (!data || data->VertexCount != 4)
+        return FALSE;
+    if (wrapMode != 0 || pointSprites)
+        return FALSE;
+    if (data->Flags != CKRST_DP_CL_VCT)
+        return FALSE;
+    if (formatFlags != quadFormat)
+        return FALSE;
+    if (!data->PositionPtr || !data->TexCoordPtr || !data->ColorPtr)
+        return FALSE;
+    if (data->NormalPtr || data->SpecularColorPtr)
+        return FALSE;
+    for (int stage = 0; stage < CKRST_MAX_STAGES - 1; ++stage) {
+        if (data->TexCoordPtrs[stage])
+            return FALSE;
+    }
+    if (data->PositionStride < 16 || data->TexCoordStride < 8 || data->ColorStride < 4)
+        return FALSE;
+    return TRUE;
+}
+
+static CKBOOL IsSpriteBatchFastPathCandidate(
+    VXPRIMITIVETYPE primType,
+    CKWORD *indices,
+    int indexCount,
+    VxDrawPrimitiveData *data,
+    CKDWORD wrapMode,
+    CKBOOL pointSprites,
+    CKDWORD formatFlags)
+{
+    const CKDWORD spriteFormat =
+        CKFF_VF_POSITION | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0 | CKFF_VF_COLOR1;
+    if (primType != VX_TRIANGLELIST || !indices || indexCount <= 0)
+        return FALSE;
+    if (!data || data->VertexCount <= 0)
+        return FALSE;
+    if (wrapMode != 0 || pointSprites)
+        return FALSE;
+    if ((indexCount % 6) != 0 || ((CKDWORD)indexCount / 6) * 4 != data->VertexCount)
+        return FALSE;
+    if ((data->Flags & ~CKRST_DP_DOCLIP) != CKRST_DP_TR_VCST)
+        return FALSE;
+    if (formatFlags != spriteFormat)
+        return FALSE;
+    if (!data->PositionPtr || !data->TexCoordPtr || !data->ColorPtr || !data->SpecularColorPtr)
+        return FALSE;
+    if (data->NormalPtr)
+        return FALSE;
+    for (int stage = 0; stage < CKRST_MAX_STAGES - 1; ++stage) {
+        if (data->TexCoordPtrs[stage])
+            return FALSE;
+    }
+    if (data->PositionStride < 12 || data->TexCoordStride < 8 ||
+        data->ColorStride < 4 || data->SpecularColorStride < 4)
+        return FALSE;
+    return TRUE;
+}
+
+static void Write2DQuadFastPathVertex(
+    CKBYTE *dst,
+    CKDWORD stride,
+    CKDWORD dstIndex,
+    VxDrawPrimitiveData *data)
+{
+    CKBYTE *out = dst + dstIndex * stride;
+    const CKBYTE *position =
+        (const CKBYTE *)data->PositionPtr + dstIndex * data->PositionStride;
+    const CKBYTE *texcoord =
+        (const CKBYTE *)data->TexCoordPtr + dstIndex * data->TexCoordStride;
+    const CKBYTE *color =
+        (const CKBYTE *)data->ColorPtr + dstIndex * data->ColorStride;
+    CKDWORD argb = 0xFFFFFFFF;
+    CKDWORD abgr;
+    CKDWORD specular = 0xFF000000;
+    float uv[4] = {};
+
+    memcpy(out, position, 16);
+    memcpy(uv, texcoord, 8);
+    memcpy(out + 16, uv, sizeof(uv));
+
+    memcpy(&argb, color, sizeof(argb));
+    abgr = (argb & 0xFF00FF00) |
+           ((argb & 0x00FF0000) >> 16) |
+           ((argb & 0x000000FF) << 16);
+    memcpy(out + 32, &abgr, sizeof(abgr));
+    memcpy(out + 36, &specular, sizeof(specular));
+}
+
+static void WriteSpriteBatchFastPathVertex(
+    CKBYTE *dst,
+    CKDWORD stride,
+    CKDWORD dstIndex,
+    VxDrawPrimitiveData *data)
+{
+    CKBYTE *out = dst + dstIndex * stride;
+    const CKBYTE *position =
+        (const CKBYTE *)data->PositionPtr + dstIndex * data->PositionStride;
+    const CKBYTE *texcoord =
+        (const CKBYTE *)data->TexCoordPtr + dstIndex * data->TexCoordStride;
+    const CKBYTE *color =
+        (const CKBYTE *)data->ColorPtr + dstIndex * data->ColorStride;
+    const CKBYTE *specularColor =
+        (const CKBYTE *)data->SpecularColorPtr + dstIndex * data->SpecularColorStride;
+    CKDWORD argb = 0xFFFFFFFF;
+    CKDWORD abgr;
+    float uv[4] = {};
+
+    memcpy(out, position, 12);
+    memcpy(uv, texcoord, 8);
+    memcpy(out + 12, uv, sizeof(uv));
+
+    memcpy(&argb, color, sizeof(argb));
+    abgr = (argb & 0xFF00FF00) |
+           ((argb & 0x00FF0000) >> 16) |
+           ((argb & 0x000000FF) << 16);
+    memcpy(out + 28, &abgr, sizeof(abgr));
+
+    memcpy(&argb, specularColor, sizeof(argb));
+    abgr = (argb & 0xFF00FF00) |
+           ((argb & 0x00FF0000) >> 16) |
+           ((argb & 0x000000FF) << 16);
+    memcpy(out + 32, &abgr, sizeof(abgr));
 }
 
 static CKFFPointSpriteParams PointSpriteParamsForVertex(
@@ -285,6 +423,69 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastLayout = layoutHandle;
 
     CKDWORD vertexCount = data->VertexCount;
+    const CKBOOL quadFastPathCandidate =
+        Is2DQuadFastPathCandidate(primType, indices, indexCount, data,
+                                  wrapMode, pointSprites, formatFlags);
+    const CKBOOL spriteBatchFastPathCandidate =
+        IsSpriteBatchFastPathCandidate(primType, indices, indexCount, data,
+                                       wrapMode, pointSprites, formatFlags);
+    if (quadFastPathCandidate &&
+        m_Context->GetAvailTransientVertexBuffer(4, layoutHandle) >= 4 &&
+        m_Context->GetAvailTransientIndexBuffer(6, FALSE) >= 6) {
+        CKTransientVertexBuffer tvb;
+        memset(&tvb, 0, sizeof(tvb));
+        if (m_Context->AllocTransientVertexBuffer(&tvb, 4, layoutHandle)) {
+            CKTransientIndexBuffer tib;
+            memset(&tib, 0, sizeof(tib));
+            if (m_Context->AllocTransientIndexBuffer(&tib, 6, FALSE)) {
+                CKWORD *out = (CKWORD *)tib.Data;
+                for (CKDWORD i = 0; i < 4; ++i)
+                    Write2DQuadFastPathVertex((CKBYTE *)tvb.Data, stride, i, data);
+                out[0] = 0;
+                out[1] = 1;
+                out[2] = 2;
+                out[3] = 0;
+                out[4] = 2;
+                out[5] = 3;
+                m_LastVertexBytes = tvb.Size;
+                m_LastIndexBytes = tib.Size;
+                encoder->SetTransientVertexBuffer(0, &tvb);
+                encoder->SetTransientIndexBuffer(&tib);
+                CKRenderFrameCostStatsAddTransientPrepare(TRUE, TRUE,
+                                                          m_LastVertexBytes,
+                                                          m_LastIndexBytes,
+                                                          FALSE);
+                return TRUE;
+            }
+        }
+    }
+
+    if (spriteBatchFastPathCandidate &&
+        m_Context->GetAvailTransientVertexBuffer(vertexCount, layoutHandle) >= vertexCount &&
+        m_Context->GetAvailTransientIndexBuffer((CKDWORD)indexCount, FALSE) >= (CKDWORD)indexCount) {
+        CKTransientVertexBuffer tvb;
+        memset(&tvb, 0, sizeof(tvb));
+        if (m_Context->AllocTransientVertexBuffer(&tvb, vertexCount, layoutHandle)) {
+            CKTransientIndexBuffer tib;
+            memset(&tib, 0, sizeof(tib));
+            if (m_Context->AllocTransientIndexBuffer(&tib, (CKDWORD)indexCount, FALSE)) {
+                for (CKDWORD i = 0; i < vertexCount; ++i)
+                    WriteSpriteBatchFastPathVertex((CKBYTE *)tvb.Data, stride, i, data);
+                memcpy(tib.Data, indices, indexCount * sizeof(CKWORD));
+                m_LastVertexBytes = tvb.Size;
+                m_LastIndexBytes = tib.Size;
+                encoder->SetTransientVertexBuffer(0, &tvb);
+                encoder->SetTransientIndexBuffer(&tib);
+                CKRenderFrameCostStatsAddTransientPrepare(FALSE, FALSE,
+                                                          m_LastVertexBytes,
+                                                          m_LastIndexBytes,
+                                                          FALSE);
+                CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(TRUE, TRUE);
+                return TRUE;
+            }
+        }
+    }
+
     if (pointSprites && primType == VX_POINTLIST && data->PositionPtr) {
         CKFFPointSpriteParams params;
         if (pointParams) {
@@ -383,6 +584,10 @@ CKBOOL CKTransientGeometry::Prepare(
 
         encoder->SetTransientVertexBuffer(0, &tvb);
         encoder->SetTransientIndexBuffer(&tib);
+        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+                                                  m_LastVertexBytes,
+                                                  m_LastIndexBytes,
+                                                  FALSE);
         return TRUE;
     }
 
@@ -449,6 +654,11 @@ CKBOOL CKTransientGeometry::Prepare(
         }
 
         encoder->SetTransientVertexBuffer(0, &tvb);
+        CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+                                                  m_LastVertexBytes,
+                                                  m_LastIndexBytes,
+                                                  primType == VX_TRIANGLEFAN ||
+                                                  primType == VX_TRIANGLESTRIP);
         return TRUE;
     }
 
@@ -499,6 +709,12 @@ CKBOOL CKTransientGeometry::Prepare(
         encoder->SetTransientIndexBuffer(&tib);
     }
 
+    CKRenderFrameCostStatsAddTransientPrepare(quadFastPathCandidate, FALSE,
+                                              m_LastVertexBytes,
+                                              m_LastIndexBytes,
+                                              primType == VX_TRIANGLEFAN ||
+                                              primType == VX_TRIANGLESTRIP);
+    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(spriteBatchFastPathCandidate, FALSE);
     return TRUE;
 }
 

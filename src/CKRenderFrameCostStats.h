@@ -47,14 +47,29 @@ struct CKRenderFrameCostStatsSnapshot {
     CKDWORD MeshRenderCalls;
     CKDWORD MeshDefaultCalls;
     CKDWORD MeshGroupCalls;
+    CKDWORD TwoDEntityRenderCalls;
+    CKDWORD TwoDEntityUpdateExtentsCalls;
+    CKDWORD TwoDEntityDrawCalls;
+    CKDWORD SpriteDrawCalls;
     CKDWORD MaterialSetCalls;
     CKDWORD MaterialNoOpCandidates;
     CKDWORD MaterialNoOpSkips;
     CKDWORD MaterialDirtyMisses;
     CKDWORD DrawPrimitiveCalls;
+    CKDWORD DrawPrimitiveSanitizeCalls;
     CKDWORD DrawPrimitiveFastPathCandidates;
     CKDWORD DrawPrimitiveFastPathHits;
     CKDWORD DrawPrimitiveFastPathFallbacks;
+    CKDWORD TransientPrepareCalls;
+    CKDWORD TransientQuadFastPathCandidates;
+    CKDWORD TransientQuadFastPathHits;
+    CKDWORD TransientQuadFastPathFallbacks;
+    CKDWORD TransientSpriteBatchFastPathCandidates;
+    CKDWORD TransientSpriteBatchFastPathHits;
+    CKDWORD TransientSpriteBatchFastPathFallbacks;
+    CKDWORD TransientFanToListConversions;
+    CKDWORD TransientVertexBytes;
+    CKDWORD TransientIndexBytes;
     CKDWORD ViewportSetCalls;
     CKDWORD ViewportSetSkipped;
     CKDWORD PrimitiveSubmits;
@@ -84,6 +99,18 @@ void CKRenderFrameCostStatsAddMaterialSet(CKBOOL noOpCandidate,
 void CKRenderFrameCostStatsAddMeshRender();
 void CKRenderFrameCostStatsAddMeshDefault();
 void CKRenderFrameCostStatsAddMeshGroup();
+void CKRenderFrameCostStatsAdd2DEntityRender();
+void CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
+void CKRenderFrameCostStatsAdd2DEntityDraw();
+void CKRenderFrameCostStatsAddSpriteDraw();
+void CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
+void CKRenderFrameCostStatsAddTransientPrepare(CKBOOL quadCandidate,
+                                               CKBOOL quadHit,
+                                               CKDWORD vertexBytes,
+                                               CKDWORD indexBytes,
+                                               CKBOOL fanToListConversion);
+void CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(CKBOOL candidate,
+                                                           CKBOOL hit);
 void CKRenderFrameCostStatsAddPrimitiveSubmit();
 void CKRenderFrameCostStatsAddMeshSubmit();
 void CKRenderFrameCostStatsAddSubmittedDraw();
