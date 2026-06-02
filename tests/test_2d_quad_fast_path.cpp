@@ -242,6 +242,48 @@ static void MultistageAndStaleExtendedDataFallBack()
               "multistage quad must not hit fast path");
 }
 
+static void QuadFastPathRejectsFourComponentTexcoords()
+{
+    QuadFastPathHarness harness;
+    VxDrawPrimitiveData data;
+    float positions[16];
+    float texcoords[16];
+    CKDWORD colors[4];
+    CKBYTE texcoordCounts[CKRST_MAX_STAGES];
+
+    FillQuadInput(positions, texcoords, colors);
+    texcoords[8] = 0.25f;
+    texcoords[9] = 0.50f;
+    texcoords[10] = 0.75f;
+    texcoords[11] = 1.00f;
+    texcoords[12] = 0.10f;
+    texcoords[13] = 0.20f;
+    texcoords[14] = 0.30f;
+    texcoords[15] = 0.40f;
+    InitQuadData(&data, positions, texcoords, colors);
+    data.TexCoordStride = 4 * sizeof(float);
+    memset(texcoordCounts, 0, sizeof(texcoordCounts));
+    texcoordCounts[0] = 4;
+    BeginStatsSample();
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_TRIANGLEFAN,
+                                       NULL,
+                                       4,
+                                       &data,
+                                       0,
+                                       FALSE,
+                                       NULL,
+                                       texcoordCounts) == TRUE,
+              "four-component texcoord quad should prepare through generic path");
+
+    CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
+    TestCheck(stats.TransientQuadFastPathHits == 0,
+              "four-component texcoord quad must not hit fast path");
+    TestCheck(stats.TransientFanToListConversions == 1,
+              "four-component texcoord fallback should use generic fan conversion");
+}
+
 static void InitSpriteBatchData(VxDrawPrimitiveData *data,
                                 CKVertex *vertices,
                                 int vertexCount,
@@ -274,7 +316,7 @@ static void FillSpriteBatchInput(CKVertex *vertices, int vertexCount)
     }
 }
 
-static void SpriteBatchFastPathPacksExpectedData()
+static void SpriteBatchUsesGenericPath()
 {
     QuadFastPathHarness harness;
     CKVertex vertices[8];
@@ -297,22 +339,22 @@ static void SpriteBatchFastPathPacksExpectedData()
                                        FALSE,
                                        NULL,
                                        NULL) == TRUE,
-              "sprite batch fast path prepare should succeed");
+              "sprite batch generic prepare should succeed");
 
     CKRenderFrameCostStatsSnapshot stats = EndStatsSample();
-    TestCheck(stats.TransientSpriteBatchFastPathCandidates == 1,
-              "sprite batch should be counted as a fast path candidate");
-    TestCheck(stats.TransientSpriteBatchFastPathHits == 1,
-              "sprite batch should hit the fast path");
+    TestCheck(stats.TransientSpriteBatchFastPathCandidates == 0,
+              "sprite batch fast path should be disabled");
+    TestCheck(stats.TransientSpriteBatchFastPathHits == 0,
+              "sprite batch must not hit the disabled fast path");
     TestCheck(stats.TransientSpriteBatchFastPathFallbacks == 0,
-              "sprite batch fast path should not fallback");
+              "disabled sprite batch fast path should not report fallback noise");
     TestCheck(stats.TransientFanToListConversions == 0,
-              "sprite batch fast path should not convert topology");
+              "sprite batch triangle list should not convert topology");
 
     TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 8 * 36,
-              "sprite batch fast path should write eight 36-byte vertices");
+              "sprite batch generic path should write eight 36-byte vertices");
     TestCheck(harness.Context.Encoder.LastIndexBytes.size() == 12 * sizeof(CKWORD),
-              "sprite batch fast path should copy twelve 16-bit indices");
+              "sprite batch generic path should copy twelve 16-bit indices");
 
     const CKBYTE *vb = harness.Context.Encoder.LastVertexBytes.data();
     for (int i = 0; i < 8; ++i) {
@@ -335,7 +377,7 @@ static void SpriteBatchFastPathPacksExpectedData()
     const CKWORD *ib = (const CKWORD *)harness.Context.Encoder.LastIndexBytes.data();
     for (int i = 0; i < 12; ++i) {
         TestCheck(ib[i] == indices[i],
-                  "sprite batch fast path must preserve source indices");
+                  "sprite batch generic path must preserve source indices");
     }
 }
 
@@ -372,7 +414,8 @@ int main()
     tests.Run("2D quad fast path packs expected data", &FastPathPacksExpectedQuad);
     tests.Run("indexed quad falls back", &IndexedQuadFallsBackToGenericPath);
     tests.Run("multistage and stale extended data fall back", &MultistageAndStaleExtendedDataFallBack);
-    tests.Run("sprite batch fast path packs expected data", &SpriteBatchFastPathPacksExpectedData);
+    tests.Run("four-component texcoord quad falls back", &QuadFastPathRejectsFourComponentTexcoords);
+    tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
     tests.Run("sprite batch fast path rejects non-batch shape", &SpriteBatchFastPathRejectsNonBatchShape);
     return tests.ExitCode();
 }
