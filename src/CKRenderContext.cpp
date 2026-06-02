@@ -1373,7 +1373,8 @@ void RCKRenderContext::ApplyRenderOptions() {
 
     m_FFPipeline.SetRenderOptions(
         m_RenderManager->m_DisableFilter.Value != 0,
-        m_RenderManager->m_DisableMipmap.Value != 0);
+        m_RenderManager->m_DisableMipmap.Value != 0,
+        CKRenderRootSettings().GetBool("ForceAnisotropicFiltering", false) ? TRUE : FALSE);
 }
 
 void RCKRenderContext::SetClearBackground(CKBOOL ClearBack) {
@@ -2627,6 +2628,58 @@ void RCKRenderContext::WarnExitThread() {
     // WarnThread removed in rasterizer v2
 }
 
+void RCKRenderContext::AllocateRenderPipelineResources() {
+    if (!m_RenderManager)
+        return;
+
+    if (!m_RenderPipelineResources.SceneColorTexture)
+        m_RenderPipelineResources.SceneColorTexture = m_RenderManager->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    if (!m_RenderPipelineResources.SceneDepthTexture)
+        m_RenderPipelineResources.SceneDepthTexture = m_RenderManager->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    if (!m_RenderPipelineResources.SceneFrameBuffer)
+        m_RenderPipelineResources.SceneFrameBuffer = m_RenderManager->CreateObjectIndex(CKRST_OBJ_FRAMEBUFFER);
+    if (!m_RenderPipelineResources.PostVertexShader)
+        m_RenderPipelineResources.PostVertexShader = m_RenderManager->CreateObjectIndex(CKRST_OBJ_SHADER);
+    if (!m_RenderPipelineResources.PostPixelShader)
+        m_RenderPipelineResources.PostPixelShader = m_RenderManager->CreateObjectIndex(CKRST_OBJ_SHADER);
+    if (!m_RenderPipelineResources.PostProgram)
+        m_RenderPipelineResources.PostProgram = m_RenderManager->CreateObjectIndex(CKRST_OBJ_PROGRAM);
+    if (!m_RenderPipelineResources.PostSamplerUniform)
+        m_RenderPipelineResources.PostSamplerUniform = m_RenderManager->CreateObjectIndex(CKRST_OBJ_UNIFORM);
+    if (!m_RenderPipelineResources.PostParamsUniform)
+        m_RenderPipelineResources.PostParamsUniform = m_RenderManager->CreateObjectIndex(CKRST_OBJ_UNIFORM);
+    if (!m_RenderPipelineResources.PostVertexLayout)
+        m_RenderPipelineResources.PostVertexLayout = m_RenderManager->CreateObjectIndex(CKRST_OBJ_VERTEXLAYOUT);
+
+    m_FFPipeline.GetRenderPipeline().SetResourceIds(m_RenderPipelineResources);
+}
+
+void RCKRenderContext::ReleaseRenderPipelineResources() {
+    if (!m_RenderManager)
+        return;
+
+    if (m_RenderPipelineResources.SceneColorTexture)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.SceneColorTexture, CKRST_OBJ_TEXTURE);
+    if (m_RenderPipelineResources.SceneDepthTexture)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.SceneDepthTexture, CKRST_OBJ_TEXTURE);
+    if (m_RenderPipelineResources.SceneFrameBuffer)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.SceneFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+    if (m_RenderPipelineResources.PostVertexShader)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostVertexShader, CKRST_OBJ_SHADER);
+    if (m_RenderPipelineResources.PostPixelShader)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostPixelShader, CKRST_OBJ_SHADER);
+    if (m_RenderPipelineResources.PostProgram)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostProgram, CKRST_OBJ_PROGRAM);
+    if (m_RenderPipelineResources.PostSamplerUniform)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostSamplerUniform, CKRST_OBJ_UNIFORM);
+    if (m_RenderPipelineResources.PostParamsUniform)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostParamsUniform, CKRST_OBJ_UNIFORM);
+    if (m_RenderPipelineResources.PostVertexLayout)
+        m_RenderManager->ReleaseObjectIndex(m_RenderPipelineResources.PostVertexLayout, CKRST_OBJ_VERTEXLAYOUT);
+
+    m_RenderPipelineResources = CKRenderPipelineResourceIds();
+}
+
 // IDA: 0x10068220
 CK2dEntity *RCKRenderContext::Pick2D(const Vx2DVector &v) {
     return _Pick2D(v, FALSE);
@@ -2701,7 +2754,9 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, m_TargetFrameBuffer);
+        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_POSTPROCESS, m_TargetFrameBuffer);
         m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, m_TargetFrameBuffer);
+        m_FFPipeline.GetRenderPipeline().SetExternalRenderTarget(TRUE);
     }
 
     if (texture) {
@@ -2737,7 +2792,9 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, 0);
+    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_POSTPROCESS, 0);
     m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
+    m_FFPipeline.GetRenderPipeline().SetExternalRenderTarget(FALSE);
 
     CKRenderContextSettings savedSettings;
     savedSettings.m_Rect.left = m_RasterizerContext->m_PosX;
@@ -2941,6 +2998,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Initialize the fixed-function pipeline
     m_FFPipeline.Init(m_RasterizerContext);
+    AllocateRenderPipelineResources();
     ApplyRenderOptions();
 
     m_Fullscreen = Fullscreen;
@@ -3137,6 +3195,7 @@ CKBOOL RCKRenderContext::DestroyDevice() {
         m_RenderManager->DestroyingDevice(this);
 
     m_FFPipeline.Shutdown();
+    ReleaseRenderPipelineResources();
 
     if (m_RasterizerContext) {
         if (m_TargetFrameBuffer != 0)

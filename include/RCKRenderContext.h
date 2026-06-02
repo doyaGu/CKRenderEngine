@@ -227,6 +227,8 @@ private:
     void ExecutePreRenderCallbacks();
     void ExecutePostRenderCallbacks(CKBOOL beforeTransparent);
     void ExecutePostSpriteCallbacks();
+    void AllocateRenderPipelineResources();
+    void ReleaseRenderPipelineResources();
     void LoadPVInformationTexture();
     void DrawPVInformationWatermark();
     void AppendStateOnOffLine(CKBOOL on);
@@ -348,6 +350,7 @@ public:
     CKRenderView m_Current3DView;
     CKDWORD m_RasterizerDebugFlags;
     CKDrawAnnotationState *m_DrawAnnotationState;
+    CKRenderPipelineResourceIds m_RenderPipelineResources;
 };
 
 #endif // RCKRENDERCONTEXT_H
