@@ -164,6 +164,20 @@ CKBOOL CKFFRenderPacketSameRunKey(const CKRenderPacket &a,
     return CKFFRenderPacketSortKeyEquals(a.SortKey, b.SortKey);
 }
 
+CKBOOL CKFFRenderPacketCanInstanceRun(const CKRenderPacket &a,
+                                      const CKRenderPacket &b)
+{
+    if (!a.CanInstance || !b.CanInstance)
+        return FALSE;
+    if (a.InstancedProgram != b.InstancedProgram)
+        return FALSE;
+    if (!CKFFRenderPacketSameRunKey(a, b))
+        return FALSE;
+    if (a.ViewProjectionHash != b.ViewProjectionHash)
+        return FALSE;
+    return memcmp(&a.ViewProjection, &b.ViewProjection, sizeof(VxMatrix)) == 0 ? TRUE : FALSE;
+}
+
 CKBOOL CKFFRenderPacketAddUniform(CKFFRenderPacketUniformPayload *payload,
                                   CKDWORD uniform,
                                   const void *data,

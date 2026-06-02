@@ -368,8 +368,6 @@ private:
                                                 CKRenderPacketReplayCache *cache,
                                                 CKBOOL lastRun);
     CKBOOL CanInstanceVertexBufferPacket() const;
-    CKBOOL CanInstanceVertexBufferPacketRun(const CKRenderPacket &a,
-                                            const CKRenderPacket &b) const;
     void BindVertexBufferPacketSharedState(CKRasterizerEncoder *encoder,
                                            const CKRenderPacket &packet,
                                            CKRenderPacketReplayCache *cache);

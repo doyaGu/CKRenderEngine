@@ -249,6 +249,46 @@ void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
     }
 }
 
+void CKFFRenderPacketQueue::BuildRunPlans(const XArray<CKDWORD> *indices,
+                                          CKBOOL directReplay,
+                                          CKBOOL instancingEnabled,
+                                          XArray<CKFFRenderPacketRunPlan> &plans) const
+{
+    const int count = directReplay || !indices ? m_Packets.Size() : indices->Size();
+    plans.Resize(0);
+
+    for (int i = 0; i < count;) {
+        const int packetIndex = directReplay || !indices
+            ? i
+            : (int)(*indices)[i];
+        const CKRenderPacket &packet = m_Packets[packetIndex];
+        int runLength = 1;
+        if (instancingEnabled && packet.CanInstance) {
+            while (i + runLength < count) {
+                const int nextIndex = directReplay || !indices
+                    ? i + runLength
+                    : (int)(*indices)[i + runLength];
+                const CKRenderPacket &nextPacket = m_Packets[nextIndex];
+                if (!CKFFRenderPacketCanInstanceRun(packet, nextPacket))
+                    break;
+                ++runLength;
+            }
+        }
+
+        CKFFRenderPacketRunPlan plan;
+        plan.Start = i;
+        plan.Count = runLength;
+        plan.Instanced = (instancingEnabled &&
+                          runLength >= CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT &&
+                          packet.CanInstance) ? TRUE : FALSE;
+        plan.FallbackReason = plan.Instanced
+            ? CKFF_RENDER_PACKET_RUN_FALLBACK_NONE
+            : CKFF_RENDER_PACKET_RUN_FALLBACK_NOT_INSTANCEABLE;
+        plans.PushBack(plan);
+        i += runLength;
+    }
+}
+
 void CKFFRenderPacketQueue::TrackPacket(const CKRenderPacket &packet)
 {
     ++m_AdaptiveSamples;
