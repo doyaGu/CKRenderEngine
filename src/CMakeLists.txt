@@ -88,6 +88,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFFSpecializationInfo.h
         CKFFSpecializedModuleTable.h
         CKFFStateDesc.h
+        CKFFRenderPacketQueue.h
         CKFFShaderCache.h
         CKFFConstants.h
         CKDrawAnnotation.h
@@ -155,6 +156,7 @@ set(CKRE_SOURCES
 
         CKFixedFunctionPipeline.cpp
         CKFFRenderPacket.cpp
+        CKFFRenderPacketQueue.cpp
         CKFFStageState.cpp
         CKFFUniformState.cpp
         CKFFShaderKey.cpp
