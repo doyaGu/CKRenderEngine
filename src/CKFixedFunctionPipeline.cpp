@@ -270,7 +270,7 @@ CKFFOpaquePacketGuard::CKFFOpaquePacketGuard(CKFixedFunctionPipeline &pipeline, 
     : m_Pipeline(active ? &pipeline : nullptr),
       m_SavedAllowed(active ? pipeline.GetOpaqueRenderPacketsAllowed() : TRUE) {
     if (m_Pipeline) {
-        m_Pipeline->FlushOpaqueRenderPackets();
+        m_Pipeline->FlushOpaqueRenderPackets(nullptr, FALSE, FALSE);
         m_Pipeline->SetOpaqueRenderPacketsAllowed(FALSE);
     }
 }
@@ -688,7 +688,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 {
     if (!encoder || !data || data->VertexCount == 0) return;
     if (HasOpaqueRenderPackets())
-        FlushOpaqueRenderPackets(encoder);
+        FlushOpaqueRenderPackets(encoder, FALSE, FALSE);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats)
@@ -926,7 +926,9 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    if (CanQueueOpaqueVertexBufferPacket(view, type, vb, ib, vertexLayout)) {
+    const CKDWORD packetRejectReason =
+        GetOpaqueVertexBufferPacketRejectReason(view, type, vb, ib, vertexLayout);
+    if (packetRejectReason == CKFF_RENDER_PACKET_ELIGIBLE) {
         CKRenderPacket packet;
         InitVertexBufferPacketForCapture(&packet);
         if (BuildVertexBufferPacket(encoder, &packet, view, type, vb, ib,
@@ -946,10 +948,12 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
             ++m_FrameStats.RenderPacketFallbacks;
 #endif
+    } else {
+        TrackOpaqueRenderPacketReject(packetRejectReason);
     }
 
     if (HasOpaqueRenderPackets())
-        FlushOpaqueRenderPackets(encoder);
+        FlushOpaqueRenderPackets(encoder, FALSE, FALSE);
     SubmitVertexBufferPacketImmediate(encoder, view, type, vb, ib,
                                       baseVertex, vertexCount,
                                       startIndex, indexCount,
@@ -1928,6 +1932,21 @@ void CKFixedFunctionPipeline::InitVertexBufferPacketForCapture(CKRenderPacket *p
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
 {
     m_OpaquePacketQueue.AddPacket(packet);
+    UpdateOpaqueRenderPacketAdaptiveStats();
+}
+
+void CKFixedFunctionPipeline::TrackOpaqueRenderPacketReject(CKDWORD rejectReason)
+{
+    if (rejectReason != CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS)
+        return;
+    if (!m_OpaquePacketQueue.IsAdaptiveCooldownActive())
+        return;
+    m_OpaquePacketQueue.MarkAdaptiveCooldownBypass();
+    UpdateOpaqueRenderPacketAdaptiveStats();
+}
+
+void CKFixedFunctionPipeline::UpdateOpaqueRenderPacketAdaptiveStats()
+{
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_FrameStats.RenderPacketAdaptiveSamples = m_OpaquePacketQueue.GetAdaptiveSamples();
     m_FrameStats.RenderPacketAdaptiveSavedBindEstimate =
@@ -1940,6 +1959,14 @@ void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &pack
         m_OpaquePacketQueue.GetAdaptiveSampleMaxRun();
     m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate =
         m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate();
+    m_FrameStats.RenderPacketAdaptiveCooldownBypasses =
+        m_OpaquePacketQueue.GetAdaptiveCooldownBypasses();
+    m_FrameStats.RenderPacketAdaptiveCooldownFrames =
+        m_OpaquePacketQueue.GetAdaptiveCooldownFrames();
+    m_FrameStats.RenderPacketAdaptiveFrameEndEvaluations =
+        m_OpaquePacketQueue.GetAdaptiveFrameEndEvaluations();
+    m_FrameStats.RenderPacketAdaptiveFrameEndRunBypasses =
+        m_OpaquePacketQueue.GetAdaptiveFrameEndRunBypasses();
 #endif
 }
 
@@ -1962,7 +1989,8 @@ CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasteriz
     m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate =
         m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate();
 #endif
-    FlushOpaqueRenderPackets(encoder, TRUE);
+    UpdateOpaqueRenderPacketAdaptiveStats();
+    FlushOpaqueRenderPackets(encoder, TRUE, FALSE);
     return TRUE;
 }
 
@@ -2075,7 +2103,7 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.TransientVertexBytes,
                    m_FrameStats.TransientIndexBytes);
         CK_LOG_FMT("FFPStats.Packet",
-                   "frame=%u q=%u replay=%u fb=%u flush=%u overflow=%u runs=%u maxRun=%u skipState=%u skipTex=%u skipUniform=%u staticUp=%u staticSkip=%u objectUp=%u objectSkip=%u skipVB=%u skipIB=%u staticBuild=%u staticReuse=%u staticIntern=%u sortSkip=%u adaptiveSamples=%u adaptiveBypasses=%u adaptiveRunBypasses=%u adaptiveSaved=%u adaptiveSampleRuns=%u adaptiveSampleMaxRun=%u adaptiveSubmitSaved=%u viewProjRebuild=%u instRuns=%u instPackets=%u instSubmits=%u instBytes=%u instAllocFail=%u submitSaved=%u instFallbacks=%u",
+                   "frame=%u q=%u replay=%u fb=%u flush=%u overflow=%u runs=%u maxRun=%u skipState=%u skipTex=%u skipUniform=%u staticUp=%u staticSkip=%u objectUp=%u objectSkip=%u skipVB=%u skipIB=%u staticBuild=%u staticReuse=%u staticIntern=%u sortSkip=%u adaptiveSamples=%u adaptiveBypasses=%u adaptiveRunBypasses=%u adaptiveCooldownBypasses=%u adaptiveCooldownFrames=%u adaptiveFrameEndEvals=%u adaptiveFrameEndRunBypasses=%u adaptiveSaved=%u adaptiveSampleRuns=%u adaptiveSampleMaxRun=%u adaptiveSubmitSaved=%u viewProjRebuild=%u instRuns=%u instPackets=%u instSubmits=%u instBytes=%u instAllocFail=%u submitSaved=%u instFallbacks=%u",
                    m_FrameStats.FrameIndex,
                    m_FrameStats.QueuedRenderPackets,
                    m_FrameStats.ReplayedRenderPackets,
@@ -2100,6 +2128,10 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
                    m_FrameStats.RenderPacketAdaptiveSamples,
                    m_FrameStats.RenderPacketAdaptiveBypasses,
                    m_FrameStats.RenderPacketAdaptiveRunBypasses,
+                   m_FrameStats.RenderPacketAdaptiveCooldownBypasses,
+                   m_FrameStats.RenderPacketAdaptiveCooldownFrames,
+                   m_FrameStats.RenderPacketAdaptiveFrameEndEvaluations,
+                   m_FrameStats.RenderPacketAdaptiveFrameEndRunBypasses,
                    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate,
                    m_FrameStats.RenderPacketAdaptiveSampleRuns,
                    m_FrameStats.RenderPacketAdaptiveSampleMaxRun,
@@ -2450,15 +2482,7 @@ void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
 void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
 {
     m_OpaquePacketQueue.ResetFrameState();
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    m_FrameStats.RenderPacketAdaptiveSamples = 0;
-    m_FrameStats.RenderPacketAdaptiveBypasses = 0;
-    m_FrameStats.RenderPacketAdaptiveSavedBindEstimate = 0;
-    m_FrameStats.RenderPacketAdaptiveRunBypasses = 0;
-    m_FrameStats.RenderPacketAdaptiveSampleRuns = 0;
-    m_FrameStats.RenderPacketAdaptiveSampleMaxRun = 0;
-    m_FrameStats.RenderPacketAdaptiveSubmitSavedEstimate = 0;
-#endif
+    UpdateOpaqueRenderPacketAdaptiveStats();
 }
 
 void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
@@ -2514,7 +2538,8 @@ void CKFixedFunctionPipeline::InitRenderPacketReplayContext(CKFFRenderPacketRepl
 }
 
 void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
-                                                       CKBOOL forceDirectReplay)
+                                                       CKBOOL forceDirectReplay,
+                                                       CKBOOL allowAdaptiveLearning)
 {
     if (!HasOpaqueRenderPackets())
         return;
@@ -2543,6 +2568,11 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     if (m_DiagnosticConfig.StatsEnabled)
         m_FrameStats.RenderPacketSortUs += CKRenderPerfElapsedUs(packetTimer);
 #endif
+
+    if (allowAdaptiveLearning) {
+        m_OpaquePacketQueue.EvaluateAdaptiveFrameEnd(m_OpaqueInstancingEnabled);
+        UpdateOpaqueRenderPacketAdaptiveStats();
+    }
 
     CKRenderPacketReplayCache cache;
     memset(&cache, 0, sizeof(cache));
