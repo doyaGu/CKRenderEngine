@@ -182,18 +182,37 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_TRANSPARENT_SORT_RENDER]),
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_FOREGROUND_2D]));
     fprintf(file,
-            "[CK2_3D] [FrameCostStats.DrawCounts] entities3D=%u entities2D=%u drawPrimitive=%u fastQuad=%u fastFallback=%u viewportSkip=%u materialSet=%u materialNoOpCandidate=%u submitted=%u primitiveSubmit=%u meshSubmit=%u\n",
+            "[CK2_3D] [FrameCostStats.DrawCounts] entities3D=%u entities2D=%u meshRender=%u meshGroup=%u 2dRender=%u 2dExtents=%u 2dDraw=%u spriteDraw=%u drawPrimitive=%u sanitize=%u submitted=%u primitiveSubmit=%u meshSubmit=%u\n",
             CKRenderFrameCostAverageDword(s.Entities3D),
             CKRenderFrameCostAverageDword(s.Entities2D),
+            CKRenderFrameCostAverageDword(s.MeshRenderCalls),
+            CKRenderFrameCostAverageDword(s.MeshGroupCalls),
+            CKRenderFrameCostAverageDword(s.TwoDEntityRenderCalls),
+            CKRenderFrameCostAverageDword(s.TwoDEntityUpdateExtentsCalls),
+            CKRenderFrameCostAverageDword(s.TwoDEntityDrawCalls),
+            CKRenderFrameCostAverageDword(s.SpriteDrawCalls),
             CKRenderFrameCostAverageDword(s.DrawPrimitiveCalls),
-            CKRenderFrameCostAverageDword(s.DrawPrimitiveFastPathHits),
-            CKRenderFrameCostAverageDword(s.DrawPrimitiveFastPathFallbacks),
-            CKRenderFrameCostAverageDword(s.ViewportSetSkipped),
-            CKRenderFrameCostAverageDword(s.MaterialSetCalls),
-            CKRenderFrameCostAverageDword(s.MaterialNoOpCandidates),
+            CKRenderFrameCostAverageDword(s.DrawPrimitiveSanitizeCalls),
             CKRenderFrameCostAverageDword(s.SubmittedDraws),
             CKRenderFrameCostAverageDword(s.PrimitiveSubmits),
             CKRenderFrameCostAverageDword(s.MeshSubmits));
+    fprintf(file,
+            "[CK2_3D] [FrameCostStats.Primitive] wrapperQuadCandidate=%u wrapperQuadFallback=%u ffpQuadCandidate=%u ffpQuadHit=%u ffpQuadFallback=%u spriteBatchCandidate=%u spriteBatchHit=%u spriteBatchFallback=%u transientPrepare=%u fanToList=%u transientVB=%u transientIB=%u viewportSkip=%u materialSet=%u materialNoOpCandidate=%u\n",
+            CKRenderFrameCostAverageDword(s.DrawPrimitiveFastPathCandidates),
+            CKRenderFrameCostAverageDword(s.DrawPrimitiveFastPathFallbacks),
+            CKRenderFrameCostAverageDword(s.TransientQuadFastPathCandidates),
+            CKRenderFrameCostAverageDword(s.TransientQuadFastPathHits),
+            CKRenderFrameCostAverageDword(s.TransientQuadFastPathFallbacks),
+            CKRenderFrameCostAverageDword(s.TransientSpriteBatchFastPathCandidates),
+            CKRenderFrameCostAverageDword(s.TransientSpriteBatchFastPathHits),
+            CKRenderFrameCostAverageDword(s.TransientSpriteBatchFastPathFallbacks),
+            CKRenderFrameCostAverageDword(s.TransientPrepareCalls),
+            CKRenderFrameCostAverageDword(s.TransientFanToListConversions),
+            CKRenderFrameCostAverageDword(s.TransientVertexBytes),
+            CKRenderFrameCostAverageDword(s.TransientIndexBytes),
+            CKRenderFrameCostAverageDword(s.ViewportSetSkipped),
+            CKRenderFrameCostAverageDword(s.MaterialSetCalls),
+            CKRenderFrameCostAverageDword(s.MaterialNoOpCandidates));
     fclose(file);
     g_FrameCostStats.SummaryWritten = TRUE;
 }
@@ -324,6 +343,70 @@ void CKRenderFrameCostStatsAddMeshGroup()
 {
     if (CKRenderFrameCostStatsIsCollecting())
         ++g_FrameCostStats.Totals.MeshGroupCalls;
+}
+
+void CKRenderFrameCostStatsAdd2DEntityRender()
+{
+    if (CKRenderFrameCostStatsIsCollecting())
+        ++g_FrameCostStats.Totals.TwoDEntityRenderCalls;
+}
+
+void CKRenderFrameCostStatsAdd2DEntityUpdateExtents()
+{
+    if (CKRenderFrameCostStatsIsCollecting())
+        ++g_FrameCostStats.Totals.TwoDEntityUpdateExtentsCalls;
+}
+
+void CKRenderFrameCostStatsAdd2DEntityDraw()
+{
+    if (CKRenderFrameCostStatsIsCollecting())
+        ++g_FrameCostStats.Totals.TwoDEntityDrawCalls;
+}
+
+void CKRenderFrameCostStatsAddSpriteDraw()
+{
+    if (CKRenderFrameCostStatsIsCollecting())
+        ++g_FrameCostStats.Totals.SpriteDrawCalls;
+}
+
+void CKRenderFrameCostStatsAddDrawPrimitiveSanitize()
+{
+    if (CKRenderFrameCostStatsIsCollecting())
+        ++g_FrameCostStats.Totals.DrawPrimitiveSanitizeCalls;
+}
+
+void CKRenderFrameCostStatsAddTransientPrepare(CKBOOL quadCandidate,
+                                               CKBOOL quadHit,
+                                               CKDWORD vertexBytes,
+                                               CKDWORD indexBytes,
+                                               CKBOOL fanToListConversion)
+{
+    if (!CKRenderFrameCostStatsIsCollecting())
+        return;
+    ++g_FrameCostStats.Totals.TransientPrepareCalls;
+    if (quadCandidate)
+        ++g_FrameCostStats.Totals.TransientQuadFastPathCandidates;
+    if (quadHit)
+        ++g_FrameCostStats.Totals.TransientQuadFastPathHits;
+    else if (quadCandidate)
+        ++g_FrameCostStats.Totals.TransientQuadFastPathFallbacks;
+    if (fanToListConversion)
+        ++g_FrameCostStats.Totals.TransientFanToListConversions;
+    g_FrameCostStats.Totals.TransientVertexBytes += vertexBytes;
+    g_FrameCostStats.Totals.TransientIndexBytes += indexBytes;
+}
+
+void CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(CKBOOL candidate,
+                                                           CKBOOL hit)
+{
+    if (!CKRenderFrameCostStatsIsCollecting())
+        return;
+    if (candidate)
+        ++g_FrameCostStats.Totals.TransientSpriteBatchFastPathCandidates;
+    if (hit)
+        ++g_FrameCostStats.Totals.TransientSpriteBatchFastPathHits;
+    else if (candidate)
+        ++g_FrameCostStats.Totals.TransientSpriteBatchFastPathFallbacks;
 }
 
 void CKRenderFrameCostStatsAddPrimitiveSubmit()

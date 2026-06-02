@@ -1576,6 +1576,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         memcpy(&drawData, data, sizeof(VxDrawPrimitiveDataSimple));
     }
     drawData.Flags &= ~CKRST_DP_VBUFFER;
+    CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
     ApplyDrawAnnotation(encoder, view, pType,
                         (CKDWORD)indexcount,
                         (CKDWORD)drawData.VertexCount);

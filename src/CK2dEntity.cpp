@@ -7,6 +7,7 @@
 #include "CKDebugLogger.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKDrawAnnotation.h"
+#include "CKRenderFrameCostStats.h"
 
 // External function from CKMeshUtils.cpp
 extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
@@ -618,6 +619,7 @@ CKBOOL RCK2dEntity::IsClippedToCamera() {
 
 // IDA: 0x1005cce5 - Updates clipped extents (m_VtxPos and m_SrcRect) for rendering
 CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
+    CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
     RCKRenderContext *rc = (RCKRenderContext *) dev;
 
     // Determine source rect to use
@@ -773,6 +775,7 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
 CKERROR RCK2dEntity::Render(CKRenderContext *context) {
     // IDA: 0x1005ed00
     RCKRenderContext *dev = (RCKRenderContext *) context;
+    CKRenderFrameCostStatsAdd2DEntityRender();
 
     // Check if hidden by parent hierarchy
     if (m_ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
@@ -830,6 +833,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
 CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
     // IDA: 0x1005e430
     RCKRenderContext *dev = (RCKRenderContext *) context;
+    CKRenderFrameCostStatsAdd2DEntityDraw();
 
     if (m_Material) {
         // Save viewport if not clip-to-camera
