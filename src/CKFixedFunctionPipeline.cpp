@@ -1530,8 +1530,10 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
         VxMatrix matrices[4];
         matrices[0] = vertexBlend ? viewProj : modelViewProj;
         matrices[1] = m_World;
-        matrices[2] = vertexBlend ? m_View : modelView;
-        matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
+        if (viewSpaceUniforms) {
+            matrices[2] = vertexBlend ? m_View : modelView;
+            matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
+        }
         if (vertexBlend) {
             VxMatrix identity;
             identity.Identity();
@@ -1852,8 +1854,10 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
     uniforms->MatrixCount = viewSpaceUniforms ? 4 : 2;
     uniforms->Matrices[0] = modelViewProj;
     uniforms->Matrices[1] = m_World;
-    uniforms->Matrices[2] = modelView;
-    uniforms->Matrices[3] = normalMatrix;
+    if (viewSpaceUniforms) {
+        uniforms->Matrices[2] = modelView;
+        uniforms->Matrices[3] = normalMatrix;
+    }
     return TRUE;
 }
 
