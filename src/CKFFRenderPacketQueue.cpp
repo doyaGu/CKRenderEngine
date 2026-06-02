@@ -249,6 +249,48 @@ void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
     }
 }
 
+void CKFFRenderPacketQueue::GetRunStats(const XArray<CKDWORD> *indices,
+                                        CKBOOL directReplay,
+                                        CKDWORD *runCount,
+                                        CKDWORD *maxRun) const
+{
+    CKDWORD runs = 0;
+    CKDWORD currentRun = 0;
+    CKDWORD longestRun = 0;
+    const int count = directReplay || !indices ? m_Packets.Size() : indices->Size();
+
+    for (int i = 0; i < count; ++i) {
+        const int packetIndex = directReplay || !indices
+            ? i
+            : (int)(*indices)[i];
+        const CKRenderPacket &packet = m_Packets[packetIndex];
+        if (i == 0) {
+            runs = 1;
+            currentRun = 1;
+        } else {
+            const int previousIndex = directReplay || !indices
+                ? i - 1
+                : (int)(*indices)[i - 1];
+            const CKRenderPacket &previous = m_Packets[previousIndex];
+            if (CKFFRenderPacketSameRunKey(previous, packet)) {
+                ++currentRun;
+            } else {
+                if (currentRun > longestRun)
+                    longestRun = currentRun;
+                ++runs;
+                currentRun = 1;
+            }
+        }
+    }
+
+    if (currentRun > longestRun)
+        longestRun = currentRun;
+    if (runCount)
+        *runCount = runs;
+    if (maxRun)
+        *maxRun = longestRun;
+}
+
 void CKFFRenderPacketQueue::BuildRunPlans(const XArray<CKDWORD> *indices,
                                           CKBOOL directReplay,
                                           CKBOOL instancingEnabled,

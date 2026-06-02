@@ -362,9 +362,6 @@ private:
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
                                        CKRasterizerEncoder *encoder);
-    void RecordOpaqueRenderPacketRuns(const XArray<CKDWORD> &indices,
-                                      CKBOOL directReplay,
-                                      int packetCount);
     void ClearOpaqueRenderPackets();
     void ResetOpaqueRenderPacketFrameState();
     CKDWORD InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload);
