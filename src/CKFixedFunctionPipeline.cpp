@@ -1755,38 +1755,48 @@ CKBOOL CKFixedFunctionPipeline::BuildObjectUniformPayload(CKFFRenderPacketUnifor
 
 CKBOOL CKFixedFunctionPipeline::CanBuildPacketObjectUniforms() const
 {
+    return GetPacketObjectUniformRejectReason() == CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
+}
+
+CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason() const
+{
     if (m_CurrentShaderKey.VS.GetHasPositionT())
-        return TRUE;
+        return CKFF_RENDER_PACKET_ELIGIBLE;
     if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
-        return FALSE;
-    return TRUE;
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
+    return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
 CKBOOL CKFixedFunctionPipeline::CanInstanceVertexBufferPacket() const
 {
+    return GetVertexBufferPacketInstancingRejectReason() == CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
+}
+
+CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason() const
+{
     if (!m_OpaqueInstancingEnabled || !m_InstanceLayout)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_INSTANCE_LAYOUT;
     if (m_CurrentShaderKey.VS.GetHasPositionT())
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_POSITIONT;
     if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     if (m_CurrentShaderKey.FS.LastActiveTextureStage >= 4)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
     for (CKDWORD stage = 0; stage <= m_CurrentShaderKey.FS.LastActiveTextureStage; ++stage) {
         if ((m_CurrentShaderKey.VS.TexCoordIndex[stage] & 7u) >= 4)
-            return FALSE;
+            return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
         if ((m_CurrentShaderKey.VS.TexGen[stage] & 7u) != 0)
-            return FALSE;
+            return CKFF_RENDER_PACKET_REJECT_TEXGEN;
     }
     if ((m_CurrentShaderKey.VS.Bits & (1ull << 13)) != 0)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_VIEW_SPACE_SHADER;
     if (m_CurrentShaderKey.FS.VertexFogMode != 0)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_FOG;
     if (m_CurrentShaderKey.FS.PixelFogMode != 0)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_PIXEL_FOG;
     if (m_CurrentShaderKey.FS.RangeFog)
-        return FALSE;
-    return TRUE;
+        return CKFF_RENDER_PACKET_REJECT_RANGE_FOG;
+    return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
 void CKFixedFunctionPipeline::UpdateViewProjectionCache()
@@ -2302,25 +2312,45 @@ CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView vi
                                                                  CKDWORD ib,
                                                                  CKDWORD vertexLayout) const
 {
-    if (!m_OpaqueSortingEnabled || !m_OpaquePacketAllowed)
-        return FALSE;
+    return GetOpaqueVertexBufferPacketRejectReason(view, type, vb, ib, vertexLayout) ==
+        CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
+}
+
+CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRenderView view,
+                                                                         VXPRIMITIVETYPE type,
+                                                                         CKDWORD vb,
+                                                                         CKDWORD ib,
+                                                                         CKDWORD vertexLayout) const
+{
+    if (!m_OpaqueSortingEnabled)
+        return CKFF_RENDER_PACKET_REJECT_SORT_DISABLED;
+    if (!m_OpaquePacketAllowed)
+        return CKFF_RENDER_PACKET_REJECT_PACKETS_DISALLOWED;
     if (m_OpaquePacketQueue.IsAdaptiveBypassed())
-        return FALSE;
-    if (!m_Context || !vb || !ib || !vertexLayout)
-        return FALSE;
-    if (view != CKRP_VIEW_OPAQUE3D || type != VX_TRIANGLELIST)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS;
+    if (!m_Context)
+        return CKFF_RENDER_PACKET_REJECT_NO_CONTEXT;
+    if (!vb)
+        return CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
+    if (!ib)
+        return CKFF_RENDER_PACKET_REJECT_MISSING_INDEX_BUFFER;
+    if (!vertexLayout)
+        return CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_LAYOUT;
+    if (view != CKRP_VIEW_OPAQUE3D)
+        return CKFF_RENDER_PACKET_REJECT_WRONG_VIEW;
+    if (type != VX_TRIANGLELIST)
+        return CKFF_RENDER_PACKET_REJECT_WRONG_PRIMITIVE;
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_ALPHA_BLEND;
     if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE))
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_Z_DISABLED;
     if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED;
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE)
-        return FALSE;
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
-        return FALSE;
-    return TRUE;
+        return CKFF_RENDER_PACKET_REJECT_INDEXED_VERTEX_BLEND;
+    return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
