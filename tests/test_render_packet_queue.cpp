@@ -67,6 +67,17 @@ void DrawPacketChurnCandidate(CKFixedFunctionPipeline *ffp,
                                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0));
 }
 
+void DrawPacketUniqueBindingCandidate(CKFixedFunctionPipeline *ffp,
+                                      FFPDiagnosticContext *context,
+                                      int index)
+{
+    ffp->SetTexture(0, 3000 + (CKDWORD)index, CKRST_TEXTURE_VALID);
+    DrawPacketCandidateWithFormat(ffp, context, CKRP_VIEW_OPAQUE3D,
+                                  1000 + (CKDWORD)index,
+                                  2000 + (CKDWORD)index,
+                                  CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0));
+}
+
 void SetPacketWorld(CKFixedFunctionPipeline *ffp, float x)
 {
     VxMatrix world;
@@ -559,6 +570,28 @@ void OpaquePacketAdaptiveBypassesLowBenefitFrame()
     ffp.Shutdown();
 }
 
+void OpaquePacketAdaptiveBypassesNoRepeatBindings()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+
+    for (int i = 0; i < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT; ++i)
+        DrawPacketUniqueBindingCandidate(&ffp, &context, i);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Adaptive sample without repeated texture or buffers must bypass");
+    TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
+              "No-repeat adaptive bypass must flush the sampled queue");
+    TestCheck(ffp.GetOpaquePacketAdaptiveBypasses() == 1,
+              "No-repeat adaptive bypass must be counted");
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketInstancingMergesHighRepeatRun()
 {
     FFPDiagnosticDriver driver;
@@ -845,6 +878,8 @@ int main()
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",
               &OpaquePacketAdaptiveBypassesLowBenefitFrame);
+    tests.Run("Opaque packet adaptive bypasses no repeat bindings",
+              &OpaquePacketAdaptiveBypassesNoRepeatBindings);
     tests.Run("Opaque packet instancing merges high-repeat run",
               &OpaquePacketInstancingMergesHighRepeatRun);
     tests.Run("Opaque packet instancing can be disabled",

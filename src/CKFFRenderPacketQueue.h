@@ -52,6 +52,7 @@ public:
 private:
     void TrackPacket(const CKRenderPacket &packet);
     CKDWORD EstimateSavedBinds(const CKRenderPacket &packet) const;
+    CKDWORD EstimateRepeatBinds(const CKRenderPacket &packet) const;
 
     XArray<CKRenderPacket> m_Packets;
     XArray<CKFFRenderPacketUniformPayload> m_StaticUniformPayloads;
@@ -69,6 +70,7 @@ private:
     CKDWORD m_AdaptiveSamples;
     CKDWORD m_AdaptiveBypasses;
     CKDWORD m_AdaptiveSavedBindEstimate;
+    CKDWORD m_AdaptiveRepeatBindEstimate;
 };
 
 #endif

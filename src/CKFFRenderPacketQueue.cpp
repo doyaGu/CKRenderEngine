@@ -14,7 +14,8 @@ CKFFRenderPacketQueue::CKFFRenderPacketQueue()
       m_AdaptiveBypass(FALSE),
       m_AdaptiveSamples(0),
       m_AdaptiveBypasses(0),
-      m_AdaptiveSavedBindEstimate(0)
+      m_AdaptiveSavedBindEstimate(0),
+      m_AdaptiveRepeatBindEstimate(0)
 {
     memset(&m_FirstPacketSortKey, 0, sizeof(m_FirstPacketSortKey));
     memset(&m_LastPacketSortKey, 0, sizeof(m_LastPacketSortKey));
@@ -38,6 +39,7 @@ void CKFFRenderPacketQueue::ResetFrameState()
     m_AdaptiveSamples = 0;
     m_AdaptiveBypasses = 0;
     m_AdaptiveSavedBindEstimate = 0;
+    m_AdaptiveRepeatBindEstimate = 0;
 }
 
 CKBOOL CKFFRenderPacketQueue::HasPackets() const
@@ -165,6 +167,8 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass() const
         return FALSE;
     if (m_AdaptiveSamples > CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
         return FALSE;
+    if (m_AdaptiveRepeatBindEstimate == 0)
+        return TRUE;
     if (m_AdaptiveSavedBindEstimate >= (m_AdaptiveSamples / 2))
         return FALSE;
     return TRUE;
@@ -337,6 +341,7 @@ void CKFFRenderPacketQueue::TrackPacket(const CKRenderPacket &packet)
 {
     ++m_AdaptiveSamples;
     m_AdaptiveSavedBindEstimate += EstimateSavedBinds(packet);
+    m_AdaptiveRepeatBindEstimate += EstimateRepeatBinds(packet);
 
     if (!m_HasLastKey) {
         m_HasLastKey = TRUE;
@@ -368,6 +373,28 @@ CKDWORD CKFFRenderPacketQueue::EstimateSavedBinds(const CKRenderPacket &packet) 
         ++saved;
     if (prev.StaticUniformIndex == packet.StaticUniformIndex)
         ++saved;
+    if (prev.SortKey.TextureSetHash == packet.SortKey.TextureSetHash &&
+        prev.ActiveTextureCount == packet.ActiveTextureCount)
+        ++saved;
+    if (prev.VertexLayout == packet.VertexLayout &&
+        prev.VertexBuffer == packet.VertexBuffer &&
+        prev.BaseVertex == packet.BaseVertex &&
+        prev.VertexCount == packet.VertexCount)
+        ++saved;
+    if (prev.IndexBuffer == packet.IndexBuffer &&
+        prev.StartIndex == packet.StartIndex &&
+        prev.IndexCount == packet.IndexCount)
+        ++saved;
+    return saved;
+}
+
+CKDWORD CKFFRenderPacketQueue::EstimateRepeatBinds(const CKRenderPacket &packet) const
+{
+    if (m_Packets.Size() <= 0)
+        return 0;
+
+    const CKRenderPacket &prev = m_Packets[m_Packets.Size() - 1];
+    CKDWORD saved = 0;
     if (prev.SortKey.TextureSetHash == packet.SortKey.TextureSetHash &&
         prev.ActiveTextureCount == packet.ActiveTextureCount)
         ++saved;
