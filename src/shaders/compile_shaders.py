@@ -34,6 +34,8 @@ SHADERS = [
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage"},
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_volume",
      "defines": ["CKFF_VOLUME_SAMPLER_LAYOUT=1"]},
+    {"source": "vs_postprocess.sc", "stage": "vertex", "name": "vs_postprocess"},
+    {"source": "fs_postprocess.sc", "stage": "fragment", "name": "fs_postprocess"},
 ]
 
 
