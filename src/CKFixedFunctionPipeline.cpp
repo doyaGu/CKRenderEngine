@@ -2375,6 +2375,98 @@ void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
     m_OpaquePacketQueue.SortPackets(indices);
 }
 
+void CKFixedFunctionPipeline::InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
+                                                            CKRasterizerEncoder *encoder)
+{
+    if (!context)
+        return;
+
+    memset(context, 0, sizeof(CKFFRenderPacketReplayContext));
+    context->Encoder = encoder;
+    context->Context = m_Context;
+    context->Queue = &m_OpaquePacketQueue;
+    context->InstanceLayout = m_InstanceLayout;
+    CKFFInitRenderPacketReplayDiagnostics(&context->Diagnostics);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    context->Diagnostics.StatsEnabled =
+        m_DiagnosticConfig.StatsEnabled ? TRUE : FALSE;
+    context->Diagnostics.UniformHistEnabled =
+        m_DiagnosticConfig.UniformHistEnabled ? TRUE : FALSE;
+    context->Diagnostics.Uniforms = &m_ShaderCache.GetUniforms();
+    context->Diagnostics.UniformSets = &m_FrameStats.UniformSets;
+    context->Diagnostics.UniformVec4s = &m_FrameStats.UniformVec4s;
+    context->Diagnostics.UniformHandleSets = m_FrameStats.UniformHandleSets;
+    context->Diagnostics.UniformHandleVec4s = m_FrameStats.UniformHandleVec4s;
+    context->Diagnostics.TextureBinds = &m_FrameStats.TextureBinds;
+    context->Diagnostics.VertexLayoutSets = &m_FrameStats.VertexLayoutSets;
+    context->Diagnostics.VertexBufferSets = &m_FrameStats.VertexBufferSets;
+    context->Diagnostics.IndexBufferSets = &m_FrameStats.IndexBufferSets;
+    context->Diagnostics.TransformSets = &m_FrameStats.TransformSets;
+    context->Diagnostics.SubmittedDraws = &m_FrameStats.SubmittedDraws;
+    context->Diagnostics.ReplayedRenderPackets = &m_FrameStats.ReplayedRenderPackets;
+    context->Diagnostics.RenderPacketSkippedStates = &m_FrameStats.RenderPacketSkippedStates;
+    context->Diagnostics.RenderPacketSkippedTextures = &m_FrameStats.RenderPacketSkippedTextures;
+    context->Diagnostics.RenderPacketSkippedUniforms = &m_FrameStats.RenderPacketSkippedUniforms;
+    context->Diagnostics.RenderPacketStaticUniformUploads = &m_FrameStats.RenderPacketStaticUniformUploads;
+    context->Diagnostics.RenderPacketStaticUniformSkips = &m_FrameStats.RenderPacketStaticUniformSkips;
+    context->Diagnostics.RenderPacketObjectUniformUploads = &m_FrameStats.RenderPacketObjectUniformUploads;
+    context->Diagnostics.RenderPacketSkippedVertexBuffers = &m_FrameStats.RenderPacketSkippedVertexBuffers;
+    context->Diagnostics.RenderPacketSkippedIndexBuffers = &m_FrameStats.RenderPacketSkippedIndexBuffers;
+    context->Diagnostics.RenderPacketInstancedRuns = &m_FrameStats.RenderPacketInstancedRuns;
+    context->Diagnostics.RenderPacketInstancedPackets = &m_FrameStats.RenderPacketInstancedPackets;
+    context->Diagnostics.RenderPacketInstancedSubmits = &m_FrameStats.RenderPacketInstancedSubmits;
+    context->Diagnostics.RenderPacketInstanceBufferBytes = &m_FrameStats.RenderPacketInstanceBufferBytes;
+    context->Diagnostics.RenderPacketInstanceAllocFailures = &m_FrameStats.RenderPacketInstanceAllocFailures;
+    context->Diagnostics.RenderPacketSubmitSavedEstimate = &m_FrameStats.RenderPacketSubmitSavedEstimate;
+    context->Diagnostics.RenderPacketInstancingFallbacks = &m_FrameStats.RenderPacketInstancingFallbacks;
+#endif
+}
+
+void CKFixedFunctionPipeline::RecordOpaqueRenderPacketRuns(const XArray<CKDWORD> &indices,
+                                                           CKBOOL directReplay,
+                                                           int packetCount)
+{
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (!m_DiagnosticConfig.StatsEnabled)
+        return;
+
+    CKDWORD runCount = 0;
+    CKDWORD currentRun = 0;
+    CKDWORD maxRun = 0;
+    const int replayCount = directReplay ? packetCount : indices.Size();
+    for (int i = 0; i < replayCount; ++i) {
+        const CKRenderPacket &packet = directReplay
+            ? m_OpaquePacketQueue.GetPacket(i)
+            : m_OpaquePacketQueue.GetPacket((int)indices[i]);
+        if (i == 0) {
+            runCount = 1;
+            currentRun = 1;
+        } else {
+            const CKRenderPacket &prevPacket = directReplay
+                ? m_OpaquePacketQueue.GetPacket(i - 1)
+                : m_OpaquePacketQueue.GetPacket((int)indices[i - 1]);
+            if (CKFFRenderPacketSameRunKey(prevPacket, packet)) {
+                ++currentRun;
+            } else {
+                if (currentRun > maxRun)
+                    maxRun = currentRun;
+                ++runCount;
+                currentRun = 1;
+            }
+        }
+    }
+    if (currentRun > maxRun)
+        maxRun = currentRun;
+    m_FrameStats.RenderPacketRuns += runCount;
+    if (maxRun > m_FrameStats.RenderPacketMaxRunLength)
+        m_FrameStats.RenderPacketMaxRunLength = maxRun;
+#else
+    (void)indices;
+    (void)directReplay;
+    (void)packetCount;
+#endif
+}
+
 void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
                                                        CKBOOL forceDirectReplay)
 {
@@ -2409,79 +2501,8 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     CKRenderPacketReplayCache cache;
     memset(&cache, 0, sizeof(cache));
     CKFFRenderPacketReplayContext replayContext;
-    memset(&replayContext, 0, sizeof(replayContext));
-    replayContext.Encoder = encoder;
-    replayContext.Context = m_Context;
-    replayContext.Queue = &m_OpaquePacketQueue;
-    replayContext.InstanceLayout = m_InstanceLayout;
-    CKFFInitRenderPacketReplayDiagnostics(&replayContext.Diagnostics);
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    replayContext.Diagnostics.StatsEnabled =
-        m_DiagnosticConfig.StatsEnabled ? TRUE : FALSE;
-    replayContext.Diagnostics.UniformHistEnabled =
-        m_DiagnosticConfig.UniformHistEnabled ? TRUE : FALSE;
-    replayContext.Diagnostics.Uniforms = &m_ShaderCache.GetUniforms();
-    replayContext.Diagnostics.UniformSets = &m_FrameStats.UniformSets;
-    replayContext.Diagnostics.UniformVec4s = &m_FrameStats.UniformVec4s;
-    replayContext.Diagnostics.UniformHandleSets = m_FrameStats.UniformHandleSets;
-    replayContext.Diagnostics.UniformHandleVec4s = m_FrameStats.UniformHandleVec4s;
-    replayContext.Diagnostics.TextureBinds = &m_FrameStats.TextureBinds;
-    replayContext.Diagnostics.VertexLayoutSets = &m_FrameStats.VertexLayoutSets;
-    replayContext.Diagnostics.VertexBufferSets = &m_FrameStats.VertexBufferSets;
-    replayContext.Diagnostics.IndexBufferSets = &m_FrameStats.IndexBufferSets;
-    replayContext.Diagnostics.TransformSets = &m_FrameStats.TransformSets;
-    replayContext.Diagnostics.SubmittedDraws = &m_FrameStats.SubmittedDraws;
-    replayContext.Diagnostics.ReplayedRenderPackets = &m_FrameStats.ReplayedRenderPackets;
-    replayContext.Diagnostics.RenderPacketSkippedStates = &m_FrameStats.RenderPacketSkippedStates;
-    replayContext.Diagnostics.RenderPacketSkippedTextures = &m_FrameStats.RenderPacketSkippedTextures;
-    replayContext.Diagnostics.RenderPacketSkippedUniforms = &m_FrameStats.RenderPacketSkippedUniforms;
-    replayContext.Diagnostics.RenderPacketStaticUniformUploads = &m_FrameStats.RenderPacketStaticUniformUploads;
-    replayContext.Diagnostics.RenderPacketStaticUniformSkips = &m_FrameStats.RenderPacketStaticUniformSkips;
-    replayContext.Diagnostics.RenderPacketObjectUniformUploads = &m_FrameStats.RenderPacketObjectUniformUploads;
-    replayContext.Diagnostics.RenderPacketSkippedVertexBuffers = &m_FrameStats.RenderPacketSkippedVertexBuffers;
-    replayContext.Diagnostics.RenderPacketSkippedIndexBuffers = &m_FrameStats.RenderPacketSkippedIndexBuffers;
-    replayContext.Diagnostics.RenderPacketInstancedRuns = &m_FrameStats.RenderPacketInstancedRuns;
-    replayContext.Diagnostics.RenderPacketInstancedPackets = &m_FrameStats.RenderPacketInstancedPackets;
-    replayContext.Diagnostics.RenderPacketInstancedSubmits = &m_FrameStats.RenderPacketInstancedSubmits;
-    replayContext.Diagnostics.RenderPacketInstanceBufferBytes = &m_FrameStats.RenderPacketInstanceBufferBytes;
-    replayContext.Diagnostics.RenderPacketInstanceAllocFailures = &m_FrameStats.RenderPacketInstanceAllocFailures;
-    replayContext.Diagnostics.RenderPacketSubmitSavedEstimate = &m_FrameStats.RenderPacketSubmitSavedEstimate;
-    replayContext.Diagnostics.RenderPacketInstancingFallbacks = &m_FrameStats.RenderPacketInstancingFallbacks;
-#endif
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (m_DiagnosticConfig.StatsEnabled) {
-        CKDWORD runCount = 0;
-        CKDWORD currentRun = 0;
-        CKDWORD maxRun = 0;
-        const int replayCount = directReplay ? packetCount : indices.Size();
-        for (int i = 0; i < replayCount; ++i) {
-            const CKRenderPacket &packet = directReplay
-                ? m_OpaquePacketQueue.GetPacket(i)
-                : m_OpaquePacketQueue.GetPacket((int)indices[i]);
-            if (i == 0) {
-                runCount = 1;
-                currentRun = 1;
-            } else {
-                const CKRenderPacket &prevPacket = directReplay
-                    ? m_OpaquePacketQueue.GetPacket(i - 1)
-                    : m_OpaquePacketQueue.GetPacket((int)indices[i - 1]);
-                if (CKFFRenderPacketSameRunKey(prevPacket, packet)) {
-                    ++currentRun;
-                } else {
-                    if (currentRun > maxRun)
-                        maxRun = currentRun;
-                    ++runCount;
-                    currentRun = 1;
-                }
-            }
-        }
-        if (currentRun > maxRun)
-            maxRun = currentRun;
-        m_FrameStats.RenderPacketRuns += runCount;
-        if (maxRun > m_FrameStats.RenderPacketMaxRunLength)
-            m_FrameStats.RenderPacketMaxRunLength = maxRun;
-    }
-#endif
+    InitRenderPacketReplayContext(&replayContext, encoder);
+    RecordOpaqueRenderPacketRuns(indices, directReplay, packetCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (m_DiagnosticConfig.StatsEnabled)
         packetTimer = CKRenderPerfNow();
