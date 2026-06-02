@@ -2396,20 +2396,6 @@ void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
     m_OpaquePacketQueue.SortPackets(indices);
 }
 
-CKBOOL CKFixedFunctionPipeline::CanInstanceVertexBufferPacketRun(const CKRenderPacket &a,
-                                                                 const CKRenderPacket &b) const
-{
-    if (!a.CanInstance || !b.CanInstance)
-        return FALSE;
-    if (a.InstancedProgram != b.InstancedProgram)
-        return FALSE;
-    if (!CKFFRenderPacketSameRunKey(a, b))
-        return FALSE;
-    if (a.ViewProjectionHash != b.ViewProjectionHash)
-        return FALSE;
-    return memcmp(&a.ViewProjection, &b.ViewProjection, sizeof(VxMatrix)) == 0 ? TRUE : FALSE;
-}
-
 void CKFixedFunctionPipeline::BindVertexBufferPacketSharedState(CKRasterizerEncoder *encoder,
                                                                 const CKRenderPacket &packet,
                                                                 CKRenderPacketReplayCache *cache)
@@ -2767,46 +2753,29 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     if (m_DiagnosticConfig.StatsEnabled)
         packetTimer = CKRenderPerfNow();
 #endif
-    const int count = directReplay ? packetCount : indices.Size();
-    for (int i = 0; i < count;) {
-        const int packetIndex = directReplay
-            ? i
-            : (int)indices[i];
-        const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
-        int runLength = 1;
-        if (packet.CanInstance) {
-            while (i + runLength < count) {
-                const int nextIndex = directReplay
-                    ? i + runLength
-                    : (int)indices[i + runLength];
-                const CKRenderPacket &nextPacket = m_OpaquePacketQueue.GetPacket(nextIndex);
-                if (!CanInstanceVertexBufferPacketRun(packet, nextPacket))
-                    break;
-                ++runLength;
-            }
-        }
-
-        if (runLength >= CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT) {
-            if (ReplayVertexBufferPacketRunInstanced(encoder, &indices, i, runLength,
-                                                     directReplay, &cache,
-                                                     i + runLength == count ? TRUE : FALSE)) {
-                i += runLength;
+    XArray<CKFFRenderPacketRunPlan> runPlans;
+    m_OpaquePacketQueue.BuildRunPlans(&indices, directReplay, m_OpaqueInstancingEnabled, runPlans);
+    const int planCount = runPlans.Size();
+    const int replayCount = directReplay ? packetCount : indices.Size();
+    for (int planIndex = 0; planIndex < planCount; ++planIndex) {
+        const CKFFRenderPacketRunPlan &plan = runPlans[planIndex];
+        const CKBOOL lastPlan = (planIndex + 1 == planCount) ? TRUE : FALSE;
+        if (plan.Instanced) {
+            if (ReplayVertexBufferPacketRunInstanced(encoder, &indices, plan.Start, plan.Count,
+                                                     directReplay, &cache, lastPlan)) {
                 continue;
             }
-            for (int j = 0; j < runLength; ++j) {
-                const int fallbackIndex = directReplay
-                    ? i + j
-                    : (int)indices[i + j];
-                const CKRenderPacket &fallbackPacket = m_OpaquePacketQueue.GetPacket(fallbackIndex);
-                ReplayVertexBufferPacket(encoder, fallbackPacket, &cache,
-                                         i + j + 1 == count ? TRUE : FALSE);
-            }
-            i += runLength;
-            continue;
         }
 
-        ReplayVertexBufferPacket(encoder, packet, &cache, i + 1 == count ? TRUE : FALSE);
-        ++i;
+        for (int j = 0; j < plan.Count; ++j) {
+            const int orderIndex = plan.Start + j;
+            const int packetIndex = directReplay
+                ? orderIndex
+                : (int)indices[orderIndex];
+            const CKRenderPacket &packet = m_OpaquePacketQueue.GetPacket(packetIndex);
+            ReplayVertexBufferPacket(encoder, packet, &cache,
+                                     orderIndex + 1 == replayCount ? TRUE : FALSE);
+        }
     }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (m_DiagnosticConfig.StatsEnabled)
