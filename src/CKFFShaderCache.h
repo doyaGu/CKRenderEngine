@@ -26,6 +26,23 @@ struct CKFFProgramBinding {
     operator CKDWORD() const { return Program; }
 };
 
+struct CKFFProgramContext {
+    CKFFShaderKey ShaderKey;
+    CKFFProgramBinding Binding;
+    CKDWORD Program;
+    CKBOOL FullSpecialized;
+    CKFFSpecializationInfo Specialization;
+
+    CKFFProgramContext()
+        : ShaderKey(), Binding(), Program(0), FullSpecialized(FALSE), Specialization() {}
+};
+
+void CKFFInitProgramContext(CKFFProgramContext *context,
+                            const CKFFShaderKey &key,
+                            const CKFFProgramBinding &binding);
+CKBOOL CKFFCanUseInstancedProgramForPacket(const CKFFProgramContext &normalContext,
+                                           const CKFFProgramContext &instancedContext);
+
 struct CKFFShaderKeyXHash {
     int operator()(const CKFFShaderKey &key) const {
         CKFFShaderKeyHash hash;
