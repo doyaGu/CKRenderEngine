@@ -305,8 +305,6 @@ private:
     // Texture stage state
     CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     float m_Viewport[4];
-    CKViewportData m_LastViewportData;
-    CKBOOL m_HasLastViewportData;
     VxPlane m_UserClipPlanes[6];
     CKBYTE m_TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 

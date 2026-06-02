@@ -63,7 +63,6 @@ struct CKRenderFrameCostStatsSnapshot {
     CKDWORD TransientVertexBytes;
     CKDWORD TransientIndexBytes;
     CKDWORD ViewportSetCalls;
-    CKDWORD ViewportSetSkipped;
     CKDWORD PrimitiveSubmits;
     CKDWORD MeshSubmits;
     CKDWORD SubmittedDraws;
@@ -85,7 +84,7 @@ void CKRenderFrameCostStatsAddPlayerTiming(double updateUs, double inputUs,
                                            CKBOOL processRan, CKBOOL renderRan);
 void CKRenderFrameCostStatsAddSection(CKRenderFrameCostSection section, double us);
 void CKRenderFrameCostStatsAddDrawPrimitive();
-void CKRenderFrameCostStatsAddViewportSet(CKBOOL skipped);
+void CKRenderFrameCostStatsAddViewportSet();
 void CKRenderFrameCostStatsAddMaterialSet(CKBOOL noOpCandidate,
                                           CKBOOL skipped,
                                           CKBOOL dirtyMiss);
@@ -115,7 +114,7 @@ void CKRenderFrameCostStatsSetOutputEnabledForTests(CKBOOL enabled);
 #define CK_FRAME_COST_END_RENDER_FRAME() CKRenderFrameCostStatsEndRenderFrame()
 #define CK_FRAME_COST_ADD_SECTION(Section, Us) CKRenderFrameCostStatsAddSection((Section), (Us))
 #define CK_FRAME_COST_ADD_DRAW_PRIMITIVE() CKRenderFrameCostStatsAddDrawPrimitive()
-#define CK_FRAME_COST_ADD_VIEWPORT_SET(Skipped) CKRenderFrameCostStatsAddViewportSet((Skipped))
+#define CK_FRAME_COST_ADD_VIEWPORT_SET() CKRenderFrameCostStatsAddViewportSet()
 #define CK_FRAME_COST_ADD_MATERIAL_SET(NoOpCandidate, Skipped, DirtyMiss) \
     CKRenderFrameCostStatsAddMaterialSet((NoOpCandidate), (Skipped), (DirtyMiss))
 #define CK_FRAME_COST_ADD_MESH_RENDER() CKRenderFrameCostStatsAddMeshRender()
@@ -151,7 +150,7 @@ inline void CKRenderFrameCostStatsEndRenderFrame() {}
 inline void CKRenderFrameCostStatsAddPlayerTiming(double, double, double, double, CKBOOL, CKBOOL) {}
 inline void CKRenderFrameCostStatsAddSection(CKRenderFrameCostSection, double) {}
 inline void CKRenderFrameCostStatsAddDrawPrimitive() {}
-inline void CKRenderFrameCostStatsAddViewportSet(CKBOOL) {}
+inline void CKRenderFrameCostStatsAddViewportSet() {}
 inline void CKRenderFrameCostStatsAddMaterialSet(CKBOOL, CKBOOL, CKBOOL) {}
 inline void CKRenderFrameCostStatsAddMeshRender() {}
 inline void CKRenderFrameCostStatsAddMeshDefault() {}
@@ -182,7 +181,7 @@ inline void CKRenderFrameCostStatsSetOutputEnabledForTests(CKBOOL) {}
 #define CK_FRAME_COST_END_RENDER_FRAME() do {} while (0)
 #define CK_FRAME_COST_ADD_SECTION(Section, Us) do {} while (0)
 #define CK_FRAME_COST_ADD_DRAW_PRIMITIVE() do {} while (0)
-#define CK_FRAME_COST_ADD_VIEWPORT_SET(Skipped) do {} while (0)
+#define CK_FRAME_COST_ADD_VIEWPORT_SET() do {} while (0)
 #define CK_FRAME_COST_ADD_MATERIAL_SET(NoOpCandidate, Skipped, DirtyMiss) do {} while (0)
 #define CK_FRAME_COST_ADD_MESH_RENDER() do {} while (0)
 #define CK_FRAME_COST_ADD_MESH_DEFAULT() do {} while (0)
