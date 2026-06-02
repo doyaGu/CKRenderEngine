@@ -304,6 +304,7 @@ private:
     CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
                                      const CKFFProgramContext *programContext);
     CKBOOL CanBuildPacketObjectUniforms() const;
+    CKDWORD GetPacketObjectUniformRejectReason() const;
     void UpdateViewProjectionCache();
     void UploadPacketObjectUniforms(CKRasterizerEncoder *encoder,
                                     const CKRenderPacketObjectUniforms &uniforms);
@@ -343,6 +344,9 @@ private:
                                                    CKBOOL collectStats);
     CKBOOL CanQueueOpaqueVertexBufferPacket(CKRenderView view, VXPRIMITIVETYPE type,
                                             CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout) const;
+    CKDWORD GetOpaqueVertexBufferPacketRejectReason(CKRenderView view, VXPRIMITIVETYPE type,
+                                                    CKDWORD vb, CKDWORD ib,
+                                                    CKDWORD vertexLayout) const;
     CKBOOL BuildVertexBufferPacket(CKRasterizerEncoder *encoder,
                                    CKRenderPacket *packet, CKRenderView view,
                                    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
@@ -368,6 +372,7 @@ private:
                                                 CKRenderPacketReplayCache *cache,
                                                 CKBOOL lastRun);
     CKBOOL CanInstanceVertexBufferPacket() const;
+    CKDWORD GetVertexBufferPacketInstancingRejectReason() const;
     void BindVertexBufferPacketSharedState(CKRasterizerEncoder *encoder,
                                            const CKRenderPacket &packet,
                                            CKRenderPacketReplayCache *cache);
