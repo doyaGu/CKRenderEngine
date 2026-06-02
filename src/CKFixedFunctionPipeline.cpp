@@ -2326,51 +2326,6 @@ void CKFixedFunctionPipeline::InitRenderPacketReplayContext(CKFFRenderPacketRepl
 #endif
 }
 
-void CKFixedFunctionPipeline::RecordOpaqueRenderPacketRuns(const XArray<CKDWORD> &indices,
-                                                           CKBOOL directReplay,
-                                                           int packetCount)
-{
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (!m_DiagnosticConfig.StatsEnabled)
-        return;
-
-    CKDWORD runCount = 0;
-    CKDWORD currentRun = 0;
-    CKDWORD maxRun = 0;
-    const int replayCount = directReplay ? packetCount : indices.Size();
-    for (int i = 0; i < replayCount; ++i) {
-        const CKRenderPacket &packet = directReplay
-            ? m_OpaquePacketQueue.GetPacket(i)
-            : m_OpaquePacketQueue.GetPacket((int)indices[i]);
-        if (i == 0) {
-            runCount = 1;
-            currentRun = 1;
-        } else {
-            const CKRenderPacket &prevPacket = directReplay
-                ? m_OpaquePacketQueue.GetPacket(i - 1)
-                : m_OpaquePacketQueue.GetPacket((int)indices[i - 1]);
-            if (CKFFRenderPacketSameRunKey(prevPacket, packet)) {
-                ++currentRun;
-            } else {
-                if (currentRun > maxRun)
-                    maxRun = currentRun;
-                ++runCount;
-                currentRun = 1;
-            }
-        }
-    }
-    if (currentRun > maxRun)
-        maxRun = currentRun;
-    m_FrameStats.RenderPacketRuns += runCount;
-    if (maxRun > m_FrameStats.RenderPacketMaxRunLength)
-        m_FrameStats.RenderPacketMaxRunLength = maxRun;
-#else
-    (void)indices;
-    (void)directReplay;
-    (void)packetCount;
-#endif
-}
-
 void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
                                                        CKBOOL forceDirectReplay)
 {
@@ -2406,10 +2361,16 @@ void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *enco
     memset(&cache, 0, sizeof(cache));
     CKFFRenderPacketReplayContext replayContext;
     InitRenderPacketReplayContext(&replayContext, encoder);
-    RecordOpaqueRenderPacketRuns(indices, directReplay, packetCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (m_DiagnosticConfig.StatsEnabled)
+    if (m_DiagnosticConfig.StatsEnabled) {
+        CKDWORD runCount = 0;
+        CKDWORD maxRun = 0;
+        m_OpaquePacketQueue.GetRunStats(&indices, directReplay, &runCount, &maxRun);
+        m_FrameStats.RenderPacketRuns += runCount;
+        if (maxRun > m_FrameStats.RenderPacketMaxRunLength)
+            m_FrameStats.RenderPacketMaxRunLength = maxRun;
         packetTimer = CKRenderPerfNow();
+    }
 #endif
     XArray<CKFFRenderPacketRunPlan> runPlans;
     m_OpaquePacketQueue.BuildRunPlans(&indices, directReplay, m_OpaqueInstancingEnabled, runPlans);
