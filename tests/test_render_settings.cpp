@@ -3,6 +3,7 @@
 #include "VxMath.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static void OverridesReadEveryLegacyRootOption() {
     CKRenderSettingsClearOverridesForTests();
@@ -91,10 +92,40 @@ static void FfpRuntimeOptionsDoNotLiveUnderDebugStats() {
     CKRenderSettingsClearOverridesForTests();
 }
 
+static void FrameCostStatsDefaultsAndFallbacks() {
+    CKRenderSettingsClearOverridesForTests();
+
+    const CKRenderDiagnosticsConfig &defaults = CKRenderDiagnosticsSettings();
+    TestCheck(!defaults.FrameCostStats.Enabled,
+              "Debug.FrameCostStats must default disabled");
+    TestCheck(defaults.FrameCostStats.WarmupFrames == 120,
+              "Debug.FrameCostStats WarmupFrames default must be 120");
+    TestCheck(defaults.FrameCostStats.SampleFrames == 600,
+              "Debug.FrameCostStats SampleFrames default must be 600");
+
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "Enabled", "1");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "WarmupFrames", "-1");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "SampleFrames", "0");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameCostStats, "Output", "none");
+
+    const CKRenderDiagnosticsConfig &diagnostics = CKRenderDiagnosticsSettings();
+    TestCheck(diagnostics.FrameCostStats.Enabled,
+              "FrameCostStats Enabled must be read from Debug.FrameCostStats");
+    TestCheck(diagnostics.FrameCostStats.WarmupFrames == 120,
+              "invalid FrameCostStats warmup must fall back to 120");
+    TestCheck(diagnostics.FrameCostStats.SampleFrames == 600,
+              "invalid FrameCostStats sample must fall back to 600");
+    TestCheck(strcmp(diagnostics.FrameCostStats.Output, "none") == 0,
+              "FrameCostStats Output must be read from Debug.FrameCostStats");
+
+    CKRenderSettingsClearOverridesForTests();
+}
+
 int main() {
     TestFramework tests;
     tests.Run("CK2_3D root settings parse legacy options", &OverridesReadEveryLegacyRootOption);
     tests.Run("CK2_3D defaults prefer the full quality render path", &ModernDefaultsPreferFullQualityRenderPath);
     tests.Run("FFP runtime options do not live under Debug.FFPStats", &FfpRuntimeOptionsDoNotLiveUnderDebugStats);
+    tests.Run("FrameCostStats defaults and fallbacks", &FrameCostStatsDefaultsAndFallbacks);
     return tests.ExitCode();
 }
