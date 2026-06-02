@@ -205,6 +205,30 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
     CKFFReplayIncrement(context->Diagnostics.ReplayedRenderPackets, 1);
 }
 
+static void CKFFReplayVertexBufferPacketRange(CKFFRenderPacketReplayContext *context,
+                                              const XArray<CKDWORD> *indices,
+                                              int start,
+                                              int offset,
+                                              int packetCount,
+                                              CKBOOL directReplay,
+                                              CKRenderPacketReplayCache *cache,
+                                              CKBOOL lastRange)
+{
+    if (!context || !context->Queue)
+        return;
+    if (!directReplay && !indices)
+        return;
+
+    for (int i = 0; i < packetCount; ++i) {
+        const int packetIndex = directReplay
+            ? start + offset + i
+            : (int)(*indices)[start + offset + i];
+        const CKRenderPacket &packet = context->Queue->GetPacket(packetIndex);
+        CKFFReplayVertexBufferPacket(context, packet, cache,
+                                     lastRange && i + 1 == packetCount ? TRUE : FALSE);
+    }
+}
+
 CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *context,
                                                 const XArray<CKDWORD> *indices,
                                                 int start,
@@ -223,14 +247,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
     while (pos < packetCount) {
         int remaining = packetCount - pos;
         if (remaining < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT) {
-            for (int i = pos; i < packetCount; ++i) {
-                const int packetIndex = directReplay
-                    ? start + i
-                    : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = context->Queue->GetPacket(packetIndex);
-                CKFFReplayVertexBufferPacket(context, packet, cache,
-                                             lastRun && i + 1 == packetCount ? TRUE : FALSE);
-            }
+            CKFFReplayVertexBufferPacketRange(context, indices, start, pos, remaining,
+                                              directReplay, cache, lastRun);
             return TRUE;
         }
 
@@ -248,14 +266,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
             CKFFReplayIncrement(context->Diagnostics.RenderPacketInstancingFallbacks, 1);
             if (pos == 0)
                 return FALSE;
-            for (int i = pos; i < packetCount; ++i) {
-                const int packetIndex = directReplay
-                    ? start + i
-                    : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = context->Queue->GetPacket(packetIndex);
-                CKFFReplayVertexBufferPacket(context, packet, cache,
-                                             lastRun && i + 1 == packetCount ? TRUE : FALSE);
-            }
+            CKFFReplayVertexBufferPacketRange(context, indices, start, pos, remaining,
+                                              directReplay, cache, lastRun);
             return TRUE;
         }
 
@@ -267,14 +279,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
             CKFFReplayIncrement(context->Diagnostics.RenderPacketInstancingFallbacks, 1);
             if (pos == 0)
                 return FALSE;
-            for (int i = pos; i < packetCount; ++i) {
-                const int packetIndex = directReplay
-                    ? start + i
-                    : (int)(*indices)[start + i];
-                const CKRenderPacket &packet = context->Queue->GetPacket(packetIndex);
-                CKFFReplayVertexBufferPacket(context, packet, cache,
-                                             lastRun && i + 1 == packetCount ? TRUE : FALSE);
-            }
+            CKFFReplayVertexBufferPacketRange(context, indices, start, pos, remaining,
+                                              directReplay, cache, lastRun);
             return TRUE;
         }
 
