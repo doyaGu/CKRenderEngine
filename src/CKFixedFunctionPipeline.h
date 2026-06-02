@@ -318,6 +318,29 @@ private:
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
     float ComputeDepthKey() const;
+    CKBOOL ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
+                                            CKDWORD formatFlags,
+                                            CKFFProgramContext *programContext);
+    void CaptureVertexBufferPacketIdentity(CKRasterizerEncoder *encoder,
+                                           CKRenderPacket *packet,
+                                           const CKFFProgramContext *programContext,
+                                           CKRenderView view,
+                                           VXPRIMITIVETYPE type,
+                                           CKDWORD vb,
+                                           CKDWORD ib,
+                                           CKDWORD baseVertex,
+                                           CKDWORD vertexCount,
+                                           CKDWORD startIndex,
+                                           CKDWORD indexCount,
+                                           CKDWORD vertexLayout);
+    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet) const;
+    CKBOOL CaptureVertexBufferPacketObjectUniforms(CKRenderPacket *packet,
+                                                   const CKFFProgramContext *programContext);
+    void CaptureVertexBufferPacketInstancing(CKRenderPacket *packet,
+                                             const CKFFProgramContext *programContext);
+    CKBOOL CaptureVertexBufferPacketStaticUniforms(CKRenderPacket *packet,
+                                                   const CKFFProgramContext *programContext,
+                                                   CKBOOL collectStats);
     CKBOOL CanQueueOpaqueVertexBufferPacket(CKRenderView view, VXPRIMITIVETYPE type,
                                             CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout) const;
     CKBOOL BuildVertexBufferPacket(CKRasterizerEncoder *encoder,

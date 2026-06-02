@@ -2235,6 +2235,163 @@ float CKFixedFunctionPipeline::ComputeDepthKey() const {
     return z;
 }
 
+CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
+                                                                 CKDWORD formatFlags,
+                                                                 CKFFProgramContext *programContext)
+{
+    if (!programContext)
+        return FALSE;
+
+    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
+    CKFFInitProgramContext(programContext, shaderKey, programBinding);
+    SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
+    return programContext->Program != 0 ? TRUE : FALSE;
+}
+
+void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
+    CKRasterizerEncoder *encoder,
+    CKRenderPacket *packet,
+    const CKFFProgramContext *programContext,
+    CKRenderView view,
+    VXPRIMITIVETYPE type,
+    CKDWORD vb,
+    CKDWORD ib,
+    CKDWORD baseVertex,
+    CKDWORD vertexCount,
+    CKDWORD startIndex,
+    CKDWORD indexCount,
+    CKDWORD vertexLayout)
+{
+    if (!packet || !programContext)
+        return;
+
+    ++m_OpaqueRenderPacketSerial;
+    if (m_OpaqueRenderPacketSerial == 0)
+        ++m_OpaqueRenderPacketSerial;
+    packet->Serial = m_OpaqueRenderPacketSerial;
+    packet->View = view;
+    packet->Type = type;
+    packet->Program = programContext->Program;
+    float depth = ComputeDepthKey();
+    packet->Depth = *(CKDWORD *)&depth;
+    packet->DrawState = m_DrawStateCache.BuildDrawState(type);
+    packet->StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
+    packet->StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
+    packet->StencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+    packet->VertexLayout = vertexLayout;
+    packet->VertexBuffer = vb;
+    packet->IndexBuffer = ib;
+    packet->BaseVertex = baseVertex;
+    packet->VertexCount = vertexCount;
+    packet->StartIndex = startIndex;
+    packet->IndexCount = indexCount;
+    packet->World = m_World;
+    if (encoder)
+        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
+}
+
+void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet) const
+{
+    if (!packet)
+        return;
+
+    packet->ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
+    if (packet->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        packet->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
+        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
+        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
+        packet->Textures[i].Stage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
+                                                            (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
+        packet->Textures[i].Uniform = cube ? u.s_textureCube[i] :
+                                      (volume ? u.s_textureVolume[i] : u.s_texture[i]);
+        packet->Textures[i].Texture = m_TextureHandles[i];
+        packet->Textures[i].TextureFlags = m_TextureFlags[i];
+        packet->Textures[i].Sampler = BuildSamplerDesc((int)i);
+    }
+}
+
+CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketObjectUniforms(
+    CKRenderPacket *packet,
+    const CKFFProgramContext *programContext)
+{
+    if (!packet)
+        return FALSE;
+    if (!BuildPacketObjectUniforms(&packet->ObjectUniforms, programContext))
+        return FALSE;
+    packet->ViewProjection = m_ViewProjection;
+    packet->ViewProjectionHash = CKFFHashBytes(&packet->ViewProjection,
+                                               sizeof(packet->ViewProjection),
+                                               2166136261u);
+    return TRUE;
+}
+
+void CKFixedFunctionPipeline::CaptureVertexBufferPacketInstancing(
+    CKRenderPacket *packet,
+    const CKFFProgramContext *programContext)
+{
+    if (!packet || !programContext)
+        return;
+    if (!CanInstanceVertexBufferPacket())
+        return;
+
+    CKFFShaderKey instancedKey = programContext->ShaderKey;
+    instancedKey.VS.SetInstanced(true);
+    CKFFProgramBinding instancedBinding = m_ShaderCache.GetProgram(instancedKey);
+    CKFFProgramContext instancedContext;
+    CKFFInitProgramContext(&instancedContext, instancedKey, instancedBinding);
+    if (CKFFCanUseInstancedProgramForPacket(*programContext, instancedContext)) {
+        packet->CanInstance = TRUE;
+        packet->InstancedProgram = instancedContext.Program;
+    }
+}
+
+CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
+    CKRenderPacket *packet,
+    const CKFFProgramContext *programContext,
+    CKBOOL collectStats)
+{
+    if (!packet || !programContext)
+        return FALSE;
+
+    if (m_StaticUniformCacheValid && m_StaticUniformCachedSerial == m_StaticUniformDirtySerial) {
+        packet->StaticUniformIndex = m_StaticUniformCachedIndex;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats)
+            ++m_FrameStats.RenderPacketStaticPayloadReuses;
+#endif
+    } else {
+        CKFFRenderPacketUniformPayload staticPayload;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        double buildTimer = collectStats ? CKRenderPerfNow() : 0.0;
+#endif
+        if (!BuildStaticUniformPayload(&staticPayload, programContext)) {
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+            if (collectStats)
+                ++m_FrameStats.RenderPacketUniformOverflows;
+#endif
+            return FALSE;
+        }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        if (collectStats) {
+            m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
+            ++m_FrameStats.RenderPacketStaticPayloadBuilds;
+        }
+#endif
+        packet->StaticUniformIndex = InternStaticUniformPayload(staticPayload);
+        m_StaticUniformCachedSerial = m_StaticUniformDirtySerial;
+        m_StaticUniformCachedIndex = packet->StaticUniformIndex;
+        m_StaticUniformCacheValid = TRUE;
+    }
+
+    return TRUE;
+}
+
 CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView view,
                                                                  VXPRIMITIVETYPE type,
                                                                  CKDWORD vb,
@@ -2274,20 +2431,15 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
     if (!packet || !vb)
         return FALSE;
 
+    CKBOOL collectStats = FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
+    collectStats = (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled) ? TRUE : FALSE;
     if (collectStats)
         ++m_FrameStats.HardwareDraws;
 #endif
 
-    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
-    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
-    CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFProgramContext programContext;
-    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
-    SetCurrentProgramBinding(programContext.ShaderKey, programContext.Binding);
-    if (programContext.Program == 0) {
+    if (!ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &programContext)) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
@@ -2298,101 +2450,23 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
         return FALSE;
 
     memset(packet, 0, sizeof(CKRenderPacket));
-    ++m_OpaqueRenderPacketSerial;
-    if (m_OpaqueRenderPacketSerial == 0)
-        ++m_OpaqueRenderPacketSerial;
-    packet->Serial = m_OpaqueRenderPacketSerial;
-    packet->View = view;
-    packet->Type = type;
-    packet->Program = programContext.Program;
-    float depth = ComputeDepthKey();
-    packet->Depth = *(CKDWORD *)&depth;
-    packet->DrawState = m_DrawStateCache.BuildDrawState(type);
-    packet->StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
-    packet->StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
-    packet->StencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
-    packet->VertexLayout = vertexLayout;
-    packet->VertexBuffer = vb;
-    packet->IndexBuffer = ib;
-    packet->BaseVertex = baseVertex;
-    packet->VertexCount = vertexCount;
-    packet->StartIndex = startIndex;
-    packet->IndexCount = indexCount;
-    packet->World = m_World;
-    if (encoder)
-        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
-    packet->ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
-    if (packet->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
-        packet->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
-
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
-        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        packet->Textures[i].Stage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
-                                                            (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
-        packet->Textures[i].Uniform = cube ? u.s_textureCube[i] :
-                                      (volume ? u.s_textureVolume[i] : u.s_texture[i]);
-        packet->Textures[i].Texture = m_TextureHandles[i];
-        packet->Textures[i].TextureFlags = m_TextureFlags[i];
-        packet->Textures[i].Sampler = BuildSamplerDesc((int)i);
-    }
+    CaptureVertexBufferPacketIdentity(encoder, packet, &programContext, view, type, vb, ib,
+                                      baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
+    CaptureVertexBufferPacketTextures(packet);
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     double buildTimer = collectStats ? CKRenderPerfNow() : 0.0;
 #endif
-    if (!BuildPacketObjectUniforms(&packet->ObjectUniforms, &programContext))
+    if (!CaptureVertexBufferPacketObjectUniforms(packet, &programContext))
         return FALSE;
-    packet->ViewProjection = m_ViewProjection;
-    packet->ViewProjectionHash = CKFFHashBytes(&packet->ViewProjection,
-                                               sizeof(packet->ViewProjection),
-                                               2166136261u);
-    if (CanInstanceVertexBufferPacket()) {
-        CKFFShaderKey instancedKey = shaderKey;
-        instancedKey.VS.SetInstanced(true);
-        CKFFProgramBinding instancedBinding = m_ShaderCache.GetProgram(instancedKey);
-        CKFFProgramContext instancedContext;
-        CKFFInitProgramContext(&instancedContext, instancedKey, instancedBinding);
-        if (CKFFCanUseInstancedProgramForPacket(programContext, instancedContext)) {
-            packet->CanInstance = TRUE;
-            packet->InstancedProgram = instancedContext.Program;
-        }
-    }
+    CaptureVertexBufferPacketInstancing(packet, &programContext);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats)
         m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
 #endif
 
-    if (m_StaticUniformCacheValid && m_StaticUniformCachedSerial == m_StaticUniformDirtySerial) {
-        packet->StaticUniformIndex = m_StaticUniformCachedIndex;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        if (collectStats)
-            ++m_FrameStats.RenderPacketStaticPayloadReuses;
-#endif
-    } else {
-        CKFFRenderPacketUniformPayload staticPayload;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        if (collectStats)
-            buildTimer = CKRenderPerfNow();
-#endif
-        if (!BuildStaticUniformPayload(&staticPayload, &programContext)) {
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-            if (collectStats)
-                ++m_FrameStats.RenderPacketUniformOverflows;
-#endif
-            return FALSE;
-        }
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        if (collectStats) {
-            m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
-            ++m_FrameStats.RenderPacketStaticPayloadBuilds;
-        }
-#endif
-        packet->StaticUniformIndex = InternStaticUniformPayload(staticPayload);
-        m_StaticUniformCachedSerial = m_StaticUniformDirtySerial;
-        m_StaticUniformCachedIndex = packet->StaticUniformIndex;
-        m_StaticUniformCacheValid = TRUE;
-    }
+    if (!CaptureVertexBufferPacketStaticUniforms(packet, &programContext, collectStats))
+        return FALSE;
 
     BuildRenderPacketSortKey(packet);
     return TRUE;
