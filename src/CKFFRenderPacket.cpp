@@ -225,12 +225,13 @@ CKDWORD CKFFHashRenderPacketUniformPayload(const CKFFRenderPacketUniformPayload 
     return hash;
 }
 
-CKDWORD CKFFHashRenderPacketTextureSet(const CKRenderPacket &packet)
+CKDWORD CKFFHashRenderPacketTextureSet(CKDWORD activeTextureCount,
+                                       const CKFFRenderPacketTextureBinding *textures)
 {
     CKDWORD hash = 2166136261u;
-    hash = CKFFHashBytes(&packet.ActiveTextureCount, sizeof(packet.ActiveTextureCount), hash);
-    for (CKDWORD i = 0; i < packet.ActiveTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        const CKFFRenderPacketTextureBinding &binding = packet.Textures[i];
+    hash = CKFFHashBytes(&activeTextureCount, sizeof(activeTextureCount), hash);
+    for (CKDWORD i = 0; textures && i < activeTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        const CKFFRenderPacketTextureBinding &binding = textures[i];
         hash = CKFFHashBytes(&binding.Stage, sizeof(binding.Stage), hash);
         hash = CKFFHashBytes(&binding.Uniform, sizeof(binding.Uniform), hash);
         hash = CKFFHashBytes(&binding.Texture, sizeof(binding.Texture), hash);
@@ -238,4 +239,9 @@ CKDWORD CKFFHashRenderPacketTextureSet(const CKRenderPacket &packet)
         hash = CKFFHashBytes(&binding.Sampler, sizeof(binding.Sampler), hash);
     }
     return hash;
+}
+
+CKDWORD CKFFHashRenderPacketTextureSet(const CKRenderPacket &packet)
+{
+    return CKFFHashRenderPacketTextureSet(packet.ActiveTextureCount, packet.Textures);
 }

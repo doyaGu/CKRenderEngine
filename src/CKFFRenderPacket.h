@@ -108,6 +108,7 @@ struct CKRenderPacket {
     CKDWORD StartIndex;
     CKDWORD IndexCount;
     CKDWORD ActiveTextureCount;
+    CKDWORD TextureSetHash;
     CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD StaticUniformIndex;
     CKRenderPacketObjectUniforms ObjectUniforms;
@@ -180,6 +181,8 @@ CKBOOL CKFFRenderPacketAddUniform(CKFFRenderPacketUniformPayload *payload,
                                   const void *data,
                                   CKDWORD count);
 CKDWORD CKFFHashRenderPacketUniformPayload(const CKFFRenderPacketUniformPayload &payload);
+CKDWORD CKFFHashRenderPacketTextureSet(CKDWORD activeTextureCount,
+                                       const CKFFRenderPacketTextureBinding *textures);
 CKDWORD CKFFHashRenderPacketTextureSet(const CKRenderPacket &packet);
 
 #endif // CKFFRENDERPACKET_H
