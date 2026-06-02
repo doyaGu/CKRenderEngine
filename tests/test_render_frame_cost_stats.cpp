@@ -30,7 +30,14 @@ static void WarmupAndSampleAggregateOnce() {
     TestCheck(CKRenderFrameCostStatsIsCollecting(),
               "second frame should collect");
     CKRenderFrameCostStatsAddSection(CKRFCS_FOREGROUND_2D, 4.0);
+    CKRenderFrameCostStatsAdd2DEntityRender();
+    CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
+    CKRenderFrameCostStatsAdd2DEntityDraw();
+    CKRenderFrameCostStatsAddSpriteDraw();
     CKRenderFrameCostStatsAddDrawPrimitive(TRUE, FALSE);
+    CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
+    CKRenderFrameCostStatsAddTransientPrepare(TRUE, TRUE, 160, 12, FALSE);
+    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(TRUE, TRUE);
     CKRenderFrameCostStatsAddViewportSet(TRUE);
     CKRenderFrameCostStatsAddMaterialSet(TRUE, FALSE, FALSE);
     CKRenderFrameCostStatsAddPrimitiveSubmit();
@@ -42,7 +49,12 @@ static void WarmupAndSampleAggregateOnce() {
     TestCheck(CKRenderFrameCostStatsIsCollecting(),
               "third frame should collect");
     CKRenderFrameCostStatsAddSection(CKRFCS_FOREGROUND_2D, 6.0);
+    CKRenderFrameCostStatsAdd2DEntityRender();
+    CKRenderFrameCostStatsAdd2DEntityUpdateExtents();
     CKRenderFrameCostStatsAddDrawPrimitive(TRUE, FALSE);
+    CKRenderFrameCostStatsAddDrawPrimitiveSanitize();
+    CKRenderFrameCostStatsAddTransientPrepare(TRUE, FALSE, 160, 12, TRUE);
+    CKRenderFrameCostStatsAddTransientSpriteBatchFastPath(TRUE, FALSE);
     CKRenderFrameCostStatsAddViewportSet(FALSE);
     CKRenderFrameCostStatsAddMeshSubmit();
     CKRenderFrameCostStatsAddSubmittedDraw();
@@ -65,10 +77,29 @@ static void WarmupAndSampleAggregateOnce() {
               "FrameCostStats must aggregate section timings");
     TestCheck(snapshot.DrawPrimitiveCalls == 2,
               "FrameCostStats must count draw primitive calls");
+    TestCheck(snapshot.TwoDEntityRenderCalls == 2 &&
+              snapshot.TwoDEntityUpdateExtentsCalls == 2 &&
+              snapshot.TwoDEntityDrawCalls == 1 &&
+              snapshot.SpriteDrawCalls == 1,
+              "FrameCostStats must count 2D render subpaths");
+    TestCheck(snapshot.DrawPrimitiveSanitizeCalls == 2,
+              "FrameCostStats must count primitive sanitize calls");
     TestCheck(snapshot.DrawPrimitiveFastPathCandidates == 2 &&
               snapshot.DrawPrimitiveFastPathHits == 0 &&
               snapshot.DrawPrimitiveFastPathFallbacks == 2,
               "FrameCostStats must count sanitized quad candidates as fallbacks");
+    TestCheck(snapshot.TransientPrepareCalls == 2 &&
+              snapshot.TransientQuadFastPathCandidates == 2 &&
+              snapshot.TransientQuadFastPathHits == 1 &&
+              snapshot.TransientQuadFastPathFallbacks == 1 &&
+              snapshot.TransientSpriteBatchFastPathCandidates == 2 &&
+              snapshot.TransientSpriteBatchFastPathHits == 1 &&
+              snapshot.TransientSpriteBatchFastPathFallbacks == 1 &&
+              snapshot.TransientFanToListConversions == 1,
+              "FrameCostStats must count transient quad fast path results");
+    TestCheck(snapshot.TransientVertexBytes == 320 &&
+              snapshot.TransientIndexBytes == 24,
+              "FrameCostStats must aggregate transient buffer bytes");
     TestCheck(snapshot.ViewportSetSkipped == 1,
               "FrameCostStats must count skipped viewport sets");
     TestCheck(snapshot.MaterialSetCalls == 1 &&
