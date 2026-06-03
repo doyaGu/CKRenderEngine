@@ -2263,7 +2263,6 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
 }
 
 void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
-    CKRasterizerEncoder *encoder,
     CKRenderPacket *packet,
     const CKFFProgramContext *programContext,
     CKRenderView view,
@@ -2474,7 +2473,7 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
     if (!CanBuildPacketObjectUniforms())
         return FALSE;
 
-    CaptureVertexBufferPacketIdentity(encoder, packet, &programContext, view, type, vb, ib,
+    CaptureVertexBufferPacketIdentity(packet, &programContext, view, type, vb, ib,
                                       baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
     CaptureVertexBufferPacketTextures(packet);
     CaptureVertexBufferPacketInstancing(packet, &programContext);

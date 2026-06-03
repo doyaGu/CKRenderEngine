@@ -355,8 +355,7 @@ private:
     CKBOOL ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
                                             CKDWORD formatFlags,
                                             CKFFProgramContext *programContext);
-    void CaptureVertexBufferPacketIdentity(CKRasterizerEncoder *encoder,
-                                           CKRenderPacket *packet,
+    void CaptureVertexBufferPacketIdentity(CKRenderPacket *packet,
                                            const CKFFProgramContext *programContext,
                                            CKRenderView view,
                                            VXPRIMITIVETYPE type,
