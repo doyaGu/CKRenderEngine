@@ -14,6 +14,19 @@ static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs) {
     return (CKDWORD)((vs.Bits >> 35) & 3u);
 }
 
+static CKBOOL CKFFShaderKeyLightingEnabled(const CKFFShaderKeyVS &vs)
+{
+    return (vs.Bits & (1ull << 13)) != 0 ? TRUE : FALSE;
+}
+
+static void CKFFShaderKeyMaterialSources(const CKFFShaderKeyVS &vs, float materialSource[4])
+{
+    materialSource[0] = (float)((vs.Bits >> 25) & 3u);
+    materialSource[1] = (float)((vs.Bits >> 27) & 3u);
+    materialSource[2] = (float)((vs.Bits >> 29) & 3u);
+    materialSource[3] = (float)((vs.Bits >> 31) & 3u);
+}
+
 static bool CKFFTextureSetEquals(
     CKDWORD aCount, const CKDWORD *a,
     CKDWORD bCount, const CKDWORD *b)
@@ -178,7 +191,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
       m_ForceAnisotropicFiltering(FALSE),
-      m_CurrentLightingEnabled(false), m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
+      m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
       m_OpaqueInstancingEnabled(TRUE), m_InstanceLayout(0),
       m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -223,10 +236,6 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     m_Viewport[1] = -2.0f / 600.0f;
     m_Viewport[2] = -1.0f;
     m_Viewport[3] = 1.0f;
-    m_MaterialSource[0] = (float)CKFF_MS_MATERIAL;
-    m_MaterialSource[1] = (float)CKFF_MS_MATERIAL;
-    m_MaterialSource[2] = (float)CKFF_MS_MATERIAL;
-    m_MaterialSource[3] = (float)CKFF_MS_MATERIAL;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     memset(&m_FrameStats, 0, sizeof(m_FrameStats));
 #endif
@@ -1379,7 +1388,6 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
 
     stateDesc.VS.SetLightingEnabled(!positionT && lighting && stateDesc.VS.GetHasNormal());
     prepared->LightingEnabled = stateDesc.VS.GetLightingEnabled() ? TRUE : FALSE;
-    m_CurrentLightingEnabled = prepared->LightingEnabled != FALSE;
     stateDesc.VS.SetSpecularEnabled(specular != 0);
     stateDesc.VS.SetNormalizeNormals(normalize != 0);
     stateDesc.VS.SetLocalViewer(stateDesc.VS.GetLightingEnabled() &&
@@ -1420,10 +1428,6 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
     prepared->MaterialSource[1] = (float)ambientSource;
     prepared->MaterialSource[2] = (float)specularSource;
     prepared->MaterialSource[3] = (float)emissiveSource;
-    m_MaterialSource[0] = prepared->MaterialSource[0];
-    m_MaterialSource[1] = prepared->MaterialSource[1];
-    m_MaterialSource[2] = prepared->MaterialSource[2];
-    m_MaterialSource[3] = prepared->MaterialSource[3];
 
     // Fog
     CKBOOL fogEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE);
@@ -1619,18 +1623,21 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     memcpy(drawParams[2], m_Material.Specular, sizeof(drawParams[2]));
     memcpy(drawParams[3], m_Material.Emissive, sizeof(drawParams[3]));
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = m_Material.Power;
-    memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], m_MaterialSource,
+    float materialSource[4];
+    CKFFShaderKeyMaterialSources(shaderKey.VS, materialSource);
+    memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], materialSource,
            sizeof(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES]));
     drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
     if (shaderUsesLighting) {
         CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
         float ambientColorF[4];
         CKFFPackColorARGB(ambientColor, ambientColorF);
-        drawParams[CKFF_DRAW_PARAM_LIGHTING][0] = m_CurrentLightingEnabled ? (float)packedLightCount : -1.0f;
+        const CKBOOL lightingEnabled = CKFFShaderKeyLightingEnabled(shaderKey.VS);
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][0] = lightingEnabled ? (float)packedLightCount : -1.0f;
         drawParams[CKFF_DRAW_PARAM_LIGHTING][1] = ambientColorF[0];
         drawParams[CKFF_DRAW_PARAM_LIGHTING][2] = ambientColorF[1];
         drawParams[CKFF_DRAW_PARAM_LIGHTING][3] = ambientColorF[2];
-        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][0] = m_CurrentLightingEnabled &&
+        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][0] = lightingEnabled &&
                             m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
         drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
         if (packedLightCount == 1 && viewLights) {
@@ -1873,7 +1880,7 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     const bool shaderUsesLighting = !positionT && (!fullSpecialized || ((shaderKey.VS.Bits & (1ull << 13)) != 0));
     if (shaderUsesLighting) {
         packed = CKFFPackViewLights(m_Lights, m_LightEnabled, m_ActiveLightCount,
-                                    m_CurrentLightingEnabled ? TRUE : FALSE, m_View, viewLights);
+                                    CKFFShaderKeyLightingEnabled(shaderKey.VS), m_View, viewLights);
 
         if (packed > 1)
             EmitUniform(sink, u.u_lights, viewLights, packed * 7, packed * 7, FALSE);
