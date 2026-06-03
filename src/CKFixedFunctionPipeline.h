@@ -310,9 +310,7 @@ private:
     int m_PacketProgramCacheActiveTextureCount;
     CKFFProgramContext m_PacketProgramCacheContext;
     int m_CurrentActiveTextureCount;
-    bool m_CurrentLightingEnabled;
     CKDWORD m_AlphaTestPrecision;
-    float m_MaterialSource[4];
 
     // Texture stage state
     CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
