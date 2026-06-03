@@ -99,6 +99,9 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < activeTextureCount;
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
+        const CKDWORD textureTransformFlags = stageActive
+            ? stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS]
+            : 0;
         float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
         float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];
         float *colorExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
@@ -114,7 +117,7 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
         alpha[3] = (float)CKFFResolveStageResultArg(stageStates[stage]);
         colorExtra[0] = (float)CKFFResolveStageColorArg0(stageStates[stage]);
         colorExtra[1] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
-        colorExtra[2] = (float)stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
+        colorExtra[2] = (float)textureTransformFlags;
         colorExtra[3] = stageConstants[stage][0];
         alphaExtra[0] = (float)CKFFResolveStageAlphaArg0(stageStates[stage]);
         alphaExtra[1] = stageConstants[stage][1];
