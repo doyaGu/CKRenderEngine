@@ -1474,14 +1474,18 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
     stateDesc.VS.SetVertexClipping(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
 }
 
-CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount(
-    const CKFFUniformEmissionContext *context) const
+static CKDWORD CKFFCurrentTextureMatrixUploadCount(
+    const CKFFUniformEmissionContext *context,
+    const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES])
 {
-    if (!context || context->PositionT)
+    if (!context || context->PositionT || !stageStates)
         return 0;
+    CKDWORD activeTextureCount = context->ActiveTextureCount;
+    if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
     CKDWORD count = 0;
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKDWORD flags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
+    for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
+        const CKDWORD flags = stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         const CKDWORD componentCount = flags & 0xFFu;
         if (componentCount > 1 && componentCount <= 4)
             count = stage + 1;
@@ -1785,7 +1789,7 @@ void CKFixedFunctionPipeline::CKFFEmitTextureMatrixUniforms(const CKFFUniformEmi
         return;
     CKFFUniformSink *sink = context->Uniforms;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount(context);
+    const CKDWORD texMatrixCount = CKFFCurrentTextureMatrixUploadCount(context, m_StageStates);
     if (texMatrixCount > 0)
         EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
 }
