@@ -1584,6 +1584,88 @@ bool CKFixedFunctionPipeline::ProgramUsesViewSpaceUniforms(const CKFFProgramCont
     return false;
 }
 
+CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
+    float (*drawParams)[4],
+    const CKFFLightData *viewLights,
+    int packedLightCount,
+    const CKFFProgramContext *programContext,
+    const CKFFShaderKey &shaderKey,
+    CKBOOL positionT,
+    CKBOOL fullSpecialized,
+    CKBOOL shaderUsesLighting,
+    CKBOOL fogEnabled,
+    CKDWORD vertexFogMode,
+    CKDWORD pixelFogMode) const
+{
+    memset(drawParams, 0, sizeof(float) * CKFF_DRAW_PARAM_VEC4_COUNT * 4);
+    memcpy(drawParams[0], m_Material.Diffuse, sizeof(drawParams[0]));
+    memcpy(drawParams[1], m_Material.Ambient, sizeof(drawParams[1]));
+    memcpy(drawParams[2], m_Material.Specular, sizeof(drawParams[2]));
+    memcpy(drawParams[3], m_Material.Emissive, sizeof(drawParams[3]));
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = m_Material.Power;
+    memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], m_MaterialSource,
+           sizeof(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES]));
+    drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
+    if (shaderUsesLighting) {
+        CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
+        float ambientColorF[4];
+        CKFFPackColorARGB(ambientColor, ambientColorF);
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][0] = m_CurrentLightingEnabled ? (float)packedLightCount : -1.0f;
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][1] = ambientColorF[0];
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][2] = ambientColorF[1];
+        drawParams[CKFF_DRAW_PARAM_LIGHTING][3] = ambientColorF[2];
+        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][0] = m_CurrentLightingEnabled &&
+                            m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
+        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
+        if (packedLightCount == 1 && viewLights) {
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 0], viewLights[0].Position, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 1], viewLights[0].Direction, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 2], viewLights[0].Diffuse, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 3], viewLights[0].Specular, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 4], viewLights[0].Ambient, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 5], viewLights[0].Attenuation, sizeof(drawParams[0]));
+            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 6], viewLights[0].SpotParams, sizeof(drawParams[0]));
+            drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][3] = 1.0f;
+        }
+    }
+    const bool shaderUsesVertexParams = !positionT && (!fullSpecialized || shaderUsesLighting || ProgramUsesMaterialUniform(programContext));
+    CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packedLightCount == 1 ? 19 : 8) : 6) : 0;
+
+    drawParams[CKFF_DRAW_PARAM_ALPHA][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
+    drawParams[CKFF_DRAW_PARAM_ALPHA][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
+        ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
+        : 0.0f;
+    drawParams[CKFF_DRAW_PARAM_ALPHA][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
+    drawParams[CKFF_DRAW_PARAM_ALPHA][3] = (float)pixelFogMode;
+
+    CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
+    CKFFPackColorARGB(tf, drawParams[CKFF_DRAW_PARAM_TEXTURE_FACTOR]);
+
+    drawParams[CKFF_DRAW_PARAM_FOG][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
+    drawParams[CKFF_DRAW_PARAM_FOG][3] = (float)vertexFogMode;
+
+    CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
+    CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
+
+    CKDWORD fragmentParamCount = 0;
+    if (!fullSpecialized) {
+        fragmentParamCount = 4;
+    } else if (fogEnabled) {
+        fragmentParamCount = 4;
+    } else if (ProgramUsesTexFactor(programContext)) {
+        fragmentParamCount = 2;
+    } else if (shaderKey.FS.AlphaTestEnable) {
+        fragmentParamCount = 1;
+    }
+    if (fragmentParamCount > 0 && drawParamCount < 8 + fragmentParamCount)
+        drawParamCount = 8 + fragmentParamCount;
+    if (!fullSpecialized && !positionT && fogEnabled && drawParamCount < 8)
+        drawParamCount = 8;
+    return drawParamCount;
+}
+
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
                                 CKRasterizerEncoder *encoder,
                                 CKFFRenderPacketUniformPayload *staticPayload,
@@ -1703,72 +1785,13 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     const CKDWORD pixelFogMode = fogEnabled ? shaderKey.FS.PixelFogMode : 0;
 
     float drawParams[CKFF_DRAW_PARAM_VEC4_COUNT][4];
-    memset(drawParams, 0, sizeof(drawParams));
-    memcpy(drawParams[0], m_Material.Diffuse, sizeof(drawParams[0]));
-    memcpy(drawParams[1], m_Material.Ambient, sizeof(drawParams[1]));
-    memcpy(drawParams[2], m_Material.Specular, sizeof(drawParams[2]));
-    memcpy(drawParams[3], m_Material.Emissive, sizeof(drawParams[3]));
-    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = m_Material.Power;
-    memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], m_MaterialSource,
-           sizeof(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES]));
-    drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
-    if (shaderUsesLighting) {
-        CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
-        float ambientColorF[4];
-        CKFFPackColorARGB(ambientColor, ambientColorF);
-        drawParams[CKFF_DRAW_PARAM_LIGHTING][0] = m_CurrentLightingEnabled ? (float)packed : -1.0f;
-        drawParams[CKFF_DRAW_PARAM_LIGHTING][1] = ambientColorF[0];
-        drawParams[CKFF_DRAW_PARAM_LIGHTING][2] = ambientColorF[1];
-        drawParams[CKFF_DRAW_PARAM_LIGHTING][3] = ambientColorF[2];
-        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][0] = m_CurrentLightingEnabled &&
-                            m_DrawStateCache.GetRenderState(VXRENDERSTATE_LOCALVIEWER) ? 1.0f : 0.0f;
-        drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS) ? 1.0f : 0.0f;
-        if (packed == 1) {
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 0], viewLights[0].Position, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 1], viewLights[0].Direction, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 2], viewLights[0].Diffuse, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 3], viewLights[0].Specular, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 4], viewLights[0].Ambient, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 5], viewLights[0].Attenuation, sizeof(drawParams[0]));
-            memcpy(drawParams[CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 6], viewLights[0].SpotParams, sizeof(drawParams[0]));
-            drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][3] = 1.0f;
-        }
-    }
-    const bool shaderUsesVertexParams = !positionT && (!fullSpecialized || shaderUsesLighting || ProgramUsesMaterialUniform(programContext));
-    CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packed == 1 ? 19 : 8) : 6) : 0;
-
-    drawParams[CKFF_DRAW_PARAM_ALPHA][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
-    drawParams[CKFF_DRAW_PARAM_ALPHA][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
-        ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
-        : 0.0f;
-    drawParams[CKFF_DRAW_PARAM_ALPHA][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
-    drawParams[CKFF_DRAW_PARAM_ALPHA][3] = (float)pixelFogMode;
-
-    CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
-    CKFFPackColorARGB(tf, drawParams[CKFF_DRAW_PARAM_TEXTURE_FACTOR]);
-
-    drawParams[CKFF_DRAW_PARAM_FOG][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
-    drawParams[CKFF_DRAW_PARAM_FOG][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
-    drawParams[CKFF_DRAW_PARAM_FOG][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
-    drawParams[CKFF_DRAW_PARAM_FOG][3] = (float)vertexFogMode;
-
-    CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
-    CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
-
-    CKDWORD fragmentParamCount = 0;
-    if (!fullSpecialized) {
-        fragmentParamCount = 4;
-    } else if (fogEnabled) {
-        fragmentParamCount = 4;
-    } else if (ProgramUsesTexFactor(programContext)) {
-        fragmentParamCount = 2;
-    } else if (shaderKey.FS.AlphaTestEnable) {
-        fragmentParamCount = 1;
-    }
-    if (fragmentParamCount > 0 && drawParamCount < 8 + fragmentParamCount)
-        drawParamCount = 8 + fragmentParamCount;
-    if (!fullSpecialized && !positionT && fogEnabled && drawParamCount < 8)
-        drawParamCount = 8;
+    CKDWORD drawParamCount = BuildDrawParams(drawParams, viewLights, packed,
+                                             programContext, shaderKey,
+                                             positionT ? TRUE : FALSE,
+                                             fullSpecialized,
+                                             shaderUsesLighting ? TRUE : FALSE,
+                                             fogEnabled ? TRUE : FALSE,
+                                             vertexFogMode, pixelFogMode);
     if (drawParamCount > 0)
         EmitUniform(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
 
