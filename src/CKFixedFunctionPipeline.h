@@ -158,8 +158,13 @@ struct CKFFPacketTextureSetCache {
 };
 
 struct CKFFPreparedState;
-struct CKFFVertexBufferPacketBuildResult;
 struct CKFFPipelineTestAccess;
+
+struct CKFFVertexBufferPacketBuildResult {
+    CKBOOL Success;
+    CKDWORD RejectReason;
+    CKRenderPacket Packet;
+};
 
 class CKFixedFunctionPipeline {
 public:

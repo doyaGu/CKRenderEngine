@@ -89,12 +89,6 @@ struct CKFFTextureBindingSet {
     CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
 
-struct CKFFVertexBufferPacketBuildResult {
-    CKBOOL Success;
-    CKDWORD RejectReason;
-    CKRenderPacket Packet;
-};
-
 static void CKFFInitPreparedState(CKFFPreparedState *prepared)
 {
     if (!prepared)
