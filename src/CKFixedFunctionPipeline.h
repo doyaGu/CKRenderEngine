@@ -358,6 +358,17 @@ private:
     bool ProgramUsesStageConstant(const CKFFProgramContext *programContext) const;
     bool ProgramUsesMaterialUniform(const CKFFProgramContext *programContext) const;
     bool ProgramUsesViewSpaceUniforms(const CKFFProgramContext *programContext) const;
+    CKDWORD BuildDrawParams(float (*drawParams)[4],
+                            const CKFFLightData *viewLights,
+                            int packedLightCount,
+                            const CKFFProgramContext *programContext,
+                            const CKFFShaderKey &shaderKey,
+                            CKBOOL positionT,
+                            CKBOOL fullSpecialized,
+                            CKBOOL shaderUsesLighting,
+                            CKBOOL fogEnabled,
+                            CKDWORD vertexFogMode,
+                            CKDWORD pixelFogMode) const;
     void BindTextures(CKRasterizerEncoder *encoder);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
