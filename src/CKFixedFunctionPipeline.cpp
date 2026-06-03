@@ -881,8 +881,10 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         statsStart = CKRenderPerfNow();
 #endif
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
+    CKFFProgramContext programContext;
+    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
     SetCurrentProgramBinding(shaderKey, programBinding);
-    CKDWORD program = programBinding.Program;
+    CKDWORD program = programContext.Program;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.ProgramUs += CKRenderPerfElapsedUs(statsStart);
@@ -941,7 +943,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    UploadUniforms(encoder, preparedState.ActiveTextureCount);
+    UploadUniforms(encoder, &programContext, preparedState.ActiveTextureCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
@@ -1133,8 +1135,10 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
         statsStart = CKRenderPerfNow();
 #endif
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
+    CKFFProgramContext programContext;
+    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
     SetCurrentProgramBinding(shaderKey, programBinding);
-    CKDWORD program = programBinding.Program;
+    CKDWORD program = programContext.Program;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.ProgramUs += CKRenderPerfElapsedUs(statsStart);
@@ -1195,7 +1199,7 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    UploadUniforms(encoder, preparedState.ActiveTextureCount);
+    UploadUniforms(encoder, &programContext, preparedState.ActiveTextureCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
@@ -1899,14 +1903,13 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
 }
 
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder,
+                                             const CKFFProgramContext *programContext,
                                              CKDWORD activeTextureCount) {
-    if (!encoder)
+    if (!encoder || !programContext)
         return;
-    CKFFProgramContext programContext;
-    CKFFInitProgramContext(&programContext, m_CurrentShaderKey, m_CurrentProgramBinding);
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, TRUE);
-    EmitUniformPayloads(&sink, &programContext, activeTextureCount);
+    EmitUniformPayloads(&sink, programContext, activeTextureCount);
     m_DirtyFlags = 0;
 }
 
