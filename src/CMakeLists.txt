@@ -92,6 +92,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFFRenderPacketReplay.h
         CKFFShaderCache.h
         CKFFConstants.h
+        CKFFDrawTypes.h
         CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h

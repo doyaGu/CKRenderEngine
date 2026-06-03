@@ -74,19 +74,6 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
     }
 }
 
-struct CKFFUniformEmissionContext {
-    CKFFUniformSink *Uniforms;
-    const CKFFProgramContext *ProgramContext;
-    CKFFShaderKey ShaderKey;
-    CKFFSpecializationInfo Specialization;
-    CKDWORD ActiveTextureCount;
-    CKBOOL FullSpecialized;
-    CKBOOL PositionT;
-    CKBOOL LightingEnabled;
-    CKBOOL FogEnabled;
-    CKDWORD VertexFogMode;
-    CKDWORD PixelFogMode;
-};
 
 struct CKFFUniformEmitter {
     static void EmitObjectMatrixUniforms(CKFixedFunctionPipeline *pipeline,
