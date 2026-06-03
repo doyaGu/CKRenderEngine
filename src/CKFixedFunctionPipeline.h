@@ -11,6 +11,7 @@
 #include "CKFFDebug.h"
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
+#include "CKFFDrawTypes.h"
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -141,40 +142,7 @@ struct CKFFDiagnosticConfig {
 };
 #endif
 
-struct CKFFUniformSink {
-    CKRasterizerEncoder *Encoder;
-    CKFFRenderPacketUniformPayload *StaticPayload;
-    CKFFRenderPacketUniformPayload *ObjectPayload;
-    CKBOOL EmitStatic;
-    CKBOOL EmitObject;
-    CKBOOL Failed;
-};
-
-struct CKFFPreparedState {
-    CKFFStateDesc StateDesc;
-    CKDWORD ActiveTextureCount;
-    CKBOOL PositionT;
-    CKBOOL LightingEnabled;
-    float MaterialSource[4];
-    CKDWORD TextureBoundMask;
-};
-
-struct CKFFTextureBindingSet {
-    CKDWORD ActiveTextureCount;
-    CKDWORD Hash;
-    CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
-};
-
-struct CKFFUniformEmissionContext;
 struct CKFFPipelineTestAccess;
-
-struct CKFFVertexBufferPacketBuildResult {
-    CKBOOL Success;
-    CKDWORD RejectReason;
-    CKFFProgramContext ProgramContext;
-    CKFFTextureBindingSet TextureBindingSet;
-    CKRenderPacket Packet;
-};
 
 class CKFixedFunctionPipeline {
 public:
