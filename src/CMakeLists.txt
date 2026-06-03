@@ -164,6 +164,7 @@ set(CKRE_SOURCES
         CKVertexBuffer.cpp
 
         CKFixedFunctionPipeline.cpp
+        CKFFPipelineGuards.cpp
         CKFFDrawProbes.cpp
         CKFFDrawTypes.cpp
         CKFFStateStore.cpp
