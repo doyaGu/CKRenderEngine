@@ -1756,6 +1756,79 @@ void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
     EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
 }
 
+void CKFixedFunctionPipeline::CKFFEmitTextureMatrixUniforms(CKFFUniformSink *sink)
+{
+    if (!sink)
+        return;
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
+    if (texMatrixCount > 0)
+        EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
+}
+
+void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
+    CKFFUniformSink *sink,
+    const CKFFProgramContext *programContext,
+    const CKFFShaderKey &shaderKey,
+    CKBOOL positionT,
+    CKBOOL fullSpecialized)
+{
+    if (!sink)
+        return;
+    (void)shaderKey;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    if (ProgramUsesBumpEnv(programContext)) {
+        float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
+        CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
+        EmitUniform(sink, u.u_bumpEnv, bumpEnv,
+                    CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
+    }
+
+    if (positionT)
+        EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
+
+    if (!fullSpecialized || ProgramUsesStageConstant(programContext)) {
+        CKFFStageParamsUniform stageParams;
+        CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
+        EmitUniform(sink, u.u_stageParams, stageParams.Values,
+                    CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
+    }
+
+    if (!fullSpecialized) {
+        CKFFSpecUniform ffSpec;
+        const CKFFSpecializationInfo &specialization = programContext
+            ? programContext->Specialization
+            : m_CurrentProgramBinding.Specialization;
+        CKFFPackSpecializationDwords(specialization, ffSpec);
+        EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
+                    CKFFSpecializationInfo::MaxSpecDwords,
+                    CKFFSpecializationInfo::MaxSpecDwords, FALSE);
+    }
+}
+
+void CKFixedFunctionPipeline::CKFFEmitClipPlaneUniforms(
+    CKFFUniformSink *sink,
+    const CKFFShaderKey &shaderKey,
+    CKBOOL fullSpecialized)
+{
+    if (!sink)
+        return;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    CKFFClipPlaneUniform clip;
+    const CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    if (!fullSpecialized || ((shaderKey.VS.Bits & (1ull << 34)) != 0)) {
+        if (clipMask != 0) {
+            CKFFPackClipPlaneUniforms(m_UserClipPlanes, clipMask, clip);
+            EmitUniform(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
+        } else {
+            memset(&clip, 0, sizeof(clip));
+        }
+        EmitUniform(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
+    }
+}
+
 void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
                                                   const CKFFProgramContext *programContext)
 {
@@ -1774,9 +1847,7 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     if (!emitStatic)
         return;
 
-    const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
-    if (texMatrixCount > 0)
-        EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
+    CKFFEmitTextureMatrixUniforms(sink);
 
     // bgfx uniform bindings are draw state. Packet replay can retain static
     // draw constants across sorted opaque packets, but immediate draws still
@@ -1807,45 +1878,10 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     if (drawParamCount > 0)
         EmitUniform(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
 
-    if (ProgramUsesBumpEnv(programContext)) {
-        float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
-        CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
-        EmitUniform(sink, u.u_bumpEnv, bumpEnv,
-                    CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
-    }
-
-    if (positionT)
-        EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
-
-    if (!fullSpecialized || ProgramUsesStageConstant(programContext)) {
-        CKFFStageParamsUniform stageParams;
-        CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
-        EmitUniform(sink, u.u_stageParams, stageParams.Values,
-                    CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
-    }
-
-    if (!fullSpecialized) {
-        CKFFSpecUniform ffSpec;
-        const CKFFSpecializationInfo &specialization = programContext
-            ? programContext->Specialization
-            : m_CurrentProgramBinding.Specialization;
-        CKFFPackSpecializationDwords(specialization, ffSpec);
-        EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
-                    CKFFSpecializationInfo::MaxSpecDwords,
-                    CKFFSpecializationInfo::MaxSpecDwords, FALSE);
-    }
-
-    CKFFClipPlaneUniform clip;
-    const CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
-    if (!fullSpecialized || ((shaderKey.VS.Bits & (1ull << 34)) != 0)) {
-        if (clipMask != 0) {
-            CKFFPackClipPlaneUniforms(m_UserClipPlanes, clipMask, clip);
-            EmitUniform(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
-        } else {
-            memset(&clip, 0, sizeof(clip));
-        }
-        EmitUniform(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
-    }
+    CKFFEmitStageAndSpecUniforms(sink, programContext, shaderKey,
+                                 positionT ? TRUE : FALSE,
+                                 fullSpecialized);
+    CKFFEmitClipPlaneUniforms(sink, shaderKey, fullSpecialized);
 }
 
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
