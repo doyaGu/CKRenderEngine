@@ -74,21 +74,6 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
     }
 }
 
-struct CKFFPreparedState {
-    CKFFStateDesc StateDesc;
-    CKDWORD ActiveTextureCount;
-    CKBOOL PositionT;
-    CKBOOL LightingEnabled;
-    float MaterialSource[4];
-    CKDWORD TextureBoundMask;
-};
-
-struct CKFFTextureBindingSet {
-    CKDWORD ActiveTextureCount;
-    CKDWORD Hash;
-    CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
-};
-
 static void CKFFInitPreparedState(CKFFPreparedState *prepared)
 {
     if (!prepared)
@@ -172,12 +157,21 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     set->Hash = CKFFHashRenderPacketTextureSet(set->ActiveTextureCount, set->Bindings);
 }
 
+static CKFFShaderKey CKFFBuildCurrentShaderKey(const CKFFPreparedState *prepared)
+{
+    if (!prepared)
+        return CKFFShaderKey();
+    return CKFFBuildShaderKey(prepared->StateDesc, prepared->TextureBoundMask);
+}
+
 static void CKFFInitVertexBufferPacketBuildResult(CKFFVertexBufferPacketBuildResult *result)
 {
     if (!result)
         return;
     result->Success = FALSE;
     result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
+    CKFFInitProgramContext(&result->ProgramContext, CKFFShaderKey(), CKFFProgramBinding());
+    CKFFInitTextureBindingSet(&result->TextureBindingSet);
     memset(&result->Packet, 0, sizeof(result->Packet));
 }
 
@@ -215,6 +209,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     m_PacketProgramCacheDPFlags = 0;
     m_PacketProgramCacheFormatFlags = 0;
     m_PacketProgramCacheActiveTextureCount = 0;
+    CKFFInitPreparedState(&m_PacketProgramCachePreparedState);
     memset(&m_PacketProgramCacheContext, 0, sizeof(m_PacketProgramCacheContext));
     ResetMaterial();
     memset(m_Lights, 0, sizeof(m_Lights));
@@ -880,7 +875,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 #endif
     CKFFPreparedState preparedState;
     BuildCurrentPreparedState(&preparedState, data->Flags, formatFlags, m_TexcoordComponentCounts);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
+    CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
@@ -927,9 +922,9 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.Program = program;
         debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
         debugInfo.ActiveLightCount = m_ActiveLightCount;
-        debugInfo.StateDesc = &stateDesc;
+        debugInfo.StateDesc = &preparedState.StateDesc;
         debugInfo.DrawState = &m_DrawStateCache;
-        debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+        debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
         debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
         debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
@@ -1127,7 +1122,7 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
 #endif
     CKFFPreparedState preparedState;
     BuildCurrentPreparedState(&preparedState, dpFlags, formatFlags);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
+    CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
@@ -1176,9 +1171,9 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
         debugInfo.Program = program;
         debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
         debugInfo.ActiveLightCount = m_ActiveLightCount;
-        debugInfo.StateDesc = &stateDesc;
+        debugInfo.StateDesc = &preparedState.StateDesc;
         debugInfo.DrawState = &m_DrawStateCache;
-        debugInfo.Stage0.ColorOp = stateDesc.FS.GetStageColorOp(0);
+        debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
         debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
         debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
@@ -1470,12 +1465,6 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
         stateDesc.FS.SetAlphaFunc(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
     }
     stateDesc.VS.SetVertexClipping(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
-}
-
-CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentShaderKey(const CKFFPreparedState *prepared) const {
-    if (!prepared)
-        return CKFFShaderKey();
-    return CKFFBuildShaderKey(prepared->StateDesc, prepared->TextureBoundMask);
 }
 
 void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding) {
@@ -2394,9 +2383,10 @@ float CKFixedFunctionPipeline::ComputeDepthKey() const {
 
 CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
                                                                  CKDWORD formatFlags,
+                                                                 CKFFPreparedState *preparedState,
                                                                  CKFFProgramContext *programContext)
 {
-    if (!programContext)
+    if (!preparedState || !programContext)
         return FALSE;
 
     m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
@@ -2404,20 +2394,21 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
         m_PacketProgramCacheDPFlags == dpFlags &&
         m_PacketProgramCacheFormatFlags == formatFlags &&
         m_PacketProgramCacheActiveTextureCount == m_CurrentActiveTextureCount) {
+        *preparedState = m_PacketProgramCachePreparedState;
         *programContext = m_PacketProgramCacheContext;
         SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
         return programContext->Program != 0 ? TRUE : FALSE;
     }
 
-    CKFFPreparedState preparedState;
-    BuildCurrentPreparedState(&preparedState, dpFlags, formatFlags);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
+    BuildCurrentPreparedState(preparedState, dpFlags, formatFlags);
+    CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(preparedState);
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
     SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
     m_PacketProgramCacheDPFlags = dpFlags;
     m_PacketProgramCacheFormatFlags = formatFlags;
     m_PacketProgramCacheActiveTextureCount = m_CurrentActiveTextureCount;
+    m_PacketProgramCachePreparedState = *preparedState;
     m_PacketProgramCacheContext = *programContext;
     m_PacketProgramCacheValid = TRUE;
     return programContext->Program != 0 ? TRUE : FALSE;
@@ -2619,15 +2610,18 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
         ++m_FrameStats.HardwareDraws;
 #endif
 
+    CKFFPreparedState preparedState;
     CKFFProgramContext programContext;
-    if (!ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &programContext)) {
+    if (!ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, &programContext)) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
 #endif
+        result->ProgramContext = programContext;
         result->RejectReason = CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
         return;
     }
+    result->ProgramContext = programContext;
     result->RejectReason = GetPacketObjectUniformRejectReason();
     if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
         return;
