@@ -347,7 +347,9 @@ private:
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
-    void UploadUniforms(CKRasterizerEncoder *encoder, CKDWORD activeTextureCount);
+    void UploadUniforms(CKRasterizerEncoder *encoder,
+                        const CKFFProgramContext *programContext,
+                        CKDWORD activeTextureCount);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
