@@ -7,7 +7,9 @@
 #include "CKFFShaderCache.h"
 #include "CKRasterizerTypes.h"
 
+class CKDrawStateCache;
 class CKRasterizerEncoder;
+struct CKFFStateStore;
 
 struct CKFFUniformSink {
     CKRasterizerEncoder *Encoder;
@@ -84,5 +86,8 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
         set->Bindings[stage].Sampler = CKSamplerDesc();
     }
 }
+
+float CKFFComputeDepthKey(const CKFFStateStore &state, const CKDrawStateCache &drawState);
+CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCache &drawState);
 
 #endif // CKFFDRAWTYPES_H

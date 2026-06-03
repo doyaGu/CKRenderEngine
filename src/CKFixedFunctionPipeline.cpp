@@ -1493,7 +1493,7 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
 }
 
 CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
-    return CKRST_DISCARD_ALL;
+    return CKFFSubmitDiscardFlags(m_State, m_DrawStateCache);
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
@@ -1505,12 +1505,7 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
-    // Depth key = distance from camera (view-space Z of the world origin)
-    float z = m_State.World[3][0] * m_State.View[0][2] +
-              m_State.World[3][1] * m_State.View[1][2] +
-              m_State.World[3][2] * m_State.View[2][2] +
-              m_State.View[3][2];
-    return z;
+    return CKFFComputeDepthKey(m_State, m_DrawStateCache);
 }
 
 CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
