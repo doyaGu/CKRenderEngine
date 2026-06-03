@@ -141,6 +141,38 @@ public:
     bool StatsEnabled() const { return Config.StatsEnabled || Config.UniformHistEnabled; }
     bool TimingEnabled() const { return Config.StatsEnabled; }
     double *TimerSlot(double CKFFFrameStats::*member) { return &(Stats.*member); }
+    void OnSoftwareDraw() { if (StatsEnabled()) ++Stats.SoftwareDraws; }
+    void OnHardwareDraw() { if (StatsEnabled()) ++Stats.HardwareDraws; }
+    void OnSubmittedDraw() { if (StatsEnabled()) ++Stats.SubmittedDraws; }
+    void OnPrepareFailure() { if (StatsEnabled()) ++Stats.PrepareFailures; }
+    void OnProgramMiss() { if (StatsEnabled()) ++Stats.ProgramMisses; }
+    void OnQueuedRenderPacket() { if (StatsEnabled()) ++Stats.QueuedRenderPackets; }
+    void OnRenderPacketFallback() { if (StatsEnabled()) ++Stats.RenderPacketFallbacks; }
+    void OnTransformSet() { if (StatsEnabled()) ++Stats.TransformSets; }
+    void OnVertexLayoutSet() { if (StatsEnabled()) ++Stats.VertexLayoutSets; }
+    void OnVertexBufferSet() { if (StatsEnabled()) ++Stats.VertexBufferSets; }
+    void OnIndexBufferSet() { if (StatsEnabled()) ++Stats.IndexBufferSets; }
+    void OnTextureBind() { if (StatsEnabled()) ++Stats.TextureBinds; }
+    void OnRenderPacketFlush() { if (StatsEnabled()) ++Stats.RenderPacketFlushes; }
+    void OnRenderPacketUniformOverflow() { if (StatsEnabled()) ++Stats.RenderPacketUniformOverflows; }
+    void OnRenderPacketStaticPayloadBuild() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadBuilds; }
+    void OnRenderPacketStaticPayloadReuse() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadReuses; }
+    void OnRenderPacketStaticPayloadIntern() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadInterns; }
+    void OnRenderPacketSortSkip() { if (StatsEnabled()) ++Stats.RenderPacketSortSkips; }
+    void OnViewProjectionRebuild() { if (StatsEnabled()) ++Stats.RenderPacketViewProjectionRebuilds; }
+    void OnTransientGeometry(CKDWORD vertexBytes, CKDWORD indexBytes);
+    void OnProgram(CKDWORD program);
+    void OnWorldMatrix(const VxMatrix &world);
+    void OnDrawState(const CKDrawState &drawState);
+    void OnTextureSet(CKDWORD activeTextureCount, const CKDWORD *textures);
+    void OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout);
+    void OnUniform(const CKFFUniformHandles &uniforms, CKDWORD uniform, CKDWORD count);
+    void OnAdaptiveStats(const CKFFRenderPacketQueue &queue);
+    void OnAdaptiveBypass(const CKFFRenderPacketQueue &queue);
+    void OnRenderPacketRuns(CKDWORD runCount, CKDWORD maxRun);
+    void FillReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *diagnostics,
+                               const CKFFUniformHandles &uniforms);
+    void LogAndReset(CKDrawStateCache &drawStateCache, const CKFFUniformHandles &uniforms);
 
     CKFFFrameStats Stats;
     CKFFDiagnosticConfig Config;
