@@ -2028,6 +2028,7 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         memcpy(m_FrameStats.LastTextureHandles, desiredTextures, sizeof(desiredTextures));
         m_FrameStats.HasLastTextureSet = TRUE;
     }
+#endif
 
     for (CKDWORD i = 0; i < activeCount; ++i) {
         const CKDWORD texture = desiredTextures[i];
@@ -2041,24 +2042,11 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
         const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
                                        (volume ? u.s_textureVolume[i] : u.s_texture[i]);
         encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.TextureBinds;
-    }
-#else
-    for (CKDWORD i = 0; i < activeCount; ++i) {
-        const CKDWORD texture = desiredTextures[i];
-        if (texture == 0)
-            continue;
-        CKSamplerDesc sampler = desiredSamplers[i];
-        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
-                                                             (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
-        const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
-                                       (volume ? u.s_textureVolume[i] : u.s_texture[i]);
-        encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
-    }
 #endif
+    }
 }
 
 CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
