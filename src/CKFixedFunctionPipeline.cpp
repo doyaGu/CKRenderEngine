@@ -1493,7 +1493,8 @@ static CKDWORD CKFFCurrentTextureMatrixUploadCount(
     return count;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesBumpEnv(const CKFFShaderKey &shaderKey) const {
+static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
+{
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKDWORD op = shaderKey.FS.Stages[stage].ColorOp;
@@ -1503,36 +1504,77 @@ bool CKFixedFunctionPipeline::ProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesTexFactor(const CKFFShaderKey &shaderKey) const {
+static bool CKFFTextureArgUsesTexFactor(CKDWORD arg)
+{
+    return (arg & ~(0x10u | 0x20u)) == CKRST_TA_TFACTOR;
+}
+
+static bool CKFFShaderStageUsesTexFactor(const CKFFShaderKeyFSStage &stage)
+{
+    if (stage.ColorOp == CKRST_TOP_BLENDFACTORALPHA || stage.AlphaOp == CKRST_TOP_BLENDFACTORALPHA)
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.ColorArg0))
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.ColorArg1))
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.ColorArg2))
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg0))
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg1))
+        return true;
+    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg2))
+        return true;
+    return false;
+}
+
+static bool CKFFProgramUsesTexFactor(const CKFFShaderKey &shaderKey)
+{
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
-        if (s.ColorOp == CKRST_TOP_BLENDFACTORALPHA || s.AlphaOp == CKRST_TOP_BLENDFACTORALPHA)
+        if (CKFFShaderStageUsesTexFactor(s))
             return true;
-        const CKDWORD args[] = { s.ColorArg0, s.ColorArg1, s.ColorArg2, s.AlphaArg0, s.AlphaArg1, s.AlphaArg2 };
-        for (CKDWORD arg : args) {
-            if ((arg & ~(0x10u | 0x20u)) == CKRST_TA_TFACTOR)
-                return true;
-        }
     }
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesStageConstant(const CKFFShaderKey &shaderKey) const {
+static bool CKFFTextureArgUsesStageConstant(CKDWORD arg)
+{
+    return CKFFBaseTextureArg(arg) == CKRST_TA_CONSTANT;
+}
+
+static bool CKFFShaderStageUsesStageConstant(const CKFFShaderKeyFSStage &stage)
+{
+    if (CKFFTextureArgUsesStageConstant(stage.ColorArg0))
+        return true;
+    if (CKFFTextureArgUsesStageConstant(stage.ColorArg1))
+        return true;
+    if (CKFFTextureArgUsesStageConstant(stage.ColorArg2))
+        return true;
+    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg0))
+        return true;
+    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg1))
+        return true;
+    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg2))
+        return true;
+    return false;
+}
+
+static bool CKFFProgramUsesStageConstant(const CKFFShaderKey &shaderKey)
+{
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
-        const CKDWORD args[] = { s.ColorArg0, s.ColorArg1, s.ColorArg2, s.AlphaArg0, s.AlphaArg1, s.AlphaArg2 };
-        for (CKDWORD arg : args) {
-            if (CKFFBaseTextureArg(arg) == CKRST_TA_CONSTANT)
-                return true;
-        }
+        if (CKFFShaderStageUsesStageConstant(s))
+            return true;
     }
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey,
-                                                         CKBOOL fullSpecialized) const {
+static bool CKFFProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey,
+                                           CKBOOL fullSpecialized)
+{
     if (shaderKey.VS.GetHasPositionT())
         return false;
 
@@ -1560,8 +1602,9 @@ bool CKFixedFunctionPipeline::ProgramUsesMaterialUniform(const CKFFShaderKey &sh
     return true; // Lighting still reads u_ffDrawParams[4].x for specular power.
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
-                                                           CKBOOL fullSpecialized) const {
+static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
+                                             CKBOOL fullSpecialized)
+{
     if (shaderKey.VS.GetHasPositionT())
         return false;
 
@@ -1631,7 +1674,7 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     const bool shaderUsesVertexParams = !context->PositionT &&
         (!context->FullSpecialized ||
          context->LightingEnabled ||
-         ProgramUsesMaterialUniform(context->ShaderKey, context->FullSpecialized));
+         CKFFProgramUsesMaterialUniform(context->ShaderKey, context->FullSpecialized));
     CKDWORD drawParamCount = shaderUsesVertexParams
         ? (context->LightingEnabled ? (packedLightCount == 1 ? 19 : 8) : 6)
         : 0;
@@ -1659,7 +1702,7 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
         fragmentParamCount = 4;
     } else if (context->FogEnabled) {
         fragmentParamCount = 4;
-    } else if (ProgramUsesTexFactor(context->ShaderKey)) {
+    } else if (CKFFProgramUsesTexFactor(context->ShaderKey)) {
         fragmentParamCount = 2;
     } else if (shaderKey.FS.AlphaTestEnable) {
         fragmentParamCount = 1;
@@ -1739,8 +1782,8 @@ void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformSink *sink = context->Uniforms;
-    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(context->ShaderKey,
-                                                                context->FullSpecialized);
+    const bool viewSpaceUniforms = CKFFProgramUsesViewSpaceUniforms(context->ShaderKey,
+                                                                    context->FullSpecialized);
     const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
     VxMatrix modelView;
     VxMatrix normalMatrix;
@@ -1802,7 +1845,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
 
     CKFFUniformSink *sink = context->Uniforms;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    if (ProgramUsesBumpEnv(context->ShaderKey)) {
+    if (CKFFProgramUsesBumpEnv(context->ShaderKey)) {
         float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
         CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
         EmitUniform(sink, u.u_bumpEnv, bumpEnv,
@@ -1812,7 +1855,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
     if (context->PositionT)
         EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
 
-    if (!context->FullSpecialized || ProgramUsesStageConstant(context->ShaderKey)) {
+    if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey)) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_StageStates, m_TextureHandles, context->ActiveTextureCount, stageParams);
         EmitUniform(sink, u.u_stageParams, stageParams.Values,
@@ -2014,8 +2057,8 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
         return TRUE;
 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(shaderKey,
-                                                                programContext->FullSpecialized);
+    const bool viewSpaceUniforms = CKFFProgramUsesViewSpaceUniforms(shaderKey,
+                                                                    programContext->FullSpecialized);
 
     VxMatrix modelView;
     VxMatrix normalMatrix;
