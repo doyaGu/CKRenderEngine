@@ -675,6 +675,69 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
     ffp.Shutdown();
 }
 
+void StaticUniformPayloadIgnoresInactiveTextureMatrix()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+    PrepareTexturedPacketCandidate(&ffp);
+
+    VxMatrix texMatrix0;
+    texMatrix0.Identity();
+    texMatrix0[0][0] = 2.0f;
+    texMatrix0[1][1] = 3.0f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix0);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+
+    CKFFProgramContext texturedContext;
+    CKFFPreparedState texturedPreparedState;
+    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+                  &ffp, CKRST_DP_TRANSFORM,
+                  CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
+                  &texturedContext, &texturedPreparedState),
+              "Inactive texture matrix test must resolve the active stage program");
+    TestCheck(texturedPreparedState.ActiveTextureCount == 1,
+              "Inactive texture matrix test must start with one active texture");
+
+    CKFFRenderPacketUniformPayload baselinePayload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &baselinePayload,
+                                                                &texturedContext,
+                                                                texturedPreparedState.ActiveTextureCount),
+              "Inactive texture matrix test must build a baseline payload");
+
+    VxMatrix texMatrix1;
+    texMatrix1.Identity();
+    texMatrix1[0][0] = 4.0f;
+    texMatrix1[1][1] = 5.0f;
+    ffp.SetTransform(VXMATRIX_TEXTURE1, texMatrix1);
+    ffp.SetTextureStageState(1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+
+    CKFFRenderPacketUniformPayload inactivePayload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &inactivePayload,
+                                                                &texturedContext,
+                                                                texturedPreparedState.ActiveTextureCount),
+              "Inactive texture matrix test must build a payload after inactive stage changes");
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    TestCheck(baselinePayload.EntryCount > 0 &&
+                  baselinePayload.Entries[0].Uniform == u.u_texMatrix &&
+                  baselinePayload.Entries[0].Count == 1 &&
+                  baselinePayload.Entries[0].Vec4Count == 4,
+              "Baseline payload must upload one active texture matrix");
+    TestCheck(inactivePayload.EntryCount > 0 &&
+                  inactivePayload.Entries[0].Uniform == u.u_texMatrix &&
+                  inactivePayload.Entries[0].Count == 1 &&
+                  inactivePayload.Entries[0].Vec4Count == 4,
+              "Inactive stage texture matrix must not expand texture matrix upload count");
+    TestCheck(inactivePayload.EntryCount == baselinePayload.EntryCount &&
+                  inactivePayload.Vec4Count == baselinePayload.Vec4Count &&
+                  inactivePayload.Hash == baselinePayload.Hash,
+              "Inactive stage texture matrix must not change static payload identity");
+
+    ffp.Shutdown();
+}
+
 void VertexBufferPacketBuildResultReportsRejectReasons()
 {
     {
@@ -1399,6 +1462,8 @@ int main()
               &StaticUniformPayloadOrderAndHashStaysStable);
     tests.Run("Static uniform payload uses supplied program context",
               &StaticUniformPayloadUsesSuppliedProgramContext);
+    tests.Run("Static uniform payload ignores inactive texture matrix",
+              &StaticUniformPayloadIgnoresInactiveTextureMatrix);
     tests.Run("Vertex buffer packet build result reports reject reasons",
               &VertexBufferPacketBuildResultReportsRejectReasons);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
