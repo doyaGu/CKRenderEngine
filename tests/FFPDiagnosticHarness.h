@@ -197,11 +197,15 @@ public:
         m_Driver = driver;
         m_Width = 64;
         m_Height = 64;
+        AllowTransientInstanceBuffer = TRUE;
+        FailTransientInstanceBuffer = FALSE;
+        FailCreateProgram = FALSE;
     }
 
     FFPDiagnosticEncoder Encoder;
     CKBOOL AllowTransientInstanceBuffer = TRUE;
     CKBOOL FailTransientInstanceBuffer = FALSE;
+    CKBOOL FailCreateProgram = FALSE;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     const void *LastVertexShaderCode = nullptr;
@@ -222,6 +226,8 @@ public:
         return CK_OK;
     }
     CKERROR CreateProgram(CKDWORD, CKProgramDesc *desc) override {
+        if (FailCreateProgram)
+            return CKERR_INVALIDPARAMETER;
         ++CreatedProgramCount;
         LastProgramSpecializationDwords.clear();
         if (desc && desc->SpecializationDwords && desc->SpecializationDwordCount > 0) {
