@@ -615,41 +615,66 @@ void StaticUniformPayloadOrderAndHashStaysStable()
 
 void VertexBufferPacketBuildResultReportsRejectReasons()
 {
-    FFPDiagnosticDriver driver;
-    FFPDiagnosticContext context(&driver);
-    CKFixedFunctionPipeline ffp;
-    SetupPacketPipeline(&ffp, &context, &driver);
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        SetupPacketPipeline(&ffp, &context, &driver);
 
-    CKFFVertexBufferPacketBuildResult missingVertexBuffer;
-    CKFFPipelineTestAccess::BuildVertexBufferPacket(
-        &ffp, &missingVertexBuffer, &context.Encoder,
-        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
-        0, 200, 0, 3, 0, 3,
-        CKRST_DP_TRANSFORM,
-        CKFF_VF_POSITION,
-        77);
-    TestCheck(!missingVertexBuffer.Success,
-              "Missing vertex buffer packet build must fail");
-    TestCheck(missingVertexBuffer.RejectReason == CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER,
-              "Missing vertex buffer packet build must report its reject reason");
+        CKFFVertexBufferPacketBuildResult missingVertexBuffer;
+        CKFFPipelineTestAccess::BuildVertexBufferPacket(
+            &ffp, &missingVertexBuffer, &context.Encoder,
+            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+            0, 200, 0, 3, 0, 3,
+            CKRST_DP_TRANSFORM,
+            CKFF_VF_POSITION,
+            77);
+        TestCheck(!missingVertexBuffer.Success,
+                  "Missing vertex buffer packet build must fail");
+        TestCheck(missingVertexBuffer.RejectReason == CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER,
+                  "Missing vertex buffer packet build must report its reject reason");
 
-    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
-    CKFFVertexBufferPacketBuildResult vertexBlend;
-    CKFFPipelineTestAccess::BuildVertexBufferPacket(
-        &ffp, &vertexBlend, &context.Encoder,
-        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
-        100, 200, 0, 3, 0, 3,
-        CKRST_DP_TRANSFORM,
-        CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT,
-        77);
-    TestCheck(!vertexBlend.Success,
-              "Vertex blend packet build must fail before capture");
-    TestCheck(vertexBlend.RejectReason == CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND,
-              "Vertex blend packet build must report object-uniform reject reason");
-    TestCheck(!ffp.HasOpaqueRenderPackets(),
-              "Rejected packet build result must not enqueue a packet");
+        ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
+        CKFFVertexBufferPacketBuildResult vertexBlend;
+        CKFFPipelineTestAccess::BuildVertexBufferPacket(
+            &ffp, &vertexBlend, &context.Encoder,
+            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+            100, 200, 0, 3, 0, 3,
+            CKRST_DP_TRANSFORM,
+            CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT,
+            77);
+        TestCheck(!vertexBlend.Success,
+                  "Vertex blend packet build must fail before capture");
+        TestCheck(vertexBlend.RejectReason == CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND,
+                  "Vertex blend packet build must report object-uniform reject reason");
+        TestCheck(!ffp.HasOpaqueRenderPackets(),
+                  "Rejected packet build result must not enqueue a packet");
 
-    ffp.Shutdown();
+        ffp.Shutdown();
+    }
+
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        context.FailCreateProgram = TRUE;
+        CKFixedFunctionPipeline ffp;
+        SetupPacketPipeline(&ffp, &context, &driver);
+
+        CKFFVertexBufferPacketBuildResult programMissing;
+        CKFFPipelineTestAccess::BuildVertexBufferPacket(
+            &ffp, &programMissing, &context.Encoder,
+            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+            100, 200, 0, 3, 0, 3,
+            CKRST_DP_TRANSFORM,
+            CKFF_VF_POSITION,
+            77);
+        TestCheck(!programMissing.Success,
+                  "Program-missing packet build must fail");
+        TestCheck(programMissing.RejectReason == CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING,
+                  "Program-missing packet build must report its reject reason");
+
+        ffp.Shutdown();
+    }
 }
 
 void OpaquePacketAdaptiveKeepsHighRepeatQueued()
