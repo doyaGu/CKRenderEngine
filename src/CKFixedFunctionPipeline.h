@@ -346,7 +346,7 @@ private:
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
-    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet);
+    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
     void UploadUniforms(CKRasterizerEncoder *encoder, CKDWORD activeTextureCount);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
@@ -375,7 +375,7 @@ private:
                             const CKFFLightData *viewLights,
                             int packedLightCount,
                             const CKFFUniformEmissionContext *context) const;
-    void BindTextures(CKRasterizerEncoder *encoder);
+    void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
     float ComputeDepthKey() const;
