@@ -1703,6 +1703,59 @@ CKBOOL CKFixedFunctionPipeline::EmitUniform(CKFFUniformSink *sink, CKDWORD unifo
     return TRUE;
 }
 
+void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
+    CKFFUniformSink *sink,
+    const CKFFProgramContext *programContext,
+    const CKFFShaderKey &shaderKey,
+    CKBOOL positionT)
+{
+    if (!sink || positionT)
+        return;
+
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(programContext);
+    const bool vertexBlend = CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
+    VxMatrix modelView;
+    VxMatrix normalMatrix;
+    VxMatrix viewNormalMatrix;
+    VxMatrix viewProj;
+    VxMatrix modelViewProj;
+    if (viewSpaceUniforms) {
+        Vx3DMultiplyMatrix4(modelView, m_View, m_World);
+        Vx3DInverseMatrix(normalMatrix, modelView);
+        Vx3DTransposeMatrix(normalMatrix, normalMatrix);
+        if (vertexBlend) {
+            Vx3DInverseMatrix(viewNormalMatrix, m_View);
+            Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
+        }
+    }
+    Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
+    Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
+    VxMatrix matrices[4];
+    matrices[0] = vertexBlend ? viewProj : modelViewProj;
+    matrices[1] = m_World;
+    if (viewSpaceUniforms) {
+        matrices[2] = vertexBlend ? m_View : modelView;
+        matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
+    }
+    if (vertexBlend) {
+        VxMatrix identity;
+        identity.Identity();
+        VxMatrix palette[CKFF_VERTEX_BLEND_MATRIX_COUNT];
+        for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
+            if (m_VertexBlendMatrixSet[i])
+                palette[i] = m_VertexBlendMatrices[i];
+            else
+                palette[i] = (i == 0) ? m_World : identity;
+        }
+        EmitUniform(sink, u.u_vertexBlendMatrices, palette,
+                    CKFF_VERTEX_BLEND_MATRIX_COUNT,
+                    CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
+    }
+    const CKDWORD matrixCount = viewSpaceUniforms ? 4 : 2;
+    EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
+}
+
 void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
                                                   const CKFFProgramContext *programContext)
 {
@@ -1716,49 +1769,8 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     const bool emitStatic = sink->Encoder || sink->EmitStatic;
     const bool emitObject = sink->Encoder || sink->EmitObject;
 
-    VxMatrix modelView;
-    VxMatrix normalMatrix;
-    VxMatrix viewNormalMatrix;
-    VxMatrix viewProj;
-    VxMatrix modelViewProj;
-    if (emitObject && !positionT) {
-        const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(programContext);
-        const bool vertexBlend = CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
-        if (viewSpaceUniforms) {
-            Vx3DMultiplyMatrix4(modelView, m_View, m_World);
-            Vx3DInverseMatrix(normalMatrix, modelView);
-            Vx3DTransposeMatrix(normalMatrix, normalMatrix);
-            if (vertexBlend) {
-                Vx3DInverseMatrix(viewNormalMatrix, m_View);
-                Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
-            }
-        }
-        Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
-        Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
-        VxMatrix matrices[4];
-        matrices[0] = vertexBlend ? viewProj : modelViewProj;
-        matrices[1] = m_World;
-        if (viewSpaceUniforms) {
-            matrices[2] = vertexBlend ? m_View : modelView;
-            matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
-        }
-        if (vertexBlend) {
-            VxMatrix identity;
-            identity.Identity();
-            VxMatrix palette[CKFF_VERTEX_BLEND_MATRIX_COUNT];
-            for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
-                if (m_VertexBlendMatrixSet[i])
-                    palette[i] = m_VertexBlendMatrices[i];
-                else
-                    palette[i] = (i == 0) ? m_World : identity;
-            }
-            EmitUniform(sink, u.u_vertexBlendMatrices, palette,
-                        CKFF_VERTEX_BLEND_MATRIX_COUNT,
-                        CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
-        }
-        const CKDWORD matrixCount = viewSpaceUniforms ? 4 : 2;
-        EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
-    }
+    if (emitObject)
+        CKFFEmitObjectMatrixUniforms(sink, programContext, shaderKey, positionT ? TRUE : FALSE);
     if (!emitStatic)
         return;
 
