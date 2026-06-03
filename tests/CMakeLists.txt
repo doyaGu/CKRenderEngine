@@ -5,6 +5,7 @@ function(ckre_configure_test_target TARGET_NAME)
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
+        CKRE_ENABLE_TEST_ACCESS=1
     )
 
     set(_ckre_test_ck2_dep CK2)

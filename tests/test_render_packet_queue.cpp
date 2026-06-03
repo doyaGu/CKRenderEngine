@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "CKFixedFunctionPipeline.h"
+#include "CKFFUniformState.h"
 #include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 
@@ -136,6 +137,23 @@ CKBOOL PacketMatrixAlmostEqual(const VxMatrix &a, const VxMatrix &b)
     }
     return TRUE;
 }
+
+struct CKFFPipelineTestAccess {
+    static CKBOOL ResolveVertexBufferPacketProgram(CKFixedFunctionPipeline *ffp,
+                                                   CKDWORD dpFlags,
+                                                   CKDWORD formatFlags,
+                                                   CKFFProgramContext *programContext)
+    {
+        return ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, programContext);
+    }
+
+    static CKBOOL BuildStaticUniformPayload(CKFixedFunctionPipeline *ffp,
+                                            CKFFRenderPacketUniformPayload *payload,
+                                            const CKFFProgramContext *programContext)
+    {
+        return ffp->BuildStaticUniformPayload(payload, programContext);
+    }
+};
 
 void PrepareTexturedPacketCandidate(CKFixedFunctionPipeline *ffp)
 {
@@ -527,6 +545,53 @@ void OpaquePacketTextureKindChangeRebuildsStaticPayload()
 
     ffpA.Shutdown();
     ffpB.Shutdown();
+}
+
+void StaticUniformPayloadOrderAndHashStaysStable()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+    PrepareTexturedPacketCandidate(&ffp);
+
+    CKFFProgramContext programContext;
+    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(&ffp, CKRST_DP_TRANSFORM, 0, &programContext),
+              "Static payload order test must resolve a fixed-function program");
+
+    CKFFRenderPacketUniformPayload payload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &programContext),
+              "Static payload order test must build a static payload");
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    TestCheck(payload.EntryCount == 4,
+              "Textured static payload must keep its entry count stable");
+    TestCheck(payload.Vec4Count == 55,
+              "Textured static payload must keep its vec4 count stable");
+    TestCheck(payload.Hash == 1548126050u,
+              "Textured static payload hash must stay stable");
+    TestCheck(payload.Entries[0].Uniform == u.u_ffDrawParams &&
+                  payload.Entries[0].Offset == 0 &&
+                  payload.Entries[0].Count == 12 &&
+                  payload.Entries[0].Vec4Count == 12,
+              "Static payload entry 0 must remain draw params");
+    TestCheck(payload.Entries[1].Uniform == u.u_stageParams &&
+                  payload.Entries[1].Offset == 12 &&
+                  payload.Entries[1].Count == CKFF_STAGE_PARAM_VEC4_COUNT &&
+                  payload.Entries[1].Vec4Count == CKFF_STAGE_PARAM_VEC4_COUNT,
+              "Static payload entry 1 must remain stage params");
+    TestCheck(payload.Entries[2].Uniform == u.u_ffSpec &&
+                  payload.Entries[2].Offset == 44 &&
+                  payload.Entries[2].Count == CKFFSpecializationInfo::MaxSpecDwords &&
+                  payload.Entries[2].Vec4Count == CKFFSpecializationInfo::MaxSpecDwords,
+              "Static payload entry 2 must remain fixed-function specialization params");
+    TestCheck(payload.Entries[3].Uniform == u.u_clipParams &&
+                  payload.Entries[3].Offset == 54 &&
+                  payload.Entries[3].Count == 1 &&
+                  payload.Entries[3].Vec4Count == 1,
+              "Static payload entry 3 must remain clip params");
+
+    ffp.Shutdown();
 }
 
 void OpaquePacketAdaptiveKeepsHighRepeatQueued()
@@ -1171,6 +1236,8 @@ int main()
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet texture kind change rebuilds static payload",
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
+    tests.Run("Static uniform payload order and hash stays stable",
+              &StaticUniformPayloadOrderAndHashStaysStable);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",

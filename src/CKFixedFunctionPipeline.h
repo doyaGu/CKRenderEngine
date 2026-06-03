@@ -19,6 +19,10 @@
 #include "CKRenderPipeline.h"
 #include "CKFrustumCuller.h"
 
+#ifndef CKRE_ENABLE_TEST_ACCESS
+#define CKRE_ENABLE_TEST_ACCESS 0
+#endif
+
 class CKRasterizerContext;
 class CKRasterizerEncoder;
 
@@ -154,6 +158,7 @@ struct CKFFPacketTextureSetCache {
 };
 
 struct CKFFPreparedState;
+struct CKFFPipelineTestAccess;
 
 class CKFixedFunctionPipeline {
 public:
@@ -252,6 +257,10 @@ public:
 #endif
 
 private:
+#if CKRE_ENABLE_TEST_ACCESS
+    friend struct CKFFPipelineTestAccess;
+#endif
+
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
     CKBOOL m_DisableMipmaps;
