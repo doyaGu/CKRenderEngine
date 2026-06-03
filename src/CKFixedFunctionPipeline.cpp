@@ -1612,15 +1612,11 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     float (*drawParams)[4],
     const CKFFLightData *viewLights,
     int packedLightCount,
-    const CKFFProgramContext *programContext,
-    const CKFFShaderKey &shaderKey,
-    CKBOOL positionT,
-    CKBOOL fullSpecialized,
-    CKBOOL shaderUsesLighting,
-    CKBOOL fogEnabled,
-    CKDWORD vertexFogMode,
-    CKDWORD pixelFogMode) const
+    const CKFFUniformEmissionContext *context) const
 {
+    if (!context)
+        return 0;
+    const CKFFShaderKey &shaderKey = context->ShaderKey;
     memset(drawParams, 0, sizeof(float) * CKFF_DRAW_PARAM_VEC4_COUNT * 4);
     memcpy(drawParams[0], m_Material.Diffuse, sizeof(drawParams[0]));
     memcpy(drawParams[1], m_Material.Ambient, sizeof(drawParams[1]));
@@ -1632,7 +1628,7 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], materialSource,
            sizeof(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES]));
     drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) ? 1.0f : 0.0f;
-    if (shaderUsesLighting) {
+    if (context->LightingEnabled) {
         CKDWORD ambientColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_AMBIENT);
         float ambientColorF[4];
         CKFFPackColorARGB(ambientColor, ambientColorF);
@@ -1655,15 +1651,20 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
             drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][3] = 1.0f;
         }
     }
-    const bool shaderUsesVertexParams = !positionT && (!fullSpecialized || shaderUsesLighting || ProgramUsesMaterialUniform(programContext));
-    CKDWORD drawParamCount = shaderUsesVertexParams ? (shaderUsesLighting ? (packedLightCount == 1 ? 19 : 8) : 6) : 0;
+    const bool shaderUsesVertexParams = !context->PositionT &&
+        (!context->FullSpecialized ||
+         context->LightingEnabled ||
+         ProgramUsesMaterialUniform(context->ProgramContext));
+    CKDWORD drawParamCount = shaderUsesVertexParams
+        ? (context->LightingEnabled ? (packedLightCount == 1 ? 19 : 8) : 6)
+        : 0;
 
     drawParams[CKFF_DRAW_PARAM_ALPHA][0] = (float)CKFFAlphaRefByte(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAREF));
     drawParams[CKFF_DRAW_PARAM_ALPHA][1] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? CKFFPackAlphaFuncPrecision(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC), m_AlphaTestPrecision)
         : 0.0f;
     drawParams[CKFF_DRAW_PARAM_ALPHA][2] = m_DrawStateCache.GetRenderState(VXRENDERSTATE_SPECULARENABLE) ? 1.0f : 0.0f;
-    drawParams[CKFF_DRAW_PARAM_ALPHA][3] = (float)pixelFogMode;
+    drawParams[CKFF_DRAW_PARAM_ALPHA][3] = (float)context->PixelFogMode;
 
     CKDWORD tf = m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREFACTOR);
     CKFFPackColorARGB(tf, drawParams[CKFF_DRAW_PARAM_TEXTURE_FACTOR]);
@@ -1671,24 +1672,24 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     drawParams[CKFF_DRAW_PARAM_FOG][0] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGSTART, 0.0f);
     drawParams[CKFF_DRAW_PARAM_FOG][1] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGEND, 1.0f);
     drawParams[CKFF_DRAW_PARAM_FOG][2] = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_FOGDENSITY, 1.0f);
-    drawParams[CKFF_DRAW_PARAM_FOG][3] = (float)vertexFogMode;
+    drawParams[CKFF_DRAW_PARAM_FOG][3] = (float)context->VertexFogMode;
 
     CKDWORD fogColor = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGCOLOR);
     CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
 
     CKDWORD fragmentParamCount = 0;
-    if (!fullSpecialized) {
+    if (!context->FullSpecialized) {
         fragmentParamCount = 4;
-    } else if (fogEnabled) {
+    } else if (context->FogEnabled) {
         fragmentParamCount = 4;
-    } else if (ProgramUsesTexFactor(programContext)) {
+    } else if (ProgramUsesTexFactor(context->ProgramContext)) {
         fragmentParamCount = 2;
     } else if (shaderKey.FS.AlphaTestEnable) {
         fragmentParamCount = 1;
     }
     if (fragmentParamCount > 0 && drawParamCount < 8 + fragmentParamCount)
         drawParamCount = 8 + fragmentParamCount;
-    if (!fullSpecialized && !positionT && fogEnabled && drawParamCount < 8)
+    if (!context->FullSpecialized && !context->PositionT && context->FogEnabled && drawParamCount < 8)
         drawParamCount = 8;
     return drawParamCount;
 }
@@ -1907,14 +1908,7 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     }
 
     float drawParams[CKFF_DRAW_PARAM_VEC4_COUNT][4];
-    CKDWORD drawParamCount = BuildDrawParams(drawParams, viewLights, packed,
-                                             programContext, context.ShaderKey,
-                                             context.PositionT,
-                                             context.FullSpecialized,
-                                             context.LightingEnabled,
-                                             context.FogEnabled,
-                                             context.VertexFogMode,
-                                             context.PixelFogMode);
+    CKDWORD drawParamCount = BuildDrawParams(drawParams, viewLights, packed, &context);
     if (drawParamCount > 0)
         EmitUniform(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
 
