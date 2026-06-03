@@ -98,17 +98,17 @@ public:
     void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaquePackets.SetInstancingEnabled(enabled); }
     void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePackets.SetPacketsAllowed(allowed); }
     CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePackets.PacketsAllowed(); }
-    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePackets.Queue().GetAdaptiveSamples(); }
-    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePackets.Queue().GetAdaptiveSavedBindEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveRunBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePackets.Queue().GetAdaptiveSampleRuns(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePackets.Queue().GetAdaptiveSampleMaxRun(); }
-    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePackets.Queue().GetAdaptiveSubmitSavedEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveCooldownBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePackets.Queue().GetAdaptiveCooldownFrames(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePackets.Queue().GetAdaptiveFrameEndEvaluations(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveFrameEndRunBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePackets.GetAdaptiveSamples(); }
+    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePackets.GetAdaptiveBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePackets.GetAdaptiveSavedBindEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePackets.GetAdaptiveRunBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePackets.GetAdaptiveSampleRuns(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePackets.GetAdaptiveSampleMaxRun(); }
+    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePackets.GetAdaptiveSubmitSavedEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePackets.GetAdaptiveCooldownBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePackets.GetAdaptiveCooldownFrames(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePackets.GetAdaptiveFrameEndEvaluations(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePackets.GetAdaptiveFrameEndRunBypasses(); }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }

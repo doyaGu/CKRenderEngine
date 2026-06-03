@@ -6,13 +6,11 @@
 
 class CKFixedFunctionPipeline;
 struct CKFFRenderPacketReplayContext;
+struct CKFFPipelineTestAccess;
 
 class CKFFOpaquePacketCoordinator {
 public:
     CKFFOpaquePacketCoordinator();
-
-    CKFFRenderPacketQueue &Queue() { return m_Queue; }
-    const CKFFRenderPacketQueue &Queue() const { return m_Queue; }
 
     CKBOOL HasPackets() const { return m_Queue.HasPackets(); }
     void Clear() { m_Queue.Clear(); }
@@ -32,6 +30,43 @@ public:
 
     void SetInstanceLayout(CKDWORD instanceLayout) { m_InstanceLayout = instanceLayout; }
     CKDWORD InstanceLayout() const { return m_InstanceLayout; }
+
+    CKDWORD GetAdaptiveSamples() const { return m_Queue.GetAdaptiveSamples(); }
+    CKDWORD GetAdaptiveBypasses() const { return m_Queue.GetAdaptiveBypasses(); }
+    CKDWORD GetAdaptiveSavedBindEstimate() const { return m_Queue.GetAdaptiveSavedBindEstimate(); }
+    CKDWORD GetAdaptiveRunBypasses() const { return m_Queue.GetAdaptiveRunBypasses(); }
+    CKDWORD GetAdaptiveSampleRuns() const { return m_Queue.GetAdaptiveSampleRuns(); }
+    CKDWORD GetAdaptiveSampleMaxRun() const { return m_Queue.GetAdaptiveSampleMaxRun(); }
+    CKDWORD GetAdaptiveSubmitSavedEstimate() const { return m_Queue.GetAdaptiveSubmitSavedEstimate(); }
+    CKDWORD GetAdaptiveCooldownBypasses() const { return m_Queue.GetAdaptiveCooldownBypasses(); }
+    CKDWORD GetAdaptiveCooldownFrames() const { return m_Queue.GetAdaptiveCooldownFrames(); }
+    CKDWORD GetAdaptiveFrameEndEvaluations() const { return m_Queue.GetAdaptiveFrameEndEvaluations(); }
+    CKDWORD GetAdaptiveFrameEndRunBypasses() const { return m_Queue.GetAdaptiveFrameEndRunBypasses(); }
+
+    void DrawVertexBuffer(CKFixedFunctionPipeline &pipeline,
+                          CKRasterizerEncoder *encoder,
+                          CKRenderView view,
+                          VXPRIMITIVETYPE type,
+                          CKDWORD vb,
+                          CKDWORD ib,
+                          CKDWORD baseVertex,
+                          CKDWORD vertexCount,
+                          CKDWORD startIndex,
+                          CKDWORD indexCount,
+                          CKDWORD dpFlags,
+                          CKDWORD formatFlags,
+                          CKDWORD vertexLayout);
+    void ClearRenderPackets() { m_Queue.Clear(); }
+    void ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline);
+    void FlushRenderPackets(CKFixedFunctionPipeline &pipeline,
+                            CKRasterizerEncoder *encoder,
+                            CKBOOL forceDirectReplay,
+                            CKBOOL allowAdaptiveLearning);
+
+private:
+#if CKRE_ENABLE_TEST_ACCESS
+    friend struct CKFFPipelineTestAccess;
+#endif
 
     CKBOOL TryGetCachedProgram(CKDWORD dpFlags,
                                CKDWORD formatFlags,
@@ -103,19 +138,6 @@ public:
                                  CKDWORD dpFlags,
                                  CKDWORD formatFlags,
                                  CKDWORD vertexLayout);
-    void DrawVertexBuffer(CKFixedFunctionPipeline &pipeline,
-                          CKRasterizerEncoder *encoder,
-                          CKRenderView view,
-                          VXPRIMITIVETYPE type,
-                          CKDWORD vb,
-                          CKDWORD ib,
-                          CKDWORD baseVertex,
-                          CKDWORD vertexCount,
-                          CKDWORD startIndex,
-                          CKDWORD indexCount,
-                          CKDWORD dpFlags,
-                          CKDWORD formatFlags,
-                          CKDWORD vertexLayout);
     void SubmitVertexBufferPacketImmediate(CKFixedFunctionPipeline &pipeline,
                                            CKRasterizerEncoder *encoder,
                                            CKRenderView view,
@@ -129,18 +151,11 @@ public:
                                            CKDWORD dpFlags,
                                            CKDWORD formatFlags,
                                            CKDWORD vertexLayout);
-    void ClearRenderPackets() { m_Queue.Clear(); }
-    void ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline);
     void SortRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFixedFunctionPipeline &pipeline,
                                        CKFFRenderPacketReplayContext *context,
                                        CKRasterizerEncoder *encoder);
-    void FlushRenderPackets(CKFixedFunctionPipeline &pipeline,
-                            CKRasterizerEncoder *encoder,
-                            CKBOOL forceDirectReplay,
-                            CKBOOL allowAdaptiveLearning);
 
-private:
     CKFFRenderPacketQueue m_Queue;
     CKBOOL m_InstancingEnabled;
     CKDWORD m_InstanceLayout;
