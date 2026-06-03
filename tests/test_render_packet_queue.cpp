@@ -613,6 +613,49 @@ void StaticUniformPayloadOrderAndHashStaysStable()
     ffp.Shutdown();
 }
 
+void StaticUniformPayloadUsesSuppliedProgramContext()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+    PrepareTexturedPacketCandidate(&ffp);
+
+    VxMatrix texMatrix;
+    texMatrix.Identity();
+    texMatrix[0][0] = 2.0f;
+    texMatrix[1][1] = 3.0f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+
+    CKFFProgramContext texturedContext;
+    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+                  &ffp, CKRST_DP_TRANSFORM,
+                  CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
+                  &texturedContext),
+              "Textured payload context test must resolve the textured program");
+
+    CKFFProgramContext positionTContext;
+    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+                  &ffp, CKRST_DP_CL_V,
+                  CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0,
+                  &positionTContext),
+              "Textured payload context test must switch the current program");
+
+    CKFFRenderPacketUniformPayload payload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &texturedContext),
+              "Static payload must build from the supplied textured program context");
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    TestCheck(payload.EntryCount > 0 &&
+                  payload.Entries[0].Uniform == u.u_texMatrix &&
+                  payload.Entries[0].Count == 1 &&
+                  payload.Entries[0].Vec4Count == 4,
+              "Static payload must emit texture matrices from the supplied context");
+
+    ffp.Shutdown();
+}
+
 void VertexBufferPacketBuildResultReportsRejectReasons()
 {
     {
@@ -1321,6 +1364,8 @@ int main()
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
     tests.Run("Static uniform payload order and hash stays stable",
               &StaticUniformPayloadOrderAndHashStaysStable);
+    tests.Run("Static uniform payload uses supplied program context",
+              &StaticUniformPayloadUsesSuppliedProgramContext);
     tests.Run("Vertex buffer packet build result reports reject reasons",
               &VertexBufferPacketBuildResultReportsRejectReasons);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
