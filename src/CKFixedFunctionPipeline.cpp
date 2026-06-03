@@ -1781,11 +1781,6 @@ CKBOOL CKFixedFunctionPipeline::BuildObjectUniformPayload(CKFFRenderPacketUnifor
     return TRUE;
 }
 
-CKBOOL CKFixedFunctionPipeline::CanBuildPacketObjectUniforms() const
-{
-    return GetPacketObjectUniformRejectReason() == CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
-}
-
 CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason() const
 {
     if (m_CurrentShaderKey.VS.GetHasPositionT())
@@ -1793,11 +1788,6 @@ CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason() const
     if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     return CKFF_RENDER_PACKET_ELIGIBLE;
-}
-
-CKBOOL CKFixedFunctionPipeline::CanInstanceVertexBufferPacket() const
-{
-    return GetVertexBufferPacketInstancingRejectReason() == CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
 }
 
 CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason() const
@@ -2344,7 +2334,7 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketInstancing(
 {
     if (!packet || !programContext)
         return;
-    if (!CanInstanceVertexBufferPacket())
+    if (GetVertexBufferPacketInstancingRejectReason() != CKFF_RENDER_PACKET_ELIGIBLE)
         return;
 
     CKFFShaderKey instancedKey = programContext->ShaderKey;
@@ -2394,16 +2384,6 @@ CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
     }
 
     return TRUE;
-}
-
-CKBOOL CKFixedFunctionPipeline::CanQueueOpaqueVertexBufferPacket(CKRenderView view,
-                                                                 VXPRIMITIVETYPE type,
-                                                                 CKDWORD vb,
-                                                                 CKDWORD ib,
-                                                                 CKDWORD vertexLayout) const
-{
-    return GetOpaqueVertexBufferPacketRejectReason(view, type, vb, ib, vertexLayout) ==
-        CKFF_RENDER_PACKET_ELIGIBLE ? TRUE : FALSE;
 }
 
 CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRenderView view,
@@ -2470,7 +2450,7 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
 #endif
         return FALSE;
     }
-    if (!CanBuildPacketObjectUniforms())
+    if (GetPacketObjectUniformRejectReason() != CKFF_RENDER_PACKET_ELIGIBLE)
         return FALSE;
 
     CaptureVertexBufferPacketIdentity(packet, &programContext, view, type, vb, ib,

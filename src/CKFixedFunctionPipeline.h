@@ -339,7 +339,6 @@ private:
                                      const CKFFProgramContext *programContext);
     CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
                                      const CKFFProgramContext *programContext);
-    CKBOOL CanBuildPacketObjectUniforms() const;
     CKDWORD GetPacketObjectUniformRejectReason() const;
     void UpdateViewProjectionCache();
     CKDWORD CurrentTextureMatrixUploadCount() const;
@@ -374,8 +373,6 @@ private:
     CKBOOL CaptureVertexBufferPacketStaticUniforms(CKRenderPacket *packet,
                                                    const CKFFProgramContext *programContext,
                                                    CKBOOL collectStats);
-    CKBOOL CanQueueOpaqueVertexBufferPacket(CKRenderView view, VXPRIMITIVETYPE type,
-                                            CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout) const;
     CKDWORD GetOpaqueVertexBufferPacketRejectReason(CKRenderView view, VXPRIMITIVETYPE type,
                                                     CKDWORD vb, CKDWORD ib,
                                                     CKDWORD vertexLayout) const;
@@ -392,7 +389,6 @@ private:
                                            CKDWORD startIndex, CKDWORD indexCount,
                                            CKDWORD dpFlags, CKDWORD formatFlags,
                                            CKDWORD vertexLayout);
-    CKBOOL CanInstanceVertexBufferPacket() const;
     CKDWORD GetVertexBufferPacketInstancingRejectReason() const;
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
