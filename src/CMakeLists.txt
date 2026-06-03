@@ -93,6 +93,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFFShaderCache.h
         CKFFConstants.h
         CKFFDrawTypes.h
+        CKFFStateStore.h
         CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h
@@ -158,6 +159,7 @@ set(CKRE_SOURCES
         CKVertexBuffer.cpp
 
         CKFixedFunctionPipeline.cpp
+        CKFFStateStore.cpp
         CKFFRenderPacket.cpp
         CKFFRenderPacketQueue.cpp
         CKFFRenderPacketReplay.cpp

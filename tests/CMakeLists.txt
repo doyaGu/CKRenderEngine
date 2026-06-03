@@ -88,6 +88,10 @@ ckre_add_test(ff_uniform_state_tests
     test_ff_uniform_state.cpp
 )
 
+ckre_add_test(ff_state_store_tests
+    test_ff_state_store.cpp
+)
+
 ckre_add_test(ffp_stencil_submit_tests
     test_ffp_stencil_submit.cpp
 )
