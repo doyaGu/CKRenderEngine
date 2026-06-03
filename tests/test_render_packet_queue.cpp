@@ -142,7 +142,8 @@ struct CKFFPipelineTestAccess {
                                                    CKFFPreparedState *preparedStateOut = nullptr)
     {
         CKFFPreparedState preparedState;
-        CKBOOL result = ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, programContext);
+        CKBOOL result = ffp->m_OpaquePackets.ResolveVertexBufferPacketProgram(
+            *ffp, dpFlags, formatFlags, &preparedState, programContext);
         if (preparedStateOut)
             *preparedStateOut = preparedState;
         return result;
@@ -171,11 +172,10 @@ struct CKFFPipelineTestAccess {
                                         CKDWORD formatFlags,
                                         CKDWORD vertexLayout)
     {
-        ffp->BuildVertexBufferPacket(result, encoder, view, type, vb, ib,
-                                     baseVertex, vertexCount,
-                                     startIndex, indexCount,
-                                     dpFlags, formatFlags,
-                                     vertexLayout);
+        ffp->m_OpaquePackets.BuildVertexBufferPacket(
+            *ffp, result, encoder, view, type, vb, ib,
+            baseVertex, vertexCount, startIndex, indexCount,
+            dpFlags, formatFlags, vertexLayout);
     }
 };
 

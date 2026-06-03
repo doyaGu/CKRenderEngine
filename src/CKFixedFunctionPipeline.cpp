@@ -414,12 +414,12 @@ void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     m_State.DirtyFlags = CKFF_DIRTY_ALL;
     m_State.MarkViewProjectionDirty();
     MarkPacketProgramDirty();
-    ClearOpaqueRenderPackets();
-    ResetOpaqueRenderPacketFrameState();
+    m_OpaquePackets.ClearRenderPackets();
+    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 void CKFixedFunctionPipeline::Shutdown() {
-    ClearOpaqueRenderPackets();
+    m_OpaquePackets.ClearRenderPackets();
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
     m_OpaquePackets.SetInstanceLayout(0);
@@ -569,7 +569,7 @@ void CKFFOpaquePacketGuard::Dismiss() {
 void CKFixedFunctionPipeline::SetOpaqueSortingEnabled(CKBOOL enabled)
 {
     m_OpaquePackets.SetSortingEnabled(enabled);
-    ResetOpaqueRenderPacketFrameState();
+    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 // ============================================================================
@@ -930,7 +930,7 @@ void CKFixedFunctionPipeline::BeginDebugFrame() {
     m_DebugState.BeginFrame();
     LogAndResetFrameStats();
 #endif
-    ResetOpaqueRenderPacketFrameState();
+    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 // ============================================================================
@@ -1132,20 +1132,6 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
         dpFlags, formatFlags, vertexLayout);
 }
 
-void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
-    CKRasterizerEncoder *encoder, CKRenderView view,
-    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-    CKDWORD baseVertex, CKDWORD vertexCount,
-    CKDWORD startIndex, CKDWORD indexCount,
-    CKDWORD dpFlags, CKDWORD formatFlags,
-    CKDWORD vertexLayout)
-{
-    m_OpaquePackets.SubmitVertexBufferPacketImmediate(
-        *this, encoder, view, type, vb, ib,
-        baseVertex, vertexCount, startIndex, indexCount,
-        dpFlags, formatFlags, vertexLayout);
-}
-
 // ============================================================================
 // Internal methods
 // ============================================================================
@@ -1164,17 +1150,6 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
     return m_UniformEmitter.BuildStaticUniformPayload(payload, programContext, activeTextureCount);
 }
 
-CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const
-{
-    return m_OpaquePackets.GetPacketObjectUniformRejectReason(programContext);
-}
-
-CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason(
-    const CKFFProgramContext *programContext) const
-{
-    return m_OpaquePackets.GetVertexBufferPacketInstancingRejectReason(programContext);
-}
-
 void CKFixedFunctionPipeline::UpdateViewProjectionCache()
 {
     if (!m_State.EnsureViewProjection())
@@ -1187,41 +1162,6 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
 {
     UpdateViewProjectionCache();
     return m_UniformEmitter.BuildObjectUniforms(uniforms, programContext);
-}
-
-CKDWORD CKFixedFunctionPipeline::InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload)
-{
-    return m_OpaquePackets.InternStaticUniformPayload(*this, payload);
-}
-
-void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) const
-{
-    m_OpaquePackets.BuildRenderPacketSortKey(packet);
-}
-
-void CKFixedFunctionPipeline::InitVertexBufferPacketForCapture(CKRenderPacket *packet) const
-{
-    m_OpaquePackets.InitVertexBufferPacketForCapture(packet);
-}
-
-void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
-{
-    m_OpaquePackets.TrackOpaqueRenderPacket(*this, packet);
-}
-
-void CKFixedFunctionPipeline::TrackOpaqueRenderPacketReject(CKDWORD rejectReason)
-{
-    m_OpaquePackets.TrackOpaqueRenderPacketReject(*this, rejectReason);
-}
-
-void CKFixedFunctionPipeline::UpdateOpaqueRenderPacketAdaptiveStats()
-{
-    m_OpaquePackets.UpdateAdaptiveStats(*this);
-}
-
-CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder)
-{
-    return m_OpaquePackets.CheckAdaptiveBypass(*this, encoder);
 }
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
@@ -1243,110 +1183,6 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
     return CKFFComputeDepthKey(m_State, m_DrawStateCache);
-}
-
-CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
-                                                                 CKDWORD formatFlags,
-                                                                 CKFFPreparedState *preparedState,
-                                                                 CKFFProgramContext *programContext)
-{
-    return m_OpaquePackets.ResolveVertexBufferPacketProgram(
-        *this, dpFlags, formatFlags, preparedState, programContext);
-}
-
-void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
-    CKRenderPacket *packet,
-    const CKFFProgramContext *programContext,
-    CKRenderView view,
-    VXPRIMITIVETYPE type,
-    CKDWORD vb,
-    CKDWORD ib,
-    CKDWORD baseVertex,
-    CKDWORD vertexCount,
-    CKDWORD startIndex,
-    CKDWORD indexCount,
-    CKDWORD vertexLayout)
-{
-    m_OpaquePackets.CaptureVertexBufferPacketIdentity(
-        *this, packet, programContext, view, type, vb, ib,
-        baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
-}
-
-void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet,
-                                                                const CKFFTextureBindingSet *bindingSet)
-{
-    m_OpaquePackets.CaptureVertexBufferPacketTextures(packet, bindingSet);
-}
-
-CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketObjectUniforms(
-    CKRenderPacket *packet,
-    const CKFFProgramContext *programContext)
-{
-    return m_OpaquePackets.CaptureVertexBufferPacketObjectUniforms(
-        *this, packet, programContext);
-}
-
-void CKFixedFunctionPipeline::CaptureVertexBufferPacketInstancing(
-    CKRenderPacket *packet,
-    const CKFFProgramContext *programContext)
-{
-    m_OpaquePackets.CaptureVertexBufferPacketInstancing(*this, packet, programContext);
-}
-
-CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
-    CKRenderPacket *packet,
-    const CKFFProgramContext *programContext,
-    CKBOOL collectStats)
-{
-    return m_OpaquePackets.CaptureVertexBufferPacketStaticUniforms(
-        *this, packet, programContext, collectStats);
-}
-
-CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRenderView view,
-                                                                         VXPRIMITIVETYPE type,
-                                                                         CKDWORD vb,
-                                                                         CKDWORD ib,
-                                                                         CKDWORD vertexLayout) const
-{
-    return m_OpaquePackets.GetOpaqueVertexBufferPacketRejectReason(
-        *this, view, type, vb, ib, vertexLayout);
-}
-
-void CKFixedFunctionPipeline::BuildVertexBufferPacket(
-    CKFFVertexBufferPacketBuildResult *result,
-    CKRasterizerEncoder *encoder,
-    CKRenderView view,
-    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-    CKDWORD baseVertex, CKDWORD vertexCount,
-    CKDWORD startIndex, CKDWORD indexCount,
-    CKDWORD dpFlags, CKDWORD formatFlags,
-    CKDWORD vertexLayout)
-{
-    m_OpaquePackets.BuildVertexBufferPacket(
-        *this, result, encoder, view, type, vb, ib,
-        baseVertex, vertexCount, startIndex, indexCount,
-        dpFlags, formatFlags, vertexLayout);
-}
-
-void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
-{
-    m_OpaquePackets.ClearRenderPackets();
-}
-
-void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
-{
-    m_OpaquePackets.ResetRenderPacketFrameState(*this);
-}
-
-void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
-{
-    m_OpaquePackets.SortRenderPackets(indices);
-}
-
-void CKFixedFunctionPipeline::InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
-                                                            CKRasterizerEncoder *encoder)
-{
-    m_OpaquePackets.InitRenderPacketReplayContext(*this, context, encoder);
 }
 
 void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
