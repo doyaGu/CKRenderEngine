@@ -430,12 +430,13 @@ void CKFixedFunctionPipeline::MarkPacketProgramDirty()
     m_PacketProgramCacheValid = FALSE;
 }
 
-void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet)
+void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
+                                                            CKDWORD activeTextureCount)
 {
     if (!bindingSet)
         return;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    CKDWORD activeCount = (CKDWORD)m_CurrentActiveTextureCount;
+    CKDWORD activeCount = activeTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
@@ -932,6 +933,9 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     }
 #endif
 
+    CKFFTextureBindingSet textureBindingSet;
+    BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
+
     // Upload uniforms
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -1005,7 +1009,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    BindTextures(encoder);
+    BindTextures(encoder, &textureBindingSet);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.TextureUs += CKRenderPerfElapsedUs(statsStart);
@@ -1183,6 +1187,9 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     }
 #endif
 
+    CKFFTextureBindingSet textureBindingSet;
+    BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
+
     // Upload uniforms
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -1302,7 +1309,7 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    BindTextures(encoder);
+    BindTextures(encoder, &textureBindingSet);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.TextureUs += CKRenderPerfElapsedUs(statsStart);
@@ -2157,29 +2164,28 @@ CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasteriz
     return TRUE;
 }
 
-void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
-    if (!encoder) return;
+void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
+                                           const CKFFTextureBindingSet *bindingSet) {
+    if (!encoder || !bindingSet) return;
 
-    CKFFTextureBindingSet bindingSet;
-    BuildCurrentTextureBindingSet(&bindingSet);
     CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
-    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i)
-        desiredTextures[i] = bindingSet.Bindings[i].Texture;
+    for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i)
+        desiredTextures[i] = bindingSet->Bindings[i].Texture;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats) {
         if (m_FrameStats.HasLastTextureSet &&
             CKFFTextureSetEquals(m_FrameStats.LastActiveTextureCount, m_FrameStats.LastTextureHandles,
-                                 bindingSet.ActiveTextureCount, desiredTextures))
+                                 bindingSet->ActiveTextureCount, desiredTextures))
             ++m_FrameStats.ConsecutiveTextureSetRepeats;
-        m_FrameStats.LastActiveTextureCount = bindingSet.ActiveTextureCount;
+        m_FrameStats.LastActiveTextureCount = bindingSet->ActiveTextureCount;
         memcpy(m_FrameStats.LastTextureHandles, desiredTextures, sizeof(desiredTextures));
         m_FrameStats.HasLastTextureSet = TRUE;
     }
 #endif
 
-    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i) {
-        const CKFFRenderPacketTextureBinding &binding = bindingSet.Bindings[i];
+    for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
+        const CKFFRenderPacketTextureBinding &binding = bindingSet->Bindings[i];
         if (binding.Texture == 0)
             continue;
         CKSamplerDesc sampler = binding.Sampler;
@@ -2595,7 +2601,7 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
         return;
     }
     result->ProgramContext = programContext;
-    BuildCurrentTextureBindingSet(&result->TextureBindingSet);
+    BuildCurrentTextureBindingSet(&result->TextureBindingSet, preparedState.ActiveTextureCount);
     result->RejectReason = GetPacketObjectUniformRejectReason(&programContext);
     if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
         return;
