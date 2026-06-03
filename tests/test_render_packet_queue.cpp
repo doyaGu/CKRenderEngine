@@ -643,6 +643,8 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
                   &texturedContext, &texturedPreparedState),
               "Textured payload context test must resolve the textured program");
+    TestCheck(texturedPreparedState.ActiveTextureCount == 1,
+              "Textured payload context test must capture one active texture");
 
     CKFFProgramContext positionTContext;
     TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
@@ -662,6 +664,13 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
                   payload.Entries[0].Count == 1 &&
                   payload.Entries[0].Vec4Count == 4,
               "Static payload must emit texture matrices from the supplied context");
+
+    CKFFRenderPacketUniformPayload zeroActivePayload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &zeroActivePayload,
+                                                                &texturedContext, 0),
+              "Static payload must also build with an explicit zero active texture count");
+    TestCheck(zeroActivePayload.Hash != payload.Hash,
+              "Static payload hash must include the supplied active texture count");
 
     ffp.Shutdown();
 }
