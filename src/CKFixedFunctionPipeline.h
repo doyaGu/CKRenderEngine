@@ -157,12 +157,28 @@ struct CKFFPacketTextureSetCache {
     CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
 };
 
-struct CKFFPreparedState;
+struct CKFFPreparedState {
+    CKFFStateDesc StateDesc;
+    CKDWORD ActiveTextureCount;
+    CKBOOL PositionT;
+    CKBOOL LightingEnabled;
+    float MaterialSource[4];
+    CKDWORD TextureBoundMask;
+};
+
+struct CKFFTextureBindingSet {
+    CKDWORD ActiveTextureCount;
+    CKDWORD Hash;
+    CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
+};
+
 struct CKFFPipelineTestAccess;
 
 struct CKFFVertexBufferPacketBuildResult {
     CKBOOL Success;
     CKDWORD RejectReason;
+    CKFFProgramContext ProgramContext;
+    CKFFTextureBindingSet TextureBindingSet;
     CKRenderPacket Packet;
 };
 
@@ -313,6 +329,7 @@ private:
     CKDWORD m_PacketProgramCacheDPFlags;
     CKDWORD m_PacketProgramCacheFormatFlags;
     int m_PacketProgramCacheActiveTextureCount;
+    CKFFPreparedState m_PacketProgramCachePreparedState;
     CKFFProgramContext m_PacketProgramCacheContext;
     int m_CurrentActiveTextureCount;
     CKDWORD m_AlphaTestPrecision;
@@ -333,7 +350,6 @@ private:
     // Internal methods
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
-    CKFFShaderKey BuildCurrentShaderKey(const CKFFPreparedState *prepared) const;
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
     void MarkPacketTextureSetDirty();
@@ -392,6 +408,7 @@ private:
     float ComputeDepthKey() const;
     CKBOOL ResolveVertexBufferPacketProgram(CKDWORD dpFlags,
                                             CKDWORD formatFlags,
+                                            CKFFPreparedState *preparedState,
                                             CKFFProgramContext *programContext);
     void CaptureVertexBufferPacketIdentity(CKRenderPacket *packet,
                                            const CKFFProgramContext *programContext,
