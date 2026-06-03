@@ -15,6 +15,7 @@
 #include "CKFFDrawTypes.h"
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
+#include "CKFFUniformEmitter.h"
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -134,7 +135,6 @@ private:
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
-    friend struct CKFFUniformEmitter;
 
     enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
 
@@ -165,6 +165,7 @@ private:
     CKFFDrawProbes m_Probes;
 #endif
     CKFFTextureBinder m_TextureBinder;
+    CKFFUniformEmitter m_UniformEmitter;
 
     // Internal methods
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
@@ -174,21 +175,6 @@ private:
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
-    void UploadUniforms(CKRasterizerEncoder *encoder,
-                        const CKFFProgramContext *programContext,
-                        CKDWORD activeTextureCount);
-    void UploadObjectUniforms(CKRasterizerEncoder *encoder,
-                              const CKFFProgramContext *programContext,
-                              CKDWORD activeTextureCount);
-    void UploadStaticUniforms(CKRasterizerEncoder *encoder,
-                              const CKFFProgramContext *programContext,
-                              CKDWORD activeTextureCount);
-    void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
-    CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
-                       CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
-    void EmitUniformPayloads(CKFFUniformSink *sink,
-                             const CKFFProgramContext *programContext,
-                             CKDWORD activeTextureCount);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                      const CKFFProgramContext *programContext,
                                      CKDWORD activeTextureCount);
@@ -196,10 +182,6 @@ private:
                                      const CKFFProgramContext *programContext);
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     void UpdateViewProjectionCache();
-    CKDWORD BuildDrawParams(float (*drawParams)[4],
-                            const CKFFLightData *viewLights,
-                            int packedLightCount,
-                            const CKFFUniformEmissionContext *context) const;
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();

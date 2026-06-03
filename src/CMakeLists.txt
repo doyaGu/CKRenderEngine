@@ -97,6 +97,7 @@ set(CKRE_PRIVATE_HEADERS
         CKFFStateStore.h
         CKFFStateResolver.h
         CKFFTextureBinder.h
+        CKFFUniformEmitter.h
         CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h
@@ -165,6 +166,7 @@ set(CKRE_SOURCES
         CKFFStateStore.cpp
         CKFFStateResolver.cpp
         CKFFTextureBinder.cpp
+        CKFFUniformEmitter.cpp
         CKFFRenderPacket.cpp
         CKFFRenderPacketQueue.cpp
         CKFFRenderPacketReplay.cpp
