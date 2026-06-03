@@ -360,74 +360,6 @@ struct CKFFUniformEmitter {
                                       const CKFFUniformEmissionContext *context);
 };
 
-static void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
-{
-    if (!set)
-        return;
-    set->ActiveTextureCount = 0;
-    set->Hash = 0;
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        set->Bindings[stage].Stage = stage;
-        set->Bindings[stage].Uniform = 0;
-        set->Bindings[stage].Texture = 0;
-        set->Bindings[stage].TextureFlags = 0;
-        set->Bindings[stage].Sampler = CKSamplerDesc();
-    }
-}
-
-static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
-{
-    if ((textureFlags & CKRST_TEXTURE_CUBEMAP) != 0)
-        return CKFF_SAMPLER_CUBE;
-    if ((textureFlags & CKRST_TEXTURE_VOLUMEMAP) != 0)
-        return CKFF_SAMPLER_VOLUME;
-    if ((textureFlags & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
-        return CKFF_SAMPLER_DEPTH;
-    return CKFF_SAMPLER_2D;
-}
-
-static CKDWORD CKFFTextureBindingSamplerType(CKDWORD samplerType)
-{
-    if (samplerType == CKFF_SAMPLER_CUBE || samplerType == CKFF_SAMPLER_VOLUME)
-        return samplerType;
-    return CKFF_SAMPLER_2D;
-}
-
-static CKDWORD CKFFTextureBindingUniform(const CKFFUniformHandles &uniforms,
-                                         CKDWORD stage, CKDWORD samplerType)
-{
-    if (samplerType == CKFF_SAMPLER_CUBE)
-        return uniforms.s_textureCube[stage];
-    if (samplerType == CKFF_SAMPLER_VOLUME)
-        return uniforms.s_textureVolume[stage];
-    return uniforms.s_texture[stage];
-}
-
-static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
-                                       const CKFFUniformHandles &uniforms,
-                                       CKDWORD activeTextureCount,
-                                       const CKDWORD *textureHandles,
-                                       const CKDWORD *textureFlags,
-                                       const CKSamplerDesc *samplers)
-{
-    if (!set)
-        return;
-    CKFFInitTextureBindingSet(set);
-    set->ActiveTextureCount = activeTextureCount;
-    if (set->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
-        set->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    for (CKDWORD stage = 0; stage < set->ActiveTextureCount; ++stage) {
-        const CKDWORD samplerType = CKFFTextureBindingSamplerType(
-            CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
-        set->Bindings[stage].Stage = CKFFSamplerBindStage(stage, samplerType);
-        set->Bindings[stage].Uniform = CKFFTextureBindingUniform(uniforms, stage, samplerType);
-        set->Bindings[stage].Texture = textureHandles[stage];
-        set->Bindings[stage].TextureFlags = textureFlags[stage];
-        set->Bindings[stage].Sampler = samplers[stage];
-    }
-    set->Hash = CKFFHashRenderPacketTextureSet(set->ActiveTextureCount, set->Bindings);
-}
-
 static CKFFShaderKey CKFFBuildCurrentShaderKey(const CKFFPreparedState *prepared)
 {
     if (!prepared)
@@ -450,6 +382,11 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
       m_ForceAnisotropicFiltering(FALSE),
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+      m_TextureBinder(m_State, m_ShaderCache, m_Probes),
+#else
+      m_TextureBinder(m_State, m_ShaderCache),
+#endif
       m_OpaqueInstancingEnabled(TRUE), m_InstanceLayout(0),
       m_OpaqueSortingEnabled(FALSE), m_OpaquePacketAllowed(TRUE) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -521,6 +458,7 @@ void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, C
     m_DisableTextureFiltering = DisableTextureFiltering;
     m_DisableMipmaps = DisableMipmaps;
     m_ForceAnisotropicFiltering = ForceAnisotropicFiltering;
+    m_TextureBinder.SetRenderOptions(DisableTextureFiltering, DisableMipmaps, ForceAnisotropicFiltering);
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
@@ -674,17 +612,7 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                                             CKDWORD activeTextureCount)
 {
-    if (!bindingSet)
-        return;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    CKDWORD activeCount = activeTextureCount;
-    if (activeCount > CKFF_MAX_TEXTURE_STAGES)
-        activeCount = CKFF_MAX_TEXTURE_STAGES;
-    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
-    for (CKDWORD i = 0; i < activeCount; ++i)
-        samplers[i] = BuildSamplerDesc((int)i);
-    CKFFBuildTextureBindingSet(bindingSet, u, activeCount,
-                               m_State.TextureHandles, m_State.TextureFlags, samplers);
+    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount);
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
@@ -1983,21 +1911,7 @@ CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasteriz
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
                                            const CKFFTextureBindingSet *bindingSet) {
-    if (!encoder || !bindingSet) return;
-
-    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
-    for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i)
-        desiredTextures[i] = bindingSet->Bindings[i].Texture;
-    CKFF_PROBE(m_Probes, OnTextureSet(bindingSet->ActiveTextureCount, desiredTextures));
-
-    for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
-        const CKFFRenderPacketTextureBinding &binding = bindingSet->Bindings[i];
-        if (binding.Texture == 0)
-            continue;
-        CKSamplerDesc sampler = binding.Sampler;
-        encoder->SetTexture(binding.Stage, binding.Uniform, binding.Texture, &sampler);
-        CKFF_PROBE(m_Probes, OnTextureBind());
-    }
+    m_TextureBinder.Bind(encoder, bindingSet);
 }
 
 CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
@@ -2009,21 +1923,7 @@ void CKFixedFunctionPipeline::LogAndResetFrameStats() {
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
-    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
-        return CKFFBuildSamplerDesc(nullptr);
-    CKSamplerDesc desc = CKFFBuildSamplerDesc(m_State.StageStates[stage]);
-    if (m_DisableTextureFiltering) {
-        desc.MinFilter = CKRST_FILTER_NEAREST;
-        desc.MagFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = m_DisableMipmaps ? CKRST_FILTER_NONE : CKRST_FILTER_NEAREST;
-    } else if (m_DisableMipmaps) {
-        desc.MipFilter = CKRST_FILTER_NONE;
-    } else if (m_ForceAnisotropicFiltering) {
-        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
-    }
-    return desc;
+    return m_TextureBinder.BuildSamplerDesc(stage);
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
