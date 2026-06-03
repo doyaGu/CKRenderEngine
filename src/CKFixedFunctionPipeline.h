@@ -172,6 +172,7 @@ struct CKFFTextureBindingSet {
     CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
 
+struct CKFFUniformEmissionContext;
 struct CKFFPipelineTestAccess;
 
 struct CKFFVertexBufferPacketBuildResult {
@@ -360,19 +361,10 @@ private:
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
-    void CKFFEmitObjectMatrixUniforms(CKFFUniformSink *sink,
-                                      const CKFFProgramContext *programContext,
-                                      const CKFFShaderKey &shaderKey,
-                                      CKBOOL positionT);
-    void CKFFEmitTextureMatrixUniforms(CKFFUniformSink *sink);
-    void CKFFEmitStageAndSpecUniforms(CKFFUniformSink *sink,
-                                      const CKFFProgramContext *programContext,
-                                      const CKFFShaderKey &shaderKey,
-                                      CKBOOL positionT,
-                                      CKBOOL fullSpecialized);
-    void CKFFEmitClipPlaneUniforms(CKFFUniformSink *sink,
-                                   const CKFFShaderKey &shaderKey,
-                                   CKBOOL fullSpecialized);
+    void CKFFEmitObjectMatrixUniforms(const CKFFUniformEmissionContext *context);
+    void CKFFEmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context);
+    void CKFFEmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
+    void CKFFEmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
     void EmitUniformPayloads(CKFFUniformSink *sink,
                              const CKFFProgramContext *programContext);
     CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
