@@ -79,6 +79,7 @@ struct CKFFUniformEmissionContext {
     const CKFFProgramContext *ProgramContext;
     CKFFShaderKey ShaderKey;
     CKFFSpecializationInfo Specialization;
+    CKDWORD ActiveTextureCount;
     CKBOOL FullSpecialized;
     CKBOOL PositionT;
     CKBOOL LightingEnabled;
@@ -936,7 +937,7 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    UploadUniforms(encoder);
+    UploadUniforms(encoder, preparedState.ActiveTextureCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
@@ -1187,7 +1188,7 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    UploadUniforms(encoder);
+    UploadUniforms(encoder, preparedState.ActiveTextureCount);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.UniformUs += CKRenderPerfElapsedUs(statsStart);
@@ -1684,6 +1685,7 @@ static void CKFFInitUniformSink(CKFFUniformSink *sink,
 static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
                                            CKFFUniformSink *sink,
                                            const CKFFProgramContext *programContext,
+                                           CKDWORD activeTextureCount,
                                            const CKFFShaderKey &currentShaderKey,
                                            const CKFFProgramBinding &currentProgramBinding)
 {
@@ -1696,6 +1698,7 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->Specialization = programContext
         ? programContext->Specialization
         : currentProgramBinding.Specialization;
+    context->ActiveTextureCount = activeTextureCount;
     context->FullSpecialized = programContext
         ? programContext->FullSpecialized
         : (currentProgramBinding.FullSpecialized ? TRUE : FALSE);
@@ -1811,7 +1814,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
 
     if (!context->FullSpecialized || ProgramUsesStageConstant(context->ShaderKey)) {
         CKFFStageParamsUniform stageParams;
-        CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
+        CKFFPackStageParams(m_StageStates, m_TextureHandles, context->ActiveTextureCount, stageParams);
         EmitUniform(sink, u.u_stageParams, stageParams.Values,
                     CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
@@ -1847,13 +1850,14 @@ void CKFixedFunctionPipeline::CKFFEmitClipPlaneUniforms(
 }
 
 void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
-                                                  const CKFFProgramContext *programContext)
+                                                  const CKFFProgramContext *programContext,
+                                                  CKDWORD activeTextureCount)
 {
     if (!sink)
         return;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformEmissionContext context;
-    CKFFInitUniformEmissionContext(&context, sink, programContext,
+    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount,
                                    m_CurrentShaderKey, m_CurrentProgramBinding);
     const bool emitStatic = sink->Encoder || sink->EmitStatic;
     const bool emitObject = sink->Encoder || sink->EmitObject;
@@ -1887,19 +1891,21 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     CKFFEmitClipPlaneUniforms(&context);
 }
 
-void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
+void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder,
+                                             CKDWORD activeTextureCount) {
     if (!encoder)
         return;
     CKFFProgramContext programContext;
     CKFFInitProgramContext(&programContext, m_CurrentShaderKey, m_CurrentProgramBinding);
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, TRUE);
-    EmitUniformPayloads(&sink, &programContext);
+    EmitUniformPayloads(&sink, &programContext, activeTextureCount);
     m_DirtyFlags = 0;
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                                          const CKFFProgramContext *programContext)
+                                                          const CKFFProgramContext *programContext,
+                                                          CKDWORD activeTextureCount)
 {
     if (!payload)
         return FALSE;
@@ -1907,7 +1913,7 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
 
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, nullptr, payload, nullptr, TRUE, FALSE);
-    EmitUniformPayloads(&sink, programContext);
+    EmitUniformPayloads(&sink, programContext, activeTextureCount);
     if (sink.Failed)
         return FALSE;
 
@@ -2495,7 +2501,7 @@ CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         double buildTimer = collectStats ? CKRenderPerfNow() : 0.0;
 #endif
-        if (!BuildStaticUniformPayload(&staticPayload, programContext)) {
+        if (!BuildStaticUniformPayload(&staticPayload, programContext, packet->ActiveTextureCount)) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
             if (collectStats)
                 ++m_FrameStats.RenderPacketUniformOverflows;

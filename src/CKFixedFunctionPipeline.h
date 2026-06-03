@@ -347,7 +347,7 @@ private:
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet);
-    void UploadUniforms(CKRasterizerEncoder *encoder);
+    void UploadUniforms(CKRasterizerEncoder *encoder, CKDWORD activeTextureCount);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
@@ -356,9 +356,11 @@ private:
     void CKFFEmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
     void CKFFEmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
     void EmitUniformPayloads(CKFFUniformSink *sink,
-                             const CKFFProgramContext *programContext);
+                             const CKFFProgramContext *programContext,
+                             CKDWORD activeTextureCount);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext);
+                                     const CKFFProgramContext *programContext,
+                                     CKDWORD activeTextureCount);
     CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
                                      const CKFFProgramContext *programContext);
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
