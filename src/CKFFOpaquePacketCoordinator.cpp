@@ -1,6 +1,8 @@
 #include "CKFFOpaquePacketCoordinator.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFRenderPacketReplay.h"
+#include "CKFFUniformState.h"
+#include "CKRenderFrameCostStats.h"
 #include "CKRasterizer.h"
 
 #include <cstring>
@@ -483,6 +485,224 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
     BuildRenderPacketSortKey(&result->Packet);
     result->Success = TRUE;
     result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
+}
+
+void CKFFOpaquePacketCoordinator::DrawVertexBuffer(
+    CKFixedFunctionPipeline &pipeline,
+    CKRasterizerEncoder *encoder,
+    CKRenderView view,
+    VXPRIMITIVETYPE type,
+    CKDWORD vb,
+    CKDWORD ib,
+    CKDWORD baseVertex,
+    CKDWORD vertexCount,
+    CKDWORD startIndex,
+    CKDWORD indexCount,
+    CKDWORD dpFlags,
+    CKDWORD formatFlags,
+    CKDWORD vertexLayout)
+{
+    const CKDWORD packetRejectReason =
+        GetOpaqueVertexBufferPacketRejectReason(pipeline, view, type, vb, ib, vertexLayout);
+    if (packetRejectReason == CKFF_RENDER_PACKET_ELIGIBLE) {
+        CKFFVertexBufferPacketBuildResult buildResult;
+        BuildVertexBufferPacket(pipeline, &buildResult, encoder, view, type, vb, ib,
+                                baseVertex, vertexCount,
+                                startIndex, indexCount,
+                                dpFlags, formatFlags,
+                                vertexLayout);
+        if (buildResult.Success) {
+            TrackOpaqueRenderPacket(pipeline, buildResult.Packet);
+            CKFF_PROBE(pipeline.m_Probes, OnQueuedRenderPacket());
+            CheckAdaptiveBypass(pipeline, encoder);
+            return;
+        }
+        TrackOpaqueRenderPacketReject(pipeline, buildResult.RejectReason);
+        CKFF_PROBE(pipeline.m_Probes, OnRenderPacketFallback());
+    } else {
+        TrackOpaqueRenderPacketReject(pipeline, packetRejectReason);
+    }
+
+    if (HasPackets())
+        FlushRenderPackets(pipeline, encoder, FALSE, FALSE);
+    SubmitVertexBufferPacketImmediate(pipeline, encoder, view, type, vb, ib,
+                                      baseVertex, vertexCount,
+                                      startIndex, indexCount,
+                                      dpFlags, formatFlags,
+                                      vertexLayout);
+}
+
+void CKFFOpaquePacketCoordinator::SubmitVertexBufferPacketImmediate(
+    CKFixedFunctionPipeline &pipeline,
+    CKRasterizerEncoder *encoder,
+    CKRenderView view,
+    VXPRIMITIVETYPE type,
+    CKDWORD vb,
+    CKDWORD ib,
+    CKDWORD baseVertex,
+    CKDWORD vertexCount,
+    CKDWORD startIndex,
+    CKDWORD indexCount,
+    CKDWORD dpFlags,
+    CKDWORD formatFlags,
+    CKDWORD vertexLayout)
+{
+    if (!encoder || !vb) return;
+    CKFF_PROBE(pipeline.m_Probes, OnHardwareDraw());
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const bool debugLogging = pipeline.m_DebugState.AnyLoggingEnabled();
+    const int debugDrawSerial = debugLogging ? pipeline.m_DebugState.NextDrawSerial(view) : -1;
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.World = &pipeline.m_State.World;
+        debugInfo.ViewMatrix = &pipeline.m_State.View;
+        debugInfo.Projection = &pipeline.m_State.Projection;
+        debugInfo.VertexBuffer = vb;
+        debugInfo.IndexBuffer = ib;
+        debugInfo.BaseVertex = baseVertex;
+        debugInfo.VertexCount = vertexCount;
+        debugInfo.StartIndex = startIndex;
+        debugInfo.PersistentIndexCount = indexCount;
+        debugInfo.DPFlags = dpFlags;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.VertexLayout = vertexLayout;
+        debugInfo.DrawSerial = debugDrawSerial;
+        pipeline.m_DebugState.LogDrawVertexBufferHeader(debugInfo);
+    }
+#endif
+
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
+        dpFlags, pipeline.m_State.TextureHandles, pipeline.m_State.StageStates);
+    CKFFPreparedState preparedState;
+    CKFFShaderKey shaderKey;
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, StateUs);
+        pipeline.BuildCurrentPreparedState(&preparedState, dpFlags, activeTextureCount, formatFlags);
+        shaderKey = CKFFCoordinatorBuildCurrentShaderKey(&preparedState);
+    }
+    CKFFProgramBinding programBinding;
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, ProgramUs);
+        programBinding = pipeline.m_ShaderCache.GetProgram(shaderKey);
+    }
+    CKFFProgramContext programContext;
+    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
+    CKDWORD program = programContext.Program;
+    if (program == 0) {
+        CKFF_PROBE(pipeline.m_Probes, OnProgramMiss());
+        return;
+    }
+    CKFF_PROBE(pipeline.m_Probes, OnProgram(program));
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (debugLogging) {
+        CKFFDrawDebugInfo debugInfo = {};
+        debugInfo.View = view;
+        debugInfo.Type = type;
+        debugInfo.World = &pipeline.m_State.World;
+        debugInfo.ViewMatrix = &pipeline.m_State.View;
+        debugInfo.Projection = &pipeline.m_State.Projection;
+        debugInfo.VertexBuffer = vb;
+        debugInfo.IndexBuffer = ib;
+        debugInfo.BaseVertex = baseVertex;
+        debugInfo.VertexCount = vertexCount;
+        debugInfo.StartIndex = startIndex;
+        debugInfo.PersistentIndexCount = indexCount;
+        debugInfo.DPFlags = dpFlags;
+        debugInfo.FormatFlags = formatFlags;
+        debugInfo.VertexLayout = vertexLayout;
+        debugInfo.DrawSerial = debugDrawSerial;
+        debugInfo.Program = program;
+        debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
+        debugInfo.ActiveLightCount = pipeline.m_State.ActiveLightCount;
+        debugInfo.StateDesc = &preparedState.StateDesc;
+        debugInfo.DrawState = &pipeline.m_DrawStateCache;
+        debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
+            pipeline.m_State.StageStates[0],
+            preparedState.ActiveTextureCount > 0 && pipeline.m_State.TextureHandles[0] != 0);
+        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(pipeline.m_State.StageStates[0]);
+        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(
+            pipeline.m_State.StageStates[0],
+            preparedState.ActiveTextureCount > 0,
+            pipeline.m_State.TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(
+            pipeline.m_State.StageStates[0],
+            preparedState.ActiveTextureCount > 0 && pipeline.m_State.TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(pipeline.m_State.StageStates[0]);
+        debugInfo.Stage0.Texture = pipeline.m_State.TextureHandles[0];
+        pipeline.m_DebugState.LogDrawVertexBufferDetails(debugInfo);
+    }
+#endif
+
+    CKFFTextureBindingSet textureBindingSet;
+    pipeline.BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
+
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, UniformUs);
+        pipeline.m_UniformEmitter.UploadUniforms(encoder, &programContext, preparedState.ActiveTextureCount);
+    }
+
+    CKFF_PROBE(pipeline.m_Probes, OnWorldMatrix(pipeline.m_State.World));
+    CKDWORD transformIdx = pipeline.m_Context->AllocTransform(&pipeline.m_State.World, 1);
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, TransformUs);
+        encoder->SetTransform(transformIdx, 1);
+    }
+    CKFF_PROBE(pipeline.m_Probes, OnTransformSet());
+
+    CKDrawState drawState;
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, DrawStateBuildUs);
+        drawState = pipeline.m_DrawStateCache.BuildDrawState(type);
+    }
+    CKFF_PROBE(pipeline.m_Probes, OnDrawState(drawState));
+    const CKDWORD stencilRef = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
+    const CKDWORD stencilReadMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
+    const CKDWORD stencilWriteMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, EncoderStateUs);
+        encoder->SetState(drawState);
+    }
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, StencilUs);
+        encoder->SetStencilRef(stencilRef);
+        encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
+    }
+
+    if (vertexLayout) {
+        {
+            CKFF_SCOPE_TIME(pipeline.m_Probes, LayoutUs);
+            encoder->SetVertexLayout(vertexLayout);
+        }
+        CKFF_PROBE(pipeline.m_Probes, OnVertexLayoutSet());
+    }
+
+    CKFF_PROBE(pipeline.m_Probes, OnVertexBuffers(vb, ib, vertexLayout));
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, BufferBindUs);
+        encoder->SetVertexBuffer(0, vb, baseVertex, vertexCount);
+        if (ib)
+            encoder->SetIndexBuffer(ib, startIndex, indexCount);
+    }
+    CKFF_PROBE(pipeline.m_Probes, OnVertexBufferSet());
+    if (ib)
+        CKFF_PROBE(pipeline.m_Probes, OnIndexBufferSet());
+
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, TextureUs);
+        pipeline.BindTextures(encoder, &textureBindingSet);
+    }
+
+    float depth = pipeline.ComputeDepthKey();
+    {
+        CKFF_SCOPE_TIME(pipeline.m_Probes, SubmitUs);
+        encoder->Submit(view, program, *(CKDWORD *)&depth, pipeline.SubmitDiscardFlags());
+        CK_FRAME_COST_ADD_MESH_SUBMIT();
+        CK_FRAME_COST_ADD_SUBMITTED_DRAW();
+    }
+    CKFF_PROBE(pipeline.m_Probes, OnSubmittedDraw());
 }
 
 void CKFFOpaquePacketCoordinator::ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline)
