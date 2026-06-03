@@ -292,9 +292,6 @@ private:
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
 #endif
-    CKFFShaderKey m_CurrentShaderKey;
-    CKFFProgramBinding m_CurrentProgramBinding;
-
     // Current transform state
     VxMatrix m_World;
     VxMatrix m_View;
@@ -323,7 +320,6 @@ private:
     int m_PacketProgramCacheActiveTextureCount;
     CKFFPreparedState m_PacketProgramCachePreparedState;
     CKFFProgramContext m_PacketProgramCacheContext;
-    int m_CurrentActiveTextureCount;
     CKDWORD m_AlphaTestPrecision;
 
     // Texture stage state
@@ -343,7 +339,6 @@ private:
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
                                    CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
-    void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
