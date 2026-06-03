@@ -78,6 +78,7 @@ struct CKFFUniformEmissionContext {
     CKFFUniformSink *Uniforms;
     const CKFFProgramContext *ProgramContext;
     CKFFShaderKey ShaderKey;
+    CKFFSpecializationInfo Specialization;
     CKBOOL FullSpecialized;
     CKBOOL PositionT;
     CKBOOL LightingEnabled;
@@ -1480,8 +1481,7 @@ CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount(
     return count;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const {
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
+bool CKFixedFunctionPipeline::ProgramUsesBumpEnv(const CKFFShaderKey &shaderKey) const {
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKDWORD op = shaderKey.FS.Stages[stage].ColorOp;
@@ -1491,8 +1491,7 @@ bool CKFixedFunctionPipeline::ProgramUsesBumpEnv(const CKFFProgramContext *progr
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesTexFactor(const CKFFProgramContext *programContext) const {
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
+bool CKFixedFunctionPipeline::ProgramUsesTexFactor(const CKFFShaderKey &shaderKey) const {
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
@@ -1507,8 +1506,7 @@ bool CKFixedFunctionPipeline::ProgramUsesTexFactor(const CKFFProgramContext *pro
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesStageConstant(const CKFFProgramContext *programContext) const {
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
+bool CKFixedFunctionPipeline::ProgramUsesStageConstant(const CKFFShaderKey &shaderKey) const {
     const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
     for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
@@ -1521,11 +1519,8 @@ bool CKFixedFunctionPipeline::ProgramUsesStageConstant(const CKFFProgramContext 
     return false;
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesMaterialUniform(const CKFFProgramContext *programContext) const {
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
-    const CKBOOL fullSpecialized = programContext ? programContext->FullSpecialized :
-        (m_CurrentProgramBinding.FullSpecialized ? TRUE : FALSE);
-
+bool CKFixedFunctionPipeline::ProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey,
+                                                         CKBOOL fullSpecialized) const {
     if (shaderKey.VS.GetHasPositionT())
         return false;
 
@@ -1553,11 +1548,8 @@ bool CKFixedFunctionPipeline::ProgramUsesMaterialUniform(const CKFFProgramContex
     return true; // Lighting still reads u_ffDrawParams[4].x for specular power.
 }
 
-bool CKFixedFunctionPipeline::ProgramUsesViewSpaceUniforms(const CKFFProgramContext *programContext) const {
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
-    const CKBOOL fullSpecialized = programContext ? programContext->FullSpecialized :
-        (m_CurrentProgramBinding.FullSpecialized ? TRUE : FALSE);
-
+bool CKFixedFunctionPipeline::ProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
+                                                           CKBOOL fullSpecialized) const {
     if (shaderKey.VS.GetHasPositionT())
         return false;
 
@@ -1627,7 +1619,7 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
     const bool shaderUsesVertexParams = !context->PositionT &&
         (!context->FullSpecialized ||
          context->LightingEnabled ||
-         ProgramUsesMaterialUniform(context->ProgramContext));
+         ProgramUsesMaterialUniform(context->ShaderKey, context->FullSpecialized));
     CKDWORD drawParamCount = shaderUsesVertexParams
         ? (context->LightingEnabled ? (packedLightCount == 1 ? 19 : 8) : 6)
         : 0;
@@ -1655,7 +1647,7 @@ CKDWORD CKFixedFunctionPipeline::BuildDrawParams(
         fragmentParamCount = 4;
     } else if (context->FogEnabled) {
         fragmentParamCount = 4;
-    } else if (ProgramUsesTexFactor(context->ProgramContext)) {
+    } else if (ProgramUsesTexFactor(context->ShaderKey)) {
         fragmentParamCount = 2;
     } else if (shaderKey.FS.AlphaTestEnable) {
         fragmentParamCount = 1;
@@ -1696,6 +1688,9 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->Uniforms = sink;
     context->ProgramContext = programContext;
     context->ShaderKey = programContext ? programContext->ShaderKey : currentShaderKey;
+    context->Specialization = programContext
+        ? programContext->Specialization
+        : currentProgramBinding.Specialization;
     context->FullSpecialized = programContext
         ? programContext->FullSpecialized
         : (currentProgramBinding.FullSpecialized ? TRUE : FALSE);
@@ -1736,7 +1731,8 @@ void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformSink *sink = context->Uniforms;
-    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(context->ProgramContext);
+    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(context->ShaderKey,
+                                                                context->FullSpecialized);
     const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
     VxMatrix modelView;
     VxMatrix normalMatrix;
@@ -1798,7 +1794,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
 
     CKFFUniformSink *sink = context->Uniforms;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    if (ProgramUsesBumpEnv(context->ProgramContext)) {
+    if (ProgramUsesBumpEnv(context->ShaderKey)) {
         float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
         CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
         EmitUniform(sink, u.u_bumpEnv, bumpEnv,
@@ -1808,7 +1804,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
     if (context->PositionT)
         EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
 
-    if (!context->FullSpecialized || ProgramUsesStageConstant(context->ProgramContext)) {
+    if (!context->FullSpecialized || ProgramUsesStageConstant(context->ShaderKey)) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_StageStates, m_TextureHandles, m_CurrentActiveTextureCount, stageParams);
         EmitUniform(sink, u.u_stageParams, stageParams.Values,
@@ -1817,10 +1813,7 @@ void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
 
     if (!context->FullSpecialized) {
         CKFFSpecUniform ffSpec;
-        const CKFFSpecializationInfo &specialization = context->ProgramContext
-            ? context->ProgramContext->Specialization
-            : m_CurrentProgramBinding.Specialization;
-        CKFFPackSpecializationDwords(specialization, ffSpec);
+        CKFFPackSpecializationDwords(context->Specialization, ffSpec);
         EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
                     CKFFSpecializationInfo::MaxSpecDwords,
                     CKFFSpecializationInfo::MaxSpecDwords, FALSE);
@@ -1983,12 +1976,16 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
         return FALSE;
     memset(uniforms, 0, sizeof(CKRenderPacketObjectUniforms));
 
-    const CKFFShaderKey &shaderKey = programContext ? programContext->ShaderKey : m_CurrentShaderKey;
+    if (!programContext)
+        return FALSE;
+
+    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
     if (shaderKey.VS.GetHasPositionT())
         return TRUE;
 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(programContext);
+    const bool viewSpaceUniforms = ProgramUsesViewSpaceUniforms(shaderKey,
+                                                                programContext->FullSpecialized);
 
     VxMatrix modelView;
     VxMatrix normalMatrix;
