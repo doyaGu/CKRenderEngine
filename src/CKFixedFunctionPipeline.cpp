@@ -861,13 +861,16 @@ void CKFixedFunctionPipeline::DrawPrimitive(
 #endif
 
     // Build the fixed-function state description and select the matching program.
-    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(data->Flags, m_TextureHandles, m_StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
+        data->Flags, m_TextureHandles, m_StageStates);
+    m_CurrentActiveTextureCount = (int)activeTextureCount;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
     CKFFPreparedState preparedState;
-    BuildCurrentPreparedState(&preparedState, data->Flags, formatFlags, m_TexcoordComponentCounts);
+    BuildCurrentPreparedState(&preparedState, data->Flags, activeTextureCount,
+                              formatFlags, m_TexcoordComponentCounts);
     CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -913,15 +916,15 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.Projection = &m_Projection;
         debugInfo.Viewport = m_Viewport;
         debugInfo.Program = program;
-        debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+        debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
         debugInfo.ActiveLightCount = m_ActiveLightCount;
         debugInfo.StateDesc = &preparedState.StateDesc;
         debugInfo.DrawState = &m_DrawStateCache;
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
-        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], preparedState.ActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
-        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], preparedState.ActiveTextureCount > 0, m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], preparedState.ActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
         debugInfo.Stage0.Texture = m_TextureHandles[0];
         m_DebugState.LogDrawPrimitiveDetails(debugInfo);
@@ -1106,7 +1109,9 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     }
 #endif
 
-    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
+        dpFlags, m_TextureHandles, m_StageStates);
+    m_CurrentActiveTextureCount = (int)activeTextureCount;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
@@ -1114,7 +1119,7 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
         statsStart = CKRenderPerfNow();
 #endif
     CKFFPreparedState preparedState;
-    BuildCurrentPreparedState(&preparedState, dpFlags, formatFlags);
+    BuildCurrentPreparedState(&preparedState, dpFlags, activeTextureCount, formatFlags);
     CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -1162,15 +1167,15 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
         debugInfo.VertexLayout = vertexLayout;
         debugInfo.DrawSerial = debugDrawSerial;
         debugInfo.Program = program;
-        debugInfo.ActiveTextureCount = m_CurrentActiveTextureCount;
+        debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
         debugInfo.ActiveLightCount = m_ActiveLightCount;
         debugInfo.StateDesc = &preparedState.StateDesc;
         debugInfo.DrawState = &m_DrawStateCache;
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
-        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_StageStates[0], preparedState.ActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_StageStates[0]);
-        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], m_CurrentActiveTextureCount > 0, m_TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], m_CurrentActiveTextureCount > 0 && m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_StageStates[0], preparedState.ActiveTextureCount > 0, m_TextureHandles[0] != 0);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_StageStates[0], preparedState.ActiveTextureCount > 0 && m_TextureHandles[0] != 0);
         debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_StageStates[0]);
         debugInfo.Stage0.Texture = m_TextureHandles[0];
         m_DebugState.LogDrawVertexBufferDetails(debugInfo);
@@ -1324,12 +1329,13 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
 // ============================================================================
 
 void CKFixedFunctionPipeline::BuildCurrentPreparedState(
-    CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
+    CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
+    CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
     if (!prepared)
         return;
     CKFFInitPreparedState(prepared);
     CKFFStateDesc &stateDesc = prepared->StateDesc;
-    prepared->ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
+    prepared->ActiveTextureCount = activeTextureCount;
     if (prepared->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
         prepared->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
@@ -1350,7 +1356,7 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         stateDesc.VS.SetHasTexCoord(
             stage,
-            hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (m_CurrentActiveTextureCount > stage));
+            hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (prepared->ActiveTextureCount > (CKDWORD)stage));
         const CKDWORD packedTexcoord = m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         const CKDWORD transformFlags = m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
@@ -1427,7 +1433,7 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
 
     // Fragment state description mirrors the active fixed-function texture-stage contract.
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const bool stageActive = stage < m_CurrentActiveTextureCount;
+        const bool stageActive = (CKDWORD)stage < prepared->ActiveTextureCount;
         const bool hasTexture = stageActive && m_TextureHandles[stage] != 0;
         const CKDWORD colorOp = CKFFResolveStageColorOp(m_StageStates[stage], stageActive, hasTexture);
         const CKDWORD alphaOp = CKFFResolveStageAlphaOp(m_StageStates[stage], stageActive, hasTexture);
@@ -2348,25 +2354,27 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
     if (!preparedState || !programContext)
         return FALSE;
 
-    m_CurrentActiveTextureCount = CKFFResolveActiveTextureCount(dpFlags, m_TextureHandles, m_StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
+        dpFlags, m_TextureHandles, m_StageStates);
+    m_CurrentActiveTextureCount = (int)activeTextureCount;
     if (m_PacketProgramCacheValid &&
         m_PacketProgramCacheDPFlags == dpFlags &&
         m_PacketProgramCacheFormatFlags == formatFlags &&
-        m_PacketProgramCacheActiveTextureCount == m_CurrentActiveTextureCount) {
+        m_PacketProgramCacheActiveTextureCount == (int)activeTextureCount) {
         *preparedState = m_PacketProgramCachePreparedState;
         *programContext = m_PacketProgramCacheContext;
         SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
         return programContext->Program != 0 ? TRUE : FALSE;
     }
 
-    BuildCurrentPreparedState(preparedState, dpFlags, formatFlags);
+    BuildCurrentPreparedState(preparedState, dpFlags, activeTextureCount, formatFlags);
     CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(preparedState);
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
     SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
     m_PacketProgramCacheDPFlags = dpFlags;
     m_PacketProgramCacheFormatFlags = formatFlags;
-    m_PacketProgramCacheActiveTextureCount = m_CurrentActiveTextureCount;
+    m_PacketProgramCacheActiveTextureCount = (int)activeTextureCount;
     m_PacketProgramCachePreparedState = *preparedState;
     m_PacketProgramCacheContext = *programContext;
     m_PacketProgramCacheValid = TRUE;
