@@ -142,17 +142,22 @@ struct CKFFPipelineTestAccess {
     static CKBOOL ResolveVertexBufferPacketProgram(CKFixedFunctionPipeline *ffp,
                                                    CKDWORD dpFlags,
                                                    CKDWORD formatFlags,
-                                                   CKFFProgramContext *programContext)
+                                                   CKFFProgramContext *programContext,
+                                                   CKFFPreparedState *preparedStateOut = nullptr)
     {
         CKFFPreparedState preparedState;
-        return ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, programContext);
+        CKBOOL result = ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, programContext);
+        if (preparedStateOut)
+            *preparedStateOut = preparedState;
+        return result;
     }
 
     static CKBOOL BuildStaticUniformPayload(CKFixedFunctionPipeline *ffp,
                                             CKFFRenderPacketUniformPayload *payload,
-                                            const CKFFProgramContext *programContext)
+                                            const CKFFProgramContext *programContext,
+                                            CKDWORD activeTextureCount)
     {
-        return ffp->BuildStaticUniformPayload(payload, programContext);
+        return ffp->BuildStaticUniformPayload(payload, programContext, activeTextureCount);
     }
 
     static void BuildVertexBufferPacket(CKFixedFunctionPipeline *ffp,
@@ -579,11 +584,14 @@ void StaticUniformPayloadOrderAndHashStaysStable()
     PrepareTexturedPacketCandidate(&ffp);
 
     CKFFProgramContext programContext;
-    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(&ffp, CKRST_DP_TRANSFORM, 0, &programContext),
+    CKFFPreparedState preparedState;
+    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(&ffp, CKRST_DP_TRANSFORM, 0,
+                                                                       &programContext, &preparedState),
               "Static payload order test must resolve a fixed-function program");
 
     CKFFRenderPacketUniformPayload payload;
-    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &programContext),
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &programContext,
+                                                                preparedState.ActiveTextureCount),
               "Static payload order test must build a static payload");
 
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
@@ -633,10 +641,11 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
     ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
 
     CKFFProgramContext texturedContext;
+    CKFFPreparedState texturedPreparedState;
     TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
                   &ffp, CKRST_DP_TRANSFORM,
                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
-                  &texturedContext),
+                  &texturedContext, &texturedPreparedState),
               "Textured payload context test must resolve the textured program");
 
     CKFFProgramContext positionTContext;
@@ -647,7 +656,8 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
               "Textured payload context test must switch the current program");
 
     CKFFRenderPacketUniformPayload payload;
-    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &texturedContext),
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(&ffp, &payload, &texturedContext,
+                                                                texturedPreparedState.ActiveTextureCount),
               "Static payload must build from the supplied textured program context");
 
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
