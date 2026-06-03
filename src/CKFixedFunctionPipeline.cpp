@@ -1487,6 +1487,23 @@ bool CKFixedFunctionPipeline::ProgramUsesViewSpaceUniforms(const CKFFProgramCont
     return false;
 }
 
+static void CKFFInitUniformSink(CKFFUniformSink *sink,
+                                CKRasterizerEncoder *encoder,
+                                CKFFRenderPacketUniformPayload *staticPayload,
+                                CKFFRenderPacketUniformPayload *objectPayload,
+                                CKBOOL emitStatic,
+                                CKBOOL emitObject)
+{
+    if (!sink)
+        return;
+    memset(sink, 0, sizeof(CKFFUniformSink));
+    sink->Encoder = encoder;
+    sink->StaticPayload = staticPayload;
+    sink->ObjectPayload = objectPayload;
+    sink->EmitStatic = emitStatic;
+    sink->EmitObject = emitObject;
+}
+
 CKBOOL CKFixedFunctionPipeline::EmitUniform(CKFFUniformSink *sink, CKDWORD uniform,
                                             const void *data, CKDWORD count,
                                             CKDWORD vec4Count, CKBOOL objectUniform)
@@ -1705,10 +1722,7 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     CKFFProgramContext programContext;
     CKFFInitProgramContext(&programContext, m_CurrentShaderKey, m_CurrentProgramBinding);
     CKFFUniformSink sink;
-    memset(&sink, 0, sizeof(sink));
-    sink.Encoder = encoder;
-    sink.EmitStatic = TRUE;
-    sink.EmitObject = TRUE;
+    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, TRUE);
     EmitUniformPayloads(&sink, &programContext);
     m_DirtyFlags = 0;
 }
@@ -1723,11 +1737,7 @@ CKBOOL CKFixedFunctionPipeline::BuildUniformPayloads(CKFFRenderPacketUniformPayl
     memset(objectPayload, 0, sizeof(CKFFRenderPacketUniformPayload));
 
     CKFFUniformSink sink;
-    memset(&sink, 0, sizeof(sink));
-    sink.StaticPayload = staticPayload;
-    sink.ObjectPayload = objectPayload;
-    sink.EmitStatic = TRUE;
-    sink.EmitObject = TRUE;
+    CKFFInitUniformSink(&sink, nullptr, staticPayload, objectPayload, TRUE, TRUE);
     EmitUniformPayloads(&sink, programContext);
     if (sink.Failed)
         return FALSE;
@@ -1745,10 +1755,7 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
     memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
 
     CKFFUniformSink sink;
-    memset(&sink, 0, sizeof(sink));
-    sink.StaticPayload = payload;
-    sink.EmitStatic = TRUE;
-    sink.EmitObject = FALSE;
+    CKFFInitUniformSink(&sink, nullptr, payload, nullptr, TRUE, FALSE);
     EmitUniformPayloads(&sink, programContext);
     if (sink.Failed)
         return FALSE;
@@ -1765,10 +1772,7 @@ CKBOOL CKFixedFunctionPipeline::BuildObjectUniformPayload(CKFFRenderPacketUnifor
     memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
 
     CKFFUniformSink sink;
-    memset(&sink, 0, sizeof(sink));
-    sink.ObjectPayload = payload;
-    sink.EmitStatic = FALSE;
-    sink.EmitObject = TRUE;
+    CKFFInitUniformSink(&sink, nullptr, nullptr, payload, FALSE, TRUE);
     EmitUniformPayloads(&sink, programContext);
     if (sink.Failed)
         return FALSE;
