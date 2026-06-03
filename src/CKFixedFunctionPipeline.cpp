@@ -215,8 +215,6 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
         Vx3DMatrixIdentity(m_VertexBlendMatrices[i]);
         m_VertexBlendMatrixSet[i] = FALSE;
     }
-    memset(&m_PacketTextureSetCache, 0, sizeof(m_PacketTextureSetCache));
-    m_PacketTextureSetCache.Dirty = TRUE;
     m_PacketProgramCacheValid = FALSE;
     m_PacketProgramCacheDPFlags = 0;
     m_PacketProgramCacheFormatFlags = 0;
@@ -266,7 +264,6 @@ void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     m_RenderPipeline.Init(ctx);
     m_DirtyFlags = CKFF_DIRTY_ALL;
     m_ViewProjectionDirty = TRUE;
-    MarkPacketTextureSetDirty();
     MarkPacketProgramDirty();
     ClearOpaqueRenderPackets();
     ResetOpaqueRenderPacketFrameState();
@@ -291,7 +288,6 @@ void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, C
     m_DisableTextureFiltering = DisableTextureFiltering;
     m_DisableMipmaps = DisableMipmaps;
     m_ForceAnisotropicFiltering = ForceAnisotropicFiltering;
-    MarkPacketTextureSetDirty();
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
@@ -427,11 +423,6 @@ void CKFixedFunctionPipeline::MarkStaticUniformsDirty()
     m_OpaquePacketQueue.MarkStaticUniformsDirty();
 }
 
-void CKFixedFunctionPipeline::MarkPacketTextureSetDirty()
-{
-    m_PacketTextureSetCache.Dirty = TRUE;
-}
-
 void CKFixedFunctionPipeline::MarkPacketProgramDirty()
 {
     m_PacketProgramCacheValid = FALSE;
@@ -450,22 +441,6 @@ void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSe
         samplers[i] = BuildSamplerDesc((int)i);
     CKFFBuildTextureBindingSet(bindingSet, u, activeCount,
                                m_TextureHandles, m_TextureFlags, samplers);
-}
-
-void CKFixedFunctionPipeline::UpdatePacketTextureSetCache()
-{
-    if (!m_PacketTextureSetCache.Dirty &&
-        m_PacketTextureSetCache.ActiveTextureCount == (CKDWORD)m_CurrentActiveTextureCount)
-        return;
-
-    CKFFTextureBindingSet bindingSet;
-    BuildCurrentTextureBindingSet(&bindingSet);
-
-    m_PacketTextureSetCache.ActiveTextureCount = bindingSet.ActiveTextureCount;
-    m_PacketTextureSetCache.TextureSetHash = bindingSet.Hash;
-    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i)
-        m_PacketTextureSetCache.Textures[i] = bindingSet.Bindings[i];
-    m_PacketTextureSetCache.Dirty = FALSE;
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
@@ -543,7 +518,6 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     m_StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
     Vx3DMatrixIdentity(m_TexMatrix[stage]);
-    MarkPacketTextureSetDirty();
     MarkPacketProgramDirty();
     MarkStaticUniformsDirty();
 }
@@ -574,7 +548,6 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
     m_TextureFlags[stage] = snapshot.TextureFlags;
     memcpy(m_StageStates[stage], snapshot.States, sizeof(m_StageStates[stage]));
     m_TexMatrix[stage] = snapshot.TextureMatrix;
-    MarkPacketTextureSetDirty();
     MarkPacketProgramDirty();
     MarkStaticUniformsDirty();
 }
@@ -613,7 +586,6 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
             m_StageStates[stage][CKRST_TSS_AARG2] = alphaArg2;
         }
     }
-    MarkPacketTextureSetDirty();
     MarkPacketProgramDirty();
     MarkStaticUniformsDirty();
 }
@@ -788,7 +760,6 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
     const CKDWORD newStaticFlags = CKFFStaticTextureFlags(normalizedFlags);
     m_TextureHandles[stage] = textureHandle;
     m_TextureFlags[stage] = normalizedFlags;
-    MarkPacketTextureSetDirty();
     if (oldHasTexture != newHasTexture || oldStaticFlags != newStaticFlags) {
         MarkPacketProgramDirty();
         MarkStaticUniformsDirty();
@@ -1927,26 +1898,6 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder) {
     m_DirtyFlags = 0;
 }
 
-CKBOOL CKFixedFunctionPipeline::BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
-                                                     CKFFRenderPacketUniformPayload *objectPayload,
-                                                     const CKFFProgramContext *programContext)
-{
-    if (!staticPayload || !objectPayload)
-        return FALSE;
-    memset(staticPayload, 0, sizeof(CKFFRenderPacketUniformPayload));
-    memset(objectPayload, 0, sizeof(CKFFRenderPacketUniformPayload));
-
-    CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, nullptr, staticPayload, objectPayload, TRUE, TRUE);
-    EmitUniformPayloads(&sink, programContext);
-    if (sink.Failed)
-        return FALSE;
-
-    staticPayload->Hash = CKFFHashRenderPacketUniformPayload(*staticPayload);
-    objectPayload->Hash = CKFFHashRenderPacketUniformPayload(*objectPayload);
-    return TRUE;
-}
-
 CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                                           const CKFFProgramContext *programContext)
 {
@@ -1956,23 +1907,6 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
 
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, nullptr, payload, nullptr, TRUE, FALSE);
-    EmitUniformPayloads(&sink, programContext);
-    if (sink.Failed)
-        return FALSE;
-
-    payload->Hash = CKFFHashRenderPacketUniformPayload(*payload);
-    return TRUE;
-}
-
-CKBOOL CKFixedFunctionPipeline::BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                                          const CKFFProgramContext *programContext)
-{
-    if (!payload)
-        return FALSE;
-    memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
-
-    CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, nullptr, nullptr, payload, FALSE, TRUE);
     EmitUniformPayloads(&sink, programContext);
     if (sink.Failed)
         return FALSE;
