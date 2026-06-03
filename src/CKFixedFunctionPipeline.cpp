@@ -1463,7 +1463,6 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
 void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding) {
     m_CurrentShaderKey = shaderKey;
     m_CurrentProgramBinding = binding;
-    m_CurrentSpecializationInfo = binding.Specialization;
 }
 
 CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount(

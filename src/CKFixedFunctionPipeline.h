@@ -294,7 +294,6 @@ private:
 #endif
     CKFFShaderKey m_CurrentShaderKey;
     CKFFProgramBinding m_CurrentProgramBinding;
-    CKFFSpecializationInfo m_CurrentSpecializationInfo;
 
     // Current transform state
     VxMatrix m_World;
