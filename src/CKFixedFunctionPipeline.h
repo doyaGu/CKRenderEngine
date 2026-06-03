@@ -16,6 +16,7 @@
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
+#include "CKFFOpaquePacketCoordinator.h"
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -89,28 +90,25 @@ public:
                           CKDWORD dpFlags, CKDWORD formatFlags,
                           CKDWORD vertexLayout);
 
-    CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePacketQueue.HasPackets(); }
+    CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePackets.HasPackets(); }
     void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
                                   CKBOOL forceDirectReplay = FALSE,
                                   CKBOOL allowAdaptiveLearning = TRUE);
-    void SetOpaqueSortingEnabled(CKBOOL enabled) {
-        m_OpaqueSortingEnabled = enabled;
-        ResetOpaqueRenderPacketFrameState();
-    }
-    void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaqueInstancingEnabled = enabled; }
-    void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePacketAllowed = allowed; }
-    CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePacketAllowed; }
-    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePacketQueue.GetAdaptiveSamples(); }
-    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePacketQueue.GetAdaptiveBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSavedBindEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePacketQueue.GetAdaptiveRunBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePacketQueue.GetAdaptiveSampleRuns(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePacketQueue.GetAdaptiveSampleMaxRun(); }
-    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePacketQueue.GetAdaptiveSubmitSavedEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePacketQueue.GetAdaptiveCooldownBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePacketQueue.GetAdaptiveCooldownFrames(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePacketQueue.GetAdaptiveFrameEndEvaluations(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePacketQueue.GetAdaptiveFrameEndRunBypasses(); }
+    void SetOpaqueSortingEnabled(CKBOOL enabled);
+    void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaquePackets.SetInstancingEnabled(enabled); }
+    void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePackets.SetPacketsAllowed(allowed); }
+    CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePackets.PacketsAllowed(); }
+    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePackets.Queue().GetAdaptiveSamples(); }
+    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePackets.Queue().GetAdaptiveSavedBindEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveRunBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePackets.Queue().GetAdaptiveSampleRuns(); }
+    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePackets.Queue().GetAdaptiveSampleMaxRun(); }
+    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePackets.Queue().GetAdaptiveSubmitSavedEstimate(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveCooldownBypasses(); }
+    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePackets.Queue().GetAdaptiveCooldownFrames(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePackets.Queue().GetAdaptiveFrameEndEvaluations(); }
+    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePackets.Queue().GetAdaptiveFrameEndRunBypasses(); }
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
@@ -155,17 +153,12 @@ private:
 #endif
     CKFFStateStore m_State;
 
-    CKBOOL m_PacketProgramCacheValid;
-    CKDWORD m_PacketProgramCacheDPFlags;
-    CKDWORD m_PacketProgramCacheFormatFlags;
-    int m_PacketProgramCacheActiveTextureCount;
-    CKFFPreparedState m_PacketProgramCachePreparedState;
-    CKFFProgramContext m_PacketProgramCacheContext;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes m_Probes;
 #endif
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
+    CKFFOpaquePacketCoordinator m_OpaquePackets;
 
     // Internal methods
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
@@ -241,11 +234,6 @@ private:
     void UpdateOpaqueRenderPacketAdaptiveStats();
     CKBOOL CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder);
 
-    CKFFRenderPacketQueue m_OpaquePacketQueue;
-    CKBOOL m_OpaqueInstancingEnabled;
-    CKDWORD m_InstanceLayout;
-    CKBOOL m_OpaqueSortingEnabled;
-    CKBOOL m_OpaquePacketAllowed;
 };
 
 class CKFFStateGuard {
