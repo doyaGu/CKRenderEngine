@@ -1,11 +1,26 @@
 #include "MeshAdjacency.h"
 #include "NearestPointGrid.h"
 #include "NvStripifier.h"
+#include "CKContext.h"
+#include "RCKCurve.h"
+#include "RCKCurvePoint.h"
 #include "RadixSort.h"
 #include "TestTriangleMultiset.h"
 #include "VertexCacheOptimizer.h"
 
+#include <math.h>
+
 namespace {
+
+bool TestNearlyEqual(float lhs, float rhs) {
+    return fabsf(lhs - rhs) <= 0.001f;
+}
+
+bool TestVectorNearlyEqual(const VxVector &lhs, const VxVector &rhs) {
+    return TestNearlyEqual(lhs.x, rhs.x) &&
+           TestNearlyEqual(lhs.y, rhs.y) &&
+           TestNearlyEqual(lhs.z, rhs.z);
+}
 
 void BuildTriangleMultisetFromJoinedStrip(const XArray<CKWORD> &stripIndices, XArray<TestTriCount> &tris) {
     tris.Resize(0);
@@ -135,6 +150,41 @@ void Test_VertexCacheOptimizer_OutOfRangeIndex_DoesNotCrash() {
     TestCheck(TestSameTriangleMultiset(expected, actual), "Optimizer should preserve triangle coverage with out-of-range indices");
 }
 
+void Test_ClosedCurve_IntegralStep_ReturnsFirstPoint() {
+    CKContext context(nullptr, 0, 0);
+    RCKCurve curve(&context, "ClosedCurve");
+    RCKCurvePoint p0(&context, "P0");
+    RCKCurvePoint p1(&context, "P1");
+    RCKCurvePoint p2(&context, "P2");
+
+    curve.Show(CKHIDE);
+    p0.SetLinear(TRUE);
+    p1.SetLinear(TRUE);
+    p2.SetLinear(TRUE);
+
+    VxVector v0(0.0f, 0.0f, 0.0f);
+    VxVector v1(10.0f, 0.0f, 0.0f);
+    VxVector v2(10.0f, 10.0f, 0.0f);
+    p0.SetPosition(&v0, nullptr, FALSE);
+    p1.SetPosition(&v1, nullptr, FALSE);
+    p2.SetPosition(&v2, nullptr, FALSE);
+
+    TestCheck(curve.AddControlPoint((CKCurvePoint *)&p0) == CK_OK, "Failed to add first control point");
+    TestCheck(curve.AddControlPoint((CKCurvePoint *)&p1) == CK_OK, "Failed to add second control point");
+    TestCheck(curve.AddControlPoint((CKCurvePoint *)&p2) == CK_OK, "Failed to add third control point");
+    curve.Close();
+
+    VxVector pos;
+    TestCheck(curve.GetLocalPos(0.0f, &pos) == CK_OK, "GetLocalPos(0) failed");
+    TestCheck(TestVectorNearlyEqual(pos, v0), "Closed curve step 0 should return the first point");
+
+    TestCheck(curve.GetLocalPos(1.0f, &pos) == CK_OK, "GetLocalPos(1) failed");
+    TestCheck(TestVectorNearlyEqual(pos, v0), "Closed curve step 1 should return the first point");
+
+    TestCheck(curve.GetLocalPos(2.0f, &pos) == CK_OK, "GetLocalPos(2) failed");
+    TestCheck(TestVectorNearlyEqual(pos, v0), "Closed curve integral step should return the first point");
+}
+
 } // namespace
 
 int main() {
@@ -146,5 +196,6 @@ int main() {
     tests.Run("Stripifier empty input", &Test_NvStripifier_EmptyInput_ReturnsEmptyOutput);
     tests.Run("Stripifier high-index fallback", &Test_NvStripifier_HighIndexFallback_UsesJoinedStream);
     tests.Run("Vertex cache optimizer out-of-range index", &Test_VertexCacheOptimizer_OutOfRangeIndex_DoesNotCrash);
+    tests.Run("Closed curve integral step", &Test_ClosedCurve_IntegralStep_ReturnsFirstPoint);
     return tests.ExitCode();
 }
