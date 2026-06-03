@@ -1713,12 +1713,12 @@ CKBOOL CKFixedFunctionPipeline::EmitUniform(CKFFUniformSink *sink, CKDWORD unifo
 {
     if (!sink || !data || count == 0)
         return TRUE;
-    if (sink->Encoder)
-        UploadUniform(sink->Encoder, uniform, data, count);
     if (objectUniform && !sink->EmitObject)
         return TRUE;
     if (!objectUniform && !sink->EmitStatic)
         return TRUE;
+    if (sink->Encoder)
+        UploadUniform(sink->Encoder, uniform, data, count);
     CKFFRenderPacketUniformPayload *payload = objectUniform ? sink->ObjectPayload : sink->StaticPayload;
     if (payload && !CKFFRenderPacketAddUniform(payload, uniform, data, count, vec4Count)) {
         sink->Failed = TRUE;
@@ -1854,8 +1854,8 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformEmissionContext context;
     CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount);
-    const bool emitStatic = sink->Encoder || sink->EmitStatic;
-    const bool emitObject = sink->Encoder || sink->EmitObject;
+    const bool emitStatic = sink->EmitStatic;
+    const bool emitObject = sink->EmitObject;
 
     if (emitObject)
         CKFFEmitObjectMatrixUniforms(&context);
@@ -1891,10 +1891,31 @@ void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder,
                                              CKDWORD activeTextureCount) {
     if (!encoder || !programContext)
         return;
-    CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, TRUE);
-    EmitUniformPayloads(&sink, programContext, activeTextureCount);
+    UploadObjectUniforms(encoder, programContext, activeTextureCount);
+    UploadStaticUniforms(encoder, programContext, activeTextureCount);
     m_DirtyFlags = 0;
+}
+
+void CKFixedFunctionPipeline::UploadObjectUniforms(CKRasterizerEncoder *encoder,
+                                                   const CKFFProgramContext *programContext,
+                                                   CKDWORD activeTextureCount)
+{
+    if (!encoder || !programContext)
+        return;
+    CKFFUniformSink sink;
+    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, FALSE, TRUE);
+    EmitUniformPayloads(&sink, programContext, activeTextureCount);
+}
+
+void CKFixedFunctionPipeline::UploadStaticUniforms(CKRasterizerEncoder *encoder,
+                                                   const CKFFProgramContext *programContext,
+                                                   CKDWORD activeTextureCount)
+{
+    if (!encoder || !programContext)
+        return;
+    CKFFUniformSink sink;
+    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, FALSE);
+    EmitUniformPayloads(&sink, programContext, activeTextureCount);
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
