@@ -361,7 +361,7 @@ private:
                                      const CKFFProgramContext *programContext);
     CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
                                      const CKFFProgramContext *programContext);
-    CKDWORD GetPacketObjectUniformRejectReason() const;
+    CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     void UpdateViewProjectionCache();
     CKDWORD CurrentTextureMatrixUploadCount() const;
     bool ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const;
