@@ -70,4 +70,19 @@ inline void CKFFInitPreparedState(CKFFPreparedState *prepared)
     prepared->TextureBoundMask = 0;
 }
 
+inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
+{
+    if (!set)
+        return;
+    set->ActiveTextureCount = 0;
+    set->Hash = 0;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        set->Bindings[stage].Stage = stage;
+        set->Bindings[stage].Uniform = 0;
+        set->Bindings[stage].Texture = 0;
+        set->Bindings[stage].TextureFlags = 0;
+        set->Bindings[stage].Sampler = CKSamplerDesc();
+    }
+}
+
 #endif // CKFFDRAWTYPES_H
