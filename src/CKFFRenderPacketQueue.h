@@ -9,6 +9,10 @@
 #define CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT 32
 #define CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT 128
 #define CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL 16
+#define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE 0
+#define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_BINDING 1
+#define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_RUN 2
+#define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_GENERAL 3
 
 class CKFFRenderPacketQueue {
 public:
@@ -73,6 +77,7 @@ private:
     void ClearAdaptiveCooldown();
     CKDWORD EstimateSavedBinds(const CKRenderPacket &packet) const;
     CKDWORD EstimateRepeatBinds(const CKRenderPacket &packet) const;
+    CKBOOL ShouldStartNoRunCooldown() const;
 
     XArray<CKRenderPacket> m_Packets;
     XArray<CKFFRenderPacketUniformPayload> m_StaticUniformPayloads;
@@ -87,6 +92,8 @@ private:
     CKRenderPacketSortKey m_FirstPacketSortKey;
     CKRenderPacketSortKey m_LastPacketSortKey;
     CKBOOL m_AdaptiveBypass;
+    CKDWORD m_AdaptiveBypassReason;
+    CKDWORD m_AdaptivePendingBypassReason;
     CKDWORD m_AdaptiveSamples;
     CKDWORD m_AdaptiveBypasses;
     CKDWORD m_AdaptiveSavedBindEstimate;

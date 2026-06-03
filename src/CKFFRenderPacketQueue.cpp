@@ -12,6 +12,8 @@ CKFFRenderPacketQueue::CKFFRenderPacketQueue()
       m_SingleKey(TRUE),
       m_HasLastKey(FALSE),
       m_AdaptiveBypass(FALSE),
+      m_AdaptiveBypassReason(CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE),
+      m_AdaptivePendingBypassReason(CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE),
       m_AdaptiveSamples(0),
       m_AdaptiveBypasses(0),
       m_AdaptiveSavedBindEstimate(0),
@@ -52,6 +54,8 @@ void CKFFRenderPacketQueue::ResetFrameState()
     }
 
     m_AdaptiveBypass = FALSE;
+    m_AdaptiveBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE;
+    m_AdaptivePendingBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE;
     m_AdaptiveSamples = 0;
     m_AdaptiveBypasses = 0;
     m_AdaptiveSavedBindEstimate = 0;
@@ -196,6 +200,7 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass(CKBOOL instancingEnabled)
 {
     if (m_AdaptiveBypass)
         return TRUE;
+    m_AdaptivePendingBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE;
     if (m_AdaptiveSamples < CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT)
         return FALSE;
     if (m_AdaptiveSamples > CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT)
@@ -203,15 +208,22 @@ CKBOOL CKFFRenderPacketQueue::ShouldAdaptiveBypass(CKBOOL instancingEnabled)
     if (instancingEnabled) {
         if (!m_AdaptiveSampleRunsEvaluated)
             EvaluateAdaptiveSampleRuns();
-        if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+        if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT) {
+            m_AdaptivePendingBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_RUN;
+            if (ShouldStartNoRunCooldown())
+                StartAdaptiveCooldown();
             return TRUE;
+        }
         ClearAdaptiveCooldown();
         return FALSE;
     }
-    if (m_AdaptiveRepeatBindEstimate == 0)
+    if (m_AdaptiveRepeatBindEstimate == 0) {
+        m_AdaptivePendingBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_BINDING;
         return TRUE;
+    }
     if (m_AdaptiveSavedBindEstimate >= (m_AdaptiveSamples / 2))
         return FALSE;
+    m_AdaptivePendingBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_GENERAL;
     return TRUE;
 }
 
@@ -220,6 +232,9 @@ void CKFFRenderPacketQueue::MarkAdaptiveBypass()
     if (!m_AdaptiveBypass)
         ++m_AdaptiveBypasses;
     m_AdaptiveBypass = TRUE;
+    m_AdaptiveBypassReason = m_AdaptivePendingBypassReason;
+    if (m_AdaptiveBypassReason == CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_NONE)
+        m_AdaptiveBypassReason = CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_GENERAL;
 }
 
 void CKFFRenderPacketQueue::MarkAdaptiveCooldownBypass()
@@ -239,8 +254,7 @@ CKBOOL CKFFRenderPacketQueue::EvaluateAdaptiveFrameEnd(CKBOOL instancingEnabled)
     ++m_AdaptiveFrameEndEvaluations;
     if (!m_AdaptiveSampleRunsEvaluated)
         EvaluateAdaptiveSampleRuns();
-    if (m_AdaptiveSampleMaxRun < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT &&
-        m_AdaptiveSubmitSavedEstimate == 0) {
+    if (ShouldStartNoRunCooldown()) {
         ++m_AdaptiveFrameEndRunBypasses;
         StartAdaptiveCooldown();
         return TRUE;
@@ -522,6 +536,13 @@ void CKFFRenderPacketQueue::ClearAdaptiveCooldown()
 {
     m_AdaptiveCooldownFrames = 0;
     m_AdaptiveCooldownFresh = FALSE;
+}
+
+CKBOOL CKFFRenderPacketQueue::ShouldStartNoRunCooldown() const
+{
+    if (m_AdaptiveSampleMaxRun >= CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
+        return FALSE;
+    return m_AdaptiveSubmitSavedEstimate == 0 ? TRUE : FALSE;
 }
 
 CKDWORD CKFFRenderPacketQueue::EstimateSavedBinds(const CKRenderPacket &packet) const
