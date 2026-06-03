@@ -150,13 +150,6 @@ struct CKFFUniformSink {
     CKBOOL Failed;
 };
 
-struct CKFFPacketTextureSetCache {
-    CKBOOL Dirty;
-    CKDWORD ActiveTextureCount;
-    CKDWORD TextureSetHash;
-    CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
-};
-
 struct CKFFPreparedState {
     CKFFStateDesc StateDesc;
     CKDWORD ActiveTextureCount;
@@ -325,7 +318,6 @@ private:
     // Current textures
     CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD m_TextureFlags[CKFF_MAX_TEXTURE_STAGES];
-    CKFFPacketTextureSetCache m_PacketTextureSetCache;
     CKBOOL m_PacketProgramCacheValid;
     CKDWORD m_PacketProgramCacheDPFlags;
     CKDWORD m_PacketProgramCacheFormatFlags;
@@ -353,10 +345,8 @@ private:
                                    const CKBYTE *texcoordComponentCounts = nullptr);
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
-    void MarkPacketTextureSetDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet);
-    void UpdatePacketTextureSetCache();
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
@@ -367,12 +357,7 @@ private:
     void CKFFEmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
     void EmitUniformPayloads(CKFFUniformSink *sink,
                              const CKFFProgramContext *programContext);
-    CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
-                                CKFFRenderPacketUniformPayload *objectPayload,
-                                const CKFFProgramContext *programContext);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext);
-    CKBOOL BuildObjectUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                      const CKFFProgramContext *programContext);
     CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
                                      const CKFFProgramContext *programContext);
