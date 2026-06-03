@@ -364,11 +364,11 @@ private:
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     void UpdateViewProjectionCache();
     CKDWORD CurrentTextureMatrixUploadCount(const CKFFUniformEmissionContext *context) const;
-    bool ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const;
-    bool ProgramUsesTexFactor(const CKFFProgramContext *programContext) const;
-    bool ProgramUsesStageConstant(const CKFFProgramContext *programContext) const;
-    bool ProgramUsesMaterialUniform(const CKFFProgramContext *programContext) const;
-    bool ProgramUsesViewSpaceUniforms(const CKFFProgramContext *programContext) const;
+    bool ProgramUsesBumpEnv(const CKFFShaderKey &shaderKey) const;
+    bool ProgramUsesTexFactor(const CKFFShaderKey &shaderKey) const;
+    bool ProgramUsesStageConstant(const CKFFShaderKey &shaderKey) const;
+    bool ProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey, CKBOOL fullSpecialized) const;
+    bool ProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey, CKBOOL fullSpecialized) const;
     CKDWORD BuildDrawParams(float (*drawParams)[4],
                             const CKFFLightData *viewLights,
                             int packedLightCount,
