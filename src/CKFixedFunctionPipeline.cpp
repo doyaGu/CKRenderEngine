@@ -434,7 +434,7 @@ void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSe
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
-    for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i)
+    for (CKDWORD i = 0; i < activeCount; ++i)
         samplers[i] = BuildSamplerDesc((int)i);
     CKFFBuildTextureBindingSet(bindingSet, u, activeCount,
                                m_TextureHandles, m_TextureFlags, samplers);
@@ -2189,17 +2189,9 @@ CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasteriz
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
     if (!encoder) return;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
 
-    CKDWORD activeCount = (CKDWORD)m_CurrentActiveTextureCount;
-    if (activeCount > CKFF_MAX_TEXTURE_STAGES)
-        activeCount = CKFF_MAX_TEXTURE_STAGES;
-    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
-    for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        samplers[i] = BuildSamplerDesc((int)i);
-    }
     CKFFTextureBindingSet bindingSet;
-    CKFFBuildTextureBindingSet(&bindingSet, u, activeCount, m_TextureHandles, m_TextureFlags, samplers);
+    BuildCurrentTextureBindingSet(&bindingSet);
     CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
     for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i)
         desiredTextures[i] = bindingSet.Bindings[i].Texture;
