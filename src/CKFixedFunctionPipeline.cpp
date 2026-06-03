@@ -1915,11 +1915,15 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
     return TRUE;
 }
 
-CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason() const
+CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const
 {
-    if (m_CurrentShaderKey.VS.GetHasPositionT())
+    if (!programContext)
+        return CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
+
+    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
+    if (shaderKey.VS.GetHasPositionT())
         return CKFF_RENDER_PACKET_ELIGIBLE;
-    if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
@@ -2575,7 +2579,7 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
     }
     result->ProgramContext = programContext;
     BuildCurrentTextureBindingSet(&result->TextureBindingSet);
-    result->RejectReason = GetPacketObjectUniformRejectReason();
+    result->RejectReason = GetPacketObjectUniformRejectReason(&programContext);
     if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
         return;
     }
