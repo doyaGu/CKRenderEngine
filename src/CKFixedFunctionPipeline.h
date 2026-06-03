@@ -363,7 +363,7 @@ private:
                                      const CKFFProgramContext *programContext);
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     void UpdateViewProjectionCache();
-    CKDWORD CurrentTextureMatrixUploadCount() const;
+    CKDWORD CurrentTextureMatrixUploadCount(const CKFFUniformEmissionContext *context) const;
     bool ProgramUsesBumpEnv(const CKFFProgramContext *programContext) const;
     bool ProgramUsesTexFactor(const CKFFProgramContext *programContext) const;
     bool ProgramUsesStageConstant(const CKFFProgramContext *programContext) const;
