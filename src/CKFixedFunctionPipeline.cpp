@@ -1928,29 +1928,34 @@ CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason(const CKFFPr
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
-CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason() const
+CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason(
+    const CKFFProgramContext *programContext) const
 {
+    if (!programContext)
+        return CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
     if (!m_OpaqueInstancingEnabled || !m_InstanceLayout)
         return CKFF_RENDER_PACKET_REJECT_INSTANCE_LAYOUT;
-    if (m_CurrentShaderKey.VS.GetHasPositionT())
+
+    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
+    if (shaderKey.VS.GetHasPositionT())
         return CKFF_RENDER_PACKET_REJECT_POSITIONT;
-    if (CKFFShaderKeyVertexBlendMode(m_CurrentShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
-    if (m_CurrentShaderKey.FS.LastActiveTextureStage >= 4)
+    if (shaderKey.FS.LastActiveTextureStage >= 4)
         return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
-    for (CKDWORD stage = 0; stage <= m_CurrentShaderKey.FS.LastActiveTextureStage; ++stage) {
-        if ((m_CurrentShaderKey.VS.TexCoordIndex[stage] & 7u) >= 4)
+    for (CKDWORD stage = 0; stage <= shaderKey.FS.LastActiveTextureStage; ++stage) {
+        if ((shaderKey.VS.TexCoordIndex[stage] & 7u) >= 4)
             return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
-        if ((m_CurrentShaderKey.VS.TexGen[stage] & 7u) != 0)
+        if ((shaderKey.VS.TexGen[stage] & 7u) != 0)
             return CKFF_RENDER_PACKET_REJECT_TEXGEN;
     }
-    if ((m_CurrentShaderKey.VS.Bits & (1ull << 13)) != 0)
+    if ((shaderKey.VS.Bits & (1ull << 13)) != 0)
         return CKFF_RENDER_PACKET_REJECT_VIEW_SPACE_SHADER;
-    if (m_CurrentShaderKey.FS.VertexFogMode != 0)
+    if (shaderKey.FS.VertexFogMode != 0)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_FOG;
-    if (m_CurrentShaderKey.FS.PixelFogMode != 0)
+    if (shaderKey.FS.PixelFogMode != 0)
         return CKFF_RENDER_PACKET_REJECT_PIXEL_FOG;
-    if (m_CurrentShaderKey.FS.RangeFog)
+    if (shaderKey.FS.RangeFog)
         return CKFF_RENDER_PACKET_REJECT_RANGE_FOG;
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
@@ -2452,7 +2457,7 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketInstancing(
 {
     if (!packet || !programContext)
         return;
-    if (GetVertexBufferPacketInstancingRejectReason() != CKFF_RENDER_PACKET_ELIGIBLE)
+    if (GetVertexBufferPacketInstancingRejectReason(programContext) != CKFF_RENDER_PACKET_ELIGIBLE)
         return;
 
     CKFFShaderKey instancedKey = programContext->ShaderKey;

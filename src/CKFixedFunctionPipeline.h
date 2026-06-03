@@ -418,7 +418,7 @@ private:
                                            CKDWORD startIndex, CKDWORD indexCount,
                                            CKDWORD dpFlags, CKDWORD formatFlags,
                                            CKDWORD vertexLayout);
-    CKDWORD GetVertexBufferPacketInstancingRejectReason() const;
+    CKDWORD GetVertexBufferPacketInstancingRejectReason(const CKFFProgramContext *programContext) const;
     void SortOpaqueRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
                                        CKRasterizerEncoder *encoder);
