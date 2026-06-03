@@ -140,7 +140,8 @@ struct CKFFPipelineTestAccess {
                                                    CKDWORD formatFlags,
                                                    CKFFProgramContext *programContext)
     {
-        return ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, programContext);
+        CKFFPreparedState preparedState;
+        return ffp->ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, programContext);
     }
 
     static CKBOOL BuildStaticUniformPayload(CKFixedFunctionPipeline *ffp,
