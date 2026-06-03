@@ -340,7 +340,8 @@ private:
 #endif
 
     // Internal methods
-    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD formatFlags = 0,
+    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
+                                   CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
