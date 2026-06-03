@@ -55,4 +55,19 @@ struct CKFFVertexBufferPacketBuildResult {
     CKRenderPacket Packet;
 };
 
+inline void CKFFInitPreparedState(CKFFPreparedState *prepared)
+{
+    if (!prepared)
+        return;
+    prepared->StateDesc = CKFFStateDesc();
+    prepared->ActiveTextureCount = 0;
+    prepared->PositionT = FALSE;
+    prepared->LightingEnabled = FALSE;
+    prepared->MaterialSource[0] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[1] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[2] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[3] = (float)CKFF_MS_MATERIAL;
+    prepared->TextureBoundMask = 0;
+}
+
 #endif // CKFFDRAWTYPES_H
