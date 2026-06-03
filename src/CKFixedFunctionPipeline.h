@@ -343,6 +343,15 @@ private:
                                       const CKFFProgramContext *programContext,
                                       const CKFFShaderKey &shaderKey,
                                       CKBOOL positionT);
+    void CKFFEmitTextureMatrixUniforms(CKFFUniformSink *sink);
+    void CKFFEmitStageAndSpecUniforms(CKFFUniformSink *sink,
+                                      const CKFFProgramContext *programContext,
+                                      const CKFFShaderKey &shaderKey,
+                                      CKBOOL positionT,
+                                      CKBOOL fullSpecialized);
+    void CKFFEmitClipPlaneUniforms(CKFFUniformSink *sink,
+                                   const CKFFShaderKey &shaderKey,
+                                   CKBOOL fullSpecialized);
     void EmitUniformPayloads(CKFFUniformSink *sink,
                              const CKFFProgramContext *programContext);
     CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
