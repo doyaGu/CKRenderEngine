@@ -133,6 +133,7 @@ private:
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
+    friend class CKFFOpaquePacketCoordinator;
 
     enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
 
