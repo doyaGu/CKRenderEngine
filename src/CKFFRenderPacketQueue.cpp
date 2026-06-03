@@ -323,13 +323,19 @@ CKBOOL CKFFRenderPacketQueue::IsDirectReplay(CKBOOL forceDirectReplay) const
 
 void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
 {
+    SortPacketIndices(indices, TRUE);
+}
+
+void CKFFRenderPacketQueue::SortPacketIndices(XArray<CKDWORD> &indices,
+                                              CKBOOL allowDirectReplaySkip) const
+{
     const int count = m_Packets.Size();
     indices.Resize(count);
     for (int i = 0; i < count; ++i)
         indices[i] = (CKDWORD)i;
     if (count < 2)
         return;
-    if (IsDirectReplay(FALSE))
+    if (allowDirectReplaySkip && IsDirectReplay(FALSE))
         return;
 
     XArray<CKDWORD> scratch;
@@ -364,6 +370,13 @@ void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
     }
 }
 
+int CKFFRenderPacketQueue::GetReplayPacketIndex(const XArray<CKDWORD> *indices,
+                                                CKBOOL directReplay,
+                                                int position) const
+{
+    return directReplay || !indices ? position : (int)(*indices)[position];
+}
+
 void CKFFRenderPacketQueue::GetRunStats(const XArray<CKDWORD> *indices,
                                         CKBOOL directReplay,
                                         CKDWORD *runCount,
@@ -375,17 +388,13 @@ void CKFFRenderPacketQueue::GetRunStats(const XArray<CKDWORD> *indices,
     const int count = directReplay || !indices ? m_Packets.Size() : indices->Size();
 
     for (int i = 0; i < count; ++i) {
-        const int packetIndex = directReplay || !indices
-            ? i
-            : (int)(*indices)[i];
+        const int packetIndex = GetReplayPacketIndex(indices, directReplay, i);
         const CKRenderPacket &packet = m_Packets[packetIndex];
         if (i == 0) {
             runs = 1;
             currentRun = 1;
         } else {
-            const int previousIndex = directReplay || !indices
-                ? i - 1
-                : (int)(*indices)[i - 1];
+            const int previousIndex = GetReplayPacketIndex(indices, directReplay, i - 1);
             const CKRenderPacket &previous = m_Packets[previousIndex];
             if (CKFFRenderPacketSameRunKey(previous, packet)) {
                 ++currentRun;
@@ -415,16 +424,12 @@ void CKFFRenderPacketQueue::BuildRunPlans(const XArray<CKDWORD> *indices,
     plans.Resize(0);
 
     for (int i = 0; i < count;) {
-        const int packetIndex = directReplay || !indices
-            ? i
-            : (int)(*indices)[i];
+        const int packetIndex = GetReplayPacketIndex(indices, directReplay, i);
         const CKRenderPacket &packet = m_Packets[packetIndex];
         int runLength = 1;
         if (instancingEnabled && packet.CanInstance) {
             while (i + runLength < count) {
-                const int nextIndex = directReplay || !indices
-                    ? i + runLength
-                    : (int)(*indices)[i + runLength];
+                const int nextIndex = GetReplayPacketIndex(indices, directReplay, i + runLength);
                 const CKRenderPacket &nextPacket = m_Packets[nextIndex];
                 if (!CKFFRenderPacketCanInstanceRun(packet, nextPacket))
                     break;
@@ -468,47 +473,6 @@ void CKFFRenderPacketQueue::TrackPacket(const CKRenderPacket &packet)
     m_LastPacketSortKey = packet.SortKey;
 }
 
-void CKFFRenderPacketQueue::SortAdaptiveSample(XArray<CKDWORD> &indices) const
-{
-    const int count = m_Packets.Size();
-    indices.Resize(count);
-    for (int i = 0; i < count; ++i)
-        indices[i] = (CKDWORD)i;
-    if (count < 2)
-        return;
-
-    XArray<CKDWORD> scratch;
-    scratch.Resize(count);
-    for (int width = 1; width < count; width <<= 1) {
-        for (int left = 0; left < count; left += width << 1) {
-            int mid = left + width;
-            int right = left + (width << 1);
-            if (mid > count)
-                mid = count;
-            if (right > count)
-                right = count;
-
-            int a = left;
-            int b = mid;
-            int out = left;
-            while (a < mid && b < right) {
-                const CKRenderPacket &pa = m_Packets[(int)indices[a]];
-                const CKRenderPacket &pb = m_Packets[(int)indices[b]];
-                if (CKFFCompareRenderPacket(pa, pb) <= 0)
-                    scratch[out++] = indices[a++];
-                else
-                    scratch[out++] = indices[b++];
-            }
-            while (a < mid)
-                scratch[out++] = indices[a++];
-            while (b < right)
-                scratch[out++] = indices[b++];
-        }
-        for (int i = 0; i < count; ++i)
-            indices[i] = scratch[i];
-    }
-}
-
 void CKFFRenderPacketQueue::EvaluateAdaptiveSampleRuns()
 {
     m_AdaptiveSampleRunsEvaluated = TRUE;
@@ -521,7 +485,7 @@ void CKFFRenderPacketQueue::EvaluateAdaptiveSampleRuns()
         return;
 
     XArray<CKDWORD> indices;
-    SortAdaptiveSample(indices);
+    SortPacketIndices(indices, FALSE);
 
     CKDWORD currentRun = 1;
     m_AdaptiveSampleRuns = 1;

@@ -62,8 +62,12 @@ public:
                        XArray<CKFFRenderPacketRunPlan> &plans) const;
 
 private:
+    void SortPacketIndices(XArray<CKDWORD> &indices,
+                           CKBOOL allowDirectReplaySkip) const;
+    int GetReplayPacketIndex(const XArray<CKDWORD> *indices,
+                             CKBOOL directReplay,
+                             int position) const;
     void TrackPacket(const CKRenderPacket &packet);
-    void SortAdaptiveSample(XArray<CKDWORD> &indices) const;
     void EvaluateAdaptiveSampleRuns();
     void StartAdaptiveCooldown();
     void ClearAdaptiveCooldown();
