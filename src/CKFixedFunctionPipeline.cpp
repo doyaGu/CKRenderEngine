@@ -2108,37 +2108,34 @@ void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder) {
     CKDWORD activeCount = (CKDWORD)m_CurrentActiveTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
-    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
-    CKSamplerDesc desiredSamplers[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
     for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        desiredTextures[i] = (i < activeCount) ? m_TextureHandles[i] : 0;
-        desiredSamplers[i] = BuildSamplerDesc((int)i);
+        samplers[i] = BuildSamplerDesc((int)i);
     }
+    CKFFTextureBindingSet bindingSet;
+    CKFFBuildTextureBindingSet(&bindingSet, u, activeCount, m_TextureHandles, m_TextureFlags, samplers);
+    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
+    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i)
+        desiredTextures[i] = bindingSet.Bindings[i].Texture;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool collectStats = m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled;
     if (collectStats) {
         if (m_FrameStats.HasLastTextureSet &&
             CKFFTextureSetEquals(m_FrameStats.LastActiveTextureCount, m_FrameStats.LastTextureHandles,
-                                 activeCount, desiredTextures))
+                                 bindingSet.ActiveTextureCount, desiredTextures))
             ++m_FrameStats.ConsecutiveTextureSetRepeats;
-        m_FrameStats.LastActiveTextureCount = activeCount;
+        m_FrameStats.LastActiveTextureCount = bindingSet.ActiveTextureCount;
         memcpy(m_FrameStats.LastTextureHandles, desiredTextures, sizeof(desiredTextures));
         m_FrameStats.HasLastTextureSet = TRUE;
     }
 #endif
 
-    for (CKDWORD i = 0; i < activeCount; ++i) {
-        const CKDWORD texture = desiredTextures[i];
-        if (texture == 0)
+    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i) {
+        const CKFFRenderPacketTextureBinding &binding = bindingSet.Bindings[i];
+        if (binding.Texture == 0)
             continue;
-        CKSamplerDesc sampler = desiredSamplers[i];
-        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        const CKDWORD samplerStage = CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
-                                                             (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
-        const CKDWORD samplerUniform = cube ? u.s_textureCube[i] :
-                                       (volume ? u.s_textureVolume[i] : u.s_texture[i]);
-        encoder->SetTexture(samplerStage, samplerUniform, texture, &sampler);
+        CKSamplerDesc sampler = binding.Sampler;
+        encoder->SetTexture(binding.Stage, binding.Uniform, binding.Texture, &sampler);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (collectStats)
             ++m_FrameStats.TextureBinds;
