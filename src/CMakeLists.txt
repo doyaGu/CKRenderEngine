@@ -80,6 +80,7 @@ set(CKRE_PRIVATE_HEADERS
         CKDebugLogger.h
         CKException.h
         CKFFDebug.h
+        CKFFDrawProbes.h
         CKFFStageState.h
         CKFFShaderABI.h
         CKFFUniformState.h

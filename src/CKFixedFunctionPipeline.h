@@ -9,6 +9,7 @@
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
+#include "CKFFDrawProbes.h"
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
 #include "CKFFDrawTypes.h"
@@ -133,6 +134,17 @@ struct CKFFDiagnosticConfig {
     int StatsInterval;
 };
 
+class CKFFDrawProbes {
+public:
+    CKFFDrawProbes() : Stats(), Config() {}
+
+    bool StatsEnabled() const { return Config.StatsEnabled || Config.UniformHistEnabled; }
+    bool TimingEnabled() const { return Config.StatsEnabled; }
+    double *TimerSlot(double CKFFFrameStats::*member) { return &(Stats.*member); }
+
+    CKFFFrameStats Stats;
+    CKFFDiagnosticConfig Config;
+};
 #endif
 
 struct CKFFPipelineTestAccess;
@@ -228,7 +240,7 @@ public:
     const VxMatrix &GetProjectionMatrix() const { return m_State.Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    const CKFFFrameStats &GetFrameStats() const { return m_FrameStats; }
+    const CKFFFrameStats &GetFrameStats() const { return m_Probes.Stats; }
 #else
     const CKFFFrameStats &GetFrameStats() const;
 #endif
@@ -265,8 +277,7 @@ private:
     CKFFPreparedState m_PacketProgramCachePreparedState;
     CKFFProgramContext m_PacketProgramCacheContext;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    CKFFFrameStats m_FrameStats;
-    CKFFDiagnosticConfig m_DiagnosticConfig;
+    CKFFDrawProbes m_Probes;
 #endif
 
     // Internal methods
