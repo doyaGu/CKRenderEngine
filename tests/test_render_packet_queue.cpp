@@ -153,6 +153,28 @@ struct CKFFPipelineTestAccess {
     {
         return ffp->BuildStaticUniformPayload(payload, programContext);
     }
+
+    static void BuildVertexBufferPacket(CKFixedFunctionPipeline *ffp,
+                                        CKFFVertexBufferPacketBuildResult *result,
+                                        CKRasterizerEncoder *encoder,
+                                        CKRenderView view,
+                                        VXPRIMITIVETYPE type,
+                                        CKDWORD vb,
+                                        CKDWORD ib,
+                                        CKDWORD baseVertex,
+                                        CKDWORD vertexCount,
+                                        CKDWORD startIndex,
+                                        CKDWORD indexCount,
+                                        CKDWORD dpFlags,
+                                        CKDWORD formatFlags,
+                                        CKDWORD vertexLayout)
+    {
+        ffp->BuildVertexBufferPacket(result, encoder, view, type, vb, ib,
+                                     baseVertex, vertexCount,
+                                     startIndex, indexCount,
+                                     dpFlags, formatFlags,
+                                     vertexLayout);
+    }
 };
 
 void PrepareTexturedPacketCandidate(CKFixedFunctionPipeline *ffp)
@@ -590,6 +612,45 @@ void StaticUniformPayloadOrderAndHashStaysStable()
                   payload.Entries[3].Count == 1 &&
                   payload.Entries[3].Vec4Count == 1,
               "Static payload entry 3 must remain clip params");
+
+    ffp.Shutdown();
+}
+
+void VertexBufferPacketBuildResultReportsRejectReasons()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    CKFFVertexBufferPacketBuildResult missingVertexBuffer;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &missingVertexBuffer, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        0, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM,
+        CKFF_VF_POSITION,
+        77);
+    TestCheck(!missingVertexBuffer.Success,
+              "Missing vertex buffer packet build must fail");
+    TestCheck(missingVertexBuffer.RejectReason == CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER,
+              "Missing vertex buffer packet build must report its reject reason");
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
+    CKFFVertexBufferPacketBuildResult vertexBlend;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &vertexBlend, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM,
+        CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT,
+        77);
+    TestCheck(!vertexBlend.Success,
+              "Vertex blend packet build must fail before capture");
+    TestCheck(vertexBlend.RejectReason == CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND,
+              "Vertex blend packet build must report object-uniform reject reason");
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Rejected packet build result must not enqueue a packet");
 
     ffp.Shutdown();
 }
@@ -1238,6 +1299,8 @@ int main()
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
     tests.Run("Static uniform payload order and hash stays stable",
               &StaticUniformPayloadOrderAndHashStaysStable);
+    tests.Run("Vertex buffer packet build result reports reject reasons",
+              &VertexBufferPacketBuildResultReportsRejectReasons);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",
