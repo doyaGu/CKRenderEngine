@@ -70,6 +70,12 @@ struct CKFFPreparedState {
     CKDWORD TextureBoundMask;
 };
 
+struct CKFFTextureBindingSet {
+    CKDWORD ActiveTextureCount;
+    CKDWORD Hash;
+    CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
+};
+
 static void CKFFInitPreparedState(CKFFPreparedState *prepared)
 {
     if (!prepared)
@@ -83,6 +89,74 @@ static void CKFFInitPreparedState(CKFFPreparedState *prepared)
     prepared->MaterialSource[2] = (float)CKFF_MS_MATERIAL;
     prepared->MaterialSource[3] = (float)CKFF_MS_MATERIAL;
     prepared->TextureBoundMask = 0;
+}
+
+static void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
+{
+    if (!set)
+        return;
+    set->ActiveTextureCount = 0;
+    set->Hash = 0;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        set->Bindings[stage].Stage = stage;
+        set->Bindings[stage].Uniform = 0;
+        set->Bindings[stage].Texture = 0;
+        set->Bindings[stage].TextureFlags = 0;
+        set->Bindings[stage].Sampler = CKSamplerDesc();
+    }
+}
+
+static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
+{
+    if ((textureFlags & CKRST_TEXTURE_CUBEMAP) != 0)
+        return CKFF_SAMPLER_CUBE;
+    if ((textureFlags & CKRST_TEXTURE_VOLUMEMAP) != 0)
+        return CKFF_SAMPLER_VOLUME;
+    if ((textureFlags & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
+        return CKFF_SAMPLER_DEPTH;
+    return CKFF_SAMPLER_2D;
+}
+
+static CKDWORD CKFFTextureBindingSamplerType(CKDWORD samplerType)
+{
+    if (samplerType == CKFF_SAMPLER_CUBE || samplerType == CKFF_SAMPLER_VOLUME)
+        return samplerType;
+    return CKFF_SAMPLER_2D;
+}
+
+static CKDWORD CKFFTextureBindingUniform(const CKFFUniformHandles &uniforms,
+                                         CKDWORD stage, CKDWORD samplerType)
+{
+    if (samplerType == CKFF_SAMPLER_CUBE)
+        return uniforms.s_textureCube[stage];
+    if (samplerType == CKFF_SAMPLER_VOLUME)
+        return uniforms.s_textureVolume[stage];
+    return uniforms.s_texture[stage];
+}
+
+static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
+                                       const CKFFUniformHandles &uniforms,
+                                       CKDWORD activeTextureCount,
+                                       const CKDWORD *textureHandles,
+                                       const CKDWORD *textureFlags,
+                                       const CKSamplerDesc *samplers)
+{
+    if (!set)
+        return;
+    CKFFInitTextureBindingSet(set);
+    set->ActiveTextureCount = activeTextureCount;
+    if (set->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        set->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < set->ActiveTextureCount; ++stage) {
+        const CKDWORD samplerType = CKFFTextureBindingSamplerType(
+            CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
+        set->Bindings[stage].Stage = CKFFSamplerBindStage(stage, samplerType);
+        set->Bindings[stage].Uniform = CKFFTextureBindingUniform(uniforms, stage, samplerType);
+        set->Bindings[stage].Texture = textureHandles[stage];
+        set->Bindings[stage].TextureFlags = textureFlags[stage];
+        set->Bindings[stage].Sampler = samplers[stage];
+    }
+    set->Hash = CKFFHashRenderPacketTextureSet(set->ActiveTextureCount, set->Bindings);
 }
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
@@ -344,28 +418,19 @@ void CKFixedFunctionPipeline::UpdatePacketTextureSetCache()
         m_PacketTextureSetCache.ActiveTextureCount == (CKDWORD)m_CurrentActiveTextureCount)
         return;
 
-    m_PacketTextureSetCache.ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
-    if (m_PacketTextureSetCache.ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
-        m_PacketTextureSetCache.ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
-
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    for (CKDWORD i = 0; i < m_PacketTextureSetCache.ActiveTextureCount; ++i) {
-        const bool cube = (m_TextureFlags[i] & CKRST_TEXTURE_CUBEMAP) != 0;
-        const bool volume = (m_TextureFlags[i] & CKRST_TEXTURE_VOLUMEMAP) != 0;
-        m_PacketTextureSetCache.Textures[i].Stage =
-            CKFFSamplerBindStage(i, cube ? CKFF_SAMPLER_CUBE :
-                                    (volume ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_2D));
-        m_PacketTextureSetCache.Textures[i].Uniform =
-            cube ? u.s_textureCube[i] :
-            (volume ? u.s_textureVolume[i] : u.s_texture[i]);
-        m_PacketTextureSetCache.Textures[i].Texture = m_TextureHandles[i];
-        m_PacketTextureSetCache.Textures[i].TextureFlags = m_TextureFlags[i];
-        m_PacketTextureSetCache.Textures[i].Sampler = BuildSamplerDesc((int)i);
+    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
+    for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        samplers[i] = BuildSamplerDesc((int)i);
     }
+    CKFFTextureBindingSet bindingSet;
+    CKFFBuildTextureBindingSet(&bindingSet, u, (CKDWORD)m_CurrentActiveTextureCount,
+                               m_TextureHandles, m_TextureFlags, samplers);
 
-    m_PacketTextureSetCache.TextureSetHash =
-        CKFFHashRenderPacketTextureSet(m_PacketTextureSetCache.ActiveTextureCount,
-                                       m_PacketTextureSetCache.Textures);
+    m_PacketTextureSetCache.ActiveTextureCount = bindingSet.ActiveTextureCount;
+    m_PacketTextureSetCache.TextureSetHash = bindingSet.Hash;
+    for (CKDWORD i = 0; i < bindingSet.ActiveTextureCount; ++i)
+        m_PacketTextureSetCache.Textures[i] = bindingSet.Bindings[i];
     m_PacketTextureSetCache.Dirty = FALSE;
 }
 
@@ -1374,12 +1439,7 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
         stateDesc.FS.SetStageAlphaArg2(stage, CKFFResolveStageAlphaArg2(m_StageStates[stage]));
         stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(CKFFResolveStageResultArg(m_StageStates[stage])) == CKRST_TA_TEMP);
         stateDesc.FS.SetStageProjectedSampler(stage, (m_StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
-        if ((m_TextureFlags[stage] & CKRST_TEXTURE_CUBEMAP) != 0)
-            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_CUBE);
-        else if ((m_TextureFlags[stage] & CKRST_TEXTURE_VOLUMEMAP) != 0)
-            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_VOLUME);
-        else if ((m_TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
-            stateDesc.FS.SetStageSamplerType(stage, CKFF_SAMPLER_DEPTH);
+        stateDesc.FS.SetStageSamplerType(stage, CKFFSamplerTypeFromTextureFlags(m_TextureFlags[stage]));
         stateDesc.FS.SetStageSamplerCompareFunc(stage, m_StageStates[stage][CKRST_TSS_COMPAREFUNC]);
 
         if (colorOp == CKRST_TOP_DISABLE)
