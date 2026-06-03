@@ -163,6 +163,7 @@ set(CKRE_SOURCES
         CKVertexBuffer.cpp
 
         CKFixedFunctionPipeline.cpp
+        CKFFDrawTypes.cpp
         CKFFStateStore.cpp
         CKFFStateResolver.cpp
         CKFFTextureBinder.cpp
