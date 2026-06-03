@@ -276,6 +276,7 @@ private:
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
+    friend struct CKFFUniformEmitter;
 
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
@@ -354,10 +355,6 @@ private:
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
-    void CKFFEmitObjectMatrixUniforms(const CKFFUniformEmissionContext *context);
-    void CKFFEmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context);
-    void CKFFEmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
-    void CKFFEmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
     void EmitUniformPayloads(CKFFUniformSink *sink,
                              const CKFFProgramContext *programContext,
                              CKDWORD activeTextureCount);
@@ -368,12 +365,6 @@ private:
                                      const CKFFProgramContext *programContext);
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     void UpdateViewProjectionCache();
-    CKDWORD CurrentTextureMatrixUploadCount(const CKFFUniformEmissionContext *context) const;
-    bool ProgramUsesBumpEnv(const CKFFShaderKey &shaderKey) const;
-    bool ProgramUsesTexFactor(const CKFFShaderKey &shaderKey) const;
-    bool ProgramUsesStageConstant(const CKFFShaderKey &shaderKey) const;
-    bool ProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey, CKBOOL fullSpecialized) const;
-    bool ProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey, CKBOOL fullSpecialized) const;
     CKDWORD BuildDrawParams(float (*drawParams)[4],
                             const CKFFLightData *viewLights,
                             int packedLightCount,
