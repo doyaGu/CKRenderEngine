@@ -354,6 +354,7 @@ private:
     void MarkStaticUniformsDirty();
     void MarkPacketTextureSetDirty();
     void MarkPacketProgramDirty();
+    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet);
     void UpdatePacketTextureSetCache();
     void UploadUniforms(CKRasterizerEncoder *encoder);
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
@@ -421,7 +422,8 @@ private:
                                            CKDWORD startIndex,
                                            CKDWORD indexCount,
                                            CKDWORD vertexLayout);
-    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet);
+    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet,
+                                           const CKFFTextureBindingSet *bindingSet);
     CKBOOL CaptureVertexBufferPacketObjectUniforms(CKRenderPacket *packet,
                                                    const CKFFProgramContext *programContext);
     void CaptureVertexBufferPacketInstancing(CKRenderPacket *packet,

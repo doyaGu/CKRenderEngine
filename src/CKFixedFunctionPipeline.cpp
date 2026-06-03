@@ -425,20 +425,29 @@ void CKFixedFunctionPipeline::MarkPacketProgramDirty()
     m_PacketProgramCacheValid = FALSE;
 }
 
+void CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet)
+{
+    if (!bindingSet)
+        return;
+    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    CKDWORD activeCount = (CKDWORD)m_CurrentActiveTextureCount;
+    if (activeCount > CKFF_MAX_TEXTURE_STAGES)
+        activeCount = CKFF_MAX_TEXTURE_STAGES;
+    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
+    for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i)
+        samplers[i] = BuildSamplerDesc((int)i);
+    CKFFBuildTextureBindingSet(bindingSet, u, activeCount,
+                               m_TextureHandles, m_TextureFlags, samplers);
+}
+
 void CKFixedFunctionPipeline::UpdatePacketTextureSetCache()
 {
     if (!m_PacketTextureSetCache.Dirty &&
         m_PacketTextureSetCache.ActiveTextureCount == (CKDWORD)m_CurrentActiveTextureCount)
         return;
 
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
-    for (CKDWORD i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        samplers[i] = BuildSamplerDesc((int)i);
-    }
     CKFFTextureBindingSet bindingSet;
-    CKFFBuildTextureBindingSet(&bindingSet, u, (CKDWORD)m_CurrentActiveTextureCount,
-                               m_TextureHandles, m_TextureFlags, samplers);
+    BuildCurrentTextureBindingSet(&bindingSet);
 
     m_PacketTextureSetCache.ActiveTextureCount = bindingSet.ActiveTextureCount;
     m_PacketTextureSetCache.TextureSetHash = bindingSet.Hash;
@@ -2457,16 +2466,16 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
     packet->Marker[0] = '\0';
 }
 
-void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet)
+void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet,
+                                                                const CKFFTextureBindingSet *bindingSet)
 {
-    if (!packet)
+    if (!packet || !bindingSet)
         return;
 
-    UpdatePacketTextureSetCache();
-    packet->ActiveTextureCount = m_PacketTextureSetCache.ActiveTextureCount;
-    packet->TextureSetHash = m_PacketTextureSetCache.TextureSetHash;
+    packet->ActiveTextureCount = bindingSet->ActiveTextureCount;
+    packet->TextureSetHash = bindingSet->Hash;
     for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
-        packet->Textures[i] = m_PacketTextureSetCache.Textures[i];
+        packet->Textures[i] = bindingSet->Bindings[i];
     }
 }
 
@@ -2622,6 +2631,7 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
         return;
     }
     result->ProgramContext = programContext;
+    BuildCurrentTextureBindingSet(&result->TextureBindingSet);
     result->RejectReason = GetPacketObjectUniformRejectReason();
     if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
         return;
@@ -2630,7 +2640,7 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
     InitVertexBufferPacketForCapture(&result->Packet);
     CaptureVertexBufferPacketIdentity(&result->Packet, &programContext, view, type, vb, ib,
                                       baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
-    CaptureVertexBufferPacketTextures(&result->Packet);
+    CaptureVertexBufferPacketTextures(&result->Packet, &result->TextureBindingSet);
     CaptureVertexBufferPacketInstancing(&result->Packet, &programContext);
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
