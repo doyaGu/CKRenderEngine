@@ -190,7 +190,7 @@ static void CKFFInitVertexBufferPacketBuildResult(CKFFVertexBufferPacketBuildRes
 }
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
-    : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
+    : m_Context(nullptr), m_ActiveLightCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
       m_ForceAnisotropicFiltering(FALSE),
       m_AlphaTestPrecision(0), m_DirtyFlags(CKFF_DIRTY_ALL),
@@ -865,7 +865,6 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     // Build the fixed-function state description and select the matching program.
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
         data->Flags, m_TextureHandles, m_StageStates);
-    m_CurrentActiveTextureCount = (int)activeTextureCount;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         statsStart = CKRenderPerfNow();
@@ -883,7 +882,6 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFProgramContext programContext;
     CKFFInitProgramContext(&programContext, shaderKey, programBinding);
-    SetCurrentProgramBinding(shaderKey, programBinding);
     CKDWORD program = programContext.Program;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -1118,7 +1116,6 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
 
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
         dpFlags, m_TextureHandles, m_StageStates);
-    m_CurrentActiveTextureCount = (int)activeTextureCount;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool statsTiming = m_DiagnosticConfig.StatsEnabled;
     double statsStart = 0.0;
@@ -1137,7 +1134,6 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFProgramContext programContext;
     CKFFInitProgramContext(&programContext, shaderKey, programBinding);
-    SetCurrentProgramBinding(shaderKey, programBinding);
     CKDWORD program = programContext.Program;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
@@ -1478,11 +1474,6 @@ void CKFixedFunctionPipeline::BuildCurrentPreparedState(
     stateDesc.VS.SetVertexClipping(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
 }
 
-void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding) {
-    m_CurrentShaderKey = shaderKey;
-    m_CurrentProgramBinding = binding;
-}
-
 CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount(
     const CKFFUniformEmissionContext *context) const
 {
@@ -1696,23 +1687,17 @@ static void CKFFInitUniformSink(CKFFUniformSink *sink,
 static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
                                            CKFFUniformSink *sink,
                                            const CKFFProgramContext *programContext,
-                                           CKDWORD activeTextureCount,
-                                           const CKFFShaderKey &currentShaderKey,
-                                           const CKFFProgramBinding &currentProgramBinding)
+                                           CKDWORD activeTextureCount)
 {
     if (!context)
         return;
     memset(context, 0, sizeof(CKFFUniformEmissionContext));
     context->Uniforms = sink;
     context->ProgramContext = programContext;
-    context->ShaderKey = programContext ? programContext->ShaderKey : currentShaderKey;
-    context->Specialization = programContext
-        ? programContext->Specialization
-        : currentProgramBinding.Specialization;
+    context->ShaderKey = programContext->ShaderKey;
+    context->Specialization = programContext->Specialization;
     context->ActiveTextureCount = activeTextureCount;
-    context->FullSpecialized = programContext
-        ? programContext->FullSpecialized
-        : (currentProgramBinding.FullSpecialized ? TRUE : FALSE);
+    context->FullSpecialized = programContext->FullSpecialized;
     context->PositionT = context->ShaderKey.VS.GetHasPositionT() ? TRUE : FALSE;
     context->LightingEnabled = (!context->PositionT &&
         (!context->FullSpecialized || ((context->ShaderKey.VS.Bits & (1ull << 13)) != 0)))
@@ -1864,12 +1849,11 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
                                                   const CKFFProgramContext *programContext,
                                                   CKDWORD activeTextureCount)
 {
-    if (!sink)
+    if (!sink || !programContext)
         return;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformEmissionContext context;
-    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount,
-                                   m_CurrentShaderKey, m_CurrentProgramBinding);
+    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount);
     const bool emitStatic = sink->Encoder || sink->EmitStatic;
     const bool emitObject = sink->Encoder || sink->EmitObject;
 
@@ -2371,14 +2355,12 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
 
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
         dpFlags, m_TextureHandles, m_StageStates);
-    m_CurrentActiveTextureCount = (int)activeTextureCount;
     if (m_PacketProgramCacheValid &&
         m_PacketProgramCacheDPFlags == dpFlags &&
         m_PacketProgramCacheFormatFlags == formatFlags &&
         m_PacketProgramCacheActiveTextureCount == (int)activeTextureCount) {
         *preparedState = m_PacketProgramCachePreparedState;
         *programContext = m_PacketProgramCacheContext;
-        SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
         return programContext->Program != 0 ? TRUE : FALSE;
     }
 
@@ -2386,7 +2368,6 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
     CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(preparedState);
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
-    SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
     m_PacketProgramCacheDPFlags = dpFlags;
     m_PacketProgramCacheFormatFlags = formatFlags;
     m_PacketProgramCacheActiveTextureCount = (int)activeTextureCount;
