@@ -76,6 +76,12 @@ struct CKFFTextureBindingSet {
     CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
 
+struct CKFFVertexBufferPacketBuildResult {
+    CKBOOL Success;
+    CKDWORD RejectReason;
+    CKRenderPacket Packet;
+};
+
 static void CKFFInitPreparedState(CKFFPreparedState *prepared)
 {
     if (!prepared)
@@ -157,6 +163,15 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         set->Bindings[stage].Sampler = samplers[stage];
     }
     set->Hash = CKFFHashRenderPacketTextureSet(set->ActiveTextureCount, set->Bindings);
+}
+
+static void CKFFInitVertexBufferPacketBuildResult(CKFFVertexBufferPacketBuildResult *result)
+{
+    if (!result)
+        return;
+    result->Success = FALSE;
+    result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
+    memset(&result->Packet, 0, sizeof(result->Packet));
 }
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
@@ -1029,14 +1044,14 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     const CKDWORD packetRejectReason =
         GetOpaqueVertexBufferPacketRejectReason(view, type, vb, ib, vertexLayout);
     if (packetRejectReason == CKFF_RENDER_PACKET_ELIGIBLE) {
-        CKRenderPacket packet;
-        InitVertexBufferPacketForCapture(&packet);
-        if (BuildVertexBufferPacket(encoder, &packet, view, type, vb, ib,
-                                    baseVertex, vertexCount,
-                                    startIndex, indexCount,
-                                    dpFlags, formatFlags,
-                                    vertexLayout)) {
-            TrackOpaqueRenderPacket(packet);
+        CKFFVertexBufferPacketBuildResult buildResult;
+        BuildVertexBufferPacket(&buildResult, encoder, view, type, vb, ib,
+                                baseVertex, vertexCount,
+                                startIndex, indexCount,
+                                dpFlags, formatFlags,
+                                vertexLayout);
+        if (buildResult.Success) {
+            TrackOpaqueRenderPacket(buildResult.Packet);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
             if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
                 ++m_FrameStats.QueuedRenderPackets;
@@ -1044,6 +1059,7 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
             CheckOpaqueRenderPacketAdaptiveBypass(encoder);
             return;
         }
+        TrackOpaqueRenderPacketReject(buildResult.RejectReason);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         if (m_DiagnosticConfig.StatsEnabled || m_DiagnosticConfig.UniformHistEnabled)
             ++m_FrameStats.RenderPacketFallbacks;
@@ -2577,17 +2593,23 @@ CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRende
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
-CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
+void CKFixedFunctionPipeline::BuildVertexBufferPacket(
+    CKFFVertexBufferPacketBuildResult *result,
     CKRasterizerEncoder *encoder,
-    CKRenderPacket *packet, CKRenderView view,
+    CKRenderView view,
     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
     CKDWORD baseVertex, CKDWORD vertexCount,
     CKDWORD startIndex, CKDWORD indexCount,
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    if (!packet || !vb)
-        return FALSE;
+    if (!result)
+        return;
+    CKFFInitVertexBufferPacketBuildResult(result);
+    if (!vb) {
+        result->RejectReason = CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
+        return;
+    }
 
     CKBOOL collectStats = FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -2602,33 +2624,42 @@ CKBOOL CKFixedFunctionPipeline::BuildVertexBufferPacket(
         if (collectStats)
             ++m_FrameStats.ProgramMisses;
 #endif
-        return FALSE;
+        result->RejectReason = CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
+        return;
     }
-    if (GetPacketObjectUniformRejectReason() != CKFF_RENDER_PACKET_ELIGIBLE)
-        return FALSE;
+    result->RejectReason = GetPacketObjectUniformRejectReason();
+    if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
+        return;
+    }
 
-    CaptureVertexBufferPacketIdentity(packet, &programContext, view, type, vb, ib,
+    InitVertexBufferPacketForCapture(&result->Packet);
+    CaptureVertexBufferPacketIdentity(&result->Packet, &programContext, view, type, vb, ib,
                                       baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
-    CaptureVertexBufferPacketTextures(packet);
-    CaptureVertexBufferPacketInstancing(packet, &programContext);
+    CaptureVertexBufferPacketTextures(&result->Packet);
+    CaptureVertexBufferPacketInstancing(&result->Packet, &programContext);
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     double buildTimer = collectStats ? CKRenderPerfNow() : 0.0;
 #endif
-    if (!CaptureVertexBufferPacketObjectUniforms(packet, &programContext))
-        return FALSE;
+    if (!CaptureVertexBufferPacketObjectUniforms(&result->Packet, &programContext)) {
+        result->RejectReason = CKFF_RENDER_PACKET_REJECT_OBJECT_UNIFORMS;
+        return;
+    }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (collectStats)
         m_FrameStats.RenderPacketBuildUs += CKRenderPerfElapsedUs(buildTimer);
 #endif
 
-    if (!CaptureVertexBufferPacketStaticUniforms(packet, &programContext, collectStats))
-        return FALSE;
+    if (!CaptureVertexBufferPacketStaticUniforms(&result->Packet, &programContext, collectStats)) {
+        result->RejectReason = CKFF_RENDER_PACKET_REJECT_STATIC_UNIFORMS;
+        return;
+    }
 
     if (encoder)
-        encoder->ConsumeMarker(packet->Marker, sizeof(packet->Marker));
-    BuildRenderPacketSortKey(packet);
-    return TRUE;
+        encoder->ConsumeMarker(result->Packet.Marker, sizeof(result->Packet.Marker));
+    BuildRenderPacketSortKey(&result->Packet);
+    result->Success = TRUE;
+    result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
 void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()

@@ -158,6 +158,7 @@ struct CKFFPacketTextureSetCache {
 };
 
 struct CKFFPreparedState;
+struct CKFFVertexBufferPacketBuildResult;
 struct CKFFPipelineTestAccess;
 
 class CKFixedFunctionPipeline {
@@ -411,8 +412,9 @@ private:
     CKDWORD GetOpaqueVertexBufferPacketRejectReason(CKRenderView view, VXPRIMITIVETYPE type,
                                                     CKDWORD vb, CKDWORD ib,
                                                     CKDWORD vertexLayout) const;
-    CKBOOL BuildVertexBufferPacket(CKRasterizerEncoder *encoder,
-                                   CKRenderPacket *packet, CKRenderView view,
+    void BuildVertexBufferPacket(CKFFVertexBufferPacketBuildResult *result,
+                                   CKRasterizerEncoder *encoder,
+                                   CKRenderView view,
                                    VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
                                    CKDWORD baseVertex, CKDWORD vertexCount,
                                    CKDWORD startIndex, CKDWORD indexCount,
