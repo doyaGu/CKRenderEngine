@@ -433,6 +433,29 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
     step = NormalizeStep(step, m_Opened);
     const float targetLen = step * m_Length;
 
+    if (!m_Opened && targetLen <= 0.0f) {
+        RCKCurvePoint *firstPt = (RCKCurvePoint *)m_ControlPoints[0];
+        if (!firstPt)
+            return CKERR_INVALIDPARAMETER;
+
+        firstPt->GetFittedVector(Pos);
+        if (Dir) {
+            firstPt->GetTangents(nullptr, Dir);
+            if (Dir->Magnitude() == 0.0f) {
+                RCKCurvePoint *nextPt = (RCKCurvePoint *)m_ControlPoints[1];
+                if (nextPt) {
+                    VxVector nextPos;
+                    nextPt->GetFittedVector(&nextPos);
+                    Dir->x = nextPos.x - Pos->x;
+                    Dir->y = nextPos.y - Pos->y;
+                    Dir->z = nextPos.z - Pos->z;
+                }
+            }
+            Dir->Normalize();
+        }
+        return CK_OK;
+    }
+
     VxVector p0, p1;
     VxVector t0, t1;
 
