@@ -339,6 +339,10 @@ private:
     void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
     CKBOOL EmitUniform(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
                        CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
+    void CKFFEmitObjectMatrixUniforms(CKFFUniformSink *sink,
+                                      const CKFFProgramContext *programContext,
+                                      const CKFFShaderKey &shaderKey,
+                                      CKBOOL positionT);
     void EmitUniformPayloads(CKFFUniformSink *sink,
                              const CKFFProgramContext *programContext);
     CKBOOL BuildUniformPayloads(CKFFRenderPacketUniformPayload *staticPayload,
