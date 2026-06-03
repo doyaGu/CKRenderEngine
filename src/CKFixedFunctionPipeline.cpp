@@ -1126,34 +1126,10 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    const CKDWORD packetRejectReason =
-        GetOpaqueVertexBufferPacketRejectReason(view, type, vb, ib, vertexLayout);
-    if (packetRejectReason == CKFF_RENDER_PACKET_ELIGIBLE) {
-        CKFFVertexBufferPacketBuildResult buildResult;
-        BuildVertexBufferPacket(&buildResult, encoder, view, type, vb, ib,
-                                baseVertex, vertexCount,
-                                startIndex, indexCount,
-                                dpFlags, formatFlags,
-                                vertexLayout);
-        if (buildResult.Success) {
-            TrackOpaqueRenderPacket(buildResult.Packet);
-            CKFF_PROBE(m_Probes, OnQueuedRenderPacket());
-            CheckOpaqueRenderPacketAdaptiveBypass(encoder);
-            return;
-        }
-        TrackOpaqueRenderPacketReject(buildResult.RejectReason);
-        CKFF_PROBE(m_Probes, OnRenderPacketFallback());
-    } else {
-        TrackOpaqueRenderPacketReject(packetRejectReason);
-    }
-
-    if (HasOpaqueRenderPackets())
-        FlushOpaqueRenderPackets(encoder, FALSE, FALSE);
-    SubmitVertexBufferPacketImmediate(encoder, view, type, vb, ib,
-                                      baseVertex, vertexCount,
-                                      startIndex, indexCount,
-                                      dpFlags, formatFlags,
-                                      vertexLayout);
+    m_OpaquePackets.DrawVertexBuffer(
+        *this, encoder, view, type, vb, ib,
+        baseVertex, vertexCount, startIndex, indexCount,
+        dpFlags, formatFlags, vertexLayout);
 }
 
 void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
@@ -1164,163 +1140,10 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    if (!encoder || !vb) return;
-    CKFF_PROBE(m_Probes, OnHardwareDraw());
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    // Build the fixed-function state description from the actual mesh vertex format.
-    const bool debugLogging = m_DebugState.AnyLoggingEnabled();
-    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
-    if (debugLogging) {
-        CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
-        debugInfo.Type = type;
-        debugInfo.World = &m_State.World;
-        debugInfo.ViewMatrix = &m_State.View;
-        debugInfo.Projection = &m_State.Projection;
-        debugInfo.VertexBuffer = vb;
-        debugInfo.IndexBuffer = ib;
-        debugInfo.BaseVertex = baseVertex;
-        debugInfo.VertexCount = vertexCount;
-        debugInfo.StartIndex = startIndex;
-        debugInfo.PersistentIndexCount = indexCount;
-        debugInfo.DPFlags = dpFlags;
-        debugInfo.FormatFlags = formatFlags;
-        debugInfo.VertexLayout = vertexLayout;
-        debugInfo.DrawSerial = debugDrawSerial;
-        m_DebugState.LogDrawVertexBufferHeader(debugInfo);
-    }
-#endif
-
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, m_State.TextureHandles, m_State.StageStates);
-    CKFFPreparedState preparedState;
-    CKFFShaderKey shaderKey;
-    {
-        CKFF_SCOPE_TIME(m_Probes, StateUs);
-        BuildCurrentPreparedState(&preparedState, dpFlags, activeTextureCount, formatFlags);
-        shaderKey = CKFFBuildCurrentShaderKey(&preparedState);
-    }
-    CKFFProgramBinding programBinding;
-    {
-        CKFF_SCOPE_TIME(m_Probes, ProgramUs);
-        programBinding = m_ShaderCache.GetProgram(shaderKey);
-    }
-    CKFFProgramContext programContext;
-    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
-    CKDWORD program = programContext.Program;
-    if (program == 0) {
-        CKFF_PROBE(m_Probes, OnProgramMiss());
-        return;
-    }
-    CKFF_PROBE(m_Probes, OnProgram(program));
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (debugLogging) {
-        CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
-        debugInfo.Type = type;
-        debugInfo.World = &m_State.World;
-        debugInfo.ViewMatrix = &m_State.View;
-        debugInfo.Projection = &m_State.Projection;
-        debugInfo.VertexBuffer = vb;
-        debugInfo.IndexBuffer = ib;
-        debugInfo.BaseVertex = baseVertex;
-        debugInfo.VertexCount = vertexCount;
-        debugInfo.StartIndex = startIndex;
-        debugInfo.PersistentIndexCount = indexCount;
-        debugInfo.DPFlags = dpFlags;
-        debugInfo.FormatFlags = formatFlags;
-        debugInfo.VertexLayout = vertexLayout;
-        debugInfo.DrawSerial = debugDrawSerial;
-        debugInfo.Program = program;
-        debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
-        debugInfo.ActiveLightCount = m_State.ActiveLightCount;
-        debugInfo.StateDesc = &preparedState.StateDesc;
-        debugInfo.DrawState = &m_DrawStateCache;
-        debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
-        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_State.StageStates[0], preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_State.StageStates[0]);
-        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_State.StageStates[0], preparedState.ActiveTextureCount > 0, m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_State.StageStates[0], preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_State.StageStates[0]);
-        debugInfo.Stage0.Texture = m_State.TextureHandles[0];
-        m_DebugState.LogDrawVertexBufferDetails(debugInfo);
-    }
-#endif
-
-    CKFFTextureBindingSet textureBindingSet;
-    BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
-
-    // Upload uniforms
-    {
-        CKFF_SCOPE_TIME(m_Probes, UniformUs);
-        m_UniformEmitter.UploadUniforms(encoder, &programContext, preparedState.ActiveTextureCount);
-    }
-
-    // Set world transform
-    CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
-    CKDWORD transformIdx = m_Context->AllocTransform(&m_State.World, 1);
-    {
-        CKFF_SCOPE_TIME(m_Probes, TransformUs);
-        encoder->SetTransform(transformIdx, 1);
-    }
-    CKFF_PROBE(m_Probes, OnTransformSet());
-
-    // Set draw state
-    CKDrawState drawState;
-    {
-        CKFF_SCOPE_TIME(m_Probes, DrawStateBuildUs);
-        drawState = m_DrawStateCache.BuildDrawState(type);
-    }
-    CKFF_PROBE(m_Probes, OnDrawState(drawState));
-    const CKDWORD stencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
-    const CKDWORD stencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
-    const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
-    {
-        CKFF_SCOPE_TIME(m_Probes, EncoderStateUs);
-        encoder->SetState(drawState);
-    }
-    {
-        CKFF_SCOPE_TIME(m_Probes, StencilUs);
-        encoder->SetStencilRef(stencilRef);
-        encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
-    }
-
-    // Set vertex layout
-    if (vertexLayout) {
-        {
-            CKFF_SCOPE_TIME(m_Probes, LayoutUs);
-            encoder->SetVertexLayout(vertexLayout);
-        }
-        CKFF_PROBE(m_Probes, OnVertexLayoutSet());
-    }
-
-    // Bind buffers
-    CKFF_PROBE(m_Probes, OnVertexBuffers(vb, ib, vertexLayout));
-    {
-        CKFF_SCOPE_TIME(m_Probes, BufferBindUs);
-        encoder->SetVertexBuffer(0, vb, baseVertex, vertexCount);
-        if (ib)
-            encoder->SetIndexBuffer(ib, startIndex, indexCount);
-    }
-    CKFF_PROBE(m_Probes, OnVertexBufferSet());
-    if (ib)
-        CKFF_PROBE(m_Probes, OnIndexBufferSet());
-
-    // Bind textures
-    {
-        CKFF_SCOPE_TIME(m_Probes, TextureUs);
-        BindTextures(encoder, &textureBindingSet);
-    }
-
-    // Submit
-    float depth = ComputeDepthKey();
-    {
-        CKFF_SCOPE_TIME(m_Probes, SubmitUs);
-        encoder->Submit(view, program, *(CKDWORD *)&depth, SubmitDiscardFlags());
-        CK_FRAME_COST_ADD_MESH_SUBMIT();
-        CK_FRAME_COST_ADD_SUBMITTED_DRAW();
-    }
-    CKFF_PROBE(m_Probes, OnSubmittedDraw());
+    m_OpaquePackets.SubmitVertexBufferPacketImmediate(
+        *this, encoder, view, type, vb, ib,
+        baseVertex, vertexCount, startIndex, indexCount,
+        dpFlags, formatFlags, vertexLayout);
 }
 
 // ============================================================================
