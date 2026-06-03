@@ -61,6 +61,30 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
     }
 }
 
+struct CKFFPreparedState {
+    CKFFStateDesc StateDesc;
+    CKDWORD ActiveTextureCount;
+    CKBOOL PositionT;
+    CKBOOL LightingEnabled;
+    float MaterialSource[4];
+    CKDWORD TextureBoundMask;
+};
+
+static void CKFFInitPreparedState(CKFFPreparedState *prepared)
+{
+    if (!prepared)
+        return;
+    prepared->StateDesc = CKFFStateDesc();
+    prepared->ActiveTextureCount = 0;
+    prepared->PositionT = FALSE;
+    prepared->LightingEnabled = FALSE;
+    prepared->MaterialSource[0] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[1] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[2] = (float)CKFF_MS_MATERIAL;
+    prepared->MaterialSource[3] = (float)CKFF_MS_MATERIAL;
+    prepared->TextureBoundMask = 0;
+}
+
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Context(nullptr), m_ActiveLightCount(0), m_CurrentActiveTextureCount(0),
       m_DisableTextureFiltering(FALSE), m_DisableMipmaps(FALSE),
@@ -771,8 +795,9 @@ void CKFixedFunctionPipeline::DrawPrimitive(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    CKFFStateDesc stateDesc = BuildCurrentStateDesc(data->Flags, formatFlags, m_TexcoordComponentCounts);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKFFPreparedState preparedState;
+    BuildCurrentPreparedState(&preparedState, data->Flags, formatFlags, m_TexcoordComponentCounts);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
@@ -1016,8 +1041,9 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
     if (statsTiming)
         statsStart = CKRenderPerfNow();
 #endif
-    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKFFPreparedState preparedState;
+    BuildCurrentPreparedState(&preparedState, dpFlags, formatFlags);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (statsTiming)
         m_FrameStats.StateUs += CKRenderPerfElapsedUs(statsStart);
@@ -1225,12 +1251,23 @@ void CKFixedFunctionPipeline::SubmitVertexBufferPacketImmediate(
 // Internal methods
 // ============================================================================
 
-CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
-    CKDWORD dpFlags, CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
-    CKFFStateDesc stateDesc;
+void CKFixedFunctionPipeline::BuildCurrentPreparedState(
+    CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
+    if (!prepared)
+        return;
+    CKFFInitPreparedState(prepared);
+    CKFFStateDesc &stateDesc = prepared->StateDesc;
+    prepared->ActiveTextureCount = (CKDWORD)m_CurrentActiveTextureCount;
+    if (prepared->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        prepared->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (m_TextureHandles[stage] != 0)
+            prepared->TextureBoundMask |= (1u << stage);
+    }
 
     const bool hasFormat = formatFlags != 0;
     const bool positionT = hasFormat ? ((formatFlags & CKFF_VF_POSITIONT) != 0) : ((dpFlags & CKRST_DP_TRANSFORM) == 0);
+    prepared->PositionT = positionT ? TRUE : FALSE;
 
     // Vertex state description
     stateDesc.VS.SetHasPosition(!positionT);
@@ -1260,7 +1297,8 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
     CKBOOL normalize = m_DrawStateCache.GetRenderState(VXRENDERSTATE_NORMALIZENORMALS);
 
     stateDesc.VS.SetLightingEnabled(!positionT && lighting && stateDesc.VS.GetHasNormal());
-    m_CurrentLightingEnabled = stateDesc.VS.GetLightingEnabled();
+    prepared->LightingEnabled = stateDesc.VS.GetLightingEnabled() ? TRUE : FALSE;
+    m_CurrentLightingEnabled = prepared->LightingEnabled != FALSE;
     stateDesc.VS.SetSpecularEnabled(specular != 0);
     stateDesc.VS.SetNormalizeNormals(normalize != 0);
     stateDesc.VS.SetLocalViewer(stateDesc.VS.GetLightingEnabled() &&
@@ -1297,10 +1335,14 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
     stateDesc.VS.SetAmbientSource(ambientSource);
     stateDesc.VS.SetSpecularSource(specularSource);
     stateDesc.VS.SetEmissiveSource(emissiveSource);
-    m_MaterialSource[0] = (float)diffuseSource;
-    m_MaterialSource[1] = (float)ambientSource;
-    m_MaterialSource[2] = (float)specularSource;
-    m_MaterialSource[3] = (float)emissiveSource;
+    prepared->MaterialSource[0] = (float)diffuseSource;
+    prepared->MaterialSource[1] = (float)ambientSource;
+    prepared->MaterialSource[2] = (float)specularSource;
+    prepared->MaterialSource[3] = (float)emissiveSource;
+    m_MaterialSource[0] = prepared->MaterialSource[0];
+    m_MaterialSource[1] = prepared->MaterialSource[1];
+    m_MaterialSource[2] = prepared->MaterialSource[2];
+    m_MaterialSource[3] = prepared->MaterialSource[3];
 
     // Fog
     CKBOOL fogEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_FOGENABLE);
@@ -1354,17 +1396,12 @@ CKFFStateDesc CKFixedFunctionPipeline::BuildCurrentStateDesc(
         stateDesc.FS.SetAlphaFunc(m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
     }
     stateDesc.VS.SetVertexClipping(m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
-
-    return stateDesc;
 }
 
-CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const {
-    CKDWORD textureBoundMask = 0;
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if (m_TextureHandles[stage] != 0)
-            textureBoundMask |= (1u << stage);
-    }
-    return CKFFBuildShaderKey(stateDesc, textureBoundMask);
+CKFFShaderKey CKFixedFunctionPipeline::BuildCurrentShaderKey(const CKFFPreparedState *prepared) const {
+    if (!prepared)
+        return CKFFShaderKey();
+    return CKFFBuildShaderKey(prepared->StateDesc, prepared->TextureBoundMask);
 }
 
 void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding) {
@@ -2227,8 +2264,9 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
         return programContext->Program != 0 ? TRUE : FALSE;
     }
 
-    CKFFStateDesc stateDesc = BuildCurrentStateDesc(dpFlags, formatFlags);
-    CKFFShaderKey shaderKey = BuildCurrentShaderKey(stateDesc);
+    CKFFPreparedState preparedState;
+    BuildCurrentPreparedState(&preparedState, dpFlags, formatFlags);
+    CKFFShaderKey shaderKey = BuildCurrentShaderKey(&preparedState);
     CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
     SetCurrentProgramBinding(programContext->ShaderKey, programContext->Binding);
