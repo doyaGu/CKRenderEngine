@@ -88,6 +88,17 @@ struct CKFFUniformEmissionContext {
     CKDWORD PixelFogMode;
 };
 
+struct CKFFUniformEmitter {
+    static void EmitObjectMatrixUniforms(CKFixedFunctionPipeline *pipeline,
+                                         const CKFFUniformEmissionContext *context);
+    static void EmitTextureMatrixUniforms(CKFixedFunctionPipeline *pipeline,
+                                          const CKFFUniformEmissionContext *context);
+    static void EmitStageAndSpecUniforms(CKFixedFunctionPipeline *pipeline,
+                                         const CKFFUniformEmissionContext *context);
+    static void EmitClipPlaneUniforms(CKFixedFunctionPipeline *pipeline,
+                                      const CKFFUniformEmissionContext *context);
+};
+
 static void CKFFInitPreparedState(CKFFPreparedState *prepared)
 {
     if (!prepared)
@@ -1774,13 +1785,14 @@ CKBOOL CKFixedFunctionPipeline::EmitUniform(CKFFUniformSink *sink, CKDWORD unifo
     return TRUE;
 }
 
-void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
+void CKFFUniformEmitter::EmitObjectMatrixUniforms(
+    CKFixedFunctionPipeline *pipeline,
     const CKFFUniformEmissionContext *context)
 {
-    if (!context || !context->Uniforms || context->PositionT)
+    if (!pipeline || !context || !context->Uniforms || context->PositionT)
         return;
 
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const CKFFUniformHandles &u = pipeline->m_ShaderCache.GetUniforms();
     CKFFUniformSink *sink = context->Uniforms;
     const bool viewSpaceUniforms = CKFFProgramUsesViewSpaceUniforms(context->ShaderKey,
                                                                     context->FullSpecialized);
@@ -1791,21 +1803,21 @@ void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
     VxMatrix viewProj;
     VxMatrix modelViewProj;
     if (viewSpaceUniforms) {
-        Vx3DMultiplyMatrix4(modelView, m_View, m_World);
+        Vx3DMultiplyMatrix4(modelView, pipeline->m_View, pipeline->m_World);
         Vx3DInverseMatrix(normalMatrix, modelView);
         Vx3DTransposeMatrix(normalMatrix, normalMatrix);
         if (vertexBlend) {
-            Vx3DInverseMatrix(viewNormalMatrix, m_View);
+            Vx3DInverseMatrix(viewNormalMatrix, pipeline->m_View);
             Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
         }
     }
-    Vx3DMultiplyMatrix4(viewProj, m_Projection, m_View);
-    Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_World);
+    Vx3DMultiplyMatrix4(viewProj, pipeline->m_Projection, pipeline->m_View);
+    Vx3DMultiplyMatrix4(modelViewProj, viewProj, pipeline->m_World);
     VxMatrix matrices[4];
     matrices[0] = vertexBlend ? viewProj : modelViewProj;
-    matrices[1] = m_World;
+    matrices[1] = pipeline->m_World;
     if (viewSpaceUniforms) {
-        matrices[2] = vertexBlend ? m_View : modelView;
+        matrices[2] = vertexBlend ? pipeline->m_View : modelView;
         matrices[3] = vertexBlend ? viewNormalMatrix : normalMatrix;
     }
     if (vertexBlend) {
@@ -1813,82 +1825,88 @@ void CKFixedFunctionPipeline::CKFFEmitObjectMatrixUniforms(
         identity.Identity();
         VxMatrix palette[CKFF_VERTEX_BLEND_MATRIX_COUNT];
         for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
-            if (m_VertexBlendMatrixSet[i])
-                palette[i] = m_VertexBlendMatrices[i];
+            if (pipeline->m_VertexBlendMatrixSet[i])
+                palette[i] = pipeline->m_VertexBlendMatrices[i];
             else
-                palette[i] = (i == 0) ? m_World : identity;
+                palette[i] = (i == 0) ? pipeline->m_World : identity;
         }
-        EmitUniform(sink, u.u_vertexBlendMatrices, palette,
-                    CKFF_VERTEX_BLEND_MATRIX_COUNT,
-                    CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
+        pipeline->EmitUniform(sink, u.u_vertexBlendMatrices, palette,
+                              CKFF_VERTEX_BLEND_MATRIX_COUNT,
+                              CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
     }
     const CKDWORD matrixCount = viewSpaceUniforms ? 4 : 2;
-    EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
+    pipeline->EmitUniform(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
 }
 
-void CKFixedFunctionPipeline::CKFFEmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context)
-{
-    if (!context || !context->Uniforms)
-        return;
-    CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const CKDWORD texMatrixCount = CKFFCurrentTextureMatrixUploadCount(context, m_StageStates);
-    if (texMatrixCount > 0)
-        EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
-}
-
-void CKFixedFunctionPipeline::CKFFEmitStageAndSpecUniforms(
+void CKFFUniformEmitter::EmitTextureMatrixUniforms(
+    CKFixedFunctionPipeline *pipeline,
     const CKFFUniformEmissionContext *context)
 {
-    if (!context || !context->Uniforms)
+    if (!pipeline || !context || !context->Uniforms)
+        return;
+    CKFFUniformSink *sink = context->Uniforms;
+    const CKFFUniformHandles &u = pipeline->m_ShaderCache.GetUniforms();
+    const CKDWORD texMatrixCount = CKFFCurrentTextureMatrixUploadCount(context, pipeline->m_StageStates);
+    if (texMatrixCount > 0)
+        pipeline->EmitUniform(sink, u.u_texMatrix, pipeline->m_TexMatrix,
+                              texMatrixCount, texMatrixCount * 4, FALSE);
+}
+
+void CKFFUniformEmitter::EmitStageAndSpecUniforms(
+    CKFixedFunctionPipeline *pipeline,
+    const CKFFUniformEmissionContext *context)
+{
+    if (!pipeline || !context || !context->Uniforms)
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const CKFFUniformHandles &u = pipeline->m_ShaderCache.GetUniforms();
     if (CKFFProgramUsesBumpEnv(context->ShaderKey)) {
         float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
-        CKFFPackBumpEnvUniforms(m_StageStates, bumpEnv);
-        EmitUniform(sink, u.u_bumpEnv, bumpEnv,
-                    CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
+        CKFFPackBumpEnvUniforms(pipeline->m_StageStates, bumpEnv);
+        pipeline->EmitUniform(sink, u.u_bumpEnv, bumpEnv,
+                              CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
     }
 
     if (context->PositionT)
-        EmitUniform(sink, u.u_viewport, m_Viewport, 1, 1, FALSE);
+        pipeline->EmitUniform(sink, u.u_viewport, pipeline->m_Viewport, 1, 1, FALSE);
 
     if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey)) {
         CKFFStageParamsUniform stageParams;
-        CKFFPackStageParams(m_StageStates, m_TextureHandles, context->ActiveTextureCount, stageParams);
-        EmitUniform(sink, u.u_stageParams, stageParams.Values,
-                    CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
+        CKFFPackStageParams(pipeline->m_StageStates, pipeline->m_TextureHandles,
+                            context->ActiveTextureCount, stageParams);
+        pipeline->EmitUniform(sink, u.u_stageParams, stageParams.Values,
+                              CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
 
     if (!context->FullSpecialized) {
         CKFFSpecUniform ffSpec;
         CKFFPackSpecializationDwords(context->Specialization, ffSpec);
-        EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
-                    CKFFSpecializationInfo::MaxSpecDwords,
-                    CKFFSpecializationInfo::MaxSpecDwords, FALSE);
+        pipeline->EmitUniform(sink, u.u_ffSpec, ffSpec.Values,
+                              CKFFSpecializationInfo::MaxSpecDwords,
+                              CKFFSpecializationInfo::MaxSpecDwords, FALSE);
     }
 }
 
-void CKFixedFunctionPipeline::CKFFEmitClipPlaneUniforms(
+void CKFFUniformEmitter::EmitClipPlaneUniforms(
+    CKFixedFunctionPipeline *pipeline,
     const CKFFUniformEmissionContext *context)
 {
-    if (!context || !context->Uniforms)
+    if (!pipeline || !context || !context->Uniforms)
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
+    const CKFFUniformHandles &u = pipeline->m_ShaderCache.GetUniforms();
     CKFFClipPlaneUniform clip;
-    const CKDWORD clipMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    const CKDWORD clipMask = pipeline->m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
     if (!context->FullSpecialized || ((context->ShaderKey.VS.Bits & (1ull << 34)) != 0)) {
         if (clipMask != 0) {
-            CKFFPackClipPlaneUniforms(m_UserClipPlanes, clipMask, clip);
-            EmitUniform(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
+            CKFFPackClipPlaneUniforms(pipeline->m_UserClipPlanes, clipMask, clip);
+            pipeline->EmitUniform(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
         } else {
             memset(&clip, 0, sizeof(clip));
         }
-        EmitUniform(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
+        pipeline->EmitUniform(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
     }
 }
 
@@ -1905,11 +1923,11 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     const bool emitObject = sink->EmitObject;
 
     if (emitObject)
-        CKFFEmitObjectMatrixUniforms(&context);
+        CKFFUniformEmitter::EmitObjectMatrixUniforms(this, &context);
     if (!emitStatic)
         return;
 
-    CKFFEmitTextureMatrixUniforms(&context);
+    CKFFUniformEmitter::EmitTextureMatrixUniforms(this, &context);
 
     // bgfx uniform bindings are draw state. Packet replay can retain static
     // draw constants across sorted opaque packets, but immediate draws still
@@ -1929,8 +1947,8 @@ void CKFixedFunctionPipeline::EmitUniformPayloads(CKFFUniformSink *sink,
     if (drawParamCount > 0)
         EmitUniform(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
 
-    CKFFEmitStageAndSpecUniforms(&context);
-    CKFFEmitClipPlaneUniforms(&context);
+    CKFFUniformEmitter::EmitStageAndSpecUniforms(this, &context);
+    CKFFUniformEmitter::EmitClipPlaneUniforms(this, &context);
 }
 
 void CKFixedFunctionPipeline::UploadUniforms(CKRasterizerEncoder *encoder,
