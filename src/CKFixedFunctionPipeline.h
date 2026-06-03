@@ -12,6 +12,7 @@
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
 #include "CKFFDrawTypes.h"
+#include "CKFFStateStore.h"
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
@@ -26,15 +27,6 @@
 
 class CKRasterizerContext;
 class CKRasterizerEncoder;
-
-// Dirty flags for uniform upload
-#define CKFF_DIRTY_MATRICES   0x01
-#define CKFF_DIRTY_LIGHTS     0x02
-#define CKFF_DIRTY_MATERIAL   0x04
-#define CKFF_DIRTY_FOG        0x08
-#define CKFF_DIRTY_TEXFACTOR  0x10
-#define CKFF_DIRTY_ALPHATEST  0x20
-#define CKFF_DIRTY_ALL        0xFF
 
 struct CKLightData;
 
@@ -140,6 +132,7 @@ struct CKFFDiagnosticConfig {
     bool UniformHistEnabled;
     int StatsInterval;
 };
+
 #endif
 
 struct CKFFPipelineTestAccess;
@@ -230,9 +223,9 @@ public:
     CKFrustumCuller &GetFrustumCuller() { return m_FrustumCuller; }
 
     // === Matrix access ===
-    const VxMatrix &GetWorldMatrix() const { return m_World; }
-    const VxMatrix &GetViewMatrix() const { return m_View; }
-    const VxMatrix &GetProjectionMatrix() const { return m_Projection; }
+    const VxMatrix &GetWorldMatrix() const { return m_State.World; }
+    const VxMatrix &GetViewMatrix() const { return m_State.View; }
+    const VxMatrix &GetProjectionMatrix() const { return m_State.Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKFFFrameStats &GetFrameStats() const { return m_FrameStats; }
@@ -245,6 +238,8 @@ private:
     friend struct CKFFPipelineTestAccess;
 #endif
     friend struct CKFFUniformEmitter;
+
+    enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
 
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
@@ -261,44 +256,14 @@ private:
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
 #endif
-    // Current transform state
-    VxMatrix m_World;
-    VxMatrix m_View;
-    VxMatrix m_Projection;
-    VxMatrix m_ViewProjection;
-    CKDWORD m_ViewProjectionHash;
-    VxMatrix m_TexMatrix[CKFF_MAX_TEXTURE_STAGES];
-    VxMatrix m_VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
-    CKBOOL m_VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
-    CKBOOL m_ViewProjectionDirty;
+    CKFFStateStore m_State;
 
-    // Current material
-    CKFFMaterialData m_Material;
-
-    // Current lights
-    CKFFLightData m_Lights[CKFF_MAX_LIGHTS];
-    CKBOOL m_LightEnabled[CKFF_MAX_LIGHTS];
-    int m_ActiveLightCount;
-
-    // Current textures
-    CKDWORD m_TextureHandles[CKFF_MAX_TEXTURE_STAGES];
-    CKDWORD m_TextureFlags[CKFF_MAX_TEXTURE_STAGES];
     CKBOOL m_PacketProgramCacheValid;
     CKDWORD m_PacketProgramCacheDPFlags;
     CKDWORD m_PacketProgramCacheFormatFlags;
     int m_PacketProgramCacheActiveTextureCount;
     CKFFPreparedState m_PacketProgramCachePreparedState;
     CKFFProgramContext m_PacketProgramCacheContext;
-    CKDWORD m_AlphaTestPrecision;
-
-    // Texture stage state
-    CKDWORD m_StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
-    float m_Viewport[4];
-    VxPlane m_UserClipPlanes[6];
-    CKBYTE m_TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
-
-    // Dirty tracking
-    CKDWORD m_DirtyFlags;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFFrameStats m_FrameStats;
     CKFFDiagnosticConfig m_DiagnosticConfig;
@@ -308,6 +273,7 @@ private:
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
                                    CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
+    void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
