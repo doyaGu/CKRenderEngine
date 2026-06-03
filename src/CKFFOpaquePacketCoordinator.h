@@ -4,6 +4,9 @@
 #include "CKFFDrawTypes.h"
 #include "CKFFRenderPacketQueue.h"
 
+class CKFixedFunctionPipeline;
+struct CKFFRenderPacketReplayContext;
+
 class CKFFOpaquePacketCoordinator {
 public:
     CKFFOpaquePacketCoordinator();
@@ -40,6 +43,76 @@ public:
                       CKDWORD activeTextureCount,
                       const CKFFPreparedState &preparedState,
                       const CKFFProgramContext &programContext);
+    CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
+    CKDWORD GetVertexBufferPacketInstancingRejectReason(
+        const CKFFProgramContext *programContext) const;
+    CKDWORD InternStaticUniformPayload(CKFixedFunctionPipeline &pipeline,
+                                       const CKFFRenderPacketUniformPayload &payload);
+    void BuildRenderPacketSortKey(CKRenderPacket *packet) const;
+    void InitVertexBufferPacketForCapture(CKRenderPacket *packet) const;
+    void TrackOpaqueRenderPacket(CKFixedFunctionPipeline &pipeline, const CKRenderPacket &packet);
+    void TrackOpaqueRenderPacketReject(CKFixedFunctionPipeline &pipeline, CKDWORD rejectReason);
+    void UpdateAdaptiveStats(CKFixedFunctionPipeline &pipeline);
+    CKBOOL CheckAdaptiveBypass(CKFixedFunctionPipeline &pipeline, CKRasterizerEncoder *encoder);
+    CKBOOL ResolveVertexBufferPacketProgram(CKFixedFunctionPipeline &pipeline,
+                                            CKDWORD dpFlags,
+                                            CKDWORD formatFlags,
+                                            CKFFPreparedState *preparedState,
+                                            CKFFProgramContext *programContext);
+    void CaptureVertexBufferPacketIdentity(CKFixedFunctionPipeline &pipeline,
+                                           CKRenderPacket *packet,
+                                           const CKFFProgramContext *programContext,
+                                           CKRenderView view,
+                                           VXPRIMITIVETYPE type,
+                                           CKDWORD vb,
+                                           CKDWORD ib,
+                                           CKDWORD baseVertex,
+                                           CKDWORD vertexCount,
+                                           CKDWORD startIndex,
+                                           CKDWORD indexCount,
+                                           CKDWORD vertexLayout);
+    void CaptureVertexBufferPacketTextures(CKRenderPacket *packet,
+                                           const CKFFTextureBindingSet *bindingSet);
+    CKBOOL CaptureVertexBufferPacketObjectUniforms(CKFixedFunctionPipeline &pipeline,
+                                                   CKRenderPacket *packet,
+                                                   const CKFFProgramContext *programContext);
+    void CaptureVertexBufferPacketInstancing(CKFixedFunctionPipeline &pipeline,
+                                             CKRenderPacket *packet,
+                                             const CKFFProgramContext *programContext);
+    CKBOOL CaptureVertexBufferPacketStaticUniforms(CKFixedFunctionPipeline &pipeline,
+                                                   CKRenderPacket *packet,
+                                                   const CKFFProgramContext *programContext,
+                                                   CKBOOL collectStats);
+    CKDWORD GetOpaqueVertexBufferPacketRejectReason(const CKFixedFunctionPipeline &pipeline,
+                                                    CKRenderView view,
+                                                    VXPRIMITIVETYPE type,
+                                                    CKDWORD vb,
+                                                    CKDWORD ib,
+                                                    CKDWORD vertexLayout) const;
+    void BuildVertexBufferPacket(CKFixedFunctionPipeline &pipeline,
+                                 CKFFVertexBufferPacketBuildResult *result,
+                                 CKRasterizerEncoder *encoder,
+                                 CKRenderView view,
+                                 VXPRIMITIVETYPE type,
+                                 CKDWORD vb,
+                                 CKDWORD ib,
+                                 CKDWORD baseVertex,
+                                 CKDWORD vertexCount,
+                                 CKDWORD startIndex,
+                                 CKDWORD indexCount,
+                                 CKDWORD dpFlags,
+                                 CKDWORD formatFlags,
+                                 CKDWORD vertexLayout);
+    void ClearRenderPackets() { m_Queue.Clear(); }
+    void ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline);
+    void SortRenderPackets(XArray<CKDWORD> &indices);
+    void InitRenderPacketReplayContext(CKFixedFunctionPipeline &pipeline,
+                                       CKFFRenderPacketReplayContext *context,
+                                       CKRasterizerEncoder *encoder);
+    void FlushRenderPackets(CKFixedFunctionPipeline &pipeline,
+                            CKRasterizerEncoder *encoder,
+                            CKBOOL forceDirectReplay,
+                            CKBOOL allowAdaptiveLearning);
 
 private:
     CKFFRenderPacketQueue m_Queue;

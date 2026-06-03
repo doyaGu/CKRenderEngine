@@ -1343,47 +1343,13 @@ CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUnifor
 
 CKDWORD CKFixedFunctionPipeline::GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const
 {
-    if (!programContext)
-        return CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
-
-    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
-    if (shaderKey.VS.GetHasPositionT())
-        return CKFF_RENDER_PACKET_ELIGIBLE;
-    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
-        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
-    return CKFF_RENDER_PACKET_ELIGIBLE;
+    return m_OpaquePackets.GetPacketObjectUniformRejectReason(programContext);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetVertexBufferPacketInstancingRejectReason(
     const CKFFProgramContext *programContext) const
 {
-    if (!programContext)
-        return CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
-    if (!m_OpaquePackets.InstancingEnabled() || !m_OpaquePackets.InstanceLayout())
-        return CKFF_RENDER_PACKET_REJECT_INSTANCE_LAYOUT;
-
-    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
-    if (shaderKey.VS.GetHasPositionT())
-        return CKFF_RENDER_PACKET_REJECT_POSITIONT;
-    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
-        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
-    if (shaderKey.FS.LastActiveTextureStage >= 4)
-        return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
-    for (CKDWORD stage = 0; stage <= shaderKey.FS.LastActiveTextureStage; ++stage) {
-        if ((shaderKey.VS.TexCoordIndex[stage] & 7u) >= 4)
-            return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
-        if ((shaderKey.VS.TexGen[stage] & 7u) != 0)
-            return CKFF_RENDER_PACKET_REJECT_TEXGEN;
-    }
-    if ((shaderKey.VS.Bits & (1ull << 13)) != 0)
-        return CKFF_RENDER_PACKET_REJECT_VIEW_SPACE_SHADER;
-    if (shaderKey.FS.VertexFogMode != 0)
-        return CKFF_RENDER_PACKET_REJECT_VERTEX_FOG;
-    if (shaderKey.FS.PixelFogMode != 0)
-        return CKFF_RENDER_PACKET_REJECT_PIXEL_FOG;
-    if (shaderKey.FS.RangeFog)
-        return CKFF_RENDER_PACKET_REJECT_RANGE_FOG;
-    return CKFF_RENDER_PACKET_ELIGIBLE;
+    return m_OpaquePackets.GetVertexBufferPacketInstancingRejectReason(programContext);
 }
 
 void CKFixedFunctionPipeline::UpdateViewProjectionCache()
@@ -1402,88 +1368,37 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
 
 CKDWORD CKFixedFunctionPipeline::InternStaticUniformPayload(const CKFFRenderPacketUniformPayload &payload)
 {
-    CKBOOL interned = FALSE;
-    CKDWORD index = m_OpaquePackets.Queue().InternStaticUniformPayload(payload, &interned);
-    if (interned)
-        CKFF_PROBE(m_Probes, OnRenderPacketStaticPayloadIntern());
-    return index;
+    return m_OpaquePackets.InternStaticUniformPayload(*this, payload);
 }
 
 void CKFixedFunctionPipeline::BuildRenderPacketSortKey(CKRenderPacket *packet) const
 {
-    m_OpaquePackets.Queue().BuildSortKey(packet);
+    m_OpaquePackets.BuildRenderPacketSortKey(packet);
 }
 
 void CKFixedFunctionPipeline::InitVertexBufferPacketForCapture(CKRenderPacket *packet) const
 {
-    if (!packet)
-        return;
-
-    packet->Serial = 0;
-    packet->View = CKRP_VIEW_OPAQUE3D;
-    packet->Type = VX_TRIANGLELIST;
-    packet->Program = 0;
-    packet->Depth = 0;
-    packet->DrawState.Lo = 0;
-    packet->DrawState.Mid = 0;
-    packet->DrawState.Hi = 0;
-    packet->StencilRef = 0;
-    packet->StencilReadMask = 0;
-    packet->StencilWriteMask = 0;
-    packet->VertexLayout = 0;
-    packet->VertexBuffer = 0;
-    packet->IndexBuffer = 0;
-    packet->BaseVertex = 0;
-    packet->VertexCount = 0;
-    packet->StartIndex = 0;
-    packet->IndexCount = 0;
-    packet->ActiveTextureCount = 0;
-    packet->TextureSetHash = 0;
-    memset(packet->Textures, 0, sizeof(packet->Textures));
-    packet->StaticUniformIndex = 0;
-    memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
-    memset(&packet->SortKey, 0, sizeof(packet->SortKey));
-    packet->World.SetIdentity();
-    packet->ViewProjection.SetIdentity();
-    packet->ViewProjectionHash = 0;
-    packet->CanInstance = FALSE;
-    packet->InstancedProgram = 0;
-    packet->Marker[0] = '\0';
+    m_OpaquePackets.InitVertexBufferPacketForCapture(packet);
 }
 
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacket(const CKRenderPacket &packet)
 {
-    m_OpaquePackets.Queue().AddPacket(packet);
-    UpdateOpaqueRenderPacketAdaptiveStats();
+    m_OpaquePackets.TrackOpaqueRenderPacket(*this, packet);
 }
 
 void CKFixedFunctionPipeline::TrackOpaqueRenderPacketReject(CKDWORD rejectReason)
 {
-    if (rejectReason != CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS)
-        return;
-    if (!m_OpaquePackets.Queue().IsAdaptiveCooldownActive())
-        return;
-    m_OpaquePackets.Queue().MarkAdaptiveCooldownBypass();
-    UpdateOpaqueRenderPacketAdaptiveStats();
+    m_OpaquePackets.TrackOpaqueRenderPacketReject(*this, rejectReason);
 }
 
 void CKFixedFunctionPipeline::UpdateOpaqueRenderPacketAdaptiveStats()
 {
-    CKFF_PROBE(m_Probes, OnAdaptiveStats(m_OpaquePackets.Queue()));
+    m_OpaquePackets.UpdateAdaptiveStats(*this);
 }
 
 CKBOOL CKFixedFunctionPipeline::CheckOpaqueRenderPacketAdaptiveBypass(CKRasterizerEncoder *encoder)
 {
-    if (m_OpaquePackets.Queue().IsAdaptiveBypassed())
-        return TRUE;
-    if (!m_OpaquePackets.Queue().ShouldAdaptiveBypass(m_OpaquePackets.InstancingEnabled()))
-        return FALSE;
-
-    m_OpaquePackets.Queue().MarkAdaptiveBypass();
-    CKFF_PROBE(m_Probes, OnAdaptiveBypass(m_OpaquePackets.Queue()));
-    UpdateOpaqueRenderPacketAdaptiveStats();
-    FlushOpaqueRenderPackets(encoder, TRUE, FALSE);
-    return TRUE;
+    return m_OpaquePackets.CheckAdaptiveBypass(*this, encoder);
 }
 
 void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
@@ -1512,23 +1427,8 @@ CKBOOL CKFixedFunctionPipeline::ResolveVertexBufferPacketProgram(CKDWORD dpFlags
                                                                  CKFFPreparedState *preparedState,
                                                                  CKFFProgramContext *programContext)
 {
-    if (!preparedState || !programContext)
-        return FALSE;
-
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, m_State.TextureHandles, m_State.StageStates);
-    if (m_OpaquePackets.TryGetCachedProgram(dpFlags, formatFlags, activeTextureCount,
-                                            preparedState, programContext)) {
-        return programContext->Program != 0 ? TRUE : FALSE;
-    }
-
-    BuildCurrentPreparedState(preparedState, dpFlags, activeTextureCount, formatFlags);
-    CKFFShaderKey shaderKey = CKFFBuildCurrentShaderKey(preparedState);
-    CKFFProgramBinding programBinding = m_ShaderCache.GetProgram(shaderKey);
-    CKFFInitProgramContext(programContext, shaderKey, programBinding);
-    m_OpaquePackets.CacheProgram(dpFlags, formatFlags, activeTextureCount,
-                                 *preparedState, *programContext);
-    return programContext->Program != 0 ? TRUE : FALSE;
+    return m_OpaquePackets.ResolveVertexBufferPacketProgram(
+        *this, dpFlags, formatFlags, preparedState, programContext);
 }
 
 void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
@@ -1544,87 +1444,30 @@ void CKFixedFunctionPipeline::CaptureVertexBufferPacketIdentity(
     CKDWORD indexCount,
     CKDWORD vertexLayout)
 {
-    if (!packet || !programContext)
-        return;
-
-    packet->Serial = m_OpaquePackets.Queue().NextSerial();
-    packet->View = view;
-    packet->Type = type;
-    packet->Program = programContext->Program;
-    float depth = ComputeDepthKey();
-    packet->Depth = *(CKDWORD *)&depth;
-    packet->DrawState = m_DrawStateCache.BuildDrawState(type);
-    packet->StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
-    packet->StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
-    packet->StencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
-    packet->VertexLayout = vertexLayout;
-    packet->VertexBuffer = vb;
-    packet->IndexBuffer = ib;
-    packet->BaseVertex = baseVertex;
-    packet->VertexCount = vertexCount;
-    packet->StartIndex = startIndex;
-    packet->IndexCount = indexCount;
-    packet->ActiveTextureCount = 0;
-    packet->TextureSetHash = 0;
-    packet->StaticUniformIndex = 0;
-    packet->CanInstance = FALSE;
-    packet->InstancedProgram = 0;
-    memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
-    packet->World = m_State.World;
-    packet->Marker[0] = '\0';
+    m_OpaquePackets.CaptureVertexBufferPacketIdentity(
+        *this, packet, programContext, view, type, vb, ib,
+        baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
 }
 
 void CKFixedFunctionPipeline::CaptureVertexBufferPacketTextures(CKRenderPacket *packet,
                                                                 const CKFFTextureBindingSet *bindingSet)
 {
-    if (!packet || !bindingSet)
-        return;
-
-    packet->ActiveTextureCount = bindingSet->ActiveTextureCount;
-    packet->TextureSetHash = bindingSet->Hash;
-    for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
-        packet->Textures[i] = bindingSet->Bindings[i];
-    }
+    m_OpaquePackets.CaptureVertexBufferPacketTextures(packet, bindingSet);
 }
 
 CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketObjectUniforms(
     CKRenderPacket *packet,
     const CKFFProgramContext *programContext)
 {
-    if (!packet)
-        return FALSE;
-
-    if (packet->CanInstance) {
-        UpdateViewProjectionCache();
-        memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
-        packet->ObjectUniforms.MatrixUniform = m_ShaderCache.GetUniforms().u_ffMatrices;
-    } else {
-        if (!BuildPacketObjectUniforms(&packet->ObjectUniforms, programContext))
-            return FALSE;
-    }
-    packet->ViewProjection = m_State.ViewProjection();
-    packet->ViewProjectionHash = m_State.ViewProjectionHash();
-    return TRUE;
+    return m_OpaquePackets.CaptureVertexBufferPacketObjectUniforms(
+        *this, packet, programContext);
 }
 
 void CKFixedFunctionPipeline::CaptureVertexBufferPacketInstancing(
     CKRenderPacket *packet,
     const CKFFProgramContext *programContext)
 {
-    if (!packet || !programContext)
-        return;
-    if (GetVertexBufferPacketInstancingRejectReason(programContext) != CKFF_RENDER_PACKET_ELIGIBLE)
-        return;
-
-    CKFFShaderKey instancedKey = programContext->ShaderKey;
-    instancedKey.VS.SetInstanced(true);
-    CKFFProgramBinding instancedBinding = m_ShaderCache.GetProgram(instancedKey);
-    CKFFProgramContext instancedContext;
-    CKFFInitProgramContext(&instancedContext, instancedKey, instancedBinding);
-    if (CKFFCanUseInstancedProgramForPacket(*programContext, instancedContext)) {
-        packet->CanInstance = TRUE;
-        packet->InstancedProgram = instancedContext.Program;
-    }
+    m_OpaquePackets.CaptureVertexBufferPacketInstancing(*this, packet, programContext);
 }
 
 CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
@@ -1632,31 +1475,8 @@ CKBOOL CKFixedFunctionPipeline::CaptureVertexBufferPacketStaticUniforms(
     const CKFFProgramContext *programContext,
     CKBOOL collectStats)
 {
-    if (!packet || !programContext)
-        return FALSE;
-
-    if (m_OpaquePackets.Queue().TryUseCachedStaticUniform(&packet->StaticUniformIndex)) {
-        if (collectStats)
-            CKFF_PROBE(m_Probes, OnRenderPacketStaticPayloadReuse());
-    } else {
-        CKFFRenderPacketUniformPayload staticPayload;
-        CKBOOL payloadBuilt = FALSE;
-        {
-            CKFF_SCOPE_TIME(m_Probes, RenderPacketBuildUs);
-            payloadBuilt = BuildStaticUniformPayload(&staticPayload, programContext, packet->ActiveTextureCount);
-        }
-        if (!payloadBuilt) {
-            if (collectStats)
-                CKFF_PROBE(m_Probes, OnRenderPacketUniformOverflow());
-            return FALSE;
-        }
-        if (collectStats)
-            CKFF_PROBE(m_Probes, OnRenderPacketStaticPayloadBuild());
-        packet->StaticUniformIndex = InternStaticUniformPayload(staticPayload);
-        m_OpaquePackets.Queue().CacheStaticUniform(packet->StaticUniformIndex);
-    }
-
-    return TRUE;
+    return m_OpaquePackets.CaptureVertexBufferPacketStaticUniforms(
+        *this, packet, programContext, collectStats);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRenderView view,
@@ -1665,35 +1485,8 @@ CKDWORD CKFixedFunctionPipeline::GetOpaqueVertexBufferPacketRejectReason(CKRende
                                                                          CKDWORD ib,
                                                                          CKDWORD vertexLayout) const
 {
-    if (!m_OpaquePackets.SortingEnabled())
-        return CKFF_RENDER_PACKET_REJECT_SORT_DISABLED;
-    if (!m_OpaquePackets.PacketsAllowed())
-        return CKFF_RENDER_PACKET_REJECT_PACKETS_DISALLOWED;
-    if (!m_Context)
-        return CKFF_RENDER_PACKET_REJECT_NO_CONTEXT;
-    if (!vb)
-        return CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
-    if (!ib)
-        return CKFF_RENDER_PACKET_REJECT_MISSING_INDEX_BUFFER;
-    if (!vertexLayout)
-        return CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_LAYOUT;
-    if (view != CKRP_VIEW_OPAQUE3D)
-        return CKFF_RENDER_PACKET_REJECT_WRONG_VIEW;
-    if (type != VX_TRIANGLELIST)
-        return CKFF_RENDER_PACKET_REJECT_WRONG_PRIMITIVE;
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
-        return CKFF_RENDER_PACKET_REJECT_ALPHA_BLEND;
-    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE))
-        return CKFF_RENDER_PACKET_REJECT_Z_DISABLED;
-    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
-        return CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED;
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE)
-        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
-        return CKFF_RENDER_PACKET_REJECT_INDEXED_VERTEX_BLEND;
-    if (m_OpaquePackets.Queue().IsAdaptiveBypassed())
-        return CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS;
-    return CKFF_RENDER_PACKET_ELIGIBLE;
+    return m_OpaquePackets.GetOpaqueVertexBufferPacketRejectReason(
+        *this, view, type, vb, ib, vertexLayout);
 }
 
 void CKFixedFunctionPipeline::BuildVertexBufferPacket(
@@ -1706,159 +1499,36 @@ void CKFixedFunctionPipeline::BuildVertexBufferPacket(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    if (!result)
-        return;
-    CKFFInitVertexBufferPacketBuildResult(result);
-    if (!vb) {
-        result->RejectReason = CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
-        return;
-    }
-
-    CKBOOL collectStats = FALSE;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    collectStats = m_Probes.StatsEnabled() ? TRUE : FALSE;
-#endif
-    CKFF_PROBE(m_Probes, OnHardwareDraw());
-
-    CKFFPreparedState preparedState;
-    CKFFProgramContext programContext;
-    if (!ResolveVertexBufferPacketProgram(dpFlags, formatFlags, &preparedState, &programContext)) {
-        if (collectStats)
-            CKFF_PROBE(m_Probes, OnProgramMiss());
-        result->ProgramContext = programContext;
-        result->RejectReason = CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
-        return;
-    }
-    result->ProgramContext = programContext;
-    BuildCurrentTextureBindingSet(&result->TextureBindingSet, preparedState.ActiveTextureCount);
-    result->RejectReason = GetPacketObjectUniformRejectReason(&programContext);
-    if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
-        return;
-    }
-
-    InitVertexBufferPacketForCapture(&result->Packet);
-    CaptureVertexBufferPacketIdentity(&result->Packet, &programContext, view, type, vb, ib,
-                                      baseVertex, vertexCount, startIndex, indexCount, vertexLayout);
-    CaptureVertexBufferPacketTextures(&result->Packet, &result->TextureBindingSet);
-    CaptureVertexBufferPacketInstancing(&result->Packet, &programContext);
-
-    CKBOOL objectUniformsBuilt = FALSE;
-    {
-        CKFF_SCOPE_TIME(m_Probes, RenderPacketBuildUs);
-        objectUniformsBuilt = CaptureVertexBufferPacketObjectUniforms(&result->Packet, &programContext);
-    }
-    if (!objectUniformsBuilt) {
-        result->RejectReason = CKFF_RENDER_PACKET_REJECT_OBJECT_UNIFORMS;
-        return;
-    }
-
-    if (!CaptureVertexBufferPacketStaticUniforms(&result->Packet, &programContext, collectStats)) {
-        result->RejectReason = CKFF_RENDER_PACKET_REJECT_STATIC_UNIFORMS;
-        return;
-    }
-
-    if (encoder)
-        encoder->ConsumeMarker(result->Packet.Marker, sizeof(result->Packet.Marker));
-    BuildRenderPacketSortKey(&result->Packet);
-    result->Success = TRUE;
-    result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
+    m_OpaquePackets.BuildVertexBufferPacket(
+        *this, result, encoder, view, type, vb, ib,
+        baseVertex, vertexCount, startIndex, indexCount,
+        dpFlags, formatFlags, vertexLayout);
 }
 
 void CKFixedFunctionPipeline::ClearOpaqueRenderPackets()
 {
-    m_OpaquePackets.Queue().Clear();
+    m_OpaquePackets.ClearRenderPackets();
 }
 
 void CKFixedFunctionPipeline::ResetOpaqueRenderPacketFrameState()
 {
-    m_OpaquePackets.Queue().ResetFrameState();
-    UpdateOpaqueRenderPacketAdaptiveStats();
+    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 void CKFixedFunctionPipeline::SortOpaqueRenderPackets(XArray<CKDWORD> &indices)
 {
-    m_OpaquePackets.Queue().SortPackets(indices);
+    m_OpaquePackets.SortRenderPackets(indices);
 }
 
 void CKFixedFunctionPipeline::InitRenderPacketReplayContext(CKFFRenderPacketReplayContext *context,
                                                             CKRasterizerEncoder *encoder)
 {
-    if (!context)
-        return;
-
-    memset(context, 0, sizeof(CKFFRenderPacketReplayContext));
-    context->Encoder = encoder;
-    context->Context = m_Context;
-    context->Queue = &m_OpaquePackets.Queue();
-    context->InstanceLayout = m_OpaquePackets.InstanceLayout();
-    CKFFInitRenderPacketReplayDiagnostics(&context->Diagnostics);
-    CKFF_PROBE(m_Probes, FillReplayDiagnostics(&context->Diagnostics, m_ShaderCache.GetUniforms()));
+    m_OpaquePackets.InitRenderPacketReplayContext(*this, context, encoder);
 }
 
 void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
                                                        CKBOOL forceDirectReplay,
                                                        CKBOOL allowAdaptiveLearning)
 {
-    if (!HasOpaqueRenderPackets())
-        return;
-    if (!encoder)
-        encoder = m_RenderPipeline.GetEncoder();
-    if (!encoder) {
-        ClearOpaqueRenderPackets();
-        return;
-    }
-
-    const int packetCount = m_OpaquePackets.Queue().GetPacketCount();
-    const CKBOOL directReplay = m_OpaquePackets.Queue().IsDirectReplay(forceDirectReplay);
-    XArray<CKDWORD> indices;
-    {
-        CKFF_SCOPE_TIME(m_Probes, RenderPacketSortUs);
-        if (!directReplay)
-            SortOpaqueRenderPackets(indices);
-    }
-    if (directReplay) {
-        if (packetCount > 1)
-            CKFF_PROBE(m_Probes, OnRenderPacketSortSkip());
-    }
-
-    if (allowAdaptiveLearning) {
-        m_OpaquePackets.Queue().EvaluateAdaptiveFrameEnd(m_OpaquePackets.InstancingEnabled());
-        UpdateOpaqueRenderPacketAdaptiveStats();
-    }
-
-    CKRenderPacketReplayCache cache;
-    memset(&cache, 0, sizeof(cache));
-    CKFFRenderPacketReplayContext replayContext;
-    InitRenderPacketReplayContext(&replayContext, encoder);
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (m_Probes.TimingEnabled()) {
-        CKDWORD runCount = 0;
-        CKDWORD maxRun = 0;
-        m_OpaquePackets.Queue().GetRunStats(&indices, directReplay, &runCount, &maxRun);
-        m_Probes.OnRenderPacketRuns(runCount, maxRun);
-    }
-#endif
-    {
-        CKFF_SCOPE_TIME(m_Probes, RenderPacketReplayUs);
-        XArray<CKFFRenderPacketRunPlan> runPlans;
-        m_OpaquePackets.Queue().BuildRunPlans(&indices, directReplay, m_OpaquePackets.InstancingEnabled(), runPlans);
-        const int planCount = runPlans.Size();
-        for (int planIndex = 0; planIndex < planCount; ++planIndex) {
-            const CKFFRenderPacketRunPlan &plan = runPlans[planIndex];
-            const CKBOOL lastPlan = (planIndex + 1 == planCount) ? TRUE : FALSE;
-            if (plan.Instanced) {
-                if (CKFFReplayVertexBufferPacketRunInstanced(&replayContext, &indices,
-                                                             plan.Start, plan.Count,
-                                                             directReplay, &cache, lastPlan)) {
-                    continue;
-                }
-            }
-
-            CKFFReplayVertexBufferPacketRange(&replayContext, &indices, plan.Start, 0,
-                                              plan.Count, directReplay, &cache, lastPlan);
-        }
-    }
-
-    ClearOpaqueRenderPackets();
-    CKFF_PROBE(m_Probes, OnRenderPacketFlush());
+    m_OpaquePackets.FlushRenderPackets(*this, encoder, forceDirectReplay, allowAdaptiveLearning);
 }
