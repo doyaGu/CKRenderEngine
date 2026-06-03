@@ -153,6 +153,8 @@ struct CKFFPacketTextureSetCache {
     CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
 };
 
+struct CKFFPreparedState;
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -316,9 +318,9 @@ private:
 #endif
 
     // Internal methods
-    CKFFStateDesc BuildCurrentStateDesc(CKDWORD dpFlags, CKDWORD formatFlags = 0,
-                                        const CKBYTE *texcoordComponentCounts = nullptr);
-    CKFFShaderKey BuildCurrentShaderKey(const CKFFStateDesc &stateDesc) const;
+    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD formatFlags = 0,
+                                   const CKBYTE *texcoordComponentCounts = nullptr);
+    CKFFShaderKey BuildCurrentShaderKey(const CKFFPreparedState *prepared) const;
     void SetCurrentProgramBinding(const CKFFShaderKey &shaderKey, const CKFFProgramBinding &binding);
     void MarkStaticUniformsDirty();
     void MarkPacketTextureSetDirty();
