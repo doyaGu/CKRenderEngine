@@ -868,8 +868,9 @@ void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
               "Player-like no-run sample must report max run one");
     TestCheck(ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate() == 0,
               "Player-like no-run sample must not estimate submit savings");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
-              "Sample-time no-run bypass must not start persistent cooldown");
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
+              "Sample-time no-run bypass must start persistent cooldown");
 
     DrawPacketUniqueMeshCandidate(&ffp, &context,
                                   CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT);
@@ -883,7 +884,7 @@ void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
     ffp.Shutdown();
 }
 
-void OpaquePacketAdaptiveSampleBypassDoesNotPersist()
+void OpaquePacketAdaptiveSampleBypassCooldownReprobes()
 {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -897,21 +898,34 @@ void OpaquePacketAdaptiveSampleBypassDoesNotPersist()
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "No-run adaptive sample must bypass the current frame");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
-              "No-run adaptive sample must not persist cooldown");
+    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
+              "No-run adaptive sample must start persistent cooldown");
 
     ffp.BeginDebugFrame();
     for (int i = 0; i < 8; ++i)
         DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
 
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Cooldown frame must bypass high-repeat draws before capture");
+    TestCheck(context.Encoder.SubmitCount ==
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 8,
+              "Cooldown frame must submit high-repeat draws immediately");
+
+    for (int frame = 0; frame < CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL; ++frame)
+        ffp.BeginDebugFrame();
+
+    for (int i = 0; i < 8; ++i)
+        DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+
     TestCheck(ffp.HasOpaqueRenderPackets(),
-              "Next frame high-repeat draws must queue after sample-time bypass");
+              "Expired sample-time cooldown must allow high-repeat draws to queue");
 
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
 
     TestCheck(context.Encoder.SubmitCount ==
-                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
-              "Next frame high-repeat run must restore instanced replay immediately");
+                  CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 9,
+              "High-repeat reprobe must restore instanced replay after cooldown");
     TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
                   CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
               "Restored high-repeat frame must report an instanceable run");
@@ -1397,8 +1411,8 @@ int main()
               &OpaquePacketAdaptiveRunGateKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive run gate bypasses no-run frame",
               &OpaquePacketAdaptiveRunGateBypassesNoRunFrame);
-    tests.Run("Opaque packet adaptive sample bypass does not persist",
-              &OpaquePacketAdaptiveSampleBypassDoesNotPersist);
+    tests.Run("Opaque packet adaptive sample bypass cooldown reprobes",
+              &OpaquePacketAdaptiveSampleBypassCooldownReprobes);
     tests.Run("Opaque packet adaptive packet-only ignores run gate",
               &OpaquePacketAdaptivePacketOnlyIgnoresRunGate);
     tests.Run("Opaque packet adaptive frame-end no-run starts cooldown",
