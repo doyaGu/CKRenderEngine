@@ -10,6 +10,15 @@
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 #define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
 
+// Dirty flags for fixed-function uniform upload.
+#define CKFF_DIRTY_MATRICES   0x01
+#define CKFF_DIRTY_LIGHTS     0x02
+#define CKFF_DIRTY_MATERIAL   0x04
+#define CKFF_DIRTY_FOG        0x08
+#define CKFF_DIRTY_TEXFACTOR  0x10
+#define CKFF_DIRTY_ALPHATEST  0x20
+#define CKFF_DIRTY_ALL        0xFF
+
 // ============================================================================
 // Light data for shader upload (view-space)
 // ============================================================================
