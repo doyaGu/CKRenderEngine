@@ -1465,8 +1465,10 @@ void CKFixedFunctionPipeline::SetCurrentProgramBinding(const CKFFShaderKey &shad
     m_CurrentSpecializationInfo = binding.Specialization;
 }
 
-CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount() const {
-    if (m_CurrentShaderKey.VS.GetHasPositionT())
+CKDWORD CKFixedFunctionPipeline::CurrentTextureMatrixUploadCount(
+    const CKFFUniformEmissionContext *context) const
+{
+    if (!context || context->PositionT)
         return 0;
     CKDWORD count = 0;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
@@ -1783,7 +1785,7 @@ void CKFixedFunctionPipeline::CKFFEmitTextureMatrixUniforms(const CKFFUniformEmi
         return;
     CKFFUniformSink *sink = context->Uniforms;
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount();
+    const CKDWORD texMatrixCount = CurrentTextureMatrixUploadCount(context);
     if (texMatrixCount > 0)
         EmitUniform(sink, u.u_texMatrix, m_TexMatrix, texMatrixCount, texMatrixCount * 4, FALSE);
 }
