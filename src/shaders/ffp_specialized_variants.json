@@ -4534,6 +4534,79 @@
           }
     },
     {
+          "name": "opengl_level_3d_stage0_modulate_flat",
+          "vs": "3d",
+          "key": {
+                "vsTexcoordDeclMask": 4793490,
+                "vsTexGen": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "vsTexCoordIndex": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7
+                ],
+                "vsTexTransformFlags": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                ],
+                "lastActiveTextureStage": 0,
+                "pixelFogMode": 0,
+                "rangeFog": false,
+                "vsBits": 33570845,
+                "globalSpecularEnable": false,
+                "alphaTestEnable": false,
+                "alphaFunc": 0,
+                "fogEnable": false,
+                "vertexFogMode": 0,
+                "flatShade": true,
+                "stages": [
+                      {
+                            "colorOp": 4,
+                            "colorArg0": 1,
+                            "colorArg1": 2,
+                            "colorArg2": 1,
+                            "alphaOp": 4,
+                            "alphaArg0": 1,
+                            "alphaArg1": 2,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      },
+                      {
+                            "colorOp": 1,
+                            "colorArg0": 1,
+                            "colorArg1": 0,
+                            "colorArg2": 1,
+                            "alphaOp": 1,
+                            "alphaArg0": 1,
+                            "alphaArg1": 0,
+                            "alphaArg2": 1,
+                            "resultIsTemp": false,
+                            "projectedSampler": false
+                      }
+                ]
+          }
+    },
+    {
           "name": "opengl_menu_3d_stage0_modulate_specular",
           "vs": "3d",
           "key": {
