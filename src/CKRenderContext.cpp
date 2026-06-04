@@ -3452,12 +3452,7 @@ void RCKRenderContext::CallSprite3DBatches() {
                 dpData.SpecularColorPtr = &vertices->Specular;
                 dpData.TexCoordPtr = &vertices->tu;
 
-                const CKRenderView saved3DView = m_Current3DView;
-                if (material->IsAlphaTransparent() || material->AlphaBlendEnabled() ||
-                    m_FFPipeline.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
-                    m_Current3DView = CKRP_VIEW_TRANSPARENT;
                 DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, &dpData);
-                m_Current3DView = saved3DView;
             }
         }
 
