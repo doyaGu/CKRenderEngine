@@ -48,7 +48,7 @@ def shader_by_name(name: str) -> dict[str, object]:
 BACKENDS = [
     {"name": "dx11", "platform": "windows", "profile": "s_5_0"},
     {"name": "dx12", "platform": "windows", "profile": "s_6_0"},
-    {"name": "spirv", "platform": "linux", "profile": "spirv"},
+    {"name": "spirv", "platform": "linux", "profile": "spirv10-10"},
     {"name": "glsl", "platform": "linux", "profile": "150"},
     {"name": "metal", "platform": "osx", "profile": "metal"},
 ]
@@ -110,6 +110,12 @@ def include_dirs(script_dir: Path) -> list[Path]:
     ]
 
 
+def varying_def_for_backend(script_dir: Path, backend: dict[str, str]) -> Path:
+    if backend["name"] in {"glsl", "spirv"}:
+        return script_dir / "varying_no_flat_color.def.sc"
+    return script_dir / "varying.def.sc"
+
+
 def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
                 backend: dict[str, str], output: Path,
                 defines: list[str] | None = None) -> None:
@@ -120,7 +126,7 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         "--type", shader["stage"],
         "--platform", backend["platform"],
         "-p", backend["profile"],
-        "--varyingdef", str(script_dir / "varying.def.sc"),
+        "--varyingdef", str(varying_def_for_backend(script_dir, backend)),
     ]
     if defines:
         cmd.extend(["--define", ";".join(defines)])
@@ -989,6 +995,8 @@ def main() -> int:
     parser.add_argument("--shaderc", help="Path to bgfx shaderc executable.")
     parser.add_argument("--backend", choices=[b["name"] for b in BACKENDS],
                         action="append", help="Backend to compile. May be repeated.")
+    parser.add_argument("--skip-module-table", action="store_true",
+                        help="Compile selected backend headers without rewriting the shared module table.")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
@@ -1015,7 +1023,8 @@ def main() -> int:
                                      specialized_variants, sampler_layouts)
         validate_sampler_layout_headers(generated_dir, selected, BACKENDS, sampler_layouts)
         check_sampler_layout_size_budget(generated_dir)
-        write_specialized_module_table(generated_dir, selected, specialized_variants, sampler_layouts)
+        if not args.skip_module_table:
+            write_specialized_module_table(generated_dir, selected, specialized_variants, sampler_layouts)
 
     print("All shaders compiled successfully.")
     return 0
