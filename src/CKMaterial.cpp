@@ -2035,4 +2035,6 @@ void RCKMaterial::FlushSprite3DBatch() {
     m_Sprite3DBatch->m_Indices.Resize(0);
     m_Sprite3DBatch->m_Vertices.Resize(0);
     m_Sprite3DBatch->m_Flags = 0;
+    m_Sprite3DBatch->m_IndexCount = 0;
+    m_Sprite3DBatch->m_VertexCount = 0;
 }
