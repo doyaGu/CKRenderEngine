@@ -274,7 +274,11 @@ int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
 int CKFFResolveActiveTextureCount(CKDWORD dpFlags,
                                   const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
                                   const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]) {
-    int count = CKFFActiveTextureCountFromDPFlags(dpFlags);
+    const int declaredCount = CKFFActiveTextureCountFromDPFlags(dpFlags);
+    if (declaredCount > 0)
+        return declaredCount;
+
+    int count = 0;
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKDWORD op = stageStates[stage][CKRST_TSS_OP];
         if (textureHandles[stage] != 0 ||
