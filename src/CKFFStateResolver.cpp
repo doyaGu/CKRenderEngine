@@ -118,7 +118,7 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     out->ActiveTextureCount = activeTextureCount;
     if (out->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
         out->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+    for (CKDWORD stage = 0; stage < out->ActiveTextureCount; ++stage) {
         if (state.TextureHandles[stage] != 0)
             out->TextureBoundMask |= (1u << stage);
     }
