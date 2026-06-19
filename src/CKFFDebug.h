@@ -205,6 +205,7 @@ private:
                                    const VxDrawPrimitiveData *data) const;
     void LogPositionTSamples(const float *viewport, const VxDrawPrimitiveData *data) const;
     const char *PrimitiveName(VXPRIMITIVETYPE type) const;
+    const char *VertexBlendName(CKDWORD vertexBlend) const;
 
     int m_DrawLogCount;
     int m_Real3DDrawLogCount;

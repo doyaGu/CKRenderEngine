@@ -115,10 +115,13 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
 
     if (Is3DView(info.View) && config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
+        const CKDWORD vertexBlend = info.DrawState->GetRenderState(VXRENDERSTATE_VERTEXBLEND);
         CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
+                   "3D contract #%d: serial=%d view=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X dpFlags=0x%X fmt=0x%X stride=%u positionStride=%u hasNormal=%u vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
                    m_3DContractLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
-                   info.Data->VertexCount, info.IndexCount, info.Data->Flags, info.FormatFlags, stride,
+                   info.Data->VertexCount, info.IndexCount, info.Data->Flags, info.Data->Flags, info.FormatFlags,
+                   stride, info.Data->PositionStride, info.Data->NormalPtr ? 1u : 0u,
+                   VertexBlendName(vertexBlend), vertexBlend,
                    info.StateDesc->VS.GetLightingEnabled() ? 1 : 0, info.ActiveTextureCount,
                    info.Stage0.ColorOp, info.Stage0.ColorArg1, info.Stage0.ColorArg2,
                    info.Stage0.AlphaOp, info.Stage0.AlphaArg1, info.Stage0.AlphaArg2,
@@ -214,12 +217,15 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
     }
 
     if (Is3DView(info.View) && config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
+        const CKDWORD vertexBlend = info.DrawState->GetRenderState(VXRENDERSTATE_VERTEXBLEND);
         CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
+                   "3D contract #%d: serial=%d view=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X dpFlags=0x%X fmt=0x%X layout=%u hasNormal=%u positionStride=0 vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
                    m_3DContractLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
                    info.VertexBuffer, info.IndexBuffer, info.BaseVertex, info.VertexCount,
-                   info.StartIndex, info.PersistentIndexCount, info.DPFlags, info.FormatFlags,
-                   info.VertexLayout, info.StateDesc->VS.GetLightingEnabled() ? 1 : 0,
+                   info.StartIndex, info.PersistentIndexCount, info.DPFlags, info.DPFlags, info.FormatFlags,
+                   info.VertexLayout, info.StateDesc->VS.GetHasNormal() ? 1u : 0u,
+                   VertexBlendName(vertexBlend), vertexBlend,
+                   info.StateDesc->VS.GetLightingEnabled() ? 1 : 0,
                    info.ActiveTextureCount, info.Stage0.ColorOp, info.Stage0.ColorArg1,
                    info.Stage0.ColorArg2, info.Stage0.AlphaOp, info.Stage0.AlphaArg1,
                    info.Stage0.AlphaArg2, info.Stage0.Texture,
@@ -255,6 +261,16 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
 
 bool CKFFDebugState::Is3DView(CKRenderView view) const {
     return view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT;
+}
+
+const char *CKFFDebugState::VertexBlendName(CKDWORD vertexBlend) const {
+    if (vertexBlend == VXVBLEND_DISABLE) return "DISABLE";
+    if (vertexBlend == VXVBLEND_TWEENING) return "TWEENING";
+    if (vertexBlend == VXVBLEND_0WEIGHTS) return "0WEIGHTS";
+    if (vertexBlend == VXVBLEND_1WEIGHTS) return "1WEIGHTS";
+    if (vertexBlend == VXVBLEND_2WEIGHTS) return "2WEIGHTS";
+    if (vertexBlend == VXVBLEND_3WEIGHTS) return "3WEIGHTS";
+    return "UNKNOWN";
 }
 
 bool CKFFDebugState::HasNonIdentityViewTranslation(const VxMatrix &view) const {

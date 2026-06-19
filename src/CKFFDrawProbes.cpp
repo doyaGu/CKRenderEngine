@@ -2,6 +2,7 @@
 
 #include "CKDebugLogger.h"
 #include "CKDrawStateCache.h"
+#include "CKFFDebug.h"
 #include "CKFFRenderPacketQueue.h"
 #include "CKFFRenderPacketReplay.h"
 
