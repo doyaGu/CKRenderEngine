@@ -138,19 +138,6 @@ private:
                                  CKDWORD dpFlags,
                                  CKDWORD formatFlags,
                                  CKDWORD vertexLayout);
-    void SubmitVertexBufferPacketImmediate(CKFixedFunctionPipeline &pipeline,
-                                           CKRasterizerEncoder *encoder,
-                                           CKRenderView view,
-                                           VXPRIMITIVETYPE type,
-                                           CKDWORD vb,
-                                           CKDWORD ib,
-                                           CKDWORD baseVertex,
-                                           CKDWORD vertexCount,
-                                           CKDWORD startIndex,
-                                           CKDWORD indexCount,
-                                           CKDWORD dpFlags,
-                                           CKDWORD formatFlags,
-                                           CKDWORD vertexLayout);
     void SortRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFixedFunctionPipeline &pipeline,
                                        CKFFRenderPacketReplayContext *context,
