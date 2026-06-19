@@ -2661,6 +2661,19 @@ static int PMGetParentVertex(CKProgressiveMesh *pm, int vertexIndex) {
     return vertexIndex;
 }
 
+bool CKRETestPMRemappedTriangleIsDegenerate(int vertexCount, const CKDWORD *parents, int parentCount, CKWORD a, CKWORD b, CKWORD c) {
+    CKProgressiveMesh pm;
+    pm.m_VertexCount = vertexCount;
+    pm.m_Data.Resize(parentCount);
+    for (int i = 0; i < parentCount; ++i)
+        pm.m_Data[i] = parents[i];
+
+    const CKWORD v0 = (CKWORD) PMGetParentVertex(&pm, a);
+    const CKWORD v1 = (CKWORD) PMGetParentVertex(&pm, b);
+    const CKWORD v2 = (CKWORD) PMGetParentVertex(&pm, c);
+    return v0 == v1 || v1 == v2 || v2 == v0;
+}
+
 /**
  * @brief Look up parent vertex with LOD limit for geo-morphing.
  *
@@ -2696,6 +2709,17 @@ static void VxVectorLerp(VxVector *result, float t, const VxVector *from, const 
     result->x = from->x + (to->x - from->x) * t;
     result->y = from->y + (to->y - from->y) * t;
     result->z = from->z + (to->z - from->z) * t;
+}
+
+static void PMInterpolateGeoMorphVertex(VxVertex *result, float t, const VxVertex *current, const VxVertex *target) {
+    VxVectorLerp(&result->m_Position, t, &current->m_Position, &target->m_Position);
+    VxVectorLerp(&result->m_Normal, t, &current->m_Normal, &target->m_Normal);
+    result->m_UV.x = current->m_UV.x + (target->m_UV.x - current->m_UV.x) * t;
+    result->m_UV.y = current->m_UV.y + (target->m_UV.y - current->m_UV.y) * t;
+}
+
+void CKRETestInterpolatePMGeoMorphVertex(VxVertex *result, float t, const VxVertex *current, const VxVertex *target) {
+    PMInterpolateGeoMorphVertex(result, t, current, target);
 }
 
 void RCKMesh::BuildRenderMesh() {
@@ -2819,16 +2843,7 @@ void RCKMesh::BuildRenderMesh() {
                     // Interpolate position
                     VxVertex *targetVert = &m_Vertices[tv];
                     VxVertex *currentVert = &m_Vertices[cv];
-                    VxVectorLerp(&interpVertices[tv].m_Position, lerpFactor, &currentVert->m_Position, &targetVert->m_Position);
-
-                    // Interpolate normal
-                    VxVectorLerp(&interpVertices[tv].m_Normal, lerpFactor, &currentVert->m_Normal, &targetVert->m_Normal);
-
-                    // Interpolate UV coordinates
-                    interpVertices[tv].m_UV.x = currentVert->m_UV.x * lerpFactor +
-                                                targetVert->m_UV.x * (1.0f - lerpFactor);
-                    interpVertices[tv].m_UV.y = currentVert->m_UV.y * lerpFactor +
-                                                targetVert->m_UV.y * (1.0f - lerpFactor);
+                    PMInterpolateGeoMorphVertex(&interpVertices[tv], lerpFactor, currentVert, targetVert);
                 }
             }
 
