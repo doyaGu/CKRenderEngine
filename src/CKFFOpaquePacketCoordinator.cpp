@@ -12,12 +12,15 @@ static CKDWORD CKFFCoordinatorShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs
     return (CKDWORD)((vs.Bits >> 35) & 3u);
 }
 
-static CKFFShaderKey CKFFCoordinatorBuildCurrentShaderKey(const CKFFPreparedState *prepared)
+static CKDWORD CKFFCoordinatorVertexBlendRejectReason(CKDWORD vertexBlend)
 {
-    if (!prepared)
-        return CKFFShaderKey();
-    return CKFFBuildShaderKey(prepared->StateDesc, prepared->TextureBoundMask);
+    if (vertexBlend == VXVBLEND_DISABLE)
+        return CKFF_RENDER_PACKET_ELIGIBLE;
+    return vertexBlend == VXVBLEND_TWEENING
+        ? CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING
+        : CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
 }
+
 
 static void CKFFCoordinatorInitVertexBufferPacketBuildResult(CKFFVertexBufferPacketBuildResult *result)
 {
@@ -88,7 +91,10 @@ CKDWORD CKFFOpaquePacketCoordinator::GetPacketObjectUniformRejectReason(
     const CKFFShaderKey &shaderKey = programContext->ShaderKey;
     if (shaderKey.VS.GetHasPositionT())
         return CKFF_RENDER_PACKET_ELIGIBLE;
-    if (CKFFCoordinatorShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+    const CKDWORD vertexBlendMode = CKFFCoordinatorShaderKeyVertexBlendMode(shaderKey.VS);
+    if (vertexBlendMode == CKFF_VERTEX_BLEND_TWEEN)
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING;
+    if (vertexBlendMode == CKFF_VERTEX_BLEND_NORMAL)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     return CKFF_RENDER_PACKET_ELIGIBLE;
 }
@@ -104,7 +110,10 @@ CKDWORD CKFFOpaquePacketCoordinator::GetVertexBufferPacketInstancingRejectReason
     const CKFFShaderKey &shaderKey = programContext->ShaderKey;
     if (shaderKey.VS.GetHasPositionT())
         return CKFF_RENDER_PACKET_REJECT_POSITIONT;
-    if (CKFFCoordinatorShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+    const CKDWORD vertexBlendMode = CKFFCoordinatorShaderKeyVertexBlendMode(shaderKey.VS);
+    if (vertexBlendMode == CKFF_VERTEX_BLEND_TWEEN)
+        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING;
+    if (vertexBlendMode == CKFF_VERTEX_BLEND_NORMAL)
         return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
     if (shaderKey.FS.LastActiveTextureStage >= 4)
         return CKFF_RENDER_PACKET_REJECT_TEXCOORD_RANGE;
@@ -132,7 +141,7 @@ CKDWORD CKFFOpaquePacketCoordinator::InternStaticUniformPayload(
     CKBOOL interned = FALSE;
     CKDWORD index = m_Queue.InternStaticUniformPayload(payload, &interned);
     if (interned)
-        CKFF_PROBE(pipeline.m_Probes, OnRenderPacketStaticPayloadIntern());
+        CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketStaticPayloadIntern());
     return index;
 }
 
@@ -198,7 +207,7 @@ void CKFFOpaquePacketCoordinator::TrackOpaqueRenderPacketReject(CKFixedFunctionP
 
 void CKFFOpaquePacketCoordinator::UpdateAdaptiveStats(CKFixedFunctionPipeline &pipeline)
 {
-    CKFF_PROBE(pipeline.m_Probes, OnAdaptiveStats(m_Queue));
+    CKFF_PROBE(pipeline.GetProbes(), OnAdaptiveStats(m_Queue));
 }
 
 CKBOOL CKFFOpaquePacketCoordinator::CheckAdaptiveBypass(CKFixedFunctionPipeline &pipeline,
@@ -210,7 +219,7 @@ CKBOOL CKFFOpaquePacketCoordinator::CheckAdaptiveBypass(CKFixedFunctionPipeline 
         return FALSE;
 
     m_Queue.MarkAdaptiveBypass();
-    CKFF_PROBE(pipeline.m_Probes, OnAdaptiveBypass(m_Queue));
+    CKFF_PROBE(pipeline.GetProbes(), OnAdaptiveBypass(m_Queue));
     UpdateAdaptiveStats(pipeline);
     FlushRenderPackets(pipeline, encoder, TRUE, FALSE);
     return TRUE;
@@ -227,15 +236,15 @@ CKBOOL CKFFOpaquePacketCoordinator::ResolveVertexBufferPacketProgram(
         return FALSE;
 
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, pipeline.m_State.TextureHandles, pipeline.m_State.StageStates);
+        dpFlags, pipeline.GetStateStore().TextureHandles, pipeline.GetStateStore().StageStates);
     if (TryGetCachedProgram(dpFlags, formatFlags, activeTextureCount,
                             preparedState, programContext)) {
         return programContext->Program != 0 ? TRUE : FALSE;
     }
 
     pipeline.BuildCurrentPreparedState(preparedState, dpFlags, activeTextureCount, formatFlags);
-    CKFFShaderKey shaderKey = CKFFCoordinatorBuildCurrentShaderKey(preparedState);
-    CKFFProgramBinding programBinding = pipeline.m_ShaderCache.GetProgram(shaderKey);
+    CKFFShaderKey shaderKey = CKFFBuildShaderKeyFromPreparedState(preparedState);
+    CKFFProgramBinding programBinding = pipeline.GetShaderCache().GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
     CacheProgram(dpFlags, formatFlags, activeTextureCount, *preparedState, *programContext);
     return programContext->Program != 0 ? TRUE : FALSE;
@@ -264,10 +273,10 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->Program = programContext->Program;
     float depth = pipeline.ComputeDepthKey();
     packet->Depth = *(CKDWORD *)&depth;
-    packet->DrawState = pipeline.m_DrawStateCache.BuildDrawState(type);
-    packet->StencilRef = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
-    packet->StencilReadMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
-    packet->StencilWriteMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
+    packet->DrawState = pipeline.GetDrawStateCache().BuildDrawState(type);
+    packet->StencilRef = pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILREF);
+    packet->StencilReadMask = pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILMASK);
+    packet->StencilWriteMask = pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
     packet->VertexLayout = vertexLayout;
     packet->VertexBuffer = vb;
     packet->IndexBuffer = ib;
@@ -281,7 +290,7 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->CanInstance = FALSE;
     packet->InstancedProgram = 0;
     memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
-    packet->World = pipeline.m_State.World;
+    packet->World = pipeline.GetStateStore().World;
     packet->Marker[0] = '\0';
 }
 
@@ -310,13 +319,13 @@ CKBOOL CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketObjectUniforms(
     if (packet->CanInstance) {
         pipeline.UpdateViewProjectionCache();
         memset(&packet->ObjectUniforms, 0, sizeof(packet->ObjectUniforms));
-        packet->ObjectUniforms.MatrixUniform = pipeline.m_ShaderCache.GetUniforms().u_ffMatrices;
+        packet->ObjectUniforms.MatrixUniform = pipeline.GetShaderCache().GetUniforms().u_ffMatrices;
     } else {
         if (!pipeline.BuildPacketObjectUniforms(&packet->ObjectUniforms, programContext))
             return FALSE;
     }
-    packet->ViewProjection = pipeline.m_State.ViewProjection();
-    packet->ViewProjectionHash = pipeline.m_State.ViewProjectionHash();
+    packet->ViewProjection = pipeline.GetStateStore().ViewProjection();
+    packet->ViewProjectionHash = pipeline.GetStateStore().ViewProjectionHash();
     return TRUE;
 }
 
@@ -332,7 +341,7 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketInstancing(
 
     CKFFShaderKey instancedKey = programContext->ShaderKey;
     instancedKey.VS.SetInstanced(true);
-    CKFFProgramBinding instancedBinding = pipeline.m_ShaderCache.GetProgram(instancedKey);
+    CKFFProgramBinding instancedBinding = pipeline.GetShaderCache().GetProgram(instancedKey);
     CKFFProgramContext instancedContext;
     CKFFInitProgramContext(&instancedContext, instancedKey, instancedBinding);
     if (CKFFCanUseInstancedProgramForPacket(*programContext, instancedContext)) {
@@ -352,22 +361,22 @@ CKBOOL CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketStaticUniforms(
 
     if (m_Queue.TryUseCachedStaticUniform(&packet->StaticUniformIndex)) {
         if (collectStats)
-            CKFF_PROBE(pipeline.m_Probes, OnRenderPacketStaticPayloadReuse());
+            CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketStaticPayloadReuse());
     } else {
         CKFFRenderPacketUniformPayload staticPayload;
         CKBOOL payloadBuilt = FALSE;
         {
-            CKFF_SCOPE_TIME(pipeline.m_Probes, RenderPacketBuildUs);
+            CKFF_SCOPE_TIME(pipeline.GetProbes(), RenderPacketBuildUs);
             payloadBuilt = pipeline.BuildStaticUniformPayload(
                 &staticPayload, programContext, packet->ActiveTextureCount);
         }
         if (!payloadBuilt) {
             if (collectStats)
-                CKFF_PROBE(pipeline.m_Probes, OnRenderPacketUniformOverflow());
+                CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketUniformOverflow());
             return FALSE;
         }
         if (collectStats)
-            CKFF_PROBE(pipeline.m_Probes, OnRenderPacketStaticPayloadBuild());
+            CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketStaticPayloadBuild());
         packet->StaticUniformIndex = InternStaticUniformPayload(pipeline, staticPayload);
         m_Queue.CacheStaticUniform(packet->StaticUniformIndex);
     }
@@ -387,7 +396,7 @@ CKDWORD CKFFOpaquePacketCoordinator::GetOpaqueVertexBufferPacketRejectReason(
         return CKFF_RENDER_PACKET_REJECT_SORT_DISABLED;
     if (!m_PacketsAllowed)
         return CKFF_RENDER_PACKET_REJECT_PACKETS_DISALLOWED;
-    if (!pipeline.m_Context)
+    if (!pipeline.GetContext())
         return CKFF_RENDER_PACKET_REJECT_NO_CONTEXT;
     if (!vb)
         return CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
@@ -399,15 +408,19 @@ CKDWORD CKFFOpaquePacketCoordinator::GetOpaqueVertexBufferPacketRejectReason(
         return CKFF_RENDER_PACKET_REJECT_WRONG_VIEW;
     if (type != VX_TRIANGLELIST)
         return CKFF_RENDER_PACKET_REJECT_WRONG_PRIMITIVE;
-    if (pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
+    if (pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE))
         return CKFF_RENDER_PACKET_REJECT_ALPHA_BLEND;
-    if (!pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZENABLE))
+    if (!pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_ZENABLE))
         return CKFF_RENDER_PACKET_REJECT_Z_DISABLED;
-    if (!pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
+    if (!pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
         return CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED;
-    if (pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE)
-        return CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND;
-    if (pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
+    {
+        const CKDWORD vertexBlendReject = CKFFCoordinatorVertexBlendRejectReason(
+            pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_VERTEXBLEND));
+        if (vertexBlendReject != CKFF_RENDER_PACKET_ELIGIBLE)
+            return vertexBlendReject;
+    }
+    if (pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE))
         return CKFF_RENDER_PACKET_REJECT_INDEXED_VERTEX_BLEND;
     if (m_Queue.IsAdaptiveBypassed())
         return CKFF_RENDER_PACKET_REJECT_ADAPTIVE_BYPASS;
@@ -432,19 +445,23 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
         result->RejectReason = CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER;
         return;
     }
+    result->RejectReason = CKFFCoordinatorVertexBlendRejectReason(
+        pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_VERTEXBLEND));
+    if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE)
+        return;
 
     CKBOOL collectStats = FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    collectStats = pipeline.m_Probes.StatsEnabled() ? TRUE : FALSE;
+    collectStats = pipeline.GetProbes().StatsEnabled() ? TRUE : FALSE;
 #endif
-    CKFF_PROBE(pipeline.m_Probes, OnHardwareDraw());
+    CKFF_PROBE(pipeline.GetProbes(), OnHardwareDraw());
 
     CKFFPreparedState preparedState;
     CKFFProgramContext programContext;
     if (!ResolveVertexBufferPacketProgram(pipeline, dpFlags, formatFlags,
                                           &preparedState, &programContext)) {
         if (collectStats)
-            CKFF_PROBE(pipeline.m_Probes, OnProgramMiss());
+            CKFF_PROBE(pipeline.GetProbes(), OnProgramMiss());
         result->ProgramContext = programContext;
         result->RejectReason = CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
         return;
@@ -465,7 +482,7 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
 
     CKBOOL objectUniformsBuilt = FALSE;
     {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, RenderPacketBuildUs);
+        CKFF_SCOPE_TIME(pipeline.GetProbes(), RenderPacketBuildUs);
         objectUniformsBuilt = CaptureVertexBufferPacketObjectUniforms(
             pipeline, &result->Packet, &programContext);
     }
@@ -513,196 +530,23 @@ void CKFFOpaquePacketCoordinator::DrawVertexBuffer(
                                 vertexLayout);
         if (buildResult.Success) {
             TrackOpaqueRenderPacket(pipeline, buildResult.Packet);
-            CKFF_PROBE(pipeline.m_Probes, OnQueuedRenderPacket());
+            CKFF_PROBE(pipeline.GetProbes(), OnQueuedRenderPacket());
             CheckAdaptiveBypass(pipeline, encoder);
             return;
         }
         TrackOpaqueRenderPacketReject(pipeline, buildResult.RejectReason);
-        CKFF_PROBE(pipeline.m_Probes, OnRenderPacketFallback());
+        CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketFallback());
     } else {
         TrackOpaqueRenderPacketReject(pipeline, packetRejectReason);
     }
 
     if (HasPackets())
         FlushRenderPackets(pipeline, encoder, FALSE, FALSE);
-    SubmitVertexBufferPacketImmediate(pipeline, encoder, view, type, vb, ib,
-                                      baseVertex, vertexCount,
-                                      startIndex, indexCount,
-                                      dpFlags, formatFlags,
-                                      vertexLayout);
-}
-
-void CKFFOpaquePacketCoordinator::SubmitVertexBufferPacketImmediate(
-    CKFixedFunctionPipeline &pipeline,
-    CKRasterizerEncoder *encoder,
-    CKRenderView view,
-    VXPRIMITIVETYPE type,
-    CKDWORD vb,
-    CKDWORD ib,
-    CKDWORD baseVertex,
-    CKDWORD vertexCount,
-    CKDWORD startIndex,
-    CKDWORD indexCount,
-    CKDWORD dpFlags,
-    CKDWORD formatFlags,
-    CKDWORD vertexLayout)
-{
-    if (!encoder || !vb) return;
-    CKFF_PROBE(pipeline.m_Probes, OnHardwareDraw());
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    const bool debugLogging = pipeline.m_DebugState.AnyLoggingEnabled();
-    const int debugDrawSerial = debugLogging ? pipeline.m_DebugState.NextDrawSerial(view) : -1;
-    if (debugLogging) {
-        CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
-        debugInfo.Type = type;
-        debugInfo.World = &pipeline.m_State.World;
-        debugInfo.ViewMatrix = &pipeline.m_State.View;
-        debugInfo.Projection = &pipeline.m_State.Projection;
-        debugInfo.VertexBuffer = vb;
-        debugInfo.IndexBuffer = ib;
-        debugInfo.BaseVertex = baseVertex;
-        debugInfo.VertexCount = vertexCount;
-        debugInfo.StartIndex = startIndex;
-        debugInfo.PersistentIndexCount = indexCount;
-        debugInfo.DPFlags = dpFlags;
-        debugInfo.FormatFlags = formatFlags;
-        debugInfo.VertexLayout = vertexLayout;
-        debugInfo.DrawSerial = debugDrawSerial;
-        pipeline.m_DebugState.LogDrawVertexBufferHeader(debugInfo);
-    }
-#endif
-
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, pipeline.m_State.TextureHandles, pipeline.m_State.StageStates);
-    CKFFPreparedState preparedState;
-    CKFFShaderKey shaderKey;
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, StateUs);
-        pipeline.BuildCurrentPreparedState(&preparedState, dpFlags, activeTextureCount, formatFlags);
-        shaderKey = CKFFCoordinatorBuildCurrentShaderKey(&preparedState);
-    }
-    CKFFProgramBinding programBinding;
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, ProgramUs);
-        programBinding = pipeline.m_ShaderCache.GetProgram(shaderKey);
-    }
-    CKFFProgramContext programContext;
-    CKFFInitProgramContext(&programContext, shaderKey, programBinding);
-    CKDWORD program = programContext.Program;
-    if (program == 0) {
-        CKFF_PROBE(pipeline.m_Probes, OnProgramMiss());
-        return;
-    }
-    CKFF_PROBE(pipeline.m_Probes, OnProgram(program));
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (debugLogging) {
-        CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
-        debugInfo.Type = type;
-        debugInfo.World = &pipeline.m_State.World;
-        debugInfo.ViewMatrix = &pipeline.m_State.View;
-        debugInfo.Projection = &pipeline.m_State.Projection;
-        debugInfo.VertexBuffer = vb;
-        debugInfo.IndexBuffer = ib;
-        debugInfo.BaseVertex = baseVertex;
-        debugInfo.VertexCount = vertexCount;
-        debugInfo.StartIndex = startIndex;
-        debugInfo.PersistentIndexCount = indexCount;
-        debugInfo.DPFlags = dpFlags;
-        debugInfo.FormatFlags = formatFlags;
-        debugInfo.VertexLayout = vertexLayout;
-        debugInfo.DrawSerial = debugDrawSerial;
-        debugInfo.Program = program;
-        debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
-        debugInfo.ActiveLightCount = pipeline.m_State.ActiveLightCount;
-        debugInfo.StateDesc = &preparedState.StateDesc;
-        debugInfo.DrawState = &pipeline.m_DrawStateCache;
-        debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
-        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
-            pipeline.m_State.StageStates[0],
-            preparedState.ActiveTextureCount > 0 && pipeline.m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(pipeline.m_State.StageStates[0]);
-        debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(
-            pipeline.m_State.StageStates[0],
-            preparedState.ActiveTextureCount > 0,
-            pipeline.m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(
-            pipeline.m_State.StageStates[0],
-            preparedState.ActiveTextureCount > 0 && pipeline.m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(pipeline.m_State.StageStates[0]);
-        debugInfo.Stage0.Texture = pipeline.m_State.TextureHandles[0];
-        pipeline.m_DebugState.LogDrawVertexBufferDetails(debugInfo);
-    }
-#endif
-
-    CKFFTextureBindingSet textureBindingSet;
-    pipeline.BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
-
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, UniformUs);
-        pipeline.m_UniformEmitter.UploadUniforms(encoder, &programContext, preparedState.ActiveTextureCount);
-    }
-
-    CKFF_PROBE(pipeline.m_Probes, OnWorldMatrix(pipeline.m_State.World));
-    CKDWORD transformIdx = pipeline.m_Context->AllocTransform(&pipeline.m_State.World, 1);
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, TransformUs);
-        encoder->SetTransform(transformIdx, 1);
-    }
-    CKFF_PROBE(pipeline.m_Probes, OnTransformSet());
-
-    CKDrawState drawState;
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, DrawStateBuildUs);
-        drawState = pipeline.m_DrawStateCache.BuildDrawState(type);
-    }
-    CKFF_PROBE(pipeline.m_Probes, OnDrawState(drawState));
-    const CKDWORD stencilRef = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
-    const CKDWORD stencilReadMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK);
-    const CKDWORD stencilWriteMask = pipeline.m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, EncoderStateUs);
-        encoder->SetState(drawState);
-    }
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, StencilUs);
-        encoder->SetStencilRef(stencilRef);
-        encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
-    }
-
-    if (vertexLayout) {
-        {
-            CKFF_SCOPE_TIME(pipeline.m_Probes, LayoutUs);
-            encoder->SetVertexLayout(vertexLayout);
-        }
-        CKFF_PROBE(pipeline.m_Probes, OnVertexLayoutSet());
-    }
-
-    CKFF_PROBE(pipeline.m_Probes, OnVertexBuffers(vb, ib, vertexLayout));
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, BufferBindUs);
-        encoder->SetVertexBuffer(0, vb, baseVertex, vertexCount);
-        if (ib)
-            encoder->SetIndexBuffer(ib, startIndex, indexCount);
-    }
-    CKFF_PROBE(pipeline.m_Probes, OnVertexBufferSet());
-    if (ib)
-        CKFF_PROBE(pipeline.m_Probes, OnIndexBufferSet());
-
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, TextureUs);
-        pipeline.BindTextures(encoder, &textureBindingSet);
-    }
-
-    float depth = pipeline.ComputeDepthKey();
-    {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, SubmitUs);
-        encoder->Submit(view, program, *(CKDWORD *)&depth, pipeline.SubmitDiscardFlags());
-        CK_FRAME_COST_ADD_MESH_SUBMIT();
-        CK_FRAME_COST_ADD_SUBMITTED_DRAW();
-    }
-    CKFF_PROBE(pipeline.m_Probes, OnSubmittedDraw());
+    pipeline.SubmitVertexBufferImmediate(encoder, view, type, vb, ib,
+                                         baseVertex, vertexCount,
+                                         startIndex, indexCount,
+                                         dpFlags, formatFlags,
+                                         vertexLayout);
 }
 
 void CKFFOpaquePacketCoordinator::ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline)
@@ -726,12 +570,12 @@ void CKFFOpaquePacketCoordinator::InitRenderPacketReplayContext(
 
     memset(context, 0, sizeof(CKFFRenderPacketReplayContext));
     context->Encoder = encoder;
-    context->Context = pipeline.m_Context;
+    context->Context = pipeline.GetContext();
     context->Queue = &m_Queue;
     context->InstanceLayout = m_InstanceLayout;
     CKFFInitRenderPacketReplayDiagnostics(&context->Diagnostics);
-    CKFF_PROBE(pipeline.m_Probes,
-               FillReplayDiagnostics(&context->Diagnostics, pipeline.m_ShaderCache.GetUniforms()));
+    CKFF_PROBE(pipeline.GetProbes(),
+               FillReplayDiagnostics(&context->Diagnostics, pipeline.GetShaderCache().GetUniforms()));
 }
 
 void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pipeline,
@@ -742,7 +586,7 @@ void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pi
     if (!HasPackets())
         return;
     if (!encoder)
-        encoder = pipeline.m_RenderPipeline.GetEncoder();
+        encoder = pipeline.GetRenderPipeline().GetEncoder();
     if (!encoder) {
         ClearRenderPackets();
         return;
@@ -752,13 +596,13 @@ void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pi
     const CKBOOL directReplay = m_Queue.IsDirectReplay(forceDirectReplay);
     XArray<CKDWORD> indices;
     {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, RenderPacketSortUs);
+        CKFF_SCOPE_TIME(pipeline.GetProbes(), RenderPacketSortUs);
         if (!directReplay)
             SortRenderPackets(indices);
     }
     if (directReplay) {
         if (packetCount > 1)
-            CKFF_PROBE(pipeline.m_Probes, OnRenderPacketSortSkip());
+            CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketSortSkip());
     }
 
     if (allowAdaptiveLearning) {
@@ -771,15 +615,15 @@ void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pi
     CKFFRenderPacketReplayContext replayContext;
     InitRenderPacketReplayContext(pipeline, &replayContext, encoder);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (pipeline.m_Probes.TimingEnabled()) {
+    if (pipeline.GetProbes().TimingEnabled()) {
         CKDWORD runCount = 0;
         CKDWORD maxRun = 0;
         m_Queue.GetRunStats(&indices, directReplay, &runCount, &maxRun);
-        pipeline.m_Probes.OnRenderPacketRuns(runCount, maxRun);
+        pipeline.GetProbes().OnRenderPacketRuns(runCount, maxRun);
     }
 #endif
     {
-        CKFF_SCOPE_TIME(pipeline.m_Probes, RenderPacketReplayUs);
+        CKFF_SCOPE_TIME(pipeline.GetProbes(), RenderPacketReplayUs);
         XArray<CKFFRenderPacketRunPlan> runPlans;
         m_Queue.BuildRunPlans(&indices, directReplay, m_InstancingEnabled, runPlans);
         const int planCount = runPlans.Size();
@@ -800,5 +644,5 @@ void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pi
     }
 
     ClearRenderPackets();
-    CKFF_PROBE(pipeline.m_Probes, OnRenderPacketFlush());
+    CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketFlush());
 }
