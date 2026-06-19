@@ -253,8 +253,13 @@ void CKFixedFunctionPipeline::DrawPrimitive(
         (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
          (type == VX_POINTLIST && m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE)))
             ? VX_TRIANGLELIST : type;
-    SubmitPrepared(encoder, view, drawStateType, &programContext, &textureBindingSet,
-                   0, 0, 0, 0, 0, 0, 0, CKFF_SUBMIT_PRIMITIVE);
+    CKFFDrawSubmission submission = {};
+    submission.View = view;
+    submission.DrawStateType = drawStateType;
+    submission.ProgramContext = &programContext;
+    submission.Textures = &textureBindingSet;
+    submission.Source = CKFF_SUBMIT_PRIMITIVE;
+    SubmitPrepared(encoder, submission);
 }
 
 void CKFixedFunctionPipeline::DrawVertexBuffer(
@@ -277,16 +282,13 @@ void CKFixedFunctionPipeline::DrawVertexBuffer(
 
 void CKFixedFunctionPipeline::SubmitPrepared(
     CKRasterizerEncoder *encoder,
-    CKRenderView view,
-    VXPRIMITIVETYPE drawStateType,
-    const CKFFProgramContext *programContext,
-    const CKFFTextureBindingSet *textures,
-    CKDWORD vb, CKDWORD ib,
-    CKDWORD baseVertex, CKDWORD vertexCount,
-    CKDWORD startIndex, CKDWORD indexCount,
-    CKDWORD vertexLayout,
-    CKFFSubmitSource source)
+    const CKFFDrawSubmission &submission)
 {
+    const CKFFProgramContext *programContext = submission.ProgramContext;
+    const CKFFTextureBindingSet *textures = submission.Textures;
+    if (!encoder || !programContext || !textures)
+        return;
+
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         m_UniformEmitter.UploadUniforms(encoder, programContext, textures->ActiveTextureCount);
@@ -303,7 +305,7 @@ void CKFixedFunctionPipeline::SubmitPrepared(
     CKDrawState drawState;
     {
         CKFF_SCOPE_TIME(m_Probes, DrawStateBuildUs);
-        drawState = m_DrawStateCache.BuildDrawState(drawStateType);
+        drawState = m_DrawStateCache.BuildDrawState(submission.DrawStateType);
     }
     CKFF_PROBE(m_Probes, OnDrawState(drawState));
     const CKDWORD stencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF);
@@ -319,24 +321,24 @@ void CKFixedFunctionPipeline::SubmitPrepared(
         encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
     }
 
-    if (vertexLayout) {
+    if (submission.VertexLayout) {
         {
             CKFF_SCOPE_TIME(m_Probes, LayoutUs);
-            encoder->SetVertexLayout(vertexLayout);
+            encoder->SetVertexLayout(submission.VertexLayout);
         }
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
     }
 
-    if (vb) {
-        CKFF_PROBE(m_Probes, OnVertexBuffers(vb, ib, vertexLayout));
+    if (submission.VertexBuffer) {
+        CKFF_PROBE(m_Probes, OnVertexBuffers(submission.VertexBuffer, submission.IndexBuffer, submission.VertexLayout));
         {
             CKFF_SCOPE_TIME(m_Probes, BufferBindUs);
-            encoder->SetVertexBuffer(0, vb, baseVertex, vertexCount);
-            if (ib)
-                encoder->SetIndexBuffer(ib, startIndex, indexCount);
+            encoder->SetVertexBuffer(0, submission.VertexBuffer, submission.BaseVertex, submission.VertexCount);
+            if (submission.IndexBuffer)
+                encoder->SetIndexBuffer(submission.IndexBuffer, submission.StartIndex, submission.IndexCount);
         }
         CKFF_PROBE(m_Probes, OnVertexBufferSet());
-        if (ib)
+        if (submission.IndexBuffer)
             CKFF_PROBE(m_Probes, OnIndexBufferSet());
     }
 
@@ -348,8 +350,8 @@ void CKFixedFunctionPipeline::SubmitPrepared(
     float depth = ComputeDepthKey();
     {
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
-        encoder->Submit(view, programContext->Program, *(CKDWORD *)&depth, SubmitDiscardFlags());
-        if (source == CKFF_SUBMIT_PRIMITIVE) {
+        encoder->Submit(submission.View, programContext->Program, *(CKDWORD *)&depth, SubmitDiscardFlags());
+        if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {
             CK_FRAME_COST_ADD_MESH_SUBMIT();
@@ -465,9 +467,20 @@ void CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     CKFFTextureBindingSet textureBindingSet;
     BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount);
 
-    SubmitPrepared(encoder, view, type, &programContext, &textureBindingSet,
-                   vb, ib, baseVertex, vertexCount, startIndex, indexCount,
-                   vertexLayout, CKFF_SUBMIT_VERTEX_BUFFER);
+    CKFFDrawSubmission submission = {};
+    submission.View = view;
+    submission.DrawStateType = type;
+    submission.ProgramContext = &programContext;
+    submission.Textures = &textureBindingSet;
+    submission.VertexBuffer = vb;
+    submission.IndexBuffer = ib;
+    submission.BaseVertex = baseVertex;
+    submission.VertexCount = vertexCount;
+    submission.StartIndex = startIndex;
+    submission.IndexCount = indexCount;
+    submission.VertexLayout = vertexLayout;
+    submission.Source = CKFF_SUBMIT_VERTEX_BUFFER;
+    SubmitPrepared(encoder, submission);
 }
 
 void CKFixedFunctionPipeline::BuildCurrentPreparedState(
