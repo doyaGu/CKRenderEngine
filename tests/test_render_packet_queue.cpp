@@ -487,6 +487,40 @@ void OpaquePacketVertexBlendFallsBackImmediate()
     ffp.Shutdown();
 }
 
+void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+
+    CKFFVertexBufferPacketBuildResult tweenBuild;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &tweenBuild, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM,
+        CKFF_VF_POSITION | CKFF_VF_NORMAL,
+        77);
+    TestCheck(!tweenBuild.Success,
+              "TWEENING packet build must fail before capture");
+    TestCheck(tweenBuild.RejectReason == CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING,
+              "TWEENING packet build must report a tween-specific reject reason");
+
+    DrawPacketCandidateWithFormat(&ffp, &context, CKRP_VIEW_OPAQUE3D,
+                                  100, 200,
+                                  CKFF_VF_POSITION | CKFF_VF_NORMAL);
+
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "TWEENING opaque mesh must fallback immediate until second position/normal inputs exist");
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "TWEENING fallback must submit immediately");
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketTextureHandleChangeKeepsStaticPayload()
 {
     FFPDiagnosticDriver driverA;
@@ -1458,6 +1492,8 @@ int main()
               &OpaquePacketInstancedMatrixMatchesObjectUniformMVP);
     tests.Run("Opaque packet vertex blend falls back immediate",
               &OpaquePacketVertexBlendFallsBackImmediate);
+    tests.Run("Opaque packet TWEENING reports specific reject and falls back immediate",
+              &OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet texture kind change rebuilds static payload",
