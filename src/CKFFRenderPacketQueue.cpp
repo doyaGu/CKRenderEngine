@@ -29,6 +29,7 @@ CKFFRenderPacketQueue::CKFFRenderPacketQueue()
       m_AdaptiveFrameEndEvaluations(0),
       m_AdaptiveFrameEndRunBypasses(0)
 {
+    ResetStaticUniformPayloadBuckets();
     memset(&m_FirstPacketSortKey, 0, sizeof(m_FirstPacketSortKey));
     memset(&m_LastPacketSortKey, 0, sizeof(m_LastPacketSortKey));
 }
@@ -37,6 +38,7 @@ void CKFFRenderPacketQueue::Clear()
 {
     m_Packets.Resize(0);
     m_StaticUniformPayloads.Resize(0);
+    ResetStaticUniformPayloadBuckets();
     m_StaticUniformCacheValid = FALSE;
     m_AlreadySorted = TRUE;
     m_SingleKey = TRUE;
@@ -133,21 +135,61 @@ CKDWORD CKFFRenderPacketQueue::InternStaticUniformPayload(const CKFFRenderPacket
                                                          CKBOOL *interned)
 {
     const int count = m_StaticUniformPayloads.Size();
-    const int scanCount = count < CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT
-        ? count
-        : CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT;
     if (interned)
         *interned = FALSE;
 
-    for (int i = 0; i < scanCount; ++i) {
-        if (CKFFRenderPacketUniformPayloadEquals(m_StaticUniformPayloads[i], payload))
-            return (CKDWORD)i;
+    if (m_StaticUniformBucketHeads.Size() != CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT ||
+        m_StaticUniformBucketEntries.Size() != count)
+        RebuildStaticUniformPayloadBuckets();
+
+    const CKDWORD bucket = payload.Hash & (CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT - 1u);
+    CKDWORD entryIndex = m_StaticUniformBucketHeads[(int)bucket];
+    while (entryIndex != CKFF_RENDER_PACKET_STATIC_INTERN_INVALID_INDEX &&
+           entryIndex < (CKDWORD)m_StaticUniformBucketEntries.Size()) {
+        const CKFFStaticUniformPayloadBucketEntry &entry = m_StaticUniformBucketEntries[(int)entryIndex];
+        if (entry.Hash == payload.Hash && entry.PayloadIndex < (CKDWORD)count) {
+            if (CKFFRenderPacketUniformPayloadEquals(m_StaticUniformPayloads[(int)entry.PayloadIndex], payload))
+                return entry.PayloadIndex;
+        }
+        entryIndex = entry.Next;
     }
 
     m_StaticUniformPayloads.PushBack(payload);
+    AddStaticUniformPayloadBucketEntry((CKDWORD)count);
     if (interned)
         *interned = TRUE;
     return (CKDWORD)count;
+}
+
+void CKFFRenderPacketQueue::ResetStaticUniformPayloadBuckets()
+{
+    if (m_StaticUniformBucketHeads.Size() != CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT)
+        m_StaticUniformBucketHeads.Resize(CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT);
+    for (int i = 0; i < m_StaticUniformBucketHeads.Size(); ++i)
+        m_StaticUniformBucketHeads[i] = CKFF_RENDER_PACKET_STATIC_INTERN_INVALID_INDEX;
+    m_StaticUniformBucketEntries.Resize(0);
+}
+
+void CKFFRenderPacketQueue::RebuildStaticUniformPayloadBuckets()
+{
+    ResetStaticUniformPayloadBuckets();
+    for (int i = 0; i < m_StaticUniformPayloads.Size(); ++i)
+        AddStaticUniformPayloadBucketEntry((CKDWORD)i);
+}
+
+void CKFFRenderPacketQueue::AddStaticUniformPayloadBucketEntry(CKDWORD payloadIndex)
+{
+    if (payloadIndex >= (CKDWORD)m_StaticUniformPayloads.Size())
+        return;
+
+    const CKDWORD hash = m_StaticUniformPayloads[(int)payloadIndex].Hash;
+    const CKDWORD bucket = hash & (CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT - 1u);
+    CKFFStaticUniformPayloadBucketEntry entry;
+    entry.Hash = hash;
+    entry.PayloadIndex = payloadIndex;
+    entry.Next = m_StaticUniformBucketHeads[(int)bucket];
+    m_StaticUniformBucketHeads[(int)bucket] = (CKDWORD)m_StaticUniformBucketEntries.Size();
+    m_StaticUniformBucketEntries.PushBack(entry);
 }
 
 void CKFFRenderPacketQueue::BuildSortKey(CKRenderPacket *packet) const

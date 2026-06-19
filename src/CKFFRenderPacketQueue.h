@@ -5,7 +5,8 @@
 #include "XArray.h"
 
 #define CKFF_RENDER_PACKET_MIN_SORT_COUNT 64
-#define CKFF_RENDER_PACKET_STATIC_INTERN_SCAN_LIMIT 128
+#define CKFF_RENDER_PACKET_STATIC_INTERN_BUCKET_COUNT 256
+#define CKFF_RENDER_PACKET_STATIC_INTERN_INVALID_INDEX 0xFFFFFFFFu
 #define CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT 32
 #define CKFF_RENDER_PACKET_ADAPTIVE_SAMPLE_COUNT 128
 #define CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL 16
@@ -13,6 +14,12 @@
 #define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_BINDING 1
 #define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_RUN 2
 #define CKFF_RENDER_PACKET_ADAPTIVE_BYPASS_REASON_GENERAL 3
+
+struct CKFFStaticUniformPayloadBucketEntry {
+    CKDWORD Hash;
+    CKDWORD PayloadIndex;
+    CKDWORD Next;
+};
 
 class CKFFRenderPacketQueue {
 public:
@@ -78,9 +85,14 @@ private:
     CKDWORD EstimateSavedBinds(const CKRenderPacket &packet) const;
     CKDWORD EstimateRepeatBinds(const CKRenderPacket &packet) const;
     CKBOOL ShouldStartNoRunCooldown() const;
+    void ResetStaticUniformPayloadBuckets();
+    void RebuildStaticUniformPayloadBuckets();
+    void AddStaticUniformPayloadBucketEntry(CKDWORD payloadIndex);
 
     XArray<CKRenderPacket> m_Packets;
     XArray<CKFFRenderPacketUniformPayload> m_StaticUniformPayloads;
+    XArray<CKDWORD> m_StaticUniformBucketHeads;
+    XArray<CKFFStaticUniformPayloadBucketEntry> m_StaticUniformBucketEntries;
     CKDWORD m_PacketSerial;
     CKDWORD m_StaticUniformDirtySerial;
     CKDWORD m_StaticUniformCachedSerial;

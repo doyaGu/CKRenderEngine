@@ -162,6 +162,21 @@ private:
     enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
     enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
+    struct CKFFDrawSubmission {
+        CKRenderView View;
+        VXPRIMITIVETYPE DrawStateType;
+        const CKFFProgramContext *ProgramContext;
+        const CKFFTextureBindingSet *Textures;
+        CKDWORD VertexBuffer;
+        CKDWORD IndexBuffer;
+        CKDWORD BaseVertex;
+        CKDWORD VertexCount;
+        CKDWORD StartIndex;
+        CKDWORD IndexCount;
+        CKDWORD VertexLayout;
+        CKFFSubmitSource Source;
+    };
+
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
     CKBOOL m_DisableMipmaps;
@@ -190,16 +205,7 @@ private:
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
-    void SubmitPrepared(CKRasterizerEncoder *encoder,
-                        CKRenderView view,
-                        VXPRIMITIVETYPE drawStateType,
-                        const CKFFProgramContext *programContext,
-                        const CKFFTextureBindingSet *textures,
-                        CKDWORD vb, CKDWORD ib,
-                        CKDWORD baseVertex, CKDWORD vertexCount,
-                        CKDWORD startIndex, CKDWORD indexCount,
-                        CKDWORD vertexLayout,
-                        CKFFSubmitSource source);
+    void SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
