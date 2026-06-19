@@ -11,6 +11,11 @@ void BuildNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVe
 int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direction, VxIntersectionDesc *desc, CK_RAYINTERSECTION mode, const VxMatrix &worldMatrix);
 void NormalizeGenericFunc(VxVertex *vertices, int count);
 
+#if CKRE_ENABLE_TEST_ACCESS
+void CKRETestInterpolatePMGeoMorphVertex(VxVertex *result, float t, const VxVertex *current, const VxVertex *target);
+bool CKRETestPMRemappedTriangleIsDegenerate(int vertexCount, const CKDWORD *parents, int parentCount, CKWORD a, CKWORD b, CKWORD c);
+#endif
+
 class RCKMesh : public CKMesh {
     // Friend function for ray intersection (needs access to protected members)
     friend int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direction, 
