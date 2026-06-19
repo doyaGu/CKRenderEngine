@@ -229,6 +229,7 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
         stateDesc.FS.SetStageProjectedSampler(stage, (state.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
         stateDesc.FS.SetStageSamplerType(stage, CKFFResolverSamplerTypeFromTextureFlags(state.TextureFlags[stage]));
         stateDesc.FS.SetStageSamplerCompareFunc(stage, state.StageStates[stage][CKRST_TSS_COMPAREFUNC]);
+        stateDesc.FS.SetStageMirrorOnceMask(stage, CKFFResolveMirrorOnceAddressMask(state.StageStates[stage]) >> 9);
 
         if (colorOp == CKRST_TOP_DISABLE)
             break;

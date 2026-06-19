@@ -161,6 +161,24 @@ CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage) {
     return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ResultArg;
 }
 
+CKDWORD CKFFResolveMirrorOnceAddressMask(const CKDWORD *stage) {
+    if (!stage)
+        return 0;
+
+    const CKDWORD base = stage[CKRST_TSS_ADDRESS];
+    const CKDWORD addressU = stage[CKRST_TSS_ADDRESSU] != 0 ? stage[CKRST_TSS_ADDRESSU] : base;
+    const CKDWORD addressV = stage[CKRST_TSS_ADDRESSV] != 0 ? stage[CKRST_TSS_ADDRESSV] : base;
+    const CKDWORD addressW = stage[CKRST_TSS_ADDRESW] != 0 ? stage[CKRST_TSS_ADDRESW] : base;
+    CKDWORD mask = 0;
+    if (addressU == VXTEXTURE_ADDRESSMIRRORONCE)
+        mask |= CKFF_TTF_MIRRORONCE_U;
+    if (addressV == VXTEXTURE_ADDRESSMIRRORONCE)
+        mask |= CKFF_TTF_MIRRORONCE_V;
+    if (addressW == VXTEXTURE_ADDRESSMIRRORONCE)
+        mask |= CKFF_TTF_MIRRORONCE_W;
+    return mask;
+}
+
 static float StageStateAsFloat(CKDWORD value) {
     float result = 0.0f;
     memcpy(&result, &value, sizeof(float));
@@ -220,17 +238,20 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
     state.Count = 0;
     state.Indexed = FALSE;
     state.Supported = TRUE;
+    state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_NONE;
 
     if (vertexBlend == VXVBLEND_DISABLE)
         return state;
 
     if ((formatFlags & CKFF_VF_POSITIONT) != 0) {
         state.Supported = FALSE;
+        state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_POSITIONT;
         return state;
     }
 
     if (vertexBlend == VXVBLEND_TWEENING) {
         state.Supported = FALSE;
+        state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_TWEENING;
         return state;
     }
 
@@ -241,6 +262,11 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
     const bool hasBlendInput = (count == 0) || ((formatFlags & CKFF_VF_BLENDWEIGHT) != 0);
     const bool hasIndexInput = !indexed || ((formatFlags & CKFF_VF_BLENDINDEX) != 0);
     state.Supported = (hasBlendInput && hasIndexInput) ? TRUE : FALSE;
+    if (!state.Supported) {
+        state.UnsupportedReason = !hasBlendInput
+            ? CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_WEIGHT
+            : CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_INDEX;
+    }
     if (state.Supported) {
         state.Mode = CKFF_VERTEX_BLEND_NORMAL;
         state.Count = count;

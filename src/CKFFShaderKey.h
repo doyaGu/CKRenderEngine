@@ -44,6 +44,7 @@ struct CKFFShaderKeyFSStage {
     bool ProjectedSampler;
     CKDWORD SamplerType;
     CKDWORD SamplerCompareFunc;
+    CKDWORD MirrorOnceMask;
 };
 
 struct CKFFShaderKeyFS {

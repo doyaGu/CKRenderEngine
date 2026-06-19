@@ -230,6 +230,7 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_postprocess.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_specialized_variants.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 

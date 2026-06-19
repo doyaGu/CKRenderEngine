@@ -31,6 +31,15 @@ struct CKFFVertexBlendState {
     CKDWORD Count;
     CKBOOL Indexed;
     CKBOOL Supported;
+    CKDWORD UnsupportedReason;
+};
+
+enum CKFFVertexBlendUnsupportedReason {
+    CKFF_VERTEX_BLEND_UNSUPPORTED_NONE = 0,
+    CKFF_VERTEX_BLEND_UNSUPPORTED_POSITIONT,
+    CKFF_VERTEX_BLEND_UNSUPPORTED_TWEENING,
+    CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_WEIGHT,
+    CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_INDEX
 };
 
 enum CKFFTexcoordGenerationMode {
@@ -70,6 +79,13 @@ enum CKFFShaderSemantic {
     CKFF_SHADER_SEMANTIC_COUNT
 };
 
+static const CKDWORD CKFF_TTF_MIRRORONCE_U = 0x200u;
+static const CKDWORD CKFF_TTF_MIRRORONCE_V = 0x400u;
+static const CKDWORD CKFF_TTF_MIRRORONCE_W = 0x800u;
+static const CKDWORD CKFF_TTF_MIRRORONCE_MASK = CKFF_TTF_MIRRORONCE_U |
+                                                CKFF_TTF_MIRRORONCE_V |
+                                                CKFF_TTF_MIRRORONCE_W;
+
 CKDWORD CKFFBaseTextureArg(CKDWORD arg);
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
@@ -87,6 +103,7 @@ CKDWORD CKFFResolveStageAlphaArg0(const CKDWORD *stage);
 CKDWORD CKFFResolveStageAlphaArg1(const CKDWORD *stage, bool hasTexture);
 CKDWORD CKFFResolveStageAlphaArg2(const CKDWORD *stage);
 CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage);
+CKDWORD CKFFResolveMirrorOnceAddressMask(const CKDWORD *stage);
 
 CK_ADDRESS_MODE CKFFTranslateAddressMode(CKDWORD mode);
 void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]);

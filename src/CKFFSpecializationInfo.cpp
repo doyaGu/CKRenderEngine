@@ -54,6 +54,8 @@ CKFFSpecBitfield CKFFSpecializationInfo::Layout(CKFFSpecConstantId id) {
         return {5, 16, 16};
     case CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK:
         return {3, 0, 32};
+    case CKFF_SPEC_MIRRORONCE_SAMPLER_MASK:
+        return {4, 19, 12};
     default:
         break;
     }
