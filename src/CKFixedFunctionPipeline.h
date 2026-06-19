@@ -112,11 +112,17 @@ public:
 
     // === Subsystem access ===
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
+    const CKDrawStateCache &GetDrawStateCache() const { return m_DrawStateCache; }
     CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
     CKTransientGeometry &GetTransientGeometry() { return m_TransientGeometry; }
     CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
     CKRenderPipeline &GetRenderPipeline() { return m_RenderPipeline; }
     CKFrustumCuller &GetFrustumCuller() { return m_FrustumCuller; }
+    CKRasterizerContext *GetContext() const { return m_Context; }
+    const CKFFStateStore &GetStateStore() const { return m_State; }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    CKFFDrawProbes &GetProbes() { return m_Probes; }
+#endif
 
     // === Matrix access ===
     const VxMatrix &GetWorldMatrix() const { return m_State.World; }
@@ -129,13 +135,32 @@ public:
     const CKFFFrameStats &GetFrameStats() const;
 #endif
 
+    // === Packet-build support ===
+    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
+                                   CKDWORD formatFlags = 0,
+                                   const CKBYTE *texcoordComponentCounts = nullptr);
+    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
+    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
+                                     const CKFFProgramContext *programContext,
+                                     CKDWORD activeTextureCount);
+    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
+                                     const CKFFProgramContext *programContext);
+    void UpdateViewProjectionCache();
+    float ComputeDepthKey() const;
+    void SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder, CKRenderView view,
+                                     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                                     CKDWORD baseVertex, CKDWORD vertexCount,
+                                     CKDWORD startIndex, CKDWORD indexCount,
+                                     CKDWORD dpFlags, CKDWORD formatFlags,
+                                     CKDWORD vertexLayout);
+
 private:
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
-    friend class CKFFOpaquePacketCoordinator;
 
     enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
+    enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
     CKRasterizerContext *m_Context;
     CKBOOL m_DisableTextureFiltering;
@@ -162,23 +187,22 @@ private:
     CKFFOpaquePacketCoordinator m_OpaquePackets;
 
     // Internal methods
-    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
-                                   CKDWORD formatFlags = 0,
-                                   const CKBYTE *texcoordComponentCounts = nullptr);
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
-    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
-    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext,
-                                     CKDWORD activeTextureCount);
-    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                                     const CKFFProgramContext *programContext);
-    void UpdateViewProjectionCache();
+    void SubmitPrepared(CKRasterizerEncoder *encoder,
+                        CKRenderView view,
+                        VXPRIMITIVETYPE drawStateType,
+                        const CKFFProgramContext *programContext,
+                        const CKFFTextureBindingSet *textures,
+                        CKDWORD vb, CKDWORD ib,
+                        CKDWORD baseVertex, CKDWORD vertexCount,
+                        CKDWORD startIndex, CKDWORD indexCount,
+                        CKDWORD vertexLayout,
+                        CKFFSubmitSource source);
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
-    float ComputeDepthKey() const;
 
 };
 
