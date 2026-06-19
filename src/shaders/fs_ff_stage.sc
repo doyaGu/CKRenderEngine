@@ -201,12 +201,22 @@ float compareDepth(float depth, float ref, int func)
     return depth;
 }
 
+vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
+{
+    if (samplerType == 1 || mirrorOnceMask == 0) return coord;
+    if ((mirrorOnceMask & 1) != 0) coord.x = clamp(abs(coord.x), 0.0, 1.0);
+    if ((mirrorOnceMask & 2) != 0) coord.y = clamp(abs(coord.y), 0.0, 1.0);
+    if (samplerType == 3 && (mirrorOnceMask & 4) != 0) coord.z = clamp(abs(coord.z), 0.0, 1.0);
+    return coord;
+}
+
 #if defined(CKFF_FULL_SPECIALIZED)
 #define CKFF_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
 
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (stage == 0) {
 #if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
         return textureCube(s_textureCube0, coord.xyz);
@@ -289,9 +299,10 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bo
 #elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
 #define CKFF_STATIC_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
 
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (stage == 0) {
 #if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
         return textureCube(s_textureCube0, coord.xyz);
@@ -384,9 +395,10 @@ vec4 getVolumeTextureColor(int stage, vec4 coord)
     return texture3D(s_textureVolume7, coord.xyz);
 }
 
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         // The volume runtime layout uses slots 8..15 for 3D samplers.
         // Arbitrary cube+volume mixes require an exact full-specialized shader.
@@ -413,9 +425,10 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bo
     return color;
 }
 #else
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         if (stage == 0) return textureCube(s_textureCube0, coord.xyz);
         if (stage == 1) return textureCube(s_textureCube1, coord.xyz);
@@ -568,7 +581,7 @@ bool alphaPass(float alpha, int func)
                 sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump); \
                 sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump); \
             } \
-            vec4 texColor = getTextureColor((STAGE_INDEX), sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, hasTexture); \
+            vec4 texColor = getTextureColor((STAGE_INDEX), sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, stageParams.MirrorOnceMask, hasTexture); \
             if ((STAGE_INDEX) != 0 && previousColorOp == 23) { \
                 int bumpBase = ((STAGE_INDEX) - 1) * 2; \
                 float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0); \
@@ -656,7 +669,7 @@ void main()
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, hasTexture);
+        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, stageParams.MirrorOnceMask, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);

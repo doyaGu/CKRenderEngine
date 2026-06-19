@@ -308,9 +308,11 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
     set_spec_bits(dwords, 5, 14, 1, 1 if key["rangeFog"] else 0)
     set_spec_bits(dwords, 5, 15, 1, 1 if key["flatShade"] else 0)
     projected_sampler_mask = 0
+    mirror_once_sampler_mask = 0
     for stage_index, stage in enumerate(key["stages"][:4]):
         if stage["projectedSampler"]:
             projected_sampler_mask |= (1 << stage_index)
+        mirror_once_sampler_mask |= (stage["mirrorOnceMask"] & 0x7) << (stage_index * 3)
         word = 6 + stage_index
         set_spec_bits(dwords, 1, stage_index * 5, 5, repack_ffp_arg(stage["colorArg0"]))
         set_spec_bits(dwords, 2, stage_index * 5, 5, repack_ffp_arg(stage["alphaArg0"]))
@@ -326,6 +328,7 @@ def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
         set_spec_bits(dwords, 3, stage_index * 4, 4, stage["samplerCompareFunc"])
 
     set_spec_bits(dwords, 5, 0, 4, projected_sampler_mask)
+    set_spec_bits(dwords, 4, 19, 12, mirror_once_sampler_mask)
     return dwords
 
 
@@ -347,6 +350,7 @@ def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
         "projectedSampler": read_bool(stage.get("projectedSampler", False), f"{field}.projectedSampler"),
         "samplerType": read_uint32(stage.get("samplerType", 0), f"{field}.samplerType") & 3,
         "samplerCompareFunc": read_uint32(stage.get("samplerCompareFunc", 0), f"{field}.samplerCompareFunc") & 0xF,
+        "mirrorOnceMask": read_uint32(stage.get("mirrorOnceMask", 0), f"{field}.mirrorOnceMask") & 0x7,
     }
     normalized["hasTexture"] = read_bool(
         stage.get("hasTexture", ffp_stage_uses_texture(normalized)),
@@ -369,6 +373,7 @@ def default_specialized_stage() -> dict[str, object]:
         "projectedSampler": False,
         "samplerType": 0,
         "samplerCompareFunc": 0,
+        "mirrorOnceMask": 0,
     }
 
 
@@ -681,6 +686,7 @@ def write_specialized_key_function(f, variant: dict[str, object]) -> None:
         f.write(f"{prefix}.ProjectedSampler = {'true' if stage['projectedSampler'] else 'false'};\n")
         f.write(f"{prefix}.SamplerType = {stage['samplerType']};\n")
         f.write(f"{prefix}.SamplerCompareFunc = {stage['samplerCompareFunc']};\n")
+        f.write(f"{prefix}.MirrorOnceMask = {stage['mirrorOnceMask']}u;\n")
     f.write("    return key;\n")
     f.write("}\n\n")
 

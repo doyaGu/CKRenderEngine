@@ -221,6 +221,7 @@ struct CKFFFSStateDesc {
         bool ProjectedSampler = false;
         uint32_t SamplerType = CKFF_SAMPLER_2D;
         uint32_t SamplerCompareFunc = 0;
+        uint32_t MirrorOnceMask = 0;
 
         bool operator==(const Stage &o) const {
             return ColorOp == o.ColorOp &&
@@ -234,7 +235,8 @@ struct CKFFFSStateDesc {
                    ResultIsTemp == o.ResultIsTemp &&
                    ProjectedSampler == o.ProjectedSampler &&
                    SamplerType == o.SamplerType &&
-                   SamplerCompareFunc == o.SamplerCompareFunc;
+                   SamplerCompareFunc == o.SamplerCompareFunc &&
+                   MirrorOnceMask == o.MirrorOnceMask;
         }
         bool operator!=(const Stage &o) const { return !(*this == o); }
     };
@@ -292,6 +294,10 @@ struct CKFFFSStateDesc {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
         Stages[stage].SamplerCompareFunc = func & 0xFu;
     }
+    void SetStageMirrorOnceMask(uint32_t stage, uint32_t mask) {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return;
+        Stages[stage].MirrorOnceMask = mask & 0x7u;
+    }
 
     uint32_t GetStageColorOp(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
@@ -340,6 +346,10 @@ struct CKFFFSStateDesc {
     uint32_t GetStageSamplerCompareFunc(uint32_t stage) const {
         if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
         return Stages[stage].SamplerCompareFunc;
+    }
+    uint32_t GetStageMirrorOnceMask(uint32_t stage) const {
+        if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES) return 0;
+        return Stages[stage].MirrorOnceMask & 0x7u;
     }
 
     // --- Global flags (bits 0-2) ---

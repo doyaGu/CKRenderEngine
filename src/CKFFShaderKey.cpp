@@ -68,7 +68,8 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
             a.HasTexture != b.HasTexture ||
             a.ProjectedSampler != b.ProjectedSampler ||
             a.SamplerType != b.SamplerType ||
-            a.SamplerCompareFunc != b.SamplerCompareFunc)
+            a.SamplerCompareFunc != b.SamplerCompareFunc ||
+            a.MirrorOnceMask != b.MirrorOnceMask)
             return false;
     }
     return true;
@@ -106,6 +107,7 @@ size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
         seed = HashCombine(seed, stage.ProjectedSampler ? 1u : 0u);
         seed = HashCombine(seed, stage.SamplerType);
         seed = HashCombine(seed, stage.SamplerCompareFunc);
+        seed = HashCombine(seed, stage.MirrorOnceMask);
     }
     return seed;
 }
@@ -169,6 +171,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.ProjectedSampler = desc.GetStageProjectedSampler(stage);
         dst.SamplerType = desc.GetStageSamplerType(stage);
         dst.SamplerCompareFunc = desc.GetStageSamplerCompareFunc(stage);
+        dst.MirrorOnceMask = desc.GetStageMirrorOnceMask(stage);
 
         if (dst.ColorOp == 0 || dst.ColorOp == CKRST_TOP_DISABLE)
             break;
@@ -217,11 +220,14 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     CKDWORD projectedSamplerMask = 0;
     CKDWORD samplerTypeMask = 0;
     CKDWORD samplerCompareFuncMask = 0;
+    CKDWORD mirrorOnceMask = 0;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
         if (key.Stages[stage].ProjectedSampler)
             projectedSamplerMask |= (1u << stage);
+        mirrorOnceMask |= (key.Stages[stage].MirrorOnceMask & 7u) << (stage * 3);
     }
     info.Set(CKFF_SPEC_PROJECTED_SAMPLER_MASK, projectedSamplerMask);
+    info.Set(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK, mirrorOnceMask);
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
         samplerTypeMask |= (key.Stages[stage].SamplerType & 3u) << (stage * 2);
     info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK, samplerTypeMask);

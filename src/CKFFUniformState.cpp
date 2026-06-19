@@ -100,7 +100,8 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
         const bool stageActive = stage < activeTextureCount;
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
         const CKDWORD textureTransformFlags = stageActive
-            ? stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS]
+            ? (stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
+               CKFFResolveMirrorOnceAddressMask(stageStates[stage]))
             : 0;
         float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
         float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];

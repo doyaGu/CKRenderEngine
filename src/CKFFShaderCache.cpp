@@ -161,9 +161,6 @@ static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
                                        const CKFFShaderKey &key,
                                        const unsigned char **vsData,
                                        unsigned int *vsSize);
-static void CKFFSamplerLayoutStageTypesString(const CKFFSamplerLayoutKey &layout,
-                                              char *buffer,
-                                              std::size_t bufferSize);
 
 CKFFShaderCache::CKFFShaderCache()
     : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
@@ -441,23 +438,20 @@ static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
     }
 }
 
-static void CKFFSamplerLayoutStageTypesString(const CKFFSamplerLayoutKey &layout,
-                                              char *buffer,
-                                              std::size_t bufferSize) {
-    if (!buffer || bufferSize == 0)
-        return;
-    std::snprintf(buffer, bufferSize, "[%u,%u,%u,%u,%u,%u,%u,%u]",
-                  CKFFSamplerLayoutStageType(layout, 0),
-                  CKFFSamplerLayoutStageType(layout, 1),
-                  CKFFSamplerLayoutStageType(layout, 2),
-                  CKFFSamplerLayoutStageType(layout, 3),
-                  CKFFSamplerLayoutStageType(layout, 4),
-                  CKFFSamplerLayoutStageType(layout, 5),
-                  CKFFSamplerLayoutStageType(layout, 6),
-                  CKFFSamplerLayoutStageType(layout, 7));
-}
-
 CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
+    if (key.FS.LastActiveTextureStage > 3) {
+        CK_LOG_FMT("ShaderCache",
+                   "FFP full-specialized rejected: lastStage=%u exceeds specialized stage limit; falling back",
+                   key.FS.LastActiveTextureStage);
+        if (CKFFShaderKeyNeedsVolumeSampler(key)) {
+            if (CKFFShaderKeyNeedsCubeSampler(key)) {
+                return CreateStaticSamplerLayoutProgram(key);
+            }
+            return CreateVolumeSamplerLayoutProgram(key);
+        }
+        return CreateUberSpecializedProgram(key);
+    }
+
     CKFFSpecializedModule module;
     if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
         CKDWORD program = CreateProgramFromBinary(
@@ -471,7 +465,7 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
     CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
     const CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key.FS);
     char stageTypes[32];
-    CKFFSamplerLayoutStageTypesString(layout, stageTypes, sizeof(stageTypes));
+    CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
     CK_LOG_FMT("ShaderCache",
                "Full FFP specialized module cache miss: backend=%s profile=0x%08X positionT=%u vsBits=%llu vsTexcoordDeclMask=%u vsTexGen0=%u vsTexGen1=%u vsTexGen2=%u vsTexGen3=%u vsTexGen4=%u vsTexGen5=%u vsTexGen6=%u vsTexGen7=%u vsTexCoordIndex0=%u vsTexCoordIndex1=%u vsTexCoordIndex2=%u vsTexCoordIndex3=%u vsTexCoordIndex4=%u vsTexCoordIndex5=%u vsTexCoordIndex6=%u vsTexCoordIndex7=%u vsTexTransformFlags0=%u vsTexTransformFlags1=%u vsTexTransformFlags2=%u vsTexTransformFlags3=%u vsTexTransformFlags4=%u vsTexTransformFlags5=%u vsTexTransformFlags6=%u vsTexTransformFlags7=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
                m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
@@ -540,15 +534,16 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
     CKFFSamplerLayoutModule module;
     if (!CKFFFindSamplerLayoutModule(layout, m_Target.Profile, module)) {
         char stageTypes[32];
-        CKFFSamplerLayoutStageTypesString(layout, stageTypes, sizeof(stageTypes));
+        char manifestEntry[128];
+        CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
+        CKFFFormatSamplerLayoutManifestEntry(layout, set->Name, manifestEntry, sizeof(manifestEntry));
         CK_LOG_FMT("ShaderCache",
-                   "FFP static sampler layout miss: backend=%s profile=0x%08X lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u manifestEntry={\"backends\":[\"%s\"],\"stageTypes\":%s}",
+                   "FFP static sampler layout miss: backend=%s profile=0x%08X lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u manifestEntry=%s",
                    set->Name, m_Target.Profile, key.FS.LastActiveTextureStage,
                    CKFFShaderKeyActiveTextureMask(key), layout.Bits,
                    stageTypes,
                    CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u,
-                   set->Name,
-                   stageTypes);
+                   manifestEntry);
         return CKFFProgramBinding();
     }
 
@@ -557,7 +552,7 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
     const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
     const bool instanced = key.VS.GetInstanced();
     char stageTypes[32];
-    CKFFSamplerLayoutStageTypesString(layout, stageTypes, sizeof(stageTypes));
+    CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
     const unsigned char *vsData = nullptr;
     unsigned int vsSize = 0;
     CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
