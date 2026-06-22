@@ -216,6 +216,8 @@ public:
     CKDWORD CreatedProgramCount = 0;
     const void *LastVertexShaderCode = nullptr;
     CKDWORD LastVertexShaderCodeSize = 0;
+    const void *LastPixelShaderCode = nullptr;
+    CKDWORD LastPixelShaderCodeSize = 0;
     std::vector<CKDWORD> LastProgramSpecializationDwords;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
     std::vector<FFPViewClearRecord> ViewClears;
@@ -228,6 +230,10 @@ public:
         if (desc && desc->Stage == CKRST_SHADER_VERTEX) {
             LastVertexShaderCode = desc->Code;
             LastVertexShaderCodeSize = desc->CodeSize;
+        }
+        if (desc && desc->Stage == CKRST_SHADER_PIXEL) {
+            LastPixelShaderCode = desc->Code;
+            LastPixelShaderCodeSize = desc->CodeSize;
         }
         return CK_OK;
     }
