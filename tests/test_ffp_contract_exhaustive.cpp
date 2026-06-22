@@ -392,8 +392,8 @@ void DomainTablesCoverCurrentEnumShape()
                   kFFPCoverageTextureOps[25].Value == CKRST_TOP_LERP &&
                   CKRST_TOP_LERP == 26,
               "Texture op domain must stay aligned with VxDefines CKRST_TOP range");
-    TestCheck(FFPCoverageArrayCount(kFFPCoverageTextureArgs) == 10,
-              "Texture arg domain must include base args plus modifier representatives");
+    TestCheck(FFPCoverageArrayCount(kFFPCoverageTextureArgs) == 28,
+              "Texture arg domain must include every base arg times every modifier combination");
     TestCheck(FFPCoverageArrayCount(kFFPCoverageSamplerTypes) == 4,
               "Sampler type domain must list every CKFF sampler type");
     TestCheck(FFPCoverageArrayCount(kFFPCoverageVxCompareFuncs) == 8,
