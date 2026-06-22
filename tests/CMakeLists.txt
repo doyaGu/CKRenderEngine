@@ -88,6 +88,10 @@ ckre_add_test(ff_uniform_state_tests
     test_ff_uniform_state.cpp
 )
 
+ckre_add_test(ff_shader_backend_parity_tests
+    test_ff_shader_backend_parity.cpp
+)
+
 ckre_add_test(ff_state_store_tests
     test_ff_state_store.cpp
 )
