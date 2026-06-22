@@ -92,6 +92,22 @@ ckre_add_test(ff_shader_backend_parity_tests
     test_ff_shader_backend_parity.cpp
 )
 
+ckre_add_test(ffp_contract_exhaustive_tests
+    test_ffp_contract_exhaustive.cpp
+)
+
+ckre_add_test(ffp_sampler_layout_exhaustive_tests
+    test_ffp_sampler_layout_exhaustive.cpp
+)
+
+ckre_add_test(ffp_runtime_routing_exhaustive_tests
+    test_ffp_runtime_routing_exhaustive.cpp
+)
+
+ckre_add_test(ffp_pixel_parity_tests
+    test_ffp_pixel_parity.cpp
+)
+
 ckre_add_test(ff_state_store_tests
     test_ff_state_store.cpp
 )
