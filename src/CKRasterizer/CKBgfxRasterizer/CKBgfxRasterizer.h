@@ -351,6 +351,9 @@ public:
 
     // Statistics
     const CKRenderStats *GetStats() override;
+#ifdef CKRE_ENABLE_TEST_ACCESS
+    CKDWORD GetFatalCountForTests() const { return m_DebugFatalCount.load(std::memory_order_relaxed); }
+#endif
 
     // Resource naming
     void SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name) override;
@@ -452,6 +455,7 @@ private:
     std::atomic<CKDWORD> m_DebugMarkerOverwriteCount;
     std::atomic<CKDWORD> m_DebugMarkerStaleCount;
     std::atomic<CKDWORD> m_DebugInvalidSubmitCount;
+    std::atomic<CKDWORD> m_DebugFatalCount;
     std::atomic<CKDWORD> m_DebugParsedAnnotationCount;
     std::atomic<CKDWORD> m_DebugRawPrimitiveCount;
     std::atomic<CKDWORD> m_DebugSourceSubmitCount[CKBGFX_DRAWMAP_SOURCE_COUNT];

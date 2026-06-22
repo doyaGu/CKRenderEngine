@@ -256,9 +256,15 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
 bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
 {
     char value[32] = {0};
-    if (!CKBgfxConfigString("Renderer", "Backend", value, (CKDWORD)sizeof(value)) ||
-        CKBgfxLogNameEquals(value, "auto"))
+    const char *envBackend = getenv("CKBGFX_RENDERER_BACKEND");
+    if (envBackend && envBackend[0] != '\0') {
+        strncpy(value, envBackend, sizeof(value) - 1);
+        value[sizeof(value) - 1] = '\0';
+    } else if (!CKBgfxConfigString("Renderer", "Backend", value, (CKDWORD)sizeof(value)) ||
+               CKBgfxLogNameEquals(value, "auto")) {
         return bgfx::RendererType::Count;
+    }
+
     if (CKBgfxLogNameEquals(value, "d3d11") || CKBgfxLogNameEquals(value, "direct3d11"))
         return bgfx::RendererType::Direct3D11;
     if (CKBgfxLogNameEquals(value, "d3d12") || CKBgfxLogNameEquals(value, "direct3d12"))

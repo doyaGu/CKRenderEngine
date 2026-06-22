@@ -108,6 +108,14 @@ ckre_add_test(ffp_pixel_parity_tests
     test_ffp_pixel_parity.cpp
 )
 
+ckre_add_test(ffp_opengl_runtime_tests
+    test_ffp_opengl_runtime.cpp
+)
+if (TARGET SDL3::SDL3)
+    target_link_libraries(ffp_opengl_runtime_tests PRIVATE SDL3::SDL3)
+endif ()
+target_link_libraries(ffp_opengl_runtime_tests PRIVATE bgfx bimg bx)
+
 ckre_add_test(ff_state_store_tests
     test_ff_state_store.cpp
 )
