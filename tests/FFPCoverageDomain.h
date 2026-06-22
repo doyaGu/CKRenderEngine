@@ -1,0 +1,170 @@
+#ifndef CKRE_FFP_COVERAGE_DOMAIN_H
+#define CKRE_FFP_COVERAGE_DOMAIN_H
+
+#include "CKFFShaderKey.h"
+#include "CKRasterizerEnums.h"
+
+#include <stddef.h>
+
+struct FFPCoverageValue {
+    CKDWORD Value;
+    const char *Name;
+};
+
+struct FFPCoverageBackend {
+    CK_SHADER_PROFILE Profile;
+    const char *Name;
+};
+
+static const FFPCoverageBackend kFFPCoverageBackends[] = {
+    {CKRST_SHADER_PROFILE_DX11, "dx11"},
+    {CKRST_SHADER_PROFILE_DX12, "dx12"},
+    {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
+    {CKRST_SHADER_PROFILE_GLSL, "glsl"},
+    {CKRST_SHADER_PROFILE_MSL, "metal"},
+};
+
+static const FFPCoverageValue kFFPCoverageTextureOps[] = {
+    {CKRST_TOP_DISABLE, "DISABLE"},
+    {CKRST_TOP_SELECTARG1, "SELECTARG1"},
+    {CKRST_TOP_SELECTARG2, "SELECTARG2"},
+    {CKRST_TOP_MODULATE, "MODULATE"},
+    {CKRST_TOP_MODULATE2X, "MODULATE2X"},
+    {CKRST_TOP_MODULATE4X, "MODULATE4X"},
+    {CKRST_TOP_ADD, "ADD"},
+    {CKRST_TOP_ADDSIGNED, "ADDSIGNED"},
+    {CKRST_TOP_ADDSIGNED2X, "ADDSIGNED2X"},
+    {CKRST_TOP_SUBTRACT, "SUBTRACT"},
+    {CKRST_TOP_ADDSMOOTH, "ADDSMOOTH"},
+    {CKRST_TOP_BLENDDIFFUSEALPHA, "BLENDDIFFUSEALPHA"},
+    {CKRST_TOP_BLENDTEXTUREALPHA, "BLENDTEXTUREALPHA"},
+    {CKRST_TOP_BLENDFACTORALPHA, "BLENDFACTORALPHA"},
+    {CKRST_TOP_BLENDTEXTUREALPHAPM, "BLENDTEXTUREALPHAPM"},
+    {CKRST_TOP_BLENDCURRENTALPHA, "BLENDCURRENTALPHA"},
+    {CKRST_TOP_PREMODULATE, "PREMODULATE"},
+    {CKRST_TOP_MODULATEALPHA_ADDCOLOR, "MODULATEALPHA_ADDCOLOR"},
+    {CKRST_TOP_MODULATECOLOR_ADDALPHA, "MODULATECOLOR_ADDALPHA"},
+    {CKRST_TOP_MODULATEINVALPHA_ADDCOLOR, "MODULATEINVALPHA_ADDCOLOR"},
+    {CKRST_TOP_MODULATEINVCOLOR_ADDALPHA, "MODULATEINVCOLOR_ADDALPHA"},
+    {CKRST_TOP_BUMPENVMAP, "BUMPENVMAP"},
+    {CKRST_TOP_BUMPENVMAPLUMINANCE, "BUMPENVMAPLUMINANCE"},
+    {CKRST_TOP_DOTPRODUCT3, "DOTPRODUCT3"},
+    {CKRST_TOP_MULTIPLYADD, "MULTIPLYADD"},
+    {CKRST_TOP_LERP, "LERP"},
+};
+
+static const FFPCoverageValue kFFPCoverageTextureArgs[] = {
+    {CKRST_TA_DIFFUSE, "DIFFUSE"},
+    {CKRST_TA_CURRENT, "CURRENT"},
+    {CKRST_TA_TEXTURE, "TEXTURE"},
+    {CKRST_TA_TFACTOR, "TFACTOR"},
+    {CKRST_TA_SPECULAR, "SPECULAR"},
+    {CKRST_TA_TEMP, "TEMP"},
+    {CKRST_TA_CONSTANT, "CONSTANT"},
+    {CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT, "TEXTURE_COMPLEMENT"},
+    {CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE, "TEXTURE_ALPHA"},
+    {CKRST_TA_CURRENT | CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE, "CURRENT_COMPLEMENT_ALPHA"},
+};
+
+static const FFPCoverageValue kFFPCoverageSamplerTypes[] = {
+    {CKFF_SAMPLER_2D, "2D"},
+    {CKFF_SAMPLER_CUBE, "CUBE"},
+    {CKFF_SAMPLER_DEPTH, "DEPTH"},
+    {CKFF_SAMPLER_VOLUME, "VOLUME"},
+};
+
+static const FFPCoverageValue kFFPCoverageSamplerCompareFuncs[] = {
+    {CKRST_COMPARE_NONE, "NONE"},
+    {CKRST_COMPARE_LESS, "LESS"},
+    {CKRST_COMPARE_LEQUAL, "LEQUAL"},
+    {CKRST_COMPARE_EQUAL, "EQUAL"},
+    {CKRST_COMPARE_GEQUAL, "GEQUAL"},
+    {CKRST_COMPARE_GREATER, "GREATER"},
+    {CKRST_COMPARE_NOTEQUAL, "NOTEQUAL"},
+    {CKRST_COMPARE_NEVER, "NEVER"},
+    {CKRST_COMPARE_ALWAYS, "ALWAYS"},
+};
+
+static const FFPCoverageValue kFFPCoverageVxCompareFuncs[] = {
+    {VXCMP_NEVER, "NEVER"},
+    {VXCMP_LESS, "LESS"},
+    {VXCMP_EQUAL, "EQUAL"},
+    {VXCMP_LESSEQUAL, "LESSEQUAL"},
+    {VXCMP_GREATER, "GREATER"},
+    {VXCMP_NOTEQUAL, "NOTEQUAL"},
+    {VXCMP_GREATEREQUAL, "GREATEREQUAL"},
+    {VXCMP_ALWAYS, "ALWAYS"},
+};
+
+static const FFPCoverageValue kFFPCoverageTexGenModes[] = {
+    {0, "PASSTHRU"},
+    {1, "CAMERANORMAL"},
+    {2, "CAMERAPOSITION"},
+    {3, "REFLECTION"},
+    {4, "SPHEREMAP"},
+};
+
+static const FFPCoverageValue kFFPCoverageMaterialSources[] = {
+    {0, "MATERIAL"},
+    {1, "COLOR0"},
+    {2, "COLOR1"},
+};
+
+static const FFPCoverageValue kFFPCoverageVertexBlendModes[] = {
+    {CKFF_VERTEX_BLEND_DISABLED, "DISABLED"},
+    {CKFF_VERTEX_BLEND_NORMAL, "NORMAL"},
+    {CKFF_VERTEX_BLEND_TWEEN, "TWEEN"},
+};
+
+template <typename T, size_t N>
+inline size_t FFPCoverageArrayCount(const T (&)[N])
+{
+    return N;
+}
+
+inline CKDWORD FFPCoverageTextureOpArgsMask(CKDWORD op)
+{
+    if (op == CKRST_TOP_DISABLE)
+        return 0u;
+    if (op == CKRST_TOP_SELECTARG1 || op == CKRST_TOP_PREMODULATE)
+        return 0b010u;
+    if (op == CKRST_TOP_SELECTARG2)
+        return 0b100u;
+    if (op == CKRST_TOP_MULTIPLYADD || op == CKRST_TOP_LERP)
+        return 0b111u;
+    return 0b110u;
+}
+
+inline CKDWORD FFPCoverageBaseTextureArg(CKDWORD arg)
+{
+    return arg & 0x7u;
+}
+
+inline bool FFPCoverageArgUsesTexture(CKDWORD arg)
+{
+    return FFPCoverageBaseTextureArg(arg) == CKRST_TA_TEXTURE;
+}
+
+inline CKDWORD FFPCoverageNormalizeLayoutType(CKDWORD rawType, bool hasTexture)
+{
+    if (!hasTexture)
+        return CKFF_SAMPLER_2D;
+    if (rawType == CKFF_SAMPLER_CUBE || rawType == CKFF_SAMPLER_VOLUME)
+        return rawType;
+    return CKFF_SAMPLER_2D;
+}
+
+inline CKFFShaderKey MakeFFPCoverageVSKey(bool positionT)
+{
+    CKFFShaderKey key;
+    CKFFVSStateDesc desc;
+    desc.SetHasPosition(!positionT);
+    desc.SetHasPositionT(positionT);
+    desc.SetHasColor0(true);
+    desc.SetHasNormal(!positionT);
+    desc.SetHasTexCoord0(true);
+    key.VS = CKFFShaderKeyVS(desc);
+    return key;
+}
+
+#endif
