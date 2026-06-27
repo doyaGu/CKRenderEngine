@@ -2,9 +2,7 @@
 
 #include <cstring>
 
-namespace {
-
-CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
+static CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
     static const CKFFSpecBitfield fields[] = {
         {0, 0, 5},  // color op
         {1, 0, 5},  // color arg0
@@ -21,8 +19,6 @@ CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
     layout.BitOffset += (field == 1 || field == 5) ? stage * 5 : 0;
     return layout;
 }
-
-} // namespace
 
 CKFFSpecializationInfo::CKFFSpecializationInfo() {
     memset(m_Data, 0, sizeof(m_Data));
