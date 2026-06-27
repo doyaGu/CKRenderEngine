@@ -39,12 +39,14 @@ function(ckre_configure_test_target TARGET_NAME)
         "$<TARGET_FILE_DIR:${TARGET_NAME}>/CK2_3D.ini"
         VERBATIM
     )
+    ckre_copy_runtime_dependencies(${TARGET_NAME})
 endfunction()
 
 function(ckre_add_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    add_test(NAME ${TARGET_NAME} COMMAND $<TARGET_FILE:${TARGET_NAME}>)
+    set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
 endfunction()
 
 function(ckre_add_benchmark TARGET_NAME)
