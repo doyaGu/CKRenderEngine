@@ -27,7 +27,9 @@ void TransparentObjectLayoutMatchesOriginalDllOffsets() {
               "CKTransparentObject ZhMin must stay immediately after the node pointer");
     TestCheck(offsetof(CKTransparentObject, m_ZhMax) == sizeof(CKSceneGraphNode *) + sizeof(float),
               "CKTransparentObject ZhMax must stay immediately after ZhMin");
-#if !defined(_WIN64)
+    TestCheck(sizeof(CKTransparentObject) == sizeof(CKSceneGraphNode *) + (2 * sizeof(float)),
+              "CKTransparentObject must not contain unexpected padding");
+#if defined(_WIN32) && !defined(_WIN64)
     TestCheck(sizeof(CKTransparentObject) == 12,
               "Win32 CKTransparentObject must remain 12 bytes like the original CK2_3D.dll");
 #endif
