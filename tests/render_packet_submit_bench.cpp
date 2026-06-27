@@ -4,24 +4,19 @@
 #include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 
+#include <chrono>
 #include <cstring>
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
 
-static double BenchNow()
+using BenchClock = std::chrono::steady_clock;
+
+static BenchClock::time_point BenchNow()
 {
-    LARGE_INTEGER counter;
-    QueryPerformanceCounter(&counter);
-    return (double)counter.QuadPart;
+    return BenchClock::now();
 }
 
-static double BenchElapsedUs(double start)
+static double BenchElapsedUs(BenchClock::time_point start)
 {
-    LARGE_INTEGER frequency;
-    QueryPerformanceFrequency(&frequency);
-    return (BenchNow() - start) * 1000000.0 / (double)frequency.QuadPart;
+    return std::chrono::duration<double, std::micro>(BenchNow() - start).count();
 }
 
 struct BenchScenario {
@@ -165,10 +160,10 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
 
     double drawUs = 0.0;
     double flushUs = 0.0;
-    const double start = BenchNow();
+    const auto start = BenchNow();
     for (int frame = 0; frame < scenario->Frames; ++frame) {
         ffp.BeginDebugFrame();
-        double phaseStart = BenchNow();
+        auto phaseStart = BenchNow();
         for (int draw = 0; draw < scenario->DrawsPerFrame; ++draw)
             DrawBenchPacket(&ffp, &context, draw, scenario);
         drawUs += BenchElapsedUs(phaseStart);

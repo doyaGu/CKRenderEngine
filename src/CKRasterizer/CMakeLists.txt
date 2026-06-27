@@ -137,7 +137,9 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
             FOLDER "Tests"
     )
-    add_test(NAME NullRasterizerTests COMMAND test_null_rasterizer)
+    ckre_copy_runtime_dependencies(test_null_rasterizer)
+    add_test(NAME NullRasterizerTests COMMAND $<TARGET_FILE:test_null_rasterizer>)
+    set_tests_properties(NullRasterizerTests PROPERTIES TIMEOUT 60)
 
     add_executable(test_bgfx_rasterizer tests/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
@@ -169,7 +171,9 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
             FOLDER "Tests"
     )
-    add_test(NAME BgfxRasterizerTests COMMAND test_bgfx_rasterizer)
+    ckre_copy_runtime_dependencies(test_bgfx_rasterizer)
+    add_test(NAME BgfxRasterizerTests COMMAND $<TARGET_FILE:test_bgfx_rasterizer>)
+    set_tests_properties(BgfxRasterizerTests PROPERTIES TIMEOUT 60)
 endif ()
 
 # Installation
