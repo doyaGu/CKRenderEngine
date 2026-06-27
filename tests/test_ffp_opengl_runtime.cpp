@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKBgfxInternal.h"
 #include "CKFFSamplerLayout.h"
 #include "CKFFShaderCache.h"
 #include "CKFFSpecializedModuleTable.h"
@@ -17,7 +18,7 @@
 
 namespace {
 
-char g_OpenGLRuntimeFailure[512];
+char g_BackendRuntimeFailure[512];
 
 void TestCheckf(bool condition, const char *format, ...)
 {
@@ -26,9 +27,9 @@ void TestCheckf(bool condition, const char *format, ...)
 
     va_list args;
     va_start(args, format);
-    vsnprintf(g_OpenGLRuntimeFailure, sizeof(g_OpenGLRuntimeFailure), format, args);
+    vsnprintf(g_BackendRuntimeFailure, sizeof(g_BackendRuntimeFailure), format, args);
     va_end(args);
-    TestFail(g_OpenGLRuntimeFailure);
+    TestFail(g_BackendRuntimeFailure);
 }
 
 bool EnvFlagEnabled(const char *name)
@@ -51,6 +52,12 @@ void SetEnvValue(const char *name, const char *value)
 #endif
 }
 
+const char *GetEnvValue(const char *name)
+{
+    const char *value = getenv(name);
+    return value && value[0] != '\0' ? value : NULL;
+}
+
 void SetSelectStage(CKFFShaderKeyFSStage &stage,
                     CKDWORD arg,
                     bool hasTexture,
@@ -65,20 +72,21 @@ void SetSelectStage(CKFFShaderKeyFSStage &stage,
     stage.SamplerType = samplerType;
 }
 
-const CKFFSpecializedModuleEntry *FirstGeneratedGLSLEntry()
+const CKFFSpecializedModuleEntry *FirstGeneratedEntry(CK_SHADER_PROFILE profile)
 {
     for (size_t i = 0; i < g_CKFFSpecializedModuleCount; ++i) {
-        if (g_CKFFSpecializedModules[i].Profile == CKRST_SHADER_PROFILE_GLSL)
+        if (g_CKFFSpecializedModules[i].Profile == profile)
             return &g_CKFFSpecializedModules[i];
     }
     return NULL;
 }
 
-CKFFShaderKey MakeRuntimeKeySkeleton()
+CKFFShaderKey MakeRuntimeKeySkeleton(CK_SHADER_PROFILE profile)
 {
-    const CKFFSpecializedModuleEntry *entry = FirstGeneratedGLSLEntry();
-    TestCheck(entry != NULL,
-              "OpenGL runtime test requires at least one generated GLSL full-specialized key");
+    const CKFFSpecializedModuleEntry *entry = FirstGeneratedEntry(profile);
+    TestCheckf(entry != NULL,
+               "backend runtime test requires at least one generated %s full-specialized key",
+               CKBgfxShaderProfileName(profile));
 
     CKFFShaderKey key;
     key.VS = entry->Key.VS;
@@ -86,9 +94,9 @@ CKFFShaderKey MakeRuntimeKeySkeleton()
     return key;
 }
 
-CKFFShaderKey MakeStageFourFallbackKey(CKDWORD samplerType)
+CKFFShaderKey MakeStageFourFallbackKey(CK_SHADER_PROFILE profile, CKDWORD samplerType)
 {
-    CKFFShaderKey key = MakeRuntimeKeySkeleton();
+    CKFFShaderKey key = MakeRuntimeKeySkeleton(profile);
     for (CKDWORD stage = 0; stage < 4; ++stage)
         SetSelectStage(key.FS.Stages[stage], CKRST_TA_CURRENT, false, CKFF_SAMPLER_2D);
     SetSelectStage(key.FS.Stages[4], CKRST_TA_TEXTURE, true, samplerType);
@@ -96,9 +104,9 @@ CKFFShaderKey MakeStageFourFallbackKey(CKDWORD samplerType)
     return key;
 }
 
-CKFFShaderKey MakeVolumeCubeStaticLayoutKey()
+CKFFShaderKey MakeVolumeCubeStaticLayoutKey(CK_SHADER_PROFILE profile)
 {
-    CKFFShaderKey key = MakeRuntimeKeySkeleton();
+    CKFFShaderKey key = MakeRuntimeKeySkeleton(profile);
     SetSelectStage(key.FS.Stages[0], CKRST_TA_TEXTURE, true, CKFF_SAMPLER_VOLUME);
     SetSelectStage(key.FS.Stages[1], CKRST_TA_TEXTURE, true, CKFF_SAMPLER_CUBE);
     key.FS.LastActiveTextureStage = 1;
@@ -122,7 +130,7 @@ void RunShaderProgramCase(CKBgfxRasterizerContext *context,
     cache.Init(context);
     const CKFFProgramBinding binding = cache.GetProgram(key);
     TestCheckf(binding.Program != 0,
-               "%s must create a real OpenGL FFP shader program", caseName);
+               "%s must create a real backend FFP shader program", caseName);
     TestCheckf(binding.FullSpecialized == expectedFullSpecialized,
                "%s selected route mismatch fullSpecialized=%u expected=%u",
                caseName,
@@ -132,7 +140,7 @@ void RunShaderProgramCase(CKBgfxRasterizerContext *context,
     TestCheckf(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE) == CK_OK,
                "%s must process bgfx frame after program creation", caseName);
     TestCheckf(context->GetFatalCountForTests() == fatalBefore,
-               "%s triggered a bgfx fatal callback during OpenGL shader creation/link",
+               "%s triggered a bgfx fatal callback during shader creation/link",
                caseName);
 
     cache.Shutdown();
@@ -140,14 +148,19 @@ void RunShaderProgramCase(CKBgfxRasterizerContext *context,
     CKRenderSettingsClearOverridesForTests();
 }
 
-void OpenGLRuntimeCreatesRepresentativeFFPPrograms()
+void BackendRuntimeCreatesRepresentativeFFPPrograms()
 {
-    SetEnvValue("CKBGFX_RENDERER_BACKEND", "opengl");
+    const char *requestedBackend = GetEnvValue("CKRE_RUNTIME_BACKEND");
+    if (!requestedBackend)
+        requestedBackend = GetEnvValue("CKRE_BGFX_RUNTIME_BACKEND");
+    if (!requestedBackend)
+        requestedBackend = "opengl";
+    SetEnvValue("CKBGFX_RENDERER_BACKEND", requestedBackend);
 
     TestCheckf(SDL_Init(SDL_INIT_VIDEO),
                "SDL video init failed: %s", SDL_GetError());
 
-    SDL_Window *window = SDL_CreateWindow("ffp-opengl-runtime",
+    SDL_Window *window = SDL_CreateWindow("ffp-backend-runtime",
                                           64, 64,
                                           SDL_WINDOW_HIDDEN);
     TestCheckf(window != NULL,
@@ -155,7 +168,7 @@ void OpenGLRuntimeCreatesRepresentativeFFPPrograms()
 
     CKBgfxRasterizer rasterizer;
     TestCheck(rasterizer.Start((WIN_HANDLE)window) == TRUE,
-              "CKBgfxRasterizer must start for OpenGL runtime test");
+              "CKBgfxRasterizer must start for backend runtime test");
     TestCheck(rasterizer.GetDriverCount() > 0,
               "CKBgfxRasterizer must expose a driver");
 
@@ -170,51 +183,54 @@ void OpenGLRuntimeCreatesRepresentativeFFPPrograms()
     CKBgfxRasterizerContext *context = static_cast<CKBgfxRasterizerContext *>(baseContext);
     TestCheck(context->Create((WIN_HANDLE)window, 0, 0, 64, 64, 32,
                               FALSE, 0, 24, 8) == TRUE,
-              "bgfx OpenGL context creation must succeed");
+              "bgfx backend context creation must succeed");
 
     CKShaderTargetDesc target;
     TestCheck(driver->GetShaderTarget(&target) == CK_OK,
-              "OpenGL runtime driver must expose a shader target");
-    TestCheckf(target.Profile == CKRST_SHADER_PROFILE_GLSL,
-               "OpenGL runtime driver selected shader profile 0x%08X instead of GLSL",
-               target.Profile);
+              "backend runtime driver must expose a shader target");
 
-    const CKFFSpecializedModuleEntry *fullEntry = FirstGeneratedGLSLEntry();
-    TestCheck(fullEntry != NULL,
-              "OpenGL runtime test requires a generated GLSL specialized module");
+    const CKFFSpecializedModuleEntry *fullEntry = FirstGeneratedEntry(target.Profile);
+    TestCheckf(fullEntry != NULL,
+               "backend runtime test requires a generated %s specialized module",
+               CKBgfxShaderProfileName(target.Profile));
+    printf("  backend: requested=%s profile=%s\n",
+           requestedBackend,
+           CKBgfxShaderProfileName(target.Profile));
+
     RunShaderProgramCase(context, fullEntry->Key, false, true,
-                         "full-specialized GLSL route");
-    RunShaderProgramCase(context, MakeStageFourFallbackKey(CKFF_SAMPLER_2D),
+                         "full-specialized backend route");
+    RunShaderProgramCase(context, MakeStageFourFallbackKey(target.Profile, CKFF_SAMPLER_2D),
                          false, false,
-                         "stage 4 uber fallback GLSL route");
-    RunShaderProgramCase(context, MakeStageFourFallbackKey(CKFF_SAMPLER_VOLUME),
+                         "stage 4 uber fallback backend route");
+    RunShaderProgramCase(context, MakeStageFourFallbackKey(target.Profile, CKFF_SAMPLER_VOLUME),
                          false, false,
-                         "stage 4 volume fallback GLSL route");
-    RunShaderProgramCase(context, MakeVolumeCubeStaticLayoutKey(),
+                         "stage 4 volume fallback backend route");
+    RunShaderProgramCase(context, MakeVolumeCubeStaticLayoutKey(target.Profile),
                          false, false,
-                         "volume+cube static sampler GLSL route");
+                         "volume+cube static sampler backend route");
     RunShaderProgramCase(context, fullEntry->Key, true, false,
-                         "forced uber GLSL route");
+                         "forced uber backend route");
 
     driver->DestroyContext(context);
     rasterizer.Close();
     SDL_DestroyWindow(window);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
-    printf("  coverage: openglRuntimeProgramCases=5\n");
+    printf("  coverage: backendRuntimeProgramCases=5\n");
 }
 
 } // namespace
 
 int main()
 {
-    if (!EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS")) {
-        printf("SKIPPED: set CKRE_RUN_OPENGL_RUNTIME_TESTS=1 to run the Linux OpenGL runtime gate.\n");
+    if (!EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS") &&
+        !EnvFlagEnabled("CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS")) {
+        printf("SKIPPED: set CKRE_RUN_OPENGL_RUNTIME_TESTS=1 or CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the bgfx backend runtime gate.\n");
         return 0;
     }
 
     TestFramework tests;
-    tests.Run("OpenGL runtime creates representative FFP programs",
-              &OpenGLRuntimeCreatesRepresentativeFFPPrograms);
+    tests.Run("bgfx backend runtime creates representative FFP programs",
+              &BackendRuntimeCreatesRepresentativeFFPPrograms);
     return tests.ExitCode();
 }
