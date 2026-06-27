@@ -757,6 +757,49 @@ static void TestDrawMapTraceContractHelpers()
 }
 
 // ============================================================================
+// Test 8: Debug overlay view map contract
+// ============================================================================
+
+static void TestDebugOverlayViewMapContract()
+{
+    TEST_SECTION("Debug Overlay View Map Contract");
+
+    const char *line0 = CKBgfxDebugViewLine0();
+    const char *line1 = CKBgfxDebugViewLine1();
+    TEST_ASSERT(std::strcmp(line0, "views: 0 clear 1 bg2d 2 first3d 3 opaque") == 0,
+                "overlay first view line matches render pipeline ordering");
+    TEST_ASSERT(std::strcmp(line1, "       4 stencil 5 trans 6 post 7 fg2d") == 0,
+                "overlay second view line includes stencil, post, and foreground views");
+}
+
+// ============================================================================
+// Test 9: Invalid submit contract
+// ============================================================================
+
+static void TestInvalidProgramSubmitIsRejected()
+{
+    TEST_SECTION("Invalid Program Submit Contract");
+
+    CKBgfxRasterizerContext context(NULL);
+    context.SetDebug(CKRST_DEBUG_DRAWMAP |
+                     CKRST_DEBUG_DRAWMAP_SUBMITS |
+                     CKRST_DEBUG_DRAWMAP_MARKERS);
+
+    CKBgfxEncoder encoder;
+    encoder.m_Context = &context;
+    std::strncpy(encoder.m_LastMarker, "invalid-program", sizeof(encoder.m_LastMarker) - 1);
+    encoder.m_LastMarker[sizeof(encoder.m_LastMarker) - 1] = '\0';
+
+    const CKDWORD before = context.GetInvalidSubmitCountForTests();
+    encoder.Submit(3, 0x1234, 0, CKRST_DISCARD_ALL);
+
+    TEST_ASSERT(context.GetInvalidSubmitCountForTests() == before + 1,
+                "invalid program submit increments the contract counter");
+    TEST_ASSERT(encoder.m_LastMarker[0] == '\0',
+                "invalid submit consumes the pending marker instead of leaking it to the next draw");
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -778,6 +821,8 @@ int main()
     TestBgfxRasterizerLifecycle();
     TestEncoderSlotReuse();
     TestDrawMapTraceContractHelpers();
+    TestDebugOverlayViewMapContract();
+    TestInvalidProgramSubmitIsRejected();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);

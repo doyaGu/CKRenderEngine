@@ -33,6 +33,9 @@ const char *CKBgfxShaderProfileName(CK_SHADER_PROFILE profile);
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);
 bgfx::RendererType::Enum CKBgfxParseRequestedRenderer();
 uint32_t CKBgfxBuildResetFlags(CKBOOL VSync, CKDWORD Samples);
+const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum type);
+const char *CKBgfxDebugViewLine0();
+const char *CKBgfxDebugViewLine1();
 
 bgfx::UniformType::Enum CKBgfxUniformType(CK_UNIFORM_TYPE Type);
 bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB Attrib);

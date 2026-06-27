@@ -1073,6 +1073,57 @@ void TextureBindingMaskIgnoresInactiveStages() {
               "Texture binding mask must not split disabled stage keys");
 }
 
+void BgfxTransientAllocationsPreflightAvailability() {
+    const std::string contents = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
+    TestCheck(!contents.empty(),
+              "bgfx rasterizer context source must be readable");
+
+    struct Contract {
+        const char *Function;
+        const char *Avail;
+        const char *Alloc;
+        const char *Miss;
+    };
+    const Contract contracts[] = {
+        {
+            "CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer",
+            "bgfx::getAvailTransientVertexBuffer",
+            "bgfx::allocTransientVertexBuffer",
+            "RecordTransientAllocMiss(\"vertex\"",
+        },
+        {
+            "CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer",
+            "bgfx::getAvailTransientIndexBuffer",
+            "bgfx::allocTransientIndexBuffer",
+            "RecordTransientAllocMiss(\"index\"",
+        },
+        {
+            "CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer",
+            "bgfx::getAvailInstanceDataBuffer",
+            "bgfx::allocInstanceDataBuffer",
+            "RecordTransientAllocMiss(\"instance\"",
+        },
+    };
+
+    for (size_t i = 0; i < sizeof(contracts) / sizeof(contracts[0]); ++i) {
+        const std::string::size_type functionStart = contents.find(contracts[i].Function);
+        TestCheck(functionStart != std::string::npos,
+                  "transient allocation function must exist");
+        if (functionStart == std::string::npos)
+            continue;
+
+        const std::string::size_type availPos = contents.find(contracts[i].Avail, functionStart);
+        const std::string::size_type allocPos = contents.find(contracts[i].Alloc, functionStart);
+        const std::string::size_type missPos = contents.find(contracts[i].Miss, functionStart);
+
+        TestCheck(availPos != std::string::npos && allocPos != std::string::npos && availPos < allocPos,
+                  "transient allocation must query bgfx availability before allocation");
+        TestCheck(missPos != std::string::npos && missPos < allocPos,
+                  "transient allocation must record capacity misses before attempting allocation");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1159,5 +1210,7 @@ int main() {
               &TextureBindingMaskIgnoresStagesWithoutTextureArgs);
     tests.Run("Texture binding mask ignores inactive stages",
               &TextureBindingMaskIgnoresInactiveStages);
+    tests.Run("bgfx transient allocations preflight availability",
+              &BgfxTransientAllocationsPreflightAvailability);
     return tests.ExitCode();
 }

@@ -145,6 +145,7 @@ if (CKRE_BUILD_TESTS OR BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
             ${CKRE_INCLUDE_DIR}
     )
+    target_compile_definitions(test_bgfx_rasterizer PRIVATE CKRE_ENABLE_TEST_ACCESS=1)
     if (TARGET CKBgfxRasterizerStatic)
         target_link_libraries(test_bgfx_rasterizer PRIVATE
                 CKBgfxRasterizerStatic
