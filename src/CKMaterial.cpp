@@ -1447,20 +1447,12 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled() ? TRUE : FALSE);
     ffp.SetRenderState(VXRENDERSTATE_ZFUNC, (CKDWORD)GetZFunc());
 
-    // --- Alpha test ---
-    if (AlphaTestEnabled()) {
-        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
-        ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, (CKDWORD)GetAlphaFunc());
-        ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, m_AlphaRef);
-    } else {
-        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-    }
-
     // --- Texture ---
+    CKBOOL textureOwnsAlphaTest = FALSE;
     CKTexture *tex = m_Textures[TextureStage];
     if (tex) {
         CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
-        tex->SetAsCurrent(context, clamped, TextureStage);
+        textureOwnsAlphaTest = (tex->SetAsCurrent(context, clamped, TextureStage) == 2);
 
         ffp.SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
         ffp.SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
@@ -1489,6 +1481,16 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         DP3Effect(dev, TextureStage);
     } else if (effect == VXEFFECT_2TEXTURES || effect == VXEFFECT_3TEXTURES) {
         BlendTexturesEffect(dev, TextureStage + 1);
+    }
+
+    if (!textureOwnsAlphaTest) {
+        if (AlphaTestEnabled()) {
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+            ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, (CKDWORD)GetAlphaFunc());
+            ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, m_AlphaRef);
+        } else {
+            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+        }
     }
 
     CK_RENDER_PERF_ADD(renderStats, MaterialSetUs, CKRenderPerfElapsedUs(perfStart));
