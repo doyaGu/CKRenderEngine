@@ -18,8 +18,6 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace {
-
 struct CKPostprocessShaderBlobSet {
     CK_SHADER_PROFILE Profile;
     const unsigned char *VS;
@@ -41,7 +39,7 @@ const CKPostprocessShaderBlobSet g_PostprocessShaderBlobSets[] = {
      s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
 };
 
-const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE profile)
+static const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE profile)
 {
     for (const CKPostprocessShaderBlobSet &set : g_PostprocessShaderBlobSets) {
         if (set.Profile == profile)
@@ -50,7 +48,7 @@ const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE
     return nullptr;
 }
 
-float ParseRenderScale(const char *value, float fallback)
+static float ParseRenderScale(const char *value, float fallback)
 {
     if (!value || value[0] == '\0')
         return fallback;
@@ -61,7 +59,7 @@ float ParseRenderScale(const char *value, float fallback)
     return parsed;
 }
 
-CKDWORD ScaledDimension(CKDWORD value, float scale)
+static CKDWORD ScaledDimension(CKDWORD value, float scale)
 {
     if (value == 0)
         value = 1;
@@ -72,8 +70,6 @@ CKDWORD ScaledDimension(CKDWORD value, float scale)
         return 16384;
     return (CKDWORD)(scaled + 0.5f);
 }
-
-} // namespace
 
 float CKRenderPipelineClampRenderScale(float scale)
 {
