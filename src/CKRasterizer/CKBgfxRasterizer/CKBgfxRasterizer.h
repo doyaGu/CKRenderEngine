@@ -353,6 +353,9 @@ public:
     const CKRenderStats *GetStats() override;
 #ifdef CKRE_ENABLE_TEST_ACCESS
     CKDWORD GetFatalCountForTests() const { return m_DebugFatalCount.load(std::memory_order_relaxed); }
+    CKDWORD GetInvalidSubmitCountForTests() const { return m_DebugInvalidSubmitCount.load(std::memory_order_relaxed); }
+    CKDWORD GetEncoderLeakCountForTests() const { return m_DebugEncoderLeakCount.load(std::memory_order_relaxed); }
+    CKDWORD GetTransientAllocMissCountForTests() const { return m_DebugTransientAllocMissCount.load(std::memory_order_relaxed); }
 #endif
 
     // Resource naming
@@ -459,6 +462,8 @@ private:
     std::atomic<CKDWORD> m_DebugParsedAnnotationCount;
     std::atomic<CKDWORD> m_DebugRawPrimitiveCount;
     std::atomic<CKDWORD> m_DebugSourceSubmitCount[CKBGFX_DRAWMAP_SOURCE_COUNT];
+    std::atomic<CKDWORD> m_DebugEncoderLeakCount;
+    std::atomic<CKDWORD> m_DebugTransientAllocMissCount;
     CK_VIEW_MODE m_DebugViewMode[CKRST_MAX_RENDER_VIEWS];
     char m_DebugViewName[CKRST_MAX_RENDER_VIEWS][64];
     CKDWORD m_DebugViewOrderGeneration;
@@ -485,6 +490,8 @@ private:
                         CKDWORD BgfxHandle, CKDWORD Layout,
                         CKDWORD Stride, CKDWORD Count,
                         CKDWORD Index32, CKDWORD Flags);
+    void RecordInvalidSubmit(CKSTRING Kind, CKRenderView View, CKDWORD Program, CKSTRING Reason);
+    void RecordTransientAllocMiss(const char *Kind, CKDWORD Requested, CKDWORD Available);
 
     XArray<CKBgfxShaderRecord *> m_Shaders;
     XArray<CKBgfxProgramRecord *> m_Programs;

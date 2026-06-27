@@ -240,6 +240,25 @@ const char *CKBgfxShaderProfileName(CK_SHADER_PROFILE profile)
     }
 }
 
+const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum type)
+{
+    switch (type) {
+    case bgfx::NativeWindowHandleType::Default: return "Default";
+    case bgfx::NativeWindowHandleType::Wayland: return "Wayland";
+    default:                                    return "Unknown";
+    }
+}
+
+const char *CKBgfxDebugViewLine0()
+{
+    return "views: 0 clear 1 bg2d 2 first3d 3 opaque";
+}
+
+const char *CKBgfxDebugViewLine1()
+{
+    return "       4 stencil 5 trans 6 post 7 fg2d";
+}
+
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
 {
     switch (type) {
