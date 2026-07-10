@@ -1,10 +1,9 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
 
-#include <cstdarg>
-#include <cstdio>
-#include <cstring>
-#include <mutex>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifndef _WIN32
 #ifndef _TRUNCATE
@@ -105,45 +104,32 @@ void CKBgfxCallback::traceVargs(const char *filePath, uint16_t line, const char 
 }
 
 void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
-                                uint32_t _pitch, bgfx::TextureFormat::Enum,
+                                uint32_t _pitch, bgfx::TextureFormat::Enum _format,
                                 const void *_data, uint32_t _size, bool _yflip)
 {
     if (!m_Context)
         return;
 
-    if (_filePath && strcmp(_filePath, "__backbuffer_read__") == 0) {
-        VxImageDescEx *target = m_Context->m_BackbufferReadTarget;
-        if (target && target->Image) {
-            const uint32_t bytesPerPixel = _width > 0 ? _pitch / _width : 0;
-            uint32_t dstPitch = target->BytesPerLine > 0
-                ? (uint32_t)target->BytesPerLine
-                : _width * bytesPerPixel;
-            const uint32_t copyPitch = dstPitch < _pitch ? dstPitch : _pitch;
-            const uint32_t copyRows = target->Height > 0 && (uint32_t)target->Height < _height
-                ? (uint32_t)target->Height
-                : _height;
-            const CKBYTE *src = static_cast<const CKBYTE *>(_data);
-            CKBYTE *dst = static_cast<CKBYTE *>(target->Image);
-            for (uint32_t y = 0; y < copyRows; ++y) {
-                const uint32_t srcY = _yflip ? (_height - 1u - y) : y;
-                memcpy(dst + y * dstPitch, src + srcY * _pitch, copyPitch);
+    CKBgfxScreenShotRequest request = {};
+    bool foundRequest = false;
+    {
+        VxMutexLock lock(m_Context->m_ScreenShotMutex);
+        for (int i = 0; i < m_Context->m_PendingScreenShots.Size(); ++i) {
+            if (_filePath &&
+                m_Context->m_PendingScreenShots[i].Path.Compare(_filePath) == 0) {
+                m_Context->m_PendingScreenShots.RemoveAt((unsigned int)i, request);
+                foundRequest = true;
+                break;
             }
-            target->Width = (int)_width;
-            target->Height = (int)_height;
-            target->BytesPerLine = (int)dstPitch;
-            target->BitsPerPixel = (int)(bytesPerPixel * 8);
         }
-        m_Context->m_BackbufferReadReady.store(true, std::memory_order_release);
-        return;
     }
-
-    std::lock_guard<std::mutex> lock(m_Context->m_ScreenShotMutex);
-    if (m_Context->m_PendingScreenShotCallback) {
-        m_Context->m_PendingScreenShotCallback(
-            m_Context->m_PendingScreenShotFB,
+    if (foundRequest && request.Callback) {
+        VX_PIXELFORMAT format = UNKNOWN_PF;
+        CKBgfxTryPixelFormat(_format, format);
+        request.Callback(
+            request.UserData, request.FrameBuffer,
             (CKDWORD)_width, (CKDWORD)_height, (CKDWORD)_pitch,
-            _data, (CKDWORD)_size, _yflip ? TRUE : FALSE);
-        m_Context->m_PendingScreenShotCallback = NULL;
+            format, _data, (CKDWORD)_size, _yflip ? TRUE : FALSE);
         return;
     }
 

@@ -1,14 +1,45 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
+#include "CKRasterizerValidation.h"
 #include "../../CKDrawAnnotation.h"
 
 #include <bgfx/platform.h>
 #include <SDL3/SDL.h>
 #include <stdint.h>
-#include <algorithm>
-#include <cstdarg>
-#include <cstring>
+#include <stdarg.h>
+#include <string.h>
+
+static_assert(BGFX_API_VERSION == 143, "Review CKBgfxRasterizer mappings before updating bgfx");
+static_assert(CKRST_DISCARD_BINDINGS == BGFX_DISCARD_BINDINGS, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_INDEX_BUFFER == BGFX_DISCARD_INDEX_BUFFER, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_INSTANCE_DATA == BGFX_DISCARD_INSTANCE_DATA, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_STATE == BGFX_DISCARD_STATE, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_TRANSFORM == BGFX_DISCARD_TRANSFORM, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_VERTEX_STREAMS == BGFX_DISCARD_VERTEX_STREAMS, "discard ABI mismatch");
+static_assert(CKRST_DISCARD_ALL == BGFX_DISCARD_ALL, "discard ABI mismatch");
+static_assert(CKRST_FRAME_CAPTURE == BGFX_FRAME_DEBUG_CAPTURE, "frame ABI mismatch");
+static_assert(CKRST_FRAME_DISCARD == BGFX_FRAME_DISCARD, "frame ABI mismatch");
+static_assert(CKRST_FRAME_FLUSH == BGFX_FRAME_FLUSH, "frame ABI mismatch");
+
+static VxMutex g_BgfxContextMutex;
+static CKBgfxRasterizerContext *g_BgfxActiveContext = NULL;
+
+static bool CKBgfxClaimActiveContext(CKBgfxRasterizerContext *Context)
+{
+    VxMutexLock lock(g_BgfxContextMutex);
+    if (g_BgfxActiveContext && g_BgfxActiveContext != Context)
+        return false;
+    g_BgfxActiveContext = Context;
+    return true;
+}
+
+static void CKBgfxReleaseActiveContext(CKBgfxRasterizerContext *Context)
+{
+    VxMutexLock lock(g_BgfxContextMutex);
+    if (g_BgfxActiveContext == Context)
+        g_BgfxActiveContext = NULL;
+}
 
 static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
 {
@@ -39,17 +70,8 @@ static bool CKBgfxIsOpenGLRenderer()
            type == bgfx::RendererType::OpenGLES;
 }
 
-static bool CKBgfxTargetOriginBottomLeft(CKRasterizerDriver *driver)
-{
-    CKShaderTargetDesc target;
-    return driver && driver->GetShaderTarget(&target) == CK_OK &&
-           (target.Flags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
-}
-
-static CKDWORD CKBgfxMipBit(CKDWORD mip)
-{
-    return mip < 32 ? (1u << mip) : 0u;
-}
+static CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
+                                   CKBOOL AllowComparison);
 
 static const char *CKBgfxViewModeName(CK_VIEW_MODE Mode)
 {
@@ -115,17 +137,6 @@ static CKDWORD CKBgfxHashProgram(const CKBgfxProgramRecord *Record)
     return hash;
 }
 
-static CKDWORD CKBgfxHashSpecDwords(const CKDWORD *Values, CKDWORD Count)
-{
-    CKDWORD hash = CKBGFX_DRAWMAP_HASH_INIT;
-    hash = CKBgfxHashDword(hash, Count);
-    if (!Values)
-        return hash;
-    for (CKDWORD i = 0; i < Count; ++i)
-        hash = CKBgfxHashDword(hash, Values[i]);
-    return hash;
-}
-
 static const char *CKBgfxTextureKindName(const CKBgfxTextureRecord *Record)
 {
     if (!Record)
@@ -137,30 +148,6 @@ static const char *CKBgfxTextureKindName(const CKBgfxTextureRecord *Record)
     if ((Record->Flags & CKRST_TEXTURE_VOLUMEMAP) && Record->Depth > 1)
         return "volume";
     return "2d";
-}
-
-static void CKBgfxFormatSpecDwords(const CKBgfxProgramRecord *Record,
-                                   char *Dst, CKDWORD DstSize)
-{
-    CKDWORD offset = 0;
-    if (!Dst || DstSize == 0)
-        return;
-    Dst[0] = '\0';
-    if (!Record)
-        return;
-    for (CKDWORD i = 0; i < Record->SpecializationDwordCount && offset + 1 < DstSize; ++i) {
-        int written = snprintf(Dst + offset, DstSize - offset,
-                               i == 0 ? "%u" : ",%u",
-                               (unsigned)Record->SpecializationDwords[i]);
-        if (written <= 0)
-            break;
-        if ((CKDWORD)written >= DstSize - offset) {
-            offset = DstSize - 1;
-            break;
-        }
-        offset += (CKDWORD)written;
-    }
-    Dst[DstSize - 1] = '\0';
 }
 
 static bool CKBgfxCanGenerateMipMaps(const VxImageDescEx *desc)
@@ -209,6 +196,13 @@ static bool CKBgfxIsCompressedTextureFormat(bgfx::TextureFormat::Enum fmt)
            fmt == bgfx::TextureFormat::BC3;
 }
 
+static bool CKBgfxCanExposeReadback(VX_PIXELFORMAT pf,
+                                    bgfx::TextureFormat::Enum fmt)
+{
+    return (pf == _32_ARGB8888 && fmt == bgfx::TextureFormat::BGRA8) ||
+           (pf == _32_ABGR8888 && fmt == bgfx::TextureFormat::RGBA8);
+}
+
 static bool CKBgfxCanUseGeneratedMipChain(CKDWORD flags,
                                            bgfx::TextureFormat::Enum fmt,
                                            CKDWORD depth,
@@ -238,7 +232,7 @@ static void CKBgfxDestroySamplerBaseHandle(CKBgfxTextureRecord *rec)
 
 static bool CKBgfxCanUseSamplerBaseHandle(const CKBgfxTextureRecord *rec)
 {
-    if (!rec || !CKBgfxIsOpenGLRenderer())
+    if (!rec)
         return false;
     if (rec->MipCount <= 1 || rec->IsDepth)
         return false;
@@ -246,7 +240,9 @@ static bool CKBgfxCanUseSamplerBaseHandle(const CKBgfxTextureRecord *rec)
         return false;
     if ((rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1)
         return false;
-    if (CKBgfxIsCompressedTextureFormat(rec->Format))
+    if (rec->Flags & (CKRST_TEXTURE_RENDERTARGET |
+                      CKRST_TEXTURE_BLIT_DST |
+                      CKRST_TEXTURE_COMPUTE_WRITE))
         return false;
     return true;
 }
@@ -260,7 +256,7 @@ static bool CKBgfxEnsureSamplerBaseHandle(CKBgfxTextureRecord *rec)
 
     bgfx::TextureHandle handle = bgfx::createTexture2D(
         (uint16_t)rec->Width, (uint16_t)rec->Height, false, 1,
-        rec->Format, CKBgfxTextureFlagsFromDescFlags(rec->Flags), NULL);
+        rec->Format, BGFX_TEXTURE_NONE, NULL);
     if (!bgfx::isValid(handle))
         return false;
 
@@ -468,20 +464,31 @@ static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscre
 }
 
 // ===========================================================================
-// Helper: ensure slot array is large enough and return pointer at index
+// Helper: allocate a context-local wrapper slot. Slot zero stays invalid.
 // ===========================================================================
 
 template <typename T>
-static T *&EnsureSlot(XArray<T *> &arr, CKDWORD index)
+static CKDWORD AllocateSlot(XArray<T *> &arr, CKDWORD maxHandles,
+                            VxMutex &tableMutex)
 {
-    while ((int)index >= arr.Size())
+    VxMutexLock lock(tableMutex);
+    if (arr.Size() == 0)
         arr.PushBack(NULL);
-    return arr[index];
+    for (int i = 1; i < arr.Size(); ++i) {
+        if (!arr[i])
+            return (CKDWORD)i;
+    }
+    if (maxHandles != 0 && (CKDWORD)(arr.Size() - 1) >= maxHandles)
+        return 0;
+    arr.PushBack(NULL);
+    return (CKDWORD)(arr.Size() - 1);
 }
 
 template <typename T>
-static T *GetSlot(XArray<T *> &arr, CKDWORD index)
+static T *GetSlot(XArray<T *> &arr, CKDWORD index,
+                  VxMutex &tableMutex)
 {
+    VxMutexLock lock(tableMutex);
     if (index == 0 || (int)index >= arr.Size())
         return NULL;
     return arr[index];
@@ -510,29 +517,25 @@ static void DestroyAllRecords(XArray<RecordT *> &arr)
 // Helper: CK_DISCARD_FLAGS -> bgfx discard flags
 // ===========================================================================
 
+static bool CKBgfxTryDiscardFlags(CKDWORD flags, uint8_t &result)
+{
+    const CKDWORD individualMask = CKRST_DISCARD_BINDINGS |
+                                   CKRST_DISCARD_INDEX_BUFFER |
+                                   CKRST_DISCARD_INSTANCE_DATA |
+                                   CKRST_DISCARD_STATE |
+                                   CKRST_DISCARD_TRANSFORM |
+                                   CKRST_DISCARD_VERTEX_STREAMS;
+    if (flags != CKRST_DISCARD_ALL && (flags & ~individualMask) != 0)
+        return false;
+    result = (uint8_t)flags;
+    return true;
+}
+
 static uint8_t ToBgfxDiscardFlags(CKDWORD flags)
 {
-    if (flags == CKRST_DISCARD_ALL)
-        return BGFX_DISCARD_ALL;
-    if (flags == CKRST_DISCARD_NONE)
-        return BGFX_DISCARD_NONE;
-
-    uint8_t bgfxFlags = 0;
-    if (flags & CKRST_DISCARD_VERTEXBUFFER)
-        bgfxFlags |= BGFX_DISCARD_VERTEX_STREAMS;
-    if (flags & CKRST_DISCARD_INDEXBUFFER)
-        bgfxFlags |= BGFX_DISCARD_INDEX_BUFFER;
-    if (flags & CKRST_DISCARD_TEXTURES)
-        bgfxFlags |= BGFX_DISCARD_BINDINGS;
-    if (flags & CKRST_DISCARD_UNIFORMS)
-        bgfxFlags |= BGFX_DISCARD_BINDINGS;
-    if (flags & CKRST_DISCARD_STATE)
-        bgfxFlags |= BGFX_DISCARD_STATE;
-    if (flags & CKRST_DISCARD_TRANSFORM)
-        bgfxFlags |= BGFX_DISCARD_TRANSFORM;
-    if (flags & CKRST_DISCARD_INSTANCEDATA)
-        bgfxFlags |= BGFX_DISCARD_INSTANCE_DATA;
-    return bgfxFlags;
+    uint8_t result = BGFX_DISCARD_NONE;
+    CKBgfxTryDiscardFlags(flags, result);
+    return result;
 }
 
 // ===========================================================================
@@ -541,6 +544,7 @@ static uint8_t ToBgfxDiscardFlags(CKDWORD flags)
 
 CKBgfxEncoder::CKBgfxEncoder()
     : m_Active{FALSE}, m_Context(NULL), m_Encoder(NULL),
+      m_OwnsNativeEncoder(FALSE), m_Status(CK_OK),
       m_StencilRef(0), m_StencilReadMask(0xFF), m_StencilWriteMask(0xFF),
       m_CurrentLayout(0), m_PointSize(0),
       m_CachedDrawState(), m_CachedBgfxState(0),
@@ -554,6 +558,28 @@ CKBgfxEncoder::CKBgfxEncoder()
 }
 
 CKBgfxEncoder::~CKBgfxEncoder() {}
+
+CKERROR CKBgfxEncoder::GetStatus() const
+{
+    return m_Status;
+}
+
+void CKBgfxEncoder::SetError(CKERROR Error)
+{
+    if (m_Status == CK_OK && Error != CK_OK)
+        m_Status = Error;
+}
+
+CKBOOL CKBgfxEncoder::CanSubmit()
+{
+    if (!m_Active.load(std::memory_order_acquire) || !m_Context ||
+        m_OwnerThread != VxThread::GetCurrentVxThreadId())
+    {
+        SetError(CKERR_INVALIDOPERATION);
+        return FALSE;
+    }
+    return m_Status == CK_OK ? TRUE : FALSE;
+}
 
 static void ApplyBgfxState(bgfx::Encoder *encoder, uint64_t bgfxState)
 {
@@ -591,8 +617,16 @@ static void ApplyStencil(bgfx::Encoder *encoder, CKDrawState state,
 
 void CKBgfxEncoder::SetState(CKDrawState State)
 {
+    if (!CanSubmit())
+        return;
+    uint64_t bgfxState = 0;
+    const CKERROR stateError = CKBgfxTryState(State, bgfxState);
+    if (stateError != CK_OK) {
+        SetError(stateError);
+        return;
+    }
     m_CachedDrawState = State;
-    m_CachedBgfxState = CKBgfxState(State);
+    m_CachedBgfxState = bgfxState;
 
     uint64_t finalState = m_CachedBgfxState;
     if (m_PointSize > 0)
@@ -603,27 +637,53 @@ void CKBgfxEncoder::SetState(CKDrawState State)
 
 void CKBgfxEncoder::SetStencilRef(CKDWORD Ref)
 {
-    m_StencilRef = Ref & 0xFF;
+    if (!CanSubmit())
+        return;
+    if (Ref > 0xFF) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    m_StencilRef = Ref;
     if (m_CachedDrawState.Mid & CKRST_STENCIL_ENABLE)
         ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask, m_StencilWriteMask);
 }
 
 void CKBgfxEncoder::SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask)
 {
-    m_StencilReadMask = ReadMask & 0xFF;
-    m_StencilWriteMask = WriteMask & 0xFF;
+    if (!CanSubmit())
+        return;
+    if (ReadMask > 0xFF || WriteMask > 0xFF) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    if (WriteMask != 0x00 && WriteMask != 0xFF) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    m_StencilReadMask = ReadMask;
+    m_StencilWriteMask = WriteMask;
     if (m_CachedDrawState.Mid & CKRST_STENCIL_ENABLE)
         ApplyStencil(m_Encoder, m_CachedDrawState, m_StencilRef, m_StencilReadMask, m_StencilWriteMask);
 }
 
 void CKBgfxEncoder::SetScissor(const CKRECT *Rect)
 {
+    if (!CanSubmit())
+        return;
     if (!Rect)
     {
         if (m_Encoder)
             m_Encoder->setScissor();
         else
             bgfx::setScissor();
+        return;
+    }
+    if (Rect->left < 0 || Rect->top < 0 ||
+        Rect->right < Rect->left || Rect->bottom < Rect->top ||
+        Rect->left > 0xffff || Rect->top > 0xffff ||
+        Rect->right - Rect->left > 0xffff ||
+        Rect->bottom - Rect->top > 0xffff) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
     }
     uint16_t x = (uint16_t)Rect->left;
@@ -638,24 +698,32 @@ void CKBgfxEncoder::SetScissor(const CKRECT *Rect)
 
 void CKBgfxEncoder::SetPointSize(float Size)
 {
-    m_PointSize = (CKDWORD)(Size + 0.5f);
-    if (m_PointSize > 15) m_PointSize = 15;
-
-    if (m_CachedBgfxState != 0)
-    {
-        uint64_t finalState = m_CachedBgfxState;
-        if (m_PointSize > 0)
-            finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
-        ApplyBgfxState(m_Encoder, finalState);
+    if (!CanSubmit())
+        return;
+    if (!(Size >= 0.0f && Size <= 15.0f)) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
     }
+    m_PointSize = (CKDWORD)(Size + 0.5f);
+
+    uint64_t finalState = m_CachedBgfxState;
+    if (m_PointSize > 0)
+        finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
+    ApplyBgfxState(m_Encoder, finalState);
 }
 
 void CKBgfxEncoder::SetTransform(CKDWORD TransformIndex, CKDWORD Count)
 {
-    if (!m_Context || TransformIndex == CKRST_INVALID_TRANSFORM)
+    if (!CanSubmit())
         return;
-    if (TransformIndex + Count > CKRST_MAX_TRANSFORMS)
+    const CKDWORD allocatedTransforms = m_Context
+        ? m_Context->m_TransformCount.load(std::memory_order_acquire) : 0;
+    if (!m_Context || TransformIndex == CKRST_INVALID_TRANSFORM || Count == 0 ||
+        TransformIndex + Count < TransformIndex ||
+        TransformIndex + Count > allocatedTransforms) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
 
     const VxMatrix *mtx = &m_Context->m_TransformCache[TransformIndex];
     if (m_Encoder)
@@ -664,27 +732,28 @@ void CKBgfxEncoder::SetTransform(CKDWORD TransformIndex, CKDWORD Count)
         bgfx::setTransform((const void *)mtx, (uint16_t)Count);
 }
 
-void CKBgfxEncoder::SetVertexLayout(CKDWORD Layout)
-{
-    m_CurrentLayout = Layout;
-}
-
 void CKBgfxEncoder::SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                     CKDWORD StartVertex, CKDWORD VertexCount)
+                                     CKDWORD StartVertex, CKDWORD VertexCount,
+                                     CKDWORD Layout)
 {
-    if (!m_Context)
+    if (!CanSubmit())
         return;
-    CKBgfxVertexBufferRecord *rec = m_Context->GetVertexBuffer(Buffer);
-    if (!rec)
+    if (!m_Context) {
+        SetError(CKERR_INVALIDOPERATION);
         return;
-
-    bgfx::VertexLayoutHandle layoutHandle = BGFX_INVALID_HANDLE;
-    if (m_CurrentLayout != 0)
-    {
-        CKBgfxVertexLayoutRecord *layoutRec = m_Context->GetVertexLayout(m_CurrentLayout);
-        if (layoutRec)
-            layoutHandle = layoutRec->Handle;
     }
+    CKBgfxVertexBufferRecord *rec = m_Context->GetVertexBuffer(Buffer);
+    CKBgfxVertexLayoutRecord *layoutRec = m_Context->GetVertexLayout(Layout);
+    if (!rec || !layoutRec || Stream >= m_Context->m_CapsDesc.MaxVertexStreams ||
+        VertexCount == 0 || StartVertex > rec->VertexCount ||
+        VertexCount > rec->VertexCount - StartVertex) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+
+    const bgfx::VertexLayoutHandle layoutHandle = layoutRec->Handle;
+
+    m_CurrentLayout = Layout;
 
     if (m_Encoder)
         m_Encoder->setVertexBuffer((uint8_t)Stream, rec->Handle, StartVertex, VertexCount, layoutHandle);
@@ -705,11 +774,18 @@ void CKBgfxEncoder::SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
 void CKBgfxEncoder::SetIndexBuffer(CKDWORD Buffer,
                                     CKDWORD StartIndex, CKDWORD IndexCount)
 {
-    if (!m_Context)
+    if (!CanSubmit())
         return;
+    if (!m_Context) {
+        SetError(CKERR_INVALIDOPERATION);
+        return;
+    }
     CKBgfxIndexBufferRecord *rec = m_Context->GetIndexBuffer(Buffer);
-    if (!rec)
+    if (!rec || IndexCount == 0 || StartIndex > rec->IndexCount ||
+        IndexCount > rec->IndexCount - StartIndex) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
     if (m_Encoder)
         m_Encoder->setIndexBuffer(rec->Handle, StartIndex, IndexCount);
     else
@@ -725,11 +801,23 @@ void CKBgfxEncoder::SetIndexBuffer(CKDWORD Buffer,
 void CKBgfxEncoder::SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
                                        CKDWORD StartInstance, CKDWORD InstanceCount)
 {
-    if (!m_Context)
+    if (!CanSubmit())
         return;
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    if (!m_Context) {
+        SetError(CKERR_INVALIDOPERATION);
+        return;
+    }
     CKBgfxVertexBufferRecord *rec = m_Context->GetVertexBuffer(Buffer);
-    if (!rec)
+    if (!rec || Stream != 0 ||
+        InstanceCount == 0 || StartInstance > rec->VertexCount ||
+        InstanceCount > rec->VertexCount - StartInstance) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
     if (m_Encoder)
         m_Encoder->setInstanceDataBuffer(rec->Handle, StartInstance, InstanceCount);
     else
@@ -739,8 +827,14 @@ void CKBgfxEncoder::SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
 void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
                                               CKTransientVertexBuffer *Buffer)
 {
-    if (!Buffer || !Buffer->Data || !m_Context)
+    if (!CanSubmit())
         return;
+    if (!Buffer || !Buffer->Data || !m_Context ||
+        Stream >= m_Context->m_CapsDesc.MaxVertexStreams || Buffer->VertexCount == 0) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    VxMutexLock poolLock(m_Context->m_TransientPoolMutex);
     bgfx::TransientVertexBuffer *tvb = NULL;
     CKDWORD vbCount = m_Context->m_TransientVBCount.load(std::memory_order_acquire);
     for (CKDWORD i = 0; i < vbCount; ++i)
@@ -751,8 +845,19 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
             break;
         }
     }
-    if (!tvb)
+    if (!tvb) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
+    CKBgfxVertexLayoutRecord *layout = m_Context->GetVertexLayout(Buffer->Layout);
+    if (!layout || Buffer->Size != tvb->size ||
+        Buffer->StartVertex != tvb->startVertex ||
+        Buffer->Stride != tvb->stride ||
+        layout->Handle.idx != tvb->layoutHandle.idx ||
+        Buffer->VertexCount > tvb->size / tvb->stride) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     if (m_Encoder)
         m_Encoder->setVertexBuffer((uint8_t)Stream, tvb, 0, Buffer->VertexCount);
     else
@@ -761,8 +866,13 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
 
 void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
 {
-    if (!Buffer || !Buffer->Data || !m_Context)
+    if (!CanSubmit())
         return;
+    if (!Buffer || !Buffer->Data || !m_Context || Buffer->IndexCount == 0) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    VxMutexLock poolLock(m_Context->m_TransientPoolMutex);
     bgfx::TransientIndexBuffer *tib = NULL;
     CKDWORD ibCount = m_Context->m_TransientIBCount.load(std::memory_order_acquire);
     for (CKDWORD i = 0; i < ibCount; ++i)
@@ -773,8 +883,17 @@ void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
             break;
         }
     }
-    if (!tib)
+    if (!tib) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
+    const CKDWORD indexSize = tib->isIndex16 ? 2u : 4u;
+    if (Buffer->Size != tib->size || Buffer->StartIndex != tib->startIndex ||
+        (Buffer->Index32 != FALSE) == tib->isIndex16 ||
+        Buffer->IndexCount > tib->size / indexSize) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     if (m_Encoder)
         m_Encoder->setIndexBuffer(tib, 0, Buffer->IndexCount);
     else
@@ -784,9 +903,14 @@ void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
 void CKBgfxEncoder::SetTransientInstanceBuffer(CKDWORD Stream,
                                                 CKTransientInstanceBuffer *Buffer)
 {
-    (void)Stream;
-    if (!Buffer || !Buffer->Data || !m_Context)
+    if (!CanSubmit())
         return;
+    if (!Buffer || !Buffer->Data || !m_Context ||
+        Stream != 0 || Buffer->InstanceCount == 0) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    VxMutexLock poolLock(m_Context->m_TransientPoolMutex);
     bgfx::InstanceDataBuffer *idb = NULL;
     CKDWORD instCount = m_Context->m_TransientInstCount.load(std::memory_order_acquire);
     for (CKDWORD i = 0; i < instCount; ++i)
@@ -797,8 +921,21 @@ void CKBgfxEncoder::SetTransientInstanceBuffer(CKDWORD Stream,
             break;
         }
     }
-    if (!idb)
+    if (!idb) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
+    CKBgfxVertexLayoutRecord *layout = m_Context->GetVertexLayout(Buffer->Layout);
+    const CKDWORD layoutStride = layout
+        ? (layout->Layout.m_stride + 15u) & ~15u
+        : 0;
+    if (!layout || Buffer->Size != idb->size || Buffer->Stride != idb->stride ||
+        layoutStride != idb->stride ||
+        Buffer->StartInstance > idb->num ||
+        Buffer->InstanceCount > idb->num - Buffer->StartInstance) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     if (m_Encoder)
         m_Encoder->setInstanceDataBuffer(idb, Buffer->StartInstance, Buffer->InstanceCount);
     else
@@ -809,16 +946,48 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
                                 CKDWORD Texture, CKSamplerDesc *Sampler)
 {
     static int s_SetTextureLogCount = 0;
-    if (!m_Context)
+    if (!CanSubmit())
         return;
+    if (!m_Context) {
+        SetError(CKERR_INVALIDOPERATION);
+        return;
+    }
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
+    if (Stage >= m_Context->m_CapsDesc.MaxTextureStages || !uniRec ||
+        uniRec->Type != CKRST_UNIFORM_SAMPLER || (Texture != 0 && !texRec)) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    if (texRec && (texRec->Flags & CKRST_TEXTURE_READBACK) != 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    uint32_t flags = BGFX_SAMPLER_NONE;
+    if (!CKBgfxTrySamplerFlags(Sampler, flags)) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    if (Sampler) {
+        if (Sampler->CompareFunc != CKRST_COMPARE_NONE) {
+            if (!texRec ||
+                (m_Context->m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) == 0 ||
+                (CKBgfxMapFormatCaps(m_Context->m_NativeFormatCaps[texRec->Format],
+                                     FALSE, TRUE) &
+                 CKRST_FORMAT_CAPS_TEXTURE_COMPARE) == 0) {
+                SetError(CKERR_NOTIMPLEMENTED);
+                return;
+            }
+        }
+    }
     bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_Context->m_DefaultWhiteTexture;
     bool usingSamplerBase = false;
-    if (texRec &&
-        !CKBgfxSamplerWantsMipMaps(Sampler) &&
-        texRec->SamplerBaseValid &&
-        bgfx::isValid(texRec->SamplerBaseHandle)) {
+    if (texRec && !CKBgfxSamplerWantsMipMaps(Sampler) && texRec->MipCount > 1) {
+        if (!texRec->SamplerBaseValid ||
+            !bgfx::isValid(texRec->SamplerBaseHandle)) {
+            SetError(CKERR_NOTIMPLEMENTED);
+            return;
+        }
         textureHandle = texRec->SamplerBaseHandle;
         usingSamplerBase = true;
     }
@@ -835,9 +1004,10 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
                  (void *)Sampler);
         s_SetTextureLogCount++;
     }
-    if (!uniRec || !bgfx::isValid(textureHandle))
+    if (!bgfx::isValid(textureHandle)) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
-    uint32_t flags = CKBgfxSamplerFlags(Sampler);
+    }
     if (m_Encoder)
         m_Encoder->setTexture((uint8_t)Stage, uniRec->Handle, textureHandle, flags);
     else
@@ -855,15 +1025,22 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
 
 void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
 {
-    if (!m_Context)
+    if (!CanSubmit())
         return;
+    if (!m_Context) {
+        SetError(CKERR_INVALIDOPERATION);
+        return;
+    }
     CKBgfxUniformRecord *rec = m_Context->GetUniform(Uniform);
-    if (!rec)
+    if (!rec || rec->Type == CKRST_UNIFORM_SAMPLER || !Data || Count == 0 ||
+        Count > rec->Count) {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
     static int s_uniformLogCount = 0;
     if (m_Context->m_DebugLogUniforms && s_uniformLogCount < 256) {
         const float *f = static_cast<const float *>(Data);
-        if (f && rec->Type == CKRST_UNIFORM_FLOAT4) {
+        if (f && rec->Type == CKRST_UNIFORM_VEC4) {
             CKBgfxLogf("SetUniform",
                      "uniform=%u name=%s handle=%u type=%u count=%u recCount=%u first=(%.3f %.3f %.3f %.3f)",
                      Uniform, rec->Name, rec->Handle.idx, (unsigned)rec->Type, Count, rec->Count,
@@ -881,26 +1058,23 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
         bgfx::setUniform(rec->Handle, Data, (uint16_t)Count);
 }
 
-void CKBgfxEncoder::SetDrawSpecialization(const CKDWORD *Values, CKDWORD Count)
-{
-    if (!Values || Count == 0) {
-        m_DebugSpecializationHash = 0;
-        m_DebugSpecializationValid = FALSE;
-        return;
-    }
-    m_DebugSpecializationHash = CKBgfxHashSpecDwords(Values, Count);
-    m_DebugSpecializationValid = TRUE;
-}
-
 void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
                             CKDWORD Depth, CKDWORD Flags)
 {
-    if (!m_Context) {
+    if (!CanSubmit()) {
+        m_DebugSpecializationValid = FALSE;
+        return;
+    }
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (View >= CKRST_MAX_RENDER_VIEWS ||
+        !CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_DebugSpecializationValid = FALSE;
         return;
     }
     CKBgfxProgramRecord *rec = m_Context->GetProgram(Program);
-    if (!rec || !bgfx::isValid(rec->Handle)) {
+    if (!rec || !bgfx::isValid(rec->Handle) || rec->PixelShader == 0) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_Context->RecordInvalidSubmit((CKSTRING)"Submit", View, Program,
                                        (CKSTRING)"invalid_program");
         if (m_Context->m_DrawMapMarkerCaptureActive)
@@ -908,9 +1082,9 @@ void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
         m_DebugSpecializationValid = FALSE;
         return;
     }
-    uint8_t discard = ToBgfxDiscardFlags(Flags);
     if (m_Context->m_DrawMapSubmitActive)
         TraceSubmit((CKSTRING)"Submit", View, Program, rec->Handle, Depth, Flags, 0, 0, 0);
+    m_Context->RecordViewColorWrite(View, TRUE);
     if (m_Encoder)
         m_Encoder->submit((bgfx::ViewId)View, rec->Handle, Depth, discard);
     else
@@ -952,11 +1126,9 @@ void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
     CK_SHADER_PROFILE shaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
     if (m_PointSize > 0)
         finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
-    if (m_Context->m_Driver) {
-        CKShaderTargetDesc target;
-        if (m_Context->m_Driver->GetShaderTarget(&target) == CK_OK)
-            shaderProfile = target.Profile;
-    }
+    CKRasterizerTargetDesc target;
+    if (m_Context->GetTargetDesc(&target) == CK_OK)
+        shaderProfile = target.ShaderProfile;
 
     texFields[0] = '\0';
     for (CKDWORD i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i) {
@@ -1054,9 +1226,7 @@ void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
         submitTrace.Program = Program;
         submitTrace.BgfxProgram = bgfx::isValid(ProgramHandle) ? ProgramHandle.idx : 0xffff;
         submitTrace.ProgramHash = programHash;
-        submitTrace.SpecHash = m_DebugSpecializationValid
-            ? m_DebugSpecializationHash
-            : (programRecord ? programRecord->SpecHash : 0u);
+        submitTrace.SpecHash = 0;
         submitTrace.ShaderProfile = (CKSTRING)CKBgfxShaderProfileName(shaderProfile);
         submitTrace.StateHash = stateHash;
         submitTrace.BgfxStateLo = (CKDWORD)(finalState & 0xffffffffu);
@@ -1099,6 +1269,11 @@ void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
 
 void CKBgfxEncoder::Touch(CKRenderView View)
 {
+    if (!CanSubmit() || View >= m_Context->m_CapsDesc.MaxRenderViews) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    m_Context->RecordViewColorWrite(View, FALSE);
     if (m_Encoder)
         m_Encoder->touch((bgfx::ViewId)View);
     else
@@ -1111,40 +1286,56 @@ void CKBgfxEncoder::Blit(CKRenderView View,
                           CKDWORD SrcTexture, CKDWORD SrcMip,
                           const CKRECT *SrcRect)
 {
-    if (!m_Context)
+    if (!CanSubmit())
         return;
     CKBgfxTextureRecord *dst = m_Context->GetTexture(DstTexture);
     CKBgfxTextureRecord *src = m_Context->GetTexture(SrcTexture);
-    if (!dst || !src)
+    if (!dst || !src || View >= m_Context->m_CapsDesc.MaxRenderViews)
+    {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
     if (DstMip >= dst->MipCount || SrcMip >= src->MipCount)
+    {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
-
-    const CKDWORD dstWidth = std::max<CKDWORD>(1, dst->Width >> DstMip);
-    const CKDWORD dstHeight = std::max<CKDWORD>(1, dst->Height >> DstMip);
+    }
+    const CKDWORD dstWidth = XMax((CKDWORD)1, dst->Width >> DstMip);
+    const CKDWORD dstHeight = XMax((CKDWORD)1, dst->Height >> DstMip);
+    const CKDWORD srcWidth = XMax((CKDWORD)1, src->Width >> SrcMip);
+    const CKDWORD srcHeight = XMax((CKDWORD)1, src->Height >> SrcMip);
+    if (DstX >= dstWidth || DstY >= dstHeight ||
+        (SrcRect && (SrcRect->left < 0 || SrcRect->top < 0 ||
+                     SrcRect->right <= SrcRect->left ||
+                     SrcRect->bottom <= SrcRect->top ||
+                     (CKDWORD)SrcRect->right > srcWidth ||
+                     (CKDWORD)SrcRect->bottom > srcHeight))) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_BLIT) == 0 ||
+        (dst->Flags & CKRST_TEXTURE_BLIT_DST) == 0 ||
+        dst->Format != src->Format) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
     const int srcRectWidth = SrcRect ? SrcRect->right - SrcRect->left : 0;
     const int srcRectHeight = SrcRect ? SrcRect->bottom - SrcRect->top : 0;
     const CKDWORD copiedWidth = SrcRect
         ? (srcRectWidth > 0 ? (CKDWORD)srcRectWidth : 0)
-        : std::max<CKDWORD>(1, src->Width >> SrcMip);
+        : XMax((CKDWORD)1, src->Width >> SrcMip);
     const CKDWORD copiedHeight = SrcRect
         ? (srcRectHeight > 0 ? (CKDWORD)srcRectHeight : 0)
-        : std::max<CKDWORD>(1, src->Height >> SrcMip);
+        : XMax((CKDWORD)1, src->Height >> SrcMip);
+    const CKDWORD actualCopiedWidth =
+        XMin(copiedWidth, dstWidth - DstX);
+    const CKDWORD actualCopiedHeight =
+        XMin(copiedHeight, dstHeight - DstY);
     const CKBOOL fullDestination =
         DstX == 0 && DstY == 0 &&
-        copiedWidth == dstWidth && copiedHeight == dstHeight;
-    if (fullDestination) {
-        const CKDWORD dstMipBit = CKBgfxMipBit(DstMip);
-        const CKDWORD srcMipBit = CKBgfxMipBit(SrcMip);
-        const CKBOOL sourceBottomLeft =
-            CKBgfxTargetOriginBottomLeft(m_Context->m_Driver) &&
-            (((src->Flags & CKRST_TEXTURE_RENDERTARGET) != 0) ||
-             ((src->ReadbackBottomLeftMipMask & srcMipBit) != 0));
-        if (sourceBottomLeft)
-            dst->ReadbackBottomLeftMipMask |= dstMipBit;
-        else
-            dst->ReadbackBottomLeftMipMask &= ~dstMipBit;
-    }
+        actualCopiedWidth == dstWidth && actualCopiedHeight == dstHeight;
+    m_Context->RecordViewColorWrite(View, FALSE);
+    m_Context->RecordTextureBlit(dst, DstMip, src, SrcMip, fullDestination);
     if (SrcRect)
     {
         if (m_Encoder)
@@ -1182,56 +1373,131 @@ void CKBgfxEncoder::Blit(CKRenderView View,
 void CKBgfxEncoder::SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                                      CK_ACCESS_MODE Access)
 {
-    if (!m_Context || !m_Encoder)
+    if (!CanSubmit())
         return;
+    if (!m_Context || Stage >= m_Context->m_CapsDesc.MaxComputeBindings)
+    {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
     CKBgfxVertexBufferRecord *vb = m_Context->GetVertexBuffer(Buffer);
-    if (!vb)
+    if (!vb || (Access != CKRST_ACCESS_READ && Access != CKRST_ACCESS_WRITE &&
+                Access != CKRST_ACCESS_READWRITE))
+    {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
+    const CKBOOL allowRead = (vb->Flags & CKRST_VB_COMPUTE_READ) != 0;
+    const CKBOOL allowWrite = (vb->Flags & CKRST_VB_COMPUTE_WRITE) != 0;
+    if ((Access == CKRST_ACCESS_READ && !allowRead) ||
+        (Access == CKRST_ACCESS_WRITE && !allowWrite) ||
+        (Access == CKRST_ACCESS_READWRITE && (!allowRead || !allowWrite))) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
     bgfx::Access::Enum bgfxAccess = bgfx::Access::Read;
     if (Access == CKRST_ACCESS_WRITE) bgfxAccess = bgfx::Access::Write;
     else if (Access == CKRST_ACCESS_READWRITE) bgfxAccess = bgfx::Access::ReadWrite;
-    m_Encoder->setBuffer((uint8_t)Stage, vb->Handle, bgfxAccess);
+    if (m_Encoder)
+        m_Encoder->setBuffer((uint8_t)Stage, vb->Handle, bgfxAccess);
+    else
+        bgfx::setBuffer((uint8_t)Stage, vb->Handle, bgfxAccess);
 }
 
 void CKBgfxEncoder::SetComputeImage(CKDWORD Stage, CKDWORD Texture,
                                      CKDWORD Mip, CK_ACCESS_MODE Access)
 {
-    if (!m_Context || !m_Encoder)
+    if (!CanSubmit())
         return;
+    if (!m_Context || Stage >= m_Context->m_CapsDesc.MaxComputeBindings)
+    {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     CKBgfxTextureRecord *tex = m_Context->GetTexture(Texture);
-    if (!tex)
+    if (!tex || Mip >= tex->MipCount ||
+        (Access != CKRST_ACCESS_READ && Access != CKRST_ACCESS_WRITE &&
+         Access != CKRST_ACCESS_READWRITE))
+    {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
+    }
+    if ((tex->Flags & CKRST_TEXTURE_READBACK) != 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0 ||
+        (m_Context->m_CapsDesc.Features & CKRST_CAPS_IMAGE_RW) == 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    const CKDWORD formatCaps = CKBgfxMapFormatCaps(
+        m_Context->m_NativeFormatCaps[tex->Format], FALSE, FALSE);
+    if ((Access == CKRST_ACCESS_READ &&
+         (formatCaps & CKRST_FORMAT_CAPS_IMAGE_READ) == 0) ||
+        ((Access == CKRST_ACCESS_WRITE || Access == CKRST_ACCESS_READWRITE) &&
+         ((tex->Flags & CKRST_TEXTURE_COMPUTE_WRITE) == 0 ||
+          (formatCaps & CKRST_FORMAT_CAPS_IMAGE_WRITE) == 0)) ||
+        (Access == CKRST_ACCESS_READWRITE &&
+         (formatCaps & CKRST_FORMAT_CAPS_IMAGE_READ) == 0)) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
     bgfx::Access::Enum bgfxAccess = bgfx::Access::Read;
     if (Access == CKRST_ACCESS_WRITE) bgfxAccess = bgfx::Access::Write;
     else if (Access == CKRST_ACCESS_READWRITE) bgfxAccess = bgfx::Access::ReadWrite;
-    m_Encoder->setImage((uint8_t)Stage, tex->Handle, (uint8_t)Mip, bgfxAccess);
+    if (Access == CKRST_ACCESS_WRITE || Access == CKRST_ACCESS_READWRITE)
+        m_Context->RecordTextureWrite(tex, Mip, CKBGFX_ORIENTATION_UNKNOWN, TRUE);
+    if (m_Encoder)
+        m_Encoder->setImage((uint8_t)Stage, tex->Handle, (uint8_t)Mip, bgfxAccess);
+    else
+        bgfx::setImage((uint8_t)Stage, tex->Handle, (uint8_t)Mip, bgfxAccess);
 }
 
 void CKBgfxEncoder::SetCondition(CKDWORD Query, CKBOOL Visible)
 {
-    if (!m_Context || !m_Encoder)
+    if (!CanSubmit())
         return;
+    if (!m_Context)
+    {
+        SetError(CKERR_INVALIDOPERATION);
+        return;
+    }
     CKBgfxOcclusionQueryRecord *oq = m_Context->GetOcclusionQuery(Query);
     if (!oq)
+    {
+        SetError(CKERR_INVALIDPARAMETER);
         return;
-    m_Encoder->setCondition(oq->Handle, Visible != FALSE);
+    }
+    if (m_Encoder)
+        m_Encoder->setCondition(oq->Handle, Visible != FALSE);
+    else
+        bgfx::setCondition(oq->Handle, Visible != FALSE);
 }
 
 void CKBgfxEncoder::SetMarker(CKSTRING Name)
 {
-    if (!m_Context || !m_Context->m_DrawMapMarkerCaptureActive)
+    if (!CanSubmit())
+        return;
+    if (!m_Context)
         return;
     if (Name) {
-        if (m_LastMarker[0] != '\0') {
-            m_Context->m_DebugMarkerOverwriteCount.fetch_add(1, std::memory_order_relaxed);
-            if (CKBgfxDrawMapChannelEnabled(m_Context->m_DrawMapFlags,
-                                            CKRST_DEBUG_DRAWMAP_MARKERS))
-                CKBgfxLogf("MarkerOverwrite",
-                           "frame=%u old=\"%s\" new=\"%s\"",
-                           m_Context->m_DebugFrameId, m_LastMarker, Name);
+        if (m_Context->m_DrawMapMarkerCaptureActive) {
+            if (m_LastMarker[0] != '\0') {
+                m_Context->m_DebugMarkerOverwriteCount.fetch_add(1, std::memory_order_relaxed);
+                if (CKBgfxDrawMapChannelEnabled(m_Context->m_DrawMapFlags,
+                                                CKRST_DEBUG_DRAWMAP_MARKERS))
+                    CKBgfxLogf("MarkerOverwrite",
+                               "frame=%u old=\"%s\" new=\"%s\"",
+                               m_Context->m_DebugFrameId, m_LastMarker, Name);
+            }
+            strncpy(m_LastMarker, Name, sizeof(m_LastMarker) - 1);
+            m_LastMarker[sizeof(m_LastMarker) - 1] = '\0';
         }
-        strncpy(m_LastMarker, Name, sizeof(m_LastMarker) - 1);
-        m_LastMarker[sizeof(m_LastMarker) - 1] = '\0';
         if (m_Encoder)
             m_Encoder->setMarker(Name);
         else
@@ -1246,6 +1512,8 @@ void CKBgfxEncoder::SetMarker(CKSTRING Name)
 
 CKBOOL CKBgfxEncoder::ConsumeMarker(char *Buffer, CKDWORD BufferSize)
 {
+    if (!CanSubmit())
+        return FALSE;
     if (!m_Context || !m_Context->m_DrawMapMarkerCaptureActive)
         return FALSE;
     if (!Buffer || BufferSize == 0)
@@ -1263,13 +1531,21 @@ void CKBgfxEncoder::SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
                                           CKDWORD Query, CKDWORD Depth,
                                           CKDWORD Flags)
 {
-    if (!m_Context || !m_Encoder) {
+    if (!CanSubmit()) {
+        m_DebugSpecializationValid = FALSE;
+        return;
+    }
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (View >= m_Context->m_CapsDesc.MaxRenderViews ||
+        !CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_DebugSpecializationValid = FALSE;
         return;
     }
     CKBgfxProgramRecord *prog = m_Context->GetProgram(Program);
     CKBgfxOcclusionQueryRecord *oq = m_Context->GetOcclusionQuery(Query);
-    if (!prog || !bgfx::isValid(prog->Handle) || !oq) {
+    if (!prog || !bgfx::isValid(prog->Handle) || prog->PixelShader == 0 || !oq) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_Context->RecordInvalidSubmit((CKSTRING)"Occlusion", View, Program,
                                        !prog || !bgfx::isValid(prog->Handle)
                                            ? (CKSTRING)"invalid_program"
@@ -1281,7 +1557,11 @@ void CKBgfxEncoder::SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
     }
     if (m_Context->m_DrawMapSubmitActive)
         TraceSubmit((CKSTRING)"Occlusion", View, Program, prog->Handle, Depth, Flags, Query, 0, 0);
-    m_Encoder->submit((bgfx::ViewId)View, prog->Handle, oq->Handle, Depth, ToBgfxDiscardFlags(Flags));
+    m_Context->RecordViewColorWrite(View, TRUE);
+    if (m_Encoder)
+        m_Encoder->submit((bgfx::ViewId)View, prog->Handle, oq->Handle, Depth, discard);
+    else
+        bgfx::submit((bgfx::ViewId)View, prog->Handle, oq->Handle, Depth, discard);
     if (m_Context->m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
     m_DebugSpecializationValid = FALSE;
@@ -1292,13 +1572,22 @@ void CKBgfxEncoder::SubmitIndirect(CKRenderView View, CKDWORD Program,
                                     CKDWORD Start, CKDWORD Count,
                                     CKDWORD Depth, CKDWORD Flags)
 {
-    if (!m_Context || !m_Encoder) {
+    if (!CanSubmit()) {
+        m_DebugSpecializationValid = FALSE;
+        return;
+    }
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (View >= m_Context->m_CapsDesc.MaxRenderViews || Count == 0 ||
+        !CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_DebugSpecializationValid = FALSE;
         return;
     }
     CKBgfxProgramRecord *prog = m_Context->GetProgram(Program);
     CKBgfxIndirectBufferRecord *ib = m_Context->GetIndirectBuffer(IndirectBuffer);
-    if (!prog || !bgfx::isValid(prog->Handle) || !ib) {
+    if (!prog || !bgfx::isValid(prog->Handle) || prog->PixelShader == 0 || !ib ||
+        Start > ib->MaxCommands || Count > ib->MaxCommands - Start) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_Context->RecordInvalidSubmit((CKSTRING)"Indirect", View, Program,
                                        !prog || !bgfx::isValid(prog->Handle)
                                            ? (CKSTRING)"invalid_program"
@@ -1310,8 +1599,13 @@ void CKBgfxEncoder::SubmitIndirect(CKRenderView View, CKDWORD Program,
     }
     if (m_Context->m_DrawMapSubmitActive)
         TraceSubmit((CKSTRING)"Indirect", View, Program, prog->Handle, Depth, Flags, IndirectBuffer, Start, Count);
-    m_Encoder->submit((bgfx::ViewId)View, prog->Handle, ib->Handle,
-                      (uint16_t)Start, (uint16_t)Count, Depth, ToBgfxDiscardFlags(Flags));
+    m_Context->RecordViewColorWrite(View, TRUE);
+    if (m_Encoder)
+        m_Encoder->submit((bgfx::ViewId)View, prog->Handle, ib->Handle,
+                          Start, Count, Depth, discard);
+    else
+        bgfx::submit((bgfx::ViewId)View, prog->Handle, ib->Handle,
+                     Start, Count, Depth, discard);
     if (m_Context->m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
     m_DebugSpecializationValid = FALSE;
@@ -1322,17 +1616,32 @@ void CKBgfxEncoder::Dispatch(CKRenderView View, CKDWORD Program,
                               CKDWORD Flags)
 {
     m_DebugSpecializationValid = FALSE;
-    if (!m_Context || !m_Encoder)
+    if (!CanSubmit())
         return;
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (View >= m_Context->m_CapsDesc.MaxRenderViews ||
+        !CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     CKBgfxProgramRecord *prog = m_Context->GetProgram(Program);
-    if (!prog || !bgfx::isValid(prog->Handle)) {
+    if (!prog || !bgfx::isValid(prog->Handle) || prog->PixelShader != 0) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_Context->RecordInvalidSubmit((CKSTRING)"Dispatch", View, Program,
                                        (CKSTRING)"invalid_program");
         if (m_Context->m_DrawMapMarkerCaptureActive)
             m_LastMarker[0] = '\0';
         return;
     }
-    m_Encoder->dispatch((bgfx::ViewId)View, prog->Handle, NumX, NumY, NumZ, ToBgfxDiscardFlags(Flags));
+    m_Context->RecordViewColorWrite(View, FALSE);
+    if (m_Encoder)
+        m_Encoder->dispatch((bgfx::ViewId)View, prog->Handle, NumX, NumY, NumZ, discard);
+    else
+        bgfx::dispatch((bgfx::ViewId)View, prog->Handle, NumX, NumY, NumZ, discard);
 }
 
 void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
@@ -1340,11 +1649,24 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
                                       CKDWORD Start, CKDWORD Count,
                                       CKDWORD Flags)
 {
-    if (!m_Context || !m_Encoder)
+    if (!CanSubmit())
         return;
+    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0 ||
+        (m_Context->m_CapsDesc.Features & CKRST_CAPS_DRAW_INDIRECT) == 0) {
+        SetError(CKERR_NOTIMPLEMENTED);
+        return;
+    }
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (View >= m_Context->m_CapsDesc.MaxRenderViews || Count == 0 ||
+        !CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER);
+        return;
+    }
     CKBgfxProgramRecord *prog = m_Context->GetProgram(Program);
     CKBgfxIndirectBufferRecord *ib = m_Context->GetIndirectBuffer(IndirectBuffer);
-    if (!prog || !bgfx::isValid(prog->Handle) || !ib) {
+    if (!prog || !bgfx::isValid(prog->Handle) || prog->PixelShader != 0 || !ib ||
+        Start > ib->MaxCommands || Count > ib->MaxCommands - Start) {
+        SetError(CKERR_INVALIDPARAMETER);
         m_Context->RecordInvalidSubmit((CKSTRING)"DispatchIndirect", View, Program,
                                        !prog || !bgfx::isValid(prog->Handle)
                                            ? (CKSTRING)"invalid_program"
@@ -1353,8 +1675,13 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
             m_LastMarker[0] = '\0';
         return;
     }
-    m_Encoder->dispatch((bgfx::ViewId)View, prog->Handle, ib->Handle,
-                        (uint16_t)Start, (uint16_t)Count, ToBgfxDiscardFlags(Flags));
+    m_Context->RecordViewColorWrite(View, FALSE);
+    if (m_Encoder)
+        m_Encoder->dispatch((bgfx::ViewId)View, prog->Handle, ib->Handle,
+                            Start, Count, discard);
+    else
+        bgfx::dispatch((bgfx::ViewId)View, prog->Handle, ib->Handle,
+                       Start, Count, discard);
 }
 
 // ===========================================================================
@@ -1363,10 +1690,11 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 
 CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
     : m_BgfxInitialized(FALSE), m_RendererName("Unknown"),
+      m_RendererType(bgfx::RendererType::Count),
+      m_NativeSupported(0),
       m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE), m_AntialiasSamples(0),
-      m_PendingScreenShotCallback(NULL), m_PendingScreenShotFB(0),
-      m_BackbufferReadTarget(NULL), m_BackbufferReadReady{false},
+      m_NextScreenShotToken(1),
       m_DebugFrameId(0), m_DebugSubmitSerial{0}, m_DebugMissingAnnotationCount{0},
       m_DebugMarkerOverwriteCount{0}, m_DebugMarkerStaleCount{0},
       m_DebugInvalidSubmitCount{0}, m_DebugFatalCount{0},
@@ -1382,28 +1710,145 @@ CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
       m_TransientVBCount{0}, m_TransientIBCount{0}, m_TransientInstCount{0}
 {
     m_Driver = driver;
+    memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
     m_BgfxCallback.SetContext(this);
     for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i) {
         m_DebugViewSubmitSerial[i].store(0, std::memory_order_relaxed);
         m_DebugViewMode[i] = CKRST_VIEWMODE_DEFAULT;
         m_DebugViewName[i][0] = '\0';
+        m_ViewFrameBuffer[i] = 0;
+        m_ViewRect[i].left = 0;
+        m_ViewRect[i].top = 0;
+        m_ViewRect[i].right = 0;
+        m_ViewRect[i].bottom = 0;
+        m_ViewClearFlags[i] = 0;
+        m_ViewClearRecorded[i] = FALSE;
     }
     for (int i = 0; i < CKDRAW_SOURCE_COUNT; ++i)
         m_DebugSourceSubmitCount[i].store(0, std::memory_order_relaxed);
 }
 
+static CKBgfxTextureOrientation CKBgfxMergeOrientation(
+    CKBgfxTextureOrientation Current,
+    CKBgfxTextureOrientation Incoming,
+    CKBOOL FullOverwrite)
+{
+    if (FullOverwrite)
+        return Incoming;
+    if (Incoming == CKBGFX_ORIENTATION_UNKNOWN)
+        return CKBGFX_ORIENTATION_UNKNOWN;
+    if (Incoming == CKBGFX_ORIENTATION_MIXED ||
+        Current == CKBGFX_ORIENTATION_MIXED)
+        return CKBGFX_ORIENTATION_MIXED;
+    if (Current == CKBGFX_ORIENTATION_UNKNOWN || Current == Incoming)
+        return Incoming;
+    return CKBGFX_ORIENTATION_MIXED;
+}
+
+void CKBgfxRasterizerContext::RecordTextureWrite(
+    CKBgfxTextureRecord *Texture, CKDWORD Mip,
+    CKBgfxTextureOrientation Orientation, CKBOOL FullOverwrite)
+{
+    if (!Texture || Mip >= Texture->MipCount || Mip >= CKBGFX_MAX_TRACKED_MIPS)
+        return;
+    VxMutexLock lock(m_ResourceStateMutex);
+    const CKBgfxTextureOrientation current =
+        (CKBgfxTextureOrientation)Texture->ReadbackOrientation[Mip];
+    Texture->ReadbackOrientation[Mip] = (CKBYTE)CKBgfxMergeOrientation(
+        current, Orientation, FullOverwrite);
+}
+
+void CKBgfxRasterizerContext::RecordTextureBlit(
+    CKBgfxTextureRecord *Destination, CKDWORD DestinationMip,
+    const CKBgfxTextureRecord *Source, CKDWORD SourceMip,
+    CKBOOL FullOverwrite)
+{
+    if (!Destination || !Source ||
+        DestinationMip >= Destination->MipCount || SourceMip >= Source->MipCount ||
+        DestinationMip >= CKBGFX_MAX_TRACKED_MIPS || SourceMip >= CKBGFX_MAX_TRACKED_MIPS)
+        return;
+    VxMutexLock lock(m_ResourceStateMutex);
+    const CKBgfxTextureOrientation source =
+        (CKBgfxTextureOrientation)Source->ReadbackOrientation[SourceMip];
+    const CKBgfxTextureOrientation current =
+        (CKBgfxTextureOrientation)Destination->ReadbackOrientation[DestinationMip];
+    Destination->ReadbackOrientation[DestinationMip] =
+        (CKBYTE)CKBgfxMergeOrientation(current, source, FullOverwrite);
+}
+
+void CKBgfxRasterizerContext::RecordViewColorWrite(CKRenderView View,
+                                                    CKBOOL HasDraw)
+{
+    if (View >= CKRST_MAX_RENDER_VIEWS)
+        return;
+
+    VxMutexLock lock(m_ResourceStateMutex);
+    CKBgfxFrameBufferRecord *frameBuffer = GetFrameBuffer(m_ViewFrameBuffer[View]);
+    if (!frameBuffer)
+        return;
+
+    const CKBgfxTextureOrientation targetOrientation =
+        m_TargetDesc.OriginBottomLeft
+            ? CKBGFX_ORIENTATION_BOTTOM_LEFT
+            : CKBGFX_ORIENTATION_TOP_LEFT;
+    const CKBOOL executeColorClear =
+        !m_ViewClearRecorded[View] &&
+        (m_ViewClearFlags[View] & CKRST_CTXCLEAR_COLOR) != 0;
+
+    for (CKDWORD i = 0; i < frameBuffer->ColorCount; ++i) {
+        const CKFrameBufferAttachmentDesc &attachment = frameBuffer->Color[i];
+        CKBgfxTextureRecord *texture = GetTexture(attachment.Texture);
+        if (!texture || attachment.Mip >= texture->MipCount ||
+            attachment.Mip >= CKBGFX_MAX_TRACKED_MIPS)
+            continue;
+
+        CKBgfxTextureOrientation current =
+            (CKBgfxTextureOrientation)texture->ReadbackOrientation[attachment.Mip];
+        if (executeColorClear) {
+            const CKDWORD width = XMax((CKDWORD)1, texture->Width >> attachment.Mip);
+            const CKDWORD height = XMax((CKDWORD)1, texture->Height >> attachment.Mip);
+            const CKBOOL fullClear =
+                m_ViewRect[View].left == 0 && m_ViewRect[View].top == 0 &&
+                m_ViewRect[View].right == (int)width &&
+                m_ViewRect[View].bottom == (int)height;
+            current = CKBgfxMergeOrientation(current, targetOrientation, fullClear);
+        }
+        if (HasDraw)
+            current = CKBgfxMergeOrientation(current, targetOrientation, FALSE);
+        texture->ReadbackOrientation[attachment.Mip] = (CKBYTE)current;
+    }
+    if (executeColorClear)
+        m_ViewClearRecorded[View] = TRUE;
+}
+
 CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
 {
+    XArray<CKBgfxScreenShotRequest> cancelledScreenShots;
+    {
+        VxMutexLock lock(m_ScreenShotMutex);
+        cancelledScreenShots.Swap(m_PendingScreenShots);
+    }
+    for (int i = 0; i < cancelledScreenShots.Size(); ++i) {
+        CKBgfxScreenShotRequest &request = cancelledScreenShots[i];
+        if (request.Callback) {
+            request.Callback(request.UserData, request.FrameBuffer, 0, 0, 0,
+                         UNKNOWN_PF, NULL, 0, FALSE);
+        }
+    }
     if (m_BgfxInitialized)
     {
+        if (m_DefaultEncoder.m_Active.load(std::memory_order_acquire))
+        {
+            m_DefaultEncoder.m_Context = NULL;
+            m_DefaultEncoder.m_Active.store(FALSE, std::memory_order_relaxed);
+        }
         for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
         {
             if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
             {
-                if (m_Encoders[i].m_Encoder)
-                    bgfx::end(m_Encoders[i].m_Encoder);
-                m_Encoders[i].m_Encoder = NULL;
-                m_Encoders[i].m_Active.store(FALSE, std::memory_order_relaxed);
+                CKBgfxLogf("Encoder",
+                           "active pool encoder during context destruction slot=%d",
+                           i);
             }
         }
 
@@ -1425,18 +1870,25 @@ CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
 
         bgfx::shutdown();
         m_BgfxInitialized = FALSE;
+        m_Created = FALSE;
+        m_RendererType = bgfx::RendererType::Count;
     }
 
+    CKBgfxReleaseActiveContext(this);
     CKBgfxCloseLogFile();
 }
 
-CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
-                                       int Width, int Height, int Bpp,
-                                       CKBOOL Fullscreen, int RefreshRate,
-                                       int Zbpp, int StencilBpp)
+CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
+                                        int Width, int Height, int Bpp,
+                                        CKBOOL Fullscreen, int RefreshRate,
+                                        int Zbpp, int StencilBpp)
 {
-    if (m_BgfxInitialized)
-        return Resize(PosX, PosY, Width, Height, 0);
+    if (m_BgfxInitialized || m_Created)
+        return CKERR_INVALIDOPERATION;
+    if (!CKBgfxClaimActiveContext(this)) {
+        CKBgfxLogf("Init", "another CKBgfxRasterizerContext is already active");
+        return CKERR_INVALIDOPERATION;
+    }
 
     m_Window = Window;
     m_PosX = PosX;
@@ -1458,7 +1910,17 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     if (Height <= 0)
         Height = CKBgfxConfigPositiveInt("Renderer", "FallbackHeight", 480);
 
+    if (Width > 0xffff || Height > 0xffff) {
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_INVALIDPARAMETER;
+    }
+
     CKBgfxResolveFullscreenWindowSize(Window, Fullscreen, Width, Height);
+
+    if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff) {
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_INVALIDPARAMETER;
+    }
 
     m_Width = Width;
     m_Height = Height;
@@ -1474,7 +1936,8 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     init.type = requestedRenderer;
     if (!CKBgfxFillSDLPlatformData(Window, init.platformData)) {
         CKBgfxLogf("Init", "failed to extract SDL native window data window=%p", Window);
-        return FALSE;
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_INVALIDPARAMETER;
     }
     CKBgfxLogf("Init",
                "platformData ndt=%p nwh=%p type=%s",
@@ -1489,29 +1952,121 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     if (!bgfx::init(init)) {
         CKBgfxLogf("Init", "bgfx init failed for requested renderer '%s' window=%p size=%dx%d",
                    CKBgfxRendererTypeName(requestedRenderer), Window, Width, Height);
-        return FALSE;
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_INVALIDOPERATION;
     }
 
     m_BgfxInitialized = TRUE;
+    m_ApiThreadId = VxThread::GetCurrentVxThreadId();
     const bgfx::RendererType::Enum actualRenderer = bgfx::getRendererType();
+    m_RendererType = actualRenderer;
     m_RendererName = CKBgfxRendererTypeName(actualRenderer);
-    if (actualRenderer == bgfx::RendererType::OpenGLES) {
-        CKBgfxLogf("Init", "OpenGLES is unsupported: no ESSL shader profile is built");
+    if (CKBgfxShaderProfile(actualRenderer) == CKRST_SHADER_PROFILE_UNKNOWN) {
+        CKBgfxLogf("Init", "renderer %s is unsupported: no shader profile is built",
+                   CKBgfxRendererTypeName(actualRenderer));
         bgfx::shutdown();
         m_BgfxInitialized = FALSE;
-        return FALSE;
+        m_RendererType = bgfx::RendererType::Count;
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_NOTIMPLEMENTED;
     }
     const bgfx::Caps *caps = bgfx::getCaps();
+    m_TargetDesc = CKRasterizerTargetDesc();
+    m_TargetDesc.ShaderProfile = CKBgfxShaderProfile(actualRenderer);
+    m_TargetDesc.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
+    m_TargetDesc.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
+    m_CapsDesc = CKRasterizerCapsDesc();
+    memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
+    if (caps) {
+        m_NativeSupported = caps->supported;
+        memcpy(m_NativeFormatCaps, caps->formats, sizeof(m_NativeFormatCaps));
+
+        const bgfx::Caps::Limits &limits = caps->limits;
+        m_CapsDesc.MaxDrawCalls = limits.maxDrawCalls;
+        m_CapsDesc.MaxBlits = limits.maxBlits;
+        m_CapsDesc.MaxTextureSize = limits.maxTextureSize;
+        m_CapsDesc.MaxTextureLayers = limits.maxTextureLayers;
+        m_CapsDesc.MaxRenderViews = XMin((CKDWORD)limits.maxViews,
+                                         (CKDWORD)CKRST_MAX_RENDER_VIEWS);
+        m_CapsDesc.MaxFrameBuffers = limits.maxFrameBuffers;
+        m_CapsDesc.MaxColorAttachments = limits.maxFBAttachments;
+        m_CapsDesc.MaxPrograms = limits.maxPrograms;
+        m_CapsDesc.MaxShaders = limits.maxShaders;
+        m_CapsDesc.MaxTextures = limits.maxTextures;
+        m_CapsDesc.MaxTextureStages = XMin((CKDWORD)limits.maxTextureSamplers,
+                                           (CKDWORD)CKRST_MAX_TEXTURE_STAGES);
+        m_CapsDesc.MaxComputeBindings = limits.maxComputeBindings;
+        m_CapsDesc.MaxVertexLayouts = limits.maxVertexLayouts;
+        m_CapsDesc.MaxVertexStreams = XMin((CKDWORD)limits.maxVertexStreams,
+                                           (CKDWORD)CKRST_MAX_VERTEX_STREAMS);
+        m_CapsDesc.MaxIndexBuffers = limits.maxIndexBuffers;
+        m_CapsDesc.MaxVertexBuffers = limits.maxVertexBuffers;
+        m_CapsDesc.MaxDynamicIndexBuffers = limits.maxDynamicIndexBuffers;
+        m_CapsDesc.MaxDynamicVertexBuffers = limits.maxDynamicVertexBuffers;
+        m_CapsDesc.MaxUniforms = limits.maxUniforms;
+        m_CapsDesc.MaxOcclusionQueries = limits.maxOcclusionQueries;
+#if BGFX_CONFIG_MULTITHREADED
+        m_CapsDesc.MaxEncoders = XMin((CKDWORD)limits.maxEncoders,
+                                      (CKDWORD)CKRST_MAX_ENCODERS);
+#else
+        m_CapsDesc.MaxEncoders = 0;
+#endif
+        m_CapsDesc.MinResourceCommandBufferSize = limits.minResourceCbSize;
+        m_CapsDesc.MaxTransientVertexBufferSize = limits.maxTransientVbSize;
+        m_CapsDesc.MaxTransientIndexBufferSize = limits.maxTransientIbSize;
+        m_CapsDesc.MinUniformBufferSize = limits.minUniformBufferSize;
+        m_CapsDesc.MaxTransforms = CKRST_MAX_TRANSFORMS;
+
+        m_CapsDesc.Features = CKRST_CAPS_VERTEX_SHADER |
+                              CKRST_CAPS_PIXEL_SHADER |
+                              CKRST_CAPS_RENDER_VIEWS |
+                              CKRST_CAPS_FRAMEBUFFER |
+                              CKRST_CAPS_TRANSIENT_BUFFERS |
+                              CKRST_CAPS_SCISSOR |
+                              CKRST_CAPS_BUFFER_UPDATE |
+                              CKRST_CAPS_TEXTURE_UPDATE |
+                              CKRST_CAPS_BLEND_EQUATION |
+                              CKRST_CAPS_TRANSFORM_CACHE |
+                              CKRST_CAPS_TEXTURE_CUBE;
+        if (caps->supported & BGFX_CAPS_INSTANCING)
+            m_CapsDesc.Features |= CKRST_CAPS_INSTANCING;
+        if (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK)
+            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_READBACK;
+        if (caps->supported & BGFX_CAPS_TEXTURE_BLIT)
+            m_CapsDesc.Features |= CKRST_CAPS_BLIT;
+        if (caps->supported & BGFX_CAPS_INDEX32)
+            m_CapsDesc.Features |= CKRST_CAPS_INDEX32;
+        if (caps->supported & BGFX_CAPS_TEXTURE_COMPARE_ALL)
+            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_COMPARISON;
+        if (caps->supported & BGFX_CAPS_COMPUTE)
+            m_CapsDesc.Features |= CKRST_CAPS_COMPUTE;
+        if (caps->supported & BGFX_CAPS_OCCLUSION_QUERY)
+            m_CapsDesc.Features |= CKRST_CAPS_OCCLUSION_QUERY;
+        if (caps->supported & BGFX_CAPS_DRAW_INDIRECT)
+            m_CapsDesc.Features |= CKRST_CAPS_DRAW_INDIRECT;
+        if (caps->supported & BGFX_CAPS_TEXTURE_3D)
+            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_3D;
+        if (caps->supported & BGFX_CAPS_IMAGE_RW)
+            m_CapsDesc.Features |= CKRST_CAPS_IMAGE_RW;
+        if (caps->supported & BGFX_CAPS_VERTEX_ATTRIB_HALF)
+            m_CapsDesc.Features |= CKRST_CAPS_VERTEX_ATTRIB_HALF;
+        if (caps->supported & BGFX_CAPS_VERTEX_ATTRIB_UINT10)
+            m_CapsDesc.Features |= CKRST_CAPS_VERTEX_ATTRIB_UINT10;
+
+        const bgfx::TextureFormat::Enum depthFormats[] = {
+            bgfx::TextureFormat::D16,
+            bgfx::TextureFormat::D24,
+            bgfx::TextureFormat::D24S8,
+            bgfx::TextureFormat::D32F,
+        };
+        for (CKDWORD i = 0; i < sizeof(depthFormats) / sizeof(depthFormats[0]); ++i) {
+            if (m_NativeFormatCaps[depthFormats[i]] & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER) {
+                m_CapsDesc.Features |= CKRST_CAPS_DEPTH_TEXTURE;
+                break;
+            }
+        }
+    }
     if (m_Driver) {
-        CKBgfxRasterizerDriver *driver = static_cast<CKBgfxRasterizerDriver *>(m_Driver);
-        driver->m_ShaderTarget.Format = CKRST_SHADER_FORMAT_NATIVE;
-        driver->m_ShaderTarget.Profile = CKBgfxShaderProfile(actualRenderer);
-        driver->m_ShaderTarget.Version = 0;
-        driver->m_ShaderTarget.Flags = 0;
-        if (caps && caps->homogeneousDepth)
-            driver->m_ShaderTarget.Flags |= CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE;
-        if (caps && caps->originBottomLeft)
-            driver->m_ShaderTarget.Flags |= CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT;
         m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererName);
     }
 
@@ -1575,8 +2130,14 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     const bgfx::Memory *whiteMem = bgfx::copy(&whitePixel, sizeof(whitePixel));
     m_DefaultWhiteTexture = bgfx::createTexture2D(
         1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, whiteMem);
-    if (!bgfx::isValid(m_DefaultWhiteTexture))
+    if (!bgfx::isValid(m_DefaultWhiteTexture)) {
         CKBgfxLogf("Init", "failed to create default white texture");
+        bgfx::shutdown();
+        m_BgfxInitialized = FALSE;
+        m_RendererType = bgfx::RendererType::Count;
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_OUTOFMEMORY;
+    }
 
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
     bgfx::setViewClear(0,
@@ -1586,18 +2147,23 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     bgfx::frame();
     ConfigureDebug();
 
-    return TRUE;
+    m_Created = TRUE;
+
+    return CK_OK;
 }
 
-CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
-                                       int Width, int Height, CKDWORD Flags)
+CKERROR CKBgfxRasterizerContext::Resize(int PosX, int PosY,
+                                        int Width, int Height, CKDWORD Flags)
 {
-    if (!m_BgfxInitialized)
-        return FALSE;
-    if (Width <= 0 || Height <= 0)
-        return FALSE;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff ||
+        Flags != 0)
+        return CKERR_INVALIDPARAMETER;
 
     CKBgfxResolveFullscreenWindowSize(m_Window, m_Fullscreen, Width, Height);
+    if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff)
+        return CKERR_INVALIDPARAMETER;
 
     m_PosX = PosX;
     m_PosY = PosY;
@@ -1607,7 +2173,97 @@ CKBOOL CKBgfxRasterizerContext::Resize(int PosX, int PosY,
     bgfx::reset((uint32_t)Width, (uint32_t)Height, m_ResetFlags);
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
 
-    return TRUE;
+    return CK_OK;
+}
+
+CKERROR CKBgfxRasterizerContext::GetTargetDesc(CKRasterizerTargetDesc *Target) const
+{
+    if (!Target || Target->Size < sizeof(CKRasterizerTargetDesc))
+        return CKERR_INVALIDPARAMETER;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    *Target = m_TargetDesc;
+    return CK_OK;
+}
+
+static CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
+                                    CKBOOL AllowComparison)
+{
+    CKDWORD result = CKRST_FORMAT_CAPS_NONE;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_2D)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_2D;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_3D)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_3D;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_CUBE)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_CUBE;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER)
+        result |= CKRST_FORMAT_CAPS_FRAMEBUFFER;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA)
+        result |= CKRST_FORMAT_CAPS_FRAMEBUFFER_MSAA;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_IMAGE_READ)
+        result |= CKRST_FORMAT_CAPS_IMAGE_READ;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_IMAGE_WRITE)
+        result |= CKRST_FORMAT_CAPS_IMAGE_WRITE;
+    if (NativeCaps & BGFX_CAPS_FORMAT_TEXTURE_MIP_AUTOGEN)
+        result |= CKRST_FORMAT_CAPS_MIP_AUTOGEN;
+    if (NativeCaps & (BGFX_CAPS_FORMAT_TEXTURE_2D_SRGB |
+                      BGFX_CAPS_FORMAT_TEXTURE_3D_SRGB |
+                      BGFX_CAPS_FORMAT_TEXTURE_CUBE_SRGB))
+        result |= CKRST_FORMAT_CAPS_SRGB;
+    if (AllowReadback && (result & CKRST_FORMAT_CAPS_TEXTURE_2D))
+        result |= CKRST_FORMAT_CAPS_READBACK;
+    if (AllowComparison && (result & CKRST_FORMAT_CAPS_TEXTURE_2D))
+        result |= CKRST_FORMAT_CAPS_TEXTURE_COMPARE;
+    return result;
+}
+
+CKERROR CKBgfxRasterizerContext::GetCaps(CKRasterizerCapsDesc *Caps) const
+{
+    if (!Caps || Caps->Size < sizeof(CKRasterizerCapsDesc))
+        return CKERR_INVALIDPARAMETER;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    *Caps = m_CapsDesc;
+    return CK_OK;
+}
+
+CKERROR CKBgfxRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
+                                                       CKTextureFormatCaps *Caps) const
+{
+    if (!Caps || Caps->Size < sizeof(CKTextureFormatCaps))
+        return CKERR_INVALIDPARAMETER;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    bgfx::TextureFormat::Enum nativeFormat;
+    if (!CKBgfxTryTextureFormat(Format, nativeFormat))
+        return CKERR_INVALIDPARAMETER;
+    *Caps = CKTextureFormatCaps();
+    Caps->Format = Format;
+    const CKBOOL allowReadback =
+        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) != 0 &&
+        CKBgfxCanExposeReadback(Format, nativeFormat)
+            ? TRUE : FALSE;
+    Caps->Caps = CKBgfxMapFormatCaps(
+        m_NativeFormatCaps[nativeFormat], allowReadback, FALSE);
+    return CK_OK;
+}
+
+CKERROR CKBgfxRasterizerContext::GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
+                                                     CKDepthFormatCaps *Caps) const
+{
+    if (!Caps || Caps->Size < sizeof(CKDepthFormatCaps))
+        return CKERR_INVALIDPARAMETER;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    bgfx::TextureFormat::Enum nativeFormat;
+    if (!CKBgfxTryDepthFormat(Format, nativeFormat))
+        return CKERR_INVALIDPARAMETER;
+    *Caps = CKDepthFormatCaps();
+    Caps->Format = Format;
+    Caps->Caps = CKBgfxMapFormatCaps(
+        m_NativeFormatCaps[nativeFormat], FALSE,
+        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) != 0 ? TRUE : FALSE);
+    return CK_OK;
 }
 
 void CKBgfxRasterizerContext::ConfigureDebug()
@@ -1655,42 +2311,42 @@ void CKBgfxRasterizerContext::DrawDebugOverlay()
 
 CKBgfxShaderRecord *CKBgfxRasterizerContext::GetShader(CKDWORD Handle)
 {
-    return GetSlot(m_Shaders, Handle);
+    return GetSlot(m_Shaders, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxProgramRecord *CKBgfxRasterizerContext::GetProgram(CKDWORD Handle)
 {
-    return GetSlot(m_Programs, Handle);
+    return GetSlot(m_Programs, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxUniformRecord *CKBgfxRasterizerContext::GetUniform(CKDWORD Handle)
 {
-    return GetSlot(m_Uniforms, Handle);
+    return GetSlot(m_Uniforms, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxVertexLayoutRecord *CKBgfxRasterizerContext::GetVertexLayout(CKDWORD Handle)
 {
-    return GetSlot(m_VertexLayouts, Handle);
+    return GetSlot(m_VertexLayouts, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxVertexBufferRecord *CKBgfxRasterizerContext::GetVertexBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_VertexBuffers, Handle);
+    return GetSlot(m_VertexBuffers, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxIndexBufferRecord *CKBgfxRasterizerContext::GetIndexBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_IndexBuffers, Handle);
+    return GetSlot(m_IndexBuffers, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxTextureRecord *CKBgfxRasterizerContext::GetTexture(CKDWORD Handle)
 {
-    return GetSlot(m_Textures, Handle);
+    return GetSlot(m_Textures, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxFrameBufferRecord *CKBgfxRasterizerContext::GetFrameBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_FrameBuffers, Handle);
+    return GetSlot(m_FrameBuffers, Handle, m_ResourceTableMutex);
 }
 
 void CKBgfxRasterizerContext::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
@@ -1728,12 +2384,10 @@ void CKBgfxRasterizerContext::TraceProgramMap(CKSTRING Event, CKDWORD Program,
         !CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_RESOURCES))
         return;
     CKBgfxDrawMapProgramTrace trace;
-    if (m_Driver) {
-        CKShaderTargetDesc target;
-        if (m_Driver->GetShaderTarget(&target) == CK_OK)
-            profile = target.Profile;
-    }
-    CKBgfxFormatSpecDwords(Record, spec, sizeof(spec));
+    CKRasterizerTargetDesc target;
+    if (GetTargetDesc(&target) == CK_OK)
+        profile = target.ShaderProfile;
+    spec[0] = '\0';
     trace.Event = Event;
     trace.Frame = m_DebugFrameId;
     trace.Program = Program;
@@ -1741,8 +2395,8 @@ void CKBgfxRasterizerContext::TraceProgramMap(CKSTRING Event, CKDWORD Program,
     trace.VertexShader = Record ? Record->VertexShader : 0u;
     trace.PixelShader = Record ? Record->PixelShader : 0u;
     trace.Profile = (CKSTRING)CKBgfxShaderProfileName(profile);
-    trace.SpecCount = Record ? Record->SpecializationDwordCount : 0u;
-    trace.SpecHash = Record ? Record->SpecHash : 0u;
+    trace.SpecCount = 0;
+    trace.SpecHash = 0;
     trace.Spec = spec;
     CKBgfxDrawMapTraceProgram(&trace);
 }
@@ -1806,15 +2460,26 @@ void CKBgfxRasterizerContext::RecordTransientAllocMiss(const char *Kind,
 // Resource creation
 // ---------------------------------------------------------------------------
 
-CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(CKDWORD Buffer,
-                                                     CKVertexBufferDesc *Desc,
-                                                     const void *Data)
+CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc,
+                                                     const void *Data,
+                                                     CKDWORD *OutBuffer)
 {
-    if (!m_BgfxInitialized || !Desc || Buffer == 0)
+    if (!OutBuffer)
+        return CKERR_INVALIDPARAMETER;
+    *OutBuffer = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if ((Desc->m_Flags & (CKRST_VB_COMPUTE_READ | CKRST_VB_COMPUTE_WRITE)) &&
+        (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if ((Desc->m_Flags & CKRST_VB_COMPUTE_WRITE) && Data)
         return CKERR_INVALIDPARAMETER;
 
     CKDWORD vertexSize = Desc->m_VertexSize;
-    if (vertexSize == 0)
+    if (vertexSize == 0 || vertexSize > UINT16_MAX ||
+        Desc->m_MaxVertexCount == 0)
         return CKERR_INVALIDPARAMETER;
     uint64_t totalSize64 = (uint64_t)Desc->m_MaxVertexCount * vertexSize;
     if (totalSize64 > UINT32_MAX)
@@ -1822,12 +2487,18 @@ CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(CKDWORD Buffer,
     CKDWORD totalSize = (CKDWORD)totalSize64;
 
     bgfx::VertexLayout layout;
-    layout.begin();
-    layout.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
-    layout.m_stride = (uint16_t)vertexSize;
+    layout.begin(m_RendererType);
+    CKDWORD remainingStride = vertexSize;
+    while (remainingStride > 0) {
+        const uint8_t chunk = static_cast<uint8_t>(
+            XMin(remainingStride, (CKDWORD)UINT8_MAX));
+        layout.skip(chunk);
+        remainingStride -= chunk;
+    }
     layout.end();
 
-    uint16_t flags = BGFX_BUFFER_ALLOW_RESIZE;
+    uint16_t flags = (Desc->m_Flags & CKRST_VB_COMPUTE_WRITE)
+        ? 0 : BGFX_BUFFER_ALLOW_RESIZE;
     if (Desc->m_Flags & CKRST_VB_COMPUTE_READ)
         flags |= BGFX_BUFFER_COMPUTE_READ;
     if (Desc->m_Flags & CKRST_VB_COMPUTE_WRITE)
@@ -1847,28 +2518,47 @@ CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(CKDWORD Buffer,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD buffer = AllocateSlot(m_VertexBuffers,
+                                         m_CapsDesc.MaxDynamicVertexBuffers,
+                                         m_ResourceTableMutex);
+    if (buffer == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxVertexBufferRecord();
     rec->Handle = handle;
+    rec->Flags = Desc->m_Flags;
     rec->Layout = 0;
     rec->VertexSize = vertexSize;
+    rec->VertexCount = Desc->m_MaxVertexCount;
+    rec->Size = totalSize;
 
-    CKBgfxVertexBufferRecord *&slot = EnsureSlot(m_VertexBuffers, Buffer);
-    DestroyRecord(slot);
-    slot = rec;
-    TraceBufferMap((CKSTRING)"create", (CKSTRING)"vb", Buffer, rec->Handle.idx,
+    m_VertexBuffers[buffer] = rec;
+    *OutBuffer = buffer;
+    TraceBufferMap((CKSTRING)"create", (CKSTRING)"vb", buffer, rec->Handle.idx,
                    rec->Layout, rec->VertexSize, Desc->m_MaxVertexCount,
                    0, Desc->m_Flags);
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateIndexBuffer(CKDWORD Buffer,
-                                                    CKIndexBufferDesc *Desc,
+CKERROR CKBgfxRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc,
                                                     CKBOOL Index32,
-                                                    const void *Data)
+                                                    const void *Data,
+                                                    CKDWORD *OutBuffer)
 {
-    if (!m_BgfxInitialized || !Desc || Buffer == 0)
+    if (!OutBuffer)
         return CKERR_INVALIDPARAMETER;
+    *OutBuffer = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->m_MaxIndexCount == 0)
+        return CKERR_INVALIDPARAMETER;
+    if (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0)
+        return CKERR_NOTIMPLEMENTED;
 
     CKDWORD indexSize = Index32 ? 4 : 2;
     uint64_t totalSize64 = (uint64_t)Desc->m_MaxIndexCount * indexSize;
@@ -1893,40 +2583,103 @@ CKERROR CKBgfxRasterizerContext::CreateIndexBuffer(CKDWORD Buffer,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD buffer = AllocateSlot(m_IndexBuffers,
+                                         m_CapsDesc.MaxDynamicIndexBuffers,
+                                         m_ResourceTableMutex);
+    if (buffer == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxIndexBufferRecord();
     rec->Handle = handle;
     rec->Index32 = Index32;
+    rec->IndexCount = Desc->m_MaxIndexCount;
+    rec->Size = totalSize;
 
-    CKBgfxIndexBufferRecord *&slot = EnsureSlot(m_IndexBuffers, Buffer);
-    DestroyRecord(slot);
-    slot = rec;
-    TraceBufferMap((CKSTRING)"create", (CKSTRING)"ib", Buffer, rec->Handle.idx,
+    m_IndexBuffers[buffer] = rec;
+    *OutBuffer = buffer;
+    TraceBufferMap((CKSTRING)"create", (CKSTRING)"ib", buffer, rec->Handle.idx,
                    0, indexSize, Desc->m_MaxIndexCount,
                    Index32 ? 1u : 0u, Desc->m_Flags);
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
-                                                CKTextureDesc *Desc,
-                                                const VxImageDescEx *Data)
+CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
+                                                const VxImageDescEx *Data,
+                                                CKDWORD *OutTexture)
 {
     static int s_CreateTextureLogCount = 0;
-    if (!m_BgfxInitialized || !Desc || Texture == 0)
+    if (!OutTexture)
+        return CKERR_INVALIDPARAMETER;
+    *OutTexture = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->Flags & CKRST_TEXTURE_DEPTHSTENCIL)
         return CKERR_INVALIDPARAMETER;
 
+    const CKBOOL cubeRequested = (Desc->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
+    const CKBOOL volumeRequested = (Desc->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0;
+    if (Desc->Format.Width <= 0 || Desc->Format.Height <= 0 || Desc->Depth == 0 ||
+        (CKDWORD)Desc->Format.Width > m_CapsDesc.MaxTextureSize ||
+        (CKDWORD)Desc->Format.Height > m_CapsDesc.MaxTextureSize ||
+        Desc->Depth > m_CapsDesc.MaxTextureSize ||
+        (cubeRequested && volumeRequested) ||
+        (cubeRequested && (Desc->Format.Width != Desc->Format.Height || Desc->Depth != 1)) ||
+        (volumeRequested ? Desc->Depth <= 1 : Desc->Depth != 1))
+        return CKERR_INVALIDPARAMETER;
     uint16_t w = (uint16_t)Desc->Format.Width;
     uint16_t h = (uint16_t)Desc->Format.Height;
-    uint16_t d = (uint16_t)std::max<CKDWORD>(1, Desc->Depth);
-    if (w == 0 || h == 0)
-        return CKERR_INVALIDPARAMETER;
+    uint16_t d = (uint16_t)XMax((CKDWORD)1, Desc->Depth);
 
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
-    bgfx::TextureFormat::Enum fmt = CKBgfxTextureFormat(pf);
+    bgfx::TextureFormat::Enum fmt;
+    if (!CKBgfxTryTextureFormat(pf, fmt))
+        return CKERR_INVALIDPARAMETER;
+    const CKBOOL allowReadback =
+        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) != 0 &&
+        CKBgfxCanExposeReadback(pf, fmt)
+            ? TRUE : FALSE;
+    const CKDWORD formatCaps = CKBgfxMapFormatCaps(
+        m_NativeFormatCaps[fmt], allowReadback, FALSE);
+    const CKBOOL cube = cubeRequested;
+    const CKBOOL volume = volumeRequested;
+    if (Data && Data->Image && VxImageDesc2PixelFormat(*Data) != pf)
+        return CKERR_INVALIDPARAMETER;
+    CKDWORD requiredFormatCaps = cube ? CKRST_FORMAT_CAPS_TEXTURE_CUBE
+                                     : (volume ? CKRST_FORMAT_CAPS_TEXTURE_3D
+                                               : CKRST_FORMAT_CAPS_TEXTURE_2D);
+    if ((formatCaps & requiredFormatCaps) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (cube && (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_CUBE) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (volume && (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_3D) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if ((Desc->Flags & CKRST_TEXTURE_RENDERTARGET) &&
+        (formatCaps & CKRST_FORMAT_CAPS_FRAMEBUFFER) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (Desc->Flags & CKRST_TEXTURE_READBACK) {
+        if (cube || volume ||
+            (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) == 0 ||
+            (formatCaps & CKRST_FORMAT_CAPS_READBACK) == 0)
+            return CKERR_NOTIMPLEMENTED;
+    }
+    if ((Desc->Flags & CKRST_TEXTURE_BLIT_DST) &&
+        (m_CapsDesc.Features & CKRST_CAPS_BLIT) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (Desc->Flags & CKRST_TEXTURE_COMPUTE_WRITE) {
+        if ((m_CapsDesc.Features & CKRST_CAPS_IMAGE_RW) == 0 ||
+            (formatCaps & CKRST_FORMAT_CAPS_IMAGE_WRITE) == 0)
+            return CKERR_NOTIMPLEMENTED;
+    }
     CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, d);
     CKDWORD requestedMipCount = Desc->MipMapCount;
     CKBOOL openGL = CKBgfxIsOpenGLRenderer() ? TRUE : FALSE;
-    CKBOOL requestedAutoMips = (openGL && CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount)) ? TRUE : FALSE;
+    CKBOOL requestedAutoMips = CKBgfxIsAutoMipRequest(
+        requestedMipCount, fullMipCount);
     CKBOOL autoMipDataAvailable = (requestedAutoMips &&
                                    CKBgfxCanUseGeneratedMipChain(Desc->Flags, fmt, d, Data)) ? TRUE : FALSE;
     bool hasMips = CKBgfxShouldCreateTextureMipChain(
@@ -1934,22 +2687,57 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     bool uploadInitialAfterCreate = hasMips && autoMipDataAvailable && Data && Data->Image;
 
     uint64_t texFlags = CKBgfxTextureFlagsFromDescFlags(Desc->Flags);
+    if (!bgfx::isTextureValid(d, cube != FALSE, 1, fmt, texFlags))
+        return CKERR_NOTIMPLEMENTED;
 
     const bgfx::Memory *mem = NULL;
     CKDWORD copiedBytes = 0;
     if (Data && Data->Image && !uploadInitialAfterCreate)
     {
-        CKDWORD bpp = (Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32;
-        CKDWORD rowBytes = (CKDWORD)Data->Width * bpp / 8;
-        CKDWORD imgSize = rowBytes * Data->Height;
-        if ((Desc->Flags & CKRST_TEXTURE_VOLUMEMAP) && d > 1)
-            imgSize *= d;
-        if (Data->TotalImageSize != 0)
-            imgSize = Data->TotalImageSize;
-        if (pf == _DXT1 || pf == _DXT3 || pf == _DXT5)
-            imgSize = Data->TotalImageSize;
-        copiedBytes = imgSize;
-        mem = bgfx::copy(Data->Image, imgSize);
+        CKDWORD bpp = (Data->BitsPerPixel > 0)
+            ? Data->BitsPerPixel
+            : (Desc->Format.BitsPerPixel > 0 ? Desc->Format.BitsPerPixel : 32);
+        const CKBOOL compressed = pf == _DXT1 || pf == _DXT3 || pf == _DXT5;
+        if (Data->Width != w || Data->Height != h)
+            return CKERR_INVALIDPARAMETER;
+        const CKBOOL packedResource = hasMips || compressed || cube || volume;
+        if (packedResource) {
+            bgfx::TextureInfo textureInfo;
+            bgfx::calcTextureSize(textureInfo, w, h, d, cube != FALSE,
+                                  hasMips, 1, fmt);
+            if (textureInfo.storageSize == 0 || Data->TotalImageSize <= 0 ||
+                static_cast<CKDWORD>(Data->TotalImageSize) < textureInfo.storageSize)
+                return CKERR_INVALIDPARAMETER;
+            if (!compressed) {
+                if (bpp == 0 || (bpp % 8) != 0)
+                    return CKERR_INVALIDPARAMETER;
+                const CKDWORD rowBytes = static_cast<CKDWORD>(w) * (bpp / 8u);
+                if (Data->BytesPerLine > 0 &&
+                    static_cast<CKDWORD>(Data->BytesPerLine) != rowBytes)
+                    return CKERR_INVALIDPARAMETER;
+            }
+            copiedBytes = textureInfo.storageSize;
+            mem = bgfx::copy(Data->Image, copiedBytes);
+        } else {
+            if (bpp == 0 || (bpp % 8) != 0)
+                return CKERR_INVALIDPARAMETER;
+            const CKDWORD rowBytes = static_cast<CKDWORD>(w) * (bpp / 8u);
+            const CKDWORD pitch = CKBgfxResolveImagePitch(
+                w, h, bpp,
+                Data->BytesPerLine > 0 ? static_cast<CKDWORD>(Data->BytesPerLine) : 0);
+            if (rowBytes == 0 || pitch == 0)
+                return CKERR_INVALIDPARAMETER;
+            copiedBytes = rowBytes * h;
+            if (pitch == rowBytes) {
+                mem = bgfx::copy(Data->Image, copiedBytes);
+            } else {
+                mem = bgfx::alloc(copiedBytes);
+                for (uint16_t row = 0; row < h; ++row)
+                    memcpy(mem->data + row * rowBytes,
+                           static_cast<const CKBYTE *>(Data->Image) + row * pitch,
+                           rowBytes);
+            }
+        }
     }
 
     bgfx::TextureHandle handle;
@@ -1969,6 +2757,13 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD texture = AllocateSlot(m_Textures, m_CapsDesc.MaxTextures,
+                                          m_ResourceTableMutex);
+    if (texture == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxTextureRecord();
     rec->Handle = handle;
     rec->Flags = Desc->Flags;
@@ -1979,19 +2774,36 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     rec->RequestedAutoMips = requestedAutoMips;
     rec->MipCount = hasMips ? fullMipCount : 1;
     rec->Format = fmt;
+    rec->PixelFormat = pf;
     rec->BitsPerPixel = (Desc->Format.BitsPerPixel > 0) ? Desc->Format.BitsPerPixel :
                          ((Data && Data->BitsPerPixel > 0) ? Data->BitsPerPixel : 32);
+    if (Data && Data->Image && !uploadInitialAfterCreate &&
+        !(Desc->Flags & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) &&
+        Data->Width == (int)w && Data->Height == (int)h) {
+        const CKDWORD initializedMips = hasMips ? rec->MipCount : 1;
+        for (CKDWORD mip = 0; mip < initializedMips; ++mip)
+            rec->ReadbackOrientation[mip] = CKBGFX_ORIENTATION_TOP_LEFT;
+        if (hasMips && CKBgfxEnsureSamplerBaseHandle(rec)) {
+            bgfx::TextureInfo baseInfo;
+            bgfx::calcTextureSize(baseInfo, w, h, 1, false, false, 1, fmt);
+            if (baseInfo.storageSize > 0 && baseInfo.storageSize <= copiedBytes) {
+                const bgfx::Memory *baseMem =
+                    bgfx::copy(Data->Image, baseInfo.storageSize);
+                bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0,
+                                      0, 0, w, h, baseMem);
+                rec->SamplerBaseValid = TRUE;
+            }
+        }
+    }
 
-    CKBgfxTextureRecord *&slot = EnsureSlot(m_Textures, Texture);
-    DestroyRecord(slot);
-    slot = rec;
-    TraceTextureMap((CKSTRING)"create", Texture, rec);
+    m_Textures[texture] = rec;
+    TraceTextureMap((CKSTRING)"create", texture, rec);
 
     if (m_DebugLogTextures &&
         s_CreateTextureLogCount < 80) {
         CKBgfxLogf("CreateTexture",
                  "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u requestedMips=%u actualMips=%u autoMips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
-                 Texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
+                 texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
                  (int)pf, (int)fmt, rec->BitsPerPixel, requestedMipCount,
                  rec->MipCount, requestedAutoMips, copiedBytes,
                  FirstDword(Data ? Data->Image : nullptr, copiedBytes),
@@ -2000,44 +2812,56 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(CKDWORD Texture,
     }
 
     if (uploadInitialAfterCreate) {
-        CKERROR uploadResult = UpdateTexture(Texture, 0, 0, NULL, Data);
+        CKERROR uploadResult = UpdateTexture(texture, 0, 0, NULL, Data);
         if (uploadResult != CK_OK) {
-            DeleteObject(Texture, CKRST_OBJ_TEXTURE);
+            DeleteObject(texture, CKRST_OBJ_TEXTURE);
             return uploadResult;
         }
     }
 
+    *OutTexture = texture;
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateShader(CKDWORD Shader, CKShaderDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateShader(const CKShaderDesc *Desc,
+                                               CKDWORD *OutShader)
 {
-    if (!m_BgfxInitialized || !Desc || Shader == 0)
+    if (!OutShader)
         return CKERR_INVALIDPARAMETER;
+    *OutShader = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->Stage != CKRST_SHADER_VERTEX && Desc->Stage != CKRST_SHADER_PIXEL &&
+        Desc->Stage != CKRST_SHADER_COMPUTE)
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->Stage == CKRST_SHADER_COMPUTE &&
+        (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+        return CKERR_NOTIMPLEMENTED;
     if (!Desc->Code || Desc->CodeSize == 0) {
         CKBgfxLogf("CreateShader",
                    "invalid shader blob shader=%u stage=%u code=%p size=%u",
-                   Shader,
+                   0u,
                    Desc ? (unsigned)Desc->Stage : 0u,
                    Desc ? Desc->Code : NULL,
                    Desc ? Desc->CodeSize : 0u);
         return CKERR_INVALIDPARAMETER;
     }
-    CKShaderTargetDesc target = {};
-    if (!m_Driver ||
-        m_Driver->GetShaderTarget(&target) != CK_OK ||
-        Desc->Format != target.Format ||
-        Desc->Profile != target.Profile) {
+    CKRasterizerTargetDesc target;
+    if (GetTargetDesc(&target) != CK_OK ||
+        Desc->Format != CKRST_SHADER_FORMAT_NATIVE ||
+        Desc->Profile != target.ShaderProfile) {
         CKBgfxLogf("CreateShader",
                    "shader target mismatch shader=%u stage=%u descFormat=0x%08X descProfile=%s(0x%08X) targetFormat=0x%08X targetProfile=%s(0x%08X)",
-                   Shader,
+                   0u,
                    (unsigned)Desc->Stage,
                    Desc->Format,
                    CKBgfxShaderProfileName(Desc->Profile),
                    Desc->Profile,
-                   target.Format,
-                   CKBgfxShaderProfileName(target.Profile),
-                   target.Profile);
+                    CKRST_SHADER_FORMAT_NATIVE,
+                    CKBgfxShaderProfileName(target.ShaderProfile),
+                    target.ShaderProfile);
         return CKERR_INVALIDPARAMETER;
     }
 
@@ -2046,7 +2870,7 @@ CKERROR CKBgfxRasterizerContext::CreateShader(CKDWORD Shader, CKShaderDesc *Desc
     if (!bgfx::isValid(handle)) {
         CKBgfxLogf("CreateShader",
                    "bgfx::createShader failed shader=%u stage=%u profile=%s(0x%08X) size=%u",
-                   Shader,
+                   0u,
                    (unsigned)Desc->Stage,
                    CKBgfxShaderProfileName(Desc->Profile),
                    Desc->Profile,
@@ -2058,23 +2882,43 @@ CKERROR CKBgfxRasterizerContext::CreateShader(CKDWORD Shader, CKShaderDesc *Desc
     rec->Handle = handle;
     rec->Stage = Desc->Stage;
 
-    CKBgfxShaderRecord *&slot = EnsureSlot(m_Shaders, Shader);
-    DestroyRecord(slot);
-    slot = rec;
+    const CKDWORD shader = AllocateSlot(m_Shaders, m_CapsDesc.MaxShaders,
+                                         m_ResourceTableMutex);
+    if (shader == 0) {
+        bgfx::destroy(handle);
+        delete rec;
+        return CKERR_OUTOFMEMORY;
+    }
+    m_Shaders[shader] = rec;
+    *OutShader = shader;
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateProgram(const CKProgramDesc *Desc,
+                                                CKDWORD *OutProgram)
 {
-    if (!m_BgfxInitialized || !Desc || Program == 0)
+    if (!OutProgram)
         return CKERR_INVALIDPARAMETER;
+    *OutProgram = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+
+    const CKDWORD program = AllocateSlot(m_Programs, m_CapsDesc.MaxPrograms,
+                                          m_ResourceTableMutex);
+    if (program == 0)
+        return CKERR_OUTOFMEMORY;
 
     bgfx::ProgramHandle handle = BGFX_INVALID_HANDLE;
 
     CKBgfxShaderRecord *vs = GetShader(Desc->VertexShader);
     if (vs && vs->Stage == CKRST_SHADER_COMPUTE)
     {
+        if (Desc->PixelShader != 0 ||
+            (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+            return CKERR_INVALIDPARAMETER;
         handle = bgfx::createProgram(vs->Handle, false);
         if (!bgfx::isValid(handle))
             return CKERR_INVALIDPARAMETER;
@@ -2089,7 +2933,8 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *D
     else
     {
         CKBgfxShaderRecord *ps = GetShader(Desc->PixelShader);
-        if (!vs || !ps) {
+        if (!vs || !ps || vs->Stage != CKRST_SHADER_VERTEX ||
+            ps->Stage != CKRST_SHADER_PIXEL) {
             CKBgfxLogf("CreateProgram", "missing shaders vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d",
                        vs, Desc->VertexShader, ps, Desc->PixelShader, m_Shaders.Size());
             return CKERR_INVALIDPARAMETER;
@@ -2117,36 +2962,41 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(CKDWORD Program, CKProgramDesc *D
     rec->Handle = handle;
     rec->VertexShader = Desc->VertexShader;
     rec->PixelShader = Desc->PixelShader;
-    rec->SpecializationDwordCount = 0;
-    memset(rec->SpecializationDwords, 0, sizeof(rec->SpecializationDwords));
-    if (Desc->SpecializationDwords && Desc->SpecializationDwordCount > 0) {
-        rec->SpecializationDwordCount = Desc->SpecializationDwordCount;
-        if (rec->SpecializationDwordCount > 10)
-            rec->SpecializationDwordCount = 10;
-        memcpy(rec->SpecializationDwords, Desc->SpecializationDwords,
-               rec->SpecializationDwordCount * sizeof(CKDWORD));
-    }
-    rec->SpecHash = CKBgfxHashSpecDwords(rec->SpecializationDwords,
-                                         rec->SpecializationDwordCount);
 
-    CKBgfxProgramRecord *&slot = EnsureSlot(m_Programs, Program);
-    DestroyRecord(slot);
-    slot = rec;
-    TraceProgramMap((CKSTRING)"create", Program, rec);
+    m_Programs[program] = rec;
+    *OutProgram = program;
+    TraceProgramMap((CKSTRING)"create", program, rec);
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateUniform(CKDWORD Uniform, CKUniformDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateUniform(const CKUniformDesc *Desc,
+                                                CKDWORD *OutUniform)
 {
-    if (!m_BgfxInitialized || !Desc || Uniform == 0 || !Desc->Name)
+    if (!OutUniform)
+        return CKERR_INVALIDPARAMETER;
+    *OutUniform = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc || !Desc->Name || Desc->Count == 0)
         return CKERR_INVALIDPARAMETER;
 
-    bgfx::UniformType::Enum bgfxType = CKBgfxUniformType(Desc->Type);
+    bgfx::UniformType::Enum bgfxType;
+    if (!CKBgfxTryUniformType(Desc->Type, bgfxType))
+        return CKERR_INVALIDPARAMETER;
+    if (Desc->Count > UINT16_MAX)
+        return CKERR_INVALIDPARAMETER;
     uint16_t num = (uint16_t)(Desc->Count > 0 ? Desc->Count : 1);
     bgfx::UniformHandle handle = bgfx::createUniform(Desc->Name, bgfxType, num);
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
+
+    const CKDWORD uniform = AllocateSlot(m_Uniforms, m_CapsDesc.MaxUniforms,
+                                          m_ResourceTableMutex);
+    if (uniform == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
 
     auto *rec = new CKBgfxUniformRecord();
     rec->Handle = handle;
@@ -2155,60 +3005,155 @@ CKERROR CKBgfxRasterizerContext::CreateUniform(CKDWORD Uniform, CKUniformDesc *D
     strncpy(rec->Name, Desc->Name, sizeof(rec->Name) - 1);
     rec->Name[sizeof(rec->Name) - 1] = '\0';
 
-    CKBgfxUniformRecord *&slot = EnsureSlot(m_Uniforms, Uniform);
-    DestroyRecord(slot);
-    slot = rec;
+    m_Uniforms[uniform] = rec;
+    *OutUniform = uniform;
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateVertexLayout(CKDWORD Layout,
-                                                     CKVertexLayoutDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
+                                                     CKDWORD *OutLayout)
 {
-    if (!m_BgfxInitialized || !Desc || Layout == 0 || !Desc->Elements)
+    if (!OutLayout)
+        return CKERR_INVALIDPARAMETER;
+    *OutLayout = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (CKRasterizerValidateVertexLayout(Desc) != CK_OK ||
+        m_RendererType == bgfx::RendererType::Count)
         return CKERR_INVALIDPARAMETER;
 
-    bgfx::VertexLayout bgfxLayout;
-    bgfxLayout.begin();
+    CKDWORD order[CKRST_ATTRIB_COUNT];
+    bgfx::Attrib::Enum nativeAttribs[CKRST_ATTRIB_COUNT];
+    bgfx::AttribType::Enum nativeTypes[CKRST_ATTRIB_COUNT];
+    CKBOOL usedAttribs[CKRST_ATTRIB_COUNT] = {};
     for (CKDWORD i = 0; i < Desc->ElementCount; ++i)
     {
-        CKVertexElementDesc &elem = Desc->Elements[i];
-        bgfxLayout.add(
-            CKBgfxAttrib(elem.Attrib),
-            elem.Count,
-            CKBgfxAttribType(elem.Type),
-            elem.Normalized ? true : false);
+        const CKVertexElementDesc &elem = Desc->Elements[i];
+        if ((CKDWORD)elem.Attrib >= CKRST_ATTRIB_COUNT ||
+            usedAttribs[elem.Attrib] || elem.Count < 1 || elem.Count > 4 ||
+            elem.Offset >= Desc->Stride ||
+            !CKBgfxTryAttrib(elem.Attrib, nativeAttribs[i]) ||
+            !CKBgfxTryAttribType(elem.Type, nativeTypes[i]))
+            return CKERR_INVALIDPARAMETER;
+        if (elem.Type == CKRST_ATTRIBTYPE_HALF &&
+            (m_CapsDesc.Features & CKRST_CAPS_VERTEX_ATTRIB_HALF) == 0)
+            return CKERR_NOTIMPLEMENTED;
+        if (elem.Type == CKRST_ATTRIBTYPE_UINT10 &&
+            (m_CapsDesc.Features & CKRST_CAPS_VERTEX_ATTRIB_UINT10) == 0)
+            return CKERR_NOTIMPLEMENTED;
+        usedAttribs[elem.Attrib] = TRUE;
+        order[i] = i;
     }
-    if (Desc->Stride[0] > 0)
-        bgfxLayout.m_stride = Desc->Stride[0];
+
+    for (CKDWORD i = 1; i < Desc->ElementCount; ++i)
+    {
+        const CKDWORD value = order[i];
+        CKDWORD j = i;
+        while (j > 0 &&
+               Desc->Elements[order[j - 1]].Offset > Desc->Elements[value].Offset)
+        {
+            order[j] = order[j - 1];
+            --j;
+        }
+        order[j] = value;
+    }
+
+    bgfx::VertexLayout bgfxLayout;
+    bgfxLayout.begin(m_RendererType);
+    CKDWORD cursor = 0;
+    for (CKDWORD sortedIndex = 0; sortedIndex < Desc->ElementCount; ++sortedIndex)
+    {
+        const CKDWORD sourceIndex = order[sortedIndex];
+        const CKVertexElementDesc &elem = Desc->Elements[sourceIndex];
+        if (elem.Offset < cursor)
+            return CKERR_INVALIDPARAMETER;
+        CKDWORD gap = elem.Offset - cursor;
+        while (gap > 0)
+        {
+            const uint8_t chunk = (uint8_t)XMin(gap, (CKDWORD)UINT8_MAX);
+            bgfxLayout.skip(chunk);
+            gap -= chunk;
+        }
+        bgfxLayout.add(nativeAttribs[sourceIndex], elem.Count,
+                       nativeTypes[sourceIndex], elem.Normalized != FALSE,
+                       elem.AsInt != FALSE);
+        cursor = bgfxLayout.getStride();
+        if (cursor > Desc->Stride)
+            return CKERR_INVALIDPARAMETER;
+    }
+
+    CKDWORD tail = Desc->Stride - cursor;
+    while (tail > 0)
+    {
+        const uint8_t chunk = (uint8_t)XMin(tail, (CKDWORD)UINT8_MAX);
+        bgfxLayout.skip(chunk);
+        tail -= chunk;
+    }
     bgfxLayout.end();
+
+    if (bgfxLayout.getStride() != Desc->Stride)
+        return CKERR_INVALIDPARAMETER;
+    for (CKDWORD i = 0; i < Desc->ElementCount; ++i)
+    {
+        const CKVertexElementDesc &elem = Desc->Elements[i];
+        uint8_t count = 0;
+        bgfx::AttribType::Enum type = bgfx::AttribType::Count;
+        bool normalized = false;
+        bool asInt = false;
+        bgfxLayout.decode(nativeAttribs[i], count, type, normalized, asInt);
+        if (bgfxLayout.getOffset(nativeAttribs[i]) != elem.Offset ||
+            count != elem.Count || type != nativeTypes[i] ||
+            normalized != (elem.Normalized != FALSE) ||
+            asInt != (elem.AsInt != FALSE))
+            return CKERR_INVALIDPARAMETER;
+    }
 
     bgfx::VertexLayoutHandle handle = bgfx::createVertexLayout(bgfxLayout);
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD layout = AllocateSlot(m_VertexLayouts,
+                                         m_CapsDesc.MaxVertexLayouts,
+                                         m_ResourceTableMutex);
+    if (layout == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxVertexLayoutRecord();
     rec->Handle = handle;
     rec->Layout = bgfxLayout;
 
-    CKBgfxVertexLayoutRecord *&slot = EnsureSlot(m_VertexLayouts, Layout);
-    DestroyRecord(slot);
-    slot = rec;
+    m_VertexLayouts[layout] = rec;
+    *OutLayout = layout;
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(CKDWORD FrameBuffer,
-                                                    CKFrameBufferDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc,
+                                                    CKDWORD *OutFrameBuffer)
 {
-    if (!m_BgfxInitialized || !Desc || FrameBuffer == 0)
+    if (!OutFrameBuffer)
+        return CKERR_INVALIDPARAMETER;
+    *OutFrameBuffer = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if ((m_CapsDesc.Features & CKRST_CAPS_FRAMEBUFFER) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (Desc->ColorCount > m_CapsDesc.MaxColorAttachments ||
+        Desc->ColorCount > CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS ||
+        (Desc->ColorCount != 0 && !Desc->Color))
         return CKERR_INVALIDPARAMETER;
 
     CKDWORD totalAttachments = Desc->ColorCount;
     CKBOOL hasDepth = (Desc->DepthStencil.Texture != 0);
     if (hasDepth) totalAttachments++;
 
-    if (totalAttachments == 0)
+    if (totalAttachments == 0 ||
+        totalAttachments > CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS)
         return CKERR_INVALIDPARAMETER;
 
     bgfx::Attachment *attachments = new bgfx::Attachment[totalAttachments];
@@ -2217,7 +3162,16 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(CKDWORD FrameBuffer,
     for (CKDWORD i = 0; i < Desc->ColorCount; ++i)
     {
         CKBgfxTextureRecord *tex = GetTexture(Desc->Color[i].Texture);
-        if (!tex)
+        const CKBOOL cube = tex && (tex->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
+        const CKBOOL volume = tex &&
+            (tex->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && tex->Depth > 1;
+        if (!tex || tex->IsDepth ||
+            (tex->Flags & CKRST_TEXTURE_RENDERTARGET) == 0 ||
+            Desc->Color[i].Mip >= tex->MipCount ||
+            (!cube && !volume && Desc->Color[i].Layer != 0) ||
+            (cube && Desc->Color[i].Layer >= 6) ||
+            (volume && Desc->Color[i].Layer >=
+                XMax((CKDWORD)1, tex->Depth >> Desc->Color[i].Mip)))
         {
             delete[] attachments;
             return CKERR_INVALIDPARAMETER;
@@ -2231,7 +3185,9 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(CKDWORD FrameBuffer,
     if (hasDepth)
     {
         CKBgfxTextureRecord *depthTex = GetTexture(Desc->DepthStencil.Texture);
-        if (!depthTex)
+        if (!depthTex || !depthTex->IsDepth ||
+            Desc->DepthStencil.Mip >= depthTex->MipCount ||
+            Desc->DepthStencil.Layer != 0)
         {
             delete[] attachments;
             return CKERR_INVALIDPARAMETER;
@@ -2242,6 +3198,11 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(CKDWORD FrameBuffer,
         idx++;
     }
 
+    if (!bgfx::isFrameBufferValid((uint8_t)totalAttachments, attachments)) {
+        delete[] attachments;
+        return CKERR_NOTIMPLEMENTED;
+    }
+
     bgfx::FrameBufferHandle handle = bgfx::createFrameBuffer(
         (uint8_t)totalAttachments, attachments, false);
     delete[] attachments;
@@ -2249,28 +3210,56 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(CKDWORD FrameBuffer,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD frameBuffer = AllocateSlot(m_FrameBuffers,
+                                              m_CapsDesc.MaxFrameBuffers,
+                                              m_ResourceTableMutex);
+    if (frameBuffer == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxFrameBufferRecord();
     rec->Handle = handle;
-    rec->FirstColorTexture = (Desc->ColorCount > 0) ? Desc->Color[0].Texture : 0;
-    rec->FirstColorMip = (Desc->ColorCount > 0) ? Desc->Color[0].Mip : 0;
-    rec->FirstColorLayer = (Desc->ColorCount > 0) ? Desc->Color[0].Layer : 0;
+    rec->ColorCount = Desc->ColorCount;
+    for (CKDWORD i = 0; i < Desc->ColorCount; ++i)
+        rec->Color[i] = Desc->Color[i];
 
-    CKBgfxFrameBufferRecord *&slot = EnsureSlot(m_FrameBuffers, FrameBuffer);
-    DestroyRecord(slot);
-    slot = rec;
+    m_FrameBuffers[frameBuffer] = rec;
+    *OutFrameBuffer = frameBuffer;
 
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
-                                                     CKDepthTextureDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *Desc,
+                                                     CKDWORD *OutTexture)
 {
-    if (!m_BgfxInitialized || !Desc || Texture == 0)
+    if (!OutTexture)
+        return CKERR_INVALIDPARAMETER;
+    *OutTexture = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if ((m_CapsDesc.Features & CKRST_CAPS_DEPTH_TEXTURE) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    if (Desc->Width == 0 || Desc->Height == 0 ||
+        Desc->Width > m_CapsDesc.MaxTextureSize ||
+        Desc->Height > m_CapsDesc.MaxTextureSize)
         return CKERR_INVALIDPARAMETER;
 
     uint16_t w = (uint16_t)Desc->Width;
     uint16_t h = (uint16_t)Desc->Height;
-    bgfx::TextureFormat::Enum fmt = CKBgfxDepthFormat(Desc->DepthFormat);
+    bgfx::TextureFormat::Enum fmt;
+    if (!CKBgfxTryDepthFormat(Desc->DepthFormat, fmt))
+        return CKERR_INVALIDPARAMETER;
+    const CKDWORD formatCaps = CKBgfxMapFormatCaps(
+        m_NativeFormatCaps[fmt], FALSE,
+        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) != 0);
+    if ((formatCaps & CKRST_FORMAT_CAPS_FRAMEBUFFER) == 0)
+        return CKERR_NOTIMPLEMENTED;
+    const CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, 1);
+    if (Desc->MipMapCount > fullMipCount)
+        return CKERR_INVALIDPARAMETER;
     bool hasMips = Desc->MipMapCount > 1;
 
     uint64_t texFlags = BGFX_TEXTURE_RT_WRITE_ONLY;
@@ -2278,6 +3267,13 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
         w, h, hasMips, 1, fmt, texFlags, NULL);
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
+
+    const CKDWORD texture = AllocateSlot(m_Textures, m_CapsDesc.MaxTextures,
+                                          m_ResourceTableMutex);
+    if (texture == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
 
     auto *rec = new CKBgfxTextureRecord();
     rec->Handle = handle;
@@ -2291,18 +3287,56 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(CKDWORD Texture,
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
 
-    CKBgfxTextureRecord *&slot = EnsureSlot(m_Textures, Texture);
-    DestroyRecord(slot);
-    slot = rec;
-    TraceTextureMap((CKSTRING)"create", Texture, rec);
+    m_Textures[texture] = rec;
+    *OutTexture = texture;
+    TraceTextureMap((CKSTRING)"create", texture, rec);
 
     return CK_OK;
 }
 
+CKBOOL CKBgfxRasterizerContext::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
+{
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread() || Object == 0)
+        return FALSE;
+#define CKBGFX_SLOT_ALIVE(Array) \
+    ((int)Object < (Array).Size() && (Array)[Object] != NULL ? TRUE : FALSE)
+    switch (Type) {
+    case CKRST_OBJ_TEXTURE:        return CKBGFX_SLOT_ALIVE(m_Textures);
+    case CKRST_OBJ_VERTEXBUFFER:   return CKBGFX_SLOT_ALIVE(m_VertexBuffers);
+    case CKRST_OBJ_INDEXBUFFER:    return CKBGFX_SLOT_ALIVE(m_IndexBuffers);
+    case CKRST_OBJ_SHADER:         return CKBGFX_SLOT_ALIVE(m_Shaders);
+    case CKRST_OBJ_PROGRAM:        return CKBGFX_SLOT_ALIVE(m_Programs);
+    case CKRST_OBJ_UNIFORM:        return CKBGFX_SLOT_ALIVE(m_Uniforms);
+    case CKRST_OBJ_VERTEXLAYOUT:   return CKBGFX_SLOT_ALIVE(m_VertexLayouts);
+    case CKRST_OBJ_FRAMEBUFFER:    return CKBGFX_SLOT_ALIVE(m_FrameBuffers);
+    case CKRST_OBJ_OCCLUSIONQUERY: return CKBGFX_SLOT_ALIVE(m_OcclusionQueries);
+    case CKRST_OBJ_INDIRECTBUFFER: return CKBGFX_SLOT_ALIVE(m_IndirectBuffers);
+    default:                       return FALSE;
+    }
+#undef CKBGFX_SLOT_ALIVE
+}
+
 CKERROR CKBgfxRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
 {
-    if (!m_BgfxInitialized || Object == 0)
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (Object == 0)
         return CKERR_INVALIDPARAMETER;
+    switch (Type) {
+    case CKRST_OBJ_TEXTURE:
+    case CKRST_OBJ_VERTEXBUFFER:
+    case CKRST_OBJ_INDEXBUFFER:
+    case CKRST_OBJ_SHADER:
+    case CKRST_OBJ_PROGRAM:
+    case CKRST_OBJ_UNIFORM:
+    case CKRST_OBJ_VERTEXLAYOUT:
+    case CKRST_OBJ_FRAMEBUFFER:
+    case CKRST_OBJ_OCCLUSIONQUERY:
+    case CKRST_OBJ_INDIRECTBUFFER:
+        break;
+    default:
+        return CKERR_INVALIDPARAMETER;
+    }
 
     if (Type & CKRST_OBJ_TEXTURE)
     {
@@ -2358,11 +3392,20 @@ CKERROR CKBgfxRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
     return CKERR_INVALIDPARAMETER;
 }
 
-void CKBgfxRasterizerContext::FlushObjects(CKDWORD TypeMask)
+CKERROR CKBgfxRasterizerContext::FlushObjects(CKDWORD TypeMask)
 {
-    if (!m_BgfxInitialized)
-        return;
-
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (CKRasterizerValidateObjectMask(TypeMask) != CK_OK)
+        return CKERR_INVALIDPARAMETER;
+    for (CKDWORD i = 0; i < m_CapsDesc.MaxEncoders; ++i) {
+        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
+            return CKERR_INVALIDOPERATION;
+    }
+    if (TypeMask & CKRST_OBJ_FRAMEBUFFER)
+        DestroyAllRecords(m_FrameBuffers);
+    if (TypeMask & CKRST_OBJ_PROGRAM)
+        DestroyAllRecords(m_Programs);
     if (TypeMask & CKRST_OBJ_TEXTURE)
         DestroyAllRecords(m_Textures);
     if (TypeMask & CKRST_OBJ_VERTEXBUFFER)
@@ -2371,18 +3414,15 @@ void CKBgfxRasterizerContext::FlushObjects(CKDWORD TypeMask)
         DestroyAllRecords(m_IndexBuffers);
     if (TypeMask & CKRST_OBJ_SHADER)
         DestroyAllRecords(m_Shaders);
-    if (TypeMask & CKRST_OBJ_PROGRAM)
-        DestroyAllRecords(m_Programs);
     if (TypeMask & CKRST_OBJ_UNIFORM)
         DestroyAllRecords(m_Uniforms);
     if (TypeMask & CKRST_OBJ_VERTEXLAYOUT)
         DestroyAllRecords(m_VertexLayouts);
-    if (TypeMask & CKRST_OBJ_FRAMEBUFFER)
-        DestroyAllRecords(m_FrameBuffers);
     if (TypeMask & CKRST_OBJ_OCCLUSIONQUERY)
         DestroyAllRecords(m_OcclusionQueries);
     if (TypeMask & CKRST_OBJ_INDIRECTBUFFER)
         DestroyAllRecords(m_IndirectBuffers);
+    return CK_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -2392,16 +3432,21 @@ void CKBgfxRasterizerContext::FlushObjects(CKDWORD TypeMask)
 CKERROR CKBgfxRasterizerContext::UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
                                                      CKDWORD Size, const void *Data)
 {
-    if (!m_BgfxInitialized || !Data || Buffer == 0 || Size == 0)
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Data || Buffer == 0 || Size == 0)
         return CKERR_INVALIDPARAMETER;
 
     CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Buffer);
     if (!rec)
         return CKERR_INVALIDPARAMETER;
+    if (rec->Flags & CKRST_VB_COMPUTE_WRITE)
+        return CKERR_INVALIDOPERATION;
 
     if (rec->VertexSize == 0)
         return CKERR_INVALIDPARAMETER;
-    if (Offset % rec->VertexSize != 0)
+    if (Offset % rec->VertexSize != 0 || Size % rec->VertexSize != 0 ||
+        Offset > rec->Size || Size > rec->Size - Offset)
         return CKERR_INVALIDPARAMETER;
     CKDWORD startVertex = Offset / rec->VertexSize;
     const bgfx::Memory *mem = bgfx::copy(Data, Size);
@@ -2413,7 +3458,9 @@ CKERROR CKBgfxRasterizerContext::UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offs
 CKERROR CKBgfxRasterizerContext::UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
                                                     CKDWORD Size, const void *Data)
 {
-    if (!m_BgfxInitialized || !Data || Buffer == 0 || Size == 0)
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Data || Buffer == 0 || Size == 0)
         return CKERR_INVALIDPARAMETER;
 
     CKBgfxIndexBufferRecord *rec = GetIndexBuffer(Buffer);
@@ -2421,6 +3468,9 @@ CKERROR CKBgfxRasterizerContext::UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offse
         return CKERR_INVALIDPARAMETER;
 
     CKDWORD indexSize = rec->Index32 ? 4 : 2;
+    if (Offset % indexSize != 0 || Size % indexSize != 0 ||
+        Offset > rec->Size || Size > rec->Size - Offset)
+        return CKERR_INVALIDPARAMETER;
     CKDWORD startIndex = (indexSize > 0) ? Offset / indexSize : 0;
     const bgfx::Memory *mem = bgfx::copy(Data, Size);
     bgfx::update(rec->Handle, startIndex, mem);
@@ -2433,27 +3483,39 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                                 const VxImageDescEx *Data)
 {
     static int s_UpdateTextureLogCount = 0;
-    if (!m_BgfxInitialized || !Data || !Data->Image)
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Data || !Data->Image)
         return CKERR_INVALIDPARAMETER;
 
     CKBgfxTextureRecord *rec = GetTexture(Texture);
     if (!rec)
         return CKERR_INVALIDPARAMETER;
+    if (Mip >= rec->MipCount)
+        return CKERR_INVALIDPARAMETER;
+    if ((rec->Flags & CKRST_TEXTURE_READBACK) != 0)
+        return CKERR_NOTIMPLEMENTED;
 
     bool isCube = (rec->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
     bool isVolume = (rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1;
     if (!isCube && !isVolume && Face != 0)
         return CKERR_INVALIDPARAMETER;
-    if (isVolume && Face >= rec->Depth)
+    if (isCube && Face >= 6)
+        return CKERR_INVALIDPARAMETER;
+    if (isVolume && Face >= XMax((CKDWORD)1, rec->Depth >> Mip))
         return CKERR_INVALIDPARAMETER;
 
     uint16_t x = 0, y = 0;
-    const uint16_t mipWidth = (uint16_t)std::max<CKDWORD>(1, rec->Width >> Mip);
-    const uint16_t mipHeight = (uint16_t)std::max<CKDWORD>(1, rec->Height >> Mip);
+    const uint16_t mipWidth = (uint16_t)XMax((CKDWORD)1, rec->Width >> Mip);
+    const uint16_t mipHeight = (uint16_t)XMax((CKDWORD)1, rec->Height >> Mip);
     uint16_t w = mipWidth;
     uint16_t h = mipHeight;
     if (Region)
     {
+        if (Region->left < 0 || Region->top < 0 ||
+            Region->right <= Region->left || Region->bottom <= Region->top ||
+            Region->right > mipWidth || Region->bottom > mipHeight)
+            return CKERR_INVALIDPARAMETER;
         x = (uint16_t)Region->left;
         y = (uint16_t)Region->top;
         w = (uint16_t)(Region->right - Region->left);
@@ -2461,15 +3523,25 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     }
     else if (Data->Width > 0 && Data->Height > 0)
     {
+        if (Data->Width > mipWidth || Data->Height > mipHeight)
+            return CKERR_INVALIDPARAMETER;
         w = (uint16_t)Data->Width;
         h = (uint16_t)Data->Height;
     }
+    if (Data->Width != w || Data->Height != h ||
+        VxImageDesc2PixelFormat(*Data) != rec->PixelFormat)
+        return CKERR_INVALIDPARAMETER;
     const bool fullMipUpdate = x == 0 && y == 0 && w == mipWidth && h == mipHeight;
 
     bool compressed = CKBgfxIsCompressedTextureFormat(rec->Format);
+    if (compressed &&
+        ((x % 4) != 0 || (y % 4) != 0 ||
+         ((w % 4) != 0 && x + w != mipWidth) ||
+         ((h % 4) != 0 && y + h != mipHeight)))
+        return CKERR_INVALIDPARAMETER;
     bool fullBase2DUpdate = Mip == 0 &&
                             Face == 0 &&
-                            Region == NULL &&
+                            fullMipUpdate &&
                             !compressed &&
                             !isCube &&
                             !isVolume;
@@ -2483,25 +3555,24 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         canGenerateAutoMips ? TRUE : FALSE);
     if (Mip == 0 && Face == 0) {
         if (autoMipAction == CKBGFX_AUTOMIP_UPDATE_PROMOTE) {
-            if (!CKBgfxRecreateTexture2D(rec, true) &&
-                m_DebugLogTextures) {
-                CKBgfxLogf("UpdateTexture",
-                           "id=%u failed to recreate OpenGL auto-mip texture with mips",
-                           Texture);
+            if (!CKBgfxRecreateTexture2D(rec, true)) {
+                if (m_DebugLogTextures)
+                    CKBgfxLogf("UpdateTexture",
+                               "id=%u failed to recreate auto-mip texture with mips",
+                               Texture);
+                return CKERR_OUTOFMEMORY;
             }
         } else if (autoMipAction == CKBGFX_AUTOMIP_UPDATE_DEMOTE) {
-            if (!CKBgfxRecreateTexture2D(rec, false) &&
-                m_DebugLogTextures) {
-                CKBgfxLogf("UpdateTexture",
-                           "id=%u failed to recreate OpenGL auto-mip texture without mips",
-                           Texture);
+            if (!CKBgfxRecreateTexture2D(rec, false)) {
+                if (m_DebugLogTextures)
+                    CKBgfxLogf("UpdateTexture",
+                               "id=%u failed to recreate auto-mip texture without mips",
+                               Texture);
+                return CKERR_OUTOFMEMORY;
             }
             CKBgfxResetAutoMipBaseCache(rec);
         }
     }
-
-    if (Mip >= rec->MipCount)
-        return CKERR_INVALIDPARAMETER;
 
     const bgfx::Memory *mem = NULL;
     const bool updateSamplerBase =
@@ -2509,21 +3580,21 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         Face == 0 &&
         !isCube &&
         !isVolume &&
-        !compressed &&
-        (fullBase2DUpdate || rec->SamplerBaseValid) &&
+        (fullMipUpdate || rec->SamplerBaseValid) &&
         CKBgfxEnsureSamplerBaseHandle(rec);
     const bgfx::Memory *samplerBaseMem = NULL;
     if (compressed)
     {
-        CKDWORD imgSize = Data->TotalImageSize;
-        if (imgSize == 0)
-        {
-            CKDWORD blockSize = (rec->Format == bgfx::TextureFormat::BC1) ? 8 : 16;
-            CKDWORD blocksW = (w + 3) / 4;
-            CKDWORD blocksH = (h + 3) / 4;
-            imgSize = blocksW * blocksH * blockSize;
-        }
+        const CKDWORD blockSize = (rec->Format == bgfx::TextureFormat::BC1) ? 8 : 16;
+        const CKDWORD blocksW = (w + 3) / 4;
+        const CKDWORD blocksH = (h + 3) / 4;
+        const CKDWORD imgSize = blocksW * blocksH * blockSize;
+        if (Data->TotalImageSize > 0 &&
+            static_cast<CKDWORD>(Data->TotalImageSize) < imgSize)
+            return CKERR_INVALIDPARAMETER;
         mem = bgfx::copy(Data->Image, imgSize);
+        if (updateSamplerBase)
+            samplerBaseMem = bgfx::copy(Data->Image, imgSize);
     }
     else
     {
@@ -2573,12 +3644,13 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     else
         bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
 
-    if (fullMipUpdate && Face == 0 && !isCube && !isVolume)
-        rec->ReadbackBottomLeftMipMask &= ~CKBgfxMipBit(Mip);
+    if (Face == 0 && !isCube && !isVolume)
+        RecordTextureWrite(rec, Mip, CKBGFX_ORIENTATION_TOP_LEFT,
+                           fullMipUpdate ? TRUE : FALSE);
 
     if (samplerBaseMem) {
         bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0, x, y, w, h, samplerBaseMem);
-        if (fullBase2DUpdate)
+        if (fullMipUpdate)
             rec->SamplerBaseValid = TRUE;
     }
 
@@ -2590,12 +3662,23 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         !isVolume &&
         rec->MipCount > 1) {
         const bool cacheValid = CKBgfxUpdateAutoMipBaseCache(rec, Data, x, y, w, h);
-        if (cacheValid &&
-            !CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc) &&
-            m_DebugLogTextures) {
-            CKBgfxLogf("UpdateTexture",
-                       "id=%u failed to generate complete OpenGL auto-mip chain",
-                       Texture);
+        if (fullBase2DUpdate && !cacheValid)
+            return CKERR_OUTOFMEMORY;
+        if (cacheValid) {
+            if (!CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc)) {
+                if (m_DebugLogTextures)
+                    CKBgfxLogf("UpdateTexture",
+                               "id=%u failed to generate complete auto-mip chain",
+                               Texture);
+                return CKERR_OUTOFMEMORY;
+            }
+            for (CKDWORD generatedMip = 1;
+                 generatedMip < rec->MipCount &&
+                 generatedMip < CKBGFX_MAX_TRACKED_MIPS;
+                 ++generatedMip) {
+                RecordTextureWrite(rec, generatedMip,
+                                   CKBGFX_ORIENTATION_TOP_LEFT, TRUE);
+            }
         }
     }
 
@@ -2606,174 +3689,94 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
 // Readback
 // ---------------------------------------------------------------------------
 
-static CKBOOL CKBgfxValidateReadbackData(const VxImageDescEx *data,
-                                         CKDWORD width, CKDWORD height,
-                                         CKDWORD bitsPerPixel)
+static bool CKBgfxGetReadbackLayout(const CKBgfxTextureRecord *Record,
+                                    CKDWORD Width, CKDWORD Height,
+                                    CKDWORD &RowPitch, CKDWORD &RequiredSize)
 {
-    if (!data || !data->Image || width == 0 || height == 0 || bitsPerPixel == 0)
-        return FALSE;
-    if ((data->Width > 0 && (CKDWORD)data->Width < width) ||
-        (data->Height > 0 && (CKDWORD)data->Height < height))
-        return FALSE;
-    if (data->BitsPerPixel > 0 && (CKDWORD)data->BitsPerPixel != bitsPerPixel)
-        return FALSE;
-    const CKDWORD rowBytes = CKBgfxImageRowBytes(width, bitsPerPixel);
-    const CKDWORD pitch = CKBgfxResolveImagePitch(width, height, bitsPerPixel,
-        data->BytesPerLine > 0 ? (CKDWORD)data->BytesPerLine : 0u);
-    if (rowBytes == 0 || pitch < rowBytes)
-        return FALSE;
-    // BytesPerLine and TotalImageSize alias the same legacy field, so a
-    // positive value cannot be treated as both pitch and buffer capacity.
-    return TRUE;
-}
-
-static void CKBgfxFlipReadbackRows(VxImageDescEx *data, CKDWORD width,
-                                   CKDWORD height, CKDWORD bitsPerPixel)
-{
-    if (height < 2)
-        return;
-    const CKDWORD rowBytes = CKBgfxImageRowBytes(width, bitsPerPixel);
-    const CKDWORD pitch = CKBgfxResolveImagePitch(width, height, bitsPerPixel,
-        data->BytesPerLine > 0 ? (CKDWORD)data->BytesPerLine : 0u);
-    CKBYTE *scratch = new CKBYTE[rowBytes];
-    CKBYTE *bytes = static_cast<CKBYTE *>(data->Image);
-    for (CKDWORD y = 0; y < height / 2; ++y) {
-        CKBYTE *top = bytes + y * pitch;
-        CKBYTE *bottom = bytes + (height - 1u - y) * pitch;
-        memcpy(scratch, top, rowBytes);
-        memcpy(top, bottom, rowBytes);
-        memcpy(bottom, scratch, rowBytes);
+    if (!Record || Width == 0 || Height == 0)
+        return false;
+    CKDWORD rows = Height;
+    if (Record->Format == bgfx::TextureFormat::BC1 ||
+        Record->Format == bgfx::TextureFormat::BC2 ||
+        Record->Format == bgfx::TextureFormat::BC3) {
+        const CKDWORD blockSize = Record->Format == bgfx::TextureFormat::BC1 ? 8u : 16u;
+        RowPitch = XMax((CKDWORD)1, (Width + 3u) / 4u) * blockSize;
+        rows = XMax((CKDWORD)1, (Height + 3u) / 4u);
+    } else {
+        if (Record->BitsPerPixel == 0 || (Record->BitsPerPixel % 8) != 0)
+            return false;
+        const uint64_t pitch = (uint64_t)Width * (Record->BitsPerPixel / 8u);
+        if (pitch > UINT32_MAX)
+            return false;
+        RowPitch = (CKDWORD)pitch;
     }
-    delete[] scratch;
-}
-
-static CKERROR CKBgfxReadTextureRows(bgfx::TextureHandle handle, CKDWORD mip,
-                                     VxImageDescEx *data, CKDWORD width,
-                                     CKDWORD height, CKDWORD bitsPerPixel,
-                                     CKBOOL flipRows)
-{
-    const CKDWORD rowBytes = CKBgfxImageRowBytes(width, bitsPerPixel);
-    const CKDWORD pitch = CKBgfxResolveImagePitch(width, height, bitsPerPixel,
-        data->BytesPerLine > 0 ? (CKDWORD)data->BytesPerLine : 0u);
-    CKBYTE *destination = static_cast<CKBYTE *>(data->Image);
-    CKBYTE *readback = destination;
-    if (pitch != rowBytes)
-        readback = new CKBYTE[(size_t)rowBytes * height];
-
-    uint32_t frameReady = bgfx::readTexture(handle, readback, (uint8_t)mip);
-    uint32_t current = bgfx::frame();
-    while (current < frameReady)
-        current = bgfx::frame();
-
-    if (readback != destination) {
-        for (CKDWORD y = 0; y < height; ++y) {
-            const CKDWORD sourceY = flipRows ? height - 1u - y : y;
-            memcpy(destination + (size_t)y * pitch,
-                   readback + (size_t)sourceY * rowBytes,
-                   rowBytes);
-        }
-        delete[] readback;
-    } else if (flipRows) {
-        CKBgfxFlipReadbackRows(data, width, height, bitsPerPixel);
-    }
-    return CK_OK;
+    const uint64_t size = (uint64_t)RowPitch * rows;
+    if (size > UINT32_MAX)
+        return false;
+    RequiredSize = (CKDWORD)size;
+    return true;
 }
 
 CKERROR CKBgfxRasterizerContext::ReadTexture(CKDWORD Texture, CKDWORD Mip,
-                                              VxImageDescEx *Data)
+                                              CKReadbackDesc *Readback,
+                                              CKDWORD *AvailableFrame)
 {
-    if (!m_BgfxInitialized || !Data || !Data->Image)
+    if (!m_BgfxInitialized || !m_Created ||
+        VxThread::GetCurrentVxThreadId() != m_ApiThreadId)
+        return CKERR_INVALIDOPERATION;
+    if (!Readback || Readback->Size < sizeof(CKReadbackDesc))
         return CKERR_INVALIDPARAMETER;
-
-    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
-        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
-            return CKERR_INVALIDOPERATION;
-
+    if (Readback->Data && !AvailableFrame)
+        return CKERR_INVALIDPARAMETER;
     CKBgfxTextureRecord *rec = GetTexture(Texture);
     if (!rec)
         return CKERR_INVALIDPARAMETER;
-
+    if (Mip >= rec->MipCount || Mip >= CKBGFX_MAX_TRACKED_MIPS)
+        return CKERR_INVALIDPARAMETER;
+    if (rec->IsDepth)
+        return CKERR_NOTIMPLEMENTED;
+    if (rec->PixelFormat == UNKNOWN_PF)
+        return CKERR_INVALIDPARAMETER;
     if (!(rec->Flags & CKRST_TEXTURE_READBACK))
         return CKERR_INVALIDOPERATION;
-    if (Mip >= rec->MipCount || Mip >= 32)
-        return CKERR_INVALIDPARAMETER;
-
-    const CKDWORD width = std::max<CKDWORD>(1, rec->Width >> Mip);
-    const CKDWORD height = std::max<CKDWORD>(1, rec->Height >> Mip);
-    const CKDWORD bitsPerPixel = rec->BitsPerPixel > 0 ? rec->BitsPerPixel : 32u;
-    if (!CKBgfxValidateReadbackData(Data, width, height, bitsPerPixel))
-        return CKERR_INVALIDPARAMETER;
-
-    const CKBOOL originBottomLeft = CKBgfxTargetOriginBottomLeft(m_Driver) ? TRUE : FALSE;
-    const CKBOOL renderTarget = (rec->Flags & CKRST_TEXTURE_RENDERTARGET) != 0;
-    if (originBottomLeft && renderTarget &&
-        (rec->Flags & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0)
+    if ((rec->Flags & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0)
         return CKERR_NOTIMPLEMENTED;
 
-    const CKDWORD mipBit = CKBgfxMipBit(Mip);
-    const CKBOOL flipRows = originBottomLeft &&
-        (renderTarget || (rec->ReadbackBottomLeftMipMask & mipBit) != 0);
-    return CKBgfxReadTextureRows(rec->Handle, Mip, Data, width, height,
-                                 bitsPerPixel, flipRows);
-}
+    const CKDWORD width = XMax((CKDWORD)1, rec->Width >> Mip);
+    const CKDWORD height = XMax((CKDWORD)1, rec->Height >> Mip);
+    CKDWORD rowPitch = 0;
+    CKDWORD requiredSize = 0;
+    if (!CKBgfxGetReadbackLayout(rec, width, height, rowPitch, requiredSize))
+        return CKERR_NOTIMPLEMENTED;
 
-CKERROR CKBgfxRasterizerContext::ReadFrameBuffer(CKDWORD FrameBuffer,
-                                                  VxImageDescEx *Data)
-{
-    if (!m_BgfxInitialized || !Data || !Data->Image)
-        return CKERR_INVALIDPARAMETER;
-
-    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
-        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
-            return CKERR_INVALIDOPERATION;
-
-    if (FrameBuffer == 0)
+    CKBgfxTextureOrientation orientation;
     {
-        m_BackbufferReadTarget = Data;
-        m_BackbufferReadReady.store(false, std::memory_order_relaxed);
-
-        bgfx::FrameBufferHandle invalid = BGFX_INVALID_HANDLE;
-        bgfx::requestScreenShot(invalid, "__backbuffer_read__");
-
-        bgfx::frame();
-        int waitFrames = 0;
-        const int maxWaitFrames = CKBgfxConfigPositiveInt("Readback", "TimeoutFrames", 120);
-        while (!m_BackbufferReadReady.load(std::memory_order_acquire) && waitFrames++ < maxWaitFrames)
-            bgfx::frame();
-
-        m_BackbufferReadTarget = NULL;
-        if (!m_BackbufferReadReady.load(std::memory_order_acquire)) {
-            CKBgfxLogf("ReadFrameBuffer", "backbuffer readback timed out");
-            return CKERR_INVALIDOPERATION;
-        }
-        return CK_OK;
+        VxMutexLock lock(m_ResourceStateMutex);
+        orientation = (CKBgfxTextureOrientation)rec->ReadbackOrientation[Mip];
     }
-
-    CKBgfxFrameBufferRecord *fbRec = GetFrameBuffer(FrameBuffer);
-    if (!fbRec || fbRec->FirstColorTexture == 0)
-        return CKERR_INVALIDPARAMETER;
-
-    CKBgfxTextureRecord *texRec = GetTexture(fbRec->FirstColorTexture);
-    if (!texRec)
-        return CKERR_INVALIDPARAMETER;
-
-    if (!(texRec->Flags & CKRST_TEXTURE_READBACK))
-        return CKERR_INVALIDOPERATION;
-    if (fbRec->FirstColorMip >= texRec->MipCount || fbRec->FirstColorMip >= 32)
-        return CKERR_INVALIDPARAMETER;
-    if (fbRec->FirstColorLayer != 0 ||
-        (texRec->Flags & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0)
+    if (orientation == CKBGFX_ORIENTATION_UNKNOWN ||
+        orientation == CKBGFX_ORIENTATION_MIXED)
         return CKERR_NOTIMPLEMENTED;
+    const CKBOOL flipRows = orientation == CKBGFX_ORIENTATION_BOTTOM_LEFT;
 
-    const CKDWORD width = std::max<CKDWORD>(1, texRec->Width >> fbRec->FirstColorMip);
-    const CKDWORD height = std::max<CKDWORD>(1, texRec->Height >> fbRec->FirstColorMip);
-    const CKDWORD bitsPerPixel = texRec->BitsPerPixel > 0 ? texRec->BitsPerPixel : 32u;
-    if (!CKBgfxValidateReadbackData(Data, width, height, bitsPerPixel))
+    void *data = Readback->Data;
+    const CKDWORD capacity = Readback->Capacity;
+    *Readback = CKReadbackDesc();
+    Readback->Data = data;
+    Readback->Capacity = capacity;
+    Readback->RequiredSize = requiredSize;
+    Readback->RowPitch = rowPitch;
+    Readback->Width = width;
+    Readback->Height = height;
+    Readback->Format = rec->PixelFormat;
+    Readback->YFlip = flipRows;
+    if (!data)
+        return CK_OK;
+    if (capacity < requiredSize)
         return CKERR_INVALIDPARAMETER;
 
-    const CKBOOL flipRows = CKBgfxTargetOriginBottomLeft(m_Driver) ? TRUE : FALSE;
-    return CKBgfxReadTextureRows(texRec->Handle, fbRec->FirstColorMip, Data,
-                                 width, height, bitsPerPixel, flipRows);
+    *AvailableFrame = bgfx::readTexture(rec->Handle, data, (uint8_t)Mip);
+    return CK_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -2782,8 +3785,10 @@ CKERROR CKBgfxRasterizerContext::ReadFrameBuffer(CKDWORD FrameBuffer,
 
 CKERROR CKBgfxRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews || !Name)
+        return CKERR_INVALIDPARAMETER;
     bgfx::setViewName((bgfx::ViewId)View, Name);
     if (m_DrawMapActive &&
         CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_VIEWS) &&
@@ -2797,26 +3802,41 @@ CKERROR CKBgfxRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
 
 CKERROR CKBgfxRasterizerContext::SetViewRect(CKRenderView View, const CKRECT &Rect)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews || Rect.left < 0 || Rect.top < 0 ||
+        Rect.right <= Rect.left || Rect.bottom <= Rect.top ||
+        Rect.right > UINT16_MAX || Rect.bottom > UINT16_MAX)
+        return CKERR_INVALIDPARAMETER;
     bgfx::setViewRect((bgfx::ViewId)View,
                        (uint16_t)Rect.left, (uint16_t)Rect.top,
                        (uint16_t)(Rect.right - Rect.left),
                        (uint16_t)(Rect.bottom - Rect.top));
+    {
+        VxMutexLock lock(m_ResourceStateMutex);
+        m_ViewRect[View] = Rect;
+    }
     return CK_OK;
 }
 
 CKERROR CKBgfxRasterizerContext::SetViewScissor(CKRenderView View, const CKRECT *Rect)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
-    if (Rect)
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
+    if (Rect) {
+        if (Rect->left < 0 || Rect->top < 0 || Rect->right <= Rect->left ||
+            Rect->bottom <= Rect->top || Rect->right > UINT16_MAX ||
+            Rect->bottom > UINT16_MAX)
+            return CKERR_INVALIDPARAMETER;
         bgfx::setViewScissor((bgfx::ViewId)View,
                               (uint16_t)Rect->left, (uint16_t)Rect->top,
                               (uint16_t)(Rect->right - Rect->left),
                               (uint16_t)(Rect->bottom - Rect->top));
-    else
+    } else {
         bgfx::setViewScissor((bgfx::ViewId)View);
+    }
     return CK_OK;
 }
 
@@ -2824,8 +3844,13 @@ CKERROR CKBgfxRasterizerContext::SetViewClear(CKRenderView View, CKDWORD Flags,
                                                CKDWORD Color, float Z,
                                                CKDWORD Stencil)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews ||
+        (Flags & ~(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH |
+                   CKRST_CTXCLEAR_STENCIL)) != 0 || Stencil > 0xff ||
+        !(Z >= 0.0f && Z <= 1.0f))
+        return CKERR_INVALIDPARAMETER;
 
     uint16_t bgfxClearFlags = 0;
     if (Flags & CKRST_CTXCLEAR_COLOR)   bgfxClearFlags |= BGFX_CLEAR_COLOR;
@@ -2840,6 +3865,10 @@ CKERROR CKBgfxRasterizerContext::SetViewClear(CKRenderView View, CKDWORD Flags,
 
     bgfx::setViewClear((bgfx::ViewId)View, bgfxClearFlags, bgfxColor, Z,
                         (uint8_t)Stencil);
+    {
+        VxMutexLock lock(m_ResourceStateMutex);
+        m_ViewClearFlags[View] = Flags;
+    }
     return CK_OK;
 }
 
@@ -2847,8 +3876,10 @@ CKERROR CKBgfxRasterizerContext::SetViewTransform(CKRenderView View,
                                                    const VxMatrix *ViewMatrix,
                                                    const VxMatrix *ProjMatrix)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
     bgfx::setViewTransform((bgfx::ViewId)View,
                             ViewMatrix ? (const void *)ViewMatrix : NULL,
                             ProjMatrix ? (const void *)ProjMatrix : NULL);
@@ -2858,8 +3889,10 @@ CKERROR CKBgfxRasterizerContext::SetViewTransform(CKRenderView View,
 CKERROR CKBgfxRasterizerContext::SetViewFrameBuffer(CKRenderView View,
                                                      CKDWORD FrameBuffer)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
     if (FrameBuffer == 0)
     {
         bgfx::FrameBufferHandle invalid = BGFX_INVALID_HANDLE;
@@ -2868,23 +3901,30 @@ CKERROR CKBgfxRasterizerContext::SetViewFrameBuffer(CKRenderView View,
     else
     {
         CKBgfxFrameBufferRecord *rec = GetFrameBuffer(FrameBuffer);
-        if (rec)
-            bgfx::setViewFrameBuffer((bgfx::ViewId)View, rec->Handle);
+        if (!rec)
+            return CKERR_INVALIDPARAMETER;
+        bgfx::setViewFrameBuffer((bgfx::ViewId)View, rec->Handle);
+    }
+    {
+        VxMutexLock lock(m_ResourceStateMutex);
+        m_ViewFrameBuffer[View] = FrameBuffer;
     }
     return CK_OK;
 }
 
 CKERROR CKBgfxRasterizerContext::SetViewMode(CKRenderView View, CK_VIEW_MODE Mode)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
     bgfx::ViewMode::Enum bgfxMode;
     switch (Mode) {
     case CKRST_VIEWMODE_DEFAULT:    bgfxMode = bgfx::ViewMode::Default; break;
     case CKRST_VIEWMODE_SEQUENTIAL: bgfxMode = bgfx::ViewMode::Sequential; break;
     case CKRST_VIEWMODE_DEPTH_ASC:  bgfxMode = bgfx::ViewMode::DepthAscending; break;
     case CKRST_VIEWMODE_DEPTH_DESC: bgfxMode = bgfx::ViewMode::DepthDescending; break;
-    default:                        bgfxMode = bgfx::ViewMode::Default; break;
+    default:                        return CKERR_INVALIDPARAMETER;
     }
     bgfx::setViewMode((bgfx::ViewId)View, bgfxMode);
     const CKBOOL traceViews = m_DrawMapActive
@@ -2902,8 +3942,17 @@ CKERROR CKBgfxRasterizerContext::SetViewMode(CKRenderView View, CK_VIEW_MODE Mod
 CKERROR CKBgfxRasterizerContext::SetViewOrder(CKRenderView Start, CKWORD Count,
                                                const CKRenderView *Order)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (Count == 0 || Start >= m_CapsDesc.MaxRenderViews ||
+        (CKDWORD)Start + Count > m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
+    if (Order) {
+        for (CKWORD i = 0; i < Count; ++i) {
+            if (Order[i] >= m_CapsDesc.MaxRenderViews)
+                return CKERR_INVALIDPARAMETER;
+        }
+    }
     bgfx::setViewOrder((bgfx::ViewId)Start, Count, (const bgfx::ViewId *)Order);
     const CKBOOL traceViews = m_DrawMapActive
         ? CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_VIEWS)
@@ -2940,30 +3989,49 @@ CKERROR CKBgfxRasterizerContext::SetViewOrder(CKRenderView Start, CKWORD Count,
 
 CKERROR CKBgfxRasterizerContext::ResetView(CKRenderView View)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
     bgfx::resetView((bgfx::ViewId)View);
+    {
+        VxMutexLock lock(m_ResourceStateMutex);
+        m_ViewFrameBuffer[View] = 0;
+        m_ViewRect[View].left = 0;
+        m_ViewRect[View].top = 0;
+        m_ViewRect[View].right = 0;
+        m_ViewRect[View].bottom = 0;
+        m_ViewClearFlags[View] = 0;
+        m_ViewClearRecorded[View] = FALSE;
+    }
     return CK_OK;
 }
 
 CKERROR CKBgfxRasterizerContext::TouchView(CKRenderView View)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
+    if (View >= m_CapsDesc.MaxRenderViews)
+        return CKERR_INVALIDPARAMETER;
+    RecordViewColorWrite(View, FALSE);
     bgfx::touch((bgfx::ViewId)View);
     return CK_OK;
 }
 
-void CKBgfxRasterizerContext::SetAntialias(CKDWORD Samples)
+CKERROR CKBgfxRasterizerContext::SetAntialias(CKDWORD Samples)
 {
-    const CKDWORD clamped = Samples >= 16 ? 16 : Samples >= 8 ? 8 : Samples >= 4 ? 4 : Samples >= 2 ? 2 : 0;
-    if (m_AntialiasSamples == clamped)
-        return;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (Samples != 0 && Samples != 2 && Samples != 4 &&
+        Samples != 8 && Samples != 16)
+        return CKERR_INVALIDPARAMETER;
+    if (m_AntialiasSamples == Samples)
+        return CK_OK;
 
-    m_AntialiasSamples = clamped;
+    m_AntialiasSamples = Samples;
     m_ResetFlags = CKBgfxBuildResetFlags(m_VSync, m_AntialiasSamples);
-    if (m_BgfxInitialized)
-        bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+    bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+    return CK_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -2972,7 +4040,7 @@ void CKBgfxRasterizerContext::SetAntialias(CKDWORD Samples)
 
 CKDWORD CKBgfxRasterizerContext::AllocTransform(VxMatrix *Transform, CKDWORD Count)
 {
-    if (!Transform || Count == 0)
+    if (!m_BgfxInitialized || !m_Created || !Transform || Count == 0)
         return CKRST_INVALID_TRANSFORM;
 
     CKDWORD expected = m_TransformCount.load(std::memory_order_relaxed);
@@ -2996,12 +4064,14 @@ CKDWORD CKBgfxRasterizerContext::AllocTransform(VxMatrix *Transform, CKDWORD Cou
 CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer(
     CKTransientVertexBuffer *Buffer, CKDWORD VertexCount, CKDWORD Layout)
 {
-    if (!m_BgfxInitialized || !Buffer || VertexCount == 0)
+    if (!m_BgfxInitialized || !m_Created || !Buffer || VertexCount == 0)
         return FALSE;
 
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
         return FALSE;
+
+    VxMutexLock poolLock(m_TransientPoolMutex);
 
     const CKDWORD available = bgfx::getAvailTransientVertexBuffer(VertexCount, layoutRec->Layout);
     if (available < VertexCount) {
@@ -3021,7 +4091,6 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer(
     bgfx::allocTransientVertexBuffer(tvb, VertexCount, layoutRec->Layout);
     if (tvb->data == NULL)
     {
-        m_TransientVBCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("vertex-alloc", VertexCount, available);
         return FALSE;
     }
@@ -3039,8 +4108,11 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer(
 CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
     CKTransientIndexBuffer *Buffer, CKDWORD IndexCount, CKBOOL Index32)
 {
-    if (!m_BgfxInitialized || !Buffer || IndexCount == 0)
+    if (!m_BgfxInitialized || !m_Created || !Buffer || IndexCount == 0 ||
+        (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0))
         return FALSE;
+
+    VxMutexLock poolLock(m_TransientPoolMutex);
 
     const CKDWORD available = bgfx::getAvailTransientIndexBuffer(IndexCount, Index32 ? true : false);
     if (available < IndexCount) {
@@ -3060,7 +4132,6 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
     bgfx::allocTransientIndexBuffer(tib, IndexCount, Index32 ? true : false);
     if (tib->data == NULL)
     {
-        m_TransientIBCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("index-alloc", IndexCount, available);
         return FALSE;
     }
@@ -3077,12 +4148,15 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
 CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
     CKTransientInstanceBuffer *Buffer, CKDWORD InstanceCount, CKDWORD Layout)
 {
-    if (!m_BgfxInitialized || !Buffer || InstanceCount == 0)
+    if (!m_BgfxInitialized || !m_Created || !Buffer || InstanceCount == 0 ||
+        (m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0)
         return FALSE;
 
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
         return FALSE;
+
+    VxMutexLock poolLock(m_TransientPoolMutex);
 
     uint16_t stride = layoutRec->Layout.m_stride;
     if (stride % 16 != 0)
@@ -3106,7 +4180,6 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
     bgfx::allocInstanceDataBuffer(idb, InstanceCount, stride);
     if (idb->data == NULL)
     {
-        m_TransientInstCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("instance-alloc", InstanceCount, available);
         return FALSE;
     }
@@ -3124,6 +4197,8 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
 CKDWORD CKBgfxRasterizerContext::GetAvailTransientVertexBuffer(
     CKDWORD VertexCount, CKDWORD Layout)
 {
+    if (!m_BgfxInitialized || !m_Created || VertexCount == 0)
+        return 0;
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
         return 0;
@@ -3133,12 +4208,18 @@ CKDWORD CKBgfxRasterizerContext::GetAvailTransientVertexBuffer(
 CKDWORD CKBgfxRasterizerContext::GetAvailTransientIndexBuffer(
     CKDWORD IndexCount, CKBOOL Index32)
 {
+    if (!m_BgfxInitialized || !m_Created || IndexCount == 0 ||
+        (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0))
+        return 0;
     return bgfx::getAvailTransientIndexBuffer(IndexCount, Index32 ? true : false);
 }
 
 CKDWORD CKBgfxRasterizerContext::GetAvailTransientInstanceBuffer(
     CKDWORD InstanceCount, CKDWORD Layout)
 {
+    if (!m_BgfxInitialized || !m_Created || InstanceCount == 0 ||
+        (m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0)
+        return 0;
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
         return 0;
@@ -3152,69 +4233,99 @@ CKDWORD CKBgfxRasterizerContext::GetAvailTransientInstanceBuffer(
 // Encoder and frame
 // ---------------------------------------------------------------------------
 
-CKRasterizerEncoder *CKBgfxRasterizerContext::BeginEncoder()
+static void CKBgfxResetEncoderWrapper(CKBgfxEncoder &Encoder,
+                                      CKBgfxRasterizerContext *Context,
+                                      bgfx::Encoder *NativeEncoder,
+                                      CKBOOL OwnsNativeEncoder)
 {
-    if (!m_BgfxInitialized)
+    Encoder.m_Context = Context;
+    Encoder.m_Encoder = NativeEncoder;
+    Encoder.m_OwnsNativeEncoder = OwnsNativeEncoder;
+    Encoder.m_Status = CK_OK;
+    Encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
+    Encoder.m_StencilRef = 0;
+    Encoder.m_StencilReadMask = 0xFF;
+    Encoder.m_StencilWriteMask = 0xFF;
+    Encoder.m_CurrentLayout = 0;
+    Encoder.m_PointSize = 0;
+    memset(&Encoder.m_CachedDrawState, 0, sizeof(CKDrawState));
+    Encoder.m_CachedBgfxState = 0;
+    Encoder.m_LastMarker[0] = '\0';
+    memset(Encoder.m_DebugVertexBindings, 0, sizeof(Encoder.m_DebugVertexBindings));
+    memset(Encoder.m_DebugTextureBindings, 0, sizeof(Encoder.m_DebugTextureBindings));
+    Encoder.m_DebugVertexBindingMask = 0;
+    Encoder.m_DebugTextureBindingMask = 0;
+    Encoder.m_DebugIndexBuffer = 0;
+    Encoder.m_DebugIndexStart = 0;
+    Encoder.m_DebugIndexCount = 0;
+    Encoder.m_DebugIndexHandle = 0;
+    Encoder.m_DebugSpecializationHash = 0;
+    Encoder.m_DebugSpecializationValid = FALSE;
+}
+
+CKRasterizerEncoder *CKBgfxRasterizerContext::BeginEncoder(CKBOOL ForceNewEncoder)
+{
+    if (!m_BgfxInitialized || !m_Created)
         return NULL;
 
-    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
+    const CKBOOL useDefault = !ForceNewEncoder &&
+                              VxThread::GetCurrentVxThreadId() == m_ApiThreadId;
+    if (useDefault)
     {
         CKBOOL expected = FALSE;
-    if (m_Encoders[i].m_Active.compare_exchange_strong(
+        if (!m_DefaultEncoder.m_Active.compare_exchange_strong(
+                expected, TRUE, std::memory_order_acq_rel,
+                std::memory_order_relaxed))
+            return NULL;
+        CKBgfxResetEncoderWrapper(m_DefaultEncoder, this, NULL, FALSE);
+        return &m_DefaultEncoder;
+    }
+
+#if !BGFX_CONFIG_MULTITHREADED
+    return NULL;
+#else
+    for (CKDWORD i = 0; i < m_CapsDesc.MaxEncoders; ++i)
+    {
+        CKBOOL expected = FALSE;
+        if (m_Encoders[i].m_Active.compare_exchange_strong(
                 expected, TRUE, std::memory_order_acq_rel, std::memory_order_relaxed))
         {
-            m_Encoders[i].m_Context = this;
-#if BGFX_CONFIG_MULTITHREADED
-            m_Encoders[i].m_Encoder = bgfx::begin(true);
-            if (!m_Encoders[i].m_Encoder) {
-                m_Encoders[i].m_Context = NULL;
+            bgfx::Encoder *nativeEncoder = bgfx::begin(true);
+            if (!nativeEncoder) {
                 m_Encoders[i].m_Active.store(FALSE, std::memory_order_release);
                 return NULL;
             }
-#else
-            m_Encoders[i].m_Encoder = NULL;
-#endif
-            m_Encoders[i].m_StencilRef = 0;
-            m_Encoders[i].m_StencilReadMask = 0xFF;
-            m_Encoders[i].m_StencilWriteMask = 0xFF;
-            m_Encoders[i].m_CurrentLayout = 0;
-            m_Encoders[i].m_PointSize = 0;
-            memset(&m_Encoders[i].m_CachedDrawState, 0, sizeof(CKDrawState));
-            m_Encoders[i].m_CachedBgfxState = 0;
-            m_Encoders[i].m_LastMarker[0] = '\0';
-            if (m_DrawMapSubmitActive) {
-                memset(m_Encoders[i].m_DebugVertexBindings, 0,
-                       sizeof(m_Encoders[i].m_DebugVertexBindings));
-                memset(m_Encoders[i].m_DebugTextureBindings, 0,
-                       sizeof(m_Encoders[i].m_DebugTextureBindings));
-                m_Encoders[i].m_DebugVertexBindingMask = 0;
-                m_Encoders[i].m_DebugTextureBindingMask = 0;
-                m_Encoders[i].m_DebugIndexBuffer = 0;
-                m_Encoders[i].m_DebugIndexStart = 0;
-                m_Encoders[i].m_DebugIndexCount = 0;
-                m_Encoders[i].m_DebugIndexHandle = 0;
-            }
+            CKBgfxResetEncoderWrapper(m_Encoders[i], this, nativeEncoder, TRUE);
             return &m_Encoders[i];
         }
     }
     return NULL;
+#endif
 }
 
-void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
+CKERROR CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
 {
     if (!Encoder)
-        return;
+        return CKERR_INVALIDPARAMETER;
 
     CKBgfxEncoder *enc = NULL;
-    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i) {
-        if (Encoder == &m_Encoders[i]) {
-            enc = &m_Encoders[i];
-            break;
+    if (Encoder == &m_DefaultEncoder) {
+        enc = &m_DefaultEncoder;
+    } else {
+        for (int i = 0; i < CKRST_MAX_ENCODERS; ++i) {
+            if (Encoder == &m_Encoders[i]) {
+                enc = &m_Encoders[i];
+                break;
+            }
         }
     }
 
-    if (!enc)
-        return;
+    if (!enc || !enc->m_Active.load(std::memory_order_acquire))
+        return CKERR_INVALIDPARAMETER;
+    if (enc->m_OwnerThread != VxThread::GetCurrentVxThreadId()) {
+        enc->SetError(CKERR_INVALIDOPERATION);
+        return enc->GetStatus();
+    }
 
     if (m_DrawMapMarkerCaptureActive && enc->m_LastMarker[0] != '\0') {
         m_DebugMarkerStaleCount.fetch_add(1, std::memory_order_relaxed);
@@ -3225,17 +4336,34 @@ void CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
         enc->m_LastMarker[0] = '\0';
     }
 
-    if (enc->m_Encoder) {
+    if (enc->m_OwnsNativeEncoder && enc->m_Encoder) {
         bgfx::end(enc->m_Encoder);
         enc->m_Encoder = NULL;
     }
 
+    const CKERROR status = enc->GetStatus();
+    enc->m_Context = NULL;
+    enc->m_OwnsNativeEncoder = FALSE;
     enc->m_Active.store(FALSE, std::memory_order_release);
+    return status;
 }
 
-CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
+CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
+                                       CKDWORD Flags, CKDWORD *FrameNumber)
 {
-    if (!m_BgfxInitialized)
+    if (!m_BgfxInitialized || !m_Created ||
+        VxThread::GetCurrentVxThreadId() != m_ApiThreadId)
+        return CKERR_INVALIDOPERATION;
+
+    if (SyncMode != CKRST_FRAME_SYNC_IMMEDIATE &&
+        SyncMode != CKRST_FRAME_SYNC_VSYNC &&
+        SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT)
+        return CKERR_INVALIDPARAMETER;
+    if ((Flags & ~(CKRST_FRAME_CAPTURE | CKRST_FRAME_DISCARD |
+                   CKRST_FRAME_FLUSH)) != 0)
+        return CKERR_INVALIDPARAMETER;
+
+    if (m_DefaultEncoder.m_Active.load(std::memory_order_acquire))
         return CKERR_INVALIDOPERATION;
 
     for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
@@ -3245,24 +4373,10 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
             const CKDWORD leak = m_DebugEncoderLeakCount.fetch_add(1, std::memory_order_relaxed);
             if (leak < 16 || CKBgfxLogEnabled("Config", false)) {
                 CKBgfxLogf("Encoder",
-                           "active encoder forced closed before frame frame=%u slot=%d",
+                           "active encoder before frame frame=%u slot=%d",
                            m_DebugFrameId,
                            i);
             }
-            if (m_Encoders[i].m_Encoder)
-            {
-                bgfx::end(m_Encoders[i].m_Encoder);
-                m_Encoders[i].m_Encoder = NULL;
-            }
-            if (m_DrawMapMarkerCaptureActive && m_Encoders[i].m_LastMarker[0] != '\0') {
-                m_DebugMarkerStaleCount.fetch_add(1, std::memory_order_relaxed);
-                if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_MARKERS))
-                    CKBgfxLogf("MarkerStale",
-                               "frame=%u reason=frame_end label=\"%s\"",
-                               m_DebugFrameId, m_Encoders[i].m_LastMarker);
-                m_Encoders[i].m_LastMarker[0] = '\0';
-            }
-            m_Encoders[i].m_Active.store(FALSE, std::memory_order_release);
         }
     }
 
@@ -3323,7 +4437,14 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
         }
     }
 
-    bgfx::frame();
+    const CKDWORD submittedFrame = bgfx::frame((uint8_t)Flags);
+    if (FrameNumber)
+        *FrameNumber = submittedFrame;
+    {
+        VxMutexLock lock(m_ResourceStateMutex);
+        for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i)
+            m_ViewClearRecorded[i] = FALSE;
+    }
     ++m_DebugFrameId;
     if (m_DrawMapActive) {
         m_DebugSubmitSerial.store(0, std::memory_order_relaxed);
@@ -3344,9 +4465,12 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
         CKBgfxLogf("FrameMap", "Begin frame=%u", m_DebugFrameId);
 
     m_TransformCount.store(0, std::memory_order_relaxed);
-    m_TransientVBCount.store(0, std::memory_order_relaxed);
-    m_TransientIBCount.store(0, std::memory_order_relaxed);
-    m_TransientInstCount.store(0, std::memory_order_relaxed);
+    {
+        VxMutexLock poolLock(m_TransientPoolMutex);
+        m_TransientVBCount.store(0, std::memory_order_relaxed);
+        m_TransientIBCount.store(0, std::memory_order_relaxed);
+        m_TransientInstCount.store(0, std::memory_order_relaxed);
+    }
 
     return CK_OK;
 }
@@ -3355,42 +4479,69 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode)
 // Resource creation - occlusion queries, indirect buffers
 // ===========================================================================
 
-CKERROR CKBgfxRasterizerContext::CreateOcclusionQuery(CKDWORD Query,
-                                                       CKOcclusionQueryDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
+                                                       CKDWORD *OutQuery)
 {
-    if (!m_BgfxInitialized || Query == 0)
+    if (!OutQuery)
         return CKERR_INVALIDPARAMETER;
+    *OutQuery = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
+    if ((m_CapsDesc.Features & CKRST_CAPS_OCCLUSION_QUERY) == 0)
+        return CKERR_NOTIMPLEMENTED;
 
     bgfx::OcclusionQueryHandle handle = bgfx::createOcclusionQuery();
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD query = AllocateSlot(m_OcclusionQueries,
+                                        m_CapsDesc.MaxOcclusionQueries,
+                                        m_ResourceTableMutex);
+    if (query == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxOcclusionQueryRecord();
     rec->Handle = handle;
 
-    CKBgfxOcclusionQueryRecord *&slot = EnsureSlot(m_OcclusionQueries, Query);
-    DestroyRecord(slot);
-    slot = rec;
+    m_OcclusionQueries[query] = rec;
+    *OutQuery = query;
     return CK_OK;
 }
 
-CKERROR CKBgfxRasterizerContext::CreateIndirectBuffer(CKDWORD Buffer,
-                                                       CKIndirectBufferDesc *Desc)
+CKERROR CKBgfxRasterizerContext::CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
+                                                       CKDWORD *OutBuffer)
 {
-    if (!m_BgfxInitialized || !Desc || Buffer == 0)
+    if (!OutBuffer)
         return CKERR_INVALIDPARAMETER;
+    *OutBuffer = 0;
+    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Desc || Desc->MaxCommands == 0)
+        return CKERR_INVALIDPARAMETER;
+    if ((m_CapsDesc.Features & CKRST_CAPS_DRAW_INDIRECT) == 0)
+        return CKERR_NOTIMPLEMENTED;
 
     bgfx::IndirectBufferHandle handle = bgfx::createIndirectBuffer(Desc->MaxCommands);
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
+    const CKDWORD buffer = AllocateSlot(m_IndirectBuffers, 0,
+                                         m_ResourceTableMutex);
+    if (buffer == 0) {
+        bgfx::destroy(handle);
+        return CKERR_OUTOFMEMORY;
+    }
+
     auto *rec = new CKBgfxIndirectBufferRecord();
     rec->Handle = handle;
     rec->MaxCommands = Desc->MaxCommands;
 
-    CKBgfxIndirectBufferRecord *&slot = EnsureSlot(m_IndirectBuffers, Buffer);
-    DestroyRecord(slot);
-    slot = rec;
+    m_IndirectBuffers[buffer] = rec;
+    *OutBuffer = buffer;
     return CK_OK;
 }
 
@@ -3401,6 +4552,8 @@ CKERROR CKBgfxRasterizerContext::CreateIndirectBuffer(CKDWORD Buffer,
 CK_OCCLUSION_RESULT CKBgfxRasterizerContext::GetOcclusionResult(CKDWORD Query,
                                                                  CKDWORD *PixelCount)
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKRST_OCCLUSION_NORESULT;
     CKBgfxOcclusionQueryRecord *oq = GetOcclusionQuery(Query);
     if (!oq)
         return CKRST_OCCLUSION_NORESULT;
@@ -3422,19 +4575,28 @@ CK_OCCLUSION_RESULT CKBgfxRasterizerContext::GetOcclusionResult(CKDWORD Query,
 // Palette, debug text, debug flags
 // ===========================================================================
 
-void CKBgfxRasterizerContext::SetPaletteColor(CKDWORD Index, CKDWORD RGBA)
+CKERROR CKBgfxRasterizerContext::SetPaletteColor(CKDWORD Index, CKDWORD RGBA)
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (Index >= 16)
+        return CKERR_INVALIDPARAMETER;
     bgfx::setPaletteColor((uint8_t)Index, RGBA);
+    return CK_OK;
 }
 
 void CKBgfxRasterizerContext::DbgTextClear(CKDWORD Color, CKBOOL Small)
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return;
     bgfx::dbgTextClear((uint8_t)Color, Small != FALSE);
 }
 
 void CKBgfxRasterizerContext::DbgTextPrintf(CKWORD X, CKWORD Y, CKDWORD Attr,
                                              CKSTRING Format, ...)
 {
+    if (!m_BgfxInitialized || !IsApiThread() || !Format)
+        return;
     char buf[4096];
     va_list args;
     va_start(args, Format);
@@ -3447,6 +4609,8 @@ void CKBgfxRasterizerContext::DbgTextImage(CKWORD X, CKWORD Y,
                                             CKWORD Width, CKWORD Height,
                                             const void *Data, CKWORD Pitch)
 {
+    if (!m_BgfxInitialized || !IsApiThread() || !Data)
+        return;
     bgfx::dbgTextImage(X, Y, Width, Height, Data, Pitch);
 }
 
@@ -3483,6 +4647,8 @@ void CKBgfxRasterizerContext::SetDebug(CKDWORD Flags)
 
 const CKRenderStats *CKBgfxRasterizerContext::GetStats()
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return &m_Stats;
     const bgfx::Stats *s = bgfx::getStats();
     if (!s)
         return &m_Stats;
@@ -3540,7 +4706,7 @@ const CKRenderStats *CKBgfxRasterizerContext::GetStats()
 void CKBgfxRasterizerContext::SetResourceName(CKDWORD Handle, CKDWORD Type,
                                                CKSTRING Name)
 {
-    if (!Name)
+    if (!m_BgfxInitialized || !IsApiThread() || !Name)
         return;
 
     int32_t len = (int32_t)strlen(Name);
@@ -3589,6 +4755,8 @@ CKDWORD CKBgfxRasterizerContext::GetShaderUniforms(CKDWORD Shader,
                                                     CKDWORD *Uniforms,
                                                     CKDWORD MaxCount)
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return 0;
     CKBgfxShaderRecord *rec = GetShader(Shader);
     if (!rec)
         return 0;
@@ -3616,7 +4784,7 @@ void CKBgfxRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Inf
         return;
 
     Info->Name[0] = '\0';
-    Info->Type = CKRST_UNIFORM_FLOAT4;
+    Info->Type = CKRST_UNIFORM_VEC4;
     Info->Count = 0;
 
     CKBgfxUniformRecord *rec = GetUniform(Uniform);
@@ -3636,20 +4804,13 @@ void CKBgfxRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Inf
 CKDWORD CKBgfxRasterizerContext::GetFrameBufferTexture(CKDWORD FrameBuffer,
                                                         CKDWORD Attachment)
 {
+    if (!m_BgfxInitialized || !IsApiThread())
+        return 0;
     CKBgfxFrameBufferRecord *fb = GetFrameBuffer(FrameBuffer);
-    if (!fb)
+    if (!fb || Attachment >= fb->ColorCount)
         return 0;
-
-    bgfx::TextureHandle th = bgfx::getTexture(fb->Handle, (uint8_t)Attachment);
-    if (!bgfx::isValid(th))
-        return 0;
-
-    for (int i = 0; i < m_Textures.Size(); ++i)
-    {
-        if (m_Textures[i] && m_Textures[i]->Handle.idx == th.idx)
-            return (CKDWORD)i;
-    }
-    return 0;
+    return IsObjectAlive(fb->Color[Attachment].Texture, CKRST_OBJ_TEXTURE)
+        ? fb->Color[Attachment].Texture : 0;
 }
 
 // ===========================================================================
@@ -3660,6 +4821,11 @@ CKBOOL CKBgfxRasterizerContext::IsTextureValid(CKDWORD Depth, CKBOOL CubeMap,
                                                 CKWORD NumLayers, CKDWORD Format,
                                                 CKDWORD Flags)
 {
+    if (!m_BgfxInitialized || !IsApiThread() || Depth == 0 || NumLayers == 0)
+        return FALSE;
+    bgfx::TextureFormat::Enum nativeFormat;
+    if (!CKBgfxTryTextureFormat(static_cast<VX_PIXELFORMAT>(Format), nativeFormat))
+        return FALSE;
     uint64_t bgfxFlags = 0;
     if (Flags & CKRST_TEXTURE_RENDERTARGET)  bgfxFlags |= BGFX_TEXTURE_RT;
     if (Flags & CKRST_TEXTURE_BLIT_DST)      bgfxFlags |= BGFX_TEXTURE_BLIT_DST;
@@ -3667,7 +4833,7 @@ CKBOOL CKBgfxRasterizerContext::IsTextureValid(CKDWORD Depth, CKBOOL CubeMap,
     if (Flags & CKRST_TEXTURE_READBACK)      bgfxFlags |= BGFX_TEXTURE_READ_BACK;
 
     return bgfx::isTextureValid((uint16_t)Depth, CubeMap != FALSE, NumLayers,
-                                (bgfx::TextureFormat::Enum)Format, bgfxFlags)
+                                nativeFormat, bgfxFlags)
            ? TRUE : FALSE;
 }
 
@@ -3676,13 +4842,18 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
                                                     const CKFrameBufferAttachmentDesc *DepthStencil)
 {
     static const CKDWORD MAX_ATTACHMENTS = 16;
+    if (!m_BgfxInitialized || !IsApiThread() || ColorCount > MAX_ATTACHMENTS ||
+        (ColorCount != 0 && !Color))
+        return FALSE;
     bgfx::Attachment attachments[MAX_ATTACHMENTS];
     CKDWORD count = 0;
 
     for (CKDWORD i = 0; i < ColorCount && count < MAX_ATTACHMENTS; ++i)
     {
         CKBgfxTextureRecord *tex = GetTexture(Color[i].Texture);
-        if (!tex) return FALSE;
+        if (!tex || tex->IsDepth || Color[i].Mip >= tex->MipCount ||
+            Color[i].Layer != 0)
+            return FALSE;
         attachments[count].init(tex->Handle, bgfx::Access::Write,
                                 (uint16_t)Color[i].Layer, 1, (uint16_t)Color[i].Mip);
         ++count;
@@ -3691,7 +4862,9 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
     if (DepthStencil && DepthStencil->Texture != 0)
     {
         CKBgfxTextureRecord *tex = GetTexture(DepthStencil->Texture);
-        if (!tex) return FALSE;
+        if (!tex || !tex->IsDepth || DepthStencil->Mip >= tex->MipCount ||
+            DepthStencil->Layer != 0)
+            return FALSE;
         if (count < MAX_ATTACHMENTS)
         {
             attachments[count].init(tex->Handle, bgfx::Access::Write,
@@ -3717,10 +4890,18 @@ void CKBgfxRasterizerContext::CalcTextureSize(CKTextureInfo *Info,
     if (!Info)
         return;
 
+    memset(Info, 0, sizeof(*Info));
+    if (!m_BgfxInitialized || !IsApiThread() || Width == 0 || Height == 0 ||
+        Depth == 0 || NumLayers == 0)
+        return;
+    bgfx::TextureFormat::Enum nativeFormat;
+    if (!CKBgfxTryTextureFormat(static_cast<VX_PIXELFORMAT>(Format), nativeFormat))
+        return;
+
     bgfx::TextureInfo bgfxInfo;
     bgfx::calcTextureSize(bgfxInfo, Width, Height, Depth, CubeMap != FALSE,
                           HasMips != FALSE, NumLayers,
-                          (bgfx::TextureFormat::Enum)Format);
+                          nativeFormat);
 
     Info->Format = Format;
     Info->StorageSize = bgfxInfo.storageSize;
@@ -3736,23 +4917,32 @@ void CKBgfxRasterizerContext::CalcTextureSize(CKTextureInfo *Info,
 // Screenshot capture
 // ===========================================================================
 
-void CKBgfxRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
-                                                 CKScreenShotCallback Callback)
+CKERROR CKBgfxRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
+                                                    CKScreenShotCallback Callback,
+                                                    void *UserData)
 {
-    if (!Callback)
-        return;
+    if (!m_BgfxInitialized || !IsApiThread())
+        return CKERR_INVALIDOPERATION;
+    if (!Callback || FrameBuffer != 0)
+        return CKERR_INVALIDPARAMETER;
 
+    XString requestPath;
     {
-        std::lock_guard<std::mutex> lock(m_ScreenShotMutex);
-        m_PendingScreenShotCallback = Callback;
-        m_PendingScreenShotFB = FrameBuffer;
+        VxMutexLock lock(m_ScreenShotMutex);
+        CKBgfxScreenShotRequest pending = {};
+        pending.FrameBuffer = FrameBuffer;
+        pending.Callback = Callback;
+        pending.UserData = UserData;
+        char path[64];
+        snprintf(path, sizeof(path), "ckrst-screenshot-%llu",
+                 (unsigned long long)m_NextScreenShotToken++);
+        pending.Path = path;
+        requestPath = pending.Path;
+        m_PendingScreenShots.PushBack(pending);
     }
 
-    CKBgfxFrameBufferRecord *fb = (FrameBuffer != 0) ? GetFrameBuffer(FrameBuffer) : NULL;
-    bgfx::FrameBufferHandle fbHandle = BGFX_INVALID_HANDLE;
-    if (fb)
-        fbHandle = fb->Handle;
-    bgfx::requestScreenShot(fbHandle, "screenshot");
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, requestPath.CStr());
+    return CK_OK;
 }
 
 // ===========================================================================
@@ -3761,11 +4951,11 @@ void CKBgfxRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
 
 CKBgfxOcclusionQueryRecord *CKBgfxRasterizerContext::GetOcclusionQuery(CKDWORD Handle)
 {
-    return GetSlot(m_OcclusionQueries, Handle);
+    return GetSlot(m_OcclusionQueries, Handle, m_ResourceTableMutex);
 }
 
 CKBgfxIndirectBufferRecord *CKBgfxRasterizerContext::GetIndirectBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_IndirectBuffers, Handle);
+    return GetSlot(m_IndirectBuffers, Handle, m_ResourceTableMutex);
 }
 

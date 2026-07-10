@@ -6,8 +6,7 @@
 #define CKBGFX_DRAWMAP_SOURCE_COUNT 6
 
 #include <atomic>
-#include <cstring>
-#include <mutex>
+#include <string.h>
 #include <bgfx/bgfx.h>
 
 #define CKBGFX_DRAWMAP_HASH_INIT 2166136261u
@@ -71,11 +70,8 @@ struct CKBgfxShaderRecord {
 
 struct CKBgfxProgramRecord {
     bgfx::ProgramHandle Handle;
-    CKDWORD SpecializationDwords[10];
-    CKDWORD SpecializationDwordCount;
     CKDWORD VertexShader;
     CKDWORD PixelShader;
-    CKDWORD SpecHash;
 };
 
 struct CKBgfxUniformRecord {
@@ -92,23 +88,42 @@ struct CKBgfxVertexLayoutRecord {
 
 struct CKBgfxVertexBufferRecord {
     bgfx::DynamicVertexBufferHandle Handle;
+    CKDWORD Flags;
     CKDWORD Layout;
     CKDWORD VertexSize;
+    CKDWORD VertexCount;
+    CKDWORD Size;
 };
 
 struct CKBgfxIndexBufferRecord {
     bgfx::DynamicIndexBufferHandle Handle;
     CKBOOL Index32;
+    CKDWORD IndexCount;
+    CKDWORD Size;
 };
+
+enum CKBgfxTextureOrientation {
+    CKBGFX_ORIENTATION_UNKNOWN = 0,
+    CKBGFX_ORIENTATION_TOP_LEFT,
+    CKBGFX_ORIENTATION_BOTTOM_LEFT,
+    CKBGFX_ORIENTATION_MIXED,
+};
+
+static const CKDWORD CKBGFX_MAX_TRACKED_MIPS = 32;
+static const CKDWORD CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS = 16;
 
 struct CKBgfxTextureRecord {
     CKBgfxTextureRecord()
         : Handle(BGFX_INVALID_HANDLE), SamplerBaseHandle(BGFX_INVALID_HANDLE),
           Flags(0), Width(0), Height(0), Depth(1),
           IsDepth(FALSE), RequestedAutoMips(FALSE), MipCount(1),
-          Format(bgfx::TextureFormat::Count), BitsPerPixel(0),
+          Format(bgfx::TextureFormat::Count), PixelFormat(UNKNOWN_PF), BitsPerPixel(0),
           SamplerBaseValid(FALSE),
-          AutoMipBaseValid(FALSE), ReadbackBottomLeftMipMask(0) {}
+          AutoMipBaseValid(FALSE)
+    {
+        memset(ReadbackOrientation, CKBGFX_ORIENTATION_UNKNOWN,
+               sizeof(ReadbackOrientation));
+    }
 
     ~CKBgfxTextureRecord()
     {
@@ -130,18 +145,18 @@ struct CKBgfxTextureRecord {
     CKBOOL RequestedAutoMips;
     CKDWORD MipCount;
     bgfx::TextureFormat::Enum Format;
+    VX_PIXELFORMAT PixelFormat;
     CKDWORD BitsPerPixel;
     CKBOOL SamplerBaseValid;
     VxImageDescEx AutoMipBaseDesc;
     CKBOOL AutoMipBaseValid;
-    CKDWORD ReadbackBottomLeftMipMask;
+    CKBYTE ReadbackOrientation[CKBGFX_MAX_TRACKED_MIPS];
 };
 
 struct CKBgfxFrameBufferRecord {
     bgfx::FrameBufferHandle Handle;
-    CKDWORD FirstColorTexture;
-    CKDWORD FirstColorMip;
-    CKDWORD FirstColorLayer;
+    CKDWORD ColorCount;
+    CKFrameBufferAttachmentDesc Color[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];
 };
 
 struct CKBgfxOcclusionQueryRecord {
@@ -177,13 +192,13 @@ public:
 
     CKRasterizerContext *CreateContext() override;
     CKBOOL DestroyContext(CKRasterizerContext *Context) override;
+};
 
-    CKERROR GetShaderTarget(CKShaderTargetDesc *Target) const override;
-    CKERROR GetProgrammableCaps(VxProgCapsDesc &Caps) override;
-
-private:
-    friend class CKBgfxRasterizerContext;
-    CKShaderTargetDesc m_ShaderTarget;
+struct CKBgfxScreenShotRequest {
+    CKDWORD FrameBuffer;
+    CKScreenShotCallback Callback;
+    void *UserData;
+    XString Path;
 };
 
 // ===========================================================================
@@ -194,6 +209,7 @@ class CKBgfxEncoder : public CKRasterizerEncoder {
 public:
     CKBgfxEncoder();
     ~CKBgfxEncoder() override;
+    CKERROR GetStatus() const override;
 
     void SetState(CKDrawState State) override;
     void SetStencilRef(CKDWORD Ref) override;
@@ -203,9 +219,9 @@ public:
 
     void SetTransform(CKDWORD TransformIndex, CKDWORD Count) override;
 
-    void SetVertexLayout(CKDWORD Layout) override;
     void SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
-                         CKDWORD StartVertex, CKDWORD VertexCount) override;
+                         CKDWORD StartVertex, CKDWORD VertexCount,
+                         CKDWORD Layout) override;
     void SetIndexBuffer(CKDWORD Buffer,
                         CKDWORD StartIndex, CKDWORD IndexCount) override;
     void SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
@@ -219,8 +235,6 @@ public:
     void SetTexture(CKDWORD Stage, CKDWORD Uniform,
                     CKDWORD Texture, CKSamplerDesc *Sampler) override;
     void SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count) override;
-    void SetDrawSpecialization(const CKDWORD *Values, CKDWORD Count) override;
-
     void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                           CK_ACCESS_MODE Access) override;
     void SetComputeImage(CKDWORD Stage, CKDWORD Texture,
@@ -259,6 +273,9 @@ public:
     std::atomic<CKBOOL> m_Active;
     CKBgfxRasterizerContext *m_Context;
     bgfx::Encoder *m_Encoder;
+    CKBOOL m_OwnsNativeEncoder;
+    CKERROR m_Status;
+    XUINTPTR m_OwnerThread;
 
     CKDWORD m_StencilRef;
     CKDWORD m_StencilReadMask;
@@ -288,6 +305,8 @@ public:
                      CKDWORD Extra0,
                      CKDWORD Extra1,
                      CKDWORD Extra2);
+    void SetError(CKERROR Error);
+    CKBOOL CanSubmit();
 };
 
 // ===========================================================================
@@ -300,30 +319,44 @@ public:
     explicit CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver);
     ~CKBgfxRasterizerContext() override;
 
-    CKBOOL Create(WIN_HANDLE Window, int PosX, int PosY,
-                  int Width, int Height, int Bpp,
-                  CKBOOL Fullscreen, int RefreshRate,
-                  int Zbpp, int StencilBpp) override;
-    CKBOOL Resize(int PosX, int PosY, int Width, int Height,
-                  CKDWORD Flags) override;
+    CKERROR Create(WIN_HANDLE Window, int PosX, int PosY,
+                   int Width, int Height, int Bpp,
+                   CKBOOL Fullscreen, int RefreshRate,
+                   int Zbpp, int StencilBpp) override;
+    CKERROR Resize(int PosX, int PosY, int Width, int Height,
+                   CKDWORD Flags) override;
+    CKERROR GetTargetDesc(CKRasterizerTargetDesc *Target) const override;
+    CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const override;
+    CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
+                                 CKTextureFormatCaps *Caps) const override;
+    CKERROR GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
+                               CKDepthFormatCaps *Caps) const override;
 
     // Resource creation
-    CKERROR CreateVertexBuffer(CKDWORD Buffer, CKVertexBufferDesc *Desc,
-                               const void *Data) override;
-    CKERROR CreateIndexBuffer(CKDWORD Buffer, CKIndexBufferDesc *Desc,
-                              CKBOOL Index32, const void *Data) override;
-    CKERROR CreateTexture(CKDWORD Texture, CKTextureDesc *Desc,
-                          const VxImageDescEx *Data) override;
-    CKERROR CreateShader(CKDWORD Shader, CKShaderDesc *Desc) override;
-    CKERROR CreateProgram(CKDWORD Program, CKProgramDesc *Desc) override;
-    CKERROR CreateUniform(CKDWORD Uniform, CKUniformDesc *Desc) override;
-    CKERROR CreateVertexLayout(CKDWORD Layout, CKVertexLayoutDesc *Desc) override;
-    CKERROR CreateFrameBuffer(CKDWORD FrameBuffer, CKFrameBufferDesc *Desc) override;
-    CKERROR CreateDepthTexture(CKDWORD Texture, CKDepthTextureDesc *Desc) override;
-    CKERROR CreateOcclusionQuery(CKDWORD Query, CKOcclusionQueryDesc *Desc) override;
-    CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc) override;
+    CKERROR CreateVertexBuffer(const CKVertexBufferDesc *Desc,
+                               const void *Data, CKDWORD *OutBuffer) override;
+    CKERROR CreateIndexBuffer(const CKIndexBufferDesc *Desc,
+                              CKBOOL Index32, const void *Data,
+                              CKDWORD *OutBuffer) override;
+    CKERROR CreateTexture(const CKTextureDesc *Desc,
+                          const VxImageDescEx *Data,
+                          CKDWORD *OutTexture) override;
+    CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *OutShader) override;
+    CKERROR CreateProgram(const CKProgramDesc *Desc, CKDWORD *OutProgram) override;
+    CKERROR CreateUniform(const CKUniformDesc *Desc, CKDWORD *OutUniform) override;
+    CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc,
+                               CKDWORD *OutLayout) override;
+    CKERROR CreateFrameBuffer(const CKFrameBufferDesc *Desc,
+                              CKDWORD *OutFrameBuffer) override;
+    CKERROR CreateDepthTexture(const CKDepthTextureDesc *Desc,
+                               CKDWORD *OutTexture) override;
+    CKERROR CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
+                                 CKDWORD *OutQuery) override;
+    CKERROR CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
+                                 CKDWORD *OutBuffer) override;
+    CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const override;
     CKERROR DeleteObject(CKDWORD Object, CKDWORD Type) override;
-    void FlushObjects(CKDWORD TypeMask) override;
+    CKERROR FlushObjects(CKDWORD TypeMask) override;
 
     // Resource update
     CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
@@ -335,16 +368,15 @@ public:
 
     // Readback
     CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip,
-                        VxImageDescEx *Data) override;
-    CKERROR ReadFrameBuffer(CKDWORD FrameBuffer,
-                            VxImageDescEx *Data) override;
+                        CKReadbackDesc *Readback,
+                        CKDWORD *AvailableFrame) override;
 
     // Occlusion query results
     CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD Query,
                                             CKDWORD *PixelCount) override;
 
     // Palette
-    void SetPaletteColor(CKDWORD Index, CKDWORD RGBA) override;
+    CKERROR SetPaletteColor(CKDWORD Index, CKDWORD RGBA) override;
 
     // Debug text overlay
     void DbgTextClear(CKDWORD Color, CKBOOL Small) override;
@@ -405,8 +437,9 @@ public:
                          CKWORD NumLayers, CKDWORD Format) override;
 
     // Screenshot capture
-    void RequestScreenShot(CKDWORD FrameBuffer,
-                           CKScreenShotCallback Callback) override;
+    CKERROR RequestScreenShot(CKDWORD FrameBuffer,
+                              CKScreenShotCallback Callback,
+                              void *UserData = NULL) override;
 
     // Render views
     CKERROR SetViewName(CKRenderView View, CKSTRING Name) override;
@@ -423,7 +456,7 @@ public:
                          const CKRenderView *Order) override;
     CKERROR ResetView(CKRenderView View) override;
     CKERROR TouchView(CKRenderView View) override;
-    void SetAntialias(CKDWORD Samples) override;
+    CKERROR SetAntialias(CKDWORD Samples) override;
 
     // Transform cache
     CKDWORD AllocTransform(VxMatrix *Transform, CKDWORD Count) override;
@@ -440,10 +473,11 @@ public:
     CKDWORD GetAvailTransientInstanceBuffer(CKDWORD InstanceCount, CKDWORD Layout) override;
 
     // Encoder and frame
-    CKRasterizerEncoder *BeginEncoder() override;
-    void EndEncoder(CKRasterizerEncoder *Encoder) override;
-    CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) override;
-    CKDWORD GetFrameSerial() const override { return m_DebugFrameId; }
+    CKRasterizerEncoder *BeginEncoder(CKBOOL ForceNewEncoder = FALSE) override;
+    CKERROR EndEncoder(CKRasterizerEncoder *Encoder) override;
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode,
+                  CKDWORD Flags = CKRST_FRAME_NONE,
+                  CKDWORD *FrameNumber = NULL) override;
 
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);
     CKBgfxProgramRecord *GetProgram(CKDWORD Handle);
@@ -459,22 +493,31 @@ public:
 private:
     friend class CKBgfxCallback;
 
+    CKBOOL IsApiThread() const
+    {
+        return VxThread::GetCurrentVxThreadId() == m_ApiThreadId ? TRUE : FALSE;
+    }
     CKDWORD FindUniformSlotByHandle(uint16_t BgfxIdx);
 
     CKBOOL m_BgfxInitialized;
     const char *m_RendererName;
+    bgfx::RendererType::Enum m_RendererType;
+    CKRasterizerTargetDesc m_TargetDesc;
+    CKRasterizerCapsDesc m_CapsDesc;
+    uint64_t m_NativeSupported;
+    uint32_t m_NativeFormatCaps[bgfx::TextureFormat::Count];
     bgfx::TextureHandle m_DefaultWhiteTexture;
     CKBOOL m_VSync;
     uint32_t m_ResetFlags;
     CKDWORD m_AntialiasSamples;
     CKBgfxCallback m_BgfxCallback;
+    CKBgfxEncoder m_DefaultEncoder;
     CKBgfxEncoder m_Encoders[CKRST_MAX_ENCODERS];
+    XUINTPTR m_ApiThreadId;
 
-    std::mutex m_ScreenShotMutex;
-    CKScreenShotCallback m_PendingScreenShotCallback;
-    CKDWORD m_PendingScreenShotFB;
-    VxImageDescEx *m_BackbufferReadTarget;
-    std::atomic<bool> m_BackbufferReadReady;
+    VxMutex m_ScreenShotMutex;
+    XArray<CKBgfxScreenShotRequest> m_PendingScreenShots;
+    uint64_t m_NextScreenShotToken;
 
     CKDWORD m_DebugFrameId;
     std::atomic<CKDWORD> m_DebugSubmitSerial;
@@ -517,6 +560,13 @@ private:
                         CKDWORD Index32, CKDWORD Flags);
     void RecordInvalidSubmit(CKSTRING Kind, CKRenderView View, CKDWORD Program, CKSTRING Reason);
     void RecordTransientAllocMiss(const char *Kind, CKDWORD Requested, CKDWORD Available);
+    void RecordViewColorWrite(CKRenderView View, CKBOOL ExecuteClear);
+    void RecordTextureWrite(CKBgfxTextureRecord *Texture, CKDWORD Mip,
+                            CKBgfxTextureOrientation Orientation,
+                            CKBOOL FullOverwrite);
+    void RecordTextureBlit(CKBgfxTextureRecord *Destination, CKDWORD DestinationMip,
+                           const CKBgfxTextureRecord *Source, CKDWORD SourceMip,
+                           CKBOOL FullOverwrite);
 
     XArray<CKBgfxShaderRecord *> m_Shaders;
     XArray<CKBgfxProgramRecord *> m_Programs;
@@ -529,6 +579,13 @@ private:
     XArray<CKBgfxOcclusionQueryRecord *> m_OcclusionQueries;
     XArray<CKBgfxIndirectBufferRecord *> m_IndirectBuffers;
 
+    VxMutex m_ResourceTableMutex;
+    VxMutex m_ResourceStateMutex;
+    CKDWORD m_ViewFrameBuffer[CKRST_MAX_RENDER_VIEWS];
+    CKRECT m_ViewRect[CKRST_MAX_RENDER_VIEWS];
+    CKDWORD m_ViewClearFlags[CKRST_MAX_RENDER_VIEWS];
+    CKBOOL m_ViewClearRecorded[CKRST_MAX_RENDER_VIEWS];
+
     CKRenderStats m_Stats{};
     XArray<CKRenderViewStats> m_ViewStatsCache;
 
@@ -538,6 +595,7 @@ private:
     static const int MAX_TRANSIENT_VB = 256;
     static const int MAX_TRANSIENT_IB = 256;
     static const int MAX_TRANSIENT_INST = 256;
+    VxMutex m_TransientPoolMutex;
     bgfx::TransientVertexBuffer m_TransientVBPool[MAX_TRANSIENT_VB];
     std::atomic<CKDWORD> m_TransientVBCount;
     bgfx::TransientIndexBuffer m_TransientIBPool[MAX_TRANSIENT_IB];

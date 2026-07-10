@@ -37,11 +37,12 @@ const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum 
 const char *CKBgfxDebugViewLine0();
 const char *CKBgfxDebugViewLine1();
 
-bgfx::UniformType::Enum CKBgfxUniformType(CK_UNIFORM_TYPE Type);
-bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB Attrib);
-bgfx::AttribType::Enum CKBgfxAttribType(CK_VERTEX_ATTRIB_TYPE Type);
-bgfx::TextureFormat::Enum CKBgfxTextureFormat(VX_PIXELFORMAT Format);
-bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT Format);
+bool CKBgfxTryUniformType(CK_UNIFORM_TYPE Type, bgfx::UniformType::Enum &Result);
+bool CKBgfxTryAttrib(CK_VERTEX_ATTRIB Attrib, bgfx::Attrib::Enum &Result);
+bool CKBgfxTryAttribType(CK_VERTEX_ATTRIB_TYPE Type, bgfx::AttribType::Enum &Result);
+bool CKBgfxTryTextureFormat(VX_PIXELFORMAT Format, bgfx::TextureFormat::Enum &Result);
+bool CKBgfxTryPixelFormat(bgfx::TextureFormat::Enum Format, VX_PIXELFORMAT &Result);
+bool CKBgfxTryDepthFormat(CK_DEPTH_FORMAT Format, bgfx::TextureFormat::Enum &Result);
 CKDWORD CKBgfxImageRowBytes(CKDWORD Width, CKDWORD BitsPerPixel);
 CKDWORD CKBgfxResolveImagePitch(CKDWORD Width, CKDWORD Height,
                                 CKDWORD BitsPerPixel, CKDWORD PitchOrImageSize);
@@ -65,6 +66,8 @@ CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL RequestedAutoM
                                                            CKBOOL CanGenerateFullMipChain);
 CKBOOL CKBgfxSamplerWantsMipMaps(const CKSamplerDesc *Sampler);
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *Sampler);
+CKBOOL CKBgfxTrySamplerFlags(const CKSamplerDesc *Sampler, uint32_t &Flags);
+CKERROR CKBgfxTryState(CKDrawState State, uint64_t &BgfxState);
 uint64_t CKBgfxState(CKDrawState State);
 
 uint32_t CKBgfxBuildFrontStencil(CKDrawState State, CKDWORD Ref,

@@ -4,9 +4,9 @@
 
 #include "CKRasterizer.h"
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 #define LOG(fmt, ...) do { fprintf(stderr, fmt "\n", ##__VA_ARGS__); fflush(stderr); } while (0)
 
@@ -268,7 +268,7 @@ int main()
 
     CKRasterizerDriver *driver = rasterizer->GetDriver(0);
     CKRasterizerContext *ctx = driver->CreateContext();
-    if (!ctx->Create(hwnd, 0, 0, WIDTH, HEIGHT)) {
+    if (ctx->Create(hwnd, 0, 0, WIDTH, HEIGHT) != CK_OK) {
         LOG("Failed to create context");
         return 1;
     }
@@ -280,19 +280,23 @@ int main()
     elements[0].Type = CKRST_ATTRIBTYPE_FLOAT;
     elements[0].Count = 3;
     elements[0].Normalized = FALSE;
+    elements[0].AsInt = FALSE;
+    elements[0].Offset = 0;
 
     elements[1].Attrib = CKRST_ATTRIB_COLOR0;
     elements[1].Type = CKRST_ATTRIBTYPE_UINT8;
     elements[1].Count = 4;
     elements[1].Normalized = TRUE;
+    elements[1].AsInt = FALSE;
+    elements[1].Offset = 3 * sizeof(float);
 
     CKVertexLayoutDesc layoutDesc = {};
     layoutDesc.Elements = elements;
     layoutDesc.ElementCount = 2;
-    layoutDesc.Stride[0] = sizeof(PosColorVertex);
+    layoutDesc.Stride = sizeof(PosColorVertex);
 
-    CKDWORD hLayout = 1;
-    if (ctx->CreateVertexLayout(hLayout, &layoutDesc) != CK_OK) {
+    CKDWORD hLayout = 0;
+    if (ctx->CreateVertexLayout(&layoutDesc, &hLayout) != CK_OK) {
         LOG("Failed to create vertex layout");
         return 1;
     }
@@ -302,8 +306,8 @@ int main()
     vbDesc.m_MaxVertexCount = 8;
     vbDesc.m_VertexSize = sizeof(PosColorVertex);
 
-    CKDWORD hVB = 1;
-    if (ctx->CreateVertexBuffer(hVB, &vbDesc, s_cubeVertices) != CK_OK) {
+    CKDWORD hVB = 0;
+    if (ctx->CreateVertexBuffer(&vbDesc, s_cubeVertices, &hVB) != CK_OK) {
         LOG("Failed to create vertex buffer");
         return 1;
     }
@@ -312,31 +316,40 @@ int main()
     CKIndexBufferDesc ibDesc;
     ibDesc.m_MaxIndexCount = 36;
 
-    CKDWORD hIB = 1;
-    if (ctx->CreateIndexBuffer(hIB, &ibDesc, FALSE, s_cubeIndices) != CK_OK) {
+    CKDWORD hIB = 0;
+    if (ctx->CreateIndexBuffer(&ibDesc, FALSE, s_cubeIndices, &hIB) != CK_OK) {
         LOG("Failed to create index buffer");
         return 1;
     }
 
     // ---- Create shaders and program ----
+    CKRasterizerTargetDesc target;
+    if (ctx->GetTargetDesc(&target) != CK_OK ||
+        target.ShaderProfile != CKRST_SHADER_PROFILE_DX11) {
+        LOG("This embedded shader sample requires the D3D11 profile");
+        return 1;
+    }
+
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
-    vsDesc.Format = CKRST_SHADER_DXBC;
-    vsDesc.Code = (CKBYTE *)s_vs_cubes;
+    vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+    vsDesc.Profile = target.ShaderProfile;
+    vsDesc.Code = s_vs_cubes;
     vsDesc.CodeSize = sizeof(s_vs_cubes);
 
     CKShaderDesc fsDesc = {};
     fsDesc.Stage = CKRST_SHADER_PIXEL;
-    fsDesc.Format = CKRST_SHADER_DXBC;
-    fsDesc.Code = (CKBYTE *)s_fs_cubes;
+    fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+    fsDesc.Profile = target.ShaderProfile;
+    fsDesc.Code = s_fs_cubes;
     fsDesc.CodeSize = sizeof(s_fs_cubes);
 
-    CKDWORD hVS = 1, hFS = 2;
-    if (ctx->CreateShader(hVS, &vsDesc) != CK_OK) {
+    CKDWORD hVS = 0, hFS = 0;
+    if (ctx->CreateShader(&vsDesc, &hVS) != CK_OK) {
         LOG("Failed to create vertex shader");
         return 1;
     }
-    if (ctx->CreateShader(hFS, &fsDesc) != CK_OK) {
+    if (ctx->CreateShader(&fsDesc, &hFS) != CK_OK) {
         LOG("Failed to create fragment shader");
         return 1;
     }
@@ -346,8 +359,8 @@ int main()
     progDesc.PixelShader = hFS;
     progDesc.ConsumeShaders = TRUE;
 
-    CKDWORD hProgram = 1;
-    if (ctx->CreateProgram(hProgram, &progDesc) != CK_OK) {
+    CKDWORD hProgram = 0;
+    if (ctx->CreateProgram(&progDesc, &hProgram) != CK_OK) {
         LOG("Failed to create program");
         return 1;
     }
@@ -403,8 +416,6 @@ int main()
         // Draw 11x11 grid of cubes
         CKRasterizerEncoder *enc = ctx->BeginEncoder();
         if (enc) {
-            enc->SetVertexLayout(hLayout);
-
             for (int yy = 0; yy < 11; ++yy) {
                 for (int xx = 0; xx < 11; ++xx) {
                     VxMatrix model;
@@ -417,13 +428,14 @@ int main()
 
                     CKDWORD transformIdx = ctx->AllocTransform(&model, 1);
                     enc->SetTransform(transformIdx, 1);
-                    enc->SetVertexBuffer(0, hVB, 0, 8);
+                    enc->SetVertexBuffer(0, hVB, 0, 8, hLayout);
                     enc->SetIndexBuffer(hIB, 0, 36);
                     enc->SetState(drawState);
                     enc->Submit(0, hProgram, 0, CKRST_DISCARD_ALL);
                 }
             }
-            ctx->EndEncoder(enc);
+            if (ctx->EndEncoder(enc) != CK_OK)
+                break;
         }
 
         ctx->Frame(CKRST_FRAME_SYNC_VSYNC);

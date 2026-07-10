@@ -73,4 +73,5 @@ extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *
     info->Desc = "bgfx Rasterizer";
     info->StartFct = CKBgfxRasterizerStart;
     info->CloseFct = CKBgfxRasterizerClose;
+    info->InterfaceRevision = CKRST_INTERFACE_REVISION;
 }
