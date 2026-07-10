@@ -82,6 +82,7 @@ enum CKFFShaderSemantic {
 static const CKDWORD CKFF_TTF_MIRRORONCE_U = 0x200u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_V = 0x400u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_W = 0x800u;
+static const CKDWORD CKFF_TTF_RENDER_TARGET_FLIP_V = 0x1000u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_MASK = CKFF_TTF_MIRRORONCE_U |
                                                 CKFF_TTF_MIRRORONCE_V |
                                                 CKFF_TTF_MIRRORONCE_W;

@@ -19,8 +19,6 @@ void CKFFStateStore::Reset()
 {
     ActiveLightCount = 0;
     AlphaTestPrecision = 0;
-    DirtyFlags = CKFF_DIRTY_ALL;
-
     Vx3DMatrixIdentity(World);
     Vx3DMatrixIdentity(View);
     Vx3DMatrixIdentity(Projection);

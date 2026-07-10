@@ -300,7 +300,8 @@ void StageParamsPackThroughABIIndices() {
     stages[2][CKRST_TSS_CONSTANT] = 0x80402010;
     textures[2] = 77;
 
-    CKFFPackStageParams(stages, textures, 3, params);
+    CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKFFPackStageParams(stages, textures, textureFlags, 3, 0, params);
 
     const float *color = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COLOR)];
     const float *alpha = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_ALPHA)];
@@ -327,6 +328,65 @@ void StageParamsPackThroughABIIndices() {
               "Stage constant must pack RGBA into color/alpha extra ABI fields");
 }
 
+void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
+    const std::string varying = ReadTextFile("Source/RenderEngine/src/shaders/varying.def.sc");
+    const std::string compiler = ReadTextFile("Source/RenderEngine/src/shaders/compile_shaders.py");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_positiont.sc");
+
+    TestCheck(varying.find("flat vec4 v_flatColor0") != std::string::npos &&
+                  varying.find("flat vec4 v_flatColor1") != std::string::npos,
+              "All shader backends must compile flat colors as non-interpolated varyings");
+    TestCheck(compiler.find("varying_no_flat_color.def.sc") == std::string::npos &&
+                  compiler.find("CKFF_NDC_MINUS_ONE_TO_ONE=1") != std::string::npos,
+              "Shader generation must use one flat-varying ABI and mark the GLSL depth convention");
+    TestCheck(vs3d.find("position.z = position.z * 2.0 - position.w") != std::string::npos &&
+                  vsPositionT.find("position.z = position.z * 2.0 - position.w") != std::string::npos,
+              "Both 3D and POSITIONT shaders must convert D3D clip depth for desktop OpenGL");
+}
+
+void RenderTargetFlipFlagFollowsBackendOrigin() {
+    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
+    CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKFFStageParamsUniform params;
+
+    stages[0][CKRST_TSS_OP] = CKRST_TOP_SELECTARG1;
+    stages[0][CKRST_TSS_ARG1] = CKRST_TA_TEXTURE;
+    textures[0] = 77;
+    textureFlags[0] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET;
+
+    CKFFPackStageParams(stages, textures, textureFlags, 1, 0, params);
+    const CKDWORD topLeftFlags = (CKDWORD)params.Values[
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+    TestCheck((topLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
+              "Top-left backends must sample render targets without a V flip");
+
+    CKFFPackStageParams(stages, textures, textureFlags, 1,
+                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
+    const CKDWORD bottomLeftFlags = (CKDWORD)params.Values[
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+    TestCheck((bottomLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) != 0,
+              "Bottom-left backends must flip 2D render-target sampling in V");
+
+    textureFlags[0] = CKRST_TEXTURE_VALID;
+    CKFFPackStageParams(stages, textures, textureFlags, 1,
+                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
+    const CKDWORD regularTextureFlags = (CKDWORD)params.Values[
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+    TestCheck((regularTextureFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
+              "Bottom-left backends must not flip ordinary texture assets");
+
+    textureFlags[0] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
+                      CKRST_TEXTURE_CUBEMAP;
+    CKFFPackStageParams(stages, textures, textureFlags, 1,
+                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
+    const CKDWORD cubeFlags = (CKDWORD)params.Values[
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+    TestCheck((cubeFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
+              "Cube render targets must not receive an invalid 2D V flip");
+}
+
 void MirrorOnceAddressModesPackIntoStageParams() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {};
@@ -349,7 +409,8 @@ void MirrorOnceAddressModesPackIntoStageParams() {
     stages[5][CKRST_TSS_ADDRESW] = VXTEXTURE_ADDRESSMIRRORONCE;
     textures[5] = 12;
 
-    CKFFPackStageParams(stages, textures, 6, params);
+    CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
+    CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params);
 
     const float *stage1 = params.Values[CKFFStageParamIndex(1, CKFF_STAGE_PARAM_COLOR_EXTRA)];
     const CKDWORD stage1Flags = (CKDWORD)stage1[2];
@@ -469,8 +530,11 @@ void TextureCombinerOpFormulasStayDxvkCompatible() {
                   fs.find("if (op == 25) return clamp(a * b + c, 0.0, 1.0)") != std::string::npos &&
                   fs.find("if (op == 26) return clamp(c * a + (vec4_splat(1.0) - c) * b, 0.0, 1.0)") != std::string::npos,
               "DOTPRODUCT3, MULTIPLYADD, and LERP formulas must remain covered");
-    TestCheck(fs.find("if (op == 17) return current") != std::string::npos,
-              "PREMODULATE must remain an explicit fallback/no-op shader op");
+    TestCheck(fs.find("if (op == 17) return a") != std::string::npos &&
+                  fs.find("current * textureColor") != std::string::npos &&
+                  fs.find("previousColorOp == 17") != std::string::npos &&
+                  fs.find("previousAlphaOp == 17") != std::string::npos,
+              "PREMODULATE must feed Arg1 through and premultiply next-stage CURRENT arguments");
 }
 
 void SpecUniformMirrorsSpecializationDwordsAsBytes() {
@@ -495,9 +559,9 @@ void SpecUniformMirrorsSpecializationDwordsAsBytes() {
     }
 }
 
-void PremodulateCoverageIsFallback() {
-    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_FALLBACK,
-              "PREMODULATE must remain marked as fallback coverage");
+void PremodulateCoverageIsExact() {
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_PREMODULATE) == CKFF_COVERAGE_EXACT,
+              "PREMODULATE must be marked as exact coverage");
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_MODULATE) == CKFF_COVERAGE_EXACT,
               "MODULATE coverage must remain exact as a control case");
 }
@@ -1134,8 +1198,12 @@ int main() {
               &TextureArgModifierRepackRoundTripsBothModifierBits);
     tests.Run("Shader ABI constants match shader uniform declarations",
               &ShaderABIConstantsMatchShaderUniformDeclarations);
+    tests.Run("Shader sources declare portable flat and clip-space contracts",
+              &ShaderSourcesDeclarePortableFlatAndClipSpaceContracts);
     tests.Run("Stage params pack through ABI indices",
               &StageParamsPackThroughABIIndices);
+    tests.Run("Render-target flip flag follows backend origin",
+              &RenderTargetFlipFlagFollowsBackendOrigin);
     tests.Run("MIRRORONCE address modes pack into stage params",
               &MirrorOnceAddressModesPackIntoStageParams);
     tests.Run("MIRRORONCE sampler desc falls back to clamp",
@@ -1152,8 +1220,8 @@ int main() {
               &TextureCombinerOpFormulasStayDxvkCompatible);
     tests.Run("Spec uniform mirrors specialization dwords as bytes",
               &SpecUniformMirrorsSpecializationDwordsAsBytes);
-    tests.Run("PREMODULATE coverage is fallback",
-              &PremodulateCoverageIsFallback);
+    tests.Run("PREMODULATE coverage is exact",
+              &PremodulateCoverageIsExact);
     tests.Run("Alpha ref uses low byte only",
               &AlphaRefUsesLowByteOnly);
     tests.Run("Alpha ref byte uses low byte only",

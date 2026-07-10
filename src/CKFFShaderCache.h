@@ -6,6 +6,7 @@
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 #include "XHashTable.h"
+#include <cstdint>
 
 class CKRasterizerContext;
 
@@ -52,6 +53,39 @@ struct CKFFShaderKeyXHash {
 
 typedef XHashTable<CKFFProgramBinding, CKFFShaderKey, CKFFShaderKeyXHash> CKFFProgramCacheTable;
 
+struct CKFFProgramModuleKey {
+    CK_SHADER_PROFILE Profile;
+    const unsigned char *VSData;
+    unsigned int VSSize;
+    const unsigned char *FSData;
+    unsigned int FSSize;
+
+    bool operator==(const CKFFProgramModuleKey &other) const {
+        return Profile == other.Profile &&
+               VSData == other.VSData && VSSize == other.VSSize &&
+               FSData == other.FSData && FSSize == other.FSSize;
+    }
+};
+
+struct CKFFProgramModuleKeyXHash {
+    int operator()(const CKFFProgramModuleKey &key) const {
+        uint64_t vs = (uint64_t)reinterpret_cast<uintptr_t>(key.VSData);
+        uint64_t fs = (uint64_t)reinterpret_cast<uintptr_t>(key.FSData);
+        uint32_t hash = 2166136261u;
+        hash = (hash ^ key.Profile) * 16777619u;
+        hash = (hash ^ (uint32_t)vs) * 16777619u;
+        hash = (hash ^ (uint32_t)(vs >> 32)) * 16777619u;
+        hash = (hash ^ key.VSSize) * 16777619u;
+        hash = (hash ^ (uint32_t)fs) * 16777619u;
+        hash = (hash ^ (uint32_t)(fs >> 32)) * 16777619u;
+        hash = (hash ^ key.FSSize) * 16777619u;
+        return (int)hash;
+    }
+};
+
+typedef XHashTable<CKDWORD, CKFFProgramModuleKey, CKFFProgramModuleKeyXHash>
+    CKFFProgramModuleCacheTable;
+
 class CKFFShaderCache {
 public:
     CKFFShaderCache();
@@ -66,12 +100,14 @@ public:
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
+    CKDWORD GetTargetFlags() const { return m_Target.Flags; }
 
     bool UsesUberShader() const { return m_UseUberShader; }
     CKFFShaderMode GetShaderMode() const {
         return m_UseUberShader ? CKFF_SHADER_MODE_UBER_SPECIALIZED : CKFF_SHADER_MODE_FULL_SPECIALIZED;
     }
-    size_t CachedProgramCount() const { return (size_t)m_ProgramCache.Size(); }
+    size_t CachedProgramCount() const { return (size_t)m_ModuleProgramCache.Size(); }
+    size_t CachedBindingCount() const { return (size_t)m_ProgramCache.Size(); }
 
 private:
     CKRasterizerContext *m_Context;
@@ -80,6 +116,7 @@ private:
     const void *m_BlobSet;
     bool m_UseUberShader;
     CKFFProgramCacheTable m_ProgramCache;
+    CKFFProgramModuleCacheTable m_ModuleProgramCache;
     CKDWORD m_NextShaderHandle;
     CKDWORD m_NextProgramHandle;
     CKDWORD m_NextUniformHandle;

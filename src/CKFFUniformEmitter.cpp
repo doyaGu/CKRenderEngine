@@ -82,6 +82,24 @@ static bool CKFFProgramUsesStageConstant(const CKFFShaderKey &shaderKey)
     return false;
 }
 
+static bool CKFFProgramUsesRenderTargetFlip(const CKFFStateStore &state,
+                                            CKDWORD shaderTargetFlags,
+                                            CKDWORD activeTextureCount)
+{
+    if ((shaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) == 0)
+        return false;
+    if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
+        if (state.TextureHandles[stage] != 0 &&
+            (state.TextureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
+            (state.TextureFlags[stage] & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
                                              CKBOOL fullSpecialized)
 {
@@ -267,10 +285,12 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     if (context->PositionT)
         Emit(sink, u.u_viewport, m_State.Viewport, 1, 1, FALSE);
 
-    if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey)) {
+    const CKDWORD targetFlags = m_ShaderCache.GetTargetFlags();
+    if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey) ||
+        CKFFProgramUsesRenderTargetFlip(m_State, targetFlags, context->ActiveTextureCount)) {
         CKFFStageParamsUniform stageParams;
-        CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles,
-                            context->ActiveTextureCount, stageParams);
+        CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
+                            context->ActiveTextureCount, targetFlags, stageParams);
         Emit(sink, u.u_stageParams, stageParams.Values,
              CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
@@ -356,7 +376,6 @@ void CKFFUniformEmitter::UploadUniforms(CKRasterizerEncoder *encoder,
         return;
     UploadObjectUniforms(encoder, programContext, activeTextureCount);
     UploadStaticUniforms(encoder, programContext, activeTextureCount);
-    m_State.DirtyFlags = 0;
 }
 
 void CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerEncoder *encoder,

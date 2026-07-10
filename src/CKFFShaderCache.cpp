@@ -179,10 +179,12 @@ void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
 
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
-        for (CKFFProgramCacheTable::Iterator it = m_ProgramCache.Begin(); it != m_ProgramCache.End(); ++it) {
-            if ((*it).Program)
-                m_Context->DeleteObject((*it).Program, CKRST_OBJ_PROGRAM);
+        for (CKFFProgramModuleCacheTable::Iterator it = m_ModuleProgramCache.Begin();
+             it != m_ModuleProgramCache.End(); ++it) {
+            if (*it)
+                m_Context->DeleteObject(*it, CKRST_OBJ_PROGRAM);
         }
+        m_ModuleProgramCache.Clear();
         m_ProgramCache.Clear();
     }
     m_Context = nullptr;
@@ -601,6 +603,13 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
 {
     if (!m_Context) return 0;
 
+    CKFFProgramModuleKey moduleKey = {
+        target.Profile, vsData, vsSize, fsData, fsSize
+    };
+    CKDWORD cachedProgram = 0;
+    if (m_ModuleProgramCache.LookUp(moduleKey, cachedProgram))
+        return cachedProgram;
+
     CKDWORD hVS = AllocShaderHandle();
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
@@ -652,6 +661,7 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     }
 
     CK_LOG_FMT("ShaderCache", "CreateProgram OK: program=%u vs=%u fs=%u", hProgram, hVS, hFS);
+    m_ModuleProgramCache.Insert(moduleKey, hProgram);
     return hProgram;
 }
 

@@ -197,7 +197,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.AlphaArg1 = 0;
     params.AlphaArg2 = 0;
     params.ResultArg = 1;
-    params.TexcoordTransformFlags = 0;
+    params.TexcoordTransformFlags = int(colorExtra.z) & 0x1000;
     params.MirrorOnceMask = ckffSpecMirrorOnceMask(stage);
     params.SamplerType = ckffSpecSamplerType(stage);
     params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);

@@ -87,7 +87,9 @@ float CKFFEncodeShaderLightType(VXLIGHT_TYPE type) {
 
 void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
                          const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
+                         const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],
                          int activeTextureCount,
+                         CKDWORD shaderTargetFlags,
                          CKFFStageParamsUniform &outParams) {
     memset(&outParams, 0, sizeof(outParams));
     if (!stageStates)
@@ -99,10 +101,16 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < activeTextureCount;
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
-        const CKDWORD textureTransformFlags = stageActive
+        CKDWORD textureTransformFlags = stageActive
             ? (stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
                CKFFResolveMirrorOnceAddressMask(stageStates[stage]))
             : 0;
+        if (hasTexture && textureFlags &&
+            (shaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0 &&
+            (textureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
+            (textureFlags[stage] & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) == 0) {
+            textureTransformFlags |= CKFF_TTF_RENDER_TARGET_FLIP_V;
+        }
         float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
         float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];
         float *colorExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
