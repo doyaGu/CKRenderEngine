@@ -8,8 +8,10 @@
 
 #include "CKEnums.h"
 #include "CKContext.h"
+#include "CKGlobals.h"
 #include "CKStateChunk.h"
 #include "RCKMesh.h"
+#include "RCKMaterial.h"
 #include "TestTriangleMultiset.h"
 
 extern void SetProcessorSpecific_FunctionsPtr();
@@ -30,6 +32,8 @@ bool UVsEqual(const Vx2DVector &lhs, const Vx2DVector &rhs, float epsilon = 0.00
     return NearlyEqual(lhs.x, rhs.x, epsilon)
         && NearlyEqual(lhs.y, rhs.y, epsilon);
 }
+
+void DummyMeshCallback(CKRenderContext *, CK3dEntity *, CKMesh *, void *) {}
 
 std::string ReadSourceText(const char *relativePath) {
     std::ifstream file(std::string(CKRE_SOURCE_DIR) + "/" + relativePath, std::ios::binary);
@@ -216,6 +220,267 @@ void RunChannelAndWeightChecks() {
     TestCheck(mesh.IsTransparent() == FALSE, "SetTransparent(FALSE) failed");
 }
 
+void RunMeshMutationRegressionChecks() {
+    CKContext context(nullptr, 0, 0);
+
+    {
+        RCKMesh mesh(&context, "NormalDirtyMesh");
+        TestCheck(mesh.SetVertexCount(1) == TRUE, "SetVertexCount failed");
+        VxVector normal(1.0f, 0.0f, 0.0f);
+        mesh.SetVertexNormal(0, &normal);
+        TestCheck((mesh.GetFlags() & VXMESH_NORMAL_CHANGED) != 0,
+                  "SetVertexNormal must mark normals dirty");
+    }
+
+    {
+        RCKMesh mesh(&context, "EmptyUVMesh");
+        CKDWORD stride = 1234;
+        TestCheck(mesh.GetTextureCoordinatesPtr(&stride, -1) == nullptr,
+                  "Empty mesh default UV pointer must be null");
+        TestCheck(mesh.GetModifierUVs(&stride, -1) == nullptr,
+                  "Empty mesh modifier UV pointer must be null");
+    }
+
+    {
+        RCKMesh mesh(&context, "NegativeChannelMesh");
+        TestCheck(mesh.GetChannelMaterial(-1) == nullptr, "Negative channel material lookup must fail");
+        TestCheck(mesh.GetChannelFlags(-1) == 0, "Negative channel flags lookup must fail");
+        TestCheck(mesh.IsChannelActive(-1) == FALSE, "Negative channel active lookup must fail");
+        TestCheck(mesh.IsChannelLit(-1) == FALSE, "Negative channel lit lookup must fail");
+        TestCheck(mesh.GetChannelSourceBlend(-1) == VXBLEND_ZERO, "Negative channel source blend lookup must fail");
+        TestCheck(mesh.GetChannelDestBlend(-1) == VXBLEND_ZERO, "Negative channel dest blend lookup must fail");
+        mesh.RemoveChannel(-1);
+        mesh.ActivateChannel(-1, TRUE);
+        mesh.LitChannel(-1, TRUE);
+        mesh.SetChannelFlags(-1, VXCHANNEL_ACTIVE);
+        mesh.SetChannelMaterial(-1, reinterpret_cast<CKMaterial *>(static_cast<uintptr_t>(0x33333333u)));
+        TestCheck(mesh.GetChannelCount() == 0, "Negative channel operations must not mutate channel list");
+    }
+
+    {
+        RCKMesh mesh(&context, "MultiPassChannelMesh");
+        for (int i = 0; i < 16; ++i) {
+            CKMaterial *material = reinterpret_cast<CKMaterial *>(
+                static_cast<uintptr_t>(0x60000000u + (CKDWORD)i * 0x100u));
+            TestCheck(mesh.AddChannel(material, FALSE) == i,
+                      "Material channels beyond the hardware stage count must remain available for multi-pass rendering");
+        }
+        CKMaterial *overflowMaterial = reinterpret_cast<CKMaterial *>(
+            static_cast<uintptr_t>(0x60001000u));
+        TestCheck(mesh.GetChannelCount() == 16,
+                  "Material channel storage must not be capped by CKRST_MAX_TEXTURE_STAGES");
+        TestCheck(mesh.AddChannel(overflowMaterial, FALSE) == -1,
+                  "Material channel storage must respect the 16-bit face channel mask");
+    }
+
+    {
+        RCKMesh mesh(&context, "FaceInitMesh");
+        TestCheck(mesh.SetVertexCount(3) == TRUE, "SetVertexCount failed");
+        TestCheck(mesh.SetFaceCount(1) == TRUE, "SetFaceCount failed");
+        CKMaterial *material = reinterpret_cast<CKMaterial *>(static_cast<uintptr_t>(0x44444444u));
+        mesh.SetFaceMaterial(0, material);
+        TestCheck(mesh.GetFaceMaterial(0) == material, "Test setup failed to assign material");
+        TestCheck(mesh.SetFaceCount(0) == TRUE, "SetFaceCount shrink failed");
+        TestCheck(mesh.SetFaceCount(1) == TRUE, "SetFaceCount grow failed");
+        TestCheck(mesh.GetFaceMaterial(0) == nullptr, "New faces must default to material group 0");
+        TestCheck(mesh.GetFaceChannelMask(0) == 0xFFFF, "New faces must default to all channels");
+        TestCheck(VectorsEqual(mesh.GetFaceNormal(0), VxVector(0.0f, 0.0f, 0.0f)),
+                  "New faces must default to zero normal");
+    }
+
+    {
+        RCKMesh mesh(&context, "ChannelUVResizeMesh");
+        TestCheck(mesh.SetVertexCount(2) == TRUE, "SetVertexCount failed");
+        CKMaterial *material = reinterpret_cast<CKMaterial *>(static_cast<uintptr_t>(0x55555555u));
+        int channel = mesh.AddChannel(material, FALSE);
+        TestCheck(channel == 0, "AddChannel failed");
+        mesh.SetVertexTextureCoordinates(0, 0.25f, 0.5f, channel);
+        mesh.SetVertexTextureCoordinates(1, 0.75f, 1.0f, channel);
+        TestCheck(mesh.SetVertexCount(3) == TRUE, "SetVertexCount grow failed");
+        float u = 0.0f;
+        float v = 0.0f;
+        mesh.GetVertexTextureCoordinates(0, &u, &v, channel);
+        TestCheck(NearlyEqual(u, 0.25f) && NearlyEqual(v, 0.5f), "Channel UV 0 must survive vertex growth");
+        mesh.GetVertexTextureCoordinates(1, &u, &v, channel);
+        TestCheck(NearlyEqual(u, 0.75f) && NearlyEqual(v, 1.0f), "Channel UV 1 must survive vertex growth");
+        mesh.GetVertexTextureCoordinates(2, &u, &v, channel);
+        TestCheck(NearlyEqual(u, 0.0f) && NearlyEqual(v, 0.0f), "New channel UV must be zero-initialized");
+        TestCheck(mesh.SetVertexCount(1) == TRUE, "SetVertexCount shrink failed");
+        mesh.GetVertexTextureCoordinates(0, &u, &v, channel);
+        TestCheck(NearlyEqual(u, 0.25f) && NearlyEqual(v, 0.5f), "Channel UV 0 must survive vertex shrink");
+    }
+
+    {
+        RCKMesh mesh(&context, "TopologyShrinkMesh");
+        TestCheck(mesh.SetVertexCount(4) == TRUE, "SetVertexCount failed");
+        TestCheck(mesh.SetFaceCount(2) == TRUE, "SetFaceCount failed");
+        mesh.SetFaceVertexIndex(0, 0, 1, 2);
+        mesh.SetFaceVertexIndex(1, 1, 2, 3);
+        TestCheck(mesh.SetLineCount(2) == TRUE, "SetLineCount failed");
+        mesh.SetLine(0, 0, 1);
+        mesh.SetLine(1, 2, 3);
+        TestCheck(mesh.SetVertexCount(3) == TRUE, "SetVertexCount shrink failed");
+        TestCheck(mesh.GetFaceCount() == 1, "Vertex shrink must remove faces that reference removed vertices");
+        TestCheck(mesh.GetLineCount() == 1, "Vertex shrink must remove lines that reference removed vertices");
+        int v0 = -1;
+        int v1 = -1;
+        int v2 = -1;
+        mesh.GetFaceVertexIndex(0, v0, v1, v2);
+        TestCheck(v0 == 0 && v1 == 1 && v2 == 2, "Remaining face topology changed unexpectedly");
+        mesh.SetFaceVertexIndex(0, 0, 1, 99);
+        mesh.GetFaceVertexIndex(0, v0, v1, v2);
+        TestCheck(v0 == 0 && v1 == 1 && v2 == 2, "Invalid face vertex index must not mutate topology");
+        TestCheck(VectorsEqual(mesh.GetFaceVertex(-1, 0), VxVector(0.0f, 0.0f, 0.0f)),
+                  "Invalid face vertex lookup must return zero fallback");
+        TestCheck(VectorsEqual(mesh.GetFaceVertex(0, 3), VxVector(0.0f, 0.0f, 0.0f)),
+                  "Invalid face corner lookup must return zero fallback");
+    }
+
+    {
+        RCKMesh mesh(&context, "CallbackCleanupMesh");
+        mesh.SetRenderCallBack(&DummyMeshCallback, nullptr);
+        mesh.RemoveAllCallbacks();
+        mesh.RemoveAllCallbacks();
+    }
+}
+
+void RunSerializationRegressionChecks() {
+    CKContext context(nullptr, 0, 0);
+
+    {
+        RCKMesh source(&context, "NormalSaveSource");
+        RCKMesh loaded(&context, "NormalSaveLoaded");
+        TestCheck(source.SetVertexCount(3) == TRUE, "SetVertexCount failed");
+        VxVector a(0.0f, 0.0f, 0.0f);
+        VxVector b(1.0f, 0.0f, 0.0f);
+        VxVector c(0.0f, 1.0f, 0.0f);
+        source.SetVertexPosition(0, &a);
+        source.SetVertexPosition(1, &b);
+        source.SetVertexPosition(2, &c);
+        TestCheck(source.SetFaceCount(1) == TRUE, "SetFaceCount failed");
+        source.SetFaceVertexIndex(0, 0, 1, 2);
+        source.BuildNormals();
+        VxVector customNormal(1.0f, 0.0f, 0.0f);
+        for (int i = 0; i < 3; ++i)
+            source.SetVertexNormal(i, &customNormal);
+
+        CKStateChunk *chunk = source.Save(nullptr, CK_STATESAVE_MESHONLY);
+        TestCheck(chunk != nullptr, "Mesh save returned a null chunk");
+        chunk->StartRead();
+        TestCheck(loaded.Load(chunk, nullptr) == CK_OK, "Mesh load failed");
+        delete chunk;
+
+        VxVector loadedNormal;
+        loaded.GetVertexNormal(0, &loadedNormal);
+        TestCheck(VectorsEqual(loadedNormal, customNormal),
+                  "Custom vertex normals must survive save/load");
+    }
+
+    {
+        RCKMesh source(&context, "ProceduralFlagSource");
+        RCKMesh loaded(&context, "ProceduralFlagLoaded");
+        TestCheck(source.SetVertexCount(2) == TRUE, "SetVertexCount failed");
+        source.SetFlags(source.GetFlags() | VXMESH_PROCEDURALPOS | VXMESH_PROCEDURALUV);
+        VxVector p0(2.0f, 3.0f, 4.0f);
+        VxVector p1(5.0f, 6.0f, 7.0f);
+        source.SetVertexPosition(0, &p0);
+        source.SetVertexPosition(1, &p1);
+        source.SetVertexTextureCoordinates(0, 0.25f, 0.5f, -1);
+        source.SetVertexTextureCoordinates(1, 0.75f, 1.0f, -1);
+
+        CKStateChunk *chunk = source.Save(nullptr, CK_STATESAVE_MESHONLY);
+        TestCheck(chunk != nullptr, "Mesh save returned a null chunk");
+        chunk->StartRead();
+        TestCheck(loaded.Load(chunk, nullptr) == CK_OK, "Mesh load failed");
+        delete chunk;
+
+        VxVector loadedPosition;
+        loaded.GetVertexPosition(1, &loadedPosition);
+        TestCheck(VectorsEqual(loadedPosition, p1), "Manual positions must clear procedural-position save hint");
+        float u = 0.0f;
+        float v = 0.0f;
+        loaded.GetVertexTextureCoordinates(1, &u, &v, -1);
+        TestCheck(NearlyEqual(u, 0.75f) && NearlyEqual(v, 1.0f),
+                  "Manual UVs must clear procedural-UV save hint");
+    }
+
+    {
+        RCKMaterial material(&context, "ChannelMaterial");
+        RCKMesh source(&context, "SameUVChannelSource");
+        RCKMesh loaded(&context, "SameUVChannelLoaded");
+        TestCheck(source.SetVertexCount(2) == TRUE, "SetVertexCount failed");
+        source.SetVertexTextureCoordinates(0, 0.25f, 0.5f, -1);
+        source.SetVertexTextureCoordinates(1, 0.75f, 1.0f, -1);
+        int channel = source.AddChannel(&material, TRUE);
+        TestCheck(channel == 0, "AddChannel failed");
+        source.SetChannelFlags(channel, VXCHANNEL_ACTIVE | VXCHANNEL_SAMEUV);
+
+        CKStateChunk *chunk = source.Save(nullptr, CK_STATESAVE_MESHONLY);
+        TestCheck(chunk != nullptr, "Mesh save returned a null chunk");
+        chunk->StartRead();
+        TestCheck(loaded.Load(chunk, nullptr) == CK_OK, "Mesh load failed");
+        delete chunk;
+
+        CKStateChunk *resaved = loaded.Save(nullptr, CK_STATESAVE_MESHONLY);
+        TestCheck(resaved != nullptr, "Mesh resave returned a null chunk");
+        resaved->StartRead();
+        TestCheck(resaved->SeekIdentifier(CK_STATESAVE_MESHCHANNELS),
+                  "Resaved mesh must contain material channels");
+        TestCheck(resaved->ReadInt() == 1, "Unexpected resaved channel count");
+        (void) resaved->ReadObjectID();
+        CKDWORD flags = resaved->ReadDword();
+        (void) resaved->ReadDword();
+        (void) resaved->ReadDword();
+        int uvCount = resaved->ReadInt();
+        delete resaved;
+
+        TestCheck((flags & VXCHANNEL_SAMEUV) != 0, "SAMEUV channel flag must survive load");
+        TestCheck(uvCount == 0, "SAMEUV channels must not resave stale channel-specific UVs");
+    }
+}
+
+void RunCopyRegressionChecks() {
+    TestCheck(CKStartUp() == CK_OK, "CKStartUp failed");
+    CKCLASSREGISTERCID(RCKMesh, CKCID_BEOBJECT);
+    CKBuildClassHierarchyTable();
+
+    CKContext *context = nullptr;
+    TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
+              "CKCreateContext failed");
+
+    {
+        RCKMesh source(context, "CopySource");
+        RCKMesh copy(context, "CopyTarget");
+        FillPMTestMesh(source);
+        CKDWORD flags = source.GetFlags();
+        flags |= VXMESH_PRELITMODE |
+                 VXMESH_WRAPU |
+                 VXMESH_WRAPV |
+                 VXMESH_FORCETRANSPARENCY |
+                 VXMESH_HINTDYNAMIC |
+                 VXMESH_STRIPIFY;
+        flags &= ~VXMESH_RENDERCHANNELS;
+        source.SetFlags(flags);
+
+        CKDependenciesContext dependencies(context);
+        TestCheck(copy.Copy(source, dependencies) == CK_OK, "Mesh copy failed");
+        const CKDWORD semanticFlags =
+            VXMESH_VISIBLE |
+            VXMESH_RENDERCHANNELS |
+            VXMESH_PRELITMODE |
+            VXMESH_WRAPU |
+            VXMESH_WRAPV |
+            VXMESH_FORCETRANSPARENCY |
+            VXMESH_HINTDYNAMIC |
+            VXMESH_STRIPIFY;
+        TestCheck((copy.GetFlags() & semanticFlags) == (source.GetFlags() & semanticFlags),
+                  "Mesh copy must preserve semantic mesh flags");
+    }
+
+    TestCheck(CKCloseContext(context) == CK_OK, "CKCloseContext failed");
+    TestCheck(CKShutdown() == CK_OK, "CKShutdown failed");
+}
+
 void RunPMGeoMorphInterpolationChecks() {
     VxVertex current = MakePMTestVertex(
         VxVector(1.0f, 2.0f, 3.0f),
@@ -287,6 +552,12 @@ void RunPMDegenerateCollapseChecks() {
               "Uncollapsed triangle should remain renderable");
     TestCheck(CKRETestPMRemappedTriangleIsDegenerate(3, parents, 4, 0, 2, 3),
               "Collapsed triangle should be detected as degenerate");
+    const CKDWORD cyclicParents[4] = {0, 1, 3, 2};
+    TestCheck(CKRETestPMRemappedTriangleIsDegenerate(2, cyclicParents, 4, 0, 2, 3),
+              "Cyclic PM parent data should resolve to a safe degenerate triangle");
+    const CKDWORD shortParents[2] = {0, 1};
+    TestCheck(CKRETestPMRemappedTriangleIsDegenerate(2, shortParents, 2, 0, 2, 1),
+              "Out-of-range PM parent data should resolve to a safe degenerate triangle");
 }
 
 void RunPMModifierCountChecks() {
@@ -462,6 +733,8 @@ int main() {
     TestFramework tests;
     tests.Run("Basic geometry checks", &RunBasicGeometryChecks);
     tests.Run("Channel and weight checks", &RunChannelAndWeightChecks);
+    tests.Run("Mesh mutation regression checks", &RunMeshMutationRegressionChecks);
+    tests.Run("Serialization regression checks", &RunSerializationRegressionChecks);
     tests.Run("PM GeoMorph interpolation checks", &RunPMGeoMorphInterpolationChecks);
     tests.Run("PM parameter checks", &RunPMParameterChecks);
     tests.Run("PM degenerate collapse checks", &RunPMDegenerateCollapseChecks);
@@ -470,5 +743,6 @@ int main() {
     tests.Run("PM GeoMorph skin branch source checks", &RunPMGeoMorphSkinBranchSourceChecks);
     tests.Run("PM save/load round trip checks", &RunPMSaveLoadRoundTripChecks);
     tests.Run("No-PM load source checks", &RunNoPMLoadSourceChecks);
+    tests.Run("Copy regression checks", &RunCopyRegressionChecks);
     return tests.ExitCode();
 }
