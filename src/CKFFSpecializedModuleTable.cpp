@@ -5,7 +5,7 @@
 bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
                                CK_SHADER_PROFILE profile,
                                CKFFSpecializedModule &module) {
-    for (std::size_t i = 0; i < g_CKFFSpecializedModuleCount; ++i) {
+    for (size_t i = 0; i < g_CKFFSpecializedModuleCount; ++i) {
         const CKFFSpecializedModuleEntry &entry = g_CKFFSpecializedModules[i];
         if (entry.Profile == profile && entry.Key == key) {
             module = entry.Module;
@@ -17,14 +17,22 @@ bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
     return false;
 }
 
-std::size_t CKFFSpecializedModuleCount() {
+size_t CKFFSpecializedModuleCount() {
     return g_CKFFSpecializedModuleCount;
+}
+
+CKDWORD CKFFGeneratedShaderABIVersion() {
+    return g_CKFFGeneratedShaderABIVersion;
+}
+
+CKDWORD CKFFGeneratedShaderInterfaceHash() {
+    return g_CKFFGeneratedShaderInterfaceHash;
 }
 
 bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
                                  CK_SHADER_PROFILE profile,
                                  CKFFSamplerLayoutModule &module) {
-    for (std::size_t i = 0; i < g_CKFFSamplerLayoutModuleCount; ++i) {
+    for (size_t i = 0; i < g_CKFFSamplerLayoutModuleCount; ++i) {
         const CKFFSamplerLayoutModuleEntry &entry = g_CKFFSamplerLayoutModules[i];
         if (entry.Profile == profile && entry.Key == key) {
             module = entry.Module;
@@ -36,6 +44,6 @@ bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
     return false;
 }
 
-std::size_t CKFFSamplerLayoutModuleCount() {
+size_t CKFFSamplerLayoutModuleCount() {
     return g_CKFFSamplerLayoutModuleCount;
 }

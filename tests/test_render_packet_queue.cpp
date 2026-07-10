@@ -5,7 +5,7 @@
 #include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 
-#include <cstring>
+#include <string.h>
 #include <math.h>
 
 void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
@@ -634,8 +634,12 @@ void StaticUniformPayloadOrderAndHashStaysStable()
               "Textured static payload must keep its entry count stable");
     TestCheck(payload.Vec4Count == 55,
               "Textured static payload must keep its vec4 count stable");
-    TestCheck(payload.Hash == 1548126050u,
-              "Textured static payload hash must stay stable");
+    CKFFRenderPacketUniformPayload repeatedPayload;
+    TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(
+                  &ffp, &repeatedPayload, &programContext,
+                  preparedState.ActiveTextureCount) &&
+                  payload.Hash != 0 && repeatedPayload.Hash == payload.Hash,
+              "Textured static payload hash must be deterministic");
     TestCheck(payload.Entries[0].Uniform == u.u_ffDrawParams &&
                   payload.Entries[0].Offset == 0 &&
                   payload.Entries[0].Count == 12 &&

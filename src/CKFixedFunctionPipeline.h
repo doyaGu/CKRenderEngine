@@ -56,7 +56,7 @@ public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 
-    void Init(CKRasterizerContext *ctx);
+    bool Init(CKRasterizerContext *ctx);
     void Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                           CKBOOL ForceAnisotropicFiltering = FALSE);

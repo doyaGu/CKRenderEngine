@@ -6,9 +6,9 @@
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
@@ -163,18 +163,21 @@ static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
                                        unsigned int *vsSize);
 
 CKFFShaderCache::CKFFShaderCache()
-    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false),
-      m_NextShaderHandle(100), m_NextProgramHandle(200), m_NextUniformHandle(300) {}
+    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_UseUberShader(false) {}
 
 CKFFShaderCache::~CKFFShaderCache() {
     Shutdown();
 }
 
-void CKFFShaderCache::Init(CKRasterizerContext *ctx) {
+bool CKFFShaderCache::Init(CKRasterizerContext *ctx) {
+    Shutdown();
     m_Context = ctx;
     m_UseUberShader = CKRenderFFPSettings().GetBool("UberShader", false);
-    CreateUniforms();
-    ResolveShaderTarget();
+    if (!ResolveShaderTarget() || !CreateUniforms()) {
+        Shutdown();
+        return false;
+    }
+    return true;
 }
 
 void CKFFShaderCache::Shutdown() {
@@ -186,198 +189,201 @@ void CKFFShaderCache::Shutdown() {
         }
         m_ModuleProgramCache.Clear();
         m_ProgramCache.Clear();
+        CKDWORD *uniforms = reinterpret_cast<CKDWORD *>(&m_Uniforms);
+        const size_t uniformCount = sizeof(m_Uniforms) / sizeof(CKDWORD);
+        for (size_t i = 0; i < uniformCount; ++i) {
+            if (uniforms[i])
+                m_Context->DeleteObject(uniforms[i], CKRST_OBJ_UNIFORM);
+        }
+        m_Uniforms = CKFFUniformHandles();
     }
     m_Context = nullptr;
     m_BlobSet = nullptr;
 }
 
-void CKFFShaderCache::CreateUniforms() {
-    if (!m_Context) return;
+bool CKFFShaderCache::CreateUniforms() {
+    if (!m_Context) return false;
 
     CKUniformDesc desc;
 
-    desc.Type = CKRST_UNIFORM_MATRIX4;
+    desc.Type = CKRST_UNIFORM_MAT4;
     desc.Name = (char *)"u_ffMatrices";
     desc.Count = CKFF_MATRIX_VEC4_COUNT;
-    m_Uniforms.u_ffMatrices = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffMatrices, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffMatrices);
 
     desc.Name = (char *)"u_vertexBlendMatrices";
     desc.Count = CKFF_VERTEX_BLEND_MATRIX_COUNT;
-    m_Uniforms.u_vertexBlendMatrices = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_vertexBlendMatrices, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_vertexBlendMatrices);
 
-    desc.Type = CKRST_UNIFORM_FLOAT4;
+    desc.Type = CKRST_UNIFORM_VEC4;
     desc.Name = (char *)"u_ffDrawParams";
     desc.Count = CKFF_DRAW_PARAM_VEC4_COUNT;
-    m_Uniforms.u_ffDrawParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffDrawParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffDrawParams);
 
-    desc.Type = CKRST_UNIFORM_MATRIX4;
+    desc.Type = CKRST_UNIFORM_MAT4;
     desc.Name = (char *)"u_ckModelViewProj";
     desc.Count = 1;
-    m_Uniforms.u_ckModelViewProj = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ckModelViewProj, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModelViewProj);
 
     desc.Name = (char *)"u_ckModel";
     desc.Count = 1;
-    m_Uniforms.u_ckModel = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ckModel, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModel);
 
     desc.Name = (char *)"u_ckModelView";
     desc.Count = 1;
-    m_Uniforms.u_ckModelView = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ckModelView, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModelView);
 
     desc.Name = (char *)"u_ckNormalMatrix";
     desc.Count = 1;
-    m_Uniforms.u_ckNormalMatrix = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ckNormalMatrix, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckNormalMatrix);
 
     desc.Name = (char *)"u_texMatrix";
     desc.Count = CKFF_MAX_TEXTURE_STAGES;
-    m_Uniforms.u_texMatrix = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_texMatrix, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_texMatrix);
 
-    desc.Type = CKRST_UNIFORM_FLOAT4;
+    desc.Type = CKRST_UNIFORM_VEC4;
     desc.Name = (char *)"u_ffVertexParams";
     desc.Count = 8;
-    m_Uniforms.u_ffVertexParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffVertexParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffVertexParams);
 
     desc.Name = (char *)"u_ffFragmentParams";
     desc.Count = 4;
-    m_Uniforms.u_ffFragmentParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffFragmentParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffFragmentParams);
 
     desc.Name = (char *)"u_lights";
     desc.Count = CKFF_MAX_LIGHTS * 7;
-    m_Uniforms.u_lights = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_lights, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_lights);
 
     desc.Name = (char *)"u_lightParams";
     desc.Count = 1;
-    m_Uniforms.u_lightParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_lightParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_lightParams);
 
     desc.Name = (char *)"u_material";
     desc.Count = 5;
-    m_Uniforms.u_material = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_material, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_material);
 
     desc.Name = (char *)"u_ffParams";
     desc.Count = 1;
-    m_Uniforms.u_ffParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffParams);
 
     desc.Name = (char *)"u_lightModelParams";
     desc.Count = 1;
-    m_Uniforms.u_lightModelParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_lightModelParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_lightModelParams);
 
     desc.Name = (char *)"u_fogParams";
     desc.Count = 1;
-    m_Uniforms.u_fogParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_fogParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_fogParams);
 
     desc.Name = (char *)"u_fogColor";
     desc.Count = 1;
-    m_Uniforms.u_fogColor = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_fogColor, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_fogColor);
 
     desc.Name = (char *)"u_texFactor";
     desc.Count = 1;
-    m_Uniforms.u_texFactor = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_texFactor, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_texFactor);
 
     desc.Name = (char *)"u_alphaParams";
     desc.Count = 1;
-    m_Uniforms.u_alphaParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_alphaParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_alphaParams);
 
     desc.Name = (char *)"u_bumpEnv";
     desc.Count = CKFF_MAX_TEXTURE_STAGES * 2;
-    m_Uniforms.u_bumpEnv = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_bumpEnv, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_bumpEnv);
 
     desc.Name = (char *)"u_viewport";
     desc.Count = 1;
-    m_Uniforms.u_viewport = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_viewport, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_viewport);
 
     desc.Name = (char *)"u_stageParams";
     desc.Count = CKFF_STAGE_PARAM_VEC4_COUNT;
-    m_Uniforms.u_stageParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_stageParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_stageParams);
 
     desc.Name = (char *)"u_ffSpec";
     desc.Count = CKFF_SPEC_UNIFORM_VEC4_COUNT;
-    m_Uniforms.u_ffSpec = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_ffSpec, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffSpec);
 
     desc.Name = (char *)"u_clipPlanes";
     desc.Count = CKFF_CLIP_PLANE_COUNT;
-    m_Uniforms.u_clipPlanes = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_clipPlanes, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_clipPlanes);
 
     desc.Name = (char *)"u_clipParams";
     desc.Count = 1;
-    m_Uniforms.u_clipParams = AllocUniformHandle();
-    m_Context->CreateUniform(m_Uniforms.u_clipParams, &desc);
+    m_Context->CreateUniform(&desc, &m_Uniforms.u_clipParams);
 
     desc.Type = CKRST_UNIFORM_SAMPLER;
     desc.Count = 1;
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
         char name[32];
-        std::snprintf(name, sizeof(name), "s_texture%d", i);
+        snprintf(name, sizeof(name), "s_texture%d", i);
         desc.Name = name;
-        m_Uniforms.s_texture[i] = AllocUniformHandle();
-        m_Context->CreateUniform(m_Uniforms.s_texture[i], &desc);
+        m_Context->CreateUniform(&desc, &m_Uniforms.s_texture[i]);
     }
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
         char name[32];
-        std::snprintf(name, sizeof(name), "s_textureCube%d", i);
+        snprintf(name, sizeof(name), "s_textureCube%d", i);
         desc.Name = name;
-        m_Uniforms.s_textureCube[i] = AllocUniformHandle();
-        m_Context->CreateUniform(m_Uniforms.s_textureCube[i], &desc);
+        m_Context->CreateUniform(&desc, &m_Uniforms.s_textureCube[i]);
     }
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
         char name[32];
-        std::snprintf(name, sizeof(name), "s_textureVolume%d", i);
+        snprintf(name, sizeof(name), "s_textureVolume%d", i);
         desc.Name = name;
-        m_Uniforms.s_textureVolume[i] = AllocUniformHandle();
-        m_Context->CreateUniform(m_Uniforms.s_textureVolume[i], &desc);
+        m_Context->CreateUniform(&desc, &m_Uniforms.s_textureVolume[i]);
     }
+
+    CKDWORD *uniforms = reinterpret_cast<CKDWORD *>(&m_Uniforms);
+    const size_t uniformCount = sizeof(m_Uniforms) / sizeof(CKDWORD);
+    for (size_t i = 0; i < uniformCount; ++i) {
+        if (uniforms[i] != 0)
+            continue;
+        CK_LOG_FMT("ShaderCache", "FFP uniform initialization failed at slot=%u",
+                   (unsigned)i);
+        for (size_t j = 0; j < uniformCount; ++j) {
+            if (uniforms[j])
+                m_Context->DeleteObject(uniforms[j], CKRST_OBJ_UNIFORM);
+        }
+        m_Uniforms = CKFFUniformHandles();
+        return false;
+    }
+    return true;
 }
 
-void CKFFShaderCache::ResolveShaderTarget() {
-    if (!m_Context || !m_Context->m_Driver) return;
+bool CKFFShaderCache::ResolveShaderTarget() {
+    if (!m_Context) return false;
 
-    // This uses the driver backend selected by the active bgfx context. It is
-    // not the public Virtools legacy shader-target API, which remains
-    // unsupported when no bgfx context has supplied a concrete native target.
-    CKERROR targetErr = m_Context->m_Driver->GetShaderTarget(&m_Target);
+    CKERROR targetErr = m_Context->GetTargetDesc(&m_Target);
     if (targetErr != CK_OK) {
-        CK_LOG_FMT("ShaderCache", "GetShaderTarget failed: err=%d", targetErr);
-        return;
+        CK_LOG_FMT("ShaderCache", "GetTargetDesc failed: err=%d", targetErr);
+        return false;
     }
-    const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.Profile);
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.ShaderProfile);
     if (!set) {
-        CK_LOG_FMT("ShaderCache", "No FFP shader set for format=0x%08X profile=0x%08X",
-                   m_Target.Format, m_Target.Profile);
-        return;
+        CK_LOG_FMT("ShaderCache", "No FFP shader set for profile=0x%08X",
+                   m_Target.ShaderProfile);
+        return false;
+    }
+    if (CKFFGeneratedShaderABIVersion() != CKFF_SHADER_ABI_VERSION ||
+        CKFFGeneratedShaderInterfaceHash() != CKFF_SHADER_INTERFACE_HASH) {
+        CK_LOG_FMT("ShaderCache",
+                   "FFP shader ABI mismatch: generatedVersion=%u expectedVersion=%u generatedHash=0x%08X expectedHash=0x%08X",
+                   (unsigned)CKFFGeneratedShaderABIVersion(),
+                   (unsigned)CKFF_SHADER_ABI_VERSION,
+                   (unsigned)CKFFGeneratedShaderInterfaceHash(),
+                   (unsigned)CKFF_SHADER_INTERFACE_HASH);
+        return false;
     }
 
     m_BlobSet = set;
     CK_LOG_FMT("ShaderCache",
                "FFP shader mode: backend=%s profile=0x%08X mode=%s specializedModules=%u samplerLayoutModules=%u abiDrawParams=%u abiStageParams=%u abiSpecDwords=%u",
-               set->Name, m_Target.Profile,
+                set->Name, m_Target.ShaderProfile,
                m_UseUberShader ? "uber" : "full-specialized",
                (unsigned)CKFFSpecializedModuleCount(),
                (unsigned)CKFFSamplerLayoutModuleCount(),
                (unsigned)CKFF_DRAW_PARAM_VEC4_COUNT,
                (unsigned)CKFF_STAGE_PARAM_VEC4_COUNT,
                (unsigned)CKFF_SPEC_UNIFORM_VEC4_COUNT);
+    return true;
 }
 
 CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
@@ -455,7 +461,7 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
     }
 
     CKFFSpecializedModule module;
-    if (CKFFFindSpecializedModule(key, m_Target.Profile, module)) {
+    if (CKFFFindSpecializedModule(key, m_Target.ShaderProfile, module)) {
         CKDWORD program = CreateProgramFromBinary(
             m_Target,
             module.VSData, module.VSSize,
@@ -471,7 +477,7 @@ CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShade
     CK_LOG_FMT("ShaderCache",
                "Full FFP specialized module cache miss: backend=%s profile=0x%08X positionT=%u vsBits=%llu vsTexcoordDeclMask=%u vsTexGen0=%u vsTexGen1=%u vsTexGen2=%u vsTexGen3=%u vsTexGen4=%u vsTexGen5=%u vsTexGen6=%u vsTexGen7=%u vsTexCoordIndex0=%u vsTexCoordIndex1=%u vsTexCoordIndex2=%u vsTexCoordIndex3=%u vsTexCoordIndex4=%u vsTexCoordIndex5=%u vsTexCoordIndex6=%u vsTexCoordIndex7=%u vsTexTransformFlags0=%u vsTexTransformFlags1=%u vsTexTransformFlags2=%u vsTexTransformFlags3=%u vsTexTransformFlags4=%u vsTexTransformFlags5=%u vsTexTransformFlags6=%u vsTexTransformFlags7=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
                m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
-               m_Target.Profile,
+               m_Target.ShaderProfile,
                key.VS.GetHasPositionT() ? 1u : 0u,
                (unsigned long long)key.VS.Bits,
                key.VS.VertexTexcoordDeclMask,
@@ -534,14 +540,14 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
 
     const CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key.FS);
     CKFFSamplerLayoutModule module;
-    if (!CKFFFindSamplerLayoutModule(layout, m_Target.Profile, module)) {
+    if (!CKFFFindSamplerLayoutModule(layout, m_Target.ShaderProfile, module)) {
         char stageTypes[32];
         char manifestEntry[128];
         CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
         CKFFFormatSamplerLayoutManifestEntry(layout, set->Name, manifestEntry, sizeof(manifestEntry));
         CK_LOG_FMT("ShaderCache",
                    "FFP static sampler layout miss: backend=%s profile=0x%08X lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u manifestEntry=%s",
-                   set->Name, m_Target.Profile, key.FS.LastActiveTextureStage,
+                   set->Name, m_Target.ShaderProfile, key.FS.LastActiveTextureStage,
                    CKFFShaderKeyActiveTextureMask(key), layout.Bits,
                    stageTypes,
                    CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u,
@@ -563,7 +569,7 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
 
     CK_LOG_FMT("ShaderCache",
                "FFP static sampler layout program: %u backend=%s profile=0x%08X positionT=%u clip=%u instanced=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u",
-               program, set->Name, m_Target.Profile, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
+               program, set->Name, m_Target.ShaderProfile, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
                instanced ? 1u : 0u,
                key.FS.LastActiveTextureStage, CKFFShaderKeyActiveTextureMask(key), layout.Bits,
                stageTypes, CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u);
@@ -596,7 +602,7 @@ CKFFProgramBinding CKFFShaderCache::CreateUberSpecializedProgram(const CKFFShade
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
-    const CKShaderTargetDesc &target,
+    const CKRasterizerTargetDesc &target,
     const unsigned char *vsData, unsigned int vsSize,
     const unsigned char *fsData, unsigned int fsSize,
     const CKFFSpecializationInfo &specInfo)
@@ -604,54 +610,52 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     if (!m_Context) return 0;
 
     CKFFProgramModuleKey moduleKey = {
-        target.Profile, vsData, vsSize, fsData, fsSize
+        target.ShaderProfile, vsData, vsSize, fsData, fsSize
     };
     CKDWORD cachedProgram = 0;
     if (m_ModuleProgramCache.LookUp(moduleKey, cachedProgram))
         return cachedProgram;
 
-    CKDWORD hVS = AllocShaderHandle();
+    CKDWORD hVS = 0;
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
-    vsDesc.Format = target.Format;
-    vsDesc.Profile = target.Profile;
-    vsDesc.Code = (CKBYTE *)vsData;
+    vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+    vsDesc.Profile = target.ShaderProfile;
+    vsDesc.Code = vsData;
     vsDesc.CodeSize = vsSize;
-    CKERROR err = m_Context->CreateShader(hVS, &vsDesc);
+    CKERROR err = m_Context->CreateShader(&vsDesc, &hVS);
     if (err != CK_OK) {
         CK_LOG_FMT("ShaderCache", "CreateShader(VS) FAILED: err=%d handle=%u size=%u", err, hVS, vsSize);
         return 0;
     }
 
-    CKDWORD hFS = AllocShaderHandle();
+    CKDWORD hFS = 0;
     CKShaderDesc fsDesc = {};
     fsDesc.Stage = CKRST_SHADER_PIXEL;
-    fsDesc.Format = target.Format;
-    fsDesc.Profile = target.Profile;
-    fsDesc.Code = (CKBYTE *)fsData;
+    fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+    fsDesc.Profile = target.ShaderProfile;
+    fsDesc.Code = fsData;
     fsDesc.CodeSize = fsSize;
-    err = m_Context->CreateShader(hFS, &fsDesc);
+    err = m_Context->CreateShader(&fsDesc, &hFS);
     if (err != CK_OK) {
         CK_LOG_FMT("ShaderCache", "CreateShader(FS) FAILED: err=%d handle=%u size=%u", err, hFS, fsSize);
         m_Context->DeleteObject(hVS, CKRST_OBJ_SHADER);
         return 0;
     }
 
-    CKDWORD hProgram = AllocProgramHandle();
+    CKDWORD hProgram = 0;
     CKProgramDesc progDesc = {};
     progDesc.VertexShader = hVS;
     progDesc.PixelShader = hFS;
     progDesc.ConsumeShaders = TRUE;
-    progDesc.SpecializationDwords = specInfo.Data();
-    progDesc.SpecializationDwordCount = specInfo.DwordCount();
-    err = m_Context->CreateProgram(hProgram, &progDesc);
+    err = m_Context->CreateProgram(&progDesc, &hProgram);
     if (err != CK_OK) {
         const CKDWORD *spec = specInfo.Data();
         CK_LOG_FMT("ShaderCache",
                    "CreateProgram FAILED: err=%d backend=%s profile=0x%08X vs=%u fs=%u vsSize=%u fsSize=%u specDwordCount=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
                    err,
                    m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
-                   target.Profile,
+                   target.ShaderProfile,
                    hVS, hFS, vsSize, fsSize, specInfo.DwordCount(),
                    spec[0], spec[1], spec[2], spec[3], spec[4],
                    spec[5], spec[6], spec[7], spec[8], spec[9]);

@@ -4,7 +4,7 @@
 #include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
 
-#include <cstring>
+#include <string.h>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
@@ -27,24 +27,14 @@ struct FFPViewClearRecord {
 class FFPDiagnosticDriver : public CKRasterizerDriver {
 public:
     explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
-                                 CKDWORD flags = 0)
-        : Profile(profile), Flags(flags) {}
-
-    CKERROR GetShaderTarget(CKShaderTargetDesc *target) const override {
-        if (!target)
-            return CKERR_INVALIDPARAMETER;
-        target->Format = CKRST_SHADER_FORMAT_NATIVE;
-        target->Profile = Profile;
-        target->Version = 0;
-        target->Flags = Flags;
-        return CK_OK;
+                                  CKDWORD flags = 0)
+        : Target() {
+        Target.ShaderProfile = profile;
+        Target.HomogeneousDepth = (flags & CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE) ? TRUE : FALSE;
+        Target.OriginBottomLeft = (flags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) ? TRUE : FALSE;
     }
 
-    CKERROR GetProgrammableCaps(VxProgCapsDesc &) override { return CK_OK; }
-
-private:
-    CK_SHADER_PROFILE Profile;
-    CKDWORD Flags;
+    CKRasterizerTargetDesc Target;
 };
 
 class FFPDiagnosticEncoder : public CKRasterizerEncoder {
@@ -85,7 +75,6 @@ public:
     std::unordered_set<CKDWORD> MatrixUniforms;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
-    std::vector<CKDWORD> LastDrawSpecializationDwords;
 
     void SetState(CKDrawState State) override {
         LastState = State;
@@ -103,8 +92,7 @@ public:
     void SetScissor(const CKRECT *) override {}
     void SetPointSize(float) override {}
     void SetTransform(CKDWORD, CKDWORD) override {}
-    void SetVertexLayout(CKDWORD) override {}
-    void SetVertexBuffer(CKDWORD, CKDWORD buffer, CKDWORD, CKDWORD) override {
+    void SetVertexBuffer(CKDWORD, CKDWORD buffer, CKDWORD, CKDWORD, CKDWORD) override {
         if (VertexBufferSetCount < 32)
             VertexBufferOrder[VertexBufferSetCount] = buffer;
         ++VertexBufferSetCount;
@@ -171,11 +159,6 @@ public:
         FloatUniforms[uniform].assign(values, values + floatCount);
         UniformCounts[uniform] = count;
     }
-    void SetDrawSpecialization(const CKDWORD *values, CKDWORD count) override {
-        LastDrawSpecializationDwords.clear();
-        if (values && count > 0)
-            LastDrawSpecializationDwords.assign(values, values + count);
-    }
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetComputeImage(CKDWORD, CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetCondition(CKDWORD, CKBOOL) override {}
@@ -216,6 +199,14 @@ public:
         FailCreateProgram = FALSE;
     }
 
+    CKERROR GetTargetDesc(CKRasterizerTargetDesc *target) const override {
+        if (!target || target->Size < sizeof(CKRasterizerTargetDesc))
+            return CKERR_INVALIDPARAMETER;
+        const FFPDiagnosticDriver *driver = static_cast<const FFPDiagnosticDriver *>(m_Driver);
+        *target = driver->Target;
+        return CK_OK;
+    }
+
     FFPDiagnosticEncoder Encoder;
     CKBOOL AllowTransientInstanceBuffer = TRUE;
     CKBOOL FailTransientInstanceBuffer = FALSE;
@@ -244,20 +235,34 @@ public:
     CKDWORD LastVertexShaderCodeSize = 0;
     const void *LastPixelShaderCode = nullptr;
     CKDWORD LastPixelShaderCodeSize = 0;
-    std::vector<CKDWORD> LastProgramSpecializationDwords;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
     std::vector<FFPViewClearRecord> ViewClears;
 
-    CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
-    CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
-    CKERROR CreateTexture(CKDWORD texture, CKTextureDesc *desc, const VxImageDescEx *) override {
+    CKERROR AllocateHandle(CKDWORD *out) {
+        if (!out)
+            return CKERR_INVALIDPARAMETER;
+        *out = NextResourceHandle++;
+        return CK_OK;
+    }
+    CKERROR CreateVertexBuffer(const CKVertexBufferDesc *, const void *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateIndexBuffer(const CKIndexBufferDesc *, CKBOOL, const void *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateTexture(const CKTextureDesc *desc, const VxImageDescEx *, CKDWORD *out) override {
         ++CreatedTextureCount;
-        LastCreatedTexture = texture;
         if (desc)
             LastTextureDesc = *desc;
-        return FailCreateTexture ? CKERR_INVALIDPARAMETER : CK_OK;
+        if (FailCreateTexture) {
+            if (out) *out = 0;
+            return CKERR_INVALIDPARAMETER;
+        }
+        CKERROR result = AllocateHandle(out);
+        LastCreatedTexture = out ? *out : 0;
+        return result;
     }
-    CKERROR CreateShader(CKDWORD, CKShaderDesc *desc) override {
+    CKERROR CreateShader(const CKShaderDesc *desc, CKDWORD *out) override {
         ++CreatedShaderCount;
         if (desc && desc->Stage == CKRST_SHADER_VERTEX) {
             LastVertexShaderCode = desc->Code;
@@ -267,45 +272,51 @@ public:
             LastPixelShaderCode = desc->Code;
             LastPixelShaderCodeSize = desc->CodeSize;
         }
-        return CK_OK;
+        return AllocateHandle(out);
     }
-    CKERROR CreateProgram(CKDWORD, CKProgramDesc *desc) override {
-        if (FailCreateProgram)
+    CKERROR CreateProgram(const CKProgramDesc *desc, CKDWORD *out) override {
+        if (FailCreateProgram) {
+            if (out) *out = 0;
             return CKERR_INVALIDPARAMETER;
-        ++CreatedProgramCount;
-        LastProgramSpecializationDwords.clear();
-        if (desc && desc->SpecializationDwords && desc->SpecializationDwordCount > 0) {
-            const CKDWORD *begin = desc->SpecializationDwords;
-            LastProgramSpecializationDwords.assign(begin, begin + desc->SpecializationDwordCount);
         }
-        return CK_OK;
+        ++CreatedProgramCount;
+        return AllocateHandle(out);
     }
-    CKERROR CreateUniform(CKDWORD, CKUniformDesc *) override { return CK_OK; }
-    CKERROR CreateVertexLayout(CKDWORD layout, CKVertexLayoutDesc *desc) override {
+    CKERROR CreateUniform(const CKUniformDesc *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateVertexLayout(const CKVertexLayoutDesc *desc, CKDWORD *out) override {
         CKDWORD stride = 0;
         LastVertexLayoutElements.clear();
         if (desc) {
-            for (int i = 0; i < CKRST_MAX_VERTEX_STREAMS; ++i) {
-                if (desc->Stride[i] > stride)
-                    stride = desc->Stride[i];
-            }
+            stride = desc->Stride;
             for (CKDWORD i = 0; i < desc->ElementCount; ++i)
                 LastVertexLayoutElements.push_back(desc->Elements[i]);
         }
-        m_LayoutStride[layout] = stride;
-        return CK_OK;
+        CKERROR result = AllocateHandle(out);
+        if (result == CK_OK)
+            m_LayoutStride[*out] = stride;
+        return result;
     }
-    CKERROR CreateFrameBuffer(CKDWORD, CKFrameBufferDesc *) override { return CK_OK; }
-    CKERROR CreateDepthTexture(CKDWORD, CKDepthTextureDesc *) override { return CK_OK; }
-    CKERROR CreateOcclusionQuery(CKDWORD, CKOcclusionQueryDesc *) override { return CK_OK; }
-    CKERROR CreateIndirectBuffer(CKDWORD, CKIndirectBufferDesc *) override { return CK_OK; }
+    CKERROR CreateFrameBuffer(const CKFrameBufferDesc *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateDepthTexture(const CKDepthTextureDesc *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateOcclusionQuery(const CKOcclusionQueryDesc *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
+    CKERROR CreateIndirectBuffer(const CKIndirectBufferDesc *, CKDWORD *out) override {
+        return AllocateHandle(out);
+    }
     CKERROR DeleteObject(CKDWORD object, CKDWORD type) override {
         ++DeletedObjectCount;
         LastDeletedObject = object;
         LastDeletedObjectType = type;
         return CK_OK;
     }
-    void FlushObjects(CKDWORD) override {}
+    CKERROR FlushObjects(CKDWORD) override { return CK_OK; }
     CKERROR UpdateVertexBuffer(CKDWORD, CKDWORD, CKDWORD, const void *) override { return CK_OK; }
     CKERROR UpdateIndexBuffer(CKDWORD, CKDWORD, CKDWORD, const void *) override { return CK_OK; }
     CKERROR UpdateTexture(CKDWORD texture, CKDWORD mip, CKDWORD face,
@@ -321,13 +332,15 @@ public:
             LastTextureUpdateDesc = *desc;
         return FailUpdateTexture ? CKERR_INVALIDPARAMETER : CK_OK;
     }
-    CKERROR ReadTexture(CKDWORD, CKDWORD, VxImageDescEx *) override { return CKERR_NOTIMPLEMENTED; }
-    CKERROR ReadFrameBuffer(CKDWORD, VxImageDescEx *) override { return CKERR_NOTIMPLEMENTED; }
+    CKERROR ReadTexture(CKDWORD, CKDWORD, CKReadbackDesc *, CKDWORD *) override {
+        return CKERR_NOTIMPLEMENTED;
+    }
     CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD, CKDWORD *) override { return CKRST_OCCLUSION_NORESULT; }
-    void SetPaletteColor(CKDWORD index, CKDWORD color) override {
+    CKERROR SetPaletteColor(CKDWORD index, CKDWORD color) override {
         if (index < 16)
             PaletteColors[index] = color;
         ++PaletteSetCount;
+        return index < 16 ? CK_OK : CKERR_INVALIDPARAMETER;
     }
     void DbgTextClear(CKDWORD, CKBOOL) override {}
     void DbgTextPrintf(CKWORD, CKWORD, CKDWORD, CKSTRING, ...) override {}
@@ -341,7 +354,9 @@ public:
     CKBOOL IsTextureValid(CKDWORD, CKBOOL, CKWORD, CKDWORD, CKDWORD) override { return TRUE; }
     CKBOOL IsFrameBufferValid(CKDWORD, const CKFrameBufferAttachmentDesc *, const CKFrameBufferAttachmentDesc *) override { return TRUE; }
     void CalcTextureSize(CKTextureInfo *, CKWORD, CKWORD, CKWORD, CKBOOL, CKBOOL, CKWORD, CKDWORD) override {}
-    void RequestScreenShot(CKDWORD, CKScreenShotCallback) override {}
+    CKERROR RequestScreenShot(CKDWORD, CKScreenShotCallback, void *) override {
+        return CKERR_NOTIMPLEMENTED;
+    }
     CKERROR SetViewName(CKRenderView, CKSTRING) override { return CK_OK; }
     CKERROR SetViewRect(CKRenderView, const CKRECT &) override { return CK_OK; }
     CKERROR SetViewScissor(CKRenderView, const CKRECT *) override { return CK_OK; }
@@ -399,16 +414,21 @@ public:
             return 0;
         return m_LayoutStride[layout] > 0 ? instanceCount : 0;
     }
-    CKRasterizerEncoder *BeginEncoder() override { return &Encoder; }
-    void EndEncoder(CKRasterizerEncoder *) override {}
-    CKERROR Frame(CKRST_FRAME_SYNC_MODE) override {
+    CKRasterizerEncoder *BeginEncoder(CKBOOL = FALSE) override { return &Encoder; }
+    CKERROR EndEncoder(CKRasterizerEncoder *encoder) override {
+        return encoder ? encoder->GetStatus() : CKERR_INVALIDPARAMETER;
+    }
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE, CKDWORD = CKRST_FRAME_NONE,
+                  CKDWORD *frameNumber = nullptr) override {
         ++FrameSerial;
+        if (frameNumber)
+            *frameNumber = FrameSerial;
         return CK_OK;
     }
-    CKDWORD GetFrameSerial() const override { return FrameSerial; }
 
 private:
     CKRenderStats m_Stats = {};
+    CKDWORD NextResourceHandle = 1;
     std::unordered_map<CKDWORD, CKDWORD> m_LayoutStride;
     std::vector<CKBYTE> m_VertexStorage;
     std::vector<CKBYTE> m_IndexStorage;

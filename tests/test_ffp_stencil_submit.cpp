@@ -1,13 +1,15 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFSpecializationInfo.h"
+#include "CKFFSpecializedModuleTable.h"
 #include "CKFFUniformState.h"
 #include "CKRenderPipeline.h"
 #include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
+#include "shaders/generated/CKFFSpecializedModuleTable.generated.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
 namespace {
 
@@ -53,9 +55,14 @@ CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
                         (((CKDWORD)it->second[i * 4 + 3] & 0xFFu) << 24);
         }
         info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
-    } else if (!context.LastProgramSpecializationDwords.empty()) {
-        info.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    } else {
+        for (size_t i = 0; i < g_CKFFSpecializedModuleCount; ++i) {
+            const CKFFSpecializedModule &module = g_CKFFSpecializedModules[i].Module;
+            if (module.FSData == context.LastPixelShaderCode &&
+                module.FSSize == context.LastPixelShaderCodeSize) {
+                return module.Specialization;
+            }
+        }
     }
     return info;
 }
@@ -290,12 +297,7 @@ void PixelFogOverridesVertexFogMode() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Pixel fog draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
@@ -435,12 +437,7 @@ void ResultArgTempClearsOnlyLastActiveStage() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "RESULTARG draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
               "Non-final active stage must preserve RESULTARG=TEMP");
@@ -464,12 +461,7 @@ void Modulate4XStaysInTextureStageSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "MODULATE4X draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE4X,
               "MODULATE4X must remain a normal texture-stage specialization op");
@@ -491,12 +483,7 @@ void PremodulateStaysInTextureStageSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "PREMODULATE draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_PREMODULATE,
               "PREMODULATE must remain encoded as the stage color op");
@@ -521,12 +508,7 @@ void TextureArgModifiersStayInSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V | CKRST_DP_STAGE(0), CKFF_VF_POSITION | CKFF_VF_TEXCOORD0, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Texture arg modifier draw must upload specialization dwords");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) ==
                   CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT),
@@ -554,12 +536,7 @@ void NullTextureStagePreservesSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Null texture draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_SELECTARG1,
               "Unbound texture stage must keep its original color op");
@@ -586,12 +563,7 @@ void StageConstantDoesNotCreateTextureDependency() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Stage constant draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     const CKDWORD stageParamsUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
@@ -628,12 +600,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Cubemap draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_CUBE,
               "Cubemap texture must mark stage 0 as cube sampler");
     TestCheck(context.Encoder.TextureBindCount == 1,
@@ -664,12 +631,7 @@ void VolumeTextureModulateCacheMissUsesUberShader() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Volume draw must submit runtime specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(context.Encoder.SubmitCount == 1,
               "Volume texture cache miss must draw through the runtime shader");
     TestCheck((spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE) &&
@@ -742,12 +704,7 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Volume + cube fallback must submit runtime specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(context.Encoder.SubmitCount == 1,
               "Volume + cube cache miss must draw through the static sampler layout fallback");
@@ -1085,7 +1042,7 @@ void BorderPaletteSlotsAreReusedAcrossFrames() {
             1, 0, 0, 3, 0, 0,
             CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     }
-    context.Frame(CKRST_FRAME_SYNC_IMMEDIATE);
+    ffp.GetRenderPipeline().EndFrame(CKRST_FRAME_SYNC_IMMEDIATE);
     ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000010u);
     const CKBOOL nextFrame = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
@@ -1129,10 +1086,6 @@ void UberShaderProgramModulesAreSharedAcrossStateBindings() {
               "Program-module cache and state-binding cache must have separate cardinality");
     TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
               "Shared uber programs must still upload current-draw specialization state");
-    TestCheck(context.Encoder.LastDrawSpecializationDwords.size() ==
-                  CKFFSpecializationInfo::MaxSpecDwords &&
-                  context.Encoder.LastDrawSpecializationDwords[0] == current.Data()[0],
-              "Shared programs must expose the current draw specialization to backend diagnostics");
 
     ffp.Shutdown();
     CKRenderSettingsClearOverridesForTests();
@@ -1239,12 +1192,7 @@ void LegacyTextureMapBlendClearsExplicitStageOps() {
     ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
     ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST, nullptr, 0, &data);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Legacy texture-map blend draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE,
               "TEXTUREMAPBLEND must restore legacy modulate color op over stale explicit op");
@@ -1365,12 +1313,7 @@ void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Projected stage 2 draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck((spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << 2)) != 0,
               "Stage 2 projected sampler must be encoded in the specialization mask");
@@ -1392,12 +1335,7 @@ void ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Projected stage 4 draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        spec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     const CKDWORD stageParamsUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =

@@ -8,6 +8,9 @@
 // Internal fixed-function shader ABI. These values define the C++ uniform
 // packing contract consumed by the checked-in bgfx shader sources.
 
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 1u;
+static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x6f7e2a31u;
+
 enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_DIFFUSE = 0,
     CKFF_DRAW_PARAM_MATERIAL_AMBIENT = 1,

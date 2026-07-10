@@ -6,7 +6,6 @@
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKFFConstants.h"
-#include "CKFFSpecializationInfo.h"
 
 #define CKFF_RENDER_PACKET_MAX_UNIFORMS 16
 #define CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S 192
@@ -101,8 +100,6 @@ struct CKRenderPacket {
     CKRenderView View;
     VXPRIMITIVETYPE Type;
     CKDWORD Program;
-    CKDWORD SpecializationDwordCount;
-    CKDWORD SpecializationDwords[CKFFSpecializationInfo::MaxSpecDwords];
     CKDWORD Depth;
     CKDrawState DrawState;
     CKDWORD StencilRef;
@@ -126,8 +123,6 @@ struct CKRenderPacket {
     CKDWORD ViewProjectionHash;
     CKBOOL CanInstance;
     CKDWORD InstancedProgram;
-    CKDWORD InstancedSpecializationDwordCount;
-    CKDWORD InstancedSpecializationDwords[CKFFSpecializationInfo::MaxSpecDwords];
     char Marker[CKFF_RENDER_PACKET_MARKER_SIZE];
 };
 
