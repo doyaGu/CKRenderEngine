@@ -1,6 +1,6 @@
-#include <cstdio>
-#include <cmath>
-#include <cstring>
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -120,6 +120,11 @@ void RegisterRasterizer(const char *dll) {
 
     CKRasterizerInfo info;
     getInfoFunc(&info);
+    if (info.InterfaceRevision != CKRST_INTERFACE_REVISION ||
+        !info.StartFct || !info.CloseFct) {
+        sl.ReleaseLibrary();
+        return;
+    }
     info.DllInstance = instance;
     info.DllName = dll;
     g_RasterizersInfo.PushBack(info);
@@ -131,9 +136,12 @@ void EnumerateRasterizers() {
         extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
         CKRasterizerInfo info;
         CKBgfxRasterizerGetInfo(&info);
-        info.DllInstance = nullptr;
-        info.DllName = "CKBgfxRasterizer";
-        g_RasterizersInfo.PushBack(info);
+        if (info.InterfaceRevision == CKRST_INTERFACE_REVISION &&
+            info.StartFct && info.CloseFct) {
+            info.DllInstance = nullptr;
+            info.DllName = "CKBgfxRasterizer";
+            g_RasterizersInfo.PushBack(info);
+        }
 #else
         XString moduleName = CKRenderEngineModulePath();
         CKPathSplitter ps(moduleName.CStr());
@@ -180,6 +188,7 @@ void EnumerateRasterizers() {
             info.DllInstance = nullptr;
             info.DllName = "";
             info.Desc = "NULL Rasterizer";
+            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
             g_RasterizersInfo.PushBack(info);
         }
 #endif

@@ -11,9 +11,12 @@
 class RCKMaterial;
 class RCK3dEntity;
 class RCKSprite3D;
+class RCKSprite;
+class RCKTexture;
 struct CKDrawAnnotation;
 struct CKDrawAnnotationObjectRef;
 struct CKDrawAnnotationState;
+struct CKPendingScreenCaptureState;
 
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
     UserDrawPrimitiveDataClass();
@@ -55,6 +58,8 @@ struct CKObjectExtents {
 
 class RCKRenderContext : public CKRenderContext {
     friend class RCKRenderManager;
+    friend class RCKSprite;
+    friend class RCKTexture;
 public:
     void AddObject(CKRenderObject *obj) override;
     void AddObjectWithHierarchy(CKRenderObject *obj) override;
@@ -229,6 +234,16 @@ private:
     void ExecutePostSpriteCallbacks();
     void AllocateRenderPipelineResources();
     void ReleaseRenderPipelineResources();
+    CKBOOL QueueTextureCopy(RCKTexture *Texture, const VxRect *Source,
+                            const VxRect *Destination, int CubeMapFace);
+    CKBOOL QueueSpriteCopy(RCKSprite *Sprite, const VxRect *Source,
+                           const VxRect *Destination);
+    void ProcessPendingScreenCaptures();
+    static void ScreenCaptureCallback(void *UserData, CKDWORD FrameBuffer,
+                                      CKDWORD Width, CKDWORD Height,
+                                      CKDWORD Pitch, VX_PIXELFORMAT Format,
+                                      const void *Data, CKDWORD Size,
+                                      CKBOOL YFlip);
     void LoadPVInformationTexture();
     void DrawPVInformationWatermark();
     void AppendStateOnOffLine(CKBOOL on);
@@ -351,6 +366,9 @@ public:
     CKDWORD m_RasterizerDebugFlags;
     CKDrawAnnotationState *m_DrawAnnotationState;
     CKRenderPipelineResourceIds m_RenderPipelineResources;
+
+private:
+    CKPendingScreenCaptureState *m_PendingScreenCaptures;
 };
 
 #endif // RCKRENDERCONTEXT_H

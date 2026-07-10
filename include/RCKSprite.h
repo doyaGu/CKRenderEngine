@@ -5,8 +5,11 @@
 #include "RCK2dEntity.h"
 #include "CKSprite.h"
 
+class RCKRenderContext;
+
 class RCKSprite : public RCK2dEntity {
     friend class RCKRenderManager;
+    friend class RCKRenderContext;
 
 public:
 
@@ -43,6 +46,10 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    CKBOOL ApplyContextCopy(RCKRenderContext *Context,
+                            const VxImageDescEx &Source,
+                            const VxRect *Destination);
+
     // CKSprite members
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_VideoFormat;

@@ -172,7 +172,9 @@ public:
     void UpdateChannelIndices();
     static CKDWORD TextureWrapModeFromMeshFlags(CKDWORD meshFlags);
     static CKBOOL RequiresWrapAwareHardwareVertexBuffer(CKDWORD meshFlags);
-    CKBOOL CheckHWVertexBuffer(CKRasterizerContext *rst, VxDrawPrimitiveData *data);
+    CKBOOL CheckHWVertexBuffer(RCKRenderContext *renderContext,
+                               CKRasterizerContext *rst,
+                               VxDrawPrimitiveData *data);
     CKBOOL CheckHWIndexBuffer(CKRasterizerContext *rst);
 
     // Progressive mesh rendering (IDA: 0x100257b1)
@@ -238,6 +240,7 @@ protected:
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;
     CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
+    CKRasterizerContext *m_RasterizerContext;
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKDWORD m_IndexBufferIndexCount;

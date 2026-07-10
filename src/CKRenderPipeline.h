@@ -93,6 +93,7 @@ public:
     // Check if we're inside a frame
     CKBOOL IsInFrame() const { return m_Encoder != nullptr; }
     CKBOOL IsSceneFrameBufferEnabled() const { return m_SceneFrameBufferActive; }
+    CKDWORD GetFrameNumber() const { return m_FrameNumber; }
 
 private:
     CKBOOL EnsurePostprocessResources();
@@ -114,6 +115,7 @@ private:
     CKDWORD m_SceneWidth;
     CKDWORD m_SceneHeight;
     CKDWORD m_PostVertexShaderProfile;
+    CKDWORD m_FrameNumber;
 };
 
 #endif // CKRENDERPIPELINE_H

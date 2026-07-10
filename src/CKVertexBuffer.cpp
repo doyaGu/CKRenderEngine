@@ -123,8 +123,8 @@ CKBOOL AllocateVertexBufferStaging(VxDrawPrimitiveData &data, CKRST_DPFLAGS flag
 
 RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(), m_MemoryPool() {
     m_CKContext = context;
-    RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
-    m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_VERTEXBUFFER);
+    m_RasterizerContext = nullptr;
+    m_ObjectIndex = 0;
     m_DpData.Flags = 0;
     memset(&m_LockedData, 0, sizeof(m_LockedData));
     m_Valid = FALSE;
@@ -140,8 +140,10 @@ RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(
 
 RCKVertexBuffer::~RCKVertexBuffer() {
     ClearVertexBufferStaging(m_DpData);
-    RCKRenderManager *rm = (RCKRenderManager *) m_CKContext->GetRenderManager();
-    rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+    if (m_RasterizerContext && m_ObjectIndex)
+        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+    m_RasterizerContext = nullptr;
+    m_ObjectIndex = 0;
 }
 
 void RCKVertexBuffer::Destroy() {
@@ -153,6 +155,8 @@ void RCKVertexBuffer::Destroy() {
 }
 
 void RCKVertexBuffer::InvalidateHardwareBuffer() {
+    m_RasterizerContext = nullptr;
+    m_ObjectIndex = 0;
     m_HardwareValid = FALSE;
     m_VertexLayout = 0;
     m_FormatFlags = 0;
@@ -220,6 +224,14 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
     if (!rctx->m_RasterizerContext)
         return;
 
+    if (m_RasterizerContext != rctx->m_RasterizerContext) {
+        if (m_RasterizerContext && m_ObjectIndex)
+            m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+        m_RasterizerContext = rctx->m_RasterizerContext;
+        m_ObjectIndex = 0;
+        m_HardwareValid = FALSE;
+    }
+
     const bool hasNormal = m_DpData.NormalPtr != nullptr;
     const bool hasUV = m_DpData.TexCoordPtr != nullptr;
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(m_DpData.Flags, hasNormal, hasUV);
@@ -246,12 +258,14 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
 
     if (!m_HardwareValid || formatFlags != m_FormatFlags || layout != m_VertexLayout ||
         (m_LockFlags & CK_LOCK_DISCARD) != 0) {
-        rctx->m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+        if (m_ObjectIndex)
+            rctx->m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+        m_ObjectIndex = 0;
         CKVertexBufferDesc desc = m_Desc;
         desc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY;
         desc.m_VertexSize = stride;
         desc.m_CurrentVCount = m_Desc.m_CurrentVCount;
-        if (rctx->m_RasterizerContext->CreateVertexBuffer(m_ObjectIndex, &desc, interleaved) == CK_OK) {
+        if (rctx->m_RasterizerContext->CreateVertexBuffer(&desc, interleaved, &m_ObjectIndex) == CK_OK) {
             m_HardwareValid = TRUE;
             m_FormatFlags = formatFlags;
             m_VertexLayout = layout;

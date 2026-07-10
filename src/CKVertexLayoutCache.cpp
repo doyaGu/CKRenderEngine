@@ -17,7 +17,7 @@ static CK_VERTEX_ATTRIB TexCoordAttrib(int stage) {
 }
 
 CKVertexLayoutCache::CKVertexLayoutCache()
-    : m_Context(nullptr), m_NextHandle(1) {}
+    : m_Context(nullptr) {}
 
 CKVertexLayoutCache::~CKVertexLayoutCache() {
     Shutdown();
@@ -26,7 +26,6 @@ CKVertexLayoutCache::~CKVertexLayoutCache() {
 void CKVertexLayoutCache::Init(CKRasterizerContext *ctx) {
     m_Context = ctx;
     m_Cache.Clear();
-    m_NextHandle = 1;
 }
 
 void CKVertexLayoutCache::Shutdown() {
@@ -134,8 +133,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
         elements[count].Count = 3;
         elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 12;
     }
@@ -144,8 +143,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
         elements[count].Count = 4;
         elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 16;
     }
@@ -154,8 +153,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
         elements[count].Count = 3;
         elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 12;
     }
@@ -164,8 +163,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
         elements[count].Count = 3;
         elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 12;
     }
@@ -174,8 +173,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_UINT8;
         elements[count].Count = 4;
         elements[count].Normalized = FALSE;
+        elements[count].AsInt = TRUE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 4;
     }
@@ -185,8 +184,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
             elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
             elements[count].Count = 4;
             elements[count].Normalized = FALSE;
+            elements[count].AsInt = FALSE;
             elements[count].Offset = offset;
-            elements[count].Stream = 0;
             count++;
             offset += 16;
         }
@@ -196,8 +195,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_UINT8;
         elements[count].Count = 4;
         elements[count].Normalized = TRUE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 4;
     }
@@ -206,8 +205,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         elements[count].Type = CKRST_ATTRIBTYPE_UINT8;
         elements[count].Count = 4;
         elements[count].Normalized = TRUE;
+        elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
-        elements[count].Stream = 0;
         count++;
         offset += 4;
     }
@@ -215,11 +214,11 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
     CKVertexLayoutDesc desc;
     desc.Elements = elements;
     desc.ElementCount = count;
-    memset(desc.Stride, 0, sizeof(desc.Stride));
-    desc.Stride[0] = offset;
+    desc.Stride = offset;
 
-    CKDWORD handle = m_NextHandle++;
-    m_Context->CreateVertexLayout(handle, &desc);
+    CKDWORD handle = 0;
+    if (m_Context->CreateVertexLayout(&desc, &handle) != CK_OK)
+        return 0;
     m_Cache.Insert(formatFlags, handle);
 
     if (outStride) *outStride = offset;
