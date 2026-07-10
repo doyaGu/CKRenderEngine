@@ -11,6 +11,17 @@ $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 
+#ifndef CKFF_NDC_MINUS_ONE_TO_ONE
+#define CKFF_NDC_MINUS_ONE_TO_ONE 0
+#endif
+
+void ckffApplyBackendClipSpace(inout vec4 position)
+{
+#if CKFF_NDC_MINUS_ONE_TO_ONE
+    position.z = position.z * 2.0 - position.w;
+#endif
+}
+
 uniform vec4 u_viewport;
 uniform vec4 u_ffDrawParams[12];
 uniform vec4 u_stageParams[32];
@@ -261,4 +272,5 @@ void main()
     v_texcoord7Fog = vec4(0.0, 0.0, 0.0, 1.0);
 #endif
     v_texcoord7Fog.z = fogFactor;
+    ckffApplyBackendClipSpace(gl_Position);
 }

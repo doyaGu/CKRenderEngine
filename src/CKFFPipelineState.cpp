@@ -58,7 +58,6 @@ void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
     if (m_State.AlphaTestPrecision == precision)
         return;
     m_State.AlphaTestPrecision = precision;
-    m_State.DirtyFlags |= CKFF_DIRTY_ALPHATEST;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -71,7 +70,6 @@ void CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix
         return;
     m_State.VertexBlendMatrices[index] = matrix;
     m_State.VertexBlendMatrixSet[index] = TRUE;
-    m_State.DirtyFlags |= CKFF_DIRTY_MATRICES;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -80,7 +78,6 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
         Vx3DMatrixIdentity(m_State.VertexBlendMatrices[i]);
         m_State.VertexBlendMatrixSet[i] = FALSE;
     }
-    m_State.DirtyFlags |= CKFF_DIRTY_MATRICES;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -105,30 +102,6 @@ void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD va
         return;
     m_DrawStateCache.SetRenderState(state, value);
 
-    switch (state) {
-    case VXRENDERSTATE_FOGENABLE:
-    case VXRENDERSTATE_FOGVERTEXMODE:
-    case VXRENDERSTATE_FOGPIXELMODE:
-    case VXRENDERSTATE_FOGSTART:
-    case VXRENDERSTATE_FOGEND:
-    case VXRENDERSTATE_FOGDENSITY:
-    case VXRENDERSTATE_FOGCOLOR:
-        m_State.DirtyFlags |= CKFF_DIRTY_FOG;
-        break;
-    case VXRENDERSTATE_AMBIENT:
-        m_State.DirtyFlags |= CKFF_DIRTY_LIGHTS;
-        break;
-    case VXRENDERSTATE_TEXTUREFACTOR:
-        m_State.DirtyFlags |= CKFF_DIRTY_TEXFACTOR;
-        break;
-    case VXRENDERSTATE_ALPHATESTENABLE:
-    case VXRENDERSTATE_ALPHAFUNC:
-    case VXRENDERSTATE_ALPHAREF:
-        m_State.DirtyFlags |= CKFF_DIRTY_ALPHATEST;
-        break;
-    default:
-        break;
-    }
     CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM;
     if (CKFFRenderStateAffectsProgram(state))
         changeMask |= CKFF_CHANGE_PROGRAM;
@@ -277,18 +250,15 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
     switch (type) {
     case VXMATRIX_WORLD:
         m_State.World = matrix;
-        m_State.DirtyFlags |= CKFF_DIRTY_MATRICES;
         OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
         break;
     case VXMATRIX_VIEW:
         m_State.View = matrix;
-        m_State.DirtyFlags |= CKFF_DIRTY_MATRICES | CKFF_DIRTY_LIGHTS;
         m_State.MarkViewProjectionDirty();
         OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
         break;
     case VXMATRIX_PROJECTION:
         m_State.Projection = matrix;
-        m_State.DirtyFlags |= CKFF_DIRTY_MATRICES;
         m_State.MarkViewProjectionDirty();
         OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
         break;
@@ -314,7 +284,6 @@ void CKFixedFunctionPipeline::ResetMaterial() {
     m_State.Material.Ambient[1] = 1.0f;
     m_State.Material.Ambient[2] = 1.0f;
     m_State.Material.Ambient[3] = 1.0f;
-    m_State.DirtyFlags |= CKFF_DIRTY_MATERIAL;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -337,7 +306,6 @@ void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
     m_State.Material.Emissive[2] = mat->Emissive.b;
     m_State.Material.Emissive[3] = mat->Emissive.a;
     m_State.Material.Power = mat->SpecularPower;
-    m_State.DirtyFlags |= CKFF_DIRTY_MATERIAL;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -382,7 +350,6 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
     dst.SpotParams[2] = 0.0f;
     dst.SpotParams[3] = 0.0f;
 
-    m_State.DirtyFlags |= CKFF_DIRTY_LIGHTS;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -396,7 +363,6 @@ void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
     for (int i = 0; i < CKFF_MAX_LIGHTS; i++) {
         if (m_State.LightEnabled[i]) m_State.ActiveLightCount++;
     }
-    m_State.DirtyFlags |= CKFF_DIRTY_LIGHTS;
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 

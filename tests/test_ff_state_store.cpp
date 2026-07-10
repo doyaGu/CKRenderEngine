@@ -19,17 +19,9 @@ static void ViewProjectionRebuildsOnceThenCaches()
     Check(s.EnsureViewProjection() == TRUE, "dirty must force rebuild");
 }
 
-static void ResetSetsDefinedDirtyFlags()
-{
-    CKFFStateStore s;
-    s.Reset();
-    Check(s.DirtyFlags == CKFF_DIRTY_ALL, "Reset sets all uniform dirty flags");
-}
-
 int main()
 {
     ViewProjectionRebuildsOnceThenCaches();
-    ResetSetsDefinedDirtyFlags();
     if (g_failures) {
         printf("%d failure(s)\n", g_failures);
         return 1;

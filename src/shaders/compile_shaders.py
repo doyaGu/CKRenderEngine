@@ -111,8 +111,6 @@ def include_dirs(script_dir: Path) -> list[Path]:
 
 
 def varying_def_for_backend(script_dir: Path, backend: dict[str, str]) -> Path:
-    if backend["name"] in {"glsl", "spirv"}:
-        return script_dir / "varying_no_flat_color.def.sc"
     return script_dir / "varying.def.sc"
 
 
@@ -128,8 +126,11 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         "-p", backend["profile"],
         "--varyingdef", str(varying_def_for_backend(script_dir, backend)),
     ]
-    if defines:
-        cmd.extend(["--define", ";".join(defines)])
+    compile_defines = list(defines or [])
+    if backend["name"] == "glsl":
+        compile_defines.append("CKFF_NDC_MINUS_ONE_TO_ONE=1")
+    if compile_defines:
+        cmd.extend(["--define", ";".join(compile_defines)])
     for inc in include_dirs(script_dir):
         cmd.extend(["-i", str(inc)])
 

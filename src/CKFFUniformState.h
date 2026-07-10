@@ -38,7 +38,9 @@ CKDWORD CKFFResolveMaterialSource(CKBOOL lighting,
 float CKFFEncodeShaderLightType(VXLIGHT_TYPE type);
 void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
                          const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
+                         const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],
                          int activeTextureCount,
+                         CKDWORD shaderTargetFlags,
                          CKFFStageParamsUniform &outParams);
 void CKFFPackSpecializationDwords(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec);
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip);

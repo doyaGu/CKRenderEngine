@@ -28,8 +28,6 @@ struct CKFFStateStore {
     VxPlane UserClipPlanes[6];
     CKDWORD AlphaTestPrecision;
 
-    CKDWORD DirtyFlags;
-
     CKBOOL EnsureViewProjection();
     const VxMatrix &ViewProjection() const { return m_ViewProjection; }
     CKDWORD ViewProjectionHash() const { return m_ViewProjectionHash; }

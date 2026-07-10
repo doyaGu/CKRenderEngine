@@ -463,8 +463,13 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 
 vec4 getSampleCoord(vec4 coord, int transformFlags)
 {
-    if ((transformFlags & 0x100) == 0) return coord;
-    return coord / (abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w);
+    if ((transformFlags & 0x100) != 0) {
+        coord /= abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w;
+    }
+    if ((transformFlags & 0x1000) != 0) {
+        coord.y = 1.0 - coord.y;
+    }
+    return coord;
 }
 
 float computePixelFogFactor(float depth, int mode, float vertexFogFactor)
@@ -485,12 +490,13 @@ vec4 applyArgModifiers(vec4 value, int arg)
     return value;
 }
 
-vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specular, vec4 temp, vec4 stageConstant)
+vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specular,
+            vec4 temp, vec4 stageConstant, bool premodulateCurrent)
 {
     int baseArg = arg & ~(0x10 | 0x20);
     vec4 value = current;
     if (baseArg == 0) value = diffuse;
-    else if (baseArg == 1) value = current;
+    else if (baseArg == 1) value = premodulateCurrent ? current * textureColor : current;
     else if (baseArg == 2) value = textureColor;
     else if (baseArg == 3) value = u_ffDrawParams[9];
     else if (baseArg == 4) value = specular;
@@ -517,7 +523,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 14) return mix(b, a, u_ffDrawParams[9].a);
     if (op == 15) return clamp(a + b * (1.0 - textureColor.a), 0.0, 1.0);
     if (op == 16) return mix(b, a, current.a);
-    if (op == 17) return current;
+    if (op == 17) return a;
     if (op == 18) return clamp(a + vec4_splat(a.a) * b, 0.0, 1.0);
     if (op == 19) return clamp(a * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 20) return clamp(a + (1.0 - a.a) * b, 0.0, 1.0);
@@ -587,12 +593,14 @@ bool alphaPass(float alpha, int func)
                 float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0); \
                 texColor *= lum; \
             } \
-            vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant); \
-            vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant); \
-            vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant); \
-            vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant); \
-            vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant); \
-            vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant); \
+            bool premodulateColor = previousColorOp == 17 && hasTexture; \
+            bool premodulateAlpha = previousAlphaOp == 17 && hasTexture; \
+            vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
+            vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
+            vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
+            vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
+            vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
+            vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
             vec4 stageResult = current; \
             vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor); \
             vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, diffuse, texColor); \
@@ -609,6 +617,7 @@ bool alphaPass(float alpha, int func)
             } \
             previousTexture = texColor; \
             previousColorOp = colorOp; \
+            previousAlphaOp = alphaOp; \
         } \
     }
 #endif
@@ -622,6 +631,7 @@ void main()
     vec4 temp = vec4(0.0, 0.0, 0.0, 0.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
     int previousColorOp = 0;
+    int previousAlphaOp = 0;
 
 #if defined(CKFF_FULL_SPECIALIZED)
     bool stagesEnabled = true;
@@ -675,12 +685,14 @@ void main()
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);
             texColor *= lum;
         }
-        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant);
-        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant);
-        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant);
-        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant);
-        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant);
-        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant);
+        bool premodulateColor = previousColorOp == 17 && hasTexture;
+        bool premodulateAlpha = previousAlphaOp == 17 && hasTexture;
+        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
 
         vec4 stageResult = current;
         vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor);
@@ -700,6 +712,7 @@ void main()
 
         previousTexture = texColor;
         previousColorOp = colorOp;
+        previousAlphaOp = alphaOp;
     }
 #endif
 

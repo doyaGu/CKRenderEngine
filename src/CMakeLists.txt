@@ -222,7 +222,6 @@ endif ()
 find_package(Python3 COMPONENTS Interpreter)
 set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying_no_flat_color.def.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_3d.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
