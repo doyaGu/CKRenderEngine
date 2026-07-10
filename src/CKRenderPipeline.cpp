@@ -562,9 +562,16 @@ CKBOOL CKRenderPipeline::SubmitPostprocess()
         return FALSE;
 
     PostVertex *vertices = (PostVertex *)tvb.Data;
-    vertices[0] = {-1.0f, -1.0f, 0.0f, 0.0f, 1.0f};
-    vertices[1] = { 3.0f, -1.0f, 0.0f, 2.0f, 1.0f};
-    vertices[2] = {-1.0f,  3.0f, 0.0f, 0.0f,-1.0f};
+    CKShaderTargetDesc target;
+    const CKBOOL originBottomLeft =
+        m_Context->m_Driver &&
+        m_Context->m_Driver->GetShaderTarget(&target) == CK_OK &&
+        (target.Flags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
+    const float bottomV = originBottomLeft ? 0.0f : 1.0f;
+    const float extendedTopV = originBottomLeft ? 2.0f : -1.0f;
+    vertices[0] = {-1.0f, -1.0f, 0.0f, 0.0f, bottomV};
+    vertices[1] = { 3.0f, -1.0f, 0.0f, 2.0f, bottomV};
+    vertices[2] = {-1.0f,  3.0f, 0.0f, 0.0f, extendedTopV};
 
     CKSamplerDesc sampler;
     memset(&sampler, 0, sizeof(sampler));

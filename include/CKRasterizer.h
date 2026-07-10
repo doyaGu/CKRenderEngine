@@ -120,6 +120,7 @@ public:
                             CKDWORD Texture, CKSamplerDesc *Sampler = NULL);
     virtual void SetUniform(CKDWORD Uniform, const void *Data,
                             CKDWORD Count = 1);
+    virtual void SetDrawSpecialization(const CKDWORD *Values, CKDWORD Count);
 
     // Compute binding
     virtual void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
@@ -305,6 +306,7 @@ public:
     virtual CKRasterizerEncoder *BeginEncoder();
     virtual void EndEncoder(CKRasterizerEncoder *Encoder);
     virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode);
+    virtual CKDWORD GetFrameSerial() const;
 
 public:
     CKRasterizerDriver *m_Driver;

@@ -60,6 +60,10 @@ void CKRasterizerEncoder::SetUniform(CKDWORD, const void *, CKDWORD)
 {
 }
 
+void CKRasterizerEncoder::SetDrawSpecialization(const CKDWORD *, CKDWORD)
+{
+}
+
 void CKRasterizerEncoder::SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE)
 {
 }
@@ -410,4 +414,9 @@ void CKRasterizerContext::EndEncoder(CKRasterizerEncoder *)
 CKERROR CKRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE)
 {
     return CK_OK;
+}
+
+CKDWORD CKRasterizerContext::GetFrameSerial() const
+{
+    return 0;
 }

@@ -114,15 +114,24 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
     if (_filePath && strcmp(_filePath, "__backbuffer_read__") == 0) {
         VxImageDescEx *target = m_Context->m_BackbufferReadTarget;
         if (target && target->Image) {
-            uint32_t dstSize = (uint32_t)(target->BytesPerLine * target->Height);
-            if (dstSize == 0)
-                dstSize = (uint32_t)(target->Width * (target->BitsPerPixel / 8) * target->Height);
-            uint32_t copySize = (dstSize > 0 && _size > dstSize) ? dstSize : _size;
-            memcpy(target->Image, _data, copySize);
+            const uint32_t bytesPerPixel = _width > 0 ? _pitch / _width : 0;
+            uint32_t dstPitch = target->BytesPerLine > 0
+                ? (uint32_t)target->BytesPerLine
+                : _width * bytesPerPixel;
+            const uint32_t copyPitch = dstPitch < _pitch ? dstPitch : _pitch;
+            const uint32_t copyRows = target->Height > 0 && (uint32_t)target->Height < _height
+                ? (uint32_t)target->Height
+                : _height;
+            const CKBYTE *src = static_cast<const CKBYTE *>(_data);
+            CKBYTE *dst = static_cast<CKBYTE *>(target->Image);
+            for (uint32_t y = 0; y < copyRows; ++y) {
+                const uint32_t srcY = _yflip ? (_height - 1u - y) : y;
+                memcpy(dst + y * dstPitch, src + srcY * _pitch, copyPitch);
+            }
             target->Width = (int)_width;
             target->Height = (int)_height;
-            target->BytesPerLine = (int)_pitch;
-            target->BitsPerPixel = (int)(_pitch / _width * 8);
+            target->BytesPerLine = (int)dstPitch;
+            target->BitsPerPixel = (int)(bytesPerPixel * 8);
         }
         m_Context->m_BackbufferReadReady.store(true, std::memory_order_release);
         return;
