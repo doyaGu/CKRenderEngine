@@ -144,17 +144,100 @@ struct CKRenderStateData
 // Shader Descriptor
 // ===========================================================================
 
-struct CKShaderTargetDesc {
-    CK_SHADER_FORMAT Format;
-    CK_SHADER_PROFILE Profile;
+struct CKRasterizerTargetDesc {
+    CKDWORD Size;
     CKDWORD Version;
-    CKDWORD Flags;
+    CK_SHADER_PROFILE ShaderProfile;
+    CKBOOL HomogeneousDepth;
+    CKBOOL OriginBottomLeft;
 
-    CKShaderTargetDesc()
-        : Format(CKRST_SHADER_FORMAT_UNKNOWN),
-          Profile(CKRST_SHADER_PROFILE_UNKNOWN),
-          Version(0),
-          Flags(0) {}
+    CKRasterizerTargetDesc()
+        : Size(sizeof(CKRasterizerTargetDesc)),
+          Version(1),
+          ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN),
+          HomogeneousDepth(FALSE),
+          OriginBottomLeft(FALSE) {}
+};
+
+struct CKRasterizerCapsDesc {
+    CKDWORD Size;
+    CKDWORD Version;
+    CKRST_CAPS Features;
+    CKDWORD MaxDrawCalls;
+    CKDWORD MaxBlits;
+    CKDWORD MaxTextureSize;
+    CKDWORD MaxTextureLayers;
+    CKDWORD MaxRenderViews;
+    CKDWORD MaxFrameBuffers;
+    CKDWORD MaxColorAttachments;
+    CKDWORD MaxPrograms;
+    CKDWORD MaxShaders;
+    CKDWORD MaxTextures;
+    CKDWORD MaxTextureStages;
+    CKDWORD MaxComputeBindings;
+    CKDWORD MaxVertexLayouts;
+    CKDWORD MaxVertexStreams;
+    CKDWORD MaxIndexBuffers;
+    CKDWORD MaxVertexBuffers;
+    CKDWORD MaxDynamicIndexBuffers;
+    CKDWORD MaxDynamicVertexBuffers;
+    CKDWORD MaxUniforms;
+    CKDWORD MaxOcclusionQueries;
+    CKDWORD MaxEncoders;
+    CKDWORD MinResourceCommandBufferSize;
+    CKDWORD MaxTransientVertexBufferSize;
+    CKDWORD MaxTransientIndexBufferSize;
+    CKDWORD MinUniformBufferSize;
+    CKDWORD MaxTransforms;
+
+    CKRasterizerCapsDesc()
+        : Size(sizeof(CKRasterizerCapsDesc)), Version(1), Features(0),
+          MaxDrawCalls(0), MaxBlits(0), MaxTextureSize(0),
+          MaxTextureLayers(0), MaxRenderViews(0), MaxFrameBuffers(0),
+          MaxColorAttachments(0), MaxPrograms(0), MaxShaders(0),
+          MaxTextures(0), MaxTextureStages(0), MaxComputeBindings(0),
+          MaxVertexLayouts(0), MaxVertexStreams(0), MaxIndexBuffers(0),
+          MaxVertexBuffers(0), MaxDynamicIndexBuffers(0),
+          MaxDynamicVertexBuffers(0), MaxUniforms(0),
+          MaxOcclusionQueries(0), MaxEncoders(0),
+          MinResourceCommandBufferSize(0), MaxTransientVertexBufferSize(0),
+          MaxTransientIndexBufferSize(0), MinUniformBufferSize(0),
+          MaxTransforms(0) {}
+};
+
+struct CKTextureFormatCaps {
+    CKDWORD Size;
+    VX_PIXELFORMAT Format;
+    CKDWORD Caps;
+
+    CKTextureFormatCaps()
+        : Size(sizeof(CKTextureFormatCaps)), Format(UNKNOWN_PF), Caps(0) {}
+};
+
+struct CKDepthFormatCaps {
+    CKDWORD Size;
+    CK_DEPTH_FORMAT Format;
+    CKDWORD Caps;
+
+    CKDepthFormatCaps()
+        : Size(sizeof(CKDepthFormatCaps)), Format(CKRST_DEPTHFMT_D24S8), Caps(0) {}
+};
+
+struct CKReadbackDesc {
+    CKDWORD Size;
+    void *Data;
+    CKDWORD Capacity;
+    CKDWORD RequiredSize;
+    CKDWORD RowPitch;
+    CKDWORD Width;
+    CKDWORD Height;
+    VX_PIXELFORMAT Format;
+    CKBOOL YFlip;
+
+    CKReadbackDesc()
+        : Size(sizeof(CKReadbackDesc)), Data(NULL), Capacity(0),
+          RequiredSize(0), RowPitch(0), Width(0), Height(0),
+          Format(UNKNOWN_PF), YFlip(FALSE) {}
 };
 
 struct CKShaderDesc {
@@ -163,9 +246,8 @@ struct CKShaderDesc {
     // Backend-specific payload selection happens above the rasterizer layer.
     CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
-    CKBYTE *Code;
+    const CKBYTE *Code;
     CKDWORD CodeSize;
-    CKSTRING EntryPoint;
 };
 
 // ===========================================================================
@@ -176,8 +258,6 @@ struct CKProgramDesc {
     CKDWORD VertexShader;
     CKDWORD PixelShader;
     CKBOOL ConsumeShaders;
-    const CKDWORD *SpecializationDwords;
-    CKDWORD SpecializationDwordCount;
 };
 
 // ===========================================================================
@@ -199,14 +279,14 @@ struct CKVertexElementDesc {
     CK_VERTEX_ATTRIB_TYPE Type;
     CKBYTE Count;
     CKBOOL Normalized;
+    CKBOOL AsInt;
     CKWORD Offset;
-    CKBYTE Stream;
 };
 
 struct CKVertexLayoutDesc {
     CKVertexElementDesc *Elements;
     CKDWORD ElementCount;
-    CKWORD Stride[CKRST_MAX_VERTEX_STREAMS];
+    CKWORD Stride;
 };
 
 // ===========================================================================
@@ -367,33 +447,10 @@ struct CKTextureInfo {
 // Screenshot Callback
 // ===========================================================================
 
-typedef void (*CKScreenShotCallback)(CKDWORD FrameBuffer, CKDWORD Width, CKDWORD Height,
-                                      CKDWORD Pitch, const void *Data, CKDWORD Size,
+typedef void (*CKScreenShotCallback)(void *UserData, CKDWORD FrameBuffer,
+                                      CKDWORD Width, CKDWORD Height,
+                                      CKDWORD Pitch, VX_PIXELFORMAT Format,
+                                      const void *Data, CKDWORD Size,
                                       CKBOOL YFlip);
-
-// ===========================================================================
-// Programmable Capabilities
-// ===========================================================================
-
-struct VxProgCapsDesc {
-    CKWORD MaxRenderViews;
-    CKDWORD MaxEncoders;
-    CKDWORD MaxVertexStreams;
-    CKDWORD MaxTextureStages;
-    CKDWORD MaxComputeBindings;
-    CKDWORD MaxUniforms;
-    CKDWORD MaxFrameBuffers;
-    CKDWORD MaxColorAttachments;
-    CKDWORD MaxTransientVertexBufferSize;
-    CKDWORD MaxTransientIndexBufferSize;
-    CKDWORD MaxTransientInstanceBufferSize;
-    CKDWORD MaxInstanceCount;
-    CKDWORD MaxTransforms;
-    CKDWORD MaxShaderModel;
-    CKDWORD MaxOcclusionQueries;
-    CKDWORD MaxIndirectBuffers;
-    CKDWORD MaxComputeWorkGroupSize[3];
-    CKDWORD Caps;
-};
 
 #endif // CKRASTERIZERTYPES_H

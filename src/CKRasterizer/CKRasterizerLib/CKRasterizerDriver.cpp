@@ -43,19 +43,6 @@ CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
     return FALSE;
 }
 
-CKERROR CKRasterizerDriver::GetShaderTarget(CKShaderTargetDesc *Target) const
-{
-    if (Target)
-        *Target = CKShaderTargetDesc();
-    return CKERR_NOTIMPLEMENTED;
-}
-
-CKERROR CKRasterizerDriver::GetProgrammableCaps(VxProgCapsDesc &Caps)
-{
-    memset(&Caps, 0, sizeof(Caps));
-    return CK_OK;
-}
-
 void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner)
 {
     m_Owner = Owner;
