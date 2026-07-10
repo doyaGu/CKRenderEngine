@@ -178,6 +178,7 @@ CKBOOL g_UpdateTransparency = FALSE;
 // Mode 2: Projected fog values (1/w based)
 int g_FogProjectionMode = 0;
 
+#define CKRE_MATERIAL_EFFECT_FAILED 0x80000000u
 
 //=============================================================================
 // Construction/Destruction
@@ -208,7 +209,7 @@ int g_FogProjectionMode = 0;
 RCKMaterial::RCKMaterial(CKContext *Context, CKSTRING name)
     : CKMaterial(Context, name) {
     // Initialize texture slots to null
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
         m_Textures[i] = nullptr;
     }
 
@@ -321,7 +322,7 @@ void RCKMaterial::CheckPreDeletion() {
     CKObject::CheckPreDeletion();
 
     // Check each texture slot and clear if texture is being deleted
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
         if (m_Textures[i]) {
             if (m_Textures[i]->IsToBeDeleted()) {
                 m_Textures[i] = nullptr;
@@ -353,7 +354,7 @@ int RCKMaterial::GetMemoryOccupation() {
  */
 CKBOOL RCKMaterial::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
     if (cid == CKCID_TEXTURE) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
             if (obj == m_Textures[i]) {
                 return TRUE;
             }
@@ -384,7 +385,7 @@ void RCKMaterial::PreSave(CKFile *file, CKDWORD flags) {
     }
 
     // Save all textures
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
         if (m_Textures[i]) {
             file->SaveObject(m_Textures[i], flags);
         }
@@ -428,6 +429,7 @@ CKStateChunk *RCKMaterial::Save(CKFile *file, CKDWORD flags) {
 
     // Create material-specific state chunk
     CKStateChunk *chunk = CreateCKStateChunk(CKCID_MATERIAL, file);
+    chunk->SetDataVersion(CHUNKDATA_CURRENTVERSION);
     chunk->StartWrite();
     chunk->AddChunkAndDelete(baseChunk);
 
@@ -500,14 +502,19 @@ CKStateChunk *RCKMaterial::Save(CKFile *file, CKDWORD flags) {
         chunk->WriteDword(effect);
     }
 
-    // Write additional textures if any are set
-    if (effect != VXEFFECT_NONE) {
-        if (m_Textures[1] || m_Textures[2] || m_Textures[3]) {
-            chunk->WriteIdentifier(CK_STATESAVE_MATDATA2);
-            chunk->WriteObject(m_Textures[1]);
-            chunk->WriteObject(m_Textures[2]);
-            chunk->WriteObject(m_Textures[3]);
+    // Write additional textures if any are set. Multi-texture slots are part
+    // of the material state even when no material effect is selected.
+    CKBOOL hasAdditionalTextures = FALSE;
+    for (int i = 1; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
+        if (m_Textures[i]) {
+            hasAdditionalTextures = TRUE;
+            break;
         }
+    }
+    if (hasAdditionalTextures) {
+        chunk->WriteIdentifier(CK_STATESAVE_MATDATA2);
+        for (int i = 1; i < CKMATERIAL_TEXTURE_COUNT; ++i)
+            chunk->WriteObject(m_Textures[i]);
     }
 
     chunk->CloseChunk();
@@ -533,9 +540,15 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
     CKBeObject::Load(chunk, file);
 
     // Clear texture slots
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
         m_Textures[i] = nullptr;
     }
+
+    if (m_EffectParameter && m_Context) {
+        m_Context->DestroyObject(m_EffectParameter, CK_DESTROY_TEMPOBJECT, nullptr);
+    }
+    m_EffectParameter = nullptr;
+    m_Flags &= ~0x3F00;
 
     // Read main material data
     if (chunk->SeekIdentifier(CK_STATESAVE_MATDATA)) {
@@ -669,9 +682,11 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Read additional textures
     if (chunk->SeekIdentifier(CK_STATESAVE_MATDATA2)) {
-        m_Textures[1] = static_cast<CKTexture *>(chunk->ReadObject(m_Context));
-        m_Textures[2] = static_cast<CKTexture *>(chunk->ReadObject(m_Context));
-        m_Textures[3] = static_cast<CKTexture *>(chunk->ReadObject(m_Context));
+        for (int i = 1; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
+            CKObject *texObj = chunk->ReadObject(m_Context);
+            if (CKIsChildClassOf(texObj, CKCID_TEXTURE))
+                m_Textures[i] = static_cast<CKTexture *>(texObj);
+        }
     }
 
     // Read effect (without parameter)
@@ -707,7 +722,7 @@ CKERROR RCKMaterial::PrepareDependencies(CKDependenciesContext &context) {
 
     // Check if textures should be included
     if (context.GetClassDependencies(CKCID_MATERIAL) & 1) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
             if (m_Textures[i]) {
                 m_Textures[i]->PrepareDependencies(context);
             }
@@ -735,7 +750,7 @@ CKERROR RCKMaterial::RemapDependencies(CKDependenciesContext &context) {
 
     // Remap textures if needed
     if (context.GetClassDependencies(CKCID_MATERIAL) & 1) {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < CKMATERIAL_TEXTURE_COUNT; ++i) {
             m_Textures[i] = static_cast<CKTexture *>(context.Remap(m_Textures[i]));
         }
     }
@@ -1002,6 +1017,9 @@ void RCKMaterial::SetEmissive(const VxColor &Color) {
  * Based on decompilation at 0x100668E0.
  */
 CKTexture *RCKMaterial::GetTexture(int TexIndex) {
+    if (TexIndex < 0 || TexIndex >= CKMATERIAL_TEXTURE_COUNT)
+        return nullptr;
+
     return m_Textures[TexIndex];
 }
 
@@ -1011,6 +1029,9 @@ CKTexture *RCKMaterial::GetTexture(int TexIndex) {
  * Based on decompilation at 0x10062E8D.
  */
 void RCKMaterial::SetTexture(int TexIndex, CKTexture *Tex) {
+    if (TexIndex < 0 || TexIndex >= CKMATERIAL_TEXTURE_COUNT)
+        return;
+
     m_Textures[TexIndex] = Tex;
 }
 
@@ -1216,10 +1237,14 @@ CKBOOL RCKMaterial::ZWriteEnabled() {
  * Based on decompilation at 0x10062FE9.
  */
 void RCKMaterial::EnableZWrite(CKBOOL ZWrite) {
+    CKBOOL oldZWrite = ZWriteEnabled();
     if (ZWrite) {
         m_Flags |= 2;
     } else {
         m_Flags &= ~2;
+    }
+    if (oldZWrite != ZWriteEnabled()) {
+        g_UpdateTransparency = TRUE;
     }
 }
 
@@ -1402,6 +1427,8 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CK_RENDER_PERF_INC(renderStats, MaterialSetCalls);
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
+    if (!dev || TextureStage < 0 || TextureStage >= CKFF_MAX_TEXTURE_STAGES)
+        return FALSE;
 
     if (m_Callback) {
         if (m_Callback(dev, this, m_CallbackArgument)) {
@@ -1410,10 +1437,36 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
 
     CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
-    if (TextureStage == 0)
-        ffp.DisableTextureStagesFrom(0);
-    else
-        ffp.ResetTextureStage(TextureStage);
+    VX_EFFECT effect = GetEffect();
+    const VxEffectDescription *effectDesc = nullptr;
+    CKRenderManager *renderManager = m_Context ? m_Context->GetRenderManager() : nullptr;
+    const int effectIndex = (int)effect;
+    if (renderManager && effect != VXEFFECT_NONE &&
+        effectIndex >= 0 && effectIndex < renderManager->GetEffectCount()) {
+        effectDesc = &renderManager->GetEffectDescription(effectIndex);
+    }
+    CKDWORD effectCallbackResult = VXEFFECTRETVAL_SKIPNONE;
+    if (effectDesc && effectDesc->SetCallback) {
+        effectCallbackResult = effectDesc->SetCallback(context, this, TextureStage, effectDesc->CallbackArg);
+        if (effectCallbackResult == VXEFFECTRETVAL_SKIPALL)
+            return TRUE;
+    }
+    const CKBOOL skipAllTextures = (effectCallbackResult & VXEFFECTRETVAL_SKIPALLTEX) != 0;
+    const CKBOOL skipTextureMatrix = (effectCallbackResult & VXEFFECTRETVAL_SKIPTEXMAT) != 0;
+    VxMatrix callbackTextureMatrix;
+    CKDWORD callbackTextureTransformFlags = CKRST_TTF_NONE;
+    if (skipTextureMatrix) {
+        callbackTextureMatrix = ffp.GetStateStore().TexMatrix[TextureStage];
+        callbackTextureTransformFlags = ffp.GetTextureStageState(
+            TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS);
+    }
+
+    if (!skipAllTextures) {
+        if (TextureStage == 0)
+            ffp.DisableTextureStagesFrom(0);
+        else
+            ffp.ResetTextureStage(TextureStage);
+    }
 
     // Material constants are part of the fixed-function current state even
     // when lighting is disabled; texture ops and unlit draws can still read
@@ -1449,38 +1502,57 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
     // --- Texture ---
     CKBOOL textureOwnsAlphaTest = FALSE;
-    CKTexture *tex = m_Textures[TextureStage];
-    if (tex) {
-        CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
-        textureOwnsAlphaTest = (tex->SetAsCurrent(context, clamped, TextureStage) == 2);
+    if (!skipAllTextures) {
+        CKTexture *tex = (TextureStage < CKMATERIAL_TEXTURE_COUNT) ? m_Textures[TextureStage] : nullptr;
+        if (tex) {
+            CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
+            int textureResult = tex->SetAsCurrent(context, clamped, TextureStage);
+            if (!textureResult) {
+                ffp.ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            textureOwnsAlphaTest = (textureResult == 2);
 
-        ffp.SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        ffp.SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        ffp.SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-    } else {
-        ffp.SetTexture(TextureStage, 0);
+            ffp.SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
+            ffp.SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
+            ffp.SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
+            ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
+        } else {
+            ffp.SetTexture(TextureStage, 0);
+        }
+
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                                 CKFFPackTexcoordIndex((CKDWORD)TextureStage, CKFF_TEXGEN_NONE));
+        ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+        ffp.DisableTextureStagesFrom(TextureStage + 1);
     }
 
-    ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                             CKFFPackTexcoordIndex((CKDWORD)TextureStage, CKFF_TEXGEN_NONE));
-    ffp.SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    ffp.DisableTextureStagesFrom(TextureStage + 1);
+    if (skipTextureMatrix) {
+        ffp.SetTransform((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
+                         callbackTextureMatrix);
+        ffp.SetTextureStageState(TextureStage,
+                                 CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                 callbackTextureTransformFlags);
+    }
 
-    VX_EFFECT effect = GetEffect();
-    if (effect == VXEFFECT_TEXGEN) {
-        TexGenEffect(dev, ReadTexGenParameter(m_EffectParameter), nullptr, TextureStage);
-    } else if (effect == VXEFFECT_TEXGENREF) {
-        CKMaterialTexGenRefParams params;
-        ReadTexGenRefParameter(m_EffectParameter, params);
-        RCK3dEntity *refEntity = static_cast<RCK3dEntity *>(m_Context ? m_Context->GetObject(params.Referential) : nullptr);
-        TexGenEffect(dev, (VX_EFFECTTEXGEN)params.TexGen, refEntity, TextureStage);
-    } else if (effect == VXEFFECT_BUMPENV) {
-        BumpMapEnvEffect(dev);
-    } else if (effect == VXEFFECT_DP3) {
-        DP3Effect(dev, TextureStage);
-    } else if (effect == VXEFFECT_2TEXTURES || effect == VXEFFECT_3TEXTURES) {
-        BlendTexturesEffect(dev, TextureStage + 1);
+    CKDWORD effectResult = 0;
+    if (!skipAllTextures && !skipTextureMatrix) {
+        if (effect == VXEFFECT_TEXGEN) {
+            effectResult = TexGenEffect(dev, ReadTexGenParameter(m_EffectParameter), nullptr, TextureStage);
+        } else if (effect == VXEFFECT_TEXGENREF) {
+            CKMaterialTexGenRefParams params;
+            ReadTexGenRefParameter(m_EffectParameter, params);
+            RCK3dEntity *refEntity = static_cast<RCK3dEntity *>(m_Context ? m_Context->GetObject(params.Referential) : nullptr);
+            effectResult = TexGenEffect(dev, (VX_EFFECTTEXGEN)params.TexGen, refEntity, TextureStage);
+        } else if (effect == VXEFFECT_BUMPENV) {
+            effectResult = BumpMapEnvEffect(dev);
+        } else if (effect == VXEFFECT_DP3) {
+            effectResult = DP3Effect(dev, TextureStage);
+        } else if (effect == VXEFFECT_2TEXTURES || effect == VXEFFECT_3TEXTURES) {
+            effectResult = BlendTexturesEffect(dev, TextureStage + 1);
+        }
+        if ((effectResult & CKRE_MATERIAL_EFFECT_FAILED) != 0)
+            return FALSE;
     }
 
     if (!textureOwnsAlphaTest) {
@@ -1514,12 +1586,12 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
     }
 
     const CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
-    if (!tex->IsInVideoMemory() && !tex->SystemToVideoMemory(context, clamped)) {
+    int textureResult = tex->SetAsCurrent(context, clamped, TextureStage);
+    if (!textureResult) {
         ffp.SetTexture(TextureStage, 0);
         return FALSE;
     }
 
-    ffp.SetTexture(TextureStage, tex->GetRstTextureIndex());
     ffp.SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
     ffp.SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
     ffp.SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
@@ -1638,7 +1710,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
     CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
 
     const CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
-    m_Textures[0]->SetAsCurrent((CKRenderContext *)dev, clamped, 0);
+    if (!m_Textures[0]->SetAsCurrent((CKRenderContext *)dev, clamped, 0)) {
+        ffp.ResetTextureStage(0);
+        return CKRE_MATERIAL_EFFECT_FAILED;
+    }
     ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
     ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
     ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, m_TextureMagMode);
@@ -1652,7 +1727,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
 
     int envStage = 1;
     if (m_Textures[1]) {
-        m_Textures[1]->SetAsCurrent((CKRenderContext *)dev, clamped, 1);
+        if (!m_Textures[1]->SetAsCurrent((CKRenderContext *)dev, clamped, 1)) {
+            ffp.ResetTextureStage(1);
+            return CKRE_MATERIAL_EFFECT_FAILED;
+        }
         ffp.SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
         ffp.SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
         ffp.SetTextureStageState(1, CKRST_TSS_ADDRESS, m_TextureAddressMode);
@@ -1681,7 +1759,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
     }
 
     if (m_Textures[2] && envStage < CKFF_MAX_TEXTURE_STAGES) {
-        m_Textures[2]->SetAsCurrent((CKRenderContext *)dev, FALSE, envStage);
+        if (!m_Textures[2]->SetAsCurrent((CKRenderContext *)dev, FALSE, envStage)) {
+            ffp.ResetTextureStage(envStage);
+            return CKRE_MATERIAL_EFFECT_FAILED;
+        }
         ffp.SetTextureStageState(envStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
         ffp.SetTextureStageState(envStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
         ffp.SetTextureStageState(envStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
@@ -1778,8 +1859,11 @@ CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
         const CKDWORD texGen = (i == 0) ? params.TexGen1 : params.TexGen2;
         const CK_ID refId = (i == 0) ? params.Referential1 : params.Referential2;
 
-        m_Textures[currentStage]->SetAsCurrent((CKRenderContext *)dev, FALSE, currentStage);
         CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+        if (!m_Textures[currentStage]->SetAsCurrent((CKRenderContext *)dev, FALSE, currentStage)) {
+            ffp.ResetTextureStage(currentStage);
+            return CKRE_MATERIAL_EFFECT_FAILED;
+        }
         ffp.SetTextureStageState(currentStage, CKRST_TSS_OP, SanitizeTextureCombineOp(combine));
         ffp.SetTextureStageState(currentStage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
         ffp.SetTextureStageState(currentStage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
@@ -1923,47 +2007,49 @@ void RCKMaterial::SetEffect(VX_EFFECT Effect) {
     m_Flags = (m_Flags & ~0x3F00) | ((Effect & 0x3F) << 8);
 
     VX_EFFECT currentEffect = GetEffect();
-    if (currentEffect != VXEFFECT_NONE) {
-        // Get render manager for effect description
-        CKRenderManager *renderManager = m_Context->GetRenderManager();
-        if (renderManager) {
-            const VxEffectDescription &effectDesc = renderManager->GetEffectDescription(Effect);
+    const VxEffectDescription *effectDesc = nullptr;
+    CKRenderManager *renderManager = m_Context ? m_Context->GetRenderManager() : nullptr;
+    const int effectIndex = (int)currentEffect;
+    if (renderManager && currentEffect != VXEFFECT_NONE &&
+        effectIndex >= 0 && effectIndex < renderManager->GetEffectCount()) {
+        effectDesc = &renderManager->GetEffectDescription(effectIndex);
+    }
+    if (currentEffect != VXEFFECT_NONE && effectDesc &&
+        (effectDesc->ParameterType.d1 != 0 || effectDesc->ParameterType.d2 != 0)) {
+        if (m_EffectParameter) {
+            // Update existing parameter
+            m_EffectParameter->SetName(const_cast<CKSTRING>(effectDesc->ParameterDescription.CStr()));
 
-            // Check if parameter type is valid (non-null GUID)
-            if (effectDesc.ParameterType.d1 != 0 || effectDesc.ParameterType.d2 != 0) {
-                if (m_EffectParameter) {
-                    // Update existing parameter
-                    m_EffectParameter->SetName(const_cast<CKSTRING>(effectDesc.ParameterDescription.CStr()));
+            CKGUID currentGuid = m_EffectParameter->GetGUID();
+            if (currentGuid != effectDesc->ParameterType) {
+                m_EffectParameter->SetGUID(effectDesc->ParameterType);
+                m_EffectParameter->
+                    SetStringValue(const_cast<CKSTRING>(effectDesc->ParameterDefaultValue.CStr()));
+            }
+        } else if (m_Context) {
+            // Create new parameter
+            CK_OBJECTCREATION_OPTIONS options = IsDynamic()
+                                                    ? CK_OBJECTCREATION_DYNAMIC
+                                                    : CK_OBJECTCREATION_NONAMECHECK;
 
-                    CKGUID currentGuid = m_EffectParameter->GetGUID();
-                    if (currentGuid != effectDesc.ParameterType) {
-                        m_EffectParameter->SetGUID(effectDesc.ParameterType);
-                        m_EffectParameter->
-                            SetStringValue(const_cast<CKSTRING>(effectDesc.ParameterDefaultValue.CStr()));
-                    }
-                } else {
-                    // Create new parameter
-                    CK_OBJECTCREATION_OPTIONS options = IsDynamic()
-                                                            ? CK_OBJECTCREATION_DYNAMIC
-                                                            : CK_OBJECTCREATION_NONAMECHECK;
+            m_EffectParameter = static_cast<CKParameter *>(
+                m_Context->CreateObject(CKCID_PARAMETER,
+                                        const_cast<CKSTRING>(effectDesc->ParameterDescription.CStr()),
+                                        options, nullptr));
 
-                    m_EffectParameter = static_cast<CKParameter *>(
-                        m_Context->CreateObject(CKCID_PARAMETER,
-                                                const_cast<CKSTRING>(effectDesc.ParameterDescription.CStr()),
-                                                options, nullptr));
-
-                    if (m_EffectParameter) {
-                        m_EffectParameter->SetGUID(effectDesc.ParameterType);
-                    }
-                }
+            if (m_EffectParameter) {
+                m_EffectParameter->SetGUID(effectDesc->ParameterType);
+                m_EffectParameter->
+                    SetStringValue(const_cast<CKSTRING>(effectDesc->ParameterDefaultValue.CStr()));
             }
         }
     } else {
-        // Destroy effect parameter when effect is cleared
-        if (m_EffectParameter) {
+        // Destroy effect parameter when effect is cleared or the new effect has
+        // no parameter type.
+        if (m_EffectParameter && m_Context) {
             m_Context->DestroyObject(m_EffectParameter, CK_DESTROY_TEMPOBJECT, nullptr);
-            m_EffectParameter = nullptr;
         }
+        m_EffectParameter = nullptr;
     }
 }
 

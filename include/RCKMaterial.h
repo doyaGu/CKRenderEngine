@@ -4,6 +4,8 @@
 #include "CKRenderEngineTypes.h"
 #include "CKMaterial.h"
 
+#define CKMATERIAL_TEXTURE_COUNT 4
+
 struct CKSprite3DBatch;
 class RCKRenderContext;
 class RCK3dEntity;
@@ -18,7 +20,7 @@ class RCK3dEntity;
  *
  * Member layout based on decompilation (total size: 0xF0 = 240 bytes):
  * - Base CKBeObject data
- * - m_Textures[4]:       4 texture slots for multi-texturing
+ * - m_Textures[CKMATERIAL_TEXTURE_COUNT]: texture slots for multi-texturing
  * - m_MaterialData:      Diffuse, Ambient, Specular, Emissive colors and power
  * - m_SpecularColor:     Cached specular color (separate from MaterialData.Specular)
  * - m_TextureBlendMode:  How texture and vertex colors are combined
@@ -233,8 +235,8 @@ public:
     void RestoreAfterChannelRender(VXBLEND_MODE savedSourceBlend, VXBLEND_MODE savedDestBlend, CKDWORD savedFlags);
 
 protected:
-    // Texture slots (4 for multi-texturing support)
-    CKTexture *m_Textures[4];
+    // Texture slots for multi-texturing support
+    CKTexture *m_Textures[CKMATERIAL_TEXTURE_COUNT];
 
     // Core material data (Diffuse, Ambient, Specular, Emissive, SpecularPower)
     CKMaterialData m_MaterialData;
