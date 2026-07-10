@@ -1,10 +1,9 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <thread>
 #include <vector>
 #include <atomic>
-#include <cassert>
 
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
@@ -462,6 +461,12 @@ static void TestSamplerCompareFlags()
     TEST_SECTION("Sampler Compare Flags");
 
     CKSamplerDesc sampler = {};
+    sampler.MinFilter = CKRST_FILTER_LINEAR;
+    sampler.MagFilter = CKRST_FILTER_LINEAR;
+    sampler.MipFilter = CKRST_FILTER_LINEAR;
+    sampler.AddressU = CKRST_ADDRESS_WRAP;
+    sampler.AddressV = CKRST_ADDRESS_WRAP;
+    sampler.AddressW = CKRST_ADDRESS_WRAP;
     sampler.CompareFunc = CKRST_COMPARE_NONE;
     TEST_ASSERT((CKBgfxSamplerFlags(&sampler) & BGFX_SAMPLER_COMPARE_LEQUAL) == 0,
                 "compare NONE emits no compare flags");
@@ -495,7 +500,7 @@ static void TestBackendProfileMapping()
                 "OpenGLES renderer is rejected without an ESSL shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Metal) == CKRST_SHADER_PROFILE_MSL,
                 "Metal renderer maps to MSL shader profile");
-    TEST_ASSERT(std::strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_SPIRV), "spirv") == 0,
+    TEST_ASSERT(strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_SPIRV), "spirv") == 0,
                 "Shader profile name must be stable for diagnostics");
 }
 
@@ -725,15 +730,15 @@ static void TestDrawMapTraceContractHelpers()
 
     TEST_ASSERT(CKBGFX_DRAWMAP_SCHEMA == 2,
                 "DrawMap submit schema stays at version 2");
-    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_SUBMIT_MAP, "SubmitMap") == 0,
+    TEST_ASSERT(strcmp(CKBGFX_DRAWMAP_TAG_SUBMIT_MAP, "SubmitMap") == 0,
                 "SubmitMap tag is centralized");
-    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_PROGRAM_MAP, "ProgramMap") == 0,
+    TEST_ASSERT(strcmp(CKBGFX_DRAWMAP_TAG_PROGRAM_MAP, "ProgramMap") == 0,
                 "ProgramMap tag is centralized");
-    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_TEXTURE_MAP, "TextureMap") == 0,
+    TEST_ASSERT(strcmp(CKBGFX_DRAWMAP_TAG_TEXTURE_MAP, "TextureMap") == 0,
                 "TextureMap tag is centralized");
-    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_BUFFER_MAP, "BufferMap") == 0,
+    TEST_ASSERT(strcmp(CKBGFX_DRAWMAP_TAG_BUFFER_MAP, "BufferMap") == 0,
                 "BufferMap tag is centralized");
-    TEST_ASSERT(std::strcmp(CKBGFX_DRAWMAP_TAG_STATE_MAP, "StateMap") == 0,
+    TEST_ASSERT(strcmp(CKBGFX_DRAWMAP_TAG_STATE_MAP, "StateMap") == 0,
                 "StateMap tag is centralized");
 
     char buffer[128];
@@ -744,7 +749,7 @@ static void TestDrawMapTraceContractHelpers()
                                                   &offset, 3, 77, 8, 21,
                                                   0x1234) == TRUE,
                 "texture binding formatter succeeds");
-    TEST_ASSERT(std::strcmp(buffer, " tex3=77:8:21:0x00001234") == 0,
+    TEST_ASSERT(strcmp(buffer, " tex3=77:8:21:0x00001234") == 0,
                 "texture binding formatter keeps contract order");
 
     offset = 0;
@@ -753,7 +758,7 @@ static void TestDrawMapTraceContractHelpers()
                                                  &offset, 1, 5, 2, 12, 9,
                                                  3) == TRUE,
                 "vertex binding formatter succeeds");
-    TEST_ASSERT(std::strcmp(buffer, " vb1=5:2:12:9:3") == 0,
+    TEST_ASSERT(strcmp(buffer, " vb1=5:2:12:9:3") == 0,
                 "vertex binding formatter keeps contract order");
 }
 
@@ -767,9 +772,9 @@ static void TestDebugOverlayViewMapContract()
 
     const char *line0 = CKBgfxDebugViewLine0();
     const char *line1 = CKBgfxDebugViewLine1();
-    TEST_ASSERT(std::strcmp(line0, "views: 0 clear 1 bg2d 2 first3d 3 opaque") == 0,
+    TEST_ASSERT(strcmp(line0, "views: 0 clear 1 bg2d 2 first3d 3 opaque") == 0,
                 "overlay first view line matches render pipeline ordering");
-    TEST_ASSERT(std::strcmp(line1, "       4 stencil 5 trans 6 post 7 fg2d") == 0,
+    TEST_ASSERT(strcmp(line1, "       4 stencil 5 trans 6 post 7 fg2d") == 0,
                 "overlay second view line includes stencil, post, and foreground views");
 }
 
@@ -788,7 +793,10 @@ static void TestInvalidProgramSubmitIsRejected()
 
     CKBgfxEncoder encoder;
     encoder.m_Context = &context;
-    std::strncpy(encoder.m_LastMarker, "invalid-program", sizeof(encoder.m_LastMarker) - 1);
+    encoder.m_Status = CK_OK;
+    encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
+    encoder.m_Active.store(TRUE, std::memory_order_release);
+    strncpy(encoder.m_LastMarker, "invalid-program", sizeof(encoder.m_LastMarker) - 1);
     encoder.m_LastMarker[sizeof(encoder.m_LastMarker) - 1] = '\0';
 
     const CKDWORD before = context.GetInvalidSubmitCountForTests();
@@ -796,6 +804,8 @@ static void TestInvalidProgramSubmitIsRejected()
 
     TEST_ASSERT(context.GetInvalidSubmitCountForTests() == before + 1,
                 "invalid program submit increments the contract counter");
+    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDPARAMETER,
+                "invalid program submit sets sticky encoder status");
     TEST_ASSERT(encoder.m_LastMarker[0] == '\0',
                 "invalid submit consumes the pending marker instead of leaking it to the next draw");
 }
@@ -812,7 +822,7 @@ static void TestUniformReflectionUsesSlotHandles()
 
     // CK slot 5 wraps bgfx uniform idx 42; slot and idx deliberately differ so
     // any raw-idx passthrough is caught.
-    context.InjectUniformRecordForTests(5, 42, CKRST_UNIFORM_MATRIX4, 8, "u_ffMatrices");
+    context.InjectUniformRecordForTests(5, 42, CKRST_UNIFORM_MAT4, 8, "u_ffMatrices");
 
     TEST_ASSERT(context.FindUniformSlotByHandleForTests(42) == 5,
                 "bgfx uniform idx resolves back to its CK slot handle");
@@ -821,9 +831,9 @@ static void TestUniformReflectionUsesSlotHandles()
 
     CKUniformInfo info;
     context.GetUniformInfo(5, &info);
-    TEST_ASSERT(std::strcmp(info.Name, "u_ffMatrices") == 0,
+    TEST_ASSERT(strcmp(info.Name, "u_ffMatrices") == 0,
                 "GetUniformInfo takes the CK slot handle and returns the record name");
-    TEST_ASSERT(info.Type == CKRST_UNIFORM_MATRIX4,
+    TEST_ASSERT(info.Type == CKRST_UNIFORM_MAT4,
                 "GetUniformInfo returns the CK uniform type from the record");
     TEST_ASSERT(info.Count == 8,
                 "GetUniformInfo returns the array count from the record");
@@ -838,6 +848,61 @@ static void TestUniformReflectionUsesSlotHandles()
     context.GetUniformInfo(0, &invalidInfo);
     TEST_ASSERT(invalidInfo.Name[0] == '\0' && invalidInfo.Count == 0,
                 "invalid handle 0 yields an empty info instead of touching bgfx");
+}
+
+// ============================================================================
+// Test 11: Exact pixel-format mapping
+// ============================================================================
+
+static void TestExactPixelFormatMapping()
+{
+    TEST_SECTION("Exact Pixel Format Mapping");
+
+    struct ExactFormatMapping {
+        VX_PIXELFORMAT PixelFormat;
+        bgfx::TextureFormat::Enum NativeFormat;
+    };
+    const ExactFormatMapping exactMappings[] = {
+        {_32_ARGB8888, bgfx::TextureFormat::BGRA8},
+        {_32_ABGR8888, bgfx::TextureFormat::RGBA8},
+        {_24_BGR888, bgfx::TextureFormat::RGB8},
+        {_16_RGB565, bgfx::TextureFormat::B5G6R5},
+        {_16_BGR565, bgfx::TextureFormat::R5G6B5},
+        {_16_ARGB1555, bgfx::TextureFormat::BGR5A1},
+        {_16_ABGR1555, bgfx::TextureFormat::RGB5A1},
+        {_16_ARGB4444, bgfx::TextureFormat::BGRA4},
+        {_16_ABGR4444, bgfx::TextureFormat::RGBA4},
+        {_DXT1, bgfx::TextureFormat::BC1},
+        {_DXT3, bgfx::TextureFormat::BC2},
+        {_DXT5, bgfx::TextureFormat::BC3},
+    };
+
+    for (int i = 0; i < (int)(sizeof(exactMappings) / sizeof(exactMappings[0])); ++i) {
+        bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
+        VX_PIXELFORMAT pixelFormat = UNKNOWN_PF;
+        TEST_ASSERT(CKBgfxTryTextureFormat(exactMappings[i].PixelFormat, nativeFormat),
+                    "exact CK format maps to bgfx");
+        TEST_ASSERT(nativeFormat == exactMappings[i].NativeFormat,
+                    "exact CK format keeps its channel layout");
+        TEST_ASSERT(CKBgfxTryPixelFormat(exactMappings[i].NativeFormat, pixelFormat),
+                    "exact bgfx format maps back to CK");
+        TEST_ASSERT(pixelFormat == exactMappings[i].PixelFormat,
+                    "exact pixel-format mapping round-trips");
+    }
+
+    const VX_PIXELFORMAT incompatibleFormats[] = {
+        _32_RGB888,
+        _32_BGRA8888,
+        _32_RGBA8888,
+        _24_RGB888,
+        _16_RGB555,
+        _16_BGR555,
+    };
+    for (int i = 0; i < (int)(sizeof(incompatibleFormats) / sizeof(incompatibleFormats[0])); ++i) {
+        bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
+        TEST_ASSERT(!CKBgfxTryTextureFormat(incompatibleFormats[i], nativeFormat),
+                    "incompatible channel layout is rejected instead of aliased");
+    }
 }
 
 // ============================================================================
@@ -865,6 +930,7 @@ int main()
     TestDebugOverlayViewMapContract();
     TestInvalidProgramSubmitIsRejected();
     TestUniformReflectionUsesSlotHandles();
+    TestExactPixelFormatMapping();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);

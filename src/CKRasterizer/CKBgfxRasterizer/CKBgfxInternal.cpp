@@ -1,4 +1,5 @@
 #include "CKBgfxInternal.h"
+#include "CKRasterizerValidation.h"
 #include "CKBgfxConfig.h"
 #include "VxWindowFunctions.h"
 
@@ -12,9 +13,9 @@
 #include <strings.h>
 #endif
 
-#include <cstdarg>
-#include <cstdio>
-#include <cstring>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifndef _WIN32
 #ifndef _TRUNCATE
@@ -299,92 +300,115 @@ bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
     return bgfx::RendererType::Count;
 }
 
-bgfx::UniformType::Enum CKBgfxUniformType(CK_UNIFORM_TYPE type)
+bool CKBgfxTryUniformType(CK_UNIFORM_TYPE type, bgfx::UniformType::Enum &result)
 {
     switch (type)
     {
-    case CKRST_UNIFORM_FLOAT1:
-    case CKRST_UNIFORM_FLOAT2:
-    case CKRST_UNIFORM_FLOAT3:
-    case CKRST_UNIFORM_FLOAT4:  return bgfx::UniformType::Vec4;
-    case CKRST_UNIFORM_MATRIX4: return bgfx::UniformType::Mat4;
-    case CKRST_UNIFORM_SAMPLER: return bgfx::UniformType::Sampler;
-    default:                    return bgfx::UniformType::Vec4;
+    case CKRST_UNIFORM_SAMPLER: result = bgfx::UniformType::Sampler; break;
+    case CKRST_UNIFORM_VEC4:    result = bgfx::UniformType::Vec4; break;
+    case CKRST_UNIFORM_MAT3:    result = bgfx::UniformType::Mat3; break;
+    case CKRST_UNIFORM_MAT4:    result = bgfx::UniformType::Mat4; break;
+    default:                    return false;
     }
+    return true;
 }
 
-bgfx::Attrib::Enum CKBgfxAttrib(CK_VERTEX_ATTRIB attrib)
+bool CKBgfxTryAttrib(CK_VERTEX_ATTRIB attrib, bgfx::Attrib::Enum &result)
 {
     switch (attrib)
     {
-    case CKRST_ATTRIB_POSITION:  return bgfx::Attrib::Position;
-    case CKRST_ATTRIB_NORMAL:    return bgfx::Attrib::Normal;
-    case CKRST_ATTRIB_TANGENT:   return bgfx::Attrib::Tangent;
-    case CKRST_ATTRIB_BITANGENT: return bgfx::Attrib::Bitangent;
-    case CKRST_ATTRIB_COLOR0:    return bgfx::Attrib::Color0;
-    case CKRST_ATTRIB_COLOR1:    return bgfx::Attrib::Color1;
-    case CKRST_ATTRIB_COLOR2:    return bgfx::Attrib::Color2;
-    case CKRST_ATTRIB_COLOR3:    return bgfx::Attrib::Color3;
-    case CKRST_ATTRIB_INDICES:   return bgfx::Attrib::Indices;
-    case CKRST_ATTRIB_WEIGHT:    return bgfx::Attrib::Weight;
-    case CKRST_ATTRIB_TEXCOORD0: return bgfx::Attrib::TexCoord0;
-    case CKRST_ATTRIB_TEXCOORD1: return bgfx::Attrib::TexCoord1;
-    case CKRST_ATTRIB_TEXCOORD2: return bgfx::Attrib::TexCoord2;
-    case CKRST_ATTRIB_TEXCOORD3: return bgfx::Attrib::TexCoord3;
-    case CKRST_ATTRIB_TEXCOORD4: return bgfx::Attrib::TexCoord4;
-    case CKRST_ATTRIB_TEXCOORD5: return bgfx::Attrib::TexCoord5;
-    case CKRST_ATTRIB_TEXCOORD6: return bgfx::Attrib::TexCoord6;
-    case CKRST_ATTRIB_TEXCOORD7: return bgfx::Attrib::TexCoord7;
-    default:                     return bgfx::Attrib::Position;
+    case CKRST_ATTRIB_POSITION:  result = bgfx::Attrib::Position; break;
+    case CKRST_ATTRIB_NORMAL:    result = bgfx::Attrib::Normal; break;
+    case CKRST_ATTRIB_TANGENT:   result = bgfx::Attrib::Tangent; break;
+    case CKRST_ATTRIB_BITANGENT: result = bgfx::Attrib::Bitangent; break;
+    case CKRST_ATTRIB_COLOR0:    result = bgfx::Attrib::Color0; break;
+    case CKRST_ATTRIB_COLOR1:    result = bgfx::Attrib::Color1; break;
+    case CKRST_ATTRIB_COLOR2:    result = bgfx::Attrib::Color2; break;
+    case CKRST_ATTRIB_COLOR3:    result = bgfx::Attrib::Color3; break;
+    case CKRST_ATTRIB_INDICES:   result = bgfx::Attrib::Indices; break;
+    case CKRST_ATTRIB_WEIGHT:    result = bgfx::Attrib::Weight; break;
+    case CKRST_ATTRIB_TEXCOORD0: result = bgfx::Attrib::TexCoord0; break;
+    case CKRST_ATTRIB_TEXCOORD1: result = bgfx::Attrib::TexCoord1; break;
+    case CKRST_ATTRIB_TEXCOORD2: result = bgfx::Attrib::TexCoord2; break;
+    case CKRST_ATTRIB_TEXCOORD3: result = bgfx::Attrib::TexCoord3; break;
+    case CKRST_ATTRIB_TEXCOORD4: result = bgfx::Attrib::TexCoord4; break;
+    case CKRST_ATTRIB_TEXCOORD5: result = bgfx::Attrib::TexCoord5; break;
+    case CKRST_ATTRIB_TEXCOORD6: result = bgfx::Attrib::TexCoord6; break;
+    case CKRST_ATTRIB_TEXCOORD7: result = bgfx::Attrib::TexCoord7; break;
+    default:                     return false;
     }
+    return true;
 }
 
-bgfx::AttribType::Enum CKBgfxAttribType(CK_VERTEX_ATTRIB_TYPE type)
+bool CKBgfxTryAttribType(CK_VERTEX_ATTRIB_TYPE type, bgfx::AttribType::Enum &result)
 {
     switch (type)
     {
-    case CKRST_ATTRIBTYPE_FLOAT:  return bgfx::AttribType::Float;
-    case CKRST_ATTRIBTYPE_UINT8:  return bgfx::AttribType::Uint8;
-    case CKRST_ATTRIBTYPE_INT16:  return bgfx::AttribType::Int16;
-    default:                      return bgfx::AttribType::Float;
+    case CKRST_ATTRIBTYPE_INT8:   result = bgfx::AttribType::Int8; break;
+    case CKRST_ATTRIBTYPE_UINT8:  result = bgfx::AttribType::Uint8; break;
+    case CKRST_ATTRIBTYPE_UINT10: result = bgfx::AttribType::Uint10; break;
+    case CKRST_ATTRIBTYPE_INT16:  result = bgfx::AttribType::Int16; break;
+    case CKRST_ATTRIBTYPE_UINT16: result = bgfx::AttribType::Uint16; break;
+    case CKRST_ATTRIBTYPE_HALF:   result = bgfx::AttribType::Half; break;
+    case CKRST_ATTRIBTYPE_FLOAT:  result = bgfx::AttribType::Float; break;
+    default:                      return false;
     }
+    return true;
 }
 
-bgfx::TextureFormat::Enum CKBgfxTextureFormat(VX_PIXELFORMAT pf)
+bool CKBgfxTryTextureFormat(VX_PIXELFORMAT pf, bgfx::TextureFormat::Enum &result)
 {
     switch (pf)
     {
-    case _32_ARGB8888: return bgfx::TextureFormat::BGRA8;
-    case _32_RGB888:   return bgfx::TextureFormat::BGRA8;
-    case _32_BGRA8888: return bgfx::TextureFormat::BGRA8;
-    case _32_ABGR8888: return bgfx::TextureFormat::RGBA8;
-    case _24_RGB888:   return bgfx::TextureFormat::RGB8;
-    case _24_BGR888:   return bgfx::TextureFormat::RGB8;
-    case _16_RGB565:
-    case _16_BGR565:   return bgfx::TextureFormat::R5G6B5;
-    case _16_RGB555:
-    case _16_BGR555:   return bgfx::TextureFormat::RGB5A1;
-    case _16_ARGB1555:
-    case _16_ABGR1555: return bgfx::TextureFormat::RGB5A1;
-    case _16_ARGB4444:
-    case _16_ABGR4444: return bgfx::TextureFormat::RGBA4;
-    case _DXT1:        return bgfx::TextureFormat::BC1;
-    case _DXT3:        return bgfx::TextureFormat::BC2;
-    case _DXT5:        return bgfx::TextureFormat::BC3;
-    default:           return bgfx::TextureFormat::BGRA8;
+    case _32_ARGB8888: result = bgfx::TextureFormat::BGRA8; break;
+    case _32_ABGR8888: result = bgfx::TextureFormat::RGBA8; break;
+    case _24_BGR888:   result = bgfx::TextureFormat::RGB8; break;
+    case _16_RGB565:   result = bgfx::TextureFormat::B5G6R5; break;
+    case _16_BGR565:   result = bgfx::TextureFormat::R5G6B5; break;
+    case _16_ARGB1555: result = bgfx::TextureFormat::BGR5A1; break;
+    case _16_ABGR1555: result = bgfx::TextureFormat::RGB5A1; break;
+    case _16_ARGB4444: result = bgfx::TextureFormat::BGRA4; break;
+    case _16_ABGR4444: result = bgfx::TextureFormat::RGBA4; break;
+    case _DXT1:        result = bgfx::TextureFormat::BC1; break;
+    case _DXT3:        result = bgfx::TextureFormat::BC2; break;
+    case _DXT5:        result = bgfx::TextureFormat::BC3; break;
+    default:           return false;
     }
+    return true;
 }
 
-bgfx::TextureFormat::Enum CKBgfxDepthFormat(CK_DEPTH_FORMAT fmt)
+bool CKBgfxTryPixelFormat(bgfx::TextureFormat::Enum format, VX_PIXELFORMAT &result)
+{
+    switch (format)
+    {
+    case bgfx::TextureFormat::BGRA8:  result = _32_ARGB8888; break;
+    case bgfx::TextureFormat::RGBA8:  result = _32_ABGR8888; break;
+    case bgfx::TextureFormat::RGB8:   result = _24_BGR888; break;
+    case bgfx::TextureFormat::B5G6R5: result = _16_RGB565; break;
+    case bgfx::TextureFormat::R5G6B5: result = _16_BGR565; break;
+    case bgfx::TextureFormat::BGR5A1: result = _16_ARGB1555; break;
+    case bgfx::TextureFormat::RGB5A1: result = _16_ABGR1555; break;
+    case bgfx::TextureFormat::BGRA4:  result = _16_ARGB4444; break;
+    case bgfx::TextureFormat::RGBA4:  result = _16_ABGR4444; break;
+    case bgfx::TextureFormat::BC1:    result = _DXT1; break;
+    case bgfx::TextureFormat::BC2:    result = _DXT3; break;
+    case bgfx::TextureFormat::BC3:    result = _DXT5; break;
+    default:                          return false;
+    }
+    return true;
+}
+
+bool CKBgfxTryDepthFormat(CK_DEPTH_FORMAT fmt, bgfx::TextureFormat::Enum &result)
 {
     switch (fmt)
     {
-    case CKRST_DEPTHFMT_D16:    return bgfx::TextureFormat::D16;
-    case CKRST_DEPTHFMT_D24:    return bgfx::TextureFormat::D24;
-    case CKRST_DEPTHFMT_D24S8:  return bgfx::TextureFormat::D24S8;
-    case CKRST_DEPTHFMT_D32F:   return bgfx::TextureFormat::D32F;
-    default:                    return bgfx::TextureFormat::D24S8;
+    case CKRST_DEPTHFMT_D16:    result = bgfx::TextureFormat::D16; break;
+    case CKRST_DEPTHFMT_D24:    result = bgfx::TextureFormat::D24; break;
+    case CKRST_DEPTHFMT_D24S8:  result = bgfx::TextureFormat::D24S8; break;
+    case CKRST_DEPTHFMT_D32F:   result = bgfx::TextureFormat::D32F; break;
+    default:                    return false;
     }
+    return true;
 }
 
 CKDWORD CKBgfxImageRowBytes(CKDWORD width, CKDWORD bitsPerPixel)
@@ -490,12 +514,13 @@ CKBOOL CKBgfxSamplerWantsMipMaps(const CKSamplerDesc *s)
     }
 }
 
-uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
+CKBOOL CKBgfxTrySamplerFlags(const CKSamplerDesc *s, uint32_t &flags)
 {
+    flags = BGFX_SAMPLER_NONE;
+    if (CKRasterizerValidateSampler(s) != CK_OK)
+        return FALSE;
     if (!s)
-        return BGFX_SAMPLER_NONE;
-
-    uint32_t flags = 0;
+        return TRUE;
 
     switch (s->MinFilter)
     {
@@ -514,7 +539,10 @@ uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
     switch (s->MipFilter)
     {
     case CKRST_FILTER_NEAREST:
-    case CKRST_FILTER_MIPNEAREST:  flags |= BGFX_SAMPLER_MIP_POINT; break;
+    case CKRST_FILTER_MIPNEAREST:
+    case CKRST_FILTER_LINEARMIPNEAREST:
+        flags |= BGFX_SAMPLER_MIP_POINT;
+        break;
     default: break;
     }
 
@@ -561,6 +589,13 @@ uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
     if (s->BorderColor != 0)
         flags |= BGFX_SAMPLER_BORDER_COLOR(s->BorderColor & 0xF);
 
+    return TRUE;
+}
+
+uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *s)
+{
+    uint32_t flags = BGFX_SAMPLER_NONE;
+    CKBgfxTrySamplerFlags(s, flags);
     return flags;
 }
 
@@ -594,10 +629,26 @@ static uint64_t CKBgfxBlendEquation(CKDWORD op)
     }
 }
 
-uint64_t CKBgfxState(CKDrawState State)
+CKERROR CKBgfxTryState(CKDrawState State, uint64_t &bgfxState)
 {
-    uint64_t bgfxState = 0;
+    bgfxState = 0;
+    const CKERROR validation = CKRasterizerValidateDrawState(State);
+    if (validation != CK_OK)
+        return validation;
+
     CKDWORD lo = State.Lo;
+
+    const CKDWORD depthFunc = (lo >> 6) & 0xF;
+    const CKDWORD cullMode = (lo >> 10) & 0x3;
+    const CKDWORD fillMode = (lo >> 12) & 0x3;
+    const CKDWORD blendSrc = (lo >> 16) & 0xF;
+    const CKDWORD blendDst = (lo >> 20) & 0xF;
+    const CKDWORD blendSrcA = (lo >> 24) & 0xF;
+    const CKDWORD blendDstA = (lo >> 28) & 0xF;
+    const CKDWORD mid = State.Mid;
+    const CKDWORD blendEq = mid & 0x7;
+    const CKDWORD blendEqA = (mid >> 3) & 0x7;
+    const CKDWORD primitive = (mid >> 6) & 0x7;
 
     if (lo & CKRST_STATE_WRITE_R) bgfxState |= BGFX_STATE_WRITE_R;
     if (lo & CKRST_STATE_WRITE_G) bgfxState |= BGFX_STATE_WRITE_G;
@@ -606,7 +657,6 @@ uint64_t CKBgfxState(CKDrawState State)
 
     if (lo & CKRST_STATE_DEPTH_TEST)
     {
-        CKDWORD depthFunc = (lo >> 6) & 0xF;
         switch (depthFunc)
         {
         case VXCMP_LESS:         bgfxState |= BGFX_STATE_DEPTH_TEST_LESS; break;
@@ -617,14 +667,13 @@ uint64_t CKBgfxState(CKDrawState State)
         case VXCMP_NOTEQUAL:     bgfxState |= BGFX_STATE_DEPTH_TEST_NOTEQUAL; break;
         case VXCMP_NEVER:        bgfxState |= BGFX_STATE_DEPTH_TEST_NEVER; break;
         case VXCMP_ALWAYS:       bgfxState |= BGFX_STATE_DEPTH_TEST_ALWAYS; break;
-        default:                 bgfxState |= BGFX_STATE_DEPTH_TEST_LESS; break;
+        default: break;
         }
     }
 
     if (lo & CKRST_STATE_DEPTH_WRITE)
         bgfxState |= BGFX_STATE_WRITE_Z;
 
-    CKDWORD cullMode = (lo >> 10) & 0x3;
     if (cullMode == 1) bgfxState |= BGFX_STATE_CULL_CW;
     else if (cullMode == 2) bgfxState |= BGFX_STATE_CULL_CCW;
 
@@ -634,10 +683,6 @@ uint64_t CKBgfxState(CKDrawState State)
     if (lo & CKRST_STATE_ALPHA_COVERAGE)
         bgfxState |= BGFX_STATE_BLEND_ALPHA_TO_COVERAGE;
 
-    CKDWORD blendSrc = (lo >> 16) & 0xF;
-    CKDWORD blendDst = (lo >> 20) & 0xF;
-    CKDWORD blendSrcA = (lo >> 24) & 0xF;
-    CKDWORD blendDstA = (lo >> 28) & 0xF;
     if (blendSrc != 0)
     {
         if (blendSrcA != 0)
@@ -653,10 +698,6 @@ uint64_t CKBgfxState(CKDrawState State)
         }
     }
 
-    CKDWORD mid = State.Mid;
-
-    CKDWORD blendEq = mid & 0x7;
-    CKDWORD blendEqA = (mid >> 3) & 0x7;
     if (blendEq != 0)
     {
         if (blendEqA != 0)
@@ -666,7 +707,6 @@ uint64_t CKBgfxState(CKDrawState State)
             bgfxState |= BGFX_STATE_BLEND_EQUATION(CKBgfxBlendEquation(blendEq));
     }
 
-    CKDWORD fillMode = (lo >> 12) & 0x3;
     if (fillMode == 1)
     {
         bgfxState |= BGFX_STATE_PT_LINES;
@@ -677,8 +717,7 @@ uint64_t CKBgfxState(CKDrawState State)
     }
     else
     {
-        CKDWORD pt = (mid >> 6) & 0x7;
-        switch (pt)
+        switch (primitive)
         {
         case VX_POINTLIST:     bgfxState |= BGFX_STATE_PT_POINTS; break;
         case VX_LINELIST:      bgfxState |= BGFX_STATE_PT_LINES; break;
@@ -692,6 +731,13 @@ uint64_t CKBgfxState(CKDrawState State)
     if (hi & CKRST_STATE_FRONT_CCW)
         bgfxState |= BGFX_STATE_FRONT_CCW;
 
+    return CK_OK;
+}
+
+uint64_t CKBgfxState(CKDrawState State)
+{
+    uint64_t bgfxState = 0;
+    CKBgfxTryState(State, bgfxState);
     return bgfxState;
 }
 
