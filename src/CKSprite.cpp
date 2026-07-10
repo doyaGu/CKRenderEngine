@@ -163,15 +163,12 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
     RCKRenderManager *rm = (RCKRenderManager *) Context->GetRenderManager();
     m_VideoFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
     m_RasterizerContext = nullptr;
-    m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    m_ObjectIndex = 0;
     m_InVideoMemory = FALSE;
 }
 
 RCKSprite::~RCKSprite() {
-    RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-    if (rm && m_ObjectIndex) {
-        rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-    }
+    FreeVideoMemory();
 }
 
 CK_CLASSID RCKSprite::GetClassID() {
@@ -270,6 +267,10 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         return CKERR_INVALIDRENDERCONTEXT;
 
     CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+    if (m_RasterizerContext != rstCtx) {
+        FreeVideoMemory();
+        m_ObjectIndex = 0;
+    }
     m_RasterizerContext = rstCtx;
 
     CKBOOL reload = FALSE;
@@ -277,6 +278,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     if (m_InVideoMemory) {
         if (!m_VideoFormatDesc.AlphaMask && m_VideoFormatDesc.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT)) {
             rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+            m_ObjectIndex = 0;
             m_InVideoMemory = FALSE;
             reload = TRUE;
         }
@@ -406,7 +408,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
         FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
     }
 
-    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &spriteDesc, nullptr) == CK_OK) {
+    if (m_RasterizerContext->CreateTexture(&spriteDesc, nullptr, &m_ObjectIndex) == CK_OK) {
         m_InVideoMemory = TRUE;
         m_VideoFormatDesc = spriteDesc.Format;
         return Restore(Clamping);
@@ -446,11 +448,17 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
 }
 
 CKBOOL RCKSprite::FreeVideoMemory() {
-    if (m_RasterizerContext && m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK) {
+    if (!m_ObjectIndex) {
         m_InVideoMemory = FALSE;
         return TRUE;
     }
-    return FALSE;
+    if (!m_RasterizerContext)
+        return FALSE;
+    const CKBOOL result =
+        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
+    m_InVideoMemory = FALSE;
+    m_ObjectIndex = 0;
+    return result;
 }
 
 CKBOOL RCKSprite::IsInVideoMemory() {
@@ -462,41 +470,42 @@ CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
         return FALSE;
 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
-
-    VxImageDescEx srcDesc;
-    const int requiredBytes = rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc);
-    if (!requiredBytes)
+    if (!rctx->m_RasterizerContext ||
+        rctx->m_RasterizerContext != m_RasterizerContext)
         return FALSE;
 
-    CKBYTE *pixels = new CKBYTE[(size_t)requiredBytes];
-    srcDesc.Image = pixels;
-    if (!rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc)) {
-        delete[] pixels;
-        return FALSE;
-    }
+    return rctx->QueueSpriteCopy(this, Src, Dest);
+}
 
-    VxImageDescEx uploadDesc = srcDesc;
+CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
+                                   const VxImageDescEx &source,
+                                   const VxRect *destination) {
+    if (!context || !context->m_RasterizerContext ||
+        context->m_RasterizerContext != m_RasterizerContext ||
+        !m_InVideoMemory)
+        return FALSE;
+
+    VxImageDescEx uploadDesc = source;
     CKBYTE *converted = nullptr;
-    if (!SamePixelFormat(srcDesc, m_VideoFormatDesc)) {
-        converted = ConvertSpriteImage(srcDesc, m_VideoFormatDesc, uploadDesc);
-        if (!converted) {
-            delete[] pixels;
+    if (!SamePixelFormat(source, m_VideoFormatDesc)) {
+        converted = ConvertSpriteImage(source, m_VideoFormatDesc, uploadDesc);
+        if (!converted)
             return FALSE;
-        }
     }
 
     CKRECT region;
     CKRECT *regionPtr = nullptr;
-    if (!BuildSpriteCopyUploadRegion(Dest, m_VideoFormatDesc.Width, m_VideoFormatDesc.Height, uploadDesc, region, regionPtr)) {
+    if (!BuildSpriteCopyUploadRegion(destination,
+                                     m_VideoFormatDesc.Width,
+                                     m_VideoFormatDesc.Height,
+                                     uploadDesc, region, regionPtr)) {
         delete[] converted;
-        delete[] pixels;
         return FALSE;
     }
 
     const CKBOOL result =
         (m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, regionPtr, &uploadDesc) == CK_OK);
     delete[] converted;
-    delete[] pixels;
     return result;
 }
 

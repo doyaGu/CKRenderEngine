@@ -54,7 +54,6 @@ public:
 private:
     CKRasterizerContext *m_Context;
     XHashTable<CKDWORD, CKDWORD> m_Cache; // formatFlags -> layout handle
-    CKDWORD m_NextHandle;
 };
 
 #endif // CKVERTEXLAYOUTCACHE_H

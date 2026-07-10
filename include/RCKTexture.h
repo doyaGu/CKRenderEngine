@@ -3,8 +3,11 @@
 
 #include "CKTexture.h"
 
+class RCKRenderContext;
+
 class RCKTexture : public CKTexture {
     friend class RCKRenderManager;
+    friend class RCKRenderContext;
 
 public:
     CKBOOL Create(int Width, int Height, int BPP, int Slot) override;
@@ -47,6 +50,11 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    CKBOOL ApplyContextCopy(RCKRenderContext *Context,
+                            const VxImageDescEx &Source,
+                            const VxRect *Destination,
+                            int CubeMapFace);
+
     VX_PIXELFORMAT m_DesiredVideoFormat;
     CKRasterizerContext *m_RasterizerContext;
     CKDWORD m_MipMapLevel;

@@ -233,6 +233,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
         if (m_RasterizerContext != rstCtx) {
             if (m_RasterizerContext)
                 m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+            m_ObjectIndex = 0;
             m_InVideoMemory = FALSE;
             m_TextureFlags = 0;
             m_CachedMipMapCount = 0;
@@ -245,6 +246,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
             ((!HasAlphaFormat(m_VideoFormat) && needsAlpha) ||
                 m_CachedMipMapCount != m_MipMapLevel)) {
             rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+            m_ObjectIndex = 0;
             m_InVideoMemory = FALSE;
             needsCreate = TRUE;
         }
@@ -493,7 +495,7 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     if (HasAlphaFormat(desc.Format))
         desc.Flags |= CKRST_TEXTURE_ALPHA;
 
-    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) == CK_OK) {
+    if (m_RasterizerContext->CreateTexture(&desc, nullptr, &m_ObjectIndex) == CK_OK) {
         m_InVideoMemory = TRUE;
         m_TextureFlags = desc.Flags;
         m_CachedMipMapCount = desc.MipMapCount;
@@ -502,10 +504,12 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
             return TRUE;
 
         m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+        m_ObjectIndex = 0;
         m_InVideoMemory = FALSE;
         m_TextureFlags = 0;
         m_CachedMipMapCount = 0;
         memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
+        m_ObjectIndex = 0;
         return FALSE;
     }
 
@@ -515,6 +519,7 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
 CKBOOL RCKTexture::FreeVideoMemory() {
     if (!m_RasterizerContext) {
         m_InVideoMemory = FALSE;
+        m_ObjectIndex = 0;
         m_TextureFlags = 0;
         m_CachedMipMapCount = 0;
         memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
@@ -522,8 +527,10 @@ CKBOOL RCKTexture::FreeVideoMemory() {
     }
 
     CKBOOL result = FALSE;
-    if (m_InVideoMemory)
+    if (m_InVideoMemory) {
         result = m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
+        m_ObjectIndex = 0;
+    }
     m_InVideoMemory = FALSE;
     m_TextureFlags = 0;
     m_CachedMipMapCount = 0;
@@ -554,39 +561,41 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
     if (IsCubeMap() && (GetSlotCount() != 6 || GetWidth() != GetHeight()))
         return FALSE;
 
-    VxImageDescEx srcDesc;
-    const int requiredBytes = rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc);
-    if (!requiredBytes)
+    return rctx->QueueTextureCopy(this, Src, Dest, CubeMapFace);
+}
+
+CKBOOL RCKTexture::ApplyContextCopy(RCKRenderContext *context,
+                                    const VxImageDescEx &source,
+                                    const VxRect *destination,
+                                    int cubeMapFace) {
+    if (!context || !context->m_RasterizerContext ||
+        context->m_RasterizerContext != m_RasterizerContext ||
+        !m_InVideoMemory)
+        return FALSE;
+    if (cubeMapFace < CKRST_CUBEFACE_XPOS || cubeMapFace > CKRST_CUBEFACE_ZNEG)
+        return FALSE;
+    if (!IsCubeMap() && cubeMapFace != CKRST_CUBEFACE_XPOS)
         return FALSE;
 
-    XBYTE *pixels = new XBYTE[(size_t)requiredBytes];
-    srcDesc.Image = pixels;
-    if (!rctx->DumpToMemory(Src, VXBUFFER_BACKBUFFER, srcDesc)) {
-        delete[] pixels;
-        return FALSE;
-    }
-
-    VxImageDescEx uploadDesc = srcDesc;
+    VxImageDescEx uploadDesc = source;
     CKBYTE *converted = nullptr;
-    if (!SamePixelFormat(srcDesc, m_VideoFormat)) {
-        converted = ConvertTextureImage(srcDesc, m_VideoFormat, uploadDesc);
-        if (!converted) {
-            delete[] pixels;
+    if (!SamePixelFormat(source, m_VideoFormat)) {
+        converted = ConvertTextureImage(source, m_VideoFormat, uploadDesc);
+        if (!converted)
             return FALSE;
-        }
     }
 
     CKRECT region;
     CKRECT *regionPtr = nullptr;
-    if (!BuildCopyUploadRegion(Dest, GetWidth(), GetHeight(), uploadDesc, region, regionPtr)) {
+    if (!BuildCopyUploadRegion(destination, GetWidth(), GetHeight(),
+                               uploadDesc, region, regionPtr)) {
         delete[] converted;
-        delete[] pixels;
         return FALSE;
     }
 
-    CKERROR err = m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, (CKDWORD)CubeMapFace, regionPtr, &uploadDesc);
+    CKERROR err = m_RasterizerContext->UpdateTexture(
+        m_ObjectIndex, 0, (CKDWORD)cubeMapFace, regionPtr, &uploadDesc);
     delete[] converted;
-    delete[] pixels;
     return err == CK_OK;
 }
 
@@ -742,6 +751,7 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
 
     if (m_InVideoMemory && m_RasterizerContext)
         m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+    m_ObjectIndex = 0;
 
     m_RasterizerContext = dev->m_RasterizerContext;
     m_InVideoMemory = FALSE;
@@ -765,7 +775,7 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
     if (HasAlphaFormat(desc.Format))
         desc.Flags |= CKRST_TEXTURE_ALPHA;
 
-    if (m_RasterizerContext->CreateTexture(m_ObjectIndex, &desc, nullptr) != CK_OK)
+    if (m_RasterizerContext->CreateTexture(&desc, nullptr, &m_ObjectIndex) != CK_OK)
         return FALSE;
 
     m_InVideoMemory = TRUE;
@@ -781,7 +791,7 @@ RCKTexture::RCKTexture(CKContext *Context, CKSTRING name) : CKTexture(Context, n
     m_MipMapLevel = 0;
     m_RasterizerContext = nullptr;
     m_MipMaps = nullptr;
-    m_ObjectIndex = rm->CreateObjectIndex(CKRST_OBJ_TEXTURE);
+    m_ObjectIndex = 0;
     m_InVideoMemory = FALSE;
     m_TextureFlags = 0;
     m_CachedMipMapCount = 0;
@@ -791,10 +801,6 @@ RCKTexture::RCKTexture(CKContext *Context, CKSTRING name) : CKTexture(Context, n
 RCKTexture::~RCKTexture() {
     FreeVideoMemory();
     RCKTexture::SetUserMipMapMode(FALSE);
-    if (m_ObjectIndex != 0) {
-        RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-        rm->ReleaseObjectIndex(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-    }
 }
 
 CK_CLASSID RCKTexture::GetClassID() {

@@ -133,7 +133,6 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     ApplyIniRenderOptions(this);
 
     m_RenderContextMaskFree = -1;
-    m_NextObjectIndex = 0;
     m_Context->RegisterNewManager(this);
 
     // Initialize driver-related fields
@@ -692,16 +691,6 @@ int RCKRenderManager::AddEffect(const VxEffectDescription &NewEffect) {
     m_Effects.PushBack(NewEffect);
     m_Effects[size].EffectIndex = (VX_EFFECT) size;
     return size;
-}
-
-CKDWORD RCKRenderManager::CreateObjectIndex(CKRST_OBJECTTYPE type) {
-    (void)type;
-    return ++m_NextObjectIndex;
-}
-
-CKBOOL RCKRenderManager::ReleaseObjectIndex(CKDWORD index, CKRST_OBJECTTYPE type) {
-    (void)index; (void)type;
-    return TRUE;
 }
 
 CKMaterial *RCKRenderManager::GetDefaultMaterial() {
