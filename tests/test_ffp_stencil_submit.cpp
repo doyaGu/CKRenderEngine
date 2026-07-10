@@ -2,6 +2,7 @@
 #include "CKFFSpecializationInfo.h"
 #include "CKFFUniformState.h"
 #include "CKRenderPipeline.h"
+#include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -36,7 +37,30 @@ static const ShaderProfileCase kSamplerLayoutProfiles[] = {
     {CKRST_SHADER_PROFILE_MSL, "metal"},
 };
 
-void DrawVertexBufferSubmitsStencilRefAndMasks() {
+CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
+                                                 const FFPDiagnosticContext &context) {
+    CKFFSpecializationInfo info;
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffSpec;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(uniform);
+    if (it != context.Encoder.FloatUniforms.end() &&
+        it->second.size() >= CKFF_SPEC_UNIFORM_VEC4_COUNT * 4) {
+        CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = {};
+        for (CKDWORD i = 0; i < CKFF_SPEC_UNIFORM_VEC4_COUNT; ++i) {
+            dwords[i] = ((CKDWORD)it->second[i * 4 + 0] & 0xFFu) |
+                        (((CKDWORD)it->second[i * 4 + 1] & 0xFFu) << 8) |
+                        (((CKDWORD)it->second[i * 4 + 2] & 0xFFu) << 16) |
+                        (((CKDWORD)it->second[i * 4 + 3] & 0xFFu) << 24);
+        }
+        info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
+    } else if (!context.LastProgramSpecializationDwords.empty()) {
+        info.SetDwords(&context.LastProgramSpecializationDwords[0],
+                       (CKDWORD)context.LastProgramSpecializationDwords.size());
+    }
+    return info;
+}
+
+void DrawVertexBufferRejectsPartialStencilWriteMask() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -49,22 +73,48 @@ void DrawVertexBufferSubmitsStencilRefAndMasks() {
     ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xF0);
     ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
 
-    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
-                         1, 0, 0, 3, 0, 0,
-                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    TestCheck(context.Encoder.SubmitCount == 1,
-              "FFP test draw must submit once");
-    TestCheck(context.Encoder.StencilRefSetCount == 1,
-              "FFP draw must submit stencil ref");
-    TestCheck(context.Encoder.StencilMaskSetCount == 1,
-              "FFP draw must submit stencil masks");
-    TestCheck(context.Encoder.LastStencilRef == 0x12,
-              "FFP draw must forward stencil ref");
-    TestCheck(context.Encoder.LastStencilReadMask == 0xF0,
-              "FFP draw must forward stencil read mask");
-    TestCheck(context.Encoder.LastStencilWriteMask == 0x0F,
-              "FFP draw must forward stencil write mask");
+    TestCheck(!drawn,
+              "A partial stencil write mask must be rejected explicitly");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "A rejected stencil write mask must not reach the backend");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STENCIL_WRITE_MASK,
+              "Partial stencil write mask rejection must report its reason");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferSubmitsRepresentableStencilMasks() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILREF, 0x12);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xF0);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Representable stencil masks must submit once");
+    TestCheck(context.Encoder.StencilRefSetCount == 1 &&
+                  context.Encoder.StencilMaskSetCount == 1,
+              "Representable stencil state must reach the backend");
+    TestCheck(context.Encoder.LastStencilRef == 0x12 &&
+                  context.Encoder.LastStencilReadMask == 0xF0 &&
+                  context.Encoder.LastStencilWriteMask == 0xFF,
+              "Representable stencil state must preserve ref and masks");
 
     ffp.Shutdown();
 }
@@ -114,12 +164,7 @@ void DrawVertexBufferSetsFlatShadeSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo gouraudSpec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Gouraud draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        gouraudSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo gouraudSpec = CurrentDrawSpecialization(ffp, context);
     TestCheck(gouraudSpec.Get(CKFF_SPEC_FLAT_SHADE) == 0,
               "Gouraud shade mode must not set flat shade specialization");
 
@@ -128,12 +173,7 @@ void DrawVertexBufferSetsFlatShadeSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo flatSpec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Flat draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        flatSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                           (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo flatSpec = CurrentDrawSpecialization(ffp, context);
     TestCheck(flatSpec.Get(CKFF_SPEC_FLAT_SHADE) == 1,
               "Flat shade mode must set flat shade specialization");
 
@@ -220,12 +260,7 @@ void RangeFogChangesSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo specNoRange;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Non-range fog draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        specNoRange.SetDwords(&context.LastProgramSpecializationDwords[0],
-                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo specNoRange = CurrentDrawSpecialization(ffp, context);
     TestCheck(specNoRange.Get(CKFF_SPEC_RANGE_FOG) == 0,
               "Range fog disabled must clear range fog specialization");
 
@@ -234,12 +269,7 @@ void RangeFogChangesSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo specRange;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Range fog draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        specRange.SetDwords(&context.LastProgramSpecializationDwords[0],
-                            (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo specRange = CurrentDrawSpecialization(ffp, context);
     TestCheck(specRange.Get(CKFF_SPEC_RANGE_FOG) == 1,
               "Range fog enabled must set range fog specialization");
 
@@ -859,12 +889,7 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo noCompareSpec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Depth draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        noCompareSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                                (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo noCompareSpec = CurrentDrawSpecialization(ffp, context);
     TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_DEPTH,
               "Depth texture must mark stage 0 as depth sampler");
     TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_NONE,
@@ -877,18 +902,240 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo compareSpec;
-    TestCheck(!context.LastProgramSpecializationDwords.empty(),
-              "Depth compare draw must submit specialization data");
-    if (!context.LastProgramSpecializationDwords.empty())
-        compareSpec.SetDwords(&context.LastProgramSpecializationDwords[0],
-                              (CKDWORD)context.LastProgramSpecializationDwords.size());
+    const CKFFSpecializationInfo compareSpec = CurrentDrawSpecialization(ffp, context);
     TestCheck((compareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_LEQUAL,
               "Depth compare func must enter specialization mask");
     TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth compare func must stay shader-evaluated and bind a non-compare sampler");
 
     ffp.Shutdown();
+}
+
+void AffineTextureCoordinatesRejectDraw() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
+              "Affine texture coordinates must not silently render as perspective-correct");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_AFFINE_TEXCOORD,
+              "Affine texture-coordinate rejection must expose its reason");
+    ffp.Shutdown();
+}
+
+void InactiveUnsupportedStateDoesNotRejectDraw() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0Fu);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_KEEP);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Unsupported state bits with no output effect must not reject a draw");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "A successful no-effect state draw must clear the reject reason");
+    ffp.Shutdown();
+}
+
+void UnknownTextureOpRejectsDraw() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, 0x7fffffffu);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
+              "An unknown texture op must not fall through to an approximate shader formula");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
+              "Unknown texture-op rejection must expose its reason");
+    ffp.Shutdown();
+}
+
+void BottomLeftCubeRenderTargetRejectsDraw() {
+    FFPDiagnosticDriver driver(CKRST_SHADER_PROFILE_GLSL,
+                               CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
+                               CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
+                          CKRST_TEXTURE_CUBEMAP);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
+              "Bottom-left cube render targets must fail until face orientation is defined");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
+              "Unsupported render-target type must expose its rejection reason");
+    ffp.Shutdown();
+}
+
+void BorderColorUsesStableBgfxPaletteSlots() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0x80402010u);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    const CKBOOL first = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKBOOL second = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(first && second,
+              "A representable border color must submit normally");
+    TestCheck(context.PaletteSetCount == 1,
+              "Repeated border colors must reuse one stable palette slot");
+    TestCheck(context.PaletteColors[0] == 0x40201080u,
+              "Virtools ARGB border color must convert to bgfx RRGGBBAA");
+    TestCheck(context.Encoder.LastTextureSampler.BorderColor == 0,
+              "The backend sampler must receive the allocated palette index");
+
+    ffp.Shutdown();
+}
+
+void BorderPaletteOverflowRejectsDraw() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    CKBOOL firstSixteenSucceeded = TRUE;
+    for (CKDWORD i = 0; i < 16; ++i) {
+        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | i);
+        firstSixteenSucceeded = firstSixteenSucceeded && ffp.DrawVertexBuffer(
+            &context.Encoder, 1, VX_TRIANGLELIST,
+            1, 0, 0, 3, 0, 0,
+            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    }
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000010u);
+    const CKBOOL overflow = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(firstSixteenSucceeded && context.PaletteSetCount == 16,
+              "All sixteen bgfx border palette slots must be usable");
+    TestCheck(!overflow && context.Encoder.SubmitCount == 16,
+              "A seventeenth border color must fail without backend submission");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BORDER_PALETTE,
+              "Border palette overflow must expose a stable rejection reason");
+
+    ffp.Shutdown();
+}
+
+void BorderPaletteSlotsAreReusedAcrossFrames() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    CKBOOL firstFrameSucceeded = TRUE;
+    for (CKDWORD i = 0; i < 16; ++i) {
+        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | i);
+        firstFrameSucceeded = firstFrameSucceeded && ffp.DrawVertexBuffer(
+            &context.Encoder, 1, VX_TRIANGLELIST,
+            1, 0, 0, 3, 0, 0,
+            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    }
+    context.Frame(CKRST_FRAME_SYNC_IMMEDIATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000010u);
+    const CKBOOL nextFrame = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(firstFrameSucceeded && nextFrame,
+              "Border palette slots must be reusable after the rasterizer advances a frame");
+    TestCheck(context.PaletteSetCount == 17 &&
+                  context.Encoder.LastTextureSampler.BorderColor == 0,
+              "The next frame must allocate its first border color from palette slot zero");
+    ffp.Shutdown();
+}
+
+void UberShaderProgramModulesAreSharedAcrossStateBindings() {
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "UberShader", "1");
+
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
+    const CKBOOL gouraud = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
+    const CKBOOL flat = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
+    TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
+              "Uber state variants sharing shader blobs must create one backend program");
+    TestCheck(ffp.GetShaderCache().CachedProgramCount() == 1 &&
+                  ffp.GetShaderCache().CachedBindingCount() == 2,
+              "Program-module cache and state-binding cache must have separate cardinality");
+    TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
+              "Shared uber programs must still upload current-draw specialization state");
+    TestCheck(context.Encoder.LastDrawSpecializationDwords.size() ==
+                  CKFFSpecializationInfo::MaxSpecDwords &&
+                  context.Encoder.LastDrawSpecializationDwords[0] == current.Data()[0],
+              "Shared programs must expose the current draw specialization to backend diagnostics");
+
+    ffp.Shutdown();
+    CKRenderSettingsClearOverridesForTests();
 }
 
 void LegacyStageBlendZeroTerminatesStaleMultitextureState() {
@@ -1711,8 +1958,18 @@ void RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent() {
 
 int main() {
     TestFramework tests;
-    tests.Run("DrawVertexBuffer submits stencil ref and masks",
-              &DrawVertexBufferSubmitsStencilRefAndMasks);
+    tests.Run("DrawVertexBuffer rejects partial stencil write masks",
+              &DrawVertexBufferRejectsPartialStencilWriteMask);
+    tests.Run("DrawVertexBuffer submits representable stencil masks",
+              &DrawVertexBufferSubmitsRepresentableStencilMasks);
+    tests.Run("Affine texture coordinates reject draw",
+              &AffineTextureCoordinatesRejectDraw);
+    tests.Run("Inactive unsupported state does not reject draw",
+              &InactiveUnsupportedStateDoesNotRejectDraw);
+    tests.Run("Unknown texture op rejects draw",
+              &UnknownTextureOpRejectsDraw);
+    tests.Run("Bottom-left cube render target rejects draw",
+              &BottomLeftCubeRenderTargetRejectsDraw);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
     tests.Run("DrawVertexBuffer sets flat shade specialization",
@@ -1757,6 +2014,14 @@ int main() {
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
+    tests.Run("Border color uses stable bgfx palette slots",
+              &BorderColorUsesStableBgfxPaletteSlots);
+    tests.Run("Border palette overflow rejects draw",
+              &BorderPaletteOverflowRejectsDraw);
+    tests.Run("Border palette slots are reused across frames",
+              &BorderPaletteSlotsAreReusedAcrossFrames);
+    tests.Run("Uber shader program modules are shared across state bindings",
+              &UberShaderProgramModulesAreSharedAcrossStateBindings);
     tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",
               &LegacyStageBlendZeroTerminatesStaleMultitextureState);
     tests.Run("Legacy TEXTUREMAPBLEND clears explicit stage ops",

@@ -26,8 +26,9 @@ struct FFPViewClearRecord {
 
 class FFPDiagnosticDriver : public CKRasterizerDriver {
 public:
-    explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11)
-        : Profile(profile) {}
+    explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
+                                 CKDWORD flags = 0)
+        : Profile(profile), Flags(flags) {}
 
     CKERROR GetShaderTarget(CKShaderTargetDesc *target) const override {
         if (!target)
@@ -35,7 +36,7 @@ public:
         target->Format = CKRST_SHADER_FORMAT_NATIVE;
         target->Profile = Profile;
         target->Version = 0;
-        target->Flags = 0;
+        target->Flags = Flags;
         return CK_OK;
     }
 
@@ -43,6 +44,7 @@ public:
 
 private:
     CK_SHADER_PROFILE Profile;
+    CKDWORD Flags;
 };
 
 class FFPDiagnosticEncoder : public CKRasterizerEncoder {
@@ -83,6 +85,7 @@ public:
     std::unordered_set<CKDWORD> MatrixUniforms;
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
+    std::vector<CKDWORD> LastDrawSpecializationDwords;
 
     void SetState(CKDrawState State) override {
         LastState = State;
@@ -168,6 +171,11 @@ public:
         FloatUniforms[uniform].assign(values, values + floatCount);
         UniformCounts[uniform] = count;
     }
+    void SetDrawSpecialization(const CKDWORD *values, CKDWORD count) override {
+        LastDrawSpecializationDwords.clear();
+        if (values && count > 0)
+            LastDrawSpecializationDwords.assign(values, values + count);
+    }
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetComputeImage(CKDWORD, CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetCondition(CKDWORD, CKBOOL) override {}
@@ -212,8 +220,26 @@ public:
     CKBOOL AllowTransientInstanceBuffer = TRUE;
     CKBOOL FailTransientInstanceBuffer = FALSE;
     CKBOOL FailCreateProgram = FALSE;
+    CKBOOL FailCreateTexture = FALSE;
+    CKBOOL FailUpdateTexture = FALSE;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
+    CKDWORD CreatedTextureCount = 0;
+    CKDWORD UpdatedTextureCount = 0;
+    CKDWORD DeletedObjectCount = 0;
+    CKDWORD PaletteSetCount = 0;
+    CKDWORD FrameSerial = 0;
+    CKDWORD PaletteColors[16] = {};
+    CKDWORD LastCreatedTexture = 0;
+    CKDWORD LastUpdatedTexture = 0;
+    CKDWORD LastUpdateMip = 0;
+    CKDWORD LastUpdateFace = 0;
+    CKDWORD LastDeletedObject = 0;
+    CKDWORD LastDeletedObjectType = 0;
+    CKTextureDesc LastTextureDesc = {};
+    VxImageDescEx LastTextureUpdateDesc = {};
+    CKRECT LastTextureUpdateRegion = {};
+    CKBOOL LastTextureUpdateHadRegion = FALSE;
     const void *LastVertexShaderCode = nullptr;
     CKDWORD LastVertexShaderCodeSize = 0;
     const void *LastPixelShaderCode = nullptr;
@@ -224,7 +250,13 @@ public:
 
     CKERROR CreateVertexBuffer(CKDWORD, CKVertexBufferDesc *, const void *) override { return CK_OK; }
     CKERROR CreateIndexBuffer(CKDWORD, CKIndexBufferDesc *, CKBOOL, const void *) override { return CK_OK; }
-    CKERROR CreateTexture(CKDWORD, CKTextureDesc *, const VxImageDescEx *) override { return CK_OK; }
+    CKERROR CreateTexture(CKDWORD texture, CKTextureDesc *desc, const VxImageDescEx *) override {
+        ++CreatedTextureCount;
+        LastCreatedTexture = texture;
+        if (desc)
+            LastTextureDesc = *desc;
+        return FailCreateTexture ? CKERR_INVALIDPARAMETER : CK_OK;
+    }
     CKERROR CreateShader(CKDWORD, CKShaderDesc *desc) override {
         ++CreatedShaderCount;
         if (desc && desc->Stage == CKRST_SHADER_VERTEX) {
@@ -267,15 +299,36 @@ public:
     CKERROR CreateDepthTexture(CKDWORD, CKDepthTextureDesc *) override { return CK_OK; }
     CKERROR CreateOcclusionQuery(CKDWORD, CKOcclusionQueryDesc *) override { return CK_OK; }
     CKERROR CreateIndirectBuffer(CKDWORD, CKIndirectBufferDesc *) override { return CK_OK; }
-    CKERROR DeleteObject(CKDWORD, CKDWORD) override { return CK_OK; }
+    CKERROR DeleteObject(CKDWORD object, CKDWORD type) override {
+        ++DeletedObjectCount;
+        LastDeletedObject = object;
+        LastDeletedObjectType = type;
+        return CK_OK;
+    }
     void FlushObjects(CKDWORD) override {}
     CKERROR UpdateVertexBuffer(CKDWORD, CKDWORD, CKDWORD, const void *) override { return CK_OK; }
     CKERROR UpdateIndexBuffer(CKDWORD, CKDWORD, CKDWORD, const void *) override { return CK_OK; }
-    CKERROR UpdateTexture(CKDWORD, CKDWORD, CKDWORD, const CKRECT *, const VxImageDescEx *) override { return CK_OK; }
+    CKERROR UpdateTexture(CKDWORD texture, CKDWORD mip, CKDWORD face,
+                          const CKRECT *region, const VxImageDescEx *desc) override {
+        ++UpdatedTextureCount;
+        LastUpdatedTexture = texture;
+        LastUpdateMip = mip;
+        LastUpdateFace = face;
+        LastTextureUpdateHadRegion = region != nullptr;
+        if (region)
+            LastTextureUpdateRegion = *region;
+        if (desc)
+            LastTextureUpdateDesc = *desc;
+        return FailUpdateTexture ? CKERR_INVALIDPARAMETER : CK_OK;
+    }
     CKERROR ReadTexture(CKDWORD, CKDWORD, VxImageDescEx *) override { return CKERR_NOTIMPLEMENTED; }
     CKERROR ReadFrameBuffer(CKDWORD, VxImageDescEx *) override { return CKERR_NOTIMPLEMENTED; }
     CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD, CKDWORD *) override { return CKRST_OCCLUSION_NORESULT; }
-    void SetPaletteColor(CKDWORD, CKDWORD) override {}
+    void SetPaletteColor(CKDWORD index, CKDWORD color) override {
+        if (index < 16)
+            PaletteColors[index] = color;
+        ++PaletteSetCount;
+    }
     void DbgTextClear(CKDWORD, CKBOOL) override {}
     void DbgTextPrintf(CKWORD, CKWORD, CKDWORD, CKSTRING, ...) override {}
     void DbgTextImage(CKWORD, CKWORD, CKWORD, CKWORD, const void *, CKWORD) override {}
@@ -348,7 +401,11 @@ public:
     }
     CKRasterizerEncoder *BeginEncoder() override { return &Encoder; }
     void EndEncoder(CKRasterizerEncoder *) override {}
-    CKERROR Frame(CKRST_FRAME_SYNC_MODE) override { return CK_OK; }
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE) override {
+        ++FrameSerial;
+        return CK_OK;
+    }
+    CKDWORD GetFrameSerial() const override { return FrameSerial; }
 
 private:
     CKRenderStats m_Stats = {};

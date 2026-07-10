@@ -26,35 +26,35 @@ void SetupPacketPipeline(CKFixedFunctionPipeline *ffp,
     ffp->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
 }
 
-void DrawPacketCandidate(CKFixedFunctionPipeline *ffp,
-                         FFPDiagnosticContext *context,
-                         CKRenderView view,
-                         CKDWORD vb,
-                         CKDWORD ib)
+CKBOOL DrawPacketCandidate(CKFixedFunctionPipeline *ffp,
+                           FFPDiagnosticContext *context,
+                           CKRenderView view,
+                           CKDWORD vb,
+                           CKDWORD ib)
 {
-    ffp->DrawVertexBuffer(&context->Encoder, view, VX_TRIANGLELIST,
-                          vb, ib,
-                          0, 3,
-                          0, 3,
-                          CKRST_DP_TRANSFORM,
-                          CKFF_VF_POSITION,
-                          77);
+    return ffp->DrawVertexBuffer(&context->Encoder, view, VX_TRIANGLELIST,
+                                 vb, ib,
+                                 0, 3,
+                                 0, 3,
+                                 CKRST_DP_TRANSFORM,
+                                 CKFF_VF_POSITION,
+                                 77);
 }
 
-void DrawPacketCandidateWithFormat(CKFixedFunctionPipeline *ffp,
-                                   FFPDiagnosticContext *context,
-                                   CKRenderView view,
-                                   CKDWORD vb,
-                                   CKDWORD ib,
-                                   CKDWORD formatFlags)
+CKBOOL DrawPacketCandidateWithFormat(CKFixedFunctionPipeline *ffp,
+                                     FFPDiagnosticContext *context,
+                                     CKRenderView view,
+                                     CKDWORD vb,
+                                     CKDWORD ib,
+                                     CKDWORD formatFlags)
 {
-    ffp->DrawVertexBuffer(&context->Encoder, view, VX_TRIANGLELIST,
-                          vb, ib,
-                          0, 3,
-                          0, 3,
-                          CKRST_DP_TRANSFORM,
-                          formatFlags,
-                          77);
+    return ffp->DrawVertexBuffer(&context->Encoder, view, VX_TRIANGLELIST,
+                                 vb, ib,
+                                 0, 3,
+                                 0, 3,
+                                 CKRST_DP_TRANSFORM,
+                                 formatFlags,
+                                 77);
 }
 
 void DrawPacketChurnCandidate(CKFixedFunctionPipeline *ffp,
@@ -273,7 +273,7 @@ void OpaquePacketFlushSortsAndSkipsRepeatedBufferBinding()
     ffp.Shutdown();
 }
 
-void LargeOpaquePacketFlushSortsAndSkipsRepeatedBufferBinding()
+void LargeOpaquePacketFlushPreservesSubmissionOrder()
 {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -290,17 +290,19 @@ void LargeOpaquePacketFlushSortsAndSkipsRepeatedBufferBinding()
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
 
     TestCheck(context.Encoder.SubmitCount == 80,
-              "Flushing sorted packet queue must submit every draw");
-    TestCheck(context.Encoder.VertexBufferSetCount == 2,
-              "Large opaque queue must sort and skip repeated VB binding");
-    TestCheck(context.Encoder.VertexBufferOrder[0] == 100 &&
-              context.Encoder.VertexBufferOrder[1] == 300,
-              "Large opaque packet sort must group by VB after shared state keys");
+              "Flushing a large packet queue must submit every draw");
+    TestCheck(context.Encoder.VertexBufferSetCount == 80,
+              "Alternating buffers must remain alternating instead of being regrouped");
+    for (CKDWORD i = 0; i < 32; ++i) {
+        const CKDWORD expected = (i & 1) ? 100 : 300;
+        TestCheck(context.Encoder.VertexBufferOrder[i] == expected,
+                  "Large opaque packet queues must preserve original draw order");
+    }
 
     ffp.Shutdown();
 }
 
-void OpaquePacketSortUsesStaticUniformsForRuns()
+void OpaquePacketRunsRemainConsecutive()
 {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -319,17 +321,14 @@ void OpaquePacketSortUsesStaticUniformsForRuns()
 
     TestCheck(context.Encoder.SubmitCount == 80,
               "Flushing different-world packets must still submit each draw");
-    TestCheck(context.Encoder.VertexBufferSetCount == 2,
-              "Static uniform sort key must allow same VB packets with different worlds to form a run");
-    TestCheck(context.Encoder.VertexBufferOrder[0] == 100 &&
-              context.Encoder.VertexBufferOrder[1] == 300,
-              "Static uniform sort key must group by VB after shared static state");
+    TestCheck(context.Encoder.VertexBufferSetCount == 80,
+              "Non-consecutive packets must not be regrouped into shared-state runs");
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKFFFrameStats &stats = ffp.GetFrameStats();
-    TestCheck(stats.RenderPacketRuns == 2,
-              "Flush diagnostics must report static-key packet runs");
-    TestCheck(stats.RenderPacketMaxRunLength == 40,
-              "Flush diagnostics must report the largest static-key run");
+    TestCheck(stats.RenderPacketRuns == 80,
+              "Flush diagnostics must count only consecutive packet runs");
+    TestCheck(stats.RenderPacketMaxRunLength == 1,
+              "Alternating state must keep the maximum run length at one");
 #endif
 
     ffp.Shutdown();
@@ -509,14 +508,16 @@ void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
     TestCheck(tweenBuild.RejectReason == CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING,
               "TWEENING packet build must report a tween-specific reject reason");
 
-    DrawPacketCandidateWithFormat(&ffp, &context, CKRP_VIEW_OPAQUE3D,
-                                  100, 200,
-                                  CKFF_VF_POSITION | CKFF_VF_NORMAL);
+    const CKBOOL drawn = DrawPacketCandidateWithFormat(
+        &ffp, &context, CKRP_VIEW_OPAQUE3D,
+        100, 200, CKFF_VF_POSITION | CKFF_VF_NORMAL);
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
-              "TWEENING opaque mesh must fallback immediate until second position/normal inputs exist");
-    TestCheck(context.Encoder.SubmitCount == 1,
-              "TWEENING fallback must submit immediately");
+              "TWEENING opaque mesh must not enter the packet queue");
+    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
+              "Unrepresentable TWEENING input must fail instead of rendering approximately");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_TWEEN,
+              "TWEENING draw rejection must report its public reason");
 
     ffp.Shutdown();
 }
@@ -1480,10 +1481,10 @@ int main()
               &OpaqueVertexBufferDrawQueuesUntilFlush);
     tests.Run("Small opaque packet flush skips sorting",
               &OpaquePacketFlushSortsAndSkipsRepeatedBufferBinding);
-    tests.Run("Large opaque packet flush sorts and skips repeated buffer binding",
-              &LargeOpaquePacketFlushSortsAndSkipsRepeatedBufferBinding);
-    tests.Run("Opaque packet sort uses static uniforms for runs",
-              &OpaquePacketSortUsesStaticUniformsForRuns);
+    tests.Run("Large opaque packet flush preserves submission order",
+              &LargeOpaquePacketFlushPreservesSubmissionOrder);
+    tests.Run("Opaque packet runs remain consecutive",
+              &OpaquePacketRunsRemainConsecutive);
     tests.Run("Opaque packet replay splits static and object uniforms",
               &OpaquePacketReplaySplitsStaticAndObjectUniforms);
     tests.Run("Opaque packet object matrices track projection changes",
@@ -1492,7 +1493,7 @@ int main()
               &OpaquePacketInstancedMatrixMatchesObjectUniformMVP);
     tests.Run("Opaque packet vertex blend falls back immediate",
               &OpaquePacketVertexBlendFallsBackImmediate);
-    tests.Run("Opaque packet TWEENING reports specific reject and falls back immediate",
+    tests.Run("Opaque packet TWEENING reports specific reject and fails draw",
               &OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);

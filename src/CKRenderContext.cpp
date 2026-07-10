@@ -1578,12 +1578,13 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
                             (CKDWORD)indexcount,
                             (CKDWORD)drawData.VertexCount);
     }
-    m_FFPipeline.DrawPrimitive(encoder, view, pType, indices, indexcount, &drawData);
+    const CKBOOL submitted = m_FFPipeline.DrawPrimitive(
+        encoder, view, pType, indices, indexcount, &drawData);
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         CKRenderPerfCurrent().DrawPrimitiveWrapperUs += CKRenderPerfElapsedUs(perfStart);
 #endif
-    return TRUE;
+    return submitted;
 }
 
 void RCKRenderContext::SetDrawAnnotation(const CKDrawAnnotation *annotation) {
