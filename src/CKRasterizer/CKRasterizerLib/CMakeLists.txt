@@ -6,6 +6,7 @@ set(CKRASTERIZER_LIB_SOURCES
 )
 
 set(CKRASTERIZER_LIB_HEADERS
+        CKRasterizerValidation.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
@@ -15,10 +16,9 @@ add_library(CKRasterizerLib STATIC ${CKRASTERIZER_LIB_SOURCES} ${CKRASTERIZER_LI
 
 target_include_directories(CKRasterizerLib
         PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 set(_ckre_rasterizer_ck2_dep CK2)

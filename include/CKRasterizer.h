@@ -22,12 +22,14 @@ struct CKRasterizerInfo {
     INSTANCE_HANDLE DllInstance;
     CKRST_STARTFUNCTION StartFct;
     CKRST_CLOSEFUNCTION CloseFct;
+    CKDWORD InterfaceRevision;
 
     CKRasterizerInfo()
     {
         DllInstance = NULL;
         StartFct = NULL;
         CloseFct = NULL;
+        InterfaceRevision = 0;
     }
 };
 
@@ -66,8 +68,6 @@ public:
     virtual CKRasterizerContext *CreateContext();
     virtual CKBOOL DestroyContext(CKRasterizerContext *Context);
 
-    virtual CKERROR GetShaderTarget(CKShaderTargetDesc *Target) const;
-    virtual CKERROR GetProgrammableCaps(VxProgCapsDesc &Caps);
     virtual void InitNULLRasterizerCaps(CKRasterizer *Owner);
 
 public:
@@ -90,6 +90,7 @@ public:
 class CKRasterizerEncoder {
 public:
     virtual ~CKRasterizerEncoder() = default;
+    virtual CKERROR GetStatus() const;
 
     // Draw state
     virtual void SetState(CKDrawState State);
@@ -102,9 +103,9 @@ public:
     virtual void SetTransform(CKDWORD TransformIndex, CKDWORD Count = 1);
 
     // Geometry binding
-    virtual void SetVertexLayout(CKDWORD Layout);
     virtual void SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                 CKDWORD StartVertex, CKDWORD VertexCount);
+                                 CKDWORD StartVertex, CKDWORD VertexCount,
+                                 CKDWORD Layout);
     virtual void SetIndexBuffer(CKDWORD Buffer,
                                 CKDWORD StartIndex, CKDWORD IndexCount);
     virtual void SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
@@ -120,8 +121,6 @@ public:
                             CKDWORD Texture, CKSamplerDesc *Sampler = NULL);
     virtual void SetUniform(CKDWORD Uniform, const void *Data,
                             CKDWORD Count = 1);
-    virtual void SetDrawSpecialization(const CKDWORD *Values, CKDWORD Count);
-
     // Compute binding
     virtual void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                                   CK_ACCESS_MODE Access);
@@ -173,35 +172,49 @@ public:
 class CKRasterizerContext {
 public:
     CKRasterizerContext();
-    virtual ~CKRasterizerContext() = default;
+    virtual ~CKRasterizerContext();
 
     // --- Context lifecycle ---
-    virtual CKBOOL Create(WIN_HANDLE Window, int PosX = 0, int PosY = 0,
-                          int Width = 0, int Height = 0, int Bpp = -1,
-                          CKBOOL Fullscreen = FALSE, int RefreshRate = 0,
-                          int Zbpp = -1, int StencilBpp = -1);
-    virtual CKBOOL Resize(int PosX = 0, int PosY = 0,
-                          int Width = 0, int Height = 0,
-                          CKDWORD Flags = 0);
-    virtual void SetAntialias(CKDWORD Samples);
+    virtual CKERROR Create(WIN_HANDLE Window, int PosX = 0, int PosY = 0,
+                           int Width = 0, int Height = 0, int Bpp = -1,
+                           CKBOOL Fullscreen = FALSE, int RefreshRate = 0,
+                           int Zbpp = -1, int StencilBpp = -1);
+    virtual CKERROR Resize(int PosX = 0, int PosY = 0,
+                           int Width = 0, int Height = 0,
+                           CKDWORD Flags = 0);
+    virtual CKERROR SetAntialias(CKDWORD Samples);
+    virtual CKERROR GetTargetDesc(CKRasterizerTargetDesc *Target) const;
+    virtual CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const;
+    virtual CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
+                                         CKTextureFormatCaps *Caps) const;
+    virtual CKERROR GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
+                                       CKDepthFormatCaps *Caps) const;
 
     // --- Resource creation ---
-    virtual CKERROR CreateVertexBuffer(CKDWORD Buffer, CKVertexBufferDesc *Desc,
-                                       const void *Data);
-    virtual CKERROR CreateIndexBuffer(CKDWORD Buffer, CKIndexBufferDesc *Desc,
-                                      CKBOOL Index32, const void *Data);
-    virtual CKERROR CreateTexture(CKDWORD Texture, CKTextureDesc *Desc,
-                                  const VxImageDescEx *Data);
-    virtual CKERROR CreateShader(CKDWORD Shader, CKShaderDesc *Desc);
-    virtual CKERROR CreateProgram(CKDWORD Program, CKProgramDesc *Desc);
-    virtual CKERROR CreateUniform(CKDWORD Uniform, CKUniformDesc *Desc);
-    virtual CKERROR CreateVertexLayout(CKDWORD Layout, CKVertexLayoutDesc *Desc);
-    virtual CKERROR CreateFrameBuffer(CKDWORD FrameBuffer, CKFrameBufferDesc *Desc);
-    virtual CKERROR CreateDepthTexture(CKDWORD Texture, CKDepthTextureDesc *Desc);
-    virtual CKERROR CreateOcclusionQuery(CKDWORD Query, CKOcclusionQueryDesc *Desc);
-    virtual CKERROR CreateIndirectBuffer(CKDWORD Buffer, CKIndirectBufferDesc *Desc);
+    virtual CKERROR CreateVertexBuffer(const CKVertexBufferDesc *Desc,
+                                       const void *Data, CKDWORD *OutBuffer);
+    virtual CKERROR CreateIndexBuffer(const CKIndexBufferDesc *Desc,
+                                      CKBOOL Index32, const void *Data,
+                                      CKDWORD *OutBuffer);
+    virtual CKERROR CreateTexture(const CKTextureDesc *Desc,
+                                  const VxImageDescEx *Data,
+                                  CKDWORD *OutTexture);
+    virtual CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *OutShader);
+    virtual CKERROR CreateProgram(const CKProgramDesc *Desc, CKDWORD *OutProgram);
+    virtual CKERROR CreateUniform(const CKUniformDesc *Desc, CKDWORD *OutUniform);
+    virtual CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc,
+                                       CKDWORD *OutLayout);
+    virtual CKERROR CreateFrameBuffer(const CKFrameBufferDesc *Desc,
+                                      CKDWORD *OutFrameBuffer);
+    virtual CKERROR CreateDepthTexture(const CKDepthTextureDesc *Desc,
+                                       CKDWORD *OutTexture);
+    virtual CKERROR CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
+                                         CKDWORD *OutQuery);
+    virtual CKERROR CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
+                                         CKDWORD *OutBuffer);
+    virtual CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const;
     virtual CKERROR DeleteObject(CKDWORD Object, CKDWORD Type);
-    virtual void FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL);
+    virtual CKERROR FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL);
 
     // --- Resource update ---
     virtual CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
@@ -214,16 +227,15 @@ public:
 
     // --- Readback ---
     virtual CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip,
-                                VxImageDescEx *Data);
-    virtual CKERROR ReadFrameBuffer(CKDWORD FrameBuffer,
-                                    VxImageDescEx *Data);
+                                CKReadbackDesc *Readback,
+                                CKDWORD *AvailableFrame);
 
     // --- Occlusion query results ---
     virtual CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD Query,
                                                    CKDWORD *PixelCount = NULL);
 
     // --- Palette ---
-    virtual void SetPaletteColor(CKDWORD Index, CKDWORD RGBA);
+    virtual CKERROR SetPaletteColor(CKDWORD Index, CKDWORD RGBA);
 
     // --- Debug text overlay ---
     virtual void DbgTextClear(CKDWORD Color = 0, CKBOOL Small = FALSE);
@@ -263,8 +275,9 @@ public:
                                  CKWORD NumLayers, CKDWORD Format);
 
     // --- Screenshot capture ---
-    virtual void RequestScreenShot(CKDWORD FrameBuffer,
-                                   CKScreenShotCallback Callback);
+    virtual CKERROR RequestScreenShot(CKDWORD FrameBuffer,
+                                      CKScreenShotCallback Callback,
+                                      void *UserData = NULL);
 
     // --- Render views ---
     virtual CKERROR SetViewName(CKRenderView View, CKSTRING Name);
@@ -303,10 +316,11 @@ public:
                                                     CKDWORD Layout);
 
     // --- Encoder and frame ---
-    virtual CKRasterizerEncoder *BeginEncoder();
-    virtual void EndEncoder(CKRasterizerEncoder *Encoder);
-    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode);
-    virtual CKDWORD GetFrameSerial() const;
+    virtual CKRasterizerEncoder *BeginEncoder(CKBOOL ForceNewEncoder = FALSE);
+    virtual CKERROR EndEncoder(CKRasterizerEncoder *Encoder);
+    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode,
+                          CKDWORD Flags = CKRST_FRAME_NONE,
+                          CKDWORD *FrameNumber = NULL);
 
 public:
     CKRasterizerDriver *m_Driver;
@@ -324,6 +338,9 @@ public:
     CKDWORD m_RefreshRate;
 
     WIN_HANDLE m_Window;
+    CKBOOL m_Created;
+    CKDWORD m_NullFrameNumber;
+    void *m_NullBackendState;
 };
 
 // ===========================================================================
