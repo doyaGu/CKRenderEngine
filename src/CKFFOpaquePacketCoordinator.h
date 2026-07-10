@@ -43,7 +43,7 @@ public:
     CKDWORD GetAdaptiveFrameEndEvaluations() const { return m_Queue.GetAdaptiveFrameEndEvaluations(); }
     CKDWORD GetAdaptiveFrameEndRunBypasses() const { return m_Queue.GetAdaptiveFrameEndRunBypasses(); }
 
-    void DrawVertexBuffer(CKFixedFunctionPipeline &pipeline,
+    CKBOOL DrawVertexBuffer(CKFixedFunctionPipeline &pipeline,
                           CKRasterizerEncoder *encoder,
                           CKRenderView view,
                           VXPRIMITIVETYPE type,

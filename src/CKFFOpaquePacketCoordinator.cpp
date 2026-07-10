@@ -159,6 +159,8 @@ void CKFFOpaquePacketCoordinator::InitVertexBufferPacketForCapture(CKRenderPacke
     packet->View = CKRP_VIEW_OPAQUE3D;
     packet->Type = VX_TRIANGLELIST;
     packet->Program = 0;
+    packet->SpecializationDwordCount = 0;
+    memset(packet->SpecializationDwords, 0, sizeof(packet->SpecializationDwords));
     packet->Depth = 0;
     packet->DrawState.Lo = 0;
     packet->DrawState.Mid = 0;
@@ -184,6 +186,9 @@ void CKFFOpaquePacketCoordinator::InitVertexBufferPacketForCapture(CKRenderPacke
     packet->ViewProjectionHash = 0;
     packet->CanInstance = FALSE;
     packet->InstancedProgram = 0;
+    packet->InstancedSpecializationDwordCount = 0;
+    memset(packet->InstancedSpecializationDwords, 0,
+           sizeof(packet->InstancedSpecializationDwords));
     packet->Marker[0] = '\0';
 }
 
@@ -271,6 +276,10 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->View = view;
     packet->Type = type;
     packet->Program = programContext->Program;
+    packet->SpecializationDwordCount = programContext->Specialization.DwordCount();
+    memcpy(packet->SpecializationDwords,
+           programContext->Specialization.Data(),
+           packet->SpecializationDwordCount * sizeof(CKDWORD));
     float depth = pipeline.ComputeDepthKey();
     packet->Depth = *(CKDWORD *)&depth;
     packet->DrawState = pipeline.GetDrawStateCache().BuildDrawState(type);
@@ -347,6 +356,11 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketInstancing(
     if (CKFFCanUseInstancedProgramForPacket(*programContext, instancedContext)) {
         packet->CanInstance = TRUE;
         packet->InstancedProgram = instancedContext.Program;
+        packet->InstancedSpecializationDwordCount =
+            instancedContext.Specialization.DwordCount();
+        memcpy(packet->InstancedSpecializationDwords,
+               instancedContext.Specialization.Data(),
+               packet->InstancedSpecializationDwordCount * sizeof(CKDWORD));
     }
 }
 
@@ -414,6 +428,8 @@ CKDWORD CKFFOpaquePacketCoordinator::GetOpaqueVertexBufferPacketRejectReason(
         return CKFF_RENDER_PACKET_REJECT_Z_DISABLED;
     if (!pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
         return CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED;
+    if (pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILENABLE))
+        return CKFF_RENDER_PACKET_REJECT_STENCIL;
     {
         const CKDWORD vertexBlendReject = CKFFCoordinatorVertexBlendRejectReason(
             pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_VERTEXBLEND));
@@ -467,7 +483,11 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
         return;
     }
     result->ProgramContext = programContext;
-    pipeline.BuildCurrentTextureBindingSet(&result->TextureBindingSet, preparedState.ActiveTextureCount);
+    if (!pipeline.BuildCurrentTextureBindingSet(
+            &result->TextureBindingSet, preparedState.ActiveTextureCount)) {
+        result->RejectReason = CKFF_RENDER_PACKET_REJECT_STATIC_UNIFORMS;
+        return;
+    }
     result->RejectReason = GetPacketObjectUniformRejectReason(&programContext);
     if (result->RejectReason != CKFF_RENDER_PACKET_ELIGIBLE) {
         return;
@@ -504,7 +524,7 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
     result->RejectReason = CKFF_RENDER_PACKET_ELIGIBLE;
 }
 
-void CKFFOpaquePacketCoordinator::DrawVertexBuffer(
+CKBOOL CKFFOpaquePacketCoordinator::DrawVertexBuffer(
     CKFixedFunctionPipeline &pipeline,
     CKRasterizerEncoder *encoder,
     CKRenderView view,
@@ -532,7 +552,7 @@ void CKFFOpaquePacketCoordinator::DrawVertexBuffer(
             TrackOpaqueRenderPacket(pipeline, buildResult.Packet);
             CKFF_PROBE(pipeline.GetProbes(), OnQueuedRenderPacket());
             CheckAdaptiveBypass(pipeline, encoder);
-            return;
+            return TRUE;
         }
         TrackOpaqueRenderPacketReject(pipeline, buildResult.RejectReason);
         CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketFallback());
@@ -542,11 +562,11 @@ void CKFFOpaquePacketCoordinator::DrawVertexBuffer(
 
     if (HasPackets())
         FlushRenderPackets(pipeline, encoder, FALSE, FALSE);
-    pipeline.SubmitVertexBufferImmediate(encoder, view, type, vb, ib,
-                                         baseVertex, vertexCount,
-                                         startIndex, indexCount,
-                                         dpFlags, formatFlags,
-                                         vertexLayout);
+    return pipeline.SubmitVertexBufferImmediate(encoder, view, type, vb, ib,
+                                                baseVertex, vertexCount,
+                                                startIndex, indexCount,
+                                                dpFlags, formatFlags,
+                                                vertexLayout);
 }
 
 void CKFFOpaquePacketCoordinator::ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline)

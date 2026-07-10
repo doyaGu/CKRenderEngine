@@ -79,12 +79,6 @@ static void AddPacket(CKFFRenderPacketQueue *queue,
     queue->AddPacket(packet);
 }
 
-static CKBOOL SameSortKeyExceptSerial(const CKRenderPacket &a,
-                                      const CKRenderPacket &b)
-{
-    return CKFFRenderPacketSortKeyEquals(a.SortKey, b.SortKey);
-}
-
 static void StaticUniformInterningUsesExactCompare()
 {
     CKFFRenderPacketQueue queue;
@@ -102,7 +96,7 @@ static void StaticUniformInterningUsesExactCompare()
     TestCheck(collision != first, "hash collision must not reuse a different payload");
 }
 
-static void QueueSortsByPrecomputedKeyAndKeepsStableSerial()
+static void QueueKeepsSerialOrderWithPrecomputedKeys()
 {
     CKFFRenderPacketQueue queue;
     CKDWORD staticUniformIndex = InternDefaultPayload(&queue);
@@ -113,28 +107,18 @@ static void QueueSortsByPrecomputedKeyAndKeepsStableSerial()
         AddPacket(&queue, i + 1, vertexBuffer, indexBuffer, staticUniformIndex);
     }
 
-    TestCheck(queue.IsDirectReplay(FALSE) == FALSE,
-              "mixed large queue should request sorted replay");
+    TestCheck(queue.IsDirectReplay(FALSE) == TRUE,
+              "opaque packets must use order-preserving direct replay");
 
     XArray<CKDWORD> indices;
     queue.SortPackets(indices);
-    TestCheck(indices.Size() == 80, "sort should return every packet index");
-
-    CKDWORD lastSerialForKey = 0;
-    for (int i = 1; i < indices.Size(); ++i) {
-        const CKRenderPacket &previous = queue.GetPacket((int)indices[i - 1]);
-        const CKRenderPacket &current = queue.GetPacket((int)indices[i]);
-        TestCheck(CKFFCompareRenderPacket(previous, current) <= 0,
-                  "packets should be sorted by key and serial");
-        if (SameSortKeyExceptSerial(previous, current)) {
-            TestCheck(previous.Serial < current.Serial,
-                      "equal keys should preserve serial order");
-            lastSerialForKey = current.Serial;
-        } else {
-            lastSerialForKey = current.Serial;
-        }
+    TestCheck(indices.Size() == 80, "replay order should return every packet index");
+    for (int i = 0; i < indices.Size(); ++i) {
+        TestCheck(indices[i] == (CKDWORD)i,
+                  "replay indices must preserve original submission order");
+        TestCheck(queue.GetPacket((int)indices[i]).Serial == (CKDWORD)i + 1,
+                  "replay order must preserve stable draw serials");
     }
-    TestCheck(lastSerialForKey != 0, "stable sort should visit sorted packets");
 }
 
 static void RunPlansMergeInstanceCompatiblePackets()
@@ -179,8 +163,8 @@ static void RunStatsUseReplayOrder()
     XArray<CKDWORD> indices;
     queue.SortPackets(indices);
     queue.GetRunStats(&indices, FALSE, &runCount, &maxRun);
-    TestCheck(runCount == 2, "sorted replay should group the two packet keys");
-    TestCheck(maxRun == 40, "sorted replay should report the grouped run length");
+    TestCheck(runCount == 80, "replay indices must not group non-consecutive packet keys");
+    TestCheck(maxRun == 1, "alternating packet keys must remain one-packet runs");
 }
 
 static void RunPlansSplitViewProjectionChanges()
@@ -409,7 +393,7 @@ int main()
 {
     TestFramework tests;
     tests.Run("StaticUniformInterningUsesExactCompare", &StaticUniformInterningUsesExactCompare);
-    tests.Run("QueueSortsByPrecomputedKeyAndKeepsStableSerial", &QueueSortsByPrecomputedKeyAndKeepsStableSerial);
+    tests.Run("QueueKeepsSerialOrderWithPrecomputedKeys", &QueueKeepsSerialOrderWithPrecomputedKeys);
     tests.Run("RunPlansMergeInstanceCompatiblePackets", &RunPlansMergeInstanceCompatiblePackets);
     tests.Run("RunStatsUseReplayOrder", &RunStatsUseReplayOrder);
     tests.Run("RunPlansSplitViewProjectionChanges", &RunPlansSplitViewProjectionChanges);

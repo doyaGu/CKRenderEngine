@@ -363,18 +363,8 @@ CKDWORD CKFFRenderPacketQueue::GetAdaptiveSavedBindEstimate() const
 
 CKBOOL CKFFRenderPacketQueue::IsDirectReplay(CKBOOL forceDirectReplay) const
 {
-    const int packetCount = m_Packets.Size();
-    if (forceDirectReplay)
-        return TRUE;
-    if (packetCount < 2)
-        return TRUE;
-    if (packetCount < CKFF_RENDER_PACKET_MIN_SORT_COUNT)
-        return TRUE;
-    if (m_SingleKey)
-        return TRUE;
-    if (m_AlreadySorted)
-        return TRUE;
-    return FALSE;
+    (void)forceDirectReplay;
+    return TRUE;
 }
 
 void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
@@ -385,45 +375,11 @@ void CKFFRenderPacketQueue::SortPackets(XArray<CKDWORD> &indices) const
 void CKFFRenderPacketQueue::SortPacketIndices(XArray<CKDWORD> &indices,
                                               CKBOOL allowDirectReplaySkip) const
 {
+    (void)allowDirectReplaySkip;
     const int count = m_Packets.Size();
     indices.Resize(count);
     for (int i = 0; i < count; ++i)
         indices[i] = (CKDWORD)i;
-    if (count < 2)
-        return;
-    if (allowDirectReplaySkip && IsDirectReplay(FALSE))
-        return;
-
-    XArray<CKDWORD> scratch;
-    scratch.Resize(count);
-    for (int width = 1; width < count; width <<= 1) {
-        for (int left = 0; left < count; left += width << 1) {
-            int mid = left + width;
-            int right = left + (width << 1);
-            if (mid > count)
-                mid = count;
-            if (right > count)
-                right = count;
-
-            int a = left;
-            int b = mid;
-            int out = left;
-            while (a < mid && b < right) {
-                const CKRenderPacket &pa = m_Packets[(int)indices[a]];
-                const CKRenderPacket &pb = m_Packets[(int)indices[b]];
-                if (CKFFCompareRenderPacket(pa, pb) <= 0)
-                    scratch[out++] = indices[a++];
-                else
-                    scratch[out++] = indices[b++];
-            }
-            while (a < mid)
-                scratch[out++] = indices[a++];
-            while (b < right)
-                scratch[out++] = indices[b++];
-        }
-        for (int i = 0; i < count; ++i)
-            indices[i] = scratch[i];
-    }
 }
 
 int CKFFRenderPacketQueue::GetReplayPacketIndex(const XArray<CKDWORD> *indices,

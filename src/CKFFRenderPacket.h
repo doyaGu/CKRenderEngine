@@ -6,6 +6,7 @@
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKFFConstants.h"
+#include "CKFFSpecializationInfo.h"
 
 #define CKFF_RENDER_PACKET_MAX_UNIFORMS 16
 #define CKFF_RENDER_PACKET_MAX_UNIFORM_VEC4S 192
@@ -29,6 +30,7 @@ enum CKFFRenderPacketEligibilityReason {
     CKFF_RENDER_PACKET_REJECT_ALPHA_BLEND,
     CKFF_RENDER_PACKET_REJECT_Z_DISABLED,
     CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED,
+    CKFF_RENDER_PACKET_REJECT_STENCIL,
     CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND,
     CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING,
     CKFF_RENDER_PACKET_REJECT_INDEXED_VERTEX_BLEND,
@@ -99,6 +101,8 @@ struct CKRenderPacket {
     CKRenderView View;
     VXPRIMITIVETYPE Type;
     CKDWORD Program;
+    CKDWORD SpecializationDwordCount;
+    CKDWORD SpecializationDwords[CKFFSpecializationInfo::MaxSpecDwords];
     CKDWORD Depth;
     CKDrawState DrawState;
     CKDWORD StencilRef;
@@ -122,6 +126,8 @@ struct CKRenderPacket {
     CKDWORD ViewProjectionHash;
     CKBOOL CanInstance;
     CKDWORD InstancedProgram;
+    CKDWORD InstancedSpecializationDwordCount;
+    CKDWORD InstancedSpecializationDwords[CKFFSpecializationInfo::MaxSpecDwords];
     char Marker[CKFF_RENDER_PACKET_MARKER_SIZE];
 };
 

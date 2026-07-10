@@ -287,7 +287,7 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
         CKRenderView view = (m_DpData.Flags & CKRST_DP_TRANSFORM)
             ? rctx->m_Current3DView
             : rctx->m_Current2DView;
-        rctx->m_FFPipeline.DrawVertexBuffer(
+        return rctx->m_FFPipeline.DrawVertexBuffer(
             rctx->m_FFPipeline.GetRenderPipeline().GetEncoder(),
             view,
             pType,
@@ -300,7 +300,6 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
             m_DpData.Flags,
             m_FormatFlags,
             m_VertexLayout);
-        return TRUE;
     }
 
     VxDrawPrimitiveData drawData = m_DpData;

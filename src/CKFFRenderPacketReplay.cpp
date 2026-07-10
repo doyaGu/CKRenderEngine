@@ -206,6 +206,8 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
     CKDWORD transformIdx = context->Context->AllocTransform((VxMatrix *)&packet.World, 1);
     context->Encoder->SetTransform(transformIdx, 1);
     CKFFReplayIncrement(context->Diagnostics.TransformSets, 1);
+    context->Encoder->SetDrawSpecialization(packet.SpecializationDwords,
+                                            packet.SpecializationDwordCount);
     if (packet.Marker[0] != '\0')
         context->Encoder->SetMarker((CKSTRING)packet.Marker);
     context->Encoder->Submit(packet.View, packet.Program, packet.Depth,
@@ -315,6 +317,9 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
         CKFFReplayIncrement(context->Diagnostics.RenderPacketInstanceBufferBytes,
                             instanceBuffer.Stride * available);
         context->Encoder->SetTransientInstanceBuffer(0, &instanceBuffer);
+        context->Encoder->SetDrawSpecialization(
+            first.InstancedSpecializationDwords,
+            first.InstancedSpecializationDwordCount);
         if (first.Marker[0] != '\0')
             context->Encoder->SetMarker((CKSTRING)first.Marker);
 

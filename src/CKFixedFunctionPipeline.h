@@ -36,6 +36,21 @@ struct CKLightData;
 
 struct CKFFPipelineTestAccess;
 
+enum CKFFDrawRejectReason {
+    CKFF_DRAW_REJECT_NONE = 0,
+    CKFF_DRAW_REJECT_INVALID_INPUT,
+    CKFF_DRAW_REJECT_PREPARE_FAILED,
+    CKFF_DRAW_REJECT_PROGRAM_MISSING,
+    CKFF_DRAW_REJECT_STENCIL_WRITE_MASK,
+    CKFF_DRAW_REJECT_VERTEX_TWEEN,
+    CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT,
+    CKFF_DRAW_REJECT_AFFINE_TEXCOORD,
+    CKFF_DRAW_REJECT_TEXTURE_OP,
+    CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
+    CKFF_DRAW_REJECT_BORDER_PALETTE,
+    CKFF_DRAW_REJECT_COUNT
+};
+
 class CKFixedFunctionPipeline {
 public:
     CKFixedFunctionPipeline();
@@ -78,17 +93,23 @@ public:
 
     // === Drawing ===
     // Draw using VxDrawPrimitiveData (software vertex path)
-    void DrawPrimitive(CKRasterizerEncoder *encoder, CKRenderView view,
-                       VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
-                       VxDrawPrimitiveData *data);
+    CKBOOL DrawPrimitive(CKRasterizerEncoder *encoder, CKRenderView view,
+                         VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
+                         VxDrawPrimitiveData *data);
 
     // Draw using persistent vertex/index buffer handles
-    void DrawVertexBuffer(CKRasterizerEncoder *encoder, CKRenderView view,
-                          VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-                          CKDWORD baseVertex, CKDWORD vertexCount,
-                          CKDWORD startIndex, CKDWORD indexCount,
-                          CKDWORD dpFlags, CKDWORD formatFlags,
-                          CKDWORD vertexLayout);
+    CKBOOL DrawVertexBuffer(CKRasterizerEncoder *encoder, CKRenderView view,
+                            VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                            CKDWORD baseVertex, CKDWORD vertexCount,
+                            CKDWORD startIndex, CKDWORD indexCount,
+                            CKDWORD dpFlags, CKDWORD formatFlags,
+                            CKDWORD vertexLayout);
+    CKFFDrawRejectReason GetLastDrawRejectReason() const { return m_LastDrawRejectReason; }
+    CKDWORD GetRejectedDrawCount(CKFFDrawRejectReason reason) const {
+        return reason > CKFF_DRAW_REJECT_NONE && reason < CKFF_DRAW_REJECT_COUNT
+            ? m_DrawRejectCounts[reason]
+            : 0;
+    }
 
     CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePackets.HasPackets(); }
     void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
@@ -139,7 +160,7 @@ public:
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
                                    CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
-    void BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
+    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                      const CKFFProgramContext *programContext,
                                      CKDWORD activeTextureCount);
@@ -147,12 +168,12 @@ public:
                                      const CKFFProgramContext *programContext);
     void UpdateViewProjectionCache();
     float ComputeDepthKey() const;
-    void SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder, CKRenderView view,
-                                     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-                                     CKDWORD baseVertex, CKDWORD vertexCount,
-                                     CKDWORD startIndex, CKDWORD indexCount,
-                                     CKDWORD dpFlags, CKDWORD formatFlags,
-                                     CKDWORD vertexLayout);
+    CKBOOL SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder, CKRenderView view,
+                                       VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                                       CKDWORD baseVertex, CKDWORD vertexCount,
+                                       CKDWORD startIndex, CKDWORD indexCount,
+                                       CKDWORD dpFlags, CKDWORD formatFlags,
+                                       CKDWORD vertexLayout);
 
 private:
 #if CKRE_ENABLE_TEST_ACCESS
@@ -200,12 +221,19 @@ private:
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
     CKFFOpaquePacketCoordinator m_OpaquePackets;
+    CKFFDrawRejectReason m_LastDrawRejectReason;
+    CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
+    CKDWORD m_BorderPaletteColors[16];
+    CKDWORD m_BorderPaletteCount;
+    CKDWORD m_BorderPaletteFrameSerial;
 
     // Internal methods
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
-    void SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
+    CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
+    CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
+    CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
