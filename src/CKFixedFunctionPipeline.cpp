@@ -8,8 +8,8 @@
 #include "CKRenderPerfStats.h"
 #include "CKRenderFrameCostStats.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
@@ -55,14 +55,18 @@ CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
 }
 
-void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
+bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
+    Shutdown();
     m_Context = ctx;
     m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     m_BorderPaletteCount = 0;
     m_BorderPaletteFrameSerial = (CKDWORD)-1;
     memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
-    m_ShaderCache.Init(ctx);
+    if (!m_ShaderCache.Init(ctx)) {
+        Shutdown();
+        return false;
+    }
     m_DrawStateCache.Reset();
     m_VertexLayoutCache.Init(ctx);
     m_OpaquePackets.SetInstanceLayout(m_VertexLayoutCache.GetLayout(CKFF_VF_TEXCOORD0 |
@@ -75,6 +79,7 @@ void CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     MarkPacketProgramDirty();
     m_OpaquePackets.ClearRenderPackets();
     m_OpaquePackets.ResetRenderPacketFrameState(*this);
+    return true;
 }
 
 void CKFixedFunctionPipeline::Shutdown() {
@@ -207,7 +212,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
 {
     if (!bindingSet || !m_Context)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    const CKDWORD frameSerial = m_Context->GetFrameSerial();
+    const CKDWORD frameSerial = m_RenderPipeline.GetFrameNumber();
     if (m_BorderPaletteFrameSerial != frameSerial) {
         m_BorderPaletteFrameSerial = frameSerial;
         m_BorderPaletteCount = 0;
@@ -468,19 +473,15 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
         encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
     }
 
-    if (submission.VertexLayout) {
-        {
-            CKFF_SCOPE_TIME(m_Probes, LayoutUs);
-            encoder->SetVertexLayout(submission.VertexLayout);
-        }
+    if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
-    }
 
     if (submission.VertexBuffer) {
         CKFF_PROBE(m_Probes, OnVertexBuffers(submission.VertexBuffer, submission.IndexBuffer, submission.VertexLayout));
         {
             CKFF_SCOPE_TIME(m_Probes, BufferBindUs);
-            encoder->SetVertexBuffer(0, submission.VertexBuffer, submission.BaseVertex, submission.VertexCount);
+            encoder->SetVertexBuffer(0, submission.VertexBuffer, submission.BaseVertex,
+                                     submission.VertexCount, submission.VertexLayout);
             if (submission.IndexBuffer)
                 encoder->SetIndexBuffer(submission.IndexBuffer, submission.StartIndex, submission.IndexCount);
         }
@@ -497,8 +498,6 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
     float depth = ComputeDepthKey();
     {
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
-        encoder->SetDrawSpecialization(programContext->Specialization.Data(),
-                                       programContext->Specialization.DwordCount());
         encoder->Submit(submission.View, programContext->Program, *(CKDWORD *)&depth, SubmitDiscardFlags());
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();

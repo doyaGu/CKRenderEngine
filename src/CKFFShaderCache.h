@@ -6,7 +6,7 @@
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 #include "XHashTable.h"
-#include <cstdint>
+#include <stdint.h>
 
 class CKRasterizerContext;
 
@@ -91,7 +91,7 @@ public:
     CKFFShaderCache();
     ~CKFFShaderCache();
 
-    void Init(CKRasterizerContext *ctx);
+    bool Init(CKRasterizerContext *ctx);
     void Shutdown();
 
     // Select the fixed-function program for the given FFP shader key.
@@ -100,7 +100,14 @@ public:
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
-    CKDWORD GetTargetFlags() const { return m_Target.Flags; }
+    CKDWORD GetTargetFlags() const {
+        CKDWORD flags = 0;
+        if (m_Target.HomogeneousDepth)
+            flags |= CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE;
+        if (m_Target.OriginBottomLeft)
+            flags |= CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT;
+        return flags;
+    }
 
     bool UsesUberShader() const { return m_UseUberShader; }
     CKFFShaderMode GetShaderMode() const {
@@ -112,31 +119,25 @@ public:
 private:
     CKRasterizerContext *m_Context;
     CKFFUniformHandles m_Uniforms;
-    CKShaderTargetDesc m_Target;
+    CKRasterizerTargetDesc m_Target;
     const void *m_BlobSet;
     bool m_UseUberShader;
     CKFFProgramCacheTable m_ProgramCache;
     CKFFProgramModuleCacheTable m_ModuleProgramCache;
-    CKDWORD m_NextShaderHandle;
-    CKDWORD m_NextProgramHandle;
-    CKDWORD m_NextUniformHandle;
 
-    void CreateUniforms();
-    void ResolveShaderTarget();
+    bool CreateUniforms();
+    bool ResolveShaderTarget();
     CKFFProgramBinding CreateVariantProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateUberSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateFullSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateVolumeSamplerLayoutProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateStaticSamplerLayoutProgram(const CKFFShaderKey &key);
     CKDWORD CreateProgramFromBinary(
-        const CKShaderTargetDesc &target,
+        const CKRasterizerTargetDesc &target,
         const unsigned char *vsData, unsigned int vsSize,
         const unsigned char *fsData, unsigned int fsSize,
         const CKFFSpecializationInfo &specInfo);
 
-    CKDWORD AllocShaderHandle() { return m_NextShaderHandle++; }
-    CKDWORD AllocProgramHandle() { return m_NextProgramHandle++; }
-    CKDWORD AllocUniformHandle() { return m_NextUniformHandle++; }
 };
 
 #endif // CKFFSHADERCACHE_H

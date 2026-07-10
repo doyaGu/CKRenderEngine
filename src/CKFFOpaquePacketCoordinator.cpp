@@ -5,7 +5,7 @@
 #include "CKRenderFrameCostStats.h"
 #include "CKRasterizer.h"
 
-#include <cstring>
+#include <string.h>
 
 static CKDWORD CKFFCoordinatorShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs)
 {
@@ -159,8 +159,6 @@ void CKFFOpaquePacketCoordinator::InitVertexBufferPacketForCapture(CKRenderPacke
     packet->View = CKRP_VIEW_OPAQUE3D;
     packet->Type = VX_TRIANGLELIST;
     packet->Program = 0;
-    packet->SpecializationDwordCount = 0;
-    memset(packet->SpecializationDwords, 0, sizeof(packet->SpecializationDwords));
     packet->Depth = 0;
     packet->DrawState.Lo = 0;
     packet->DrawState.Mid = 0;
@@ -186,9 +184,6 @@ void CKFFOpaquePacketCoordinator::InitVertexBufferPacketForCapture(CKRenderPacke
     packet->ViewProjectionHash = 0;
     packet->CanInstance = FALSE;
     packet->InstancedProgram = 0;
-    packet->InstancedSpecializationDwordCount = 0;
-    memset(packet->InstancedSpecializationDwords, 0,
-           sizeof(packet->InstancedSpecializationDwords));
     packet->Marker[0] = '\0';
 }
 
@@ -276,10 +271,6 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->View = view;
     packet->Type = type;
     packet->Program = programContext->Program;
-    packet->SpecializationDwordCount = programContext->Specialization.DwordCount();
-    memcpy(packet->SpecializationDwords,
-           programContext->Specialization.Data(),
-           packet->SpecializationDwordCount * sizeof(CKDWORD));
     float depth = pipeline.ComputeDepthKey();
     packet->Depth = *(CKDWORD *)&depth;
     packet->DrawState = pipeline.GetDrawStateCache().BuildDrawState(type);
@@ -356,11 +347,6 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketInstancing(
     if (CKFFCanUseInstancedProgramForPacket(*programContext, instancedContext)) {
         packet->CanInstance = TRUE;
         packet->InstancedProgram = instancedContext.Program;
-        packet->InstancedSpecializationDwordCount =
-            instancedContext.Specialization.DwordCount();
-        memcpy(packet->InstancedSpecializationDwords,
-               instancedContext.Specialization.Data(),
-               packet->InstancedSpecializationDwordCount * sizeof(CKDWORD));
     }
 }
 

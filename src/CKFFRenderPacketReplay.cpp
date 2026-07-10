@@ -2,7 +2,7 @@
 #include "CKFFDebug.h"
 #include "CKRasterizer.h"
 
-#include <cstring>
+#include <string.h>
 
 static void CKFFReplayIncrement(CKDWORD *counter, CKDWORD amount)
 {
@@ -104,20 +104,20 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
         cache->HasStencil = TRUE;
     }
 
-    if (packet.VertexLayout &&
-        (!cache->HasVertexLayout || cache->VertexLayout != packet.VertexLayout)) {
-        encoder->SetVertexLayout(packet.VertexLayout);
-        cache->VertexLayout = packet.VertexLayout;
-        cache->HasVertexLayout = TRUE;
+    const CKBOOL layoutChanged = !cache->HasVertexLayout ||
+                                 cache->VertexLayout != packet.VertexLayout;
+    if (packet.VertexLayout && layoutChanged)
         CKFFReplayIncrement(diagnostics->VertexLayoutSets, 1);
-    }
 
-    if (!cache->HasVertexBuffer ||
+    if (layoutChanged || !cache->HasVertexBuffer ||
         cache->VertexBuffer != packet.VertexBuffer ||
         cache->BaseVertex != packet.BaseVertex ||
         cache->VertexCount != packet.VertexCount) {
         encoder->SetVertexBuffer(0, packet.VertexBuffer,
-                                 packet.BaseVertex, packet.VertexCount);
+                                 packet.BaseVertex, packet.VertexCount,
+                                 packet.VertexLayout);
+        cache->VertexLayout = packet.VertexLayout;
+        cache->HasVertexLayout = TRUE;
         cache->VertexBuffer = packet.VertexBuffer;
         cache->BaseVertex = packet.BaseVertex;
         cache->VertexCount = packet.VertexCount;
@@ -206,8 +206,6 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
     CKDWORD transformIdx = context->Context->AllocTransform((VxMatrix *)&packet.World, 1);
     context->Encoder->SetTransform(transformIdx, 1);
     CKFFReplayIncrement(context->Diagnostics.TransformSets, 1);
-    context->Encoder->SetDrawSpecialization(packet.SpecializationDwords,
-                                            packet.SpecializationDwordCount);
     if (packet.Marker[0] != '\0')
         context->Encoder->SetMarker((CKSTRING)packet.Marker);
     context->Encoder->Submit(packet.View, packet.Program, packet.Depth,
@@ -317,16 +315,13 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
         CKFFReplayIncrement(context->Diagnostics.RenderPacketInstanceBufferBytes,
                             instanceBuffer.Stride * available);
         context->Encoder->SetTransientInstanceBuffer(0, &instanceBuffer);
-        context->Encoder->SetDrawSpecialization(
-            first.InstancedSpecializationDwords,
-            first.InstancedSpecializationDwordCount);
         if (first.Marker[0] != '\0')
             context->Encoder->SetMarker((CKSTRING)first.Marker);
 
         const CKBOOL chunkIsLast = (pos + (int)available == packetCount) ? TRUE : FALSE;
         CKDWORD discardFlags = (lastRun && chunkIsLast)
             ? CKRST_DISCARD_ALL
-            : CKRST_DISCARD_INSTANCEDATA;
+            : CKRST_DISCARD_INSTANCE_DATA;
         context->Encoder->Submit(first.View, first.InstancedProgram, first.Depth, discardFlags);
         CKFFReplayIncrement(context->Diagnostics.SubmittedDraws, 1);
         CKFFReplayIncrement(context->Diagnostics.ReplayedRenderPackets, available);

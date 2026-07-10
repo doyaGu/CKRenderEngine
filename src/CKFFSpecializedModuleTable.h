@@ -5,7 +5,7 @@
 #include "CKFFSamplerLayout.h"
 #include "CKRasterizerTypes.h"
 
-#include <cstddef>
+#include <stddef.h>
 
 struct CKFFSpecializedModule {
     const unsigned char *VSData;
@@ -24,7 +24,9 @@ struct CKFFSpecializedModuleEntry {
 bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
                                CK_SHADER_PROFILE profile,
                                CKFFSpecializedModule &module);
-std::size_t CKFFSpecializedModuleCount();
+size_t CKFFSpecializedModuleCount();
+CKDWORD CKFFGeneratedShaderABIVersion();
+CKDWORD CKFFGeneratedShaderInterfaceHash();
 
 struct CKFFSamplerLayoutModule {
     const unsigned char *FSData;
@@ -40,6 +42,6 @@ struct CKFFSamplerLayoutModuleEntry {
 bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
                                  CK_SHADER_PROFILE profile,
                                  CKFFSamplerLayoutModule &module);
-std::size_t CKFFSamplerLayoutModuleCount();
+size_t CKFFSamplerLayoutModuleCount();
 
 #endif // CKFFSPECIALIZEDMODULETABLE_H
