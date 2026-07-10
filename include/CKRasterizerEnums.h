@@ -163,6 +163,9 @@ typedef uint32_t CK_SHADER_PROFILE;
 #define CKRST_SHADER_PROFILE_GLSL    CKRST_MAKEFOURCC('G', 'L', 'S', 'L')
 #define CKRST_SHADER_PROFILE_MSL     CKRST_MAKEFOURCC('M', 'S', 'L', ' ')
 
+#define CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE 0x00000001u
+#define CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT    0x00000002u
+
 // ---------------------------------------------------------------------------
 // Uniform Type
 // ---------------------------------------------------------------------------

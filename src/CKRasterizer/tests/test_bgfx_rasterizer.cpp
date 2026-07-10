@@ -489,9 +489,10 @@ static void TestBackendProfileMapping()
                 "D3D12 renderer maps to dx12 shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Vulkan) == CKRST_SHADER_PROFILE_SPIRV,
                 "Vulkan renderer maps to SPIR-V shader profile");
-    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGL) == CKRST_SHADER_PROFILE_GLSL &&
-                    CKBgfxShaderProfile(bgfx::RendererType::OpenGLES) == CKRST_SHADER_PROFILE_GLSL,
-                "OpenGL renderers map to GLSL shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGL) == CKRST_SHADER_PROFILE_GLSL,
+                "OpenGL renderer maps to GLSL shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGLES) == CKRST_SHADER_PROFILE_UNKNOWN,
+                "OpenGLES renderer is rejected without an ESSL shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Metal) == CKRST_SHADER_PROFILE_MSL,
                 "Metal renderer maps to MSL shader profile");
     TEST_ASSERT(std::strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_SPIRV), "spirv") == 0,
@@ -800,6 +801,46 @@ static void TestInvalidProgramSubmitIsRejected()
 }
 
 // ============================================================================
+// Test 10: Uniform reflection handle contract
+// ============================================================================
+
+static void TestUniformReflectionUsesSlotHandles()
+{
+    TEST_SECTION("Uniform Reflection Slot Handle Contract");
+
+    CKBgfxRasterizerContext context(NULL);
+
+    // CK slot 5 wraps bgfx uniform idx 42; slot and idx deliberately differ so
+    // any raw-idx passthrough is caught.
+    context.InjectUniformRecordForTests(5, 42, CKRST_UNIFORM_MATRIX4, 8, "u_ffMatrices");
+
+    TEST_ASSERT(context.FindUniformSlotByHandleForTests(42) == 5,
+                "bgfx uniform idx resolves back to its CK slot handle");
+    TEST_ASSERT(context.FindUniformSlotByHandleForTests(999) == 0,
+                "unknown bgfx uniform idx maps to invalid handle 0");
+
+    CKUniformInfo info;
+    context.GetUniformInfo(5, &info);
+    TEST_ASSERT(std::strcmp(info.Name, "u_ffMatrices") == 0,
+                "GetUniformInfo takes the CK slot handle and returns the record name");
+    TEST_ASSERT(info.Type == CKRST_UNIFORM_MATRIX4,
+                "GetUniformInfo returns the CK uniform type from the record");
+    TEST_ASSERT(info.Count == 8,
+                "GetUniformInfo returns the array count from the record");
+
+    // The raw bgfx idx (42) is not a CK slot; it must not resolve to a record.
+    CKUniformInfo rawInfo;
+    context.GetUniformInfo(42, &rawInfo);
+    TEST_ASSERT(rawInfo.Name[0] == '\0' && rawInfo.Count == 0,
+                "raw bgfx idx is not accepted as a CK slot handle");
+
+    CKUniformInfo invalidInfo;
+    context.GetUniformInfo(0, &invalidInfo);
+    TEST_ASSERT(invalidInfo.Name[0] == '\0' && invalidInfo.Count == 0,
+                "invalid handle 0 yields an empty info instead of touching bgfx");
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -823,6 +864,7 @@ int main()
     TestDrawMapTraceContractHelpers();
     TestDebugOverlayViewMapContract();
     TestInvalidProgramSubmitIsRejected();
+    TestUniformReflectionUsesSlotHandles();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);

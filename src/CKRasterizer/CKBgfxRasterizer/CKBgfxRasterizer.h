@@ -6,6 +6,7 @@
 #define CKBGFX_DRAWMAP_SOURCE_COUNT 6
 
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <bgfx/bgfx.h>
 
@@ -107,7 +108,7 @@ struct CKBgfxTextureRecord {
           IsDepth(FALSE), RequestedAutoMips(FALSE), MipCount(1),
           Format(bgfx::TextureFormat::Count), BitsPerPixel(0),
           SamplerBaseValid(FALSE),
-          AutoMipBaseValid(FALSE) {}
+          AutoMipBaseValid(FALSE), ReadbackBottomLeftMipMask(0) {}
 
     ~CKBgfxTextureRecord()
     {
@@ -133,11 +134,14 @@ struct CKBgfxTextureRecord {
     CKBOOL SamplerBaseValid;
     VxImageDescEx AutoMipBaseDesc;
     CKBOOL AutoMipBaseValid;
+    CKDWORD ReadbackBottomLeftMipMask;
 };
 
 struct CKBgfxFrameBufferRecord {
     bgfx::FrameBufferHandle Handle;
     CKDWORD FirstColorTexture;
+    CKDWORD FirstColorMip;
+    CKDWORD FirstColorLayer;
 };
 
 struct CKBgfxOcclusionQueryRecord {
@@ -215,6 +219,7 @@ public:
     void SetTexture(CKDWORD Stage, CKDWORD Uniform,
                     CKDWORD Texture, CKSamplerDesc *Sampler) override;
     void SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count) override;
+    void SetDrawSpecialization(const CKDWORD *Values, CKDWORD Count) override;
 
     void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                           CK_ACCESS_MODE Access) override;
@@ -271,6 +276,8 @@ public:
     CKDWORD m_DebugIndexStart;
     CKDWORD m_DebugIndexCount;
     CKDWORD m_DebugIndexHandle;
+    CKDWORD m_DebugSpecializationHash;
+    CKBOOL m_DebugSpecializationValid;
 
     void TraceSubmit(CKSTRING Kind,
                      CKRenderView View,
@@ -356,6 +363,21 @@ public:
     CKDWORD GetInvalidSubmitCountForTests() const { return m_DebugInvalidSubmitCount.load(std::memory_order_relaxed); }
     CKDWORD GetEncoderLeakCountForTests() const { return m_DebugEncoderLeakCount.load(std::memory_order_relaxed); }
     CKDWORD GetTransientAllocMissCountForTests() const { return m_DebugTransientAllocMissCount.load(std::memory_order_relaxed); }
+    CKDWORD FindUniformSlotByHandleForTests(uint16_t BgfxIdx) { return FindUniformSlotByHandle(BgfxIdx); }
+    void InjectUniformRecordForTests(CKDWORD Slot, uint16_t BgfxIdx, CK_UNIFORM_TYPE Type,
+                                     CKDWORD Count, const char *Name)
+    {
+        auto *rec = new CKBgfxUniformRecord();
+        rec->Handle.idx = BgfxIdx;
+        rec->Type = Type;
+        rec->Count = Count;
+        strncpy(rec->Name, Name ? Name : "", sizeof(rec->Name) - 1);
+        rec->Name[sizeof(rec->Name) - 1] = '\0';
+        while (m_Uniforms.Size() <= (int)Slot)
+            m_Uniforms.PushBack(NULL);
+        delete m_Uniforms[Slot];
+        m_Uniforms[Slot] = rec;
+    }
 #endif
 
     // Resource naming
@@ -421,6 +443,7 @@ public:
     CKRasterizerEncoder *BeginEncoder() override;
     void EndEncoder(CKRasterizerEncoder *Encoder) override;
     CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode) override;
+    CKDWORD GetFrameSerial() const override { return m_DebugFrameId; }
 
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);
     CKBgfxProgramRecord *GetProgram(CKDWORD Handle);
@@ -435,6 +458,8 @@ public:
 
 private:
     friend class CKBgfxCallback;
+
+    CKDWORD FindUniformSlotByHandle(uint16_t BgfxIdx);
 
     CKBOOL m_BgfxInitialized;
     const char *m_RendererName;

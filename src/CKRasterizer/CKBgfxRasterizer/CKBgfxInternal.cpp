@@ -265,8 +265,8 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
     case bgfx::RendererType::Direct3D11: return CKRST_SHADER_PROFILE_DX11;
     case bgfx::RendererType::Direct3D12: return CKRST_SHADER_PROFILE_DX12;
     case bgfx::RendererType::Vulkan:     return CKRST_SHADER_PROFILE_SPIRV;
-    case bgfx::RendererType::OpenGL:
-    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_GLSL;
+    case bgfx::RendererType::OpenGL:     return CKRST_SHADER_PROFILE_GLSL;
+    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_UNKNOWN;
     case bgfx::RendererType::Metal:      return CKRST_SHADER_PROFILE_MSL;
     default:                             return CKRST_SHADER_PROFILE_UNKNOWN;
     }
