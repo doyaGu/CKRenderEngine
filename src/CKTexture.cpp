@@ -118,7 +118,6 @@ static CKBOOL BuildCopyUploadRegion(const VxRect *dest, int targetWidth, int tar
     uploadDesc.Image = image;
     uploadDesc.Width = width;
     uploadDesc.Height = height;
-    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * height;
 
     region.left = left;
     region.top = top;
@@ -139,11 +138,11 @@ static CKBYTE *ConvertTextureImage(const VxImageDescEx &src, const VxImageDescEx
     uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
     if (uploadDesc.BytesPerLine <= 0)
         return nullptr;
-    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
-    if (uploadDesc.TotalImageSize <= 0)
+    const int imageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+    if (imageSize <= 0)
         return nullptr;
 
-    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    CKBYTE *converted = new CKBYTE[imageSize];
     uploadDesc.Image = converted;
     VxDoBlit(src, uploadDesc);
     return converted;
