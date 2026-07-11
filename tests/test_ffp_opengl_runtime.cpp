@@ -32,10 +32,13 @@ struct PixelResources {
     CKDWORD ColorTexture;
     CKDWORD DepthTexture;
     CKDWORD FrameBuffer;
+    CKDWORD ColorFrameBuffer;
     CKDWORD ReadbackTexture;
+    CKDWORD TransformTexture;
 
     PixelResources()
-        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), ReadbackTexture(0) {}
+        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), ColorFrameBuffer(0),
+          ReadbackTexture(0), TransformTexture(0) {}
 };
 
 struct ScreenShotResult {
@@ -273,17 +276,42 @@ CKBOOL DrawColorTriangle(CKFixedFunctionPipeline &ffp,
                              VX_TRIANGLELIST, NULL, 0, &data);
 }
 
+CKBOOL DrawTexturedTriangle(CKFixedFunctionPipeline &ffp,
+                            CKRasterizerEncoder *encoder,
+                            const VxVector positions[3],
+                            const CKDWORD colors[3],
+                            float texcoords[3][4])
+{
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+    return ffp.DrawPrimitive(encoder, CKRP_VIEW_OPAQUE3D,
+                             VX_TRIANGLELIST, NULL, 0, &data);
+}
+
 bool PixelNear(const XArray<CKBYTE> &pixels,
                int x, int y, int r, int g, int b, int tolerance = 24)
 {
-    const size_t offset = ((size_t)y * 64u + (size_t)x) * 4u;
-    if (offset + 3 >= (size_t)pixels.Size())
+    const int offset = (y * 64 + x) * 4;
+    if (offset < 0 || offset + 3 >= pixels.Size())
         return false;
     const int db = abs((int)pixels[offset + 0] - b);
     const int dg = abs((int)pixels[offset + 1] - g);
     const int dr = abs((int)pixels[offset + 2] - r);
     return dr <= tolerance && dg <= tolerance && db <= tolerance;
 }
+
+void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
+                          CKBgfxRasterizerContext *context,
+                          const PixelResources &resources,
+                          XArray<CKBYTE> &pixels,
+                          CKBOOL validateMipReadback = FALSE);
 
 void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
                             PixelResources &resources)
@@ -305,6 +333,21 @@ void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
                          CKRST_TEXTURE_READBACK;
     TestCheck(context->CreateTexture(&readbackDesc, NULL, &resources.ReadbackTexture) == CK_OK,
               "Backend pixel gate must create a blit readback texture");
+
+    CKTextureDesc transformDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, transformDesc.Format);
+    transformDesc.Format.Width = 2;
+    transformDesc.Format.Height = 1;
+    transformDesc.MipMapCount = 1;
+    transformDesc.Depth = 1;
+    transformDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    CKDWORD transformPixels[2] = {0xFFFF0000u, 0xFF00FF00u};
+    VxImageDescEx transformData = transformDesc.Format;
+    transformData.BytesPerLine = 2 * sizeof(CKDWORD);
+    transformData.Image = (XBYTE *)transformPixels;
+    TestCheck(context->CreateTexture(&transformDesc, &transformData,
+                                     &resources.TransformTexture) == CK_OK,
+              "Backend pixel gate must create a texture-transform source texture");
 
     CKDepthTextureDesc depthDesc = {};
     depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
@@ -340,6 +383,16 @@ void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
                   frameBufferDesc.ColorCount, frameBufferDesc.Color,
                   &frameBufferDesc.DepthStencil) == TRUE,
               "Framebuffer validation must agree with framebuffer creation");
+
+    CKFrameBufferDesc colorFrameBufferDesc;
+    colorFrameBufferDesc.Color = &colorAttachment;
+    colorFrameBufferDesc.ColorCount = 1;
+    colorFrameBufferDesc.DepthStencil.Texture = 0;
+    colorFrameBufferDesc.DepthStencil.Mip = 0;
+    colorFrameBufferDesc.DepthStencil.Layer = 0;
+    TestCheck(context->CreateFrameBuffer(
+                  &colorFrameBufferDesc, &resources.ColorFrameBuffer) == CK_OK,
+              "Backend pixel gate must create a color-only framebuffer");
     TestCheck(context->IsFrameBufferValid(0, NULL, NULL) == FALSE,
               "Framebuffer validation must reject an empty attachment set");
 }
@@ -347,11 +400,81 @@ void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
 void DestroyPixelFrameBuffer(CKBgfxRasterizerContext *context,
                              PixelResources &resources)
 {
+    context->DeleteObject(resources.ColorFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
     context->DeleteObject(resources.FrameBuffer, CKRST_OBJ_FRAMEBUFFER);
     context->DeleteObject(resources.DepthTexture, CKRST_OBJ_TEXTURE);
     context->DeleteObject(resources.ColorTexture, CKRST_OBJ_TEXTURE);
     context->DeleteObject(resources.ReadbackTexture, CKRST_OBJ_TEXTURE);
+    context->DeleteObject(resources.TransformTexture, CKRST_OBJ_TEXTURE);
     resources = PixelResources();
+}
+
+void BeginColorOnlyPixelFrame(CKFixedFunctionPipeline &ffp,
+                              CKBgfxRasterizerContext *context,
+                              const PixelResources &resources)
+{
+    CKRECT viewport = {0, 0, 64, 64};
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+    ffp.SetTransform(VXMATRIX_VIEW, identity);
+    ffp.SetTransform(VXMATRIX_PROJECTION, identity);
+    ffp.GetRenderPipeline().BeginFrame(
+        viewport, CKRST_CTXCLEAR_COLOR, 0xFF000000u, 1.0f, identity, identity);
+    context->SetViewFrameBuffer(CKRP_VIEW_CLEAR, resources.ColorFrameBuffer);
+    context->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, resources.ColorFrameBuffer);
+    TestCheck(ffp.GetRenderPipeline().GetEncoder() != NULL,
+              "Depth-compare pixel gate must acquire a rasterizer encoder");
+}
+
+void RunDepthComparePixelCase(CKFixedFunctionPipeline &ffp,
+                              CKBgfxRasterizerContext *context,
+                              const PixelResources &resources,
+                              CK_COMPARE_MODE compareFunc,
+                              bool expectWhite)
+{
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ffp.SetTexture(0, resources.DepthTexture,
+                   CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, compareFunc);
+    ffp.SetTexcoordComponentCount(0, 3);
+    ffp.DisableTextureStagesFrom(1);
+
+    BeginColorOnlyPixelFrame(ffp, context, resources);
+    const VxVector positions[3] = {
+        VxVector(-0.9f, -0.9f, 0.5f),
+        VxVector( 0.9f, -0.9f, 0.5f),
+        VxVector( 0.0f,  0.9f, 0.5f)
+    };
+    const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    float texcoords[3][4] = {
+        {0.5f, 0.5f, 0.5f, 1.0f},
+        {0.5f, 0.5f, 0.5f, 1.0f},
+        {0.5f, 0.5f, 0.5f, 1.0f}
+    };
+    TestCheck(DrawTexturedTriangle(
+                  ffp, ffp.GetRenderPipeline().GetEncoder(),
+                  positions, white, texcoords),
+              "Depth-compare pixel draw must submit");
+
+    XArray<CKBYTE> pixels;
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    const int pixelOffset = (32 * 64 + 32) * 4;
+    TestCheckf(PixelNear(pixels, 32, 32,
+                         expectWhite ? 255 : 0,
+                         expectWhite ? 255 : 0,
+                         expectWhite ? 255 : 0),
+               "Depth-compare pixel mismatch: func=%u expected=%u BGRA=(%u,%u,%u,%u)",
+               (unsigned)compareFunc, expectWhite ? 255u : 0u,
+               (unsigned)pixels[pixelOffset + 0],
+               (unsigned)pixels[pixelOffset + 1],
+               (unsigned)pixels[pixelOffset + 2],
+               (unsigned)pixels[pixelOffset + 3]);
 }
 
 void BeginPixelFrame(CKFixedFunctionPipeline &ffp,
@@ -377,7 +500,8 @@ void BeginPixelFrame(CKFixedFunctionPipeline &ffp,
 void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
                           CKBgfxRasterizerContext *context,
                           const PixelResources &resources,
-                          XArray<CKBYTE> &pixels)
+                          XArray<CKBYTE> &pixels,
+                          CKBOOL validateMipReadback)
 {
     CKRasterizerEncoder *encoder = ffp.GetRenderPipeline().GetEncoder();
     TestCheck(encoder != NULL,
@@ -387,10 +511,12 @@ void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
         encoder->Blit(CKRP_VIEW_FOREGROUND2D,
                       resources.ReadbackTexture, 0, 0, 0,
                       resources.ColorTexture, 0, &source);
-        CKRECT mipSource = {0, 0, 32, 32};
-        encoder->Blit(CKRP_VIEW_FOREGROUND2D,
-                      resources.ReadbackTexture, 1, 0, 0,
-                      resources.ColorTexture, 0, &mipSource);
+        if (validateMipReadback) {
+            CKRECT mipSource = {0, 0, 32, 32};
+            encoder->Blit(CKRP_VIEW_FOREGROUND2D,
+                          resources.ReadbackTexture, 1, 0, 0,
+                          resources.ColorTexture, 0, &mipSource);
+        }
     }
     ffp.GetRenderPipeline().EndFrame(CKRST_FRAME_SYNC_IMMEDIATE);
 
@@ -409,38 +535,45 @@ void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
                                    &baseAvailableFrame) == CK_OK,
               "Backend pixel gate must queue the blit destination readback");
 
-    const size_t mipBytes = 32u * 32u * 4u;
-    const size_t guardBytes = 64u;
-    XArray<CKBYTE> mipPixels;
-    mipPixels.Resize((int)(mipBytes + guardBytes));
-    memset(mipPixels.Begin(), 0xCD, mipBytes + guardBytes);
-    CKReadbackDesc mipImage;
-    TestCheck(context->ReadTexture(resources.ReadbackTexture, 1, &mipImage, NULL) == CK_OK,
-              "Backend pixel gate must query the requested mip dimensions");
-    TestCheck(mipImage.RequiredSize == mipBytes && mipImage.RowPitch == 32 * 4,
-              "Mip readback must report its own tight layout");
-    mipImage.Data = &mipPixels[0];
-    mipImage.Capacity = (CKDWORD)mipBytes;
-    CKDWORD mipAvailableFrame = 0;
-    TestCheck(context->ReadTexture(resources.ReadbackTexture, 1, &mipImage,
-                                   &mipAvailableFrame) == CK_OK,
-              "Backend pixel gate must queue the requested mip readback");
-
     CKDWORD currentFrame = 0;
     for (int i = 0; i < 120; ++i) {
         TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE,
                                  CKRST_FRAME_NONE, &currentFrame) == CK_OK,
-                  "Backend pixel gate must advance queued readbacks");
-        const bool baseReady =
-            (uint32_t)(currentFrame - baseAvailableFrame) < UINT32_C(0x80000000);
-        const bool mipReady =
-            (uint32_t)(currentFrame - mipAvailableFrame) < UINT32_C(0x80000000);
-        if (baseReady && mipReady)
+                  "Backend pixel gate must advance the base-level readback");
+        if ((uint32_t)(currentFrame - baseAvailableFrame) < UINT32_C(0x80000000))
             break;
     }
-    TestCheck((uint32_t)(currentFrame - baseAvailableFrame) < UINT32_C(0x80000000) &&
-              (uint32_t)(currentFrame - mipAvailableFrame) < UINT32_C(0x80000000),
-              "Queued texture readbacks must reach their completion frames");
+    TestCheck((uint32_t)(currentFrame - baseAvailableFrame) < UINT32_C(0x80000000),
+              "Queued base-level readback must reach its completion frame");
+
+    XArray<CKBYTE> mipPixels;
+    const size_t mipBytes = 32u * 32u * 4u;
+    if (validateMipReadback) {
+        const size_t guardBytes = 64u;
+        mipPixels.Resize((int)(mipBytes + guardBytes));
+        memset(mipPixels.Begin(), 0xCD, mipBytes + guardBytes);
+        CKReadbackDesc mipImage;
+        TestCheck(context->ReadTexture(resources.ReadbackTexture, 1, &mipImage, NULL) == CK_OK,
+                  "Backend pixel gate must query the requested mip dimensions");
+        TestCheck(mipImage.RequiredSize == mipBytes && mipImage.RowPitch == 32 * 4,
+                  "Mip readback must report its own tight layout");
+        mipImage.Data = &mipPixels[0];
+        mipImage.Capacity = (CKDWORD)mipBytes;
+        CKDWORD mipAvailableFrame = 0;
+        TestCheck(context->ReadTexture(resources.ReadbackTexture, 1, &mipImage,
+                                       &mipAvailableFrame) == CK_OK,
+                  "Backend pixel gate must queue the requested mip readback");
+
+        for (int i = 0; i < 120; ++i) {
+            TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE,
+                                     CKRST_FRAME_NONE, &currentFrame) == CK_OK,
+                      "Backend pixel gate must advance the mip readback");
+            if ((uint32_t)(currentFrame - mipAvailableFrame) < UINT32_C(0x80000000))
+                break;
+        }
+        TestCheck((uint32_t)(currentFrame - mipAvailableFrame) < UINT32_C(0x80000000),
+                  "Queued mip readback must reach its completion frame");
+    }
 
     pixels.Resize(basePixels.Size());
     memset(pixels.Begin(), 0, (size_t)pixels.Size());
@@ -449,24 +582,21 @@ void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
         memcpy(&pixels[y * image.RowPitch],
                &basePixels[sourceY * image.RowPitch], image.RowPitch);
     }
-    bool guardIntact = true;
-    for (size_t i = mipBytes; i < (size_t)mipPixels.Size(); ++i)
-        guardIntact = guardIntact && mipPixels[i] == 0xCD;
-    TestCheck(guardIntact,
-              "Mip readback orientation normalization must not use base-level dimensions");
+    if (validateMipReadback) {
+        bool guardIntact = true;
+        for (int i = (int)mipBytes; i < mipPixels.Size(); ++i)
+            guardIntact = guardIntact && mipPixels[i] == 0xCD;
+        TestCheck(guardIntact,
+                  "Mip readback orientation normalization must not use base-level dimensions");
+    }
 }
 
-void RunUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
+void CaptureUntexturedConstantPixel(CKFixedFunctionPipeline &ffp,
+                                    CKBgfxRasterizerContext *context,
                                     const PixelResources &resources,
-                                    CKBOOL forceUber,
+                                    CKBOOL uberShader,
                                     CKBYTE center[4])
 {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", forceUber ? "1" : "0");
-
-    CKFixedFunctionPipeline ffp;
-    ffp.Init(context);
     ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
@@ -487,14 +617,14 @@ void RunUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
     const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
                                 positions, white),
-              forceUber
+              uberShader
                   ? "Uber untextured-stage pixel draw must submit"
                   : "Specialized untextured-stage pixel draw must submit");
 
     XArray<CKBYTE> pixels;
     EndPixelFrameAndRead(ffp, context, resources, pixels);
     TestCheck(PixelNear(pixels, 32, 32, 64, 32, 16),
-              forceUber
+              uberShader
                   ? "Uber shader must preserve an active untextured constant stage"
                   : "Specialized shader must preserve an active untextured constant stage");
     const size_t offset = (32u * 64u + 32u) * 4u;
@@ -502,7 +632,19 @@ void RunUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
         memcpy(center, &pixels[(int)offset], 4);
     else
         memset(center, 0, 4);
+}
 
+void RunSpecializedUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
+                                                const PixelResources &resources,
+                                                CKBYTE center[4])
+{
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "UberShader", "0");
+
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context);
+    CaptureUntexturedConstantPixel(ffp, context, resources, FALSE, center);
     ffp.Shutdown();
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
 }
@@ -547,7 +689,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                "Flat-shaded backend pixel draw must submit: reason=%u encoder=%p",
                (unsigned)ffp.GetLastDrawRejectReason(),
                ffp.GetRenderPipeline().GetEncoder());
-    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    EndPixelFrameAndRead(ffp, context, resources, pixels, TRUE);
     TestCheckf(PixelNear(pixels, 32, 32, 255, 0, 0),
                "flat-shade center pixel mismatch: BGRA=(%u,%u,%u,%u)",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
@@ -580,6 +722,25 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     TestCheck(PixelNear(pixels, 32, 32, 0, 255, 0),
               "D3D depth-range normalization must preserve the nearer green draw");
 
+    // Populate a sampled depth texture, then compare a 0.5 reference against depth 0.75.
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTexture(0, 0, 0);
+    BeginPixelFrame(ffp, context, resources);
+    const CKDWORD depthWhite[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                farPositions, depthWhite),
+              "Depth source pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    RunDepthComparePixelCase(
+        ffp, context, resources, CKRST_COMPARE_LESS, true);
+    RunDepthComparePixelCase(
+        ffp, context, resources, CKRST_COMPARE_NEVER, false);
+    ffp.ResetTexcoordComponentCounts();
+    ffp.ResetTextureStage(0);
+
     // Readback is a public top-first contract, independent of backend framebuffer origin.
     ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
     BeginPixelFrame(ffp, context, resources);
@@ -603,6 +764,38 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     TestCheck(PixelNear(pixels, 32, 16, 255, 0, 0) &&
                   PixelNear(pixels, 32, 48, 0, 0, 255),
               "ReadFrameBuffer must normalize backend output to top-first rows");
+
+    // A float2 coordinate is extended with homogeneous w=1 before texture-matrix multiplication.
+    ffp.SetTexture(0, resources.TransformTexture, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+    ffp.SetTexcoordComponentCount(0, 2);
+    VxMatrix textureMatrix;
+    Vx3DMatrixIdentity(textureMatrix);
+    textureMatrix[3][0] = 0.5f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, textureMatrix);
+    BeginPixelFrame(ffp, context, resources);
+    float translatedTexcoords[3][4] = {
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f}
+    };
+    TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                   flatPositions, depthWhite, translatedTexcoords),
+              "texture-matrix backend pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 0, 255, 0),
+               "texture-matrix translation mismatch: BGRA=(%u,%u,%u,%u)",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    ffp.ResetTextureStage(0);
+    ffp.ResetTexcoordComponentCounts();
 
     // Table fog consumes eye-space depth. Projection-space z/w would leave this nearly white.
     VxMatrix fogProjection;
@@ -631,12 +824,11 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
 
-    ffp.Shutdown();
-
     CKBYTE specializedCenter[4] = {};
     CKBYTE uberCenter[4] = {};
-    RunUntexturedConstantPixelCase(context, resources, FALSE, specializedCenter);
-    RunUntexturedConstantPixelCase(context, resources, TRUE, uberCenter);
+    CaptureUntexturedConstantPixel(ffp, context, resources, TRUE, uberCenter);
+    ffp.Shutdown();
+    RunSpecializedUntexturedConstantPixelCase(context, resources, specializedCenter);
     CKBOOL routesMatch = TRUE;
     for (int channel = 0; channel < 4; ++channel) {
         routesMatch = routesMatch &&
@@ -652,7 +844,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=6 tolerance=24\n");
+    printf("  coverage: backendPixelCases=9 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()
