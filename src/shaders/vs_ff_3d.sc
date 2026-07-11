@@ -147,7 +147,7 @@ uniform vec4 u_clipParams;
 #endif
 #if CKFF_VS_INSTANCED
 #define CKFF_VS_NEEDS_VIEW_SPACE 0
-#elif ((CKFF_VS_BITS & (1 << 13)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
+#elif ((CKFF_VS_BITS & (1 << 13)) != 0) || ((CKFF_VS_BITS & (1 << 24)) != 0) || CKFF_VS_VERTEX_BLEND_MODE != 0 || CKFF_VS_FOG_MODE != 0 || CKFF_VS_TEXGEN0 != 0 || CKFF_VS_TEXGEN1 != 0 || CKFF_VS_TEXGEN2 != 0 || CKFF_VS_TEXGEN3 != 0 || CKFF_VS_TEXGEN4 != 0 || CKFF_VS_TEXGEN5 != 0 || CKFF_VS_TEXGEN6 != 0 || CKFF_VS_TEXGEN7 != 0
 #define CKFF_VS_NEEDS_VIEW_SPACE 1
 #else
 #define CKFF_VS_NEEDS_VIEW_SPACE 0
@@ -506,6 +506,9 @@ void main()
     viewNormal = vec3_splat(0.0);
 #endif
 #if !CKFF_VS_INSTANCED && !defined(CKFF_FULL_SPECIALIZED)
+    v_fogPos = vec4(0.0, 0.0, abs(viewPos.z), 1.0);
+#endif
+#if defined(CKFF_FULL_SPECIALIZED) && ((CKFF_VS_BITS & (1 << 24)) != 0)
     v_fogPos = vec4(0.0, 0.0, abs(viewPos.z), 1.0);
 #endif
 

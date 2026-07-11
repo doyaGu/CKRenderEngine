@@ -144,6 +144,10 @@ static bool CKFFShaderKeyOpUsesArg(CKDWORD op, CKDWORD arg0, CKDWORD arg1,
 bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
                                    CKDWORD previousColorOp,
                                    CKDWORD previousAlphaOp) {
+    if (stage.ColorOp == CKRST_TOP_BUMPENVMAP ||
+        stage.ColorOp == CKRST_TOP_BUMPENVMAPLUMINANCE) {
+        return true;
+    }
     if (CKFFShaderKeyOpUsesArg(stage.ColorOp, stage.ColorArg0,
                                stage.ColorArg1, stage.ColorArg2,
                                CKRST_TA_TEXTURE) ||
@@ -197,14 +201,6 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         if (dst.ColorOp == 0 || dst.ColorOp == CKRST_TOP_DISABLE)
             break;
 
-        if (stage == 0 &&
-            dst.ResultIsTemp &&
-            dst.ColorOp != CKRST_TOP_DISABLE &&
-            dst.AlphaOp == CKRST_TOP_DISABLE) {
-            dst.AlphaOp = CKRST_TOP_SELECTARG1;
-            dst.AlphaArg1 = CKRST_TA_DIFFUSE;
-        }
-
         dst.HasTexture = CKFFShaderKeyStageUsesTexture(
                              dst, previousColorOp, previousAlphaOp) &&
                          ((textureBoundMask & (1u << stage)) != 0);
@@ -220,10 +216,8 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         previousAlphaOp = dst.AlphaOp;
     }
 
-    if (activeCount > 0) {
+    if (activeCount > 0)
         key.LastActiveTextureStage = activeCount - 1;
-        key.Stages[activeCount - 1].ResultIsTemp = false;
-    }
 
     return key;
 }

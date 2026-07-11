@@ -565,9 +565,9 @@ vec4 getArg(int arg, vec4 textureColor, vec4 current, vec4 diffuse, vec4 specula
     return applyArgModifiers(value, arg);
 }
 
-vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 textureColor)
+vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 dst, vec4 current, vec4 diffuse, vec4 textureColor)
 {
-    if (op == 1) return current;
+    if (op == 1) return dst;
     if (op == 2) return a;
     if (op == 3) return b;
     if (op == 4) return a * b;
@@ -588,7 +588,7 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 19) return clamp(a * b + vec4_splat(a.a), 0.0, 1.0);
     if (op == 20) return clamp(a + (1.0 - a.a) * b, 0.0, 1.0);
     if (op == 21) return clamp((vec4_splat(1.0) - a) * b + vec4_splat(a.a), 0.0, 1.0);
-    if (op == 22 || op == 23) return current;
+    if (op == 22 || op == 23) return dst;
     if (op == 24) {
         float v = clamp(dot(a.rgb - 0.5, b.rgb - 0.5) * 4.0, 0.0, 1.0);
         return vec4_splat(v);
@@ -661,15 +661,15 @@ bool alphaPass(float alpha, int func)
             vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
             vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
             vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
-            vec4 stageResult = current; \
-            vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor); \
-            vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, diffuse, texColor); \
+            int resultArg = stageParams.ResultArg; \
+            vec4 stageResult = resultArg == 5 ? temp : current; \
+            vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor); \
+            vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, stageResult, current, diffuse, texColor); \
             stageResult.rgb = colorResult.rgb; \
             stageResult.a = alphaResult.a; \
             if (colorOp == 24) { \
                 stageResult = colorResult; \
             } \
-            int resultArg = stageParams.ResultArg; \
             if (resultArg == 5) { \
                 temp = stageResult; \
             } else { \
@@ -754,16 +754,16 @@ void main()
         vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
         vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
 
-        vec4 stageResult = current;
-        vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, current, diffuse, texColor);
-        vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, current, diffuse, texColor);
+        int resultArg = stageParams.ResultArg;
+        vec4 stageResult = resultArg == 5 ? temp : current;
+        vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor);
+        vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, stageResult, current, diffuse, texColor);
         stageResult.rgb = colorResult.rgb;
         stageResult.a = alphaResult.a;
         if (colorOp == 24) {
             stageResult = colorResult;
         }
 
-        int resultArg = stageParams.ResultArg;
         if (resultArg == 5) {
             temp = stageResult;
         } else {
