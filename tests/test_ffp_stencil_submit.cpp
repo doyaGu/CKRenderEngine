@@ -1743,6 +1743,48 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     ffp.Shutdown();
 }
 
+void WrappedLineStripSubmitsAsLineList() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {
+        VxVector(0.0f, 0.0f, 0.0f),
+        VxVector(1.0f, 0.0f, 0.0f),
+        VxVector(2.0f, 0.0f, 0.0f)
+    };
+    Vx2DVector texcoords[3] = {
+        Vx2DVector(0.9f, 0.0f),
+        Vx2DVector(0.1f, 0.0f),
+        Vx2DVector(0.8f, 0.0f)
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(Vx2DVector);
+
+    ffp.SetRenderState(VXRENDERSTATE_WRAP0, VXWRAP_U);
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_LINESTRIP,
+                                NULL, 0, &data) == TRUE,
+              "Wrapped line strip draw must submit");
+    TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_LINELIST,
+              "Wrapped line strip must submit its expanded line-list topology");
+
+    data.TexCoordPtr = NULL;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_LINESTRIP,
+                                NULL, 0, &data) == TRUE,
+              "Line strip without texcoords must still submit");
+    TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_LINESTRIP,
+              "Inactive WRAP state must not change line-strip topology");
+
+    ffp.Shutdown();
+}
+
 void PointSpriteUsesPerVertexPointSize() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -2600,6 +2642,8 @@ int main() {
               &LegacyTextureMapBlendClearsExplicitStageOps);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
+    tests.Run("Wrapped line strip submits as line list",
+              &WrappedLineStripSubmitsAsLineList);
     tests.Run("Point sprite uses per-vertex point size",
               &PointSpriteUsesPerVertexPointSize);
     tests.Run("POSITIONT texture transform does not upload texture matrix",

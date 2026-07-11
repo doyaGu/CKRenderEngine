@@ -6,10 +6,34 @@
 
 #include <math.h>
 
-static bool IsTriangleTopology(VXPRIMITIVETYPE primType) {
+static bool SupportsWrapTopology(VXPRIMITIVETYPE primType) {
     return primType == VX_TRIANGLELIST ||
            primType == VX_TRIANGLEFAN ||
-           primType == VX_TRIANGLESTRIP;
+           primType == VX_TRIANGLESTRIP ||
+           primType == VX_LINELIST ||
+           primType == VX_LINESTRIP;
+}
+
+static void AdjustPrimitiveWrapTexcoords(float texcoords[3][4], int vertexCount,
+                                         CKDWORD wrapMode, CKDWORD componentCount)
+{
+    static const CKDWORD wrapFlags[4] = {
+        VXWRAP_U, VXWRAP_V, VXWRAP_S, VXWRAP_T
+    };
+    if (vertexCount < 2 || vertexCount > 3)
+        return;
+    if (componentCount > 4)
+        componentCount = 4;
+
+    for (CKDWORD component = 0; component < componentCount; ++component) {
+        if ((wrapMode & wrapFlags[component]) == 0)
+            continue;
+        const float reference = texcoords[0][component];
+        for (int vertex = 1; vertex < vertexCount; ++vertex) {
+            const float offset = floorf(reference - texcoords[vertex][component] + 0.5f);
+            texcoords[vertex][component] += offset;
+        }
+    }
 }
 
 static VxVector TransformPoint(const VxVector &point, const VxMatrix &matrix) {
@@ -315,6 +339,9 @@ CKBOOL CKTransientGeometry::Prepare(
         }
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
+        if (vertexCount > 0x2aaaaaaau)
+            return FALSE;
+        const CKDWORD spriteIndexCount = vertexCount * 6;
         const CKDWORD spriteVertexCount = vertexCount * 4;
         if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
             return FALSE;
@@ -322,8 +349,8 @@ CKBOOL CKTransientGeometry::Prepare(
 
         CKTransientIndexBuffer tib;
         memset(&tib, 0, sizeof(tib));
-        const CKDWORD spriteIndexCount = vertexCount * 6;
-        if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, FALSE))
+        const CKBOOL index32 = spriteVertexCount > 0x10000u ? TRUE : FALSE;
+        if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, index32))
             return FALSE;
         m_LastIndexBytes = tib.Size;
 
@@ -384,14 +411,24 @@ CKBOOL CKTransientGeometry::Prepare(
                     InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j], texcoordComponentCounts);
             }
 
-            CKWORD *out = (CKWORD *)tib.Data + i * 6;
-            const CKWORD base = (CKWORD)(i * 4);
-            out[0] = base;
-            out[1] = base + 1;
-            out[2] = base + 2;
-            out[3] = base;
-            out[4] = base + 2;
-            out[5] = base + 3;
+            const CKDWORD base = i * 4;
+            if (index32) {
+                CKDWORD *out = (CKDWORD *)tib.Data + i * 6;
+                out[0] = base;
+                out[1] = base + 1;
+                out[2] = base + 2;
+                out[3] = base;
+                out[4] = base + 2;
+                out[5] = base + 3;
+            } else {
+                CKWORD *out = (CKWORD *)tib.Data + i * 6;
+                out[0] = (CKWORD)base;
+                out[1] = (CKWORD)(base + 1);
+                out[2] = (CKWORD)(base + 2);
+                out[3] = (CKWORD)base;
+                out[4] = (CKWORD)(base + 2);
+                out[5] = (CKWORD)(base + 3);
+            }
         }
 
         encoder->SetTransientVertexBuffer(0, &tvb);
@@ -408,7 +445,7 @@ CKBOOL CKTransientGeometry::Prepare(
         memcpy(activeWrapModes, wrapModes, sizeof(activeWrapModes));
 
     bool wrapTexcoords = false;
-    if (IsTriangleTopology(primType)) {
+    if (SupportsWrapTopology(primType)) {
         for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
             const void *texcoord = stage == 0
                 ? data->TexCoordPtr
@@ -423,7 +460,9 @@ CKBOOL CKTransientGeometry::Prepare(
 
     if (wrapTexcoords) {
         int srcCount = (indices && indexCount > 0) ? indexCount : (int)vertexCount;
-        if (srcCount < 3)
+        const int primitiveVertexCount =
+            (primType == VX_LINELIST || primType == VX_LINESTRIP) ? 2 : 3;
+        if (srcCount < primitiveVertexCount)
             return FALSE;
 
         XArray<CKWORD> sourceIndices;
@@ -437,34 +476,48 @@ CKBOOL CKTransientGeometry::Prepare(
                 sourceIndices[i] = (CKWORD)i;
         }
 
-        XArray<CKWORD> triangleIndices;
+        XArray<CKWORD> primitiveIndices;
         if (primType == VX_TRIANGLELIST) {
             const int triIndexCount = (srcCount / 3) * 3;
             if (triIndexCount <= 0)
                 return FALSE;
-            triangleIndices.Resize(triIndexCount);
+            primitiveIndices.Resize(triIndexCount);
             for (int i = 0; i < triIndexCount; ++i)
-                triangleIndices[i] = sourceIndices[i];
-        } else {
+                primitiveIndices[i] = sourceIndices[i];
+        } else if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
             const int maxTriListIndices = (srcCount - 2) * 3;
             if (maxTriListIndices <= 0)
                 return FALSE;
-            triangleIndices.Resize(maxTriListIndices);
+            primitiveIndices.Resize(maxTriListIndices);
             const int outCount = ConvertPrimitiveToTriangleList(
-                primType, sourceIndices.Begin(), srcCount, triangleIndices.Begin());
-            triangleIndices.Resize(outCount);
+                primType, sourceIndices.Begin(), srcCount, primitiveIndices.Begin());
+            primitiveIndices.Resize(outCount);
+        } else if (primType == VX_LINELIST) {
+            const int lineIndexCount = (srcCount / 2) * 2;
+            if (lineIndexCount <= 0)
+                return FALSE;
+            primitiveIndices.Resize(lineIndexCount);
+            for (int i = 0; i < lineIndexCount; ++i)
+                primitiveIndices[i] = sourceIndices[i];
+        } else {
+            const int lineIndexCount = (srcCount - 1) * 2;
+            primitiveIndices.Resize(lineIndexCount);
+            for (int i = 0; i < srcCount - 1; ++i) {
+                primitiveIndices[i * 2] = sourceIndices[i];
+                primitiveIndices[i * 2 + 1] = sourceIndices[i + 1];
+            }
         }
 
-        if (triangleIndices.IsEmpty())
+        if (primitiveIndices.IsEmpty())
             return FALSE;
 
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
-        if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)triangleIndices.Size(), layoutHandle))
+        if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)primitiveIndices.Size(), layoutHandle))
             return FALSE;
         m_LastVertexBytes = tvb.Size;
 
-        for (int i = 0; i < triangleIndices.Size(); i += 3) {
+        for (int i = 0; i < primitiveIndices.Size(); i += primitiveVertexCount) {
             float texcoords[3][CKFF_MAX_TEXTURE_STAGES][4] = {};
             for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
                 if ((formatFlags & CKFF_VF_TEXCOORD(stage)) == 0)
@@ -472,17 +525,17 @@ CKBOOL CKTransientGeometry::Prepare(
                 const CKDWORD componentCount = TexcoordComponentCount(
                     texcoordComponentCounts, stage);
                 float stageTexcoords[3][4];
-                for (int j = 0; j < 3; ++j) {
-                    ReadTexcoord(data, stage, triangleIndices[i + j],
+                for (int j = 0; j < primitiveVertexCount; ++j) {
+                    ReadTexcoord(data, stage, primitiveIndices[i + j],
                                  componentCount, stageTexcoords[j]);
                 }
-                AdjustTriangleWrapTexcoords(stageTexcoords, activeWrapModes[stage],
-                                            componentCount);
-                for (int j = 0; j < 3; ++j)
+                AdjustPrimitiveWrapTexcoords(stageTexcoords, primitiveVertexCount,
+                                             activeWrapModes[stage], componentCount);
+                for (int j = 0; j < primitiveVertexCount; ++j)
                     memcpy(texcoords[j][stage], stageTexcoords[j], sizeof(stageTexcoords[j]));
             }
-            for (int j = 0; j < 3; ++j) {
-                InterleaveVertex(tvb.Data, stride, (CKDWORD)(i + j), triangleIndices[i + j],
+            for (int j = 0; j < primitiveVertexCount; ++j) {
+                InterleaveVertex(tvb.Data, stride, (CKDWORD)(i + j), primitiveIndices[i + j],
                                  formatFlags, data, nullptr, nullptr, texcoordComponentCounts,
                                  &texcoords[j][0][0]);
             }
@@ -576,35 +629,7 @@ void CKTransientGeometry::AdjustTriangleWrapTexcoords(float uv[3][2], CKDWORD wr
 void CKTransientGeometry::AdjustTriangleWrapTexcoords(float texcoords[3][4],
                                                        CKDWORD wrapMode,
                                                        CKDWORD componentCount) {
-    static const CKDWORD wrapFlags[4] = {
-        VXWRAP_U, VXWRAP_V, VXWRAP_S, VXWRAP_T
-    };
-    if (componentCount > 4)
-        componentCount = 4;
-    for (CKDWORD component = 0; component < componentCount; ++component) {
-        const CKDWORD flag = wrapFlags[component];
-        if ((wrapMode & flag) == 0)
-            continue;
-
-        for (int iteration = 0; iteration < 16; ++iteration) {
-            float minValue = texcoords[0][component];
-            float maxValue = texcoords[0][component];
-            for (int i = 1; i < 3; ++i) {
-                if (texcoords[i][component] < minValue)
-                    minValue = texcoords[i][component];
-                if (texcoords[i][component] > maxValue)
-                    maxValue = texcoords[i][component];
-            }
-
-            if ((maxValue - minValue) <= 0.5f)
-                break;
-
-            for (int i = 0; i < 3; ++i) {
-                if (texcoords[i][component] <= minValue + 0.00001f)
-                    texcoords[i][component] += 1.0f;
-            }
-        }
-    }
+    AdjustPrimitiveWrapTexcoords(texcoords, 3, wrapMode, componentCount);
 }
 
 int CKTransientGeometry::ConvertToTriangleList(
