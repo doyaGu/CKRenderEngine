@@ -456,6 +456,57 @@ void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
               "Mip readback orientation normalization must not use base-level dimensions");
 }
 
+void RunUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
+                                    const PixelResources &resources,
+                                    CKBOOL forceUber,
+                                    CKBYTE center[4])
+{
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "UberShader", forceUber ? "1" : "0");
+
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context);
+    ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_CONSTANT, 0x80402010u);
+    ffp.DisableTextureStagesFrom(1);
+
+    BeginPixelFrame(ffp, context, resources);
+    const VxVector positions[3] = {
+        VxVector(-0.9f, -0.9f, 0.5f),
+        VxVector( 0.9f, -0.9f, 0.5f),
+        VxVector( 0.0f,  0.9f, 0.5f)
+    };
+    const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                positions, white),
+              forceUber
+                  ? "Uber untextured-stage pixel draw must submit"
+                  : "Specialized untextured-stage pixel draw must submit");
+
+    XArray<CKBYTE> pixels;
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 64, 32, 16),
+              forceUber
+                  ? "Uber shader must preserve an active untextured constant stage"
+                  : "Specialized shader must preserve an active untextured constant stage");
+    const size_t offset = (32u * 64u + 32u) * 4u;
+    if (offset + 3u < (size_t)pixels.Size())
+        memcpy(center, &pixels[(int)offset], 4);
+    else
+        memset(center, 0, 4);
+
+    ffp.Shutdown();
+    context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
+}
+
 void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
 {
     CKRenderSettingsClearOverridesForTests();
@@ -581,6 +632,19 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
 
     ffp.Shutdown();
+
+    CKBYTE specializedCenter[4] = {};
+    CKBYTE uberCenter[4] = {};
+    RunUntexturedConstantPixelCase(context, resources, FALSE, specializedCenter);
+    RunUntexturedConstantPixelCase(context, resources, TRUE, uberCenter);
+    CKBOOL routesMatch = TRUE;
+    for (int channel = 0; channel < 4; ++channel) {
+        routesMatch = routesMatch &&
+            abs((int)specializedCenter[channel] - (int)uberCenter[channel]) <= 4;
+    }
+    TestCheck(routesMatch,
+              "Specialized and uber untextured-stage pixels must match");
+
     TestCheck(context->RequestScreenShot(resources.FrameBuffer,
                                          ScreenShotCallback) ==
                   CKERR_NOTIMPLEMENTED,
@@ -588,7 +652,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=4 tolerance=24\n");
+    printf("  coverage: backendPixelCases=6 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()
