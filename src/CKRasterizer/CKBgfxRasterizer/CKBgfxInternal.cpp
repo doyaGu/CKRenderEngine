@@ -402,6 +402,8 @@ bool CKBgfxTryTextureFormat(VX_PIXELFORMAT pf, bgfx::TextureFormat::Enum &result
     case _DXT1:        result = bgfx::TextureFormat::BC1; break;
     case _DXT3:        result = bgfx::TextureFormat::BC2; break;
     case _DXT5:        result = bgfx::TextureFormat::BC3; break;
+    case _16_V8U8:     result = bgfx::TextureFormat::RG8S; break;
+    case _32_V16U16:   result = bgfx::TextureFormat::RG16S; break;
     default:           return false;
     }
     return true;
@@ -423,6 +425,8 @@ bool CKBgfxTryPixelFormat(bgfx::TextureFormat::Enum format, VX_PIXELFORMAT &resu
     case bgfx::TextureFormat::BC1:    result = _DXT1; break;
     case bgfx::TextureFormat::BC2:    result = _DXT3; break;
     case bgfx::TextureFormat::BC3:    result = _DXT5; break;
+    case bgfx::TextureFormat::RG8S:   result = _16_V8U8; break;
+    case bgfx::TextureFormat::RG16S:  result = _32_V16U16; break;
     default:                          return false;
     }
     return true;

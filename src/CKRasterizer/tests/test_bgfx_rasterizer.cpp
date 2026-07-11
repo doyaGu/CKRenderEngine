@@ -895,6 +895,8 @@ static void TestExactPixelFormatMapping()
         {_DXT1, bgfx::TextureFormat::BC1},
         {_DXT3, bgfx::TextureFormat::BC2},
         {_DXT5, bgfx::TextureFormat::BC3},
+        {_16_V8U8, bgfx::TextureFormat::RG8S},
+        {_32_V16U16, bgfx::TextureFormat::RG16S},
     };
 
     for (int i = 0; i < (int)(sizeof(exactMappings) / sizeof(exactMappings[0])); ++i) {
@@ -917,6 +919,8 @@ static void TestExactPixelFormatMapping()
         _24_RGB888,
         _16_RGB555,
         _16_BGR555,
+        _16_L6V5U5,
+        _32_X8L8V8U8,
     };
     for (int i = 0; i < (int)(sizeof(incompatibleFormats) / sizeof(incompatibleFormats[0])); ++i) {
         bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
