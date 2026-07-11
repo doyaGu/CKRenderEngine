@@ -6,7 +6,7 @@
 #include "CKFFRenderPacketQueue.h"
 #include "CKFFRenderPacketReplay.h"
 
-#include <cstring>
+#include <string.h>
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
 static bool CKFFTextureSetEquals(

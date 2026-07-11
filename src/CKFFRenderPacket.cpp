@@ -1,6 +1,6 @@
 #include "CKFFRenderPacket.h"
 
-#include <cstring>
+#include <string.h>
 
 CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b)
 {

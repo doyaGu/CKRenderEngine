@@ -1,6 +1,6 @@
 #include "CKFFRenderPacketQueue.h"
 
-#include <cstring>
+#include <string.h>
 
 CKFFRenderPacketQueue::CKFFRenderPacketQueue()
     : m_PacketSerial(0),

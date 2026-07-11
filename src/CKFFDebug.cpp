@@ -6,10 +6,10 @@
 #include "CKRenderSettings.h"
 #include "CKVertexLayoutCache.h"
 
-#include <cmath>
-#include <climits>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
 
 const CKFFDebugConfig &CKFFDebugConfig::Get() {
     static CKFFDebugConfig value = {};
@@ -416,7 +416,7 @@ void CKFFDebugState::LogPrimitiveIndexContract(VXPRIMITIVETYPE type, CKWORD *ind
         int sampleCount = srcCount < 12 ? srcCount : 12;
         for (int i = 0; i < sampleCount && written < (int)sizeof(sample) - 8; ++i) {
             int idx = indices ? indices[i] : i;
-            int n = std::snprintf(sample + written, sizeof(sample) - written,
+            int n = snprintf(sample + written, sizeof(sample) - written,
                                   "%s%d", i ? "," : "", idx);
             if (n <= 0)
                 break;

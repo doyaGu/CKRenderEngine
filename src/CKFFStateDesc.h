@@ -1,7 +1,7 @@
 #ifndef CKFFSTATEDESC_H
 #define CKFFSTATEDESC_H
 
-#include <cstdint>
+#include <stdint.h>
 
 // Fixed-function state description.
 // This is a diagnostic/state snapshot. Shader variant lookup uses
@@ -96,7 +96,7 @@ struct CKFFVSStateDesc {
     uint32_t GetLightCount() const     { return GetField(17, 4); }
 
     // --- Fog config (bits 21-24) ---
-    // FogMode: 0=NONE, 1=LINEAR, 2=EXP, 3=EXP2
+    // FogMode: 0=NONE, 1=EXP, 2=EXP2, 3=LINEAR
     void SetFogMode(uint32_t mode) { SetField(21, 2, mode); }
     uint32_t GetFogMode() const    { return GetField(21, 2); }
     void SetRangeFog(bool v)       { SetBit(23, v); }
