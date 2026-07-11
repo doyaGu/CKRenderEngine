@@ -305,8 +305,6 @@ bool CKBgfxTryRendererType(const char *Name,
         Renderer = bgfx::RendererType::OpenGLES;
     else if (CKBgfxLogNameEquals(Name, "metal") || CKBgfxLogNameEquals(Name, "msl"))
         Renderer = bgfx::RendererType::Metal;
-    else if (CKBgfxLogNameEquals(Name, "webgpu") || CKBgfxLogNameEquals(Name, "wgpu"))
-        Renderer = bgfx::RendererType::WebGPU;
     else
         return false;
     return true;

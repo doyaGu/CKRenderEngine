@@ -498,6 +498,8 @@ static void TestBackendProfileMapping()
     TEST_ASSERT(CKBgfxTryRendererType("DIRECT3D12", parsedRenderer) &&
                     parsedRenderer == bgfx::RendererType::Direct3D12,
                 "Renderer names remain case-insensitive");
+    TEST_ASSERT(!CKBgfxTryRendererType("webgpu", parsedRenderer),
+                "Backends without a shader profile must be rejected");
     TEST_ASSERT(!CKBgfxTryRendererType("vulakn", parsedRenderer),
                 "Unknown explicit renderer must not fall back to auto");
 
