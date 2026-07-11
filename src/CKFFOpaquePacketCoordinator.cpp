@@ -173,6 +173,7 @@ void CKFFOpaquePacketCoordinator::InitVertexBufferPacketForCapture(CKRenderPacke
     packet->VertexCount = 0;
     packet->StartIndex = 0;
     packet->IndexCount = 0;
+    packet->ActiveStageCount = 0;
     packet->ActiveTextureCount = 0;
     packet->TextureSetHash = 0;
     memset(packet->Textures, 0, sizeof(packet->Textures));
@@ -283,6 +284,7 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->VertexCount = vertexCount;
     packet->StartIndex = startIndex;
     packet->IndexCount = indexCount;
+    packet->ActiveStageCount = 0;
     packet->ActiveTextureCount = 0;
     packet->TextureSetHash = 0;
     packet->StaticUniformIndex = 0;
@@ -300,6 +302,7 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketTextures(
     if (!packet || !bindingSet)
         return;
 
+    packet->ActiveStageCount = bindingSet->ActiveStageCount;
     packet->ActiveTextureCount = bindingSet->ActiveTextureCount;
     packet->TextureSetHash = bindingSet->Hash;
     for (CKDWORD i = 0; i < packet->ActiveTextureCount; ++i) {
@@ -367,7 +370,7 @@ CKBOOL CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketStaticUniforms(
         {
             CKFF_SCOPE_TIME(pipeline.GetProbes(), RenderPacketBuildUs);
             payloadBuilt = pipeline.BuildStaticUniformPayload(
-                &staticPayload, programContext, packet->ActiveTextureCount);
+                &staticPayload, programContext, packet->ActiveStageCount);
         }
         if (!payloadBuilt) {
             if (collectStats)

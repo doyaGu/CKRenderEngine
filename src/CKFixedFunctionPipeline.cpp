@@ -130,6 +130,11 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_RENDER_TARGET_TYPE: return "render-target-type";
     case CKFF_DRAW_REJECT_BORDER_PALETTE: return "border-palette";
     case CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER: return "filtered-depth-compare";
+    case CKFF_DRAW_REJECT_DITHER: return "dither";
+    case CKFF_DRAW_REJECT_ZBIAS: return "z-bias";
+    case CKFF_DRAW_REJECT_LINE_PATTERN: return "line-pattern";
+    case CKFF_DRAW_REJECT_EDGE_ANTIALIAS: return "edge-antialias";
+    case CKFF_DRAW_REJECT_CLIPPING_DISABLED: return "clipping-disabled";
     case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
     default: return "none";
     }
@@ -152,6 +157,17 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_DITHERENABLE))
+        return RecordDrawReject(CKFF_DRAW_REJECT_DITHER);
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ZBIAS);
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
+        return RecordDrawReject(CKFF_DRAW_REJECT_LINE_PATTERN);
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
+        return RecordDrawReject(CKFF_DRAW_REJECT_EDGE_ANTIALIAS);
+    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPING))
+        return RecordDrawReject(CKFF_DRAW_REJECT_CLIPPING_DISABLED);
+
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILENABLE)) {
         const CKDWORD writeMask =
             m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
@@ -283,6 +299,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
             sampledTextureMask |= 1u << stage;
     }
     m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
+    bindingSet->ActiveStageCount = stageCount;
     for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
         CKSamplerDesc &sampler = bindingSet->Bindings[i].Sampler;
         if (sampler.AddressU != CKRST_ADDRESS_BORDER &&
@@ -518,7 +535,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
 
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
-        m_UniformEmitter.UploadUniforms(encoder, programContext, textures->ActiveTextureCount);
+        m_UniformEmitter.UploadUniforms(encoder, programContext, textures->ActiveStageCount);
     }
     if (encoder->GetStatus() != CK_OK)
         return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);

@@ -105,6 +105,26 @@ void StencilWriteMaskInvalidatesCachedDrawState() {
               "Changing stencil write mask must invalidate cached draw state");
 }
 
+void AntialiasStateMapsToMsaa() {
+    CKDrawStateCache cache;
+    TestCheck(cache.GetRenderState(VXRENDERSTATE_CLIPPING) == TRUE,
+              "Primitive clipping must default to enabled");
+
+    cache.BuildDrawState(VX_TRIANGLELIST);
+    const CKDWORD rebuilds = cache.GetBuildRebuilds();
+    cache.SetRenderState(VXRENDERSTATE_ANTIALIAS, TRUE);
+    const CKDrawState enabled = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((enabled.Lo & CKRST_STATE_MSAA) != 0,
+              "Legacy antialias state must enable rasterizer MSAA");
+    TestCheck(cache.GetBuildRebuilds() == rebuilds + 1,
+              "Changing antialias state must invalidate cached draw state");
+
+    cache.SetRenderState(VXRENDERSTATE_ANTIALIAS, FALSE);
+    const CKDrawState disabled = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((disabled.Lo & CKRST_STATE_MSAA) == 0,
+              "Disabling legacy antialias state must clear rasterizer MSAA");
+}
+
 } // namespace
 
 int main() {
@@ -119,5 +139,7 @@ int main() {
               &DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes);
     tests.Run("Stencil write mask invalidates cached draw state",
               &StencilWriteMaskInvalidatesCachedDrawState);
+    tests.Run("Antialias state maps to MSAA",
+              &AntialiasStateMapsToMsaa);
     return tests.ExitCode();
 }

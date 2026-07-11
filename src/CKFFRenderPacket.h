@@ -112,6 +112,7 @@ struct CKRenderPacket {
     CKDWORD VertexCount;
     CKDWORD StartIndex;
     CKDWORD IndexCount;
+    CKDWORD ActiveStageCount;
     CKDWORD ActiveTextureCount;
     CKDWORD TextureSetHash;
     CKFFRenderPacketTextureBinding Textures[CKFF_MAX_TEXTURE_STAGES];
