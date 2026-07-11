@@ -92,13 +92,13 @@ void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD c
     if (m_State.TexcoordComponentCounts[stage] == componentCount)
         return;
     m_State.TexcoordComponentCounts[stage] = componentCount;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::ResetTexcoordComponentCounts() {
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
         m_State.TexcoordComponentCounts[stage] = 2;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {

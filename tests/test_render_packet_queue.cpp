@@ -181,6 +181,7 @@ struct CKFFPipelineTestAccess {
             baseVertex, vertexCount, startIndex, indexCount,
             dpFlags, formatFlags, vertexLayout);
     }
+
 };
 
 void PrepareTexturedPacketCandidate(CKFixedFunctionPipeline *ffp)
@@ -924,6 +925,39 @@ void StaticUniformPayloadIgnoresInactiveTextureMatrix()
     ffp.Shutdown();
 }
 
+void TexcoordDeclarationInvalidatesStaticUniformCache()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    CKFFVertexBufferPacketBuildResult result;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &result, &context.Encoder, CKRP_VIEW_OPAQUE3D,
+        VX_TRIANGLELIST, 100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77);
+    TestCheck(result.Success,
+              "baseline packet must populate the static uniform cache");
+
+    ffp.SetTexcoordComponentCount(0, 3);
+    CKFFVertexBufferPacketBuildResult changedResult;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &changedResult, &context.Encoder, CKRP_VIEW_OPAQUE3D,
+        VX_TRIANGLELIST, 100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77);
+    TestCheck(changedResult.Success,
+              "packet must rebuild after a texcoord declaration change");
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const CKFFFrameStats &stats = ffp.GetFrameStats();
+    TestCheck(stats.RenderPacketStaticPayloadBuilds == 2,
+              "texcoord declaration changes must rebuild static uniforms with the program");
+    TestCheck(stats.RenderPacketStaticPayloadReuses == 0,
+              "texcoord declaration changes must not reuse the prior program payload");
+#endif
+    ffp.Shutdown();
+}
+
 void VertexBufferPacketBuildResultReportsRejectReasons()
 {
     {
@@ -994,7 +1028,10 @@ void VertexBufferPacketBuildResultReportsRejectReasons()
         SetupPacketPipeline(&ffp, &context, &driver);
         ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
         ffp.SetTexture(1, 102, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
-        ffp.SetTexture(2, 103, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+        ffp.SetTexture(2, 103, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTexture(3, 104, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTexture(4, 105, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTexture(5, 106, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
 
         CKFFVertexBufferPacketBuildResult samplerLayout;
         CKFFPipelineTestAccess::BuildVertexBufferPacket(
@@ -1705,6 +1742,8 @@ int main()
               &StaticUniformPayloadUsesSuppliedProgramContext);
     tests.Run("Static uniform payload ignores inactive texture matrix",
               &StaticUniformPayloadIgnoresInactiveTextureMatrix);
+    tests.Run("Texcoord declaration invalidates static uniform cache",
+              &TexcoordDeclarationInvalidatesStaticUniformCache);
     tests.Run("Vertex buffer packet build result reports reject reasons",
               &VertexBufferPacketBuildResultReportsRejectReasons);
     tests.Run("Shader binding cache remains bounded",
