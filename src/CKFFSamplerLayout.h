@@ -3,8 +3,8 @@
 
 #include "CKFFShaderKey.h"
 
-#include <cstddef>
-#include <cstdio>
+#include <stddef.h>
+#include <stdio.h>
 
 struct CKFFSamplerLayoutKey {
     CKDWORD Bits;
@@ -58,10 +58,10 @@ inline bool CKFFSamplerLayoutNeedsMixedCubeVolume(const CKFFSamplerLayoutKey &la
 
 inline void CKFFFormatSamplerLayoutStageTypes(const CKFFSamplerLayoutKey &layout,
                                               char *buffer,
-                                              std::size_t bufferSize) {
+                                              size_t bufferSize) {
     if (!buffer || bufferSize == 0)
         return;
-    std::snprintf(buffer, bufferSize, "[%u,%u,%u,%u,%u,%u,%u,%u]",
+    snprintf(buffer, bufferSize, "[%u,%u,%u,%u,%u,%u,%u,%u]",
                   CKFFSamplerLayoutStageType(layout, 0),
                   CKFFSamplerLayoutStageType(layout, 1),
                   CKFFSamplerLayoutStageType(layout, 2),
@@ -75,13 +75,13 @@ inline void CKFFFormatSamplerLayoutStageTypes(const CKFFSamplerLayoutKey &layout
 inline void CKFFFormatSamplerLayoutManifestEntry(const CKFFSamplerLayoutKey &layout,
                                                  const char *backend,
                                                  char *buffer,
-                                                 std::size_t bufferSize) {
+                                                 size_t bufferSize) {
     if (!buffer || bufferSize == 0)
         return;
 
     char stageTypes[32];
     CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
-    std::snprintf(buffer, bufferSize,
+    snprintf(buffer, bufferSize,
                   "{\"backends\":[\"%s\"],\"stageTypes\":%s}",
                   backend ? backend : "unknown",
                   stageTypes);

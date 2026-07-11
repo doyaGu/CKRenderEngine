@@ -1,6 +1,6 @@
 #include "CKFFSpecializationInfo.h"
 
-#include <cstring>
+#include <string.h>
 
 static CKFFSpecBitfield StageLayout(CKDWORD stage, CKDWORD field) {
     static const CKFFSpecBitfield fields[] = {
