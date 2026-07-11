@@ -568,6 +568,55 @@ void PremodulateCoverageIsExact() {
               "PREMODULATE must be marked as exact coverage");
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_MODULATE) == CKFF_COVERAGE_EXACT,
               "MODULATE coverage must remain exact as a control case");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAP) == CKFF_COVERAGE_EXACT,
+              "signed DuDv bump mapping must remain exact");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_UNTESTED,
+              "luminance bump mapping must remain explicit until its packed formats are supported");
+    TestCheck(CKFFClassifyShaderSemanticCoverage(
+                  CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE) ==
+                  CKFF_COVERAGE_UNTESTED,
+              "luminance bump shader semantics must match texture-op coverage");
+}
+
+void BumpMapAlwaysCreatesTextureDependency() {
+    CKFFShaderKeyFSStage stage = {};
+    stage.ColorOp = CKRST_TOP_BUMPENVMAP;
+    stage.ColorArg1 = CKRST_TA_DIFFUSE;
+    stage.ColorArg2 = CKRST_TA_CURRENT;
+    stage.AlphaOp = CKRST_TOP_SELECTARG1;
+    stage.AlphaArg1 = CKRST_TA_CURRENT;
+
+    TestCheck(CKFFShaderKeyStageUsesTexture(stage, 0, 0),
+              "BUMPENVMAP must sample its DuDv texture even when color args omit TEXTURE");
+}
+
+void TextureCombinerPreservesTempDestination() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(0, CKRST_TA_CONSTANT);
+    desc.SetStageAlphaOp(0, CKRST_TOP_DISABLE);
+    desc.SetStageResultIsTemp(0, true);
+    desc.SetStageColorOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(1, CKRST_TA_TEMP);
+    desc.SetStageAlphaOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(1, CKRST_TA_TEMP);
+    desc.SetStageResultIsTemp(1, true);
+
+    const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0);
+    TestCheck(key.Stages[0].ResultIsTemp &&
+                  key.Stages[0].AlphaOp == CKRST_TOP_DISABLE,
+              "TEMP writes with disabled alpha must preserve TEMP alpha");
+    TestCheck(key.Stages[1].ResultIsTemp,
+              "a final TEMP write must leave CURRENT unchanged");
+
+    const std::string fs = ReadTextFile(
+        "Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    TestCheck(fs.find("vec4 stageResult = resultArg == 5 ? temp : current") !=
+                  std::string::npos &&
+                  fs.find("if (op == 1) return dst") != std::string::npos &&
+                  fs.find("if (op == 22 || op == 23) return dst") !=
+                  std::string::npos,
+              "fragment stages must preserve the selected destination register");
 }
 
 void AlphaRefUsesLowByteOnly() {
@@ -1283,6 +1332,10 @@ int main() {
               &SpecUniformMirrorsSpecializationDwordsAsBytes);
     tests.Run("PREMODULATE coverage is exact",
               &PremodulateCoverageIsExact);
+    tests.Run("BUMPENVMAP always creates texture dependency",
+              &BumpMapAlwaysCreatesTextureDependency);
+    tests.Run("Texture combiner preserves TEMP destination",
+              &TextureCombinerPreservesTempDestination);
     tests.Run("Alpha ref uses low byte only",
               &AlphaRefUsesLowByteOnly);
     tests.Run("Alpha ref byte uses low byte only",

@@ -98,11 +98,74 @@ void TextureStageChainIsIndependentOfTexcoordDeclarations()
           "COLOROP disable must terminate the complete stage chain");
 }
 
+void PixelFogMarksVertexEyeSpaceDependency()
+{
+    CKFFStateStore state;
+    state.Reset();
+    CKDrawStateCache drawState;
+    drawState.Reset();
+    drawState.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    drawState.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_NONE);
+    drawState.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+
+    CKFFPreparedState prepared;
+    CKFFStateResolver::BuildPreparedState(state, drawState, &prepared,
+                                          CKRST_DP_TRANSFORM, 0,
+                                          CKFF_VF_POSITION, nullptr);
+    const CKFFShaderKey key = BuildKey(prepared);
+    Check(prepared.StateDesc.VS.GetPixelFog(),
+          "pixel fog must mark the vertex eye-space dependency");
+    Check((key.VS.Bits & (1ull << 24)) != 0,
+          "pixel fog dependency must survive shader-key construction");
+}
+
+void PointSpriteBypassesVertexTexcoordProcessing()
+{
+    CKFFStateStore state;
+    state.Reset();
+    state.TextureHandles[0] = 101;
+    state.TextureHandles[1] = 102;
+    state.StageStates[0][CKRST_TSS_TEXCOORDINDEX] =
+        CKFFPackTexcoordIndex(3, CKFF_TEXGEN_CAMERASPACEPOSITION);
+    state.StageStates[0][CKRST_TSS_TEXTURETRANSFORMFLAGS] =
+        CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED;
+    state.StageStates[1][CKRST_TSS_OP] = CKRST_TOP_SELECTARG1;
+    state.StageStates[1][CKRST_TSS_ARG1] = CKRST_TA_TEXTURE;
+    state.StageStates[1][CKRST_TSS_TEXCOORDINDEX] =
+        CKFFPackTexcoordIndex(2, CKFF_TEXGEN_CAMERASPACENORMAL);
+    state.StageStates[1][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_COUNT2;
+
+    CKDrawStateCache drawState;
+    drawState.Reset();
+
+    CKFFPreparedState prepared;
+    CKFFStateResolver::BuildPreparedState(
+        state, drawState, &prepared,
+        CKRST_DP_TRANSFORM | CKRST_DP_STAGES1, 2,
+        CKFF_VF_POSITION | CKFF_VF_TEXCOORD0 | CKFF_VF_TEXCOORD1,
+        nullptr, TRUE);
+
+    Check(prepared.StateDesc.VS.GetPointSprite(),
+          "point sprite mode must survive prepared-state construction");
+    for (CKDWORD stage = 0; stage < 2; ++stage) {
+        Check(prepared.StateDesc.VS.GetTexCoordIndex(stage) == 0,
+              "all point sprite stages must consume generated texcoord zero");
+        Check(prepared.StateDesc.VS.GetTexGenMode(stage) == 0,
+              "point sprite coordinates must bypass texgen");
+        Check(prepared.StateDesc.VS.GetTextureTransformFlags(stage) == 0,
+              "point sprite coordinates must bypass texture matrices");
+        Check(!prepared.StateDesc.FS.GetStageProjectedSampler(stage),
+              "point sprite coordinates must bypass projected division");
+    }
+}
+
 int main()
 {
     TransformedNormalInputKeepsLighting();
     PositionTForcesNoLighting();
     TextureStageChainIsIndependentOfTexcoordDeclarations();
+    PixelFogMarksVertexEyeSpaceDependency();
+    PointSpriteBypassesVertexTexcoordProcessing();
 
     if (g_failures) {
         printf("%d failure(s)\n", g_failures);
