@@ -82,21 +82,7 @@ struct CKFFUniformHandles {
     CKDWORD u_ffMatrices;   // mat4 array: MVP/projection, model, modelView, normal, blend worldView[4]
     CKDWORD u_vertexBlendMatrices; // mat4 array: fixed-function vertex blend world matrix palette
     CKDWORD u_ffDrawParams; // vec4 array: vertex params[0..7], fragment params[8..11], inline light[12..18]
-    CKDWORD u_ffVertexParams; // vec4 array: material[5], material sources, light params, light model params
-    CKDWORD u_ffFragmentParams; // vec4 array: alpha, texfactor, fog params, fog color
-    CKDWORD u_ckModelViewProj;
-    CKDWORD u_ckModel;
-    CKDWORD u_ckModelView;
-    CKDWORD u_ckNormalMatrix;
     CKDWORD u_texMatrix;   // mat4 array: one texture matrix per stage
-    CKDWORD u_lightParams;  // vec4: x=count, yzw=globalAmbient RGB
-    CKDWORD u_material;     // vec4 array: 5 elements (diff, amb, spec, emis, power)
-    CKDWORD u_ffParams;     // vec4: material source selectors diff/amb/spec/emis
-    CKDWORD u_lightModelParams; // vec4: x=localViewer, yzw=0
-    CKDWORD u_fogParams;    // vec4: start, end, density, mode
-    CKDWORD u_fogColor;     // vec4: RGBA
-    CKDWORD u_texFactor;    // vec4: RGBA
-    CKDWORD u_alphaParams;  // vec4: ref, func, specularEnable, 0
     CKDWORD u_bumpEnv;      // vec4 array: 2 elements per texture stage (matrix, luminance)
     CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY
     CKDWORD u_stageParams;  // vec4 array: per-stage color/alpha ops and args

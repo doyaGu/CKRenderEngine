@@ -239,70 +239,14 @@ bool CKFFShaderCache::CreateUniforms() {
     m_Context->CreateUniform(&desc, &m_Uniforms.u_ffDrawParams);
 
     desc.Type = CKRST_UNIFORM_MAT4;
-    desc.Name = (char *)"u_ckModelViewProj";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModelViewProj);
-
-    desc.Name = (char *)"u_ckModel";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModel);
-
-    desc.Name = (char *)"u_ckModelView";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckModelView);
-
-    desc.Name = (char *)"u_ckNormalMatrix";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ckNormalMatrix);
-
     desc.Name = (char *)"u_texMatrix";
     desc.Count = CKFF_MAX_TEXTURE_STAGES;
     m_Context->CreateUniform(&desc, &m_Uniforms.u_texMatrix);
 
     desc.Type = CKRST_UNIFORM_VEC4;
-    desc.Name = (char *)"u_ffVertexParams";
-    desc.Count = 8;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffVertexParams);
-
-    desc.Name = (char *)"u_ffFragmentParams";
-    desc.Count = 4;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffFragmentParams);
-
     desc.Name = (char *)"u_lights";
     desc.Count = CKFF_MAX_LIGHTS * 7;
     m_Context->CreateUniform(&desc, &m_Uniforms.u_lights);
-
-    desc.Name = (char *)"u_lightParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_lightParams);
-
-    desc.Name = (char *)"u_material";
-    desc.Count = 5;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_material);
-
-    desc.Name = (char *)"u_ffParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffParams);
-
-    desc.Name = (char *)"u_lightModelParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_lightModelParams);
-
-    desc.Name = (char *)"u_fogParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_fogParams);
-
-    desc.Name = (char *)"u_fogColor";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_fogColor);
-
-    desc.Name = (char *)"u_texFactor";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_texFactor);
-
-    desc.Name = (char *)"u_alphaParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_alphaParams);
 
     desc.Name = (char *)"u_bumpEnv";
     desc.Count = CKFF_MAX_TEXTURE_STAGES * 2;
