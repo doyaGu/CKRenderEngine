@@ -269,13 +269,15 @@ endif ()
 ckre_prepare_shaderc()
 add_subdirectory(deps)
 ckre_resolve_shaderc()
+if (CKRE_BUILD_TESTS)
+    enable_testing()
+endif ()
 add_subdirectory(src)
 
 # =============================================================================
 # Tests
 # =============================================================================
 if (CKRE_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif ()
 
