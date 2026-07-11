@@ -154,6 +154,7 @@ const char *SamplerLayoutProfileName(const std::string &backend) {
     if (backend == "dx12") return "CKRST_SHADER_PROFILE_DX12";
     if (backend == "spirv") return "CKRST_SHADER_PROFILE_SPIRV";
     if (backend == "glsl") return "CKRST_SHADER_PROFILE_GLSL";
+    if (backend == "essl") return "CKRST_SHADER_PROFILE_ESSL";
     if (backend == "metal") return "CKRST_SHADER_PROFILE_MSL";
     return "";
 }
