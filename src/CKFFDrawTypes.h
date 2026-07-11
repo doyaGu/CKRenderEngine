@@ -88,6 +88,7 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
 }
 
 float CKFFComputeDepthKey(const CKFFStateStore &state, const CKDrawStateCache &drawState);
+CKDWORD CKFFEncodeDepthKey(float depth);
 CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCache &drawState);
 
 inline CKFFShaderKey CKFFBuildShaderKeyFromPreparedState(const CKFFPreparedState *prepared)

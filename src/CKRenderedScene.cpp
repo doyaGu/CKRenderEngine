@@ -21,8 +21,17 @@
 #include "RCKCamera.h"
 #include "RCKLight.h"
 
+#include <string.h>
+
 extern int g_UpdateTransparency;
 extern int g_FogProjectionMode;
+
+static CKDWORD FloatRenderState(float value)
+{
+    CKDWORD bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
 
 static bool RenderedSceneFrameLogEnabled() {
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
@@ -631,17 +640,17 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
         float recipStartW = 1.0f / startW;
 
         if (g_FogProjectionMode == 0) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&m_FogEnd));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&m_FogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(m_FogEnd));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(m_FogStart));
         } else if (g_FogProjectionMode == 1) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&projFogEnd));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&projFogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogEnd));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(projFogStart));
         } else if (g_FogProjectionMode == 2) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND,   *reinterpret_cast<CKDWORD *>(&projFogStart));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, *reinterpret_cast<CKDWORD *>(&recipStartW));
+            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogStart));
+            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(recipStartW));
         }
 
-        ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, *reinterpret_cast<CKDWORD *>(&m_FogDensity));
+        ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, FloatRenderState(m_FogDensity));
         ffp.SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
     }
 
