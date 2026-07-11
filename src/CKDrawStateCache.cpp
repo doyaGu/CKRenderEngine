@@ -1,5 +1,5 @@
 #include "CKDrawStateCache.h"
-#include <cstring>
+#include <string.h>
 
 static CKDWORD FloatState(float value) {
     CKDWORD bits = 0;
@@ -188,7 +188,8 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
         lo |= CKRST_STATE_DEPTH_TEST;
         lo |= CKRST_STATE_DEPTH_FUNC(m_States[VXRENDERSTATE_ZFUNC]);
     }
-    if (m_States[VXRENDERSTATE_ZWRITEENABLE])
+    if (m_States[VXRENDERSTATE_ZENABLE] &&
+        m_States[VXRENDERSTATE_ZWRITEENABLE])
         lo |= CKRST_STATE_DEPTH_WRITE;
 
     // Cull
