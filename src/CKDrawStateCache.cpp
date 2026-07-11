@@ -79,6 +79,7 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_FOGEND] = FloatState(1.0f);
     m_States[VXRENDERSTATE_FOGDENSITY] = FloatState(1.0f);
     m_States[VXRENDERSTATE_DITHERENABLE] = FALSE;
+    m_States[VXRENDERSTATE_CLIPPING] = TRUE;
     m_States[VXRENDERSTATE_TEXTUREPERSPECTIVE] = TRUE;
     m_States[VXRENDERSTATE_STENCILENABLE] = FALSE;
     m_States[VXRENDERSTATE_STENCILFAIL] = VXSTENCILOP_KEEP;
@@ -125,6 +126,7 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
     case VXRENDERSTATE_CULLMODE:
     case VXRENDERSTATE_FILLMODE:
     case VXRENDERSTATE_INVERSEWINDING:
+    case VXRENDERSTATE_ANTIALIAS:
         m_DirtyMask |= CKFF_DIRTY_RASTER;
         break;
     case VXRENDERSTATE_STENCILENABLE:
@@ -201,6 +203,8 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Fill mode
     lo |= CKRST_STATE_FILLMODE(RemapFillMode(m_States[VXRENDERSTATE_FILLMODE]));
+    if (m_States[VXRENDERSTATE_ANTIALIAS])
+        lo |= CKRST_STATE_MSAA;
 
     // Blend
     if (m_States[VXRENDERSTATE_ALPHABLENDENABLE]) {

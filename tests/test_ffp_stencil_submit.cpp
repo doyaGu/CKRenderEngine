@@ -196,6 +196,46 @@ void DrawVertexBufferPropagatesEncoderFailure() {
     ffp.Shutdown();
 }
 
+void UnsupportedRenderStatesRejectExplicitly() {
+    struct UnsupportedStateCase {
+        VXRENDERSTATETYPE State;
+        CKDWORD Value;
+        CKDWORD ResetValue;
+        CKFFDrawRejectReason Reason;
+    };
+    const UnsupportedStateCase cases[] = {
+        {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKFF_DRAW_REJECT_DITHER},
+        {VXRENDERSTATE_ZBIAS, 1, 0, CKFF_DRAW_REJECT_ZBIAS},
+        {VXRENDERSTATE_LINEPATTERN, 0xFFFFu, 0, CKFF_DRAW_REJECT_LINE_PATTERN},
+        {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKFF_DRAW_REJECT_EDGE_ANTIALIAS},
+        {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKFF_DRAW_REJECT_CLIPPING_DISABLED},
+    };
+
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    CKBOOL allRejected = TRUE;
+    for (CKDWORD i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        ffp.SetRenderState(cases[i].State, cases[i].Value);
+        const CKBOOL drawn = ffp.DrawVertexBuffer(
+            &context.Encoder, 1, VX_TRIANGLELIST,
+            1, 0, 0, 3, 0, 0,
+            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+        allRejected = allRejected && !drawn &&
+            ffp.GetLastDrawRejectReason() == cases[i].Reason;
+        ffp.SetRenderState(cases[i].State, cases[i].ResetValue);
+    }
+
+    TestCheck(allRejected,
+              "Unsupported output-affecting render states must report explicit rejection reasons");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Unsupported render states must not reach backend submission");
+
+    ffp.Shutdown();
+}
+
 void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -1313,6 +1353,38 @@ void UnusedBorderTexturesDoNotConsumePaletteSlots() {
     ffp.Shutdown();
 }
 
+void UntexturedStageKeepsRuntimeStageParams() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_CONSTANT, 0x80402010u);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(uniform);
+    TestCheck(drawn && params != context.Encoder.FloatUniforms.end(),
+              "An untextured constant stage must upload runtime stage params");
+    TestCheck(params != context.Encoder.FloatUniforms.end() &&
+                  params->second.size() >= 4 &&
+                  params->second[0] == (float)CKRST_TOP_SELECTARG1,
+              "Texture binding span must not disable an active untextured stage");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "An untextured constant stage must not create a texture binding");
+
+    ffp.Shutdown();
+}
+
 void PremodulateImplicitTextureDependencyBindsNextStage() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -2227,6 +2299,8 @@ int main() {
               &DrawVertexBufferRejectsPartialStencilWriteMask);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
+    tests.Run("Unsupported render states reject explicitly",
+              &UnsupportedRenderStatesRejectExplicitly);
     tests.Run("DrawVertexBuffer propagates encoder failure",
               &DrawVertexBufferPropagatesEncoderFailure);
     tests.Run("DrawVertexBuffer stops before submit after binding failure",
@@ -2301,6 +2375,8 @@ int main() {
               &BorderPaletteSlotsAreReusedAcrossFrames);
     tests.Run("Unused border textures do not consume palette slots",
               &UnusedBorderTexturesDoNotConsumePaletteSlots);
+    tests.Run("Untextured stage keeps runtime stage params",
+              &UntexturedStageKeepsRuntimeStageParams);
     tests.Run("PREMODULATE implicit texture dependency binds next stage",
               &PremodulateImplicitTextureDependencyBindsNextStage);
     tests.Run("Uber shader program modules are shared across state bindings",

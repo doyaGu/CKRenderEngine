@@ -660,7 +660,7 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
         ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     }
 
-    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
     // m_PresentInterval / m_CurrentPresentInterval were v1 fields on

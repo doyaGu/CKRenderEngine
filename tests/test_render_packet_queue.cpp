@@ -669,6 +669,48 @@ void OpaquePacketIgnoresUnusedTextureBindings()
     ffp.Shutdown();
 }
 
+void OpaquePacketPreservesUntexturedStageCount()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_CONSTANT, 0x80402010u);
+
+    CKFFVertexBufferPacketBuildResult build;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &build, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77);
+
+    TestCheck(build.Success && build.TextureBindingSet.ActiveStageCount == 1 &&
+                  build.TextureBindingSet.ActiveTextureCount == 0 &&
+                  build.Packet.ActiveStageCount == 1 &&
+                  build.Packet.ActiveTextureCount == 0,
+              "Packet capture must keep stage count separate from texture binding span");
+
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(uniform);
+    TestCheck(params != context.Encoder.FloatUniforms.end() &&
+                  params->second.size() >= 4 &&
+                  params->second[0] == (float)CKRST_TOP_SELECTARG1,
+              "Packet replay must upload active untextured stage params");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "Packet replay must not bind a texture for an untextured stage");
+
+    ffp.Shutdown();
+}
+
 void OpaquePacketTextureKindChangeRebuildsStaticPayload()
 {
     FFPDiagnosticDriver driverA;
@@ -1608,6 +1650,8 @@ int main()
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet ignores unused texture bindings",
               &OpaquePacketIgnoresUnusedTextureBindings);
+    tests.Run("Opaque packet preserves untextured stage count",
+              &OpaquePacketPreservesUntexturedStageCount);
     tests.Run("Opaque packet texture kind change rebuilds static payload",
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
     tests.Run("Static uniform payload order and hash stays stable",
