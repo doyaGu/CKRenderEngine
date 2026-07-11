@@ -236,8 +236,8 @@ CKBOOL CKFFOpaquePacketCoordinator::ResolveVertexBufferPacketProgram(
     if (!preparedState || !programContext)
         return FALSE;
 
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, pipeline.GetStateStore().TextureHandles, pipeline.GetStateStore().StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
+        pipeline.GetStateStore().TextureHandles, pipeline.GetStateStore().StageStates);
     if (TryGetCachedProgram(dpFlags, formatFlags, activeTextureCount,
                             preparedState, programContext)) {
         return programContext->Program != 0 ? TRUE : FALSE;
@@ -245,6 +245,9 @@ CKBOOL CKFFOpaquePacketCoordinator::ResolveVertexBufferPacketProgram(
 
     pipeline.BuildCurrentPreparedState(preparedState, dpFlags, activeTextureCount, formatFlags);
     CKFFShaderKey shaderKey = CKFFBuildShaderKeyFromPreparedState(preparedState);
+    CKFFInitProgramContext(programContext, shaderKey, CKFFProgramBinding());
+    if (!pipeline.ValidateProgramSupport(shaderKey))
+        return FALSE;
     CKFFProgramBinding programBinding = pipeline.GetShaderCache().GetProgram(shaderKey);
     CKFFInitProgramContext(programContext, shaderKey, programBinding);
     CacheProgram(dpFlags, formatFlags, activeTextureCount, *preparedState, *programContext);
@@ -467,7 +470,10 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
         if (collectStats)
             CKFF_PROBE(pipeline.GetProbes(), OnProgramMiss());
         result->ProgramContext = programContext;
-        result->RejectReason = CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
+        result->RejectReason = pipeline.GetShaderCache().SupportsSamplerLayout(
+            programContext.ShaderKey)
+            ? CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING
+            : CKFF_RENDER_PACKET_REJECT_SAMPLER_LAYOUT;
         return;
     }
     result->ProgramContext = programContext;
