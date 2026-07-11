@@ -464,7 +464,9 @@ void main()
         viewNormal = mul(u_ffMatrices[3], vec4(blendedNormal, 0.0)).xyz;
         gl_Position = mul(u_ffMatrices[0], blendedWorldPos);
         worldClipPos = blendedWorldPos;
+#if CKFF_VS_INSTANCED || defined(CKFF_FULL_SPECIALIZED)
         v_fogPos = gl_Position;
+#endif
     } else {
 #endif
 #if CKFF_VS_INSTANCED
@@ -475,7 +477,9 @@ void main()
         gl_Position = mul(u_ffMatrices[0], localPos);
         worldClipPos = mul(u_ffMatrices[1], localPos);
 #endif
+#if CKFF_VS_INSTANCED || defined(CKFF_FULL_SPECIALIZED)
         v_fogPos = gl_Position;
+#endif
 #if CKFF_VS_VERTEX_BLEND_MODE != 0
     }
 #endif
@@ -511,6 +515,9 @@ void main()
 #else
     viewPos = vec4_splat(0.0);
     viewNormal = vec3_splat(0.0);
+#endif
+#if !CKFF_VS_INSTANCED && !defined(CKFF_FULL_SPECIALIZED)
+    v_fogPos = vec4(0.0, 0.0, abs(viewPos.z), 1.0);
 #endif
 
 #if defined(CKFF_FULL_SPECIALIZED)

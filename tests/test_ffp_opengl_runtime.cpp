@@ -21,6 +21,13 @@ namespace {
 
 char g_BackendRuntimeFailure[512];
 
+CKDWORD FloatRenderState(float value)
+{
+    CKDWORD bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
 struct PixelResources {
     CKDWORD ColorTexture;
     CKDWORD DepthTexture;
@@ -349,14 +356,18 @@ void DestroyPixelFrameBuffer(CKBgfxRasterizerContext *context,
 
 void BeginPixelFrame(CKFixedFunctionPipeline &ffp,
                      CKBgfxRasterizerContext *context,
-                     const PixelResources &resources)
+                     const PixelResources &resources,
+                     const VxMatrix *projection = NULL)
 {
     CKRECT viewport = {0, 0, 64, 64};
     VxMatrix identity;
     Vx3DMatrixIdentity(identity);
+    const VxMatrix &frameProjection = projection ? *projection : identity;
+    ffp.SetTransform(VXMATRIX_VIEW, identity);
+    ffp.SetTransform(VXMATRIX_PROJECTION, frameProjection);
     ffp.GetRenderPipeline().BeginFrame(
         viewport, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
-        0xFF000000u, 1.0f, identity, identity);
+        0xFF000000u, 1.0f, identity, frameProjection);
     context->SetViewFrameBuffer(CKRP_VIEW_CLEAR, resources.FrameBuffer);
     context->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, resources.FrameBuffer);
     TestCheck(ffp.GetRenderPipeline().GetEncoder() != NULL,
@@ -542,6 +553,33 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                   PixelNear(pixels, 32, 48, 0, 0, 255),
               "ReadFrameBuffer must normalize backend output to top-first rows");
 
+    // Table fog consumes eye-space depth. Projection-space z/w would leave this nearly white.
+    VxMatrix fogProjection;
+    Vx3DMatrixIdentity(fogProjection);
+    fogProjection[2][2] = 0.01f;
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+    ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(0.0f));
+    ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(20.0f));
+    ffp.SetRenderState(VXRENDERSTATE_FOGCOLOR, 0xFF000000u);
+    BeginPixelFrame(ffp, context, resources, &fogProjection);
+    const VxVector fogPositions[3] = {
+        VxVector(-0.9f, -0.9f, 10.0f),
+        VxVector( 0.9f, -0.9f, 10.0f),
+        VxVector( 0.0f,  0.9f, 10.0f)
+    };
+    const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                fogPositions, white),
+              "Pixel-fog backend draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 128, 128, 128),
+               "eye-space pixel fog mismatch: BGRA=(%u,%u,%u,%u)",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+
     ffp.Shutdown();
     TestCheck(context->RequestScreenShot(resources.FrameBuffer,
                                          ScreenShotCallback) ==
@@ -550,7 +588,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=3 tolerance=24\n");
+    printf("  coverage: backendPixelCases=4 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()
