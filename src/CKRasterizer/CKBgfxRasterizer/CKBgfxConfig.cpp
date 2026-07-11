@@ -6,9 +6,9 @@
 #include <strings.h>
 #endif
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const char *kCKBgfxConfigFile = "CKBgfxRasterizer.ini";
 static const char *kCKBgfxConfigSection = "CKBgfxRasterizer";
@@ -115,6 +115,6 @@ int CKBgfxConfigInt(const char *section, const char *name, int fallback)
         return fallback;
 
     char *end = nullptr;
-    long parsed = std::strtol(value, &end, 10);
+    long parsed = strtol(value, &end, 10);
     return (end != value) ? (int)parsed : fallback;
 }

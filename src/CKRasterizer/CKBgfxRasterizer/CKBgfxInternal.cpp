@@ -29,7 +29,18 @@ static int fopen_s(FILE **file, const char *path, const char *mode)
 
 static int _vsnprintf_s(char *buffer, size_t size, size_t, const char *format, va_list args)
 {
-    return vsnprintf(buffer, size, format, args);
+    if (!buffer || size == 0)
+        return 0;
+    int result = vsnprintf(buffer, size, format, args);
+    if (result < 0) {
+        buffer[0] = '\0';
+        return 0;
+    }
+    if ((size_t)result >= size) {
+        buffer[size - 1] = '\0';
+        return (int)(size - 1);
+    }
+    return result;
 }
 
 static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *format, ...)
@@ -224,6 +235,7 @@ const char *CKBgfxRendererTypeName(bgfx::RendererType::Enum type)
     case bgfx::RendererType::OpenGL:     return "OpenGL";
     case bgfx::RendererType::OpenGLES:   return "OpenGLES";
     case bgfx::RendererType::Metal:      return "Metal";
+    case bgfx::RendererType::WebGPU:     return "WebGPU";
     case bgfx::RendererType::Noop:       return "Noop";
     default:                             return "Auto";
     }
@@ -236,6 +248,7 @@ const char *CKBgfxShaderProfileName(CK_SHADER_PROFILE profile)
     case CKRST_SHADER_PROFILE_DX12:  return "dx12";
     case CKRST_SHADER_PROFILE_SPIRV: return "spirv";
     case CKRST_SHADER_PROFILE_GLSL:  return "glsl";
+    case CKRST_SHADER_PROFILE_ESSL:  return "essl";
     case CKRST_SHADER_PROFILE_MSL:   return "metal";
     default:                         return "unknown";
     }
@@ -267,13 +280,39 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
     case bgfx::RendererType::Direct3D12: return CKRST_SHADER_PROFILE_DX12;
     case bgfx::RendererType::Vulkan:     return CKRST_SHADER_PROFILE_SPIRV;
     case bgfx::RendererType::OpenGL:     return CKRST_SHADER_PROFILE_GLSL;
-    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_UNKNOWN;
+    case bgfx::RendererType::OpenGLES:   return CKRST_SHADER_PROFILE_ESSL;
     case bgfx::RendererType::Metal:      return CKRST_SHADER_PROFILE_MSL;
     default:                             return CKRST_SHADER_PROFILE_UNKNOWN;
     }
 }
 
-bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
+bool CKBgfxTryRendererType(const char *Name,
+                           bgfx::RendererType::Enum &Renderer)
+{
+    if (!Name || Name[0] == '\0' || CKBgfxLogNameEquals(Name, "auto")) {
+        Renderer = bgfx::RendererType::Count;
+        return true;
+    }
+    if (CKBgfxLogNameEquals(Name, "d3d11") || CKBgfxLogNameEquals(Name, "direct3d11"))
+        Renderer = bgfx::RendererType::Direct3D11;
+    else if (CKBgfxLogNameEquals(Name, "d3d12") || CKBgfxLogNameEquals(Name, "direct3d12"))
+        Renderer = bgfx::RendererType::Direct3D12;
+    else if (CKBgfxLogNameEquals(Name, "vulkan"))
+        Renderer = bgfx::RendererType::Vulkan;
+    else if (CKBgfxLogNameEquals(Name, "opengl") || CKBgfxLogNameEquals(Name, "gl"))
+        Renderer = bgfx::RendererType::OpenGL;
+    else if (CKBgfxLogNameEquals(Name, "opengles") || CKBgfxLogNameEquals(Name, "gles"))
+        Renderer = bgfx::RendererType::OpenGLES;
+    else if (CKBgfxLogNameEquals(Name, "metal") || CKBgfxLogNameEquals(Name, "msl"))
+        Renderer = bgfx::RendererType::Metal;
+    else if (CKBgfxLogNameEquals(Name, "webgpu") || CKBgfxLogNameEquals(Name, "wgpu"))
+        Renderer = bgfx::RendererType::WebGPU;
+    else
+        return false;
+    return true;
+}
+
+bool CKBgfxParseRequestedRenderer(bgfx::RendererType::Enum &Renderer)
 {
     char value[32] = {0};
     const char *envBackend = getenv("CKBGFX_RENDERER_BACKEND");
@@ -282,22 +321,15 @@ bgfx::RendererType::Enum CKBgfxParseRequestedRenderer()
         value[sizeof(value) - 1] = '\0';
     } else if (!CKBgfxConfigString("Renderer", "Backend", value, (CKDWORD)sizeof(value)) ||
                CKBgfxLogNameEquals(value, "auto")) {
-        return bgfx::RendererType::Count;
+        Renderer = bgfx::RendererType::Count;
+        return true;
     }
 
-    if (CKBgfxLogNameEquals(value, "d3d11") || CKBgfxLogNameEquals(value, "direct3d11"))
-        return bgfx::RendererType::Direct3D11;
-    if (CKBgfxLogNameEquals(value, "d3d12") || CKBgfxLogNameEquals(value, "direct3d12"))
-        return bgfx::RendererType::Direct3D12;
-    if (CKBgfxLogNameEquals(value, "vulkan"))
-        return bgfx::RendererType::Vulkan;
-    if (CKBgfxLogNameEquals(value, "opengl") || CKBgfxLogNameEquals(value, "gl"))
-        return bgfx::RendererType::OpenGL;
-    if (CKBgfxLogNameEquals(value, "metal") || CKBgfxLogNameEquals(value, "msl"))
-        return bgfx::RendererType::Metal;
+    if (CKBgfxTryRendererType(value, Renderer))
+        return true;
 
-    CKBgfxLogf("Init", "unknown Renderer/Backend='%s', falling back to auto", value);
-    return bgfx::RendererType::Count;
+    CKBgfxLogf("Init", "unknown Renderer/Backend='%s'", value);
+    return false;
 }
 
 bool CKBgfxTryUniformType(CK_UNIFORM_TYPE type, bgfx::UniformType::Enum &result)

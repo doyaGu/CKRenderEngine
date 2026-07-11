@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKBgfxInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -29,7 +30,6 @@ static void AddDisplayMode(XArray<VxDisplayMode> &displayModes, const SDL_Displa
 
 static void AddCompatibleDisplayMode(XArray<VxDisplayMode> &displayModes, int width, int height)
 {
-    AddDisplayMode(displayModes, width, height, 16, 60);
     AddDisplayMode(displayModes, width, height, 32, 60);
 }
 
@@ -71,29 +71,22 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     }
     SDL_free(displays);
 
-    static const int compatibleResolutions[][2] = {
-        {320, 240},
+    static const int fallbackResolutions[][2] = {
         {640, 480},
         {800, 600},
         {1024, 768},
-        {1152, 864},
         {1280, 720},
-        {1280, 768},
-        {1280, 800},
-        {1280, 960},
-        {1280, 1024},
-        {1360, 768},
-        {1366, 768},
-        {1440, 900},
-        {1600, 900},
-        {1600, 1200},
-        {1680, 1050},
         {1920, 1080},
-        {1920, 1200},
-        {2560, 1440},
     };
-    for (int i = 0; i < (int)(sizeof(compatibleResolutions) / sizeof(compatibleResolutions[0])); ++i)
-        AddCompatibleDisplayMode(m_DisplayModes, compatibleResolutions[i][0], compatibleResolutions[i][1]);
+    if (m_DisplayModes.Size() == 0) {
+        for (int i = 0;
+             i < (int)(sizeof(fallbackResolutions) / sizeof(fallbackResolutions[0]));
+             ++i) {
+            AddCompatibleDisplayMode(m_DisplayModes,
+                                     fallbackResolutions[i][0],
+                                     fallbackResolutions[i][1]);
+        }
+    }
 
     m_DisplayModes.Sort(CompareDisplayModes);
 
@@ -131,20 +124,43 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
                                       | CKRST_SPECIFICCAPS_SUPPORTSHADERS;
 
     memset(&m_2DCaps, 0, sizeof(m_2DCaps));
-    m_2DCaps.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D | CKRST_2DCAPS_GDI;
+    m_2DCaps.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D;
+#if defined(_WIN32)
+    m_2DCaps.Caps |= CKRST_2DCAPS_GDI;
+#endif
 
-    m_CapsUpToDate = TRUE;
+    m_CapsUpToDate = FALSE;
 }
 
 CKBgfxRasterizerDriver::~CKBgfxRasterizerDriver()
 {
-    for (int i = 0; i < m_Contexts.Size(); ++i)
+    for (int i = 0; i < m_Contexts.Size(); ++i) {
+        CKBgfxRasterizerContext *context =
+            static_cast<CKBgfxRasterizerContext *>(m_Contexts[i]);
+        context->BeginForcedShutdown();
+        context->EndCurrentThreadEncoders();
+        if (!context->IsIdle())
+            CKBgfxLogf("Shutdown", "waiting for active encoder threads");
+        const Uint64 waitStart = SDL_GetTicks();
+        while (!context->IsIdle() &&
+               SDL_GetTicks() - waitStart < 30000u)
+            SDL_Delay(1);
+        if (!context->IsIdle()) {
+            CKBgfxLogf("Shutdown",
+                       "timed out waiting for active encoders; preserving disabled context");
+            continue;
+        }
         delete m_Contexts[i];
+    }
     m_Contexts.Clear();
 }
 
 CKRasterizerContext *CKBgfxRasterizerDriver::CreateContext()
 {
+    if (m_Contexts.Size() != 0) {
+        CKBgfxLogf("Init", "multiple bgfx rasterizer contexts are unsupported");
+        return NULL;
+    }
     auto *ctx = new (std::nothrow) CKBgfxRasterizerContext(this);
     if (!ctx)
         return NULL;
@@ -162,6 +178,10 @@ CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
     {
         if (m_Contexts[i] == Context)
         {
+            CKBgfxRasterizerContext *bgfxContext =
+                static_cast<CKBgfxRasterizerContext *>(Context);
+            if (!bgfxContext->TryBeginShutdown())
+                return FALSE;
             delete m_Contexts[i];
             m_Contexts.RemoveAt(i);
             return TRUE;

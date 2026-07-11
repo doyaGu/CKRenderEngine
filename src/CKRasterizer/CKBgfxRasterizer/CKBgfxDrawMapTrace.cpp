@@ -1,8 +1,8 @@
 #include "CKBgfxDrawMapTrace.h"
 #include "CKBgfxInternal.h"
 
-#include <cstdarg>
-#include <cstdio>
+#include <stdarg.h>
+#include <stdio.h>
 
 static CKSTRING CKBgfxDrawMapSafeString(CKSTRING Text)
 {

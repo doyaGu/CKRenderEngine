@@ -467,31 +467,110 @@ static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscre
 // Helper: allocate a context-local wrapper slot. Slot zero stays invalid.
 // ===========================================================================
 
+static const CKDWORD CKBGFX_RESOURCE_SLOT_MASK = 0xffffu;
+static const CKDWORD CKBGFX_MAX_PENDING_SCREENSHOTS = 64u;
+
+static CKDWORD EncodeResourceHandle(CKDWORD slot, CKWORD generation)
+{
+    return ((CKDWORD)generation << 16) | slot;
+}
+
+static CKDWORD ResourceHandleSlot(CKDWORD handle)
+{
+    return handle & CKBGFX_RESOURCE_SLOT_MASK;
+}
+
+static CKWORD ResourceHandleGeneration(CKDWORD handle)
+{
+    return (CKWORD)(handle >> 16);
+}
+
 template <typename T>
-static CKDWORD AllocateSlot(XArray<T *> &arr, CKDWORD maxHandles,
+static CKDWORD AllocateSlot(XArray<CKBgfxResourceSlot<T> > &arr,
+                            CKDWORD maxHandles,
                             VxMutex &tableMutex)
 {
     VxMutexLock lock(tableMutex);
     if (arr.Size() == 0)
-        arr.PushBack(NULL);
+        arr.PushBack(CKBgfxResourceSlot<T>());
     for (int i = 1; i < arr.Size(); ++i) {
-        if (!arr[i])
-            return (CKDWORD)i;
+        CKBgfxResourceSlot<T> &slot = arr[i];
+        if (!slot.Record && !slot.Retired) {
+            if (slot.Generation == 0xffffu) {
+                slot.Retired = TRUE;
+                continue;
+            }
+            ++slot.Generation;
+            return EncodeResourceHandle((CKDWORD)i, slot.Generation);
+        }
     }
-    if (maxHandles != 0 && (CKDWORD)(arr.Size() - 1) >= maxHandles)
+    const CKDWORD handleLimit = maxHandles != 0
+        ? XMin(maxHandles, CKBGFX_RESOURCE_SLOT_MASK)
+        : CKBGFX_RESOURCE_SLOT_MASK;
+    if ((CKDWORD)(arr.Size() - 1) >= handleLimit)
         return 0;
-    arr.PushBack(NULL);
-    return (CKDWORD)(arr.Size() - 1);
+    CKBgfxResourceSlot<T> slot;
+    slot.Generation = 1;
+    arr.PushBack(slot);
+    return EncodeResourceHandle((CKDWORD)(arr.Size() - 1), slot.Generation);
 }
 
 template <typename T>
-static T *GetSlot(XArray<T *> &arr, CKDWORD index,
+static T *GetSlot(XArray<CKBgfxResourceSlot<T> > &arr, CKDWORD handle,
                   VxMutex &tableMutex)
 {
     VxMutexLock lock(tableMutex);
+    const CKDWORD index = ResourceHandleSlot(handle);
     if (index == 0 || (int)index >= arr.Size())
         return NULL;
-    return arr[index];
+    CKBgfxResourceSlot<T> &slot = arr[index];
+    return slot.Generation == ResourceHandleGeneration(handle)
+        ? slot.Record : NULL;
+}
+
+template <typename T>
+static CKBOOL StoreSlot(XArray<CKBgfxResourceSlot<T> > &arr,
+                        CKDWORD handle, T *record,
+                        VxMutex &tableMutex)
+{
+    VxMutexLock lock(tableMutex);
+    const CKDWORD index = ResourceHandleSlot(handle);
+    if (!record || index == 0 || (int)index >= arr.Size())
+        return FALSE;
+    CKBgfxResourceSlot<T> &slot = arr[index];
+    if (slot.Record || slot.Generation != ResourceHandleGeneration(handle))
+        return FALSE;
+    slot.Record = record;
+    return TRUE;
+}
+
+template <typename T>
+static T *TakeSlot(XArray<CKBgfxResourceSlot<T> > &arr, CKDWORD handle,
+                   VxMutex &tableMutex)
+{
+    VxMutexLock lock(tableMutex);
+    const CKDWORD index = ResourceHandleSlot(handle);
+    if (index == 0 || (int)index >= arr.Size())
+        return NULL;
+    CKBgfxResourceSlot<T> &slot = arr[index];
+    if (slot.Generation != ResourceHandleGeneration(handle))
+        return NULL;
+    T *record = slot.Record;
+    slot.Record = NULL;
+    return record;
+}
+
+template <typename T>
+static CKBOOL IsSlotAlive(const XArray<CKBgfxResourceSlot<T> > &arr,
+                          CKDWORD handle, VxMutex &tableMutex)
+{
+    VxMutexLock lock(tableMutex);
+    const CKDWORD index = ResourceHandleSlot(handle);
+    if (index == 0 || (int)index >= arr.Size())
+        return FALSE;
+    const CKBgfxResourceSlot<T> &slot = arr[index];
+    return slot.Record && slot.Generation == ResourceHandleGeneration(handle)
+        ? TRUE : FALSE;
 }
 
 template <typename RecordT>
@@ -506,11 +585,12 @@ static void DestroyRecord(RecordT *rec)
 }
 
 template <typename RecordT>
-static void DestroyAllRecords(XArray<RecordT *> &arr)
+static void DestroyAllRecords(XArray<CKBgfxResourceSlot<RecordT> > &arr)
 {
-    for (int i = 0; i < arr.Size(); ++i)
-        DestroyRecord(arr[i]);
-    arr.Clear();
+    for (int i = 0; i < arr.Size(); ++i) {
+        DestroyRecord(arr[i].Record);
+        arr[i].Record = NULL;
+    }
 }
 
 // ===========================================================================
@@ -576,6 +656,16 @@ CKBOOL CKBgfxEncoder::CanSubmit()
         m_OwnerThread != VxThread::GetCurrentVxThreadId())
     {
         SetError(CKERR_INVALIDOPERATION);
+        return FALSE;
+    }
+    if (m_Context->m_ShuttingDown.load(std::memory_order_acquire)) {
+        SetError(CKERR_INVALIDOPERATION);
+        return FALSE;
+    }
+    const CKERROR fatalError =
+        m_Context->m_FatalError.load(std::memory_order_acquire);
+    if (fatalError != CK_OK) {
+        SetError(fatalError);
         return FALSE;
     }
     return m_Status == CK_OK ? TRUE : FALSE;
@@ -1694,10 +1784,13 @@ CKBgfxRasterizerContext::CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver)
       m_NativeSupported(0),
       m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE), m_AntialiasSamples(0),
-      m_NextScreenShotToken(1),
+      m_FrameInProgress(FALSE), m_ShuttingDown{FALSE},
+      m_NextScreenShotToken(1), m_CaptureWidth(0), m_CaptureHeight(0),
+      m_CapturePitch(0), m_CaptureFormat(bgfx::TextureFormat::Count),
+      m_CaptureYFlip(FALSE),
       m_DebugFrameId(0), m_DebugSubmitSerial{0}, m_DebugMissingAnnotationCount{0},
       m_DebugMarkerOverwriteCount{0}, m_DebugMarkerStaleCount{0},
-      m_DebugInvalidSubmitCount{0}, m_DebugFatalCount{0},
+      m_DebugInvalidSubmitCount{0}, m_DebugFatalCount{0}, m_FatalError{CK_OK},
       m_DebugParsedAnnotationCount{0},
       m_DebugRawPrimitiveCount{0},
       m_DebugEncoderLeakCount{0}, m_DebugTransientAllocMissCount{0},
@@ -1885,6 +1978,8 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 {
     if (m_BgfxInitialized || m_Created)
         return CKERR_INVALIDOPERATION;
+    m_FatalError.store(CK_OK, std::memory_order_release);
+    m_ShuttingDown.store(FALSE, std::memory_order_release);
     if (!CKBgfxClaimActiveContext(this)) {
         CKBgfxLogf("Init", "another CKBgfxRasterizerContext is already active");
         return CKERR_INVALIDOPERATION;
@@ -1930,7 +2025,11 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_Fullscreen = Fullscreen;
     m_RefreshRate = RefreshRate;
 
-    const bgfx::RendererType::Enum requestedRenderer = CKBgfxParseRequestedRenderer();
+    bgfx::RendererType::Enum requestedRenderer = bgfx::RendererType::Count;
+    if (!CKBgfxParseRequestedRenderer(requestedRenderer)) {
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_INVALIDPARAMETER;
+    }
 
     bgfx::Init init;
     init.type = requestedRenderer;
@@ -1959,6 +2058,17 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_BgfxInitialized = TRUE;
     m_ApiThreadId = VxThread::GetCurrentVxThreadId();
     const bgfx::RendererType::Enum actualRenderer = bgfx::getRendererType();
+    if (requestedRenderer != bgfx::RendererType::Count &&
+        actualRenderer != requestedRenderer) {
+        CKBgfxLogf("Init",
+                   "requested renderer %s is unavailable; bgfx selected %s",
+                   CKBgfxRendererTypeName(requestedRenderer),
+                   CKBgfxRendererTypeName(actualRenderer));
+        bgfx::shutdown();
+        m_BgfxInitialized = FALSE;
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_NOTIMPLEMENTED;
+    }
     m_RendererType = actualRenderer;
     m_RendererName = CKBgfxRendererTypeName(actualRenderer);
     if (CKBgfxShaderProfile(actualRenderer) == CKRST_SHADER_PROFILE_UNKNOWN) {
@@ -1988,6 +2098,9 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
         m_CapsDesc.MaxTextureLayers = limits.maxTextureLayers;
         m_CapsDesc.MaxRenderViews = XMin((CKDWORD)limits.maxViews,
                                          (CKDWORD)CKRST_MAX_RENDER_VIEWS);
+        if (actualRenderer == bgfx::RendererType::Vulkan &&
+            m_CapsDesc.MaxRenderViews != 0)
+            --m_CapsDesc.MaxRenderViews;
         m_CapsDesc.MaxFrameBuffers = limits.maxFrameBuffers;
         m_CapsDesc.MaxColorAttachments = limits.maxFBAttachments;
         m_CapsDesc.MaxPrograms = limits.maxPrograms;
@@ -2149,6 +2262,49 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
 
     m_Created = TRUE;
 
+    if (m_Driver) {
+        Vx3DCapsDesc &legacyCaps = m_Driver->m_3DCaps;
+        legacyCaps.MaxTextureWidth = m_CapsDesc.MaxTextureSize;
+        legacyCaps.MaxTextureHeight = m_CapsDesc.MaxTextureSize;
+        legacyCaps.MaxTextureRatio = m_CapsDesc.MaxTextureSize;
+        legacyCaps.MaxNumberTextureStage = m_CapsDesc.MaxTextureStages;
+        legacyCaps.MaxNumberBlendStage = m_CapsDesc.MaxTextureStages;
+        if (m_CapsDesc.Features & CKRST_CAPS_BLIT)
+            legacyCaps.CKRasterizerSpecificCaps |= CKRST_SPECIFICCAPS_COPYTEXTURE;
+        else
+            legacyCaps.CKRasterizerSpecificCaps &= ~CKRST_SPECIFICCAPS_COPYTEXTURE;
+
+        m_Driver->m_TextureFormats.Clear();
+        for (int format = _32_ARGB8888; format <= _32_X8L8V8U8; ++format) {
+            CKTextureFormatCaps formatCaps;
+            if (GetTextureFormatCaps((VX_PIXELFORMAT)format, &formatCaps) != CK_OK ||
+                (formatCaps.Caps & CKRST_FORMAT_CAPS_TEXTURE_2D) == 0)
+                continue;
+            CKTextureDesc textureDesc;
+            textureDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
+            switch ((VX_PIXELFORMAT)format) {
+            case _32_ARGB8888:
+            case _16_ARGB1555:
+            case _16_ARGB4444:
+            case _32_ABGR8888:
+            case _32_RGBA8888:
+            case _32_BGRA8888:
+            case _16_ABGR1555:
+            case _16_ABGR4444:
+            case _DXT1:
+            case _DXT3:
+            case _DXT5:
+                textureDesc.Flags |= CKRST_TEXTURE_ALPHA;
+                break;
+            default:
+                break;
+            }
+            VxPixelFormat2ImageDesc((VX_PIXELFORMAT)format, textureDesc.Format);
+            m_Driver->m_TextureFormats.PushBack(textureDesc);
+        }
+        m_Driver->m_CapsUpToDate = TRUE;
+    }
+
     return CK_OK;
 }
 
@@ -2160,7 +2316,9 @@ CKERROR CKBgfxRasterizerContext::Resize(int PosX, int PosY,
     if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff ||
         Flags != 0)
         return CKERR_INVALIDPARAMETER;
-
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || HasActiveEncoders())
+        return CKERR_INVALIDOPERATION;
     CKBgfxResolveFullscreenWindowSize(m_Window, m_Fullscreen, Width, Height);
     if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff)
         return CKERR_INVALIDPARAMETER;
@@ -2184,6 +2342,63 @@ CKERROR CKBgfxRasterizerContext::GetTargetDesc(CKRasterizerTargetDesc *Target) c
         return CKERR_INVALIDOPERATION;
     *Target = m_TargetDesc;
     return CK_OK;
+}
+
+CKBOOL CKBgfxRasterizerContext::IsIdle() const
+{
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    return !m_FrameInProgress && !HasActiveEncoders() ? TRUE : FALSE;
+}
+
+CKERROR CKBgfxRasterizerContext::BeginShutdown()
+{
+    return TryBeginShutdown() ? CK_OK : CKERR_INVALIDOPERATION;
+}
+
+CKERROR CKBgfxRasterizerContext::GetDeviceStatus() const
+{
+    if (!m_BgfxInitialized || !m_Created)
+        return CKERR_INVALIDRENDERCONTEXT;
+    if (m_ShuttingDown.load(std::memory_order_acquire))
+        return CKERR_INVALIDOPERATION;
+    return m_FatalError.load(std::memory_order_acquire);
+}
+
+void CKBgfxRasterizerContext::LatchFatalError(CKERROR Error)
+{
+    if (Error == CK_OK)
+        return;
+    CKERROR expected = CK_OK;
+    m_FatalError.compare_exchange_strong(
+        expected, Error, std::memory_order_acq_rel,
+        std::memory_order_relaxed);
+}
+
+CKBOOL CKBgfxRasterizerContext::TryBeginShutdown()
+{
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || HasActiveEncoders())
+        return FALSE;
+    m_ShuttingDown.store(TRUE, std::memory_order_release);
+    return TRUE;
+}
+
+void CKBgfxRasterizerContext::BeginForcedShutdown()
+{
+    m_ShuttingDown.store(TRUE, std::memory_order_release);
+}
+
+void CKBgfxRasterizerContext::EndCurrentThreadEncoders()
+{
+    const XUINTPTR currentThread = VxThread::GetCurrentVxThreadId();
+    if (m_DefaultEncoder.m_Active.load(std::memory_order_acquire) &&
+        m_DefaultEncoder.m_OwnerThread == currentThread)
+        EndEncoder(&m_DefaultEncoder);
+    for (CKDWORD i = 0; i < m_CapsDesc.MaxEncoders; ++i) {
+        if (m_Encoders[i].m_Active.load(std::memory_order_acquire) &&
+            m_Encoders[i].m_OwnerThread == currentThread)
+            EndEncoder(&m_Encoders[i]);
+    }
 }
 
 static CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
@@ -2534,7 +2749,10 @@ CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *De
     rec->VertexCount = Desc->m_MaxVertexCount;
     rec->Size = totalSize;
 
-    m_VertexBuffers[buffer] = rec;
+    if (!StoreSlot(m_VertexBuffers, buffer, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutBuffer = buffer;
     TraceBufferMap((CKSTRING)"create", (CKSTRING)"vb", buffer, rec->Handle.idx,
                    rec->Layout, rec->VertexSize, Desc->m_MaxVertexCount,
@@ -2597,7 +2815,10 @@ CKERROR CKBgfxRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc
     rec->IndexCount = Desc->m_MaxIndexCount;
     rec->Size = totalSize;
 
-    m_IndexBuffers[buffer] = rec;
+    if (!StoreSlot(m_IndexBuffers, buffer, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutBuffer = buffer;
     TraceBufferMap((CKSTRING)"create", (CKSTRING)"ib", buffer, rec->Handle.idx,
                    0, indexSize, Desc->m_MaxIndexCount,
@@ -2796,7 +3017,10 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
         }
     }
 
-    m_Textures[texture] = rec;
+    if (!StoreSlot(m_Textures, texture, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     TraceTextureMap((CKSTRING)"create", texture, rec);
 
     if (m_DebugLogTextures &&
@@ -2889,7 +3113,10 @@ CKERROR CKBgfxRasterizerContext::CreateShader(const CKShaderDesc *Desc,
         delete rec;
         return CKERR_OUTOFMEMORY;
     }
-    m_Shaders[shader] = rec;
+    if (!StoreSlot(m_Shaders, shader, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutShader = shader;
 
     return CK_OK;
@@ -2925,9 +3152,12 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKProgramDesc *Desc,
 
         if (Desc->ConsumeShaders)
         {
-            bgfx::destroy(vs->Handle);
-            delete vs;
-            m_Shaders[Desc->VertexShader] = NULL;
+            CKBgfxShaderRecord *consumed = TakeSlot(
+                m_Shaders, Desc->VertexShader, m_ResourceTableMutex);
+            if (consumed) {
+                bgfx::destroy(consumed->Handle);
+                delete consumed;
+            }
         }
     }
     else
@@ -2949,12 +3179,18 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKProgramDesc *Desc,
 
         if (Desc->ConsumeShaders)
         {
-            bgfx::destroy(vs->Handle);
-            delete vs;
-            m_Shaders[Desc->VertexShader] = NULL;
-            bgfx::destroy(ps->Handle);
-            delete ps;
-            m_Shaders[Desc->PixelShader] = NULL;
+            CKBgfxShaderRecord *consumedVs = TakeSlot(
+                m_Shaders, Desc->VertexShader, m_ResourceTableMutex);
+            CKBgfxShaderRecord *consumedPs = TakeSlot(
+                m_Shaders, Desc->PixelShader, m_ResourceTableMutex);
+            if (consumedVs) {
+                bgfx::destroy(consumedVs->Handle);
+                delete consumedVs;
+            }
+            if (consumedPs) {
+                bgfx::destroy(consumedPs->Handle);
+                delete consumedPs;
+            }
         }
     }
 
@@ -2963,7 +3199,10 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKProgramDesc *Desc,
     rec->VertexShader = Desc->VertexShader;
     rec->PixelShader = Desc->PixelShader;
 
-    m_Programs[program] = rec;
+    if (!StoreSlot(m_Programs, program, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutProgram = program;
     TraceProgramMap((CKSTRING)"create", program, rec);
 
@@ -3005,7 +3244,10 @@ CKERROR CKBgfxRasterizerContext::CreateUniform(const CKUniformDesc *Desc,
     strncpy(rec->Name, Desc->Name, sizeof(rec->Name) - 1);
     rec->Name[sizeof(rec->Name) - 1] = '\0';
 
-    m_Uniforms[uniform] = rec;
+    if (!StoreSlot(m_Uniforms, uniform, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutUniform = uniform;
 
     return CK_OK;
@@ -3125,7 +3367,10 @@ CKERROR CKBgfxRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *De
     rec->Handle = handle;
     rec->Layout = bgfxLayout;
 
-    m_VertexLayouts[layout] = rec;
+    if (!StoreSlot(m_VertexLayouts, layout, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutLayout = layout;
 
     return CK_OK;
@@ -3156,7 +3401,7 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
         totalAttachments > CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS)
         return CKERR_INVALIDPARAMETER;
 
-    bgfx::Attachment *attachments = new bgfx::Attachment[totalAttachments];
+    bgfx::Attachment attachments[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];
     CKDWORD idx = 0;
 
     for (CKDWORD i = 0; i < Desc->ColorCount; ++i)
@@ -3173,7 +3418,6 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
             (volume && Desc->Color[i].Layer >=
                 XMax((CKDWORD)1, tex->Depth >> Desc->Color[i].Mip)))
         {
-            delete[] attachments;
             return CKERR_INVALIDPARAMETER;
         }
         attachments[idx].init(tex->Handle, bgfx::Access::Write,
@@ -3189,7 +3433,6 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
             Desc->DepthStencil.Mip >= depthTex->MipCount ||
             Desc->DepthStencil.Layer != 0)
         {
-            delete[] attachments;
             return CKERR_INVALIDPARAMETER;
         }
         attachments[idx].init(depthTex->Handle, bgfx::Access::Write,
@@ -3199,13 +3442,11 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
     }
 
     if (!bgfx::isFrameBufferValid((uint8_t)totalAttachments, attachments)) {
-        delete[] attachments;
         return CKERR_NOTIMPLEMENTED;
     }
 
     bgfx::FrameBufferHandle handle = bgfx::createFrameBuffer(
         (uint8_t)totalAttachments, attachments, false);
-    delete[] attachments;
 
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
@@ -3224,7 +3465,10 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
     for (CKDWORD i = 0; i < Desc->ColorCount; ++i)
         rec->Color[i] = Desc->Color[i];
 
-    m_FrameBuffers[frameBuffer] = rec;
+    if (!StoreSlot(m_FrameBuffers, frameBuffer, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutFrameBuffer = frameBuffer;
 
     return CK_OK;
@@ -3287,7 +3531,10 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *De
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
 
-    m_Textures[texture] = rec;
+    if (!StoreSlot(m_Textures, texture, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutTexture = texture;
     TraceTextureMap((CKSTRING)"create", texture, rec);
 
@@ -3298,22 +3545,19 @@ CKBOOL CKBgfxRasterizerContext::IsObjectAlive(CKDWORD Object, CKDWORD Type) cons
 {
     if (!m_BgfxInitialized || !m_Created || !IsApiThread() || Object == 0)
         return FALSE;
-#define CKBGFX_SLOT_ALIVE(Array) \
-    ((int)Object < (Array).Size() && (Array)[Object] != NULL ? TRUE : FALSE)
     switch (Type) {
-    case CKRST_OBJ_TEXTURE:        return CKBGFX_SLOT_ALIVE(m_Textures);
-    case CKRST_OBJ_VERTEXBUFFER:   return CKBGFX_SLOT_ALIVE(m_VertexBuffers);
-    case CKRST_OBJ_INDEXBUFFER:    return CKBGFX_SLOT_ALIVE(m_IndexBuffers);
-    case CKRST_OBJ_SHADER:         return CKBGFX_SLOT_ALIVE(m_Shaders);
-    case CKRST_OBJ_PROGRAM:        return CKBGFX_SLOT_ALIVE(m_Programs);
-    case CKRST_OBJ_UNIFORM:        return CKBGFX_SLOT_ALIVE(m_Uniforms);
-    case CKRST_OBJ_VERTEXLAYOUT:   return CKBGFX_SLOT_ALIVE(m_VertexLayouts);
-    case CKRST_OBJ_FRAMEBUFFER:    return CKBGFX_SLOT_ALIVE(m_FrameBuffers);
-    case CKRST_OBJ_OCCLUSIONQUERY: return CKBGFX_SLOT_ALIVE(m_OcclusionQueries);
-    case CKRST_OBJ_INDIRECTBUFFER: return CKBGFX_SLOT_ALIVE(m_IndirectBuffers);
+    case CKRST_OBJ_TEXTURE:        return IsSlotAlive(m_Textures, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_VERTEXBUFFER:   return IsSlotAlive(m_VertexBuffers, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_INDEXBUFFER:    return IsSlotAlive(m_IndexBuffers, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_SHADER:         return IsSlotAlive(m_Shaders, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_PROGRAM:        return IsSlotAlive(m_Programs, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_UNIFORM:        return IsSlotAlive(m_Uniforms, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_VERTEXLAYOUT:   return IsSlotAlive(m_VertexLayouts, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_FRAMEBUFFER:    return IsSlotAlive(m_FrameBuffers, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_OCCLUSIONQUERY: return IsSlotAlive(m_OcclusionQueries, Object, m_ResourceTableMutex);
+    case CKRST_OBJ_INDIRECTBUFFER: return IsSlotAlive(m_IndirectBuffers, Object, m_ResourceTableMutex);
     default:                       return FALSE;
     }
-#undef CKBGFX_SLOT_ALIVE
 }
 
 CKERROR CKBgfxRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
@@ -3338,55 +3582,58 @@ CKERROR CKBgfxRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
         return CKERR_INVALIDPARAMETER;
     }
 
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || HasActiveEncoders())
+        return CKERR_INVALIDOPERATION;
     if (Type & CKRST_OBJ_TEXTURE)
     {
-        CKBgfxTextureRecord *rec = GetTexture(Object);
-        if (rec) { TraceTextureMap((CKSTRING)"delete", Object, rec); DestroyRecord(rec); m_Textures[Object] = NULL; return CK_OK; }
+        CKBgfxTextureRecord *rec = TakeSlot(m_Textures, Object, m_ResourceTableMutex);
+        if (rec) { TraceTextureMap((CKSTRING)"delete", Object, rec); DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_VERTEXBUFFER)
     {
-        CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Object);
-        if (rec) { TraceBufferMap((CKSTRING)"delete", (CKSTRING)"vb", Object, rec->Handle.idx, rec->Layout, rec->VertexSize, 0, 0, 0); DestroyRecord(rec); m_VertexBuffers[Object] = NULL; return CK_OK; }
+        CKBgfxVertexBufferRecord *rec = TakeSlot(m_VertexBuffers, Object, m_ResourceTableMutex);
+        if (rec) { TraceBufferMap((CKSTRING)"delete", (CKSTRING)"vb", Object, rec->Handle.idx, rec->Layout, rec->VertexSize, 0, 0, 0); DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_INDEXBUFFER)
     {
-        CKBgfxIndexBufferRecord *rec = GetIndexBuffer(Object);
-        if (rec) { TraceBufferMap((CKSTRING)"delete", (CKSTRING)"ib", Object, rec->Handle.idx, 0, rec->Index32 ? 4u : 2u, 0, rec->Index32 ? 1u : 0u, 0); DestroyRecord(rec); m_IndexBuffers[Object] = NULL; return CK_OK; }
+        CKBgfxIndexBufferRecord *rec = TakeSlot(m_IndexBuffers, Object, m_ResourceTableMutex);
+        if (rec) { TraceBufferMap((CKSTRING)"delete", (CKSTRING)"ib", Object, rec->Handle.idx, 0, rec->Index32 ? 4u : 2u, 0, rec->Index32 ? 1u : 0u, 0); DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_SHADER)
     {
-        CKBgfxShaderRecord *rec = GetShader(Object);
-        if (rec) { DestroyRecord(rec); m_Shaders[Object] = NULL; return CK_OK; }
+        CKBgfxShaderRecord *rec = TakeSlot(m_Shaders, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_PROGRAM)
     {
-        CKBgfxProgramRecord *rec = GetProgram(Object);
-        if (rec) { TraceProgramMap((CKSTRING)"delete", Object, rec); DestroyRecord(rec); m_Programs[Object] = NULL; return CK_OK; }
+        CKBgfxProgramRecord *rec = TakeSlot(m_Programs, Object, m_ResourceTableMutex);
+        if (rec) { TraceProgramMap((CKSTRING)"delete", Object, rec); DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_UNIFORM)
     {
-        CKBgfxUniformRecord *rec = GetUniform(Object);
-        if (rec) { DestroyRecord(rec); m_Uniforms[Object] = NULL; return CK_OK; }
+        CKBgfxUniformRecord *rec = TakeSlot(m_Uniforms, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_VERTEXLAYOUT)
     {
-        CKBgfxVertexLayoutRecord *rec = GetVertexLayout(Object);
-        if (rec) { DestroyRecord(rec); m_VertexLayouts[Object] = NULL; return CK_OK; }
+        CKBgfxVertexLayoutRecord *rec = TakeSlot(m_VertexLayouts, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_FRAMEBUFFER)
     {
-        CKBgfxFrameBufferRecord *rec = GetFrameBuffer(Object);
-        if (rec) { DestroyRecord(rec); m_FrameBuffers[Object] = NULL; return CK_OK; }
+        CKBgfxFrameBufferRecord *rec = TakeSlot(m_FrameBuffers, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_OCCLUSIONQUERY)
     {
-        CKBgfxOcclusionQueryRecord *rec = GetOcclusionQuery(Object);
-        if (rec) { DestroyRecord(rec); m_OcclusionQueries[Object] = NULL; return CK_OK; }
+        CKBgfxOcclusionQueryRecord *rec = TakeSlot(m_OcclusionQueries, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
     if (Type & CKRST_OBJ_INDIRECTBUFFER)
     {
-        CKBgfxIndirectBufferRecord *rec = GetIndirectBuffer(Object);
-        if (rec) { DestroyRecord(rec); m_IndirectBuffers[Object] = NULL; return CK_OK; }
+        CKBgfxIndirectBufferRecord *rec = TakeSlot(m_IndirectBuffers, Object, m_ResourceTableMutex);
+        if (rec) { DestroyRecord(rec); return CK_OK; }
     }
 
     return CKERR_INVALIDPARAMETER;
@@ -3398,10 +3645,10 @@ CKERROR CKBgfxRasterizerContext::FlushObjects(CKDWORD TypeMask)
         return CKERR_INVALIDOPERATION;
     if (CKRasterizerValidateObjectMask(TypeMask) != CK_OK)
         return CKERR_INVALIDPARAMETER;
-    for (CKDWORD i = 0; i < m_CapsDesc.MaxEncoders; ++i) {
-        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
-            return CKERR_INVALIDOPERATION;
-    }
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || HasActiveEncoders())
+        return CKERR_INVALIDOPERATION;
+    VxMutexLock tableLock(m_ResourceTableMutex);
     if (TypeMask & CKRST_OBJ_FRAMEBUFFER)
         DestroyAllRecords(m_FrameBuffers);
     if (TypeMask & CKRST_OBJ_PROGRAM)
@@ -4025,11 +4272,15 @@ CKERROR CKBgfxRasterizerContext::SetAntialias(CKDWORD Samples)
     if (Samples != 0 && Samples != 2 && Samples != 4 &&
         Samples != 8 && Samples != 16)
         return CKERR_INVALIDPARAMETER;
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || HasActiveEncoders())
+        return CKERR_INVALIDOPERATION;
     if (m_AntialiasSamples == Samples)
         return CK_OK;
 
     m_AntialiasSamples = Samples;
-    m_ResetFlags = CKBgfxBuildResetFlags(m_VSync, m_AntialiasSamples);
+    m_ResetFlags = CKBgfxBuildResetFlags(m_VSync, m_AntialiasSamples) |
+                   (m_ResetFlags & BGFX_RESET_CAPTURE);
     bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
     return CK_OK;
 }
@@ -4265,7 +4516,10 @@ static void CKBgfxResetEncoderWrapper(CKBgfxEncoder &Encoder,
 
 CKRasterizerEncoder *CKBgfxRasterizerContext::BeginEncoder(CKBOOL ForceNewEncoder)
 {
-    if (!m_BgfxInitialized || !m_Created)
+    if (GetDeviceStatus() != CK_OK)
+        return NULL;
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+    if (m_FrameInProgress || GetDeviceStatus() != CK_OK)
         return NULL;
 
     const CKBOOL useDefault = !ForceNewEncoder &&
@@ -4307,6 +4561,7 @@ CKERROR CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
 {
     if (!Encoder)
         return CKERR_INVALIDPARAMETER;
+    VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
 
     CKBgfxEncoder *enc = NULL;
     if (Encoder == &m_DefaultEncoder) {
@@ -4326,6 +4581,11 @@ CKERROR CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
         enc->SetError(CKERR_INVALIDOPERATION);
         return enc->GetStatus();
     }
+
+    const CKERROR fatalError =
+        m_FatalError.load(std::memory_order_acquire);
+    if (fatalError != CK_OK)
+        enc->SetError(fatalError);
 
     if (m_DrawMapMarkerCaptureActive && enc->m_LastMarker[0] != '\0') {
         m_DebugMarkerStaleCount.fetch_add(1, std::memory_order_relaxed);
@@ -4348,12 +4608,26 @@ CKERROR CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
     return status;
 }
 
+CKBOOL CKBgfxRasterizerContext::HasActiveEncoders() const
+{
+    if (m_DefaultEncoder.m_Active.load(std::memory_order_acquire))
+        return TRUE;
+    for (CKDWORD i = 0; i < m_CapsDesc.MaxEncoders; ++i) {
+        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
                                        CKDWORD Flags, CKDWORD *FrameNumber)
 {
     if (!m_BgfxInitialized || !m_Created ||
         VxThread::GetCurrentVxThreadId() != m_ApiThreadId)
         return CKERR_INVALIDOPERATION;
+    const CKERROR fatalError = GetDeviceStatus();
+    if (fatalError != CK_OK)
+        return fatalError;
 
     if (SyncMode != CKRST_FRAME_SYNC_IMMEDIATE &&
         SyncMode != CKRST_FRAME_SYNC_VSYNC &&
@@ -4363,21 +4637,13 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
                    CKRST_FRAME_FLUSH)) != 0)
         return CKERR_INVALIDPARAMETER;
 
-    if (m_DefaultEncoder.m_Active.load(std::memory_order_acquire))
-        return CKERR_INVALIDOPERATION;
-
-    for (int i = 0; i < CKRST_MAX_ENCODERS; ++i)
     {
-        if (m_Encoders[i].m_Active.load(std::memory_order_acquire))
-        {
-            const CKDWORD leak = m_DebugEncoderLeakCount.fetch_add(1, std::memory_order_relaxed);
-            if (leak < 16 || CKBgfxLogEnabled("Config", false)) {
-                CKBgfxLogf("Encoder",
-                           "active encoder before frame frame=%u slot=%d",
-                           m_DebugFrameId,
-                           i);
-            }
+        VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+        if (m_FrameInProgress || HasActiveEncoders()) {
+            m_DebugEncoderLeakCount.fetch_add(1, std::memory_order_relaxed);
+            return CKERR_INVALIDOPERATION;
         }
+        m_FrameInProgress = TRUE;
     }
 
     const CKBOOL updatePresentSync = SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT;
@@ -4385,8 +4651,23 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
     if (updatePresentSync && vsync != m_VSync)
     {
         m_VSync = vsync;
-        m_ResetFlags = CKBgfxBuildResetFlags(vsync, m_AntialiasSamples);
+        m_ResetFlags = CKBgfxBuildResetFlags(vsync, m_AntialiasSamples) |
+                       (m_ResetFlags & BGFX_RESET_CAPTURE);
         bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+    }
+
+    CKBOOL captureFrameRequested = FALSE;
+    if (m_RendererType == bgfx::RendererType::Vulkan) {
+        captureFrameRequested = HasCaptureFrameScreenShots();
+        const CKBOOL captureEnabled =
+            (m_ResetFlags & BGFX_RESET_CAPTURE) != 0 ? TRUE : FALSE;
+        if (captureFrameRequested != captureEnabled) {
+            if (captureFrameRequested)
+                m_ResetFlags |= BGFX_RESET_CAPTURE;
+            else
+                m_ResetFlags &= ~BGFX_RESET_CAPTURE;
+            bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+        }
     }
 
     static int s_PresentSyncLogCount = 0;
@@ -4437,7 +4718,19 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
         }
     }
 
-    const CKDWORD submittedFrame = bgfx::frame((uint8_t)Flags);
+    if (captureFrameRequested) {
+        const bgfx::ViewId captureView =
+            (bgfx::ViewId)m_CapsDesc.MaxRenderViews;
+        bgfx::setViewFrameBuffer(captureView, BGFX_INVALID_HANDLE);
+        bgfx::setViewRect(captureView, 0, 0,
+                          (uint16_t)m_Width, (uint16_t)m_Height);
+        bgfx::touch(captureView);
+    }
+
+    uint8_t frameFlags = (uint8_t)Flags;
+    if (captureFrameRequested)
+        frameFlags |= BGFX_FRAME_DEBUG_CAPTURE;
+    const CKDWORD submittedFrame = bgfx::frame(frameFlags);
     if (FrameNumber)
         *FrameNumber = submittedFrame;
     {
@@ -4470,6 +4763,10 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
         m_TransientVBCount.store(0, std::memory_order_relaxed);
         m_TransientIBCount.store(0, std::memory_order_relaxed);
         m_TransientInstCount.store(0, std::memory_order_relaxed);
+    }
+    {
+        VxMutexLock lifecycleLock(m_EncoderLifecycleMutex);
+        m_FrameInProgress = FALSE;
     }
 
     return CK_OK;
@@ -4507,7 +4804,10 @@ CKERROR CKBgfxRasterizerContext::CreateOcclusionQuery(const CKOcclusionQueryDesc
     auto *rec = new CKBgfxOcclusionQueryRecord();
     rec->Handle = handle;
 
-    m_OcclusionQueries[query] = rec;
+    if (!StoreSlot(m_OcclusionQueries, query, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutQuery = query;
     return CK_OK;
 }
@@ -4540,7 +4840,10 @@ CKERROR CKBgfxRasterizerContext::CreateIndirectBuffer(const CKIndirectBufferDesc
     rec->Handle = handle;
     rec->MaxCommands = Desc->MaxCommands;
 
-    m_IndirectBuffers[buffer] = rec;
+    if (!StoreSlot(m_IndirectBuffers, buffer, rec, m_ResourceTableMutex)) {
+        DestroyRecord(rec);
+        return CKERR_INVALIDOPERATION;
+    }
     *OutBuffer = buffer;
     return CK_OK;
 }
@@ -4743,10 +5046,12 @@ void CKBgfxRasterizerContext::SetResourceName(CKDWORD Handle, CKDWORD Type,
 
 CKDWORD CKBgfxRasterizerContext::FindUniformSlotByHandle(uint16_t BgfxIdx)
 {
+    VxMutexLock lock(m_ResourceTableMutex);
     for (int i = 0; i < m_Uniforms.Size(); ++i)
     {
-        if (m_Uniforms[i] && m_Uniforms[i]->Handle.idx == BgfxIdx)
-            return (CKDWORD)i;
+        const CKBgfxResourceSlot<CKBgfxUniformRecord> &slot = m_Uniforms[i];
+        if (slot.Record && slot.Record->Handle.idx == BgfxIdx)
+            return EncodeResourceHandle((CKDWORD)i, slot.Generation);
     }
     return 0;
 }
@@ -4923,16 +5228,31 @@ CKERROR CKBgfxRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
 {
     if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
-    if (!Callback || FrameBuffer != 0)
+    const CKERROR fatalError = GetDeviceStatus();
+    if (fatalError != CK_OK)
+        return fatalError;
+    if (!Callback)
         return CKERR_INVALIDPARAMETER;
+
+    if (FrameBuffer != 0) {
+        CKBgfxFrameBufferRecord *record = GetFrameBuffer(FrameBuffer);
+        if (!record)
+            return CKERR_INVALIDPARAMETER;
+        return CKERR_NOTIMPLEMENTED;
+    }
 
     XString requestPath;
     {
         VxMutexLock lock(m_ScreenShotMutex);
+        if ((CKDWORD)m_PendingScreenShots.Size() >=
+            CKBGFX_MAX_PENDING_SCREENSHOTS)
+            return CKERR_OUTOFMEMORY;
         CKBgfxScreenShotRequest pending = {};
         pending.FrameBuffer = FrameBuffer;
         pending.Callback = Callback;
         pending.UserData = UserData;
+        pending.UseCaptureFrame =
+            m_RendererType == bgfx::RendererType::Vulkan ? TRUE : FALSE;
         char path[64];
         snprintf(path, sizeof(path), "ckrst-screenshot-%llu",
                  (unsigned long long)m_NextScreenShotToken++);
@@ -4941,8 +5261,44 @@ CKERROR CKBgfxRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
         m_PendingScreenShots.PushBack(pending);
     }
 
-    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, requestPath.CStr());
+    if (m_RendererType != bgfx::RendererType::Vulkan)
+        bgfx::requestScreenShot(BGFX_INVALID_HANDLE, requestPath.CStr());
     return CK_OK;
+}
+
+CKBOOL CKBgfxRasterizerContext::HasCaptureFrameScreenShots()
+{
+    VxMutexLock lock(m_ScreenShotMutex);
+    for (int i = 0; i < m_PendingScreenShots.Size(); ++i) {
+        if (m_PendingScreenShots[i].UseCaptureFrame)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+CKERROR CKBgfxRasterizerContext::CancelScreenShots(void *UserData)
+{
+    XArray<CKBgfxScreenShotRequest> cancelled;
+    {
+        VxMutexLock lock(m_ScreenShotMutex);
+        for (int i = m_PendingScreenShots.Size() - 1; i >= 0; --i) {
+            if (m_PendingScreenShots[i].UserData != UserData)
+                continue;
+
+            CKBgfxScreenShotRequest request = {};
+            m_PendingScreenShots.RemoveAt((unsigned int)i, request);
+            cancelled.PushBack(request);
+        }
+    }
+
+    for (int i = 0; i < cancelled.Size(); ++i) {
+        CKBgfxScreenShotRequest &request = cancelled[i];
+        if (request.Callback) {
+            request.Callback(request.UserData, request.FrameBuffer,
+                             0, 0, 0, UNKNOWN_PF, NULL, 0, FALSE);
+        }
+    }
+    return cancelled.Size() != 0 ? CK_OK : CKERR_NOTFOUND;
 }
 
 // ===========================================================================
