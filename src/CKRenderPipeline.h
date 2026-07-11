@@ -57,25 +57,26 @@ public:
     ~CKRenderPipeline();
 
     void Init(CKRasterizerContext *ctx);
-    void Shutdown();
+    CKERROR PrepareShutdown();
+    CKERROR Shutdown();
     void SetResourceIds(const CKRenderPipelineResourceIds &ids);
     void SetExternalRenderTarget(CKBOOL enabled);
 
     // Begin a new frame: configure views, acquire encoder
-    void BeginFrame(const CKRECT &viewport, CKDWORD clearFlags,
-                    CKDWORD clearColor, float clearZ,
-                    const VxMatrix &view, const VxMatrix &proj);
+    CKERROR BeginFrame(const CKRECT &viewport, CKDWORD clearFlags,
+                       CKDWORD clearColor, float clearZ,
+                       const VxMatrix &view, const VxMatrix &proj);
 
     // Composite the optional offscreen scene target to the backbuffer before
     // foreground 2D is drawn.
-    void CompositeScene();
+    CKERROR CompositeScene();
 
     // End the frame: release encoder, call Frame()
-    void EndFrame(CKRST_FRAME_SYNC_MODE syncMode);
+    CKERROR EndFrame(CKRST_FRAME_SYNC_MODE syncMode);
 
     // Queue a stencil-only clear in a dedicated view that sorts after opaque
     // scene draws and before transparent draws.
-    CKBOOL QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil);
+    CKERROR QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil);
 
     // Access the current encoder (valid between BeginFrame/EndFrame)
     CKRasterizerEncoder *GetEncoder() const { return m_Encoder; }
@@ -100,9 +101,9 @@ private:
     CKBOOL EnsureSceneFrameBuffer(const CKRECT &viewport);
     void DestroySceneFrameBuffer();
     void DestroyPostprocessResources();
-    void BindFrameBuffer(CKRenderView view, CKDWORD frameBuffer);
-    void ConfigurePostprocessView(const CKRECT &viewport);
-    CKBOOL SubmitPostprocess();
+    CKERROR BindFrameBuffer(CKRenderView view, CKDWORD frameBuffer);
+    CKERROR ConfigurePostprocessView(const CKRECT &viewport);
+    CKERROR SubmitPostprocess();
 
     CKRasterizerContext *m_Context;
     CKRasterizerEncoder *m_Encoder;

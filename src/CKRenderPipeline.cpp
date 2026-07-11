@@ -11,6 +11,8 @@
 #include "shaders/generated/spirv/fs_postprocess.bin.h"
 #include "shaders/generated/glsl/vs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_postprocess.bin.h"
+#include "shaders/generated/essl/vs_postprocess.bin.h"
+#include "shaders/generated/essl/fs_postprocess.bin.h"
 #include "shaders/generated/metal/vs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_postprocess.bin.h"
 
@@ -35,6 +37,8 @@ const CKPostprocessShaderBlobSet g_PostprocessShaderBlobSets[] = {
      s_spirv_fs_postprocess, sizeof(s_spirv_fs_postprocess)},
     {CKRST_SHADER_PROFILE_GLSL, s_glsl_vs_postprocess, sizeof(s_glsl_vs_postprocess),
      s_glsl_fs_postprocess, sizeof(s_glsl_fs_postprocess)},
+    {CKRST_SHADER_PROFILE_ESSL, s_essl_vs_postprocess, sizeof(s_essl_vs_postprocess),
+     s_essl_fs_postprocess, sizeof(s_essl_fs_postprocess)},
     {CKRST_SHADER_PROFILE_MSL, s_metal_vs_postprocess, sizeof(s_metal_vs_postprocess),
      s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
 };
@@ -151,7 +155,21 @@ void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
     }
 }
 
-void CKRenderPipeline::Shutdown() {
+CKERROR CKRenderPipeline::PrepareShutdown() {
+    CKERROR status = CK_OK;
+    if (m_Context && m_Encoder) {
+        status = m_Context->EndEncoder(m_Encoder);
+        m_Encoder = nullptr;
+    }
+    if (status != CK_OK || (m_Context && !m_Context->IsIdle()))
+        return status != CK_OK ? status : CKERR_INVALIDOPERATION;
+    return CK_OK;
+}
+
+CKERROR CKRenderPipeline::Shutdown() {
+    const CKERROR status = PrepareShutdown();
+    if (status != CK_OK)
+        return status;
     DestroySceneFrameBuffer();
     DestroyPostprocessResources();
     m_Encoder = nullptr;
@@ -164,6 +182,7 @@ void CKRenderPipeline::Shutdown() {
     m_SceneHeight = 0;
     m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
     m_FrameNumber = 0;
+    return CK_OK;
 }
 
 void CKRenderPipeline::SetResourceIds(const CKRenderPipelineResourceIds &ids) {
@@ -178,11 +197,17 @@ void CKRenderPipeline::SetExternalRenderTarget(CKBOOL enabled) {
     }
 }
 
-void CKRenderPipeline::BeginFrame(
+CKERROR CKRenderPipeline::BeginFrame(
     const CKRECT &viewport, CKDWORD clearFlags, CKDWORD clearColor, float clearZ,
     const VxMatrix &view, const VxMatrix &proj)
 {
-    if (!m_Context) return;
+    if (!m_Context)
+        return CKERR_INVALIDRENDERCONTEXT;
+    const CKERROR deviceStatus = m_Context->GetDeviceStatus();
+    if (deviceStatus != CK_OK)
+        return deviceStatus;
+    if (m_Encoder)
+        return CKERR_INVALIDOPERATION;
     m_Config = CKRenderPipelineConfigFromSettings();
     m_PostprocessSubmitted = FALSE;
 
@@ -202,19 +227,36 @@ void CKRenderPipeline::BeginFrame(
 
     const CKBOOL wantsSceneFrameBuffer =
         !m_ExternalRenderTarget && m_Config.NeedsSceneFrameBuffer();
-    const CKBOOL useSceneFrameBuffer =
-        wantsSceneFrameBuffer && EnsureSceneFrameBuffer(viewport) && EnsurePostprocessResources();
+    CKBOOL useSceneFrameBuffer = FALSE;
+    if (wantsSceneFrameBuffer) {
+        useSceneFrameBuffer =
+            EnsureSceneFrameBuffer(viewport) && EnsurePostprocessResources();
+        if (!useSceneFrameBuffer) {
+            DestroySceneFrameBuffer();
+            return CKERR_NOTIMPLEMENTED;
+        }
+    } else if (m_SceneFrameBufferActive) {
+        DestroySceneFrameBuffer();
+    }
 
     if (!m_ExternalRenderTarget) {
         const CKDWORD sceneFb = useSceneFrameBuffer ? m_ResourceIds.SceneFrameBuffer : 0;
-        BindFrameBuffer(CKRP_VIEW_CLEAR, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_BACKGROUND2D, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_RENDERFIRST3D, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_OPAQUE3D, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_TRANSPARENT, sceneFb);
-        BindFrameBuffer(CKRP_VIEW_POSTPROCESS, 0);
-        BindFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
+        CKERROR status = BindFrameBuffer(CKRP_VIEW_CLEAR, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_BACKGROUND2D, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_RENDERFIRST3D, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_OPAQUE3D, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_TRANSPARENT, sceneFb);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_POSTPROCESS, 0);
+        if (status != CK_OK) return status;
+        status = BindFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
+        if (status != CK_OK) return status;
     }
 
     CKRECT sceneRect = viewport;
@@ -226,14 +268,22 @@ void CKRenderPipeline::BeginFrame(
     }
 
     // View 0: Clear only
-    m_Context->SetViewRect(CKRP_VIEW_CLEAR, useSceneFrameBuffer ? sceneRect : viewport);
-    m_Context->SetViewClear(CKRP_VIEW_CLEAR, clearFlags, clearColor, clearZ, 0);
+    CKERROR status = m_Context->SetViewRect(
+        CKRP_VIEW_CLEAR, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewClear(
+        CKRP_VIEW_CLEAR, clearFlags, clearColor, clearZ, 0);
+    if (status != CK_OK) return status;
 
     // View 1: Background 2D
-    m_Context->SetViewRect(CKRP_VIEW_BACKGROUND2D, useSceneFrameBuffer ? sceneRect : viewport);
+    status = m_Context->SetViewRect(
+        CKRP_VIEW_BACKGROUND2D, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
     VxMatrix identity;
     Vx3DMatrixIdentity(identity);
-    m_Context->SetViewTransform(CKRP_VIEW_BACKGROUND2D, &identity, &m_OrthoProj);
+    status = m_Context->SetViewTransform(
+        CKRP_VIEW_BACKGROUND2D, &identity, &m_OrthoProj);
+    if (status != CK_OK) return status;
 
     // Log matrices on first few frames and then periodically
     const bool logFrameMatrices =
@@ -264,56 +314,94 @@ void CKRenderPipeline::BeginFrame(
     }
 
     // View 2: render-first 3D backgrounds/sky objects
-    m_Context->SetViewRect(CKRP_VIEW_RENDERFIRST3D, useSceneFrameBuffer ? sceneRect : viewport);
-    m_Context->SetViewTransform(CKRP_VIEW_RENDERFIRST3D, &view, &proj);
+    status = m_Context->SetViewRect(
+        CKRP_VIEW_RENDERFIRST3D, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewTransform(CKRP_VIEW_RENDERFIRST3D, &view, &proj);
+    if (status != CK_OK) return status;
 
     // View 3: Opaque 3D
-    m_Context->SetViewRect(CKRP_VIEW_OPAQUE3D, useSceneFrameBuffer ? sceneRect : viewport);
-    m_Context->SetViewTransform(CKRP_VIEW_OPAQUE3D, &view, &proj);
+    status = m_Context->SetViewRect(
+        CKRP_VIEW_OPAQUE3D, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewTransform(CKRP_VIEW_OPAQUE3D, &view, &proj);
+    if (status != CK_OK) return status;
 
     // View 4: optional mid-frame stencil clear before transparent draws
-    m_Context->SetViewRect(CKRP_VIEW_STENCIL_CLEAR, useSceneFrameBuffer ? sceneRect : viewport);
-    m_Context->SetViewClear(CKRP_VIEW_STENCIL_CLEAR, 0, 0, 1.0f, 0);
+    status = m_Context->SetViewRect(
+        CKRP_VIEW_STENCIL_CLEAR, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewClear(CKRP_VIEW_STENCIL_CLEAR, 0, 0, 1.0f, 0);
+    if (status != CK_OK) return status;
 
     // View 5: Transparent 3D
-    m_Context->SetViewRect(CKRP_VIEW_TRANSPARENT, useSceneFrameBuffer ? sceneRect : viewport);
-    m_Context->SetViewTransform(CKRP_VIEW_TRANSPARENT, &view, &proj);
+    status = m_Context->SetViewRect(
+        CKRP_VIEW_TRANSPARENT, useSceneFrameBuffer ? sceneRect : viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewTransform(CKRP_VIEW_TRANSPARENT, &view, &proj);
+    if (status != CK_OK) return status;
 
     // View 6: Optional postprocess scene composite
-    ConfigurePostprocessView(viewport);
+    status = ConfigurePostprocessView(viewport);
+    if (status != CK_OK) return status;
 
     // View 6: Foreground 2D
-    m_Context->SetViewRect(CKRP_VIEW_FOREGROUND2D, viewport);
-    m_Context->SetViewTransform(CKRP_VIEW_FOREGROUND2D, &identity, &m_OrthoProj);
+    status = m_Context->SetViewRect(CKRP_VIEW_FOREGROUND2D, viewport);
+    if (status != CK_OK) return status;
+    status = m_Context->SetViewTransform(
+        CKRP_VIEW_FOREGROUND2D, &identity, &m_OrthoProj);
+    if (status != CK_OK) return status;
 
     // Acquire encoder
     m_Encoder = m_Context->BeginEncoder();
+    if (!m_Encoder)
+        return CKERR_INVALIDOPERATION;
 
     // Touch clear view to ensure it's processed even with no draws
-    if (m_Encoder)
-        m_Encoder->Touch(CKRP_VIEW_CLEAR);
+    m_Encoder->Touch(CKRP_VIEW_CLEAR);
+    const CKERROR encoderStatus = m_Encoder->GetStatus();
+    if (encoderStatus != CK_OK) {
+        m_Context->EndEncoder(m_Encoder);
+        m_Encoder = nullptr;
+        return encoderStatus;
+    }
+    return CK_OK;
 }
 
-void CKRenderPipeline::CompositeScene()
+CKERROR CKRenderPipeline::CompositeScene()
 {
-    if (!m_Context || !m_Encoder || !m_SceneFrameBufferActive || m_PostprocessSubmitted)
-        return;
-    m_PostprocessSubmitted = SubmitPostprocess();
+    if (!m_Context)
+        return CKERR_INVALIDRENDERCONTEXT;
+    if (!m_Encoder)
+        return CKERR_INVALIDOPERATION;
+    if (!m_SceneFrameBufferActive || m_PostprocessSubmitted)
+        return CK_OK;
+
+    const CKERROR status = SubmitPostprocess();
+    if (status == CK_OK)
+        m_PostprocessSubmitted = TRUE;
+    return status;
 }
 
-CKBOOL CKRenderPipeline::QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil)
+CKERROR CKRenderPipeline::QueueStencilClearBeforeTransparent(const CKRECT &viewport, CKDWORD stencil)
 {
     if (!m_Context || !m_Encoder)
-        return FALSE;
+        return CKERR_INVALIDOPERATION;
 
-    m_Context->SetViewRect(CKRP_VIEW_STENCIL_CLEAR, viewport);
-    m_Context->SetViewClear(CKRP_VIEW_STENCIL_CLEAR, CKRST_CTXCLEAR_STENCIL, 0, 1.0f, stencil);
+    CKERROR status = m_Context->SetViewRect(CKRP_VIEW_STENCIL_CLEAR, viewport);
+    if (status != CK_OK)
+        return status;
+    status = m_Context->SetViewClear(
+        CKRP_VIEW_STENCIL_CLEAR, CKRST_CTXCLEAR_STENCIL, 0, 1.0f, stencil);
+    if (status != CK_OK)
+        return status;
     m_Encoder->Touch(CKRP_VIEW_STENCIL_CLEAR);
-    return TRUE;
+    return m_Encoder->GetStatus();
 }
 
-void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
-    if (!m_Context) return;
+CKERROR CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
+    if (!m_Context)
+        return CKERR_INVALIDRENDERCONTEXT;
 
     const bool logPresentSync =
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
@@ -343,23 +431,31 @@ void CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     }
     if (frameStatus == CK_OK)
         m_FrameNumber = frameNumber;
+    return encoderStatus != CK_OK ? encoderStatus : frameStatus;
 }
 
-void CKRenderPipeline::BindFrameBuffer(CKRenderView view, CKDWORD frameBuffer)
+CKERROR CKRenderPipeline::BindFrameBuffer(CKRenderView view, CKDWORD frameBuffer)
 {
-    if (m_Context)
-        m_Context->SetViewFrameBuffer(view, frameBuffer);
+    return m_Context
+        ? m_Context->SetViewFrameBuffer(view, frameBuffer)
+        : CKERR_INVALIDRENDERCONTEXT;
 }
 
-void CKRenderPipeline::ConfigurePostprocessView(const CKRECT &viewport)
+CKERROR CKRenderPipeline::ConfigurePostprocessView(const CKRECT &viewport)
 {
     if (!m_Context)
-        return;
+        return CKERR_INVALIDRENDERCONTEXT;
     VxMatrix identity;
     Vx3DMatrixIdentity(identity);
-    m_Context->SetViewRect(CKRP_VIEW_POSTPROCESS, viewport);
-    m_Context->SetViewTransform(CKRP_VIEW_POSTPROCESS, &identity, &identity);
-    m_Context->SetViewClear(CKRP_VIEW_POSTPROCESS, 0, 0, 1.0f, 0);
+    CKERROR status = m_Context->SetViewRect(CKRP_VIEW_POSTPROCESS, viewport);
+    if (status != CK_OK)
+        return status;
+    status = m_Context->SetViewTransform(
+        CKRP_VIEW_POSTPROCESS, &identity, &identity);
+    if (status != CK_OK)
+        return status;
+    return m_Context->SetViewClear(
+        CKRP_VIEW_POSTPROCESS, 0, 0, 1.0f, 0);
 }
 
 CKBOOL CKRenderPipeline::EnsureSceneFrameBuffer(const CKRECT &viewport)
@@ -588,11 +684,11 @@ void CKRenderPipeline::DestroyPostprocessResources()
     m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
 }
 
-CKBOOL CKRenderPipeline::SubmitPostprocess()
+CKERROR CKRenderPipeline::SubmitPostprocess()
 {
     if (!m_Context || !m_Encoder || !m_SceneFrameBufferActive ||
         !EnsurePostprocessResources())
-        return FALSE;
+        return CKERR_NOTIMPLEMENTED;
 
     struct PostVertex {
         float X, Y, Z;
@@ -602,7 +698,7 @@ CKBOOL CKRenderPipeline::SubmitPostprocess()
     CKTransientVertexBuffer tvb;
     memset(&tvb, 0, sizeof(tvb));
     if (!m_Context->AllocTransientVertexBuffer(&tvb, 3, m_ResourceIds.PostVertexLayout))
-        return FALSE;
+        return CKERR_OUTOFMEMORY;
 
     PostVertex *vertices = (PostVertex *)tvb.Data;
     CKRasterizerTargetDesc target;
@@ -647,5 +743,5 @@ CKBOOL CKRenderPipeline::SubmitPostprocess()
                           m_ResourceIds.SceneColorTexture, &sampler);
     m_Encoder->SetUniform(m_ResourceIds.PostParamsUniform, params, 1);
     m_Encoder->Submit(CKRP_VIEW_POSTPROCESS, m_ResourceIds.PostProgram, 0, CKRST_DISCARD_ALL);
-    return TRUE;
+    return m_Encoder->GetStatus();
 }

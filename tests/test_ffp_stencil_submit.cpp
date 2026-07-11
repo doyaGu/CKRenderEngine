@@ -11,7 +11,52 @@
 #include <math.h>
 #include <string.h>
 
+extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizer *Rasterizer);
+
 namespace {
+
+void NullRasterizerSupportsHeadlessFFP()
+{
+    CKRasterizer *rasterizer = CKNULLRasterizerStart(NULL);
+    TestCheck(rasterizer != NULL && rasterizer->GetDriverCount() == 1,
+              "Null rasterizer must expose its headless driver");
+    CKRasterizerDriver *driver = rasterizer->GetDriver(0);
+    CKRasterizerContext *first = driver->CreateContext();
+    CKRasterizerContext *second = driver->CreateContext();
+    TestCheck(first != NULL && second != NULL &&
+                  first->Create(NULL, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == CK_OK &&
+                  second->Create(NULL, 0, 0, 32, 32, 32, FALSE, 0, 16, 0) == CK_OK,
+              "Null rasterizer must allow independent headless contexts");
+
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(first),
+              "FFP must initialize without shader programs on a headless backend");
+    TestCheck(ffp.Shutdown() == CK_OK,
+              "Headless FFP shutdown must release its resources cleanly");
+    TestCheck(driver->DestroyContext(first) && driver->DestroyContext(second),
+              "Idle headless contexts must be independently destroyable");
+    CKNULLRasterizerClose(rasterizer);
+}
+
+void RenderPipelinePropagatesFrameFailure()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKRenderPipeline pipeline;
+    pipeline.Init(&context);
+
+    CKRECT viewport = {0, 0, 64, 64};
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+    pipeline.BeginFrame(viewport, 0, 0, 1.0f, identity, identity);
+    context.FrameResult = CKERR_INVALIDOPERATION;
+    TestCheck(pipeline.EndFrame(CKRST_FRAME_SYNC_IMMEDIATE) ==
+                  CKERR_INVALIDOPERATION,
+              "Render pipeline must propagate backend frame failures");
+    TestCheck(pipeline.Shutdown() == CK_OK,
+              "Pipeline must remain safely shutdownable after a frame failure");
+}
 
 CKDWORD FloatStageState(float value) {
     union {
@@ -36,6 +81,7 @@ static const ShaderProfileCase kSamplerLayoutProfiles[] = {
     {CKRST_SHADER_PROFILE_DX12, "dx12"},
     {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
     {CKRST_SHADER_PROFILE_GLSL, "glsl"},
+    {CKRST_SHADER_PROFILE_ESSL, "essl"},
     {CKRST_SHADER_PROFILE_MSL, "metal"},
 };
 
@@ -1871,8 +1917,9 @@ void RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent() {
               "BeginFrame must leave the stencil-clear view idle until requested");
 
     const CKDWORD touchCountAfterBegin = context.Encoder.TouchCount;
-    const bool queued = pipeline.QueueStencilClearBeforeTransparent(viewport, 7);
-    TestCheck(queued, "Mid-frame stencil clear must queue while the frame is active");
+    const CKERROR queued = pipeline.QueueStencilClearBeforeTransparent(viewport, 7);
+    TestCheck(queued == CK_OK,
+              "Mid-frame stencil clear must queue while the frame is active");
     TestCheck(!context.ViewClears.empty() &&
                   context.ViewClears.back().View == CKRP_VIEW_STENCIL_CLEAR,
               "Mid-frame stencil clear must target the dedicated stencil-clear view");
@@ -1892,10 +1939,42 @@ void RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent() {
     pipeline.EndFrame(CKRST_FRAME_SYNC_IMMEDIATE);
 }
 
+void RenderPipelinePropagatesBeginFrameFailures() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKRenderPipeline pipeline;
+    pipeline.Init(&context);
+
+    CKRECT viewport = {0, 0, 64, 64};
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+
+    context.DeviceStatus = CKERR_INVALIDRENDERCONTEXT;
+    TestCheck(pipeline.BeginFrame(viewport, 0, 0, 1.0f,
+                                  identity, identity) ==
+                  CKERR_INVALIDRENDERCONTEXT &&
+                  pipeline.GetEncoder() == nullptr,
+              "BeginFrame must propagate a latched device error before configuring views");
+
+    context.DeviceStatus = CK_OK;
+    context.FailBeginEncoder = TRUE;
+    TestCheck(pipeline.BeginFrame(viewport, 0, 0, 1.0f,
+                                  identity, identity) ==
+                  CKERR_INVALIDOPERATION &&
+                  pipeline.GetEncoder() == nullptr,
+              "BeginFrame must report encoder acquisition failure");
+
+    pipeline.Shutdown();
+}
+
 } // namespace
 
 int main() {
     TestFramework tests;
+    tests.Run("Null rasterizer supports headless FFP",
+              &NullRasterizerSupportsHeadlessFFP);
+    tests.Run("Render pipeline propagates frame failure",
+              &RenderPipelinePropagatesFrameFailure);
     tests.Run("DrawVertexBuffer rejects partial stencil write masks",
               &DrawVertexBufferRejectsPartialStencilWriteMask);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
@@ -2002,5 +2081,7 @@ int main() {
               &MaterialSourceUsesDeclaredDPColorStreams);
     tests.Run("Render pipeline queues stencil clear between opaque and transparent",
               &RenderPipelineQueuesStencilClearBetweenOpaqueAndTransparent);
+    tests.Run("Render pipeline propagates begin-frame failures",
+              &RenderPipelinePropagatesBeginFrameFailures);
     return tests.ExitCode();
 }
