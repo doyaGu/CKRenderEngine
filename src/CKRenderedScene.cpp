@@ -302,7 +302,11 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
     rc->m_FFPipeline.BeginDebugFrame();
     rc->m_FFPipeline.FlushOpaqueRenderPackets();
-    rc->m_FFPipeline.GetRenderPipeline().BeginFrame(viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
+    const CKERROR beginFrameStatus =
+        rc->m_FFPipeline.GetRenderPipeline().BeginFrame(
+            viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
+    if (beginFrameStatus != CK_OK)
+        return beginFrameStatus;
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         CKRenderPerfAddSection(CKRPS_BEGIN_FRAME, CKRenderPerfElapsedUs(sectionStart));
@@ -483,7 +487,13 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     rc->m_SpriteTimeProfiler.Reset();
 
-    rc->m_FFPipeline.GetRenderPipeline().CompositeScene();
+    const CKERROR compositeStatus =
+        rc->m_FFPipeline.GetRenderPipeline().CompositeScene();
+    if (compositeStatus != CK_OK) {
+        rc->m_FFPipeline.GetRenderPipeline().EndFrame(
+            CKRST_FRAME_SYNC_PRESERVE_PRESENT);
+        return compositeStatus;
+    }
 
     // Render foreground 2D sprites
     if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 &&

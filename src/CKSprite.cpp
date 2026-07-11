@@ -128,7 +128,6 @@ static CKBOOL BuildSpriteCopyUploadRegion(const VxRect *dest, int targetWidth, i
     uploadDesc.Image = image;
     uploadDesc.Width = width;
     uploadDesc.Height = height;
-    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * height;
 
     region.left = left;
     region.top = top;
@@ -147,9 +146,9 @@ static CKBYTE *ConvertSpriteImage(const VxImageDescEx &src, const VxImageDescEx 
     uploadDesc.Width = src.Width;
     uploadDesc.Height = src.Height;
     uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
-    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+    const int imageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
 
-    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    CKBYTE *converted = new CKBYTE[imageSize];
     uploadDesc.Image = converted;
     VxDoBlit(src, uploadDesc);
     return converted;

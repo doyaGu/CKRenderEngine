@@ -16,6 +16,8 @@
 
 // External reference to rasterizer info array from CK2_3D.cpp
 extern XClassArray<CKRasterizerInfo> g_RasterizersInfo;
+extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizer *Rasterizer);
 
 // Helper function to update driver description from rasterizer driver
 static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
@@ -172,6 +174,37 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
             // Remove failed rasterizer info - move to next without incrementing
             rstInfo = g_RasterizersInfo.Remove(rstInfo);
+        }
+    }
+
+    CKBOOL hasSoftwareDriver = FALSE;
+    for (int i = 0; i < m_Rasterizers.Size() && !hasSoftwareDriver; ++i) {
+        CKRasterizer *rasterizer = m_Rasterizers[i];
+        for (int driverIndex = 0; rasterizer &&
+             driverIndex < rasterizer->GetDriverCount(); ++driverIndex) {
+            CKRasterizerDriver *driver = rasterizer->GetDriver(driverIndex);
+            if (driver && !driver->m_Hardware) {
+                hasSoftwareDriver = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (!hasSoftwareDriver) {
+        CKRasterizer *fallback = CKNULLRasterizerStart(mainWindow);
+        if (fallback && fallback->GetDriverCount() > 0) {
+            CKRasterizerInfo info;
+            info.StartFct = CKNULLRasterizerStart;
+            info.CloseFct = CKNULLRasterizerClose;
+            info.DllInstance = nullptr;
+            info.DllName = "";
+            info.Desc = "NULL Rasterizer";
+            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
+            g_RasterizersInfo.PushBack(info);
+            m_Rasterizers.PushBack(fallback);
+            m_DriverCount += fallback->GetDriverCount();
+        } else if (fallback) {
+            CKNULLRasterizerClose(fallback);
         }
     }
 
