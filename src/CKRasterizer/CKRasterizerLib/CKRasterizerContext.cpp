@@ -2,8 +2,6 @@
 #include "CKRasterizerValidation.h"
 
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
 #include <string.h>
 
 CKERROR CKRasterizerEncoder::GetStatus() const
@@ -180,6 +178,7 @@ struct CKNullContextState {
     XUINTPTR ApiThread;
     VxMutex ResourceMutex;
     XArray<CKNullResourceRecord> Resources;
+    CKDWORD NextResourceHandle;
     VxMutex TransformMutex;
     XArray<VxMatrix> Transforms;
     VxMutex SubmissionMutex;
@@ -187,17 +186,15 @@ struct CKNullContextState {
     XArray<CKNullSubmission> LastSubmissions;
     CKNullViewRecord Views[CKRST_MAX_RENDER_VIEWS];
     CKRenderView ViewOrder[CKRST_MAX_RENDER_VIEWS];
-    std::mutex EncoderWaitMutex;
-    std::condition_variable EncoderEnded;
+    VxMutex EncoderLifecycleMutex;
+    CKBOOL FrameInProgress;
+    CKBOOL ShuttingDown;
     CKNullRasterizerEncoder *DefaultEncoder;
     CKNullRasterizerEncoder *PoolEncoder;
 
     CKNullContextState();
     ~CKNullContextState();
 };
-
-static VxMutex g_NullContextMutex;
-static CKRasterizerContext *g_NullActiveContext = NULL;
 
 static CKNullContextState *CKNullState(CKRasterizerContext *Context)
 {
@@ -623,7 +620,10 @@ private:
 };
 
 CKNullContextState::CKNullContextState()
-    : DefaultEncoder(new CKNullRasterizerEncoder()),
+    : NextResourceHandle(1),
+      FrameInProgress(FALSE),
+      ShuttingDown(FALSE),
+      DefaultEncoder(new CKNullRasterizerEncoder()),
       PoolEncoder(new CKNullRasterizerEncoder())
 {
     for (CKRenderView view = 0; view < CKRST_MAX_RENDER_VIEWS; ++view) {
@@ -660,11 +660,6 @@ CKRasterizerContext::CKRasterizerContext()
 
 CKRasterizerContext::~CKRasterizerContext()
 {
-    {
-        VxMutexLock lock(g_NullContextMutex);
-        if (g_NullActiveContext == this)
-            g_NullActiveContext = NULL;
-    }
     delete CKNullState(this);
     m_NullBackendState = NULL;
 }
@@ -678,14 +673,9 @@ CKERROR CKRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
         return CKERR_INVALIDOPERATION;
     if (Width <= 0 || Height <= 0)
         return CKERR_INVALIDPARAMETER;
-    {
-        VxMutexLock lock(g_NullContextMutex);
-        if (g_NullActiveContext && g_NullActiveContext != this)
-            return CKERR_INVALIDOPERATION;
-        g_NullActiveContext = this;
-    }
     CKNullContextState *state = CKNullState(this);
     state->ApiThread = VxThread::GetCurrentVxThreadId();
+    state->ShuttingDown = FALSE;
     m_Window = Window;
     m_PosX = PosX;
     m_PosY = PosY;
@@ -707,6 +697,12 @@ CKERROR CKRasterizerContext::Resize(int PosX, int PosY, int Width, int Height,
         return CKERR_INVALIDOPERATION;
     if (Width <= 0 || Height <= 0 || Flags != 0)
         return CKERR_INVALIDPARAMETER;
+    CKNullContextState *state = CKNullState(this);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    if (state->FrameInProgress ||
+        state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+        state->PoolEncoder->m_Active.load(std::memory_order_acquire))
+        return CKERR_INVALIDOPERATION;
     m_PosX = PosX;
     m_PosY = PosY;
     m_Width = Width;
@@ -718,10 +714,53 @@ CKERROR CKRasterizerContext::SetAntialias(CKDWORD Samples)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
-    return Samples == 0 || Samples == 2 || Samples == 4 ||
-           Samples == 8 || Samples == 16
-        ? CK_OK
-        : CKERR_INVALIDPARAMETER;
+    if (Samples != 0 && Samples != 2 && Samples != 4 &&
+        Samples != 8 && Samples != 16)
+        return CKERR_INVALIDPARAMETER;
+    CKNullContextState *state = CKNullState(this);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    return state->FrameInProgress ||
+           state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+           state->PoolEncoder->m_Active.load(std::memory_order_acquire)
+        ? CKERR_INVALIDOPERATION : CK_OK;
+}
+
+CKBOOL CKRasterizerContext::IsIdle() const
+{
+    const CKNullContextState *constState = CKNullState(this);
+    if (!constState)
+        return TRUE;
+    CKNullContextState *state = const_cast<CKNullContextState *>(constState);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    return !state->FrameInProgress &&
+           !state->DefaultEncoder->m_Active.load(std::memory_order_acquire) &&
+           !state->PoolEncoder->m_Active.load(std::memory_order_acquire)
+        ? TRUE : FALSE;
+}
+
+CKERROR CKRasterizerContext::GetDeviceStatus() const
+{
+    if (!m_Created)
+        return CKERR_INVALIDRENDERCONTEXT;
+    CKNullContextState *state = const_cast<CKNullContextState *>(CKNullState(this));
+    if (!state)
+        return CKERR_INVALIDRENDERCONTEXT;
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    return state->ShuttingDown ? CKERR_INVALIDOPERATION : CK_OK;
+}
+
+CKERROR CKRasterizerContext::BeginShutdown()
+{
+    CKNullContextState *state = CKNullState(this);
+    if (!m_Created || !state)
+        return CKERR_INVALIDRENDERCONTEXT;
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    if (state->FrameInProgress ||
+        state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+        state->PoolEncoder->m_Active.load(std::memory_order_acquire))
+        return CKERR_INVALIDOPERATION;
+    state->ShuttingDown = TRUE;
+    return CK_OK;
 }
 
 CKERROR CKRasterizerContext::GetTargetDesc(CKRasterizerTargetDesc *Target) const
@@ -825,21 +864,30 @@ static CKERROR CKNullCreateObject(CKRasterizerContext *Context, CKDWORD Type,
     if (Type == CKRST_OBJ_SHADER || Type == CKRST_OBJ_UNIFORM)
         limit = 128;
     VxMutexLock lock(state->ResourceMutex);
-    CKDWORD handle = 1;
-    for (; handle <= limit; ++handle) {
-        bool alive = false;
+    CKDWORD liveCount = 0;
+    for (int i = 0; i < state->Resources.Size(); ++i) {
+        if (state->Resources[i].Type == Type)
+            ++liveCount;
+    }
+    if (liveCount >= limit)
+        return CKERR_OUTOFMEMORY;
+    CKDWORD handle = 0;
+    do {
+        handle = state->NextResourceHandle++;
+        if (handle == 0)
+            continue;
+
+        CKBOOL collision = FALSE;
         for (int i = 0; i < state->Resources.Size(); ++i) {
-            if (state->Resources[i].Handle == handle &&
-                state->Resources[i].Type == Type) {
-                alive = true;
+            if (state->Resources[i].Handle == handle) {
+                collision = TRUE;
                 break;
             }
         }
-        if (!alive)
+        if (!collision)
             break;
-    }
-    if (handle > limit)
-        return CKERR_OUTOFMEMORY;
+        handle = 0;
+    } while (TRUE);
     CKNullResourceRecord resource;
     resource.Handle = handle;
     resource.Type = Type;
@@ -1076,6 +1124,11 @@ CKERROR CKRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
     CKNullContextState *state = CKNullState(this);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    if (state->FrameInProgress ||
+        state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+        state->PoolEncoder->m_Active.load(std::memory_order_acquire))
+        return CKERR_INVALIDOPERATION;
     VxMutexLock lock(state->ResourceMutex);
     for (int i = 0; i < state->Resources.Size(); ++i) {
         if (state->Resources[i].Handle == Object && state->Resources[i].Type == Type) {
@@ -1093,7 +1146,10 @@ CKERROR CKRasterizerContext::FlushObjects(CKDWORD TypeMask)
     if (CKRasterizerValidateObjectMask(TypeMask) != CK_OK)
         return CKERR_INVALIDPARAMETER;
     CKNullContextState *state = CKNullState(this);
-    if (state->PoolEncoder->m_Active.load(std::memory_order_acquire))
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    if (state->FrameInProgress ||
+        state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+        state->PoolEncoder->m_Active.load(std::memory_order_acquire))
         return CKERR_INVALIDOPERATION;
     VxMutexLock lock(state->ResourceMutex);
     for (int i = state->Resources.Size(); i > 0; --i) {
@@ -1347,9 +1403,21 @@ CKERROR CKRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
     (void)UserData;
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
-    if (!Callback || FrameBuffer != 0)
+    if (!Callback)
+        return CKERR_INVALIDPARAMETER;
+    if (FrameBuffer != 0 &&
+        !CKNullFindResource(CKNullState(this), FrameBuffer,
+                            CKRST_OBJ_FRAMEBUFFER))
         return CKERR_INVALIDPARAMETER;
     return CKERR_NOTIMPLEMENTED;
+}
+
+CKERROR CKRasterizerContext::CancelScreenShots(void *UserData)
+{
+    (void)UserData;
+    if (!m_Created || !CKNullIsApiThread(this))
+        return CKERR_INVALIDOPERATION;
+    return CKERR_NOTFOUND;
 }
 
 CKERROR CKRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
@@ -1535,6 +1603,9 @@ CKRasterizerEncoder *CKRasterizerContext::BeginEncoder(CKBOOL ForceNewEncoder)
     if (!m_Created)
         return NULL;
     CKNullContextState *state = CKNullState(this);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+    if (state->FrameInProgress || state->ShuttingDown)
+        return NULL;
     const CKBOOL useDefault = !ForceNewEncoder && CKNullIsApiThread(this);
     CKNullRasterizerEncoder *encoder = useDefault
         ? state->DefaultEncoder : state->PoolEncoder;
@@ -1551,6 +1622,7 @@ CKERROR CKRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
     if (!Encoder)
         return CKERR_INVALIDPARAMETER;
     CKNullContextState *state = CKNullState(this);
+    VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
     CKNullRasterizerEncoder *encoder = NULL;
     if (Encoder == state->DefaultEncoder)
         encoder = state->DefaultEncoder;
@@ -1564,10 +1636,6 @@ CKERROR CKRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
     }
     const CKERROR status = encoder->GetStatus();
     encoder->m_Active.store(false, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lock(state->EncoderWaitMutex);
-    }
-    state->EncoderEnded.notify_all();
     return status;
 }
 
@@ -1583,13 +1651,13 @@ CKERROR CKRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
     if ((Flags & ~(CKRST_FRAME_CAPTURE | CKRST_FRAME_DISCARD | CKRST_FRAME_FLUSH)) != 0)
         return CKERR_INVALIDPARAMETER;
     CKNullContextState *state = CKNullState(this);
-    if (state->DefaultEncoder->m_Active.load(std::memory_order_acquire))
-        return CKERR_INVALIDOPERATION;
     {
-        std::unique_lock<std::mutex> lock(state->EncoderWaitMutex);
-        state->EncoderEnded.wait(lock, [state]() {
-            return !state->PoolEncoder->m_Active.load(std::memory_order_acquire);
-        });
+        VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+        if (state->FrameInProgress || state->ShuttingDown ||
+            state->DefaultEncoder->m_Active.load(std::memory_order_acquire) ||
+            state->PoolEncoder->m_Active.load(std::memory_order_acquire))
+            return CKERR_INVALIDOPERATION;
+        state->FrameInProgress = TRUE;
     }
     {
         VxMutexLock lock(state->SubmissionMutex);
@@ -1603,5 +1671,9 @@ CKERROR CKRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
     ++m_NullFrameNumber;
     if (FrameNumber)
         *FrameNumber = m_NullFrameNumber;
+    {
+        VxMutexLock lifecycleLock(state->EncoderLifecycleMutex);
+        state->FrameInProgress = FALSE;
+    }
     return CK_OK;
 }

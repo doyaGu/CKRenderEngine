@@ -10,6 +10,12 @@ static int Fail()
     return EXIT_FAILURE;
 }
 
+static void ScreenShotCallback(void *, CKDWORD, CKDWORD, CKDWORD,
+                               CKDWORD, VX_PIXELFORMAT, const void *,
+                               CKDWORD, CKBOOL)
+{
+}
+
 static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; i < driver->m_DisplayModes.Size(); ++i) {
@@ -94,6 +100,13 @@ int main()
         context->m_StencilBpp != 8 || context->m_RefreshRate != 60)
         return Fail();
 
+    if (context->RequestScreenShot(0, ScreenShotCallback) !=
+            CKERR_NOTIMPLEMENTED ||
+        context->RequestScreenShot(0x7fffffffu, ScreenShotCallback) !=
+            CKERR_INVALIDPARAMETER ||
+        context->RequestScreenShot(0, NULL) != CKERR_INVALIDPARAMETER)
+        return Fail();
+
     if (context->Resize(1, 2, 320, 240, 0) != CK_OK)
         return Fail();
 
@@ -104,16 +117,54 @@ int main()
     CKRasterizerContext *secondContext = driver->CreateContext();
     if (!secondContext ||
         secondContext->Create(NULL, 0, 0, 320, 240, 32, FALSE, 60, 24, 8) !=
-            CKERR_INVALIDOPERATION)
+            CK_OK)
+        return Fail();
+
+    CKUniformDesc uniformDesc;
+    uniformDesc.Name = (CKSTRING)"u_nullEncoderBoundary";
+    uniformDesc.Type = CKRST_UNIFORM_VEC4;
+    uniformDesc.Count = 1;
+    CKDWORD uniform = 0;
+    if (context->CreateUniform(&uniformDesc, &uniform) != CK_OK || uniform == 0)
         return Fail();
 
     CKRasterizerEncoder *encoder = context->BeginEncoder();
     if (!encoder)
         return Fail();
+    if (context->IsIdle() ||
+        context->BeginShutdown() != CKERR_INVALIDOPERATION ||
+        driver->DestroyContext(context))
+        return Fail();
+
+    CKDWORD activeFrameNumber = 0;
+    if (context->Frame(CKRST_FRAME_SYNC_IMMEDIATE,
+                       CKRST_FRAME_NONE, &activeFrameNumber) !=
+            CKERR_INVALIDOPERATION ||
+        activeFrameNumber != 0)
+        return Fail();
+    if (context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) !=
+            CKERR_INVALIDOPERATION ||
+        context->FlushObjects(CKRST_OBJ_UNIFORM) != CKERR_INVALIDOPERATION ||
+        context->Resize(0, 0, 640, 480, 0) != CKERR_INVALIDOPERATION ||
+        context->SetAntialias(4) != CKERR_INVALIDOPERATION ||
+        !context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM))
+        return Fail();
 
     encoder->SetState(CKDrawStateBuilder().Build());
     encoder->Touch(0);
     if (context->EndEncoder(encoder) != CK_OK)
+        return Fail();
+    if (!context->IsIdle())
+        return Fail();
+    if (context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) != CK_OK ||
+        context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM))
+        return Fail();
+    CKDWORD replacementUniform = 0;
+    if (context->CreateUniform(&uniformDesc, &replacementUniform) != CK_OK ||
+        replacementUniform == 0 || replacementUniform == uniform ||
+        context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM) ||
+        !context->IsObjectAlive(replacementUniform, CKRST_OBJ_UNIFORM) ||
+        context->DeleteObject(replacementUniform, CKRST_OBJ_UNIFORM) != CK_OK)
         return Fail();
 
     CKDWORD frameNumber = 0;
@@ -122,11 +173,18 @@ int main()
         frameNumber == 0)
         return Fail();
 
+    if (context->BeginShutdown() != CK_OK ||
+        context->GetDeviceStatus() != CKERR_INVALIDOPERATION ||
+        context->BeginEncoder() != NULL ||
+        context->Frame(CKRST_FRAME_SYNC_IMMEDIATE,
+                       CKRST_FRAME_NONE, &frameNumber) !=
+            CKERR_INVALIDOPERATION)
+        return Fail();
+
     if (!driver->DestroyContext(context))
         return Fail();
 
-    if (secondContext->Create(NULL, 0, 0, 320, 240, 32, FALSE, 60, 24, 8) != CK_OK ||
-        !driver->DestroyContext(secondContext))
+    if (!driver->DestroyContext(secondContext))
         return Fail();
 
     CKNULLRasterizerClose(rasterizer);
