@@ -21,6 +21,9 @@ struct CKFFPointSpriteParams {
     float ScaleC;
     VxMatrix World;
     VxMatrix View;
+    VxMatrix Projection;
+    float ViewportWidth;
+    float ViewportHeight;
 };
 
 class CKTransientGeometry {
@@ -63,7 +66,8 @@ public:
     static float ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
                                                    CKBOOL scaleEnable,
                                                    float scaleA, float scaleB, float scaleC,
-                                                   float distance);
+                                                   float distance,
+                                                   float viewportHeight = 1.0f);
 
     // Interleave canonical fixed-function vertex data. This is shared by
     // transient and hardware VB paths so both obey the same missing-attribute

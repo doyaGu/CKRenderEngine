@@ -114,6 +114,8 @@ static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
         return true;
     if ((bits & (1ull << 13)) != 0)
         return true;
+    if ((bits & (1ull << 24)) != 0)
+        return true;
 
     if (shaderKey.FS.VertexFogMode != 0)
         return true;
@@ -303,6 +305,21 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
                             context->ActiveTextureCount, targetFlags, stageParams,
                             m_State.StageStateSetMasks);
+        if ((context->ShaderKey.VS.Bits & (1ull << 40)) != 0) {
+            for (CKDWORD stage = 0;
+                 stage < context->ActiveTextureCount &&
+                 stage < CKFF_MAX_TEXTURE_STAGES;
+                 ++stage) {
+                float *colorExtra = stageParams.Values[
+                    CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
+                colorExtra[1] = 0.0f;
+                const CKDWORD samplingFlags =
+                    (CKDWORD)colorExtra[2] &
+                    (CKFF_TTF_MIRRORONCE_MASK |
+                     CKFF_TTF_RENDER_TARGET_FLIP_V);
+                colorExtra[2] = (float)samplingFlags;
+            }
+        }
         Emit(sink, u.u_stageParams, stageParams.Values,
              CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
