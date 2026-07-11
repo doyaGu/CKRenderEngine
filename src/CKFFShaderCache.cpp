@@ -42,6 +42,14 @@
 #include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/essl/vs_ff_3d.bin.h"
+#include "shaders/generated/essl/vs_ff_3d_clip.bin.h"
+#include "shaders/generated/essl/vs_ff_3d_instanced.bin.h"
+#include "shaders/generated/essl/vs_ff_3d_instanced_clip.bin.h"
+#include "shaders/generated/essl/vs_ff_positiont.bin.h"
+#include "shaders/generated/essl/vs_ff_positiont_clip.bin.h"
+#include "shaders/generated/essl/fs_ff_stage.bin.h"
+#include "shaders/generated/essl/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/metal/vs_ff_3d.bin.h"
 #include "shaders/generated/metal/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/metal/vs_ff_3d_instanced.bin.h"
@@ -132,6 +140,15 @@ static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
      s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
      s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage),
      s_glsl_fs_ff_stage_volume, sizeof(s_glsl_fs_ff_stage_volume)},
+    {CKRST_SHADER_PROFILE_ESSL, "essl",
+     s_essl_vs_ff_3d, sizeof(s_essl_vs_ff_3d),
+     s_essl_vs_ff_3d_clip, sizeof(s_essl_vs_ff_3d_clip),
+     s_essl_vs_ff_3d_instanced, sizeof(s_essl_vs_ff_3d_instanced),
+     s_essl_vs_ff_3d_instanced_clip, sizeof(s_essl_vs_ff_3d_instanced_clip),
+     s_essl_vs_ff_positiont, sizeof(s_essl_vs_ff_positiont),
+     s_essl_vs_ff_positiont_clip, sizeof(s_essl_vs_ff_positiont_clip),
+     s_essl_fs_ff_stage, sizeof(s_essl_fs_ff_stage),
+     s_essl_fs_ff_stage_volume, sizeof(s_essl_fs_ff_stage_volume)},
     {CKRST_SHADER_PROFILE_MSL, "metal",
      s_metal_vs_ff_3d, sizeof(s_metal_vs_ff_3d),
      s_metal_vs_ff_3d_clip, sizeof(s_metal_vs_ff_3d_clip),

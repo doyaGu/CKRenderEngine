@@ -21,6 +21,7 @@ static const FFPCoverageBackend kFFPCoverageBackends[] = {
     {CKRST_SHADER_PROFILE_DX12, "dx12"},
     {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
     {CKRST_SHADER_PROFILE_GLSL, "glsl"},
+    {CKRST_SHADER_PROFILE_ESSL, "essl"},
     {CKRST_SHADER_PROFILE_MSL, "metal"},
 };
 

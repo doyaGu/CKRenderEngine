@@ -53,6 +53,7 @@ BACKENDS = [
     {"name": "dx12", "platform": "windows", "profile": "s_6_0"},
     {"name": "spirv", "platform": "linux", "profile": "spirv10-10"},
     {"name": "glsl", "platform": "linux", "profile": "150"},
+    {"name": "essl", "platform": "android", "profile": "300_es"},
     {"name": "metal", "platform": "osx", "profile": "metal"},
 ]
 
@@ -61,6 +62,7 @@ PROFILE_ENUMS = {
     "dx12": "CKRST_SHADER_PROFILE_DX12",
     "spirv": "CKRST_SHADER_PROFILE_SPIRV",
     "glsl": "CKRST_SHADER_PROFILE_GLSL",
+    "essl": "CKRST_SHADER_PROFILE_ESSL",
     "metal": "CKRST_SHADER_PROFILE_MSL",
 }
 
@@ -130,7 +132,7 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         "--varyingdef", str(varying_def_for_backend(script_dir, backend)),
     ]
     compile_defines = list(defines or [])
-    if backend["name"] == "glsl":
+    if backend["name"] in ("glsl", "essl"):
         compile_defines.append("CKFF_NDC_MINUS_ONE_TO_ONE=1")
     if compile_defines:
         cmd.extend(["--define", ";".join(compile_defines)])
@@ -1036,7 +1038,7 @@ def main() -> int:
         validate_sampler_layout_headers(generated_dir, selected, BACKENDS, sampler_layouts)
         check_sampler_layout_size_budget(generated_dir)
         if not args.skip_module_table:
-            write_specialized_module_table(generated_dir, selected, specialized_variants, sampler_layouts)
+            write_specialized_module_table(generated_dir, BACKENDS, specialized_variants, sampler_layouts)
 
     print("All shaders compiled successfully.")
     return 0
