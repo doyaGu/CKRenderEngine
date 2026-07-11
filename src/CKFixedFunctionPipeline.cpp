@@ -616,9 +616,16 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
 
     // Prepare transient geometry
     CKDWORD wrapModes[CKFF_MAX_TEXTURE_STAGES];
+    CKBOOL wrapsTexcoords = FALSE;
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         wrapModes[stage] = m_DrawStateCache.GetRenderState(
             (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage));
+        const void *texcoord = stage == 0
+            ? data->TexCoordPtr
+            : data->TexCoordPtrs[stage];
+        if ((wrapModes[stage] & VXWRAP_MASK) != 0 &&
+            (formatFlags & CKFF_VF_TEXCOORD(stage)) != 0 && texcoord)
+            wrapsTexcoords = TRUE;
     }
     CKFFPointSpriteParams pointParams;
     pointParams.Size = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
@@ -720,10 +727,14 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
             &textureBindingSet, preparedState.ActiveTextureCount, shaderKey))
         return FALSE;
 
-    VXPRIMITIVETYPE drawStateType =
-        (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
-         (type == VX_POINTLIST && m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE)))
-            ? VX_TRIANGLELIST : type;
+    VXPRIMITIVETYPE drawStateType = type;
+    if (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
+        (type == VX_POINTLIST &&
+         m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
+        drawStateType = VX_TRIANGLELIST;
+    } else if (type == VX_LINESTRIP && wrapsTexcoords) {
+        drawStateType = VX_LINELIST;
+    }
     CKFFDrawSubmission submission = {};
     submission.View = view;
     submission.DrawStateType = drawStateType;

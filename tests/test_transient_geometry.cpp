@@ -357,6 +357,76 @@ static void MultipleTextureStagesApplyIndependentWrapModes()
     }
 }
 
+static void LineWrapHandlesLargeCoordinateSpans()
+{
+    TransientGeometryHarness harness;
+    VxDrawPrimitiveData data = {};
+    float positions[8] = {
+        0.0f, 0.0f, 0.0f, 1.0f,
+        1.0f, 0.0f, 0.0f, 1.0f
+    };
+    float texcoords[4] = {0.9f, 0.0f, -31.9f, 0.0f};
+    CKDWORD wrapModes[CKRST_MAX_STAGES] = {};
+    wrapModes[0] = VXWRAP_U;
+
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = 4 * sizeof(float);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = 2 * sizeof(float);
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_LINELIST, NULL, 0, &data,
+                                       VXWRAP_U, FALSE, NULL, NULL,
+                                       wrapModes) == TRUE,
+              "line wrap prepare should succeed");
+    const size_t vertexBytes = harness.Context.Encoder.LastVertexBytes.size();
+    TestCheck(vertexBytes > 0 && (vertexBytes & 1u) == 0,
+              "line wrap must emit one expanded line segment");
+    if (vertexBytes > 0 && (vertexBytes & 1u) == 0) {
+        const size_t stride = vertexBytes / 2;
+        const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+        TestCheck(fabs(ReadFloat(vertices + stride + 16) - 1.1f) < 0.0001f,
+                  "line wrap must normalize arbitrary integer coordinate spans");
+    }
+}
+
+static void LargePointSpriteBatchUses32BitIndices()
+{
+    TransientGeometryHarness harness;
+    const int pointCount = 16385;
+    std::vector<VxVector> positions(pointCount, VxVector(0.0f, 0.0f, 0.0f));
+    VxDrawPrimitiveData data = {};
+    CKFFPointSpriteParams params = {};
+    params.Size = 1.0f;
+    params.MinSize = 1.0f;
+    params.MaxSize = 1.0f;
+    params.World.Identity();
+    params.View.Identity();
+
+    data.VertexCount = pointCount;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = positions.data();
+    data.PositionStride = sizeof(VxVector);
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_POINTLIST, NULL, 0, &data,
+                                       0, TRUE, &params, NULL) == TRUE,
+              "large point sprite batch should prepare with 32-bit indices");
+    const size_t expectedIndexBytes = (size_t)pointCount * 6 * sizeof(CKDWORD);
+    TestCheck(harness.Context.Encoder.LastIndexBytes.size() == expectedIndexBytes,
+              "large point sprite batch must allocate a 32-bit index buffer");
+    if (harness.Context.Encoder.LastIndexBytes.size() == expectedIndexBytes) {
+        const CKDWORD *indices =
+            (const CKDWORD *)harness.Context.Encoder.LastIndexBytes.data();
+        const CKDWORD lastBase = (CKDWORD)(pointCount - 1) * 4;
+        TestCheck(indices[(pointCount - 1) * 6] == lastBase &&
+                  indices[(pointCount - 1) * 6 + 5] == lastBase + 3,
+                  "large point sprite indices must not wrap at 65536 vertices");
+    }
+}
+
 static void InitSpriteBatchData(VxDrawPrimitiveData *data,
                                 CKVertex *vertices,
                                 int vertexCount,
@@ -488,6 +558,10 @@ int main()
     tests.Run("four-component texcoord quad uses generic path", &FourComponentTexcoordQuadUsesGenericPath);
     tests.Run("multiple texture stages apply independent wrap modes",
               &MultipleTextureStagesApplyIndependentWrapModes);
+    tests.Run("line wrap handles large coordinate spans",
+              &LineWrapHandlesLargeCoordinateSpans);
+    tests.Run("large point sprite batch uses 32-bit indices",
+              &LargePointSpriteBatchUses32BitIndices);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
     tests.Run("non-batch triangle list uses generic path", &NonBatchTriangleListUsesGenericPath);
     return tests.ExitCode();
