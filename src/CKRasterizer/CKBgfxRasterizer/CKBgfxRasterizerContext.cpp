@@ -3419,9 +3419,11 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
         {
             return CKERR_INVALIDPARAMETER;
         }
+        const uint8_t resolve = tex->RequestedAutoMips
+            ? BGFX_RESOLVE_AUTO_GEN_MIPS : BGFX_RESOLVE_NONE;
         attachments[idx].init(tex->Handle, bgfx::Access::Write,
                               (uint16_t)Desc->Color[i].Layer, 1,
-                              (uint16_t)Desc->Color[i].Mip);
+                              (uint16_t)Desc->Color[i].Mip, resolve);
         idx++;
     }
 
@@ -3436,7 +3438,8 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
         }
         attachments[idx].init(depthTex->Handle, bgfx::Access::Write,
                               (uint16_t)Desc->DepthStencil.Layer, 1,
-                              (uint16_t)Desc->DepthStencil.Mip);
+                              (uint16_t)Desc->DepthStencil.Mip,
+                              BGFX_RESOLVE_NONE);
         idx++;
     }
 
@@ -4021,7 +4024,7 @@ CKERROR CKBgfxRasterizerContext::ReadTexture(CKDWORD Texture, CKDWORD Mip,
     if (capacity < requiredSize)
         return CKERR_INVALIDPARAMETER;
 
-    *AvailableFrame = bgfx::readTexture(rec->Handle, data, (uint8_t)Mip);
+    *AvailableFrame = bgfx::readTexture(rec->Handle, data, 0, (uint8_t)Mip);
     return CK_OK;
 }
 
@@ -5158,8 +5161,11 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
         if (!tex || tex->IsDepth || Color[i].Mip >= tex->MipCount ||
             Color[i].Layer != 0)
             return FALSE;
+        const uint8_t resolve = tex->RequestedAutoMips
+            ? BGFX_RESOLVE_AUTO_GEN_MIPS : BGFX_RESOLVE_NONE;
         attachments[count].init(tex->Handle, bgfx::Access::Write,
-                                (uint16_t)Color[i].Layer, 1, (uint16_t)Color[i].Mip);
+                                (uint16_t)Color[i].Layer, 1,
+                                (uint16_t)Color[i].Mip, resolve);
         ++count;
     }
 
@@ -5173,7 +5179,8 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
         {
             attachments[count].init(tex->Handle, bgfx::Access::Write,
                                     (uint16_t)DepthStencil->Layer, 1,
-                                    (uint16_t)DepthStencil->Mip);
+                                    (uint16_t)DepthStencil->Mip,
+                                    BGFX_RESOLVE_NONE);
             ++count;
         }
     }
