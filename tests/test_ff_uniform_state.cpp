@@ -1124,6 +1124,51 @@ void TextureBindingMaskIgnoresStagesWithoutTextureArgs() {
               "Texture binding mask must not split keys when active ops do not use texture args");
 }
 
+void UnusedSamplerStateDoesNotSplitShaderKey() {
+    CKFFFSStateDesc baselineDesc;
+    baselineDesc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
+    baselineDesc.SetStageColorArg1(0, CKRST_TA_DIFFUSE);
+    baselineDesc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    baselineDesc.SetStageAlphaArg1(0, CKRST_TA_DIFFUSE);
+
+    CKFFFSStateDesc samplerDesc = baselineDesc;
+    samplerDesc.SetStageProjectedSampler(0, true);
+    samplerDesc.SetStageSamplerType(0, CKFF_SAMPLER_VOLUME);
+    samplerDesc.SetStageSamplerCompareFunc(0, CKRST_COMPARE_LESS);
+    samplerDesc.SetStageMirrorOnceMask(0, 7);
+
+    const CKFFShaderKeyFS baselineKey = CKFFBuildShaderKeyFS(baselineDesc, 1u << 0);
+    const CKFFShaderKeyFS samplerKey = CKFFBuildShaderKeyFS(samplerDesc, 1u << 0);
+
+    TestCheck(baselineKey == samplerKey,
+              "Sampler state must not split shader keys when the stage does not sample a texture");
+    TestCheck(!samplerKey.Stages[0].ProjectedSampler &&
+                  samplerKey.Stages[0].SamplerType == CKFF_SAMPLER_2D &&
+                  samplerKey.Stages[0].SamplerCompareFunc == CKRST_COMPARE_NONE &&
+                  samplerKey.Stages[0].MirrorOnceMask == 0,
+              "Unused sampler fields must normalize to their neutral shader-key values");
+}
+
+void PremodulateAddsImplicitNextStageTextureDependency() {
+    CKFFFSStateDesc desc;
+    desc.SetStageColorOp(0, CKRST_TOP_PREMODULATE);
+    desc.SetStageColorArg1(0, CKRST_TA_DIFFUSE);
+    desc.SetStageAlphaOp(0, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(0, CKRST_TA_DIFFUSE);
+    desc.SetStageColorOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageColorArg1(1, CKRST_TA_CURRENT);
+    desc.SetStageAlphaOp(1, CKRST_TOP_SELECTARG1);
+    desc.SetStageAlphaArg1(1, CKRST_TA_CURRENT);
+
+    const CKFFShaderKeyFS nullKey = CKFFBuildShaderKeyFS(desc, 0);
+    const CKFFShaderKeyFS boundKey = CKFFBuildShaderKeyFS(desc, 1u << 1);
+
+    TestCheck(!nullKey.Stages[1].HasTexture && boundKey.Stages[1].HasTexture,
+              "PREMODULATE must make next-stage CURRENT depend on the next-stage texture");
+    TestCheck(nullKey != boundKey,
+              "PREMODULATE implicit texture binding must split specialized shader keys");
+}
+
 void TextureBindingMaskIgnoresInactiveStages() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_DISABLE);
@@ -1277,6 +1322,10 @@ int main() {
               &TextureBindingMaskSplitsNullTextureShaderKey);
     tests.Run("Texture binding mask ignores stages without texture args",
               &TextureBindingMaskIgnoresStagesWithoutTextureArgs);
+    tests.Run("Unused sampler state does not split shader key",
+              &UnusedSamplerStateDoesNotSplitShaderKey);
+    tests.Run("PREMODULATE adds implicit next-stage texture dependency",
+              &PremodulateAddsImplicitNextStageTextureDependency);
     tests.Run("Texture binding mask ignores inactive stages",
               &TextureBindingMaskIgnoresInactiveStages);
     tests.Run("bgfx transient allocations preflight availability",

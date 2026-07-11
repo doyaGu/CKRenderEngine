@@ -172,6 +172,80 @@ void DrawVertexBufferSubmitsRepresentableStencilMasks() {
     ffp.Shutdown();
 }
 
+void DrawVertexBufferPropagatesEncoderFailure() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    context.Encoder.SubmitError = CKERR_INVALIDPARAMETER;
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(!drawn,
+              "A backend submit failure must fail the originating FFP draw");
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "The failing backend submit must be attempted exactly once");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+              "A backend submit failure must report the encoder-error reason");
+
+    context.Encoder.Status = CK_OK;
+    context.Encoder.SubmitError = CK_OK;
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    context.Encoder.StateError = CKERR_INVALIDPARAMETER;
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(!drawn,
+              "A backend state-binding failure must fail the originating FFP draw");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "A state-binding failure must stop before backend submit");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+              "A state-binding failure must report the encoder-error reason");
+
+    context.Encoder.Status = CK_OK;
+    context.Encoder.StateError = CK_OK;
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferStopsUniformUploadsAfterFailure() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    context.Encoder.UniformError = CKERR_INVALIDPARAMETER;
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(!drawn,
+              "A backend uniform failure must fail the originating FFP draw");
+    TestCheck(context.Encoder.UniformSetCount == 1,
+              "Uniform upload must stop at the first backend failure");
+    TestCheck(context.Encoder.StateSetCount == 0 && context.Encoder.SubmitCount == 0,
+              "A uniform failure must stop before state binding and submit");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+              "A uniform failure must report the encoder-error reason");
+
+    context.Encoder.Status = CK_OK;
+    context.Encoder.UniformError = CK_OK;
+    ffp.Shutdown();
+}
+
 void DrawVertexBufferUploadsAlphaPrecision() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -900,6 +974,8 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
     TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth texture without compare func must bind a non-compare sampler");
 
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
     ffp.SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
     ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
@@ -910,6 +986,30 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
               "Depth compare func must enter specialization mask");
     TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth compare func must stay shader-evaluated and bind a non-compare sampler");
+
+    ffp.Shutdown();
+}
+
+void FilteredDepthTextureCompareRejectsDraw() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
+              "Filtered shader depth compare must reject instead of changing PCF semantics");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER,
+              "Filtered shader depth compare must expose its rejection reason");
 
     ffp.Shutdown();
 }
@@ -955,6 +1055,84 @@ void InactiveUnsupportedStateDoesNotRejectDraw() {
               "Unsupported state bits with no output effect must not reject a draw");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
               "A successful no-effect state draw must clear the reject reason");
+    ffp.Shutdown();
+}
+
+void DisabledTextureStageIgnoresLaterUnsupportedState() {
+    FFPDiagnosticDriver driver(CKRST_SHADER_PROFILE_GLSL,
+                               CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
+                               CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, 0x7fffffffu);
+    ffp.SetTextureStageState(1, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
+    ffp.SetTexture(1, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
+                          CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_DEPTHSTENCIL);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "COLOROP=DISABLE must make all later texture-stage state inactive");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "Inactive later texture stages must not report a draw rejection");
+    ffp.Shutdown();
+}
+
+void BoundUnusedTextureDoesNotRequireAffineInterpolation() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "A bound but unused texture must not require affine interpolation support");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "Unused texture binding must not report an affine draw rejection");
+    ffp.Shutdown();
+}
+
+void TextureStageSnapshotPreservesExplicitZeroArgument() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+
+    CKFFTextureStageSnapshot snapshot;
+    ffp.SaveTextureStage(0, snapshot);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.RestoreTextureStage(0, snapshot);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Texture-stage snapshot must preserve an explicitly selected zero-valued argument");
     ffp.Shutdown();
 }
 
@@ -1100,6 +1278,68 @@ void BorderPaletteSlotsAreReusedAcrossFrames() {
     TestCheck(context.PaletteSetCount == 17 &&
                   context.Encoder.LastTextureSampler.BorderColor == 0,
               "The next frame must allocate its first border color from palette slot zero");
+    ffp.Shutdown();
+}
+
+void UnusedBorderTexturesDoNotConsumePaletteSlots() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+
+    CKBOOL allDrawsSucceeded = TRUE;
+    for (CKDWORD i = 0; i < 17; ++i) {
+        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | i);
+        allDrawsSucceeded = allDrawsSucceeded && ffp.DrawVertexBuffer(
+            &context.Encoder, 1, VX_TRIANGLELIST,
+            1, 0, 0, 3, 0, 0,
+            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    }
+
+    TestCheck(allDrawsSucceeded && context.Encoder.SubmitCount == 17,
+              "Unused border textures must not reject otherwise valid draws");
+    TestCheck(context.PaletteSetCount == 0,
+              "Unused border textures must not consume border palette slots");
+    TestCheck(context.Encoder.TextureBindCount == 0,
+              "Unused textures must not reach the backend binding path");
+
+    ffp.Shutdown();
+}
+
+void PremodulateImplicitTextureDependencyBindsNextStage() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_PREMODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    ffp.SetTexture(1, 88, CKRST_TEXTURE_VALID);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "PREMODULATE implicit texture dependency must remain drawable");
+    TestCheck(context.Encoder.TextureBindCount == 1 &&
+                  context.Encoder.LastTextureHandle == 88,
+              "PREMODULATE must bind the next-stage texture used by CURRENT");
+
     ffp.Shutdown();
 }
 
@@ -1352,8 +1592,9 @@ void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
     ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
     ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(2, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_PROJECTED);
+    ffp.SetTexture(2, 102, CKRST_TEXTURE_VALID);
 
     ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
@@ -1373,9 +1614,16 @@ void ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(&context);
 
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    for (int stage = 1; stage < 4; ++stage) {
+        ffp.SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    }
     ffp.SetTextureStageState(4, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-    ffp.SetTextureStageState(4, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(4, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(4, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_PROJECTED);
+    ffp.SetTexture(4, 104, CKRST_TEXTURE_VALID);
 
     ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
@@ -1979,10 +2227,22 @@ int main() {
               &DrawVertexBufferRejectsPartialStencilWriteMask);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
+    tests.Run("DrawVertexBuffer propagates encoder failure",
+              &DrawVertexBufferPropagatesEncoderFailure);
+    tests.Run("DrawVertexBuffer stops before submit after binding failure",
+              &DrawVertexBufferStopsBeforeSubmitAfterBindingFailure);
+    tests.Run("DrawVertexBuffer stops uniform uploads after failure",
+              &DrawVertexBufferStopsUniformUploadsAfterFailure);
     tests.Run("Affine texture coordinates reject draw",
               &AffineTextureCoordinatesRejectDraw);
     tests.Run("Inactive unsupported state does not reject draw",
               &InactiveUnsupportedStateDoesNotRejectDraw);
+    tests.Run("Disabled texture stage ignores later unsupported state",
+              &DisabledTextureStageIgnoresLaterUnsupportedState);
+    tests.Run("Bound unused texture does not require affine interpolation",
+              &BoundUnusedTextureDoesNotRequireAffineInterpolation);
+    tests.Run("Texture-stage snapshot preserves explicit zero argument",
+              &TextureStageSnapshotPreservesExplicitZeroArgument);
     tests.Run("Unknown texture op rejects draw",
               &UnknownTextureOpRejectsDraw);
     tests.Run("Bottom-left cube render target rejects draw",
@@ -2031,12 +2291,18 @@ int main() {
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
+    tests.Run("Filtered depth texture compare rejects draw",
+              &FilteredDepthTextureCompareRejectsDraw);
     tests.Run("Border color uses stable bgfx palette slots",
               &BorderColorUsesStableBgfxPaletteSlots);
     tests.Run("Border palette overflow rejects draw",
               &BorderPaletteOverflowRejectsDraw);
     tests.Run("Border palette slots are reused across frames",
               &BorderPaletteSlotsAreReusedAcrossFrames);
+    tests.Run("Unused border textures do not consume palette slots",
+              &UnusedBorderTexturesDoNotConsumePaletteSlots);
+    tests.Run("PREMODULATE implicit texture dependency binds next stage",
+              &PremodulateImplicitTextureDependencyBindsNextStage);
     tests.Run("Uber shader program modules are shared across state bindings",
               &UberShaderProgramModulesAreSharedAcrossStateBindings);
     tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",

@@ -68,6 +68,10 @@ public:
     CKDWORD LastInstanceStride = 0;
     CKDWORD TotalInstanceCount = 0;
     CKDWORD TotalInstanceBytes = 0;
+    CKERROR Status = CK_OK;
+    CKERROR StateError = CK_OK;
+    CKERROR UniformError = CK_OK;
+    CKERROR SubmitError = CK_OK;
     std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;
     std::vector<CKBYTE> LastIndexBytes;
@@ -76,9 +80,13 @@ public:
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
+    CKERROR GetStatus() const override { return Status; }
+
     void SetState(CKDrawState State) override {
         LastState = State;
         ++StateSetCount;
+        if (StateError != CK_OK)
+            Status = StateError;
     }
     void SetStencilRef(CKDWORD Ref) override {
         LastStencilRef = Ref;
@@ -150,6 +158,10 @@ public:
         if (!data)
             return;
         ++UniformSetCount;
+        if (UniformError != CK_OK) {
+            Status = UniformError;
+            return;
+        }
         if (MatrixUniforms.find(uniform) != MatrixUniforms.end())
             ++MatrixUniformSetCount;
         const float *values = static_cast<const float *>(data);
@@ -170,6 +182,8 @@ public:
         }
         LastProgram = program;
         ++SubmitCount;
+        if (SubmitError != CK_OK)
+            Status = SubmitError;
     }
     void SubmitOcclusionQuery(CKRenderView, CKDWORD program, CKDWORD, CKDWORD, CKDWORD) override {
         LastProgram = program;

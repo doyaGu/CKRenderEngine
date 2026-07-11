@@ -5,8 +5,8 @@
 #include "CKFFSpecializationInfo.h"
 #include "CKRenderEngineTypes.h"
 
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 struct CKFFShaderKeyVS {
     uint64_t Bits;
@@ -76,11 +76,14 @@ struct CKFFShaderKey {
 };
 
 struct CKFFShaderKeyHash {
-    std::size_t operator()(const CKFFShaderKey &key) const;
+    size_t operator()(const CKFFShaderKey &key) const;
 };
 
 CKDWORD CKFFShaderKeyArgsMask(CKDWORD op);
 bool CKFFShaderKeyArgUsesTexture(CKDWORD arg);
+bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
+                                   CKDWORD previousColorOp,
+                                   CKDWORD previousAlphaOp);
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);

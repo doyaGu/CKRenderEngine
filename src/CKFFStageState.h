@@ -23,6 +23,7 @@ struct CKFFTextureStageSnapshot {
     CKDWORD Texture;
     CKDWORD TextureFlags;
     CKDWORD States[CKFF_MAX_TEXTURE_STAGE_STATES];
+    uint64_t StateSetMask;
     VxMatrix TextureMatrix;
 };
 
@@ -97,13 +98,15 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
 
 CKDWORD CKFFResolveStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture);
 CKDWORD CKFFResolveStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasTexture);
-CKDWORD CKFFResolveStageColorArg0(const CKDWORD *stage);
-CKDWORD CKFFResolveStageColorArg1(const CKDWORD *stage, bool hasTexture);
-CKDWORD CKFFResolveStageColorArg2(const CKDWORD *stage);
-CKDWORD CKFFResolveStageAlphaArg0(const CKDWORD *stage);
-CKDWORD CKFFResolveStageAlphaArg1(const CKDWORD *stage, bool hasTexture);
-CKDWORD CKFFResolveStageAlphaArg2(const CKDWORD *stage);
-CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage);
+CKDWORD CKFFResolveStageColorArg0(const CKDWORD *stage, uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageColorArg1(const CKDWORD *stage, bool hasTexture,
+                                  uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageColorArg2(const CKDWORD *stage, uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageAlphaArg0(const CKDWORD *stage, uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageAlphaArg1(const CKDWORD *stage, bool hasTexture,
+                                  uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageAlphaArg2(const CKDWORD *stage, uint64_t stateSetMask = 0);
+CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage, uint64_t stateSetMask = 0);
 CKDWORD CKFFResolveMirrorOnceAddressMask(const CKDWORD *stage);
 
 CK_ADDRESS_MODE CKFFTranslateAddressMode(CKDWORD mode);

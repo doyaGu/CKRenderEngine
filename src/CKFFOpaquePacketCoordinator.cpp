@@ -271,8 +271,7 @@ void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
     packet->View = view;
     packet->Type = type;
     packet->Program = programContext->Program;
-    float depth = pipeline.ComputeDepthKey();
-    packet->Depth = *(CKDWORD *)&depth;
+    packet->Depth = CKFFEncodeDepthKey(pipeline.ComputeDepthKey());
     packet->DrawState = pipeline.GetDrawStateCache().BuildDrawState(type);
     packet->StencilRef = pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILREF);
     packet->StencilReadMask = pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILMASK);
@@ -470,7 +469,8 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
     }
     result->ProgramContext = programContext;
     if (!pipeline.BuildCurrentTextureBindingSet(
-            &result->TextureBindingSet, preparedState.ActiveTextureCount)) {
+            &result->TextureBindingSet, preparedState.ActiveTextureCount,
+            programContext.ShaderKey)) {
         result->RejectReason = CKFF_RENDER_PACKET_REJECT_STATIC_UNIFORMS;
         return;
     }

@@ -3,7 +3,7 @@
 #include "CKFFStageState.h"
 #include "CKRasterizerEnums.h"
 
-#include <cstring>
+#include <string.h>
 
 static size_t HashCombine(size_t seed, size_t value) {
     return seed ^ (value + 0x9e3779b9u + (seed << 6) + (seed >> 2));
@@ -133,16 +133,35 @@ bool CKFFShaderKeyArgUsesTexture(CKDWORD arg) {
     return CKFFBaseTextureArg(arg) == CKRST_TA_TEXTURE;
 }
 
-static bool CKFFShaderKeyOpUsesTexture(CKDWORD op, CKDWORD arg0, CKDWORD arg1, CKDWORD arg2) {
+static bool CKFFShaderKeyOpUsesArg(CKDWORD op, CKDWORD arg0, CKDWORD arg1,
+                                   CKDWORD arg2, CKDWORD targetArg) {
     const CKDWORD mask = CKFFShaderKeyArgsMask(op);
-    return ((mask & 0b001u) != 0 && CKFFShaderKeyArgUsesTexture(arg0)) ||
-           ((mask & 0b010u) != 0 && CKFFShaderKeyArgUsesTexture(arg1)) ||
-           ((mask & 0b100u) != 0 && CKFFShaderKeyArgUsesTexture(arg2));
+    return ((mask & 0b001u) != 0 && CKFFBaseTextureArg(arg0) == targetArg) ||
+           ((mask & 0b010u) != 0 && CKFFBaseTextureArg(arg1) == targetArg) ||
+           ((mask & 0b100u) != 0 && CKFFBaseTextureArg(arg2) == targetArg);
 }
 
-static bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage) {
-    return CKFFShaderKeyOpUsesTexture(stage.ColorOp, stage.ColorArg0, stage.ColorArg1, stage.ColorArg2) ||
-           CKFFShaderKeyOpUsesTexture(stage.AlphaOp, stage.AlphaArg0, stage.AlphaArg1, stage.AlphaArg2);
+bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
+                                   CKDWORD previousColorOp,
+                                   CKDWORD previousAlphaOp) {
+    if (CKFFShaderKeyOpUsesArg(stage.ColorOp, stage.ColorArg0,
+                               stage.ColorArg1, stage.ColorArg2,
+                               CKRST_TA_TEXTURE) ||
+        CKFFShaderKeyOpUsesArg(stage.AlphaOp, stage.AlphaArg0,
+                               stage.AlphaArg1, stage.AlphaArg2,
+                               CKRST_TA_TEXTURE)) {
+        return true;
+    }
+    if (previousColorOp == CKRST_TOP_PREMODULATE &&
+        CKFFShaderKeyOpUsesArg(stage.ColorOp, stage.ColorArg0,
+                               stage.ColorArg1, stage.ColorArg2,
+                               CKRST_TA_CURRENT)) {
+        return true;
+    }
+    return previousAlphaOp == CKRST_TOP_PREMODULATE &&
+           CKFFShaderKeyOpUsesArg(stage.AlphaOp, stage.AlphaArg0,
+                                  stage.AlphaArg1, stage.AlphaArg2,
+                                  CKRST_TA_CURRENT);
 }
 
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask) {
@@ -157,6 +176,8 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     key.FlatShade = desc.GetFlatShade();
 
     CKDWORD activeCount = 0;
+    CKDWORD previousColorOp = 0;
+    CKDWORD previousAlphaOp = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         CKFFShaderKeyFSStage &dst = key.Stages[stage];
         dst.ColorOp = desc.GetStageColorOp(stage);
@@ -184,10 +205,19 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
             dst.AlphaArg1 = CKRST_TA_DIFFUSE;
         }
 
-        dst.HasTexture = CKFFShaderKeyStageUsesTexture(dst) &&
+        dst.HasTexture = CKFFShaderKeyStageUsesTexture(
+                             dst, previousColorOp, previousAlphaOp) &&
                          ((textureBoundMask & (1u << stage)) != 0);
+        if (!dst.HasTexture) {
+            dst.ProjectedSampler = false;
+            dst.SamplerType = CKFF_SAMPLER_2D;
+            dst.SamplerCompareFunc = CKRST_COMPARE_NONE;
+            dst.MirrorOnceMask = 0;
+        }
 
         activeCount = stage + 1;
+        previousColorOp = dst.ColorOp;
+        previousAlphaOp = dst.AlphaOp;
     }
 
     if (activeCount > 0) {

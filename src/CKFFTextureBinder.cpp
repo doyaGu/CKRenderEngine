@@ -38,6 +38,7 @@ static CKDWORD CKFFTextureBindingUniform(const CKFFUniformHandles &uniforms,
 static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
                                        const CKFFUniformHandles &uniforms,
                                        CKDWORD activeTextureCount,
+                                       CKDWORD sampledTextureMask,
                                        const CKDWORD *textureHandles,
                                        const CKDWORD *textureFlags,
                                        const CKSamplerDesc *samplers)
@@ -45,10 +46,13 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     if (!set)
         return;
     CKFFInitTextureBindingSet(set);
-    set->ActiveTextureCount = activeTextureCount;
-    if (set->ActiveTextureCount > CKFF_MAX_TEXTURE_STAGES)
-        set->ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    for (CKDWORD stage = 0; stage < set->ActiveTextureCount; ++stage) {
+    CKDWORD stageCount = activeTextureCount;
+    if (stageCount > CKFF_MAX_TEXTURE_STAGES)
+        stageCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < stageCount; ++stage) {
+        if ((sampledTextureMask & (1u << stage)) == 0)
+            continue;
+        set->ActiveTextureCount = stage + 1;
         const CKDWORD samplerType = CKFFTextureBindingSamplerType(
             CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
         set->Bindings[stage].Stage = CKFFSamplerBindStage(stage, samplerType);
@@ -86,7 +90,8 @@ void CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMip
     m_ForceAnisotropicFiltering = forceAniso;
 }
 
-void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount) const
+void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
+                                        CKDWORD sampledTextureMask) const
 {
     if (!out)
         return;
@@ -95,9 +100,11 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
-    for (CKDWORD i = 0; i < activeCount; ++i)
-        samplers[i] = BuildSamplerDesc((int)i);
-    CKFFBuildTextureBindingSet(out, u, activeCount,
+    for (CKDWORD i = 0; i < activeCount; ++i) {
+        if ((sampledTextureMask & (1u << i)) != 0)
+            samplers[i] = BuildSamplerDesc((int)i);
+    }
+    CKFFBuildTextureBindingSet(out, u, activeCount, sampledTextureMask,
                                m_State.TextureHandles, m_State.TextureFlags, samplers);
 }
 
@@ -114,13 +121,16 @@ void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, const CKFFTextureBind
 #endif
 
     for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i) {
+        if (encoder->GetStatus() != CK_OK)
+            return;
         const CKFFRenderPacketTextureBinding &binding = set->Bindings[i];
         if (binding.Texture == 0)
             continue;
         CKSamplerDesc sampler = binding.Sampler;
         encoder->SetTexture(binding.Stage, binding.Uniform, binding.Texture, &sampler);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-        m_Probes.OnTextureBind();
+        if (encoder->GetStatus() == CK_OK)
+            m_Probes.OnTextureBind();
 #endif
     }
 }

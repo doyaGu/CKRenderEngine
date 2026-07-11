@@ -20,7 +20,8 @@ public:
 #endif
 
     void SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso);
-    void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount) const;
+    void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
+                         CKDWORD sampledTextureMask) const;
     void Bind(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *set) const;
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 

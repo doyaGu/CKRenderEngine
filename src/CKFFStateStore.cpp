@@ -1,7 +1,7 @@
 #include "CKFFStateStore.h"
 #include "CKFFRenderPacket.h"
 
-#include <cstring>
+#include <string.h>
 
 CKBOOL CKFFStateStore::EnsureViewProjection()
 {
@@ -47,6 +47,7 @@ void CKFFStateStore::Reset()
     memset(TextureHandles, 0, sizeof(TextureHandles));
     memset(TextureFlags, 0, sizeof(TextureFlags));
     memset(StageStates, 0, sizeof(StageStates));
+    memset(StageStateSetMasks, 0, sizeof(StageStateSetMasks));
     memset(UserClipPlanes, 0, sizeof(UserClipPlanes));
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
