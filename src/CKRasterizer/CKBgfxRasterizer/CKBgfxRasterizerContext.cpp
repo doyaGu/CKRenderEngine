@@ -2171,8 +2171,11 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
             bgfx::TextureFormat::D24S8,
             bgfx::TextureFormat::D32F,
         };
+        const uint64_t depthTextureCaps =
+            BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER |
+            BGFX_CAPS_FORMAT_TEXTURE_2D;
         for (CKDWORD i = 0; i < sizeof(depthFormats) / sizeof(depthFormats[0]); ++i) {
-            if (m_NativeFormatCaps[depthFormats[i]] & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER) {
+            if ((m_NativeFormatCaps[depthFormats[i]] & depthTextureCaps) == depthTextureCaps) {
                 m_CapsDesc.Features |= CKRST_CAPS_DEPTH_TEXTURE;
                 break;
             }
@@ -3518,14 +3521,16 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *De
     const CKDWORD formatCaps = CKBgfxMapFormatCaps(
         m_NativeFormatCaps[fmt], FALSE,
         (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) != 0);
-    if ((formatCaps & CKRST_FORMAT_CAPS_FRAMEBUFFER) == 0)
+    const CKDWORD requiredCaps =
+        CKRST_FORMAT_CAPS_FRAMEBUFFER | CKRST_FORMAT_CAPS_TEXTURE_2D;
+    if ((formatCaps & requiredCaps) != requiredCaps)
         return CKERR_NOTIMPLEMENTED;
     const CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, 1);
     if (Desc->MipMapCount > fullMipCount)
         return CKERR_INVALIDPARAMETER;
     bool hasMips = Desc->MipMapCount > 1;
 
-    uint64_t texFlags = BGFX_TEXTURE_RT_WRITE_ONLY;
+    uint64_t texFlags = BGFX_TEXTURE_RT;
     bgfx::TextureHandle handle = bgfx::createTexture2D(
         w, h, hasMips, 1, fmt, texFlags, NULL);
     if (!bgfx::isValid(handle))
