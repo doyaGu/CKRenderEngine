@@ -41,6 +41,8 @@
 #include "CKFFUniformState.h"
 #include "CKDrawAnnotation.h"
 
+#include <SDL3/SDL_timer.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -63,9 +65,9 @@ static CKBYTE *ConvertCopyImage(const VxImageDescEx &src, const VxImageDescEx &v
     uploadDesc.Width = src.Width;
     uploadDesc.Height = src.Height;
     uploadDesc.BytesPerLine = src.Width * uploadDesc.BitsPerPixel / 8;
-    uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
+    const int imageSize = uploadDesc.BytesPerLine * uploadDesc.Height;
 
-    CKBYTE *converted = new CKBYTE[uploadDesc.TotalImageSize];
+    CKBYTE *converted = new CKBYTE[imageSize];
     uploadDesc.Image = converted;
     VxDoBlit(src, uploadDesc);
     return converted;
@@ -77,13 +79,16 @@ enum CKScreenCapturePurpose {
     CK_SCREEN_CAPTURE_SPRITE,
 };
 
+struct CKPendingScreenCaptureState;
+
 struct CKPendingScreenCapture {
     CKPendingScreenCapture()
-        : Owner(nullptr), Purpose(CK_SCREEN_CAPTURE_FILE), Target(0),
+        : Owner(nullptr), State(nullptr), Purpose(CK_SCREEN_CAPTURE_FILE), Target(0),
           HasSource(FALSE), HasDestination(FALSE), CubeMapFace(0),
           Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE) {}
 
     RCKRenderContext *Owner;
+    CKPendingScreenCaptureState *State;
     CKScreenCapturePurpose Purpose;
     XString FileName;
     CK_ID Target;
@@ -101,14 +106,122 @@ struct CKPendingScreenCapture {
 };
 
 struct CKPendingScreenCaptureState {
-    ~CKPendingScreenCaptureState() {
-        for (int i = 0; i < Ready.Size(); ++i)
-            delete Ready[i];
-    }
+    CKPendingScreenCaptureState() : References(1), OwnerAlive(TRUE) {}
 
     VxMutex Mutex;
+    int References;
+    CKBOOL OwnerAlive;
     XArray<CKPendingScreenCapture *> Ready;
+    XArray<CKPendingScreenCapture *> Outstanding;
 };
+
+static const Uint64 CK_SCREEN_CAPTURE_WAIT_TIMEOUT_MS = 30000u;
+
+static void ReleaseScreenCaptureState(CKPendingScreenCaptureState *state) {
+    if (!state)
+        return;
+    CKBOOL destroy = FALSE;
+    {
+        VxMutexLock lock(state->Mutex);
+        --state->References;
+        destroy = state->References == 0 ? TRUE : FALSE;
+    }
+    if (destroy)
+        delete state;
+}
+
+static void DeleteScreenCapture(CKPendingScreenCapture *capture) {
+    if (!capture)
+        return;
+    CKPendingScreenCaptureState *state = capture->State;
+    delete capture;
+    ReleaseScreenCaptureState(state);
+}
+
+static void RegisterScreenCapture(CKPendingScreenCaptureState *state,
+                                  CKPendingScreenCapture *capture) {
+    if (!state || !capture)
+        return;
+    VxMutexLock lock(state->Mutex);
+    capture->State = state;
+    ++state->References;
+    state->Outstanding.PushBack(capture);
+}
+
+static void UnregisterScreenCapture(CKPendingScreenCaptureState *state,
+                                    CKPendingScreenCapture *capture) {
+    if (!state || !capture)
+        return;
+    VxMutexLock lock(state->Mutex);
+    state->Outstanding.Erase(capture);
+}
+
+struct CKMemoryScreenCapture {
+    CKMemoryScreenCapture()
+        : References(1), Done(FALSE), Succeeded(FALSE) {}
+
+    VxMutex Mutex;
+    int References;
+    CKBOOL Done;
+    CKBOOL Succeeded;
+    CKPendingScreenCapture Capture;
+};
+
+static void AddMemoryScreenCaptureRef(CKMemoryScreenCapture *state) {
+    if (!state)
+        return;
+    VxMutexLock lock(state->Mutex);
+    ++state->References;
+}
+
+static void ReleaseMemoryScreenCapture(CKMemoryScreenCapture *state) {
+    if (!state)
+        return;
+    CKBOOL destroy = FALSE;
+    {
+        VxMutexLock lock(state->Mutex);
+        --state->References;
+        destroy = state->References == 0 ? TRUE : FALSE;
+    }
+    if (destroy)
+        delete state;
+}
+
+static void MemoryScreenCaptureCallback(void *userData, CKDWORD frameBuffer,
+                                        CKDWORD width, CKDWORD height,
+                                        CKDWORD pitch, VX_PIXELFORMAT format,
+                                        const void *data, CKDWORD size,
+                                        CKBOOL yFlip) {
+    (void)frameBuffer;
+    CKMemoryScreenCapture *state =
+        static_cast<CKMemoryScreenCapture *>(userData);
+    if (!state)
+        return;
+
+    {
+        VxMutexLock lock(state->Mutex);
+        if (data && size != 0 && width != 0 && height != 0 && pitch != 0 &&
+            format != UNKNOWN_PF) {
+            state->Capture.Width = width;
+            state->Capture.Height = height;
+            state->Capture.Pitch = pitch;
+            state->Capture.Format = format;
+            state->Capture.YFlip = yFlip;
+            state->Capture.Data.Resize(size);
+            memcpy(state->Capture.Data.Begin(), data, size);
+            state->Succeeded = TRUE;
+        }
+        state->Done = TRUE;
+    }
+    ReleaseMemoryScreenCapture(state);
+}
+
+static CKBOOL IsMemoryScreenCaptureDone(CKMemoryScreenCapture *state) {
+    if (!state)
+        return TRUE;
+    VxMutexLock lock(state->Mutex);
+    return state->Done;
+}
 
 static CKBOOL BuildCapturedImage(const CKPendingScreenCapture &capture,
                                  VxImageDescEx &desc,
@@ -145,9 +258,10 @@ static CKBOOL BuildCapturedImage(const CKPendingScreenCapture &capture,
 
     desc.Width = right - left;
     desc.Height = bottom - top;
-    desc.BytesPerLine = desc.Width * (int)bytesPerPixel;
-    desc.TotalImageSize = desc.BytesPerLine * desc.Height;
-    pixels.Resize(desc.TotalImageSize);
+    const int rowBytes = desc.Width * (int)bytesPerPixel;
+    const int imageSize = rowBytes * desc.Height;
+    desc.BytesPerLine = rowBytes;
+    pixels.Resize(imageSize);
 
     for (int row = 0; row < desc.Height; ++row) {
         const CKDWORD logicalRow = (CKDWORD)(top + row);
@@ -156,8 +270,8 @@ static CKBOOL BuildCapturedImage(const CKPendingScreenCapture &capture,
             : logicalRow;
         const CKBYTE *source = capture.Data.Begin() +
             (size_t)sourceRow * capture.Pitch + (size_t)left * bytesPerPixel;
-        memcpy(pixels.Begin() + (size_t)row * desc.BytesPerLine,
-               source, (size_t)desc.BytesPerLine);
+        memcpy(pixels.Begin() + (size_t)row * rowBytes,
+               source, (size_t)rowBytes);
     }
 
     desc.Image = pixels.Begin();
@@ -666,8 +780,8 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
         viewRect.top = m_ViewportData.ViewY;
         viewRect.right = m_ViewportData.ViewX + m_ViewportData.ViewWidth;
         viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
-        if (m_FFPipeline.GetRenderPipeline().QueueStencilClearBeforeTransparent(viewRect, Stencil))
-            return CK_OK;
+        return m_FFPipeline.GetRenderPipeline().QueueStencilClearBeforeTransparent(
+            viewRect, Stencil);
     }
 
     CKDWORD clearColor = 0;
@@ -690,8 +804,13 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     viewRect.bottom = m_ViewportData.ViewY + m_ViewportData.ViewHeight;
     if (frameLog)
         CK_LOG("Clear", "SetViewRect/SetViewClear");
-    m_RasterizerContext->SetViewRect(CKRP_VIEW_CLEAR, viewRect);
-    m_RasterizerContext->SetViewClear(CKRP_VIEW_CLEAR, clearFlags, clearColor, 1.0f, Stencil);
+    CKERROR status = m_RasterizerContext->SetViewRect(CKRP_VIEW_CLEAR, viewRect);
+    if (status != CK_OK)
+        return status;
+    status = m_RasterizerContext->SetViewClear(
+        CKRP_VIEW_CLEAR, clearFlags, clearColor, 1.0f, Stencil);
+    if (status != CK_OK)
+        return status;
 
     if (frameLog)
         CK_LOG("Clear", "done");
@@ -773,8 +892,11 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         m_FFPipeline.FlushOpaqueRenderPackets();
         CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
         CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
-        m_FFPipeline.GetRenderPipeline().EndFrame(CKRST_FRAME_SYNC_PRESERVE_PRESENT);
+        const CKERROR frameStatus = m_FFPipeline.GetRenderPipeline().EndFrame(
+            CKRST_FRAME_SYNC_PRESERVE_PRESENT);
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_END_FRAME, frameCostStart);
+        if (frameStatus != CK_OK)
+            return frameStatus;
     } else {
         // Normal back-to-front path
 
@@ -795,8 +917,11 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
         m_FFPipeline.FlushOpaqueRenderPackets();
         CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
         CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
-        m_FFPipeline.GetRenderPipeline().EndFrame(syncMode);
+        const CKERROR frameStatus =
+            m_FFPipeline.GetRenderPipeline().EndFrame(syncMode);
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_END_FRAME, frameCostStart);
+        if (frameStatus != CK_OK)
+            return frameStatus;
     }
 
     return CK_OK;
@@ -1208,10 +1333,16 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_DeviceDestroying = TRUE;
     ApplyDrawAnnotationDebugFlags(CKRST_DEBUG_NONE);
 
-    // Notify render manager we're destroying device
-    m_RenderManager->DestroyingDevice((CKRenderContext *) this);
+    if (m_FFPipeline.PrepareShutdown() != CK_OK ||
+        (m_RasterizerContext &&
+         m_RasterizerContext->BeginShutdown() != CK_OK) ||
+        m_FFPipeline.Shutdown() != CK_OK) {
+        m_DeviceDestroying = FALSE;
+        return FALSE;
+    }
 
-    m_FFPipeline.Shutdown();
+    // Do not invalidate device-backed objects until teardown can proceed.
+    m_RenderManager->DestroyingDevice((CKRenderContext *) this);
     ReleaseRenderPipelineResources();
 
     if (m_RasterizerContext) {
@@ -1231,7 +1362,10 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
 
     // Destroy old context
     if (m_RasterizerDriver && m_RasterizerContext) {
-        m_RasterizerDriver->DestroyContext(m_RasterizerContext);
+        if (!m_RasterizerDriver->DestroyContext(m_RasterizerContext)) {
+            m_DeviceDestroying = FALSE;
+            return FALSE;
+        }
     }
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
@@ -2518,10 +2652,79 @@ void RCKRenderContext::Activate(CKBOOL active) {
 }
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    (void)iRect;
-    (void)buffer;
-    (void)desc;
-    return FALSE;
+    if (!m_RasterizerContext || buffer != VXBUFFER_BACKBUFFER ||
+        !m_RasterizerContext->IsIdle())
+        return FALSE;
+
+    CKMemoryScreenCapture *state = new CKMemoryScreenCapture();
+    if (iRect) {
+        state->Capture.Source = *iRect;
+        state->Capture.HasSource = TRUE;
+    }
+
+    AddMemoryScreenCaptureRef(state);
+    CKERROR result = m_RasterizerContext->RequestScreenShot(
+        0, MemoryScreenCaptureCallback, state);
+    if (result != CK_OK) {
+        ReleaseMemoryScreenCapture(state);
+        ReleaseMemoryScreenCapture(state);
+        return FALSE;
+    }
+
+    const Uint64 startTime = SDL_GetTicks();
+    while (!IsMemoryScreenCaptureDone(state)) {
+        result = m_RasterizerContext->Frame(
+            CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE);
+        if (result != CK_OK)
+            break;
+        if (SDL_GetTicks() - startTime >= CK_SCREEN_CAPTURE_WAIT_TIMEOUT_MS)
+            break;
+        SDL_Delay(1);
+    }
+
+    if (!IsMemoryScreenCaptureDone(state)) {
+        m_RasterizerContext->CancelScreenShots(state);
+        const Uint64 cancelTime = SDL_GetTicks();
+        while (!IsMemoryScreenCaptureDone(state) &&
+               SDL_GetTicks() - cancelTime < CK_SCREEN_CAPTURE_WAIT_TIMEOUT_MS)
+            SDL_Delay(1);
+    }
+
+    if (!IsMemoryScreenCaptureDone(state)) {
+        ReleaseMemoryScreenCapture(state);
+        return FALSE;
+    }
+
+    CKBOOL succeeded = FALSE;
+    {
+        VxMutexLock lock(state->Mutex);
+        succeeded = state->Succeeded;
+    }
+    if (!succeeded) {
+        ReleaseMemoryScreenCapture(state);
+        return FALSE;
+    }
+
+    VxImageDescEx capturedDesc;
+    XArray<CKBYTE> pixels;
+    if (!BuildCapturedImage(state->Capture, capturedDesc, pixels)) {
+        ReleaseMemoryScreenCapture(state);
+        return FALSE;
+    }
+
+    CKBYTE *destination = desc.Image;
+    desc = capturedDesc;
+    const int imageSize = pixels.Size();
+    if (!destination) {
+        desc.Image = NULL;
+        ReleaseMemoryScreenCapture(state);
+        return imageSize;
+    }
+
+    desc.Image = destination;
+    memcpy(destination, pixels.Begin(), (size_t)imageSize);
+    ReleaseMemoryScreenCapture(state);
+    return imageSize;
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
@@ -2564,10 +2767,10 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     videoFormat.Width = width;
     videoFormat.Height = height;
     videoFormat.BytesPerLine = width * videoFormat.BitsPerPixel / 8;
-    videoFormat.TotalImageSize = videoFormat.BytesPerLine * height;
+    const int videoImageSize = videoFormat.BytesPerLine * height;
 
     if (!desc.Image)
-        return videoFormat.TotalImageSize;
+        return videoImageSize;
 
     VxImageDescEx uploadDesc = desc;
     CKBYTE *converted = nullptr;
@@ -2578,8 +2781,6 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     } else {
         if (uploadDesc.BytesPerLine <= 0)
             uploadDesc.BytesPerLine = width * uploadDesc.BitsPerPixel / 8;
-        if (uploadDesc.TotalImageSize <= 0)
-            uploadDesc.TotalImageSize = uploadDesc.BytesPerLine * height;
     }
 
     CKERROR err = CK_OK;
@@ -2666,7 +2867,7 @@ int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxI
     m_ViewportData = oldViewport;
     ffp.SetViewport(m_ViewportData);
 
-    return data ? videoFormat.TotalImageSize : FALSE;
+    return data ? videoImageSize : FALSE;
 }
 
 CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBUFFER_TYPE buffer) {
@@ -2686,10 +2887,13 @@ CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBU
         capture->HasSource = TRUE;
     }
 
+    RegisterScreenCapture(m_PendingScreenCaptures, capture);
     CKERROR result = m_RasterizerContext->RequestScreenShot(
         0, &RCKRenderContext::ScreenCaptureCallback, capture);
-    if (result != CK_OK)
-        delete capture;
+    if (result != CK_OK) {
+        UnregisterScreenCapture(m_PendingScreenCaptures, capture);
+        DeleteScreenCapture(capture);
+    }
     return result;
 }
 
@@ -2714,10 +2918,13 @@ CKBOOL RCKRenderContext::QueueTextureCopy(RCKTexture *texture,
         capture->HasDestination = TRUE;
     }
 
+    RegisterScreenCapture(m_PendingScreenCaptures, capture);
     CKERROR result = m_RasterizerContext->RequestScreenShot(
         0, &RCKRenderContext::ScreenCaptureCallback, capture);
-    if (result != CK_OK)
-        delete capture;
+    if (result != CK_OK) {
+        UnregisterScreenCapture(m_PendingScreenCaptures, capture);
+        DeleteScreenCapture(capture);
+    }
     return result == CK_OK ? TRUE : FALSE;
 }
 
@@ -2740,10 +2947,13 @@ CKBOOL RCKRenderContext::QueueSpriteCopy(RCKSprite *sprite,
         capture->HasDestination = TRUE;
     }
 
+    RegisterScreenCapture(m_PendingScreenCaptures, capture);
     CKERROR result = m_RasterizerContext->RequestScreenShot(
         0, &RCKRenderContext::ScreenCaptureCallback, capture);
-    if (result != CK_OK)
-        delete capture;
+    if (result != CK_OK) {
+        UnregisterScreenCapture(m_PendingScreenCaptures, capture);
+        DeleteScreenCapture(capture);
+    }
     return result == CK_OK ? TRUE : FALSE;
 }
 
@@ -2757,9 +2967,15 @@ void RCKRenderContext::ScreenCaptureCallback(void *userData, CKDWORD frameBuffer
         static_cast<CKPendingScreenCapture *>(userData);
     if (!capture)
         return;
-    if (!capture->Owner || !data || size == 0 || width == 0 || height == 0 ||
-        pitch == 0 || format == UNKNOWN_PF) {
+    CKPendingScreenCaptureState *state = capture->State;
+    if (!state) {
         delete capture;
+        return;
+    }
+    if (!data || size == 0 || width == 0 || height == 0 ||
+        pitch == 0 || format == UNKNOWN_PF) {
+        UnregisterScreenCapture(state, capture);
+        DeleteScreenCapture(capture);
         return;
     }
 
@@ -2771,13 +2987,57 @@ void RCKRenderContext::ScreenCaptureCallback(void *userData, CKDWORD frameBuffer
     capture->Data.Resize(size);
     memcpy(capture->Data.Begin(), data, size);
 
-    CKPendingScreenCaptureState *state = capture->Owner->m_PendingScreenCaptures;
-    if (!state) {
-        delete capture;
-        return;
+    CKBOOL ready = FALSE;
+    {
+        VxMutexLock lock(state->Mutex);
+        state->Outstanding.Erase(capture);
+        if (state->OwnerAlive) {
+            state->Ready.PushBack(capture);
+            ready = TRUE;
+        }
     }
-    VxMutexLock lock(state->Mutex);
-    state->Ready.PushBack(capture);
+    if (!ready)
+        DeleteScreenCapture(capture);
+}
+
+void RCKRenderContext::CancelPendingScreenCaptures() {
+    if (!m_PendingScreenCaptures)
+        return;
+
+    for (;;) {
+        CKPendingScreenCapture *capture = NULL;
+        {
+            VxMutexLock lock(m_PendingScreenCaptures->Mutex);
+            if (m_PendingScreenCaptures->Outstanding.Size() == 0)
+                break;
+            capture = m_PendingScreenCaptures->Outstanding[0];
+        }
+
+        if (m_RasterizerContext) {
+            m_RasterizerContext->CancelScreenShots(capture);
+        } else {
+            UnregisterScreenCapture(m_PendingScreenCaptures, capture);
+            DeleteScreenCapture(capture);
+            continue;
+        }
+
+        const Uint64 waitStart = SDL_GetTicks();
+        for (;;) {
+            CKBOOL outstanding = FALSE;
+            {
+                VxMutexLock lock(m_PendingScreenCaptures->Mutex);
+                outstanding =
+                    m_PendingScreenCaptures->Outstanding.IsHere(capture);
+            }
+            if (!outstanding)
+                break;
+            if (SDL_GetTicks() - waitStart >= CK_SCREEN_CAPTURE_WAIT_TIMEOUT_MS) {
+                CK_LOG_FMT("Capture", "timed out cancelling pending screenshot");
+                return;
+            }
+            SDL_Delay(1);
+        }
+    }
 }
 
 void RCKRenderContext::ProcessPendingScreenCaptures() {
@@ -2818,7 +3078,7 @@ void RCKRenderContext::ProcessPendingScreenCaptures() {
                 }
             }
         }
-        delete capture;
+        DeleteScreenCapture(capture);
     }
 }
 
@@ -3149,11 +3409,31 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     int height = localRect.bottom - localRect.top;
     SetFullViewport(&m_ViewportData, width, height);
 
-    // Create rasterizer context
-    m_RasterizerContext = m_RasterizerDriver->CreateContext();
-    ApplyRenderOptions();
+    const auto createRasterizerContext = [this, &localRect, width, height,
+                                          Bpp, Fullscreen, RefreshRate,
+                                          Zbpp, StencilBpp]
+        (CKRasterizerDriver *driver) -> CKERROR {
+        m_RasterizerDriver = driver;
+        m_RasterizerContext = driver ? driver->CreateContext() : nullptr;
+        if (!m_RasterizerContext)
+            return CKERR_CANCREATERENDERCONTEXT;
 
-    if (!m_RasterizerContext) {
+        ApplyRenderOptions();
+        CKERROR result = m_RasterizerContext->Create(
+            m_WinHandle, localRect.left, localRect.top,
+            width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp);
+        if (result == CK_OK && !m_FFPipeline.Init(m_RasterizerContext))
+            result = CKERR_CANCREATERENDERCONTEXT;
+        if (result != CK_OK) {
+            driver->DestroyContext(m_RasterizerContext);
+            m_RasterizerContext = nullptr;
+        }
+        return result;
+    };
+
+    CKERROR contextResult = createRasterizerContext(m_RasterizerDriver);
+    if (contextResult != CK_OK) {
+        m_RasterizerDriver = nullptr;
         if (Fullscreen && restoreWindowOnFailure) {
             VxSetParent(m_WinHandle, oldParent);
             VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
@@ -3164,38 +3444,11 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         return CKERR_CANCREATERENDERCONTEXT;
     }
 
-    // Create the actual rasterizer context
-    if (m_RasterizerContext->Create(m_WinHandle, localRect.left, localRect.top,
-                                    width, height, Bpp, Fullscreen, RefreshRate,
-                                    Zbpp, StencilBpp) != CK_OK) {
-        m_RasterizerDriver->DestroyContext(m_RasterizerContext);
-        m_RasterizerContext = nullptr;
-        if (Fullscreen && restoreWindowOnFailure) {
-            VxSetParent(m_WinHandle, oldParent);
-            VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
-                         oldWindowRect.right - oldWindowRect.left, oldWindowRect.bottom - oldWindowRect.top, FALSE);
-        }
-        m_DeviceDestroying = FALSE;
-        return CKERR_CANCREATERENDERCONTEXT;
-    }
+    m_DriverIndex = Driver;
 
     width = m_RasterizerContext->m_Width;
     height = m_RasterizerContext->m_Height;
     SetFullViewport(&m_ViewportData, width, height);
-
-    // Initialize the fixed-function pipeline
-    if (!m_FFPipeline.Init(m_RasterizerContext)) {
-        m_RasterizerDriver->DestroyContext(m_RasterizerContext);
-        m_RasterizerContext = nullptr;
-        if (Fullscreen && restoreWindowOnFailure) {
-            VxSetParent(m_WinHandle, oldParent);
-            VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
-                         oldWindowRect.right - oldWindowRect.left,
-                         oldWindowRect.bottom - oldWindowRect.top, FALSE);
-        }
-        m_DeviceDestroying = FALSE;
-        return CKERR_CANCREATERENDERCONTEXT;
-    }
     AllocateRenderPipelineResources();
     ApplyRenderOptions();
 
@@ -3342,6 +3595,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
 RCKRenderContext::~RCKRenderContext() {
     // Based on IDA at 0x10066ebb
     DestroyDevice();
+    CancelPendingScreenCaptures();
     DetachAll();
     ClearCallbacks();
 
@@ -3360,8 +3614,21 @@ RCKRenderContext::~RCKRenderContext() {
         m_DrawAnnotationState = nullptr;
     }
 
-    delete m_PendingScreenCaptures;
+    CKPendingScreenCaptureState *captureState = m_PendingScreenCaptures;
     m_PendingScreenCaptures = nullptr;
+    if (captureState) {
+        XArray<CKPendingScreenCapture *> ready;
+        {
+            VxMutexLock lock(captureState->Mutex);
+            captureState->OwnerAlive = FALSE;
+            ready.Swap(captureState->Ready);
+            for (int i = 0; i < captureState->Outstanding.Size(); ++i)
+                captureState->Outstanding[i]->Owner = nullptr;
+        }
+        for (int i = 0; i < ready.Size(); ++i)
+            DeleteScreenCapture(ready[i]);
+        ReleaseScreenCaptureState(captureState);
+    }
 
     // Release the render context mask
     if (m_RenderManager)
@@ -3392,11 +3659,17 @@ CKBOOL RCKRenderContext::DestroyDevice() {
     m_DeviceDestroying = TRUE;
     ApplyDrawAnnotationDebugFlags(CKRST_DEBUG_NONE);
 
-    // Notify render manager that device is being destroyed
+    if (m_FFPipeline.PrepareShutdown() != CK_OK ||
+        (m_RasterizerContext &&
+         m_RasterizerContext->BeginShutdown() != CK_OK) ||
+        m_FFPipeline.Shutdown() != CK_OK) {
+        m_DeviceDestroying = FALSE;
+        return FALSE;
+    }
+
+    // Do not invalidate device-backed objects until teardown can proceed.
     if (m_RenderManager)
         m_RenderManager->DestroyingDevice(this);
-
-    m_FFPipeline.Shutdown();
     ReleaseRenderPipelineResources();
 
     if (m_RasterizerContext) {
@@ -3408,8 +3681,11 @@ CKBOOL RCKRenderContext::DestroyDevice() {
             m_RasterizerContext->DeleteObject(m_CopyToVideoTexture, CKRST_OBJ_TEXTURE);
     }
     // Destroy the rasterizer context
-    if (m_RasterizerDriver)
-        m_RasterizerDriver->DestroyContext(m_RasterizerContext);
+    if (m_RasterizerDriver && m_RasterizerContext &&
+        !m_RasterizerDriver->DestroyContext(m_RasterizerContext)) {
+        m_DeviceDestroying = FALSE;
+        return FALSE;
+    }
 
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
