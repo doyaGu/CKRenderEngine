@@ -183,6 +183,9 @@ public:
                            int Width = 0, int Height = 0,
                            CKDWORD Flags = 0);
     virtual CKERROR SetAntialias(CKDWORD Samples);
+    virtual CKBOOL IsIdle() const;
+    virtual CKERROR BeginShutdown();
+    virtual CKERROR GetDeviceStatus() const;
     virtual CKERROR GetTargetDesc(CKRasterizerTargetDesc *Target) const;
     virtual CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const;
     virtual CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
@@ -278,6 +281,7 @@ public:
     virtual CKERROR RequestScreenShot(CKDWORD FrameBuffer,
                                       CKScreenShotCallback Callback,
                                       void *UserData = NULL);
+    virtual CKERROR CancelScreenShots(void *UserData);
 
     // --- Render views ---
     virtual CKERROR SetViewName(CKRenderView View, CKSTRING Name);

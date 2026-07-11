@@ -34,6 +34,8 @@ CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
 
     for (int i = 0; i < m_Contexts.Size(); ++i) {
         if (m_Contexts[i] == Context) {
+            if (Context->BeginShutdown() != CK_OK)
+                return FALSE;
             delete m_Contexts[i];
             m_Contexts.RemoveAt(i);
             return TRUE;
