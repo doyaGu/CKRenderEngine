@@ -273,8 +273,11 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
     }
 
     CKDWORD count = CKFFExplicitVertexBlendWeightCount(vertexBlend);
-    if (vertexBlend != VXVBLEND_0WEIGHTS && count == 0)
+    if (vertexBlend != VXVBLEND_0WEIGHTS && count == 0) {
+        state.Supported = FALSE;
+        state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_INVALID_MODE;
         return state;
+    }
 
     const bool hasBlendInput = (count == 0) || ((formatFlags & CKFF_VF_BLENDWEIGHT) != 0);
     const bool hasIndexInput = !indexed || ((formatFlags & CKFF_VF_BLENDINDEX) != 0);
@@ -314,21 +317,19 @@ int CKFFActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
     return count;
 }
 
-int CKFFResolveActiveTextureCount(CKDWORD dpFlags,
-                                  const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
-                                  const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]) {
-    const int declaredCount = CKFFActiveTextureCountFromDPFlags(dpFlags);
-    if (declaredCount > 0)
-        return declaredCount;
-
+int CKFFResolveActiveTextureStageCount(
+    const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
+    const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]) {
+    if (!textureHandles || !stageStates)
+        return 0;
     int count = 0;
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKDWORD op = stageStates[stage][CKRST_TSS_OP];
-        if (textureHandles[stage] != 0 ||
-            (op != 0 && op != CKRST_TOP_DISABLE)) {
-            if (count < stage + 1)
-                count = stage + 1;
-        }
+        const bool hasTexture = textureHandles[stage] != 0;
+        const CKDWORD colorOp = CKFFResolveStageColorOp(
+            stageStates[stage], true, hasTexture);
+        if (colorOp == CKRST_TOP_DISABLE)
+            break;
+        count = stage + 1;
     }
     return count;
 }
@@ -346,12 +347,15 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     const CKDWORD addrV = stageState[CKRST_TSS_ADDRESSV];
     const CKDWORD addrW = stageState[CKRST_TSS_ADDRESW];
 
+    const CKDWORD maxAnisotropy = stageState[CKRST_TSS_MAXANISOTROPY];
     switch (mag) {
     case VXTEXTUREFILTER_NEAREST:
         desc.MagFilter = CKRST_FILTER_NEAREST;
         break;
     case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MagFilter = maxAnisotropy == 1
+            ? CKRST_FILTER_LINEAR
+            : CKRST_FILTER_ANISOTROPIC;
         break;
     default:
         desc.MagFilter = CKRST_FILTER_LINEAR;
@@ -380,8 +384,12 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
         desc.MipFilter = CKRST_FILTER_LINEAR;
         break;
     case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MinFilter = maxAnisotropy == 1
+            ? CKRST_FILTER_LINEAR
+            : CKRST_FILTER_ANISOTROPIC;
+        desc.MipFilter = maxAnisotropy == 1
+            ? CKRST_FILTER_LINEAR
+            : CKRST_FILTER_ANISOTROPIC;
         break;
     case VXTEXTUREFILTER_LINEAR:
     default:

@@ -2,6 +2,7 @@
 #include "CKRasterizer.h"
 #include "CKFFUniformState.h"
 #include "CKFFShaderABI.h"
+#include "CKFFSamplerLayout.h"
 #include "CKFFStateResolver.h"
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
@@ -125,6 +126,7 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_STENCIL_WRITE_MASK: return "partial-stencil-write-mask";
     case CKFF_DRAW_REJECT_VERTEX_TWEEN: return "vertex-tween";
     case CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT: return "vertex-blend-input";
+    case CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE: return "vertex-blend-palette";
     case CKFF_DRAW_REJECT_AFFINE_TEXCOORD: return "affine-texture-coordinates";
     case CKFF_DRAW_REJECT_TEXTURE_OP: return "texture-operation";
     case CKFF_DRAW_REJECT_RENDER_TARGET_TYPE: return "render-target-type";
@@ -135,9 +137,124 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_LINE_PATTERN: return "line-pattern";
     case CKFF_DRAW_REJECT_EDGE_ANTIALIAS: return "edge-antialias";
     case CKFF_DRAW_REJECT_CLIPPING_DISABLED: return "clipping-disabled";
+    case CKFF_DRAW_REJECT_STAGE_BLEND: return "texture-stage-blend";
+    case CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL: return "sampler-lod-control";
+    case CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT: return "sampler-anisotropy-limit";
+    case CKFF_DRAW_REJECT_SAMPLER_LAYOUT: return "sampler-layout";
+    case CKFF_DRAW_REJECT_STATE_VALUE: return "state-value";
     case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
     default: return "none";
     }
+}
+
+static CKBOOL CKFFValueInRange(CKDWORD value, CKDWORD first, CKDWORD last)
+{
+    return value >= first && value <= last ? TRUE : FALSE;
+}
+
+static CKBOOL CKFFValidTextureArgument(CKDWORD value)
+{
+    if ((value & ~(CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE | 0x0fu)) != 0)
+        return FALSE;
+    return (value & 0x0fu) <= CKRST_TA_CONSTANT ? TRUE : FALSE;
+}
+
+static CKBOOL CKFFValidDrawStateValues(const CKDrawStateCache &drawState)
+{
+    if (!CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_FILLMODE),
+                          VXFILL_POINT, VXFILL_SOLID) ||
+        !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_SHADEMODE),
+                          VXSHADE_FLAT, VXSHADE_GOURAUD) ||
+        !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_CULLMODE),
+                          VXCULL_NONE, VXCULL_CCW)) {
+        return FALSE;
+    }
+    if (drawState.GetRenderState(VXRENDERSTATE_ZENABLE) &&
+        !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_ZFUNC),
+                          VXCMP_NEVER, VXCMP_ALWAYS)) {
+        return FALSE;
+    }
+    if (drawState.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE) &&
+        !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_ALPHAFUNC),
+                          VXCMP_NEVER, VXCMP_ALWAYS)) {
+        return FALSE;
+    }
+    if (drawState.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE) &&
+        (!CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_SRCBLEND),
+                           VXBLEND_ZERO, VXBLEND_BOTHINVSRCALPHA) ||
+         !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_DESTBLEND),
+                           VXBLEND_ZERO, VXBLEND_SRCALPHASAT) ||
+         !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_BLENDOP),
+                           VXBLENDOP_ADD, VXBLENDOP_MAX))) {
+        return FALSE;
+    }
+    if (drawState.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
+        (drawState.GetRenderState(VXRENDERSTATE_FOGPIXELMODE) > VXFOG_LINEAR ||
+         drawState.GetRenderState(VXRENDERSTATE_FOGVERTEXMODE) > VXFOG_LINEAR)) {
+        return FALSE;
+    }
+    if (drawState.GetRenderState(VXRENDERSTATE_STENCILENABLE)) {
+        if (!CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_STENCILFUNC),
+                              VXCMP_NEVER, VXCMP_ALWAYS) ||
+            !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_STENCILFAIL),
+                              VXSTENCILOP_KEEP, VXSTENCILOP_DECR) ||
+            !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_STENCILZFAIL),
+                              VXSTENCILOP_KEEP, VXSTENCILOP_DECR) ||
+            !CKFFValueInRange(drawState.GetRenderState(VXRENDERSTATE_STENCILPASS),
+                              VXSTENCILOP_KEEP, VXSTENCILOP_DECR)) {
+            return FALSE;
+        }
+    }
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if ((drawState.GetRenderState(
+                 (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & ~VXWRAP_MASK) != 0) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static CKBOOL CKFFValidTextureStageValues(const CKDWORD *stageState)
+{
+    if (!stageState)
+        return FALSE;
+    const CKDWORD transformFlags = stageState[CKRST_TSS_TEXTURETRANSFORMFLAGS];
+    if ((transformFlags & ~(0xffu | CKRST_TTF_PROJECTED)) != 0 ||
+        (transformFlags & 0xffu) > CKRST_TTF_COUNT4) {
+        return FALSE;
+    }
+    const CKDWORD texcoordIndex = CKFFTexcoordIndex(stageState[CKRST_TSS_TEXCOORDINDEX]);
+    const CKDWORD texgen = CKFFTexcoordGeneration(stageState[CKRST_TSS_TEXCOORDINDEX]);
+    if (texcoordIndex >= CKFF_MAX_TEXTURE_STAGES || texgen > CKFF_TEXGEN_SPHEREMAP)
+        return FALSE;
+
+    const CKDWORD addressStates[4] = {
+        stageState[CKRST_TSS_ADDRESS],
+        stageState[CKRST_TSS_ADDRESSU],
+        stageState[CKRST_TSS_ADDRESSV],
+        stageState[CKRST_TSS_ADDRESW]
+    };
+    for (int i = 0; i < 4; ++i) {
+        if (addressStates[i] != 0 &&
+            !CKFFValueInRange(addressStates[i], VXTEXTURE_ADDRESSWRAP,
+                              VXTEXTURE_ADDRESSMIRRORONCE)) {
+            return FALSE;
+        }
+    }
+    const CKDWORD filters[2] = {
+        stageState[CKRST_TSS_MINFILTER],
+        stageState[CKRST_TSS_MAGFILTER]
+    };
+    for (int i = 0; i < 2; ++i) {
+        if (filters[i] != 0 &&
+            !CKFFValueInRange(filters[i], VXTEXTUREFILTER_NEAREST,
+                              VXTEXTUREFILTER_ANISOTROPIC)) {
+            return FALSE;
+        }
+    }
+    const CKDWORD compareFunc = stageState[CKRST_TSS_COMPAREFUNC];
+    return compareFunc == CKRST_COMPARE_NONE ||
+           CKFFValueInRange(compareFunc, VXCMP_NEVER, VXCMP_ALWAYS);
 }
 
 CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
@@ -157,6 +274,10 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
+    if (!CKFFValidDrawStateValues(m_DrawStateCache) ||
+        (m_DrawStateCache.GetColorWriteMask() & ~CKRST_STATE_WRITE_RGBA) != 0) {
+        return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
+    }
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         return RecordDrawReject(CKFF_DRAW_REJECT_DITHER);
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
@@ -188,6 +309,8 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_TWEEN);
         return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT);
     }
+    if (vertexBlend.Indexed && m_State.VertexBlendPaletteOverflow)
+        return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE);
 
     if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
@@ -206,6 +329,20 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             break;
         const CKDWORD alphaOp = CKFFResolveStageAlphaOp(
             m_State.StageStates[stage], TRUE, textureBound);
+        if ((stateSetMask & (1ull << CKRST_TSS_STAGEBLEND)) != 0) {
+            CKDWORD ignoredColorOp = 0;
+            CKDWORD ignoredColorArg1 = 0;
+            CKDWORD ignoredColorArg2 = 0;
+            CKDWORD ignoredAlphaOp = 0;
+            CKDWORD ignoredAlphaArg1 = 0;
+            CKDWORD ignoredAlphaArg2 = 0;
+            if (!CKFFStageBlendToTextureOps(
+                    m_State.StageStates[stage][CKRST_TSS_STAGEBLEND],
+                    ignoredColorOp, ignoredColorArg1, ignoredColorArg2,
+                    ignoredAlphaOp, ignoredAlphaArg1, ignoredAlphaArg2)) {
+                return RecordDrawReject(CKFF_DRAW_REJECT_STAGE_BLEND);
+            }
+        }
         if (CKFFClassifyTextureOpCoverage(colorOp) !=
                 CKFF_COVERAGE_EXACT ||
             CKFFClassifyTextureOpCoverage(alphaOp) !=
@@ -227,9 +364,42 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             m_State.StageStates[stage], textureBound, stateSetMask);
         shaderStage.AlphaArg2 = CKFFResolveStageAlphaArg2(
             m_State.StageStates[stage], stateSetMask);
+        const CKDWORD resultArg = CKFFResolveStageResultArg(
+            m_State.StageStates[stage], stateSetMask);
+        if (!CKFFValidTextureArgument(shaderStage.ColorArg0) ||
+            !CKFFValidTextureArgument(shaderStage.ColorArg1) ||
+            !CKFFValidTextureArgument(shaderStage.ColorArg2) ||
+            !CKFFValidTextureArgument(shaderStage.AlphaArg0) ||
+            !CKFFValidTextureArgument(shaderStage.AlphaArg1) ||
+            !CKFFValidTextureArgument(shaderStage.AlphaArg2) ||
+            (resultArg != CKRST_TA_CURRENT && resultArg != CKRST_TA_TEMP)) {
+            return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
+        }
         const CKBOOL samplesTexture = textureBound &&
             CKFFShaderKeyStageUsesTexture(
                 shaderStage, previousColorOp, previousAlphaOp);
+        if (samplesTexture) {
+            if (!CKFFValidTextureStageValues(m_State.StageStates[stage]))
+                return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
+            const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
+            const CKDWORD lodBiasBits =
+                m_State.StageStates[stage][CKRST_TSS_MIPMAPLODBIAS];
+            float lodBias = 0.0f;
+            memcpy(&lodBias, &lodBiasBits, sizeof(lodBias));
+            if (sampler.MipFilter != CKRST_FILTER_NONE &&
+                (lodBias != 0.0f ||
+                 m_State.StageStates[stage][CKRST_TSS_MAXMIPMLEVEL] != 0)) {
+                return RecordDrawReject(CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL);
+            }
+            const CKBOOL anisotropic =
+                sampler.MinFilter == CKRST_FILTER_ANISOTROPIC ||
+                sampler.MagFilter == CKRST_FILTER_ANISOTROPIC ||
+                sampler.MipFilter == CKRST_FILTER_ANISOTROPIC;
+            if (anisotropic &&
+                m_State.StageStates[stage][CKRST_TSS_MAXANISOTROPY] > 1) {
+                return RecordDrawReject(CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT);
+            }
+        }
         if (!perspectiveTexture && samplesTexture)
             return RecordDrawReject(CKFF_DRAW_REJECT_AFFINE_TEXCOORD);
         if (originBottomLeft && samplesTexture &&
@@ -253,6 +423,51 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         previousColorOp = colorOp;
         previousAlphaOp = alphaOp;
     }
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
+    const VxDrawPrimitiveData *data,
+    CKDWORD formatFlags)
+{
+    const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        formatFlags);
+    if (!vertexBlend.Supported || !vertexBlend.Indexed ||
+        vertexBlend.Mode != CKFF_VERTEX_BLEND_NORMAL) {
+        return TRUE;
+    }
+    if (!data || !data->PositionPtr || data->VertexCount <= 0)
+        return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT);
+
+    const CKDWORD weightCount = CKVertexLayoutCache::DPFlagsToBlendWeightCount(data->Flags);
+    if (weightCount < vertexBlend.Count)
+        return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT);
+    const CKDWORD indexOffset = CKVertexLayoutCache::DPFlagsToBlendIndexOffset(data->Flags);
+    if (data->PositionStride < indexOffset + sizeof(CKDWORD))
+        return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT);
+
+    const CKDWORD usedIndexCount = vertexBlend.Count + 1;
+    for (int vertex = 0; vertex < data->VertexCount; ++vertex) {
+        CKDWORD packedIndices = 0;
+        const CKBYTE *src = (const CKBYTE *)data->PositionPtr +
+                            vertex * data->PositionStride + indexOffset;
+        memcpy(&packedIndices, src, sizeof(packedIndices));
+        for (CKDWORD slot = 0; slot < usedIndexCount; ++slot) {
+            if (((packedIndices >> (slot * 8)) & 0xffu) >=
+                CKFF_VERTEX_BLEND_MATRIX_COUNT) {
+                return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE);
+            }
+        }
+    }
+    return TRUE;
+}
+
+CKBOOL CKFixedFunctionPipeline::ValidateProgramSupport(const CKFFShaderKey &shaderKey)
+{
+    if (!m_ShaderCache.SupportsSamplerLayout(shaderKey))
+        return RecordDrawReject(CKFF_DRAW_REJECT_SAMPLER_LAYOUT);
     return TRUE;
 }
 
@@ -300,6 +515,20 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
     }
     m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
     bindingSet->ActiveStageCount = stageCount;
+    const CKFFSamplerLayoutKey samplerLayout = CKFFBuildSamplerLayoutKey(shaderKey.FS);
+    if (CKFFSamplerLayoutHasSingleCubeVolume(samplerLayout)) {
+        const CKFFUniformHandles &uniforms = m_ShaderCache.GetUniforms();
+        for (CKDWORD stage = 0; stage < bindingSet->ActiveTextureCount; ++stage) {
+            CKFFRenderPacketTextureBinding &binding = bindingSet->Bindings[stage];
+            if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME) {
+                binding.Stage = CKFF_MAX_TEXTURE_STAGES;
+                binding.Uniform = uniforms.s_textureVolume[0];
+            } else if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE) {
+                binding.Stage = CKFF_MAX_TEXTURE_STAGES + 1;
+                binding.Uniform = uniforms.s_textureCube[0];
+            }
+        }
+    }
     for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
         CKSamplerDesc &sampler = bindingSet->Bindings[i].Sampler;
         if (sampler.AddressU != CKRST_ADDRESS_BORDER &&
@@ -378,8 +607,19 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     }
 #endif
 
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
+        m_State.TextureHandles, m_State.StageStates);
+    if (!ValidateDrawState(formatFlags, activeTextureCount))
+        return FALSE;
+    if (!ValidateVertexBlendIndices(data, formatFlags))
+        return FALSE;
+
     // Prepare transient geometry
-    const CKDWORD wrapMode = m_DrawStateCache.GetRenderState(VXRENDERSTATE_WRAP0);
+    CKDWORD wrapModes[CKFF_MAX_TEXTURE_STAGES];
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        wrapModes[stage] = m_DrawStateCache.GetRenderState(
+            (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage));
+    }
     CKFFPointSpriteParams pointParams;
     pointParams.Size = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
     pointParams.MinSize = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
@@ -394,9 +634,9 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     {
         CKFF_SCOPE_TIME(m_Probes, PrepareUs);
         prepared = m_TransientGeometry.Prepare(
-            encoder, type, indices, indexCount, data, wrapMode,
+            encoder, type, indices, indexCount, data, wrapModes[0],
             m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams,
-            m_State.TexcoordComponentCounts);
+            m_State.TexcoordComponentCounts, wrapModes);
     }
     if (!prepared) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -410,10 +650,6 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
                                              m_TransientGeometry.GetLastIndexBytes()));
 
     // Build the fixed-function state description and select the matching program.
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        data->Flags, m_State.TextureHandles, m_State.StageStates);
-    if (!ValidateDrawState(formatFlags, activeTextureCount))
-        return FALSE;
     CKFFPreparedState preparedState;
     CKFFShaderKey shaderKey;
     {
@@ -422,6 +658,8 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
                                   formatFlags, m_State.TexcoordComponentCounts);
         shaderKey = CKFFBuildShaderKeyFromPreparedState(&preparedState);
     }
+    if (!ValidateProgramSupport(shaderKey))
+        return FALSE;
     CKFFProgramBinding programBinding;
     {
         CKFF_SCOPE_TIME(m_Probes, ProgramUs);
@@ -505,10 +743,14 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
 {
     if (!encoder || !vb || vertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, m_State.TextureHandles, m_State.StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
+        m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(formatFlags, activeTextureCount))
         return FALSE;
+    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
+        return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE);
+    }
     const CKBOOL drawn = m_OpaquePackets.DrawVertexBuffer(
         *this, encoder, view, type, vb, ib,
         baseVertex, vertexCount, startIndex, indexCount,
@@ -662,8 +904,8 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     }
 #endif
 
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, m_State.TextureHandles, m_State.StageStates);
+    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
+        m_State.TextureHandles, m_State.StageStates);
     CKFFPreparedState preparedState;
     CKFFShaderKey shaderKey;
     {
@@ -671,6 +913,8 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
         BuildCurrentPreparedState(&preparedState, dpFlags, activeTextureCount, formatFlags);
         shaderKey = CKFFBuildShaderKeyFromPreparedState(&preparedState);
     }
+    if (!ValidateProgramSupport(shaderKey))
+        return FALSE;
     CKFFProgramBinding programBinding;
     {
         CKFF_SCOPE_TIME(m_Probes, ProgramUs);

@@ -32,7 +32,7 @@ static CKDWORD CKFFCurrentTextureMatrixUploadCount(
     for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
         const CKDWORD flags = stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
         const CKDWORD componentCount = flags & 0xFFu;
-        if (componentCount > 1 && componentCount <= 4)
+        if (componentCount >= 1 && componentCount <= 4)
             count = stage + 1;
     }
     return count;

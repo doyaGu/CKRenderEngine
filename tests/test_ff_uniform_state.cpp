@@ -652,23 +652,23 @@ void TextureCombinerTempInitializesAlphaToZero() {
               "FFP TEMP alpha must not initialize to one");
 }
 
-void DepthTextureCompareUsesVxCompareOrdering() {
+void DepthTextureCompareUsesSamplerCompareOrdering() {
     const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
-    TestCheck(contents.find("if (func == 1) return 0.0") != std::string::npos,
-              "VXCMP_NEVER must always fail shader depth compares");
-    TestCheck(contents.find("if (func == 2) return depth < ref ? 1.0 : 0.0") != std::string::npos,
-              "VXCMP_LESS must use strict less-than shader depth compare");
-    TestCheck(contents.find("if (func == 3) return depth == ref ? 1.0 : 0.0") != std::string::npos,
-              "VXCMP_EQUAL must use equality shader depth compare");
-    TestCheck(contents.find("if (func == 4) return depth <= ref ? 1.0 : 0.0") != std::string::npos,
-              "VXCMP_LESSEQUAL must use less-or-equal shader depth compare");
-    TestCheck(contents.find("if (func == 7) return depth >= ref ? 1.0 : 0.0") != std::string::npos,
-              "VXCMP_GREATEREQUAL must use greater-or-equal shader depth compare");
+    TestCheck(contents.find("if (func == 1) return ref < depth ? 1.0 : 0.0") != std::string::npos,
+              "CKRST_COMPARE_LESS must compare reference against sampled depth");
+    TestCheck(contents.find("if (func == 2) return ref <= depth ? 1.0 : 0.0") != std::string::npos,
+              "CKRST_COMPARE_LEQUAL must compare reference against sampled depth");
+    TestCheck(contents.find("if (func == 3) return ref == depth ? 1.0 : 0.0") != std::string::npos,
+              "CKRST_COMPARE_EQUAL must compare reference against sampled depth");
+    TestCheck(contents.find("if (func == 4) return ref >= depth ? 1.0 : 0.0") != std::string::npos,
+              "CKRST_COMPARE_GEQUAL must compare reference against sampled depth");
+    TestCheck(contents.find("if (func == 7) return 0.0") != std::string::npos,
+              "CKRST_COMPARE_NEVER must always fail shader depth compares");
     TestCheck(contents.find("if (func == 8) return 1.0") != std::string::npos,
-              "VXCMP_ALWAYS must always pass shader depth compares");
+              "CKRST_COMPARE_ALWAYS must always pass shader depth compares");
 }
 
 void Runtime3DVertexShaderKeepsAdditionalTexcoordsActive() {
@@ -1282,8 +1282,8 @@ int main() {
               &AlphaTestPrecisionFollowsRenderTargetAlphaMask);
     tests.Run("Texture combiner TEMP initializes alpha to zero",
               &TextureCombinerTempInitializesAlphaToZero);
-    tests.Run("Depth texture compare uses VX compare ordering",
-              &DepthTextureCompareUsesVxCompareOrdering);
+    tests.Run("Depth texture compare uses sampler compare ordering",
+              &DepthTextureCompareUsesSamplerCompareOrdering);
     tests.Run("Runtime 3D vertex shader keeps additional texcoords active",
               &Runtime3DVertexShaderKeepsAdditionalTexcoordsActive);
     tests.Run("Runtime POSITIONT vertex shader keeps additional texcoords active",

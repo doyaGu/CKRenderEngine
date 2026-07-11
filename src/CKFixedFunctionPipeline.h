@@ -44,6 +44,7 @@ enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_STENCIL_WRITE_MASK,
     CKFF_DRAW_REJECT_VERTEX_TWEEN,
     CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT,
+    CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE,
     CKFF_DRAW_REJECT_AFFINE_TEXCOORD,
     CKFF_DRAW_REJECT_TEXTURE_OP,
     CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
@@ -54,6 +55,11 @@ enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_LINE_PATTERN,
     CKFF_DRAW_REJECT_EDGE_ANTIALIAS,
     CKFF_DRAW_REJECT_CLIPPING_DISABLED,
+    CKFF_DRAW_REJECT_STAGE_BLEND,
+    CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL,
+    CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT,
+    CKFF_DRAW_REJECT_SAMPLER_LAYOUT,
+    CKFF_DRAW_REJECT_STATE_VALUE,
     CKFF_DRAW_REJECT_ENCODER_ERROR,
     CKFF_DRAW_REJECT_COUNT
 };
@@ -93,7 +99,7 @@ public:
     void SetUserClipPlane(int index, const VxPlane &plane);
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
-    void SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
+    CKBOOL SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
     void ResetVertexBlendMatrices();
     void SetTexcoordComponentCount(CKDWORD stage, CKDWORD count);
     void ResetTexcoordComponentCounts();
@@ -171,6 +177,7 @@ public:
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);
+    CKBOOL ValidateProgramSupport(const CKFFShaderKey &shaderKey);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                      const CKFFProgramContext *programContext,
                                      CKDWORD activeTextureCount);
@@ -242,6 +249,8 @@ private:
     void MarkStaticUniformsDirty();
     void MarkPacketProgramDirty();
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
+    CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
+                                      CKDWORD formatFlags);
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
     CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
