@@ -486,6 +486,57 @@ void OpaquePacketVertexBlendFallsBackImmediate()
     ffp.Shutdown();
 }
 
+void OpaquePacketReplayStopsAfterEncoderFailure()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 300, 400);
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 500, 600);
+    context.Encoder.SubmitError = CKERR_INVALIDPARAMETER;
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "Opaque packet replay must stop after the first failed submit");
+    TestCheck(context.Encoder.GetStatus() == CKERR_INVALIDPARAMETER,
+              "Opaque packet replay must preserve the encoder failure");
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Failed opaque packet replay must clear the consumed frame queue");
+
+    context.Encoder.Status = CK_OK;
+    context.Encoder.SubmitError = CK_OK;
+    ffp.Shutdown();
+}
+
+void OpaquePacketReplayStopsBeforeSubmitAfterBindingFailure()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200);
+    DrawPacketCandidate(&ffp, &context, CKRP_VIEW_OPAQUE3D, 300, 400);
+    context.Encoder.StateError = CKERR_INVALIDPARAMETER;
+
+    ffp.FlushOpaqueRenderPackets(&context.Encoder);
+
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "Opaque packet binding failure must stop before backend submit");
+    TestCheck(context.Encoder.GetStatus() == CKERR_INVALIDPARAMETER,
+              "Opaque packet replay must preserve a state-binding failure");
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Failed opaque packet replay must clear the consumed frame queue");
+
+    context.Encoder.Status = CK_OK;
+    context.Encoder.StateError = CK_OK;
+    ffp.Shutdown();
+}
+
 void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
 {
     FFPDiagnosticDriver driver;
@@ -566,6 +617,56 @@ void OpaquePacketTextureHandleChangeKeepsStaticPayload()
 
     ffpA.Shutdown();
     ffpB.Shutdown();
+}
+
+void OpaquePacketIgnoresUnusedTextureBindings()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTexture(0, 3000, CKRST_TEXTURE_VALID);
+
+    CKFFVertexBufferPacketBuildResult first;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &first, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM,
+        CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
+        77);
+
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF102030u);
+    ffp.SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LESS);
+    ffp.SetTexture(0, 3001, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+
+    CKFFVertexBufferPacketBuildResult second;
+    CKFFPipelineTestAccess::BuildVertexBufferPacket(
+        &ffp, &second, &context.Encoder,
+        CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+        100, 200, 0, 3, 0, 3,
+        CKRST_DP_TRANSFORM,
+        CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
+        77);
+
+    TestCheck(first.Success && second.Success,
+              "Unused texture state must not prevent opaque packet capture");
+    TestCheck(first.ProgramContext.ShaderKey == second.ProgramContext.ShaderKey,
+              "Unused sampler type and compare state must not split packet shader keys");
+    TestCheck(first.TextureBindingSet.ActiveTextureCount == 0 &&
+                  second.TextureBindingSet.ActiveTextureCount == 0 &&
+                  first.TextureBindingSet.Hash == second.TextureBindingSet.Hash,
+              "Unused texture handles and samplers must not split packet texture sets");
+    TestCheck(context.PaletteSetCount == 0,
+              "Unused packet textures must not allocate border palette slots");
+
+    ffp.Shutdown();
 }
 
 void OpaquePacketTextureKindChangeRebuildsStaticPayload()
@@ -1485,6 +1586,10 @@ int main()
               &OpaqueVertexBufferDrawQueuesUntilFlush);
     tests.Run("Small opaque packet flush skips sorting",
               &OpaquePacketFlushSortsAndSkipsRepeatedBufferBinding);
+    tests.Run("Opaque packet replay stops after encoder failure",
+              &OpaquePacketReplayStopsAfterEncoderFailure);
+    tests.Run("Opaque packet replay stops before submit after binding failure",
+              &OpaquePacketReplayStopsBeforeSubmitAfterBindingFailure);
     tests.Run("Large opaque packet flush preserves submission order",
               &LargeOpaquePacketFlushPreservesSubmissionOrder);
     tests.Run("Opaque packet runs remain consecutive",
@@ -1501,6 +1606,8 @@ int main()
               &OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
+    tests.Run("Opaque packet ignores unused texture bindings",
+              &OpaquePacketIgnoresUnusedTextureBindings);
     tests.Run("Opaque packet texture kind change rebuilds static payload",
               &OpaquePacketTextureKindChangeRebuildsStaticPayload);
     tests.Run("Static uniform payload order and hash stays stable",
