@@ -57,6 +57,8 @@ public:
     CKDWORD LastTextureUniform = 0;
     CKDWORD LastTextureHandle = 0;
     CKSamplerDesc LastTextureSampler = {};
+    float LastPointSize = 0.0f;
+    CKDWORD PointSizeSetCount = 0;
     CKDWORD VertexBufferSetCount = 0;
     CKDWORD IndexBufferSetCount = 0;
     CKDWORD SubmitFlags[32] = {};
@@ -98,7 +100,10 @@ public:
         ++StencilMaskSetCount;
     }
     void SetScissor(const CKRECT *) override {}
-    void SetPointSize(float) override {}
+    void SetPointSize(float size) override {
+        LastPointSize = size;
+        ++PointSizeSetCount;
+    }
     void SetTransform(CKDWORD, CKDWORD) override {}
     void SetVertexBuffer(CKDWORD, CKDWORD buffer, CKDWORD, CKDWORD, CKDWORD) override {
         if (VertexBufferSetCount < 32)

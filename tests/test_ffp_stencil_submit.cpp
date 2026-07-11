@@ -702,7 +702,7 @@ void ClipPlanesUseDedicatedVertexShaderVariant() {
     ffp.Shutdown();
 }
 
-void ResultArgTempClearsOnlyLastActiveStage() {
+void ResultArgTempPreservesEveryActiveStage() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -723,8 +723,8 @@ void ResultArgTempClearsOnlyLastActiveStage() {
 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
               "Non-final active stage must preserve RESULTARG=TEMP");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE1_RESULT_IS_TEMP) == 0,
-              "Final active stage must write to current even when RESULTARG=TEMP");
+    TestCheck(spec.Get(CKFF_SPEC_STAGE1_RESULT_IS_TEMP) == 1,
+              "Final TEMP writes must leave the final CURRENT color unchanged");
 
     ffp.Shutdown();
 }
@@ -1754,6 +1754,17 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     const float pointSize = 2.0f;
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(pointSize));
+    ffp.SetTexture(0, 100);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(
+        0, CKRST_TSS_TEXCOORDINDEX,
+        CKFFPackTexcoordIndex(3, CKFF_TEXGEN_CAMERASPACEPOSITION));
+    ffp.SetTextureStageState(
+        0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+        CKRST_TTF_COUNT3 | CKRST_TTF_PROJECTED);
 
     ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST, nullptr, 1, &data);
 
@@ -1766,6 +1777,19 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
               "One point sprite must expand to four transient vertices");
     TestCheck(context.Encoder.LastIndexBytes.size() == sizeof(CKWORD) * 6,
               "One point sprite must expand to six transient indices");
+
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) == 0,
+              "point sprite sampling must bypass projected texture coordinates");
+    const CKDWORD stageUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator packedStage =
+        context.Encoder.FloatUniforms.find(stageUniform);
+    const int colorExtra = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA) * 4;
+    TestCheck(packedStage != context.Encoder.FloatUniforms.end() &&
+                  packedStage->second.size() > (size_t)(colorExtra + 2) &&
+                  packedStage->second[colorExtra + 1] == 0.0f &&
+                  packedStage->second[colorExtra + 2] == 0.0f,
+              "point sprite runtime params must bypass texgen and texture matrices");
 
     float uv0[2], uv1[2], uv2[2], uv3[2];
     memcpy(uv0, &context.Encoder.LastVertexBytes[12], sizeof(uv0));
@@ -1780,6 +1804,83 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
               "Point sprite vertex 2 must use UV (1,1)");
     TestCheck(uv3[0] == 0.0f && uv3[1] == 1.0f,
               "Point sprite vertex 3 must use UV (0,1)");
+
+    ffp.Shutdown();
+}
+
+void PointSizeExpandsWithoutSpriteTexcoordReplacement() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector position(0.0f, 0.0f, 0.0f);
+    Vx2DVector uv(0.25f, 0.75f);
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
+    data.PositionPtr = &position;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = &uv;
+    data.TexCoordStride = sizeof(Vx2DVector);
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(2.0f));
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST,
+                                NULL, 0, &data) == TRUE,
+              "point size must expand point primitives without sprite mode");
+    TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_TRIANGLELIST,
+              "expanded point primitives must submit triangle-list topology");
+    const CKDWORD stride = 36;
+    TestCheck(context.Encoder.LastVertexBytes.size() == stride * 4,
+              "point size must expand one point to four vertices");
+    if (context.Encoder.LastVertexBytes.size() == stride * 4) {
+        for (CKDWORD vertex = 0; vertex < 4; ++vertex) {
+            float expandedUV[2] = {};
+            memcpy(expandedUV,
+                   &context.Encoder.LastVertexBytes[vertex * stride + 12],
+                   sizeof(expandedUV));
+            TestCheck(fabsf(expandedUV[0] - 0.25f) < 0.0001f &&
+                          fabsf(expandedUV[1] - 0.75f) < 0.0001f,
+                      "sprite-disabled point expansion must duplicate source texcoords");
+        }
+    }
+    ffp.Shutdown();
+}
+
+void PersistentPointBuffersRejectUnsupportedModesAndSetExactSize() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(4.0f));
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
+                                   1, 0, 0, 1, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE,
+              "integer constant point size must submit through native point state");
+    TestCheck(context.Encoder.PointSizeSetCount == 1 &&
+                  context.Encoder.LastPointSize == 4.0f,
+              "persistent point buffers must submit their exact constant point size");
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
+                                   1, 0, 0, 1, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE,
+              "persistent point sprites must reject without fragment point coordinates");
+    TestCheck(ffp.GetLastDrawRejectReason() ==
+                  CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
+              "persistent point sprite rejection must be explicit");
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(1.5f));
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
+                                   1, 0, 0, 1, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE,
+              "fractional persistent point size must not be rounded silently");
+    TestCheck(ffp.GetLastDrawRejectReason() ==
+                  CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
+              "fractional point size rejection must be explicit");
 
     ffp.Shutdown();
 }
@@ -1802,20 +1903,20 @@ void WrappedLineStripSubmitsAsLineList() {
     };
     VxDrawPrimitiveData data = {};
     data.VertexCount = 3;
-    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V | CKRST_DP_STAGES1;
     data.PositionPtr = positions;
     data.PositionStride = sizeof(VxVector);
-    data.TexCoordPtr = texcoords;
-    data.TexCoordStride = sizeof(Vx2DVector);
+    data.TexCoordPtrs[0] = texcoords;
+    data.TexCoordStrides[0] = sizeof(Vx2DVector);
 
-    ffp.SetRenderState(VXRENDERSTATE_WRAP0, VXWRAP_U);
+    ffp.SetRenderState(VXRENDERSTATE_WRAP1, VXWRAP_U);
     TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_LINESTRIP,
                                 NULL, 0, &data) == TRUE,
               "Wrapped line strip draw must submit");
     TestCheck(DrawStateTopology(context.Encoder.LastState) == VX_LINELIST,
               "Wrapped line strip must submit its expanded line-list topology");
 
-    data.TexCoordPtr = NULL;
+    data.TexCoordPtrs[0] = NULL;
     data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
     TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_LINESTRIP,
                                 NULL, 0, &data) == TRUE,
@@ -1850,6 +1951,10 @@ void PointSpriteUsesPerVertexPointSize() {
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(2.0f));
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE_MIN, FloatStageState(1.0f));
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE_MAX, FloatStageState(4.0f));
+    CKViewportData viewport;
+    viewport.ViewWidth = 100;
+    viewport.ViewHeight = 50;
+    ffp.SetViewport(viewport);
 
     ffp.DrawPrimitive(&context.Encoder, 1, VX_POINTLIST, nullptr, 1, &data);
 
@@ -1861,8 +1966,8 @@ void PointSpriteUsesPerVertexPointSize() {
         float p1[3] = {};
         memcpy(p0, &context.Encoder.LastVertexBytes[0], sizeof(p0));
         memcpy(p1, &context.Encoder.LastVertexBytes[stride], sizeof(p1));
-        TestCheck(fabsf(p0[0] + 2.0f) < 0.001f && fabsf(p1[0] - 2.0f) < 0.001f,
-                  "Per-vertex point size must drive sprite width after max clamp");
+        TestCheck(fabsf(p0[0] + 0.04f) < 0.001f && fabsf(p1[0] - 0.04f) < 0.001f,
+                  "Per-vertex point size must produce four screen pixels after max clamp");
         TestCheck(fabsf(p0[1] - p1[1]) < 0.001f,
                   "Adjacent point sprite corners must stay on the same edge");
     }
@@ -1941,9 +2046,9 @@ void DrawUploadsPerStageBumpEnvUniforms() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(&context);
 
-    ffp.SetTexture(0, 100);
+    ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
     ffp.SetTexture(1, 101);
-    ffp.SetTexture(2, 102);
+    ffp.SetTexture(2, 102, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
     ffp.SetTexture(3, 103);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
@@ -1954,7 +2059,7 @@ void DrawUploadsPerStageBumpEnvUniforms() {
     ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLSCALE, FloatStageState(5.0f));
     ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLOFFSET, FloatStageState(6.0f));
 
-    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+    ffp.SetTextureStageState(2, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
     ffp.SetTextureStageState(2, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT00, FloatStageState(7.0f));
     ffp.SetTextureStageState(2, CKRST_TSS_BUMPENVMAT01, FloatStageState(8.0f));
@@ -1985,6 +2090,60 @@ void DrawUploadsPerStageBumpEnvUniforms() {
               "Stage 2 bump env data must occupy slots 4 and 5");
 
     ffp.Shutdown();
+}
+
+void UnsupportedBumpInputsRejectExplicitly() {
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        ffp.Init(&context);
+        ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID);
+        ffp.SetTexture(1, 101);
+        ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+        ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                        1, 0, 0, 3, 0, 0,
+                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "unsigned textures must not silently enter signed bump mapping");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
+                  "unsigned bump mapping must report texture-op rejection");
+        ffp.Shutdown();
+    }
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        ffp.Init(&context);
+        ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
+        ffp.SetTexture(1, 101);
+        ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+        ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                        1, 0, 0, 3, 0, 0,
+                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "unsupported luminance bump mapping must reject");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
+                  "luminance bump mapping must report texture-op rejection");
+        ffp.Shutdown();
+    }
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        ffp.Init(&context);
+        ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
+        ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+        ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+        ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAP);
+        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                        1, 0, 0, 3, 0, 0,
+                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "BUMPENVMAP must not be accepted as an alpha-only operation");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
+                  "alpha bump mapping must report texture-op rejection");
+        ffp.Shutdown();
+    }
 }
 
 bool LayoutHasAttrib(const std::vector<CKVertexElementDesc> &elements, CK_VERTEX_ATTRIB attrib) {
@@ -2635,8 +2794,8 @@ int main() {
               &DrawVertexBufferSkipsClipUniformsWhenDisabled);
     tests.Run("Clip planes use dedicated vertex shader variant",
               &ClipPlanesUseDedicatedVertexShaderVariant);
-    tests.Run("RESULTARG TEMP clears only last active stage",
-              &ResultArgTempClearsOnlyLastActiveStage);
+    tests.Run("RESULTARG TEMP preserves every active stage",
+              &ResultArgTempPreservesEveryActiveStage);
     tests.Run("MODULATE4X stays in texture stage specialization",
               &Modulate4XStaysInTextureStageSpecialization);
     tests.Run("PREMODULATE stays in texture stage specialization",
@@ -2685,6 +2844,10 @@ int main() {
               &LegacyTextureMapBlendClearsExplicitStageOps);
     tests.Run("Point sprite DrawPrimitive expands to triangle list",
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
+    tests.Run("Point size expands without sprite texcoord replacement",
+              &PointSizeExpandsWithoutSpriteTexcoordReplacement);
+    tests.Run("Persistent point buffers reject unsupported modes and set exact size",
+              &PersistentPointBuffersRejectUnsupportedModesAndSetExactSize);
     tests.Run("Wrapped line strip submits as line list",
               &WrappedLineStripSubmitsAsLineList);
     tests.Run("Point sprite uses per-vertex point size",
@@ -2707,6 +2870,8 @@ int main() {
               &ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams);
     tests.Run("Draw uploads per-stage bump env uniforms",
               &DrawUploadsPerStageBumpEnvUniforms);
+    tests.Run("Unsupported bump inputs reject explicitly",
+              &UnsupportedBumpInputsRejectExplicitly);
     tests.Run("Vertex blend zero weights uploads matrix palette",
               &VertexBlendZeroWeightsUploadsMatrixPalette);
     tests.Run("Vertex blend uploads world matrix palette for clip planes",

@@ -669,6 +669,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
     ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_RESULTARG0, CKRST_TA_CURRENT);
     ffp.DisableTextureStagesFrom(1);
 
     XArray<CKBYTE> pixels;
@@ -720,10 +721,60 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                "texture-stage saturation mismatch: BGRA=(%u,%u,%u,%u)",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+
+    // A disabled alpha operation preserves the selected TEMP destination alpha.
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
+    ffp.SetTextureStageState(0, CKRST_TSS_RESULTARG0, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(0, CKRST_TSS_CONSTANT, 0xFFFF0000u);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(1, CKRST_TSS_RESULTARG0, CKRST_TA_CURRENT);
+    ffp.DisableTextureStagesFrom(2);
+    BeginPixelFrame(ffp, context, resources);
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                flatPositions, whiteColors),
+              "TEMP alpha-preservation pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 0, 0, 0),
+               "disabled TEMP alpha must preserve zero and fail alpha test: BGRA=(%u,%u,%u,%u)",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+
+    // The framebuffer always consumes CURRENT, even when the final stage writes TEMP.
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CONSTANT);
+    ffp.SetTextureStageState(1, CKRST_TSS_RESULTARG0, CKRST_TA_TEMP);
+    ffp.SetTextureStageState(1, CKRST_TSS_CONSTANT, 0xFF0000FFu);
+    BeginPixelFrame(ffp, context, resources);
+    const CKDWORD tempCurrentGreen[3] = {
+        0xFF00FF00u, 0xFF00FF00u, 0xFF00FF00u
+    };
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                flatPositions, tempCurrentGreen),
+              "final TEMP destination pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 0, 255, 0),
+               "final TEMP write must leave CURRENT diffuse color unchanged: BGRA=(%u,%u,%u,%u)",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
     ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_RESULTARG0, CKRST_TA_CURRENT);
     ffp.DisableTextureStagesFrom(1);
 
     // A farther draw submitted second must fail the D3D-style LESS_EQUAL depth test.
@@ -875,7 +926,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=10 tolerance=24\n");
+    printf("  coverage: backendPixelCases=12 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()

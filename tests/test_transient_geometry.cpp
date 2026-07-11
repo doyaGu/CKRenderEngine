@@ -427,6 +427,121 @@ static void LargePointSpriteBatchUses32BitIndices()
     }
 }
 
+static void IndexedPointSpritesUseSelectedVertices()
+{
+    TransientGeometryHarness harness;
+    VxVector positions[3] = {
+        VxVector(1.0f, 2.0f, 0.0f),
+        VxVector(10.0f, 20.0f, 0.0f),
+        VxVector(30.0f, 40.0f, 0.0f)
+    };
+    CKWORD indices[2] = {2, 0};
+    VxDrawPrimitiveData data = {};
+    CKFFPointSpriteParams params = {};
+    params.Size = 2.0f;
+    params.MinSize = 1.0f;
+    params.MaxSize = 64.0f;
+    params.World.Identity();
+    params.View.Identity();
+    params.Projection.Identity();
+    params.ViewportWidth = 2.0f;
+    params.ViewportHeight = 2.0f;
+
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_POINTLIST, indices, 2, &data,
+                                       0, TRUE, &params, NULL) == TRUE,
+              "indexed point sprites should prepare selected vertices");
+    const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+    const size_t stride = harness.Context.Encoder.LastVertexBytes.size() / 8;
+    TestCheck(stride > 0 &&
+                  fabs(ReadFloat(vertices) - 29.0f) < 0.0001f &&
+                  fabs(ReadFloat(vertices + stride * 4) - 0.0f) < 0.0001f,
+              "indexed point sprites must expand vertices in index order");
+}
+
+static void PointSpritesReplaceEveryDeclaredTexcoord()
+{
+    TransientGeometryHarness harness;
+    VxVector position(0.0f, 0.0f, 0.0f);
+    float texcoord0[2] = {0.25f, 0.5f};
+    float texcoord1[2] = {0.75f, 0.125f};
+    VxDrawPrimitiveData data = {};
+    CKFFPointSpriteParams params = {};
+    params.Size = 2.0f;
+    params.MinSize = 1.0f;
+    params.MaxSize = 64.0f;
+    params.World.Identity();
+    params.View.Identity();
+    params.Projection.Identity();
+    params.ViewportWidth = 2.0f;
+    params.ViewportHeight = 2.0f;
+
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_STAGES1;
+    data.PositionPtr = &position;
+    data.PositionStride = sizeof(position);
+    data.TexCoordPtr = texcoord0;
+    data.TexCoordStride = sizeof(texcoord0);
+    data.TexCoordPtrs[0] = texcoord1;
+    data.TexCoordStrides[0] = sizeof(texcoord1);
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_POINTLIST, NULL, 0, &data,
+                                       0, TRUE, &params, NULL) == TRUE,
+              "multistage point sprite should prepare");
+    const CKDWORD stride = 52;
+    const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == stride * 4,
+              "multistage point sprite must emit four complete vertices");
+    if (harness.Context.Encoder.LastVertexBytes.size() == stride * 4) {
+        TestCheck(ReadFloat(vertices + 12) == 0.0f &&
+                      ReadFloat(vertices + 16) == 0.0f &&
+                      ReadFloat(vertices + 28) == 0.0f &&
+                      ReadFloat(vertices + 32) == 0.0f,
+                  "first point corner must replace every texcoord with zero");
+        TestCheck(ReadFloat(vertices + stride + 12) == 1.0f &&
+                      ReadFloat(vertices + stride + 16) == 0.0f &&
+                      ReadFloat(vertices + stride + 28) == 1.0f &&
+                      ReadFloat(vertices + stride + 32) == 0.0f,
+                  "second point corner must replace every texcoord with point UV");
+    }
+}
+
+static void InvalidTransientIndexIsRejected()
+{
+    TransientGeometryHarness harness;
+    VxVector positions[2] = {
+        VxVector(0.0f, 0.0f, 0.0f),
+        VxVector(1.0f, 0.0f, 0.0f)
+    };
+    CKWORD indices[2] = {0, 2};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_LINELIST, indices, 2, &data) == FALSE,
+              "transient geometry must reject out-of-range indices");
+    TestCheck(harness.Context.Encoder.LastVertexBytes.empty(),
+              "invalid indices must be rejected before transient allocation");
+}
+
+static void PointScaleClampsAfterViewportConversion()
+{
+    const float size = CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        2.0f, 1.0f, 10.0f, TRUE,
+        4.0f, 0.0f, 0.0f, 5.0f, 100.0f);
+    TestCheck(fabsf(size - 10.0f) < 0.0001f,
+              "point scaling must clamp the final screen-space size");
+}
+
 static void InitSpriteBatchData(VxDrawPrimitiveData *data,
                                 CKVertex *vertices,
                                 int vertexCount,
@@ -562,6 +677,14 @@ int main()
               &LineWrapHandlesLargeCoordinateSpans);
     tests.Run("large point sprite batch uses 32-bit indices",
               &LargePointSpriteBatchUses32BitIndices);
+    tests.Run("indexed point sprites use selected vertices",
+              &IndexedPointSpritesUseSelectedVertices);
+    tests.Run("point sprites replace every declared texcoord",
+              &PointSpritesReplaceEveryDeclaredTexcoord);
+    tests.Run("invalid transient index is rejected",
+              &InvalidTransientIndexIsRejected);
+    tests.Run("point scale clamps after viewport conversion",
+              &PointScaleClampsAfterViewportConversion);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
     tests.Run("non-batch triangle list uses generic path", &NonBatchTriangleListUsesGenericPath);
     return tests.ExitCode();

@@ -132,15 +132,19 @@ void TextureOpsAndArgsDriveTextureDependency()
                     SetStageColorArg(desc, stage, slot, arg);
 
                     const bool slotUsed = (opMask & (1u << slot)) != 0;
-                    const bool expectedHasTexture = op != CKRST_TOP_DISABLE &&
+                    const bool explicitTextureDependency = op != CKRST_TOP_DISABLE &&
                         slotUsed && FFPCoverageArgUsesTexture(arg);
+                    const bool bumpTextureDependency = op == CKRST_TOP_BUMPENVMAP ||
+                        op == CKRST_TOP_BUMPENVMAPLUMINANCE;
+                    const bool expectedColorHasTexture = explicitTextureDependency ||
+                        bumpTextureDependency;
                     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1u << stage);
 
-                    TestCheckf(key.Stages[stage].HasTexture == expectedHasTexture,
+                    TestCheckf(key.Stages[stage].HasTexture == expectedColorHasTexture,
                                "Color op %s stage %u slot %u arg %s texture dependency mismatch",
                                kFFPCoverageTextureOps[opIndex].Name, stage, slot,
                                kFFPCoverageTextureArgs[argIndex].Name);
-                    if (expectedHasTexture)
+                    if (expectedColorHasTexture)
                         ++textureDependent;
                     ++checked;
 
@@ -152,7 +156,7 @@ void TextureOpsAndArgsDriveTextureDependency()
                     SetStageAlphaArg(desc, stage, slot, arg);
                     key = CKFFBuildShaderKeyFS(desc, 1u << stage);
 
-                    TestCheckf(key.Stages[stage].HasTexture == expectedHasTexture,
+                    TestCheckf(key.Stages[stage].HasTexture == explicitTextureDependency,
                                "Alpha op %s stage %u slot %u arg %s texture dependency mismatch",
                                kFFPCoverageTextureOps[opIndex].Name, stage, slot,
                                kFFPCoverageTextureArgs[argIndex].Name);
