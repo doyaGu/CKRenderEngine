@@ -125,6 +125,18 @@ void AntialiasStateMapsToMsaa() {
               "Disabling legacy antialias state must clear rasterizer MSAA");
 }
 
+void DisabledDepthBufferCannotWriteDepth() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    cache.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+
+    const CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((state.Lo & CKRST_STATE_DEPTH_TEST) == 0,
+              "Disabled depth buffering must clear the depth test");
+    TestCheck((state.Lo & CKRST_STATE_DEPTH_WRITE) == 0,
+              "Disabled depth buffering must also clear depth writes");
+}
+
 } // namespace
 
 int main() {
@@ -141,5 +153,7 @@ int main() {
               &StencilWriteMaskInvalidatesCachedDrawState);
     tests.Run("Antialias state maps to MSAA",
               &AntialiasStateMapsToMsaa);
+    tests.Run("Disabled depth buffer cannot write depth",
+              &DisabledDepthBufferCannotWriteDepth);
     return tests.ExitCode();
 }
