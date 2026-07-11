@@ -8,6 +8,8 @@
 #include "XHashTable.h"
 #include <stdint.h>
 
+#define CKFF_MAX_PROGRAM_BINDINGS 4096
+
 class CKRasterizerContext;
 
 enum CKFFShaderMode {
@@ -97,6 +99,7 @@ public:
     // Select the fixed-function program for the given FFP shader key.
     // Returns the program handle (0 if unavailable).
     CKFFProgramBinding GetProgram(const CKFFShaderKey &key);
+    CKBOOL SupportsSamplerLayout(const CKFFShaderKey &key) const;
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
@@ -115,6 +118,7 @@ public:
     }
     size_t CachedProgramCount() const { return (size_t)m_ModuleProgramCache.Size(); }
     size_t CachedBindingCount() const { return (size_t)m_ProgramCache.Size(); }
+    size_t MaxCachedBindingCount() const { return CKFF_MAX_PROGRAM_BINDINGS; }
 
 private:
     CKRasterizerContext *m_Context;

@@ -56,6 +56,30 @@ inline bool CKFFSamplerLayoutNeedsMixedCubeVolume(const CKFFSamplerLayoutKey &la
     return CKFFSamplerLayoutNeedsCubeSampler(layout) && CKFFSamplerLayoutNeedsVolumeSampler(layout);
 }
 
+inline CKDWORD CKFFSamplerLayoutTypeCount(const CKFFSamplerLayoutKey &layout,
+                                          CKDWORD samplerType) {
+    CKDWORD count = 0;
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+        if (CKFFSamplerLayoutStageType(layout, stage) == samplerType)
+            ++count;
+    }
+    return count;
+}
+
+inline bool CKFFSamplerLayoutHasSingleCubeVolume(const CKFFSamplerLayoutKey &layout) {
+    return CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_CUBE) == 1 &&
+           CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_VOLUME) == 1;
+}
+
+inline CKFFSamplerLayoutKey CKFFCanonicalSamplerLayoutKey(
+    const CKFFSamplerLayoutKey &layout) {
+    if (!CKFFSamplerLayoutHasSingleCubeVolume(layout))
+        return layout;
+    CKFFSamplerLayoutKey canonical;
+    canonical.Bits = CKFF_SAMPLER_VOLUME | (CKFF_SAMPLER_CUBE << 2);
+    return canonical;
+}
+
 inline void CKFFFormatSamplerLayoutStageTypes(const CKFFSamplerLayoutKey &layout,
                                               char *buffer,
                                               size_t bufferSize) {

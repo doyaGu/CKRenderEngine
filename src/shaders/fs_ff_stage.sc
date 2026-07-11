@@ -89,6 +89,17 @@ SAMPLER3D(s_textureVolume7, 15);
 #else
 SAMPLER2D(s_texture7, 7);
 #endif
+#elif defined(CKFF_MIXED_SINGLE_SAMPLER_LAYOUT)
+SAMPLER2D(s_texture0, 0);
+SAMPLER2D(s_texture1, 1);
+SAMPLER2D(s_texture2, 2);
+SAMPLER2D(s_texture3, 3);
+SAMPLER2D(s_texture4, 4);
+SAMPLER2D(s_texture5, 5);
+SAMPLER2D(s_texture6, 6);
+SAMPLER2D(s_texture7, 7);
+SAMPLER3D(s_textureVolume0, 8);
+SAMPLERCUBE(s_textureCube0, 9);
 #elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
 #if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube0, 8);
@@ -190,13 +201,13 @@ SAMPLERCUBE(s_textureCube7, 15);
 
 float compareDepth(float depth, float ref, int func)
 {
-    if (func == 1) return 0.0;
-    if (func == 2) return depth < ref ? 1.0 : 0.0;
-    if (func == 3) return depth == ref ? 1.0 : 0.0;
-    if (func == 4) return depth <= ref ? 1.0 : 0.0;
-    if (func == 5) return depth > ref ? 1.0 : 0.0;
-    if (func == 6) return depth != ref ? 1.0 : 0.0;
-    if (func == 7) return depth >= ref ? 1.0 : 0.0;
+    if (func == 1) return ref < depth ? 1.0 : 0.0;
+    if (func == 2) return ref <= depth ? 1.0 : 0.0;
+    if (func == 3) return ref == depth ? 1.0 : 0.0;
+    if (func == 4) return ref >= depth ? 1.0 : 0.0;
+    if (func == 5) return ref > depth ? 1.0 : 0.0;
+    if (func == 6) return ref != depth ? 1.0 : 0.0;
+    if (func == 7) return 0.0;
     if (func == 8) return 1.0;
     return depth;
 }
@@ -295,6 +306,27 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     vec4 color = texture2D(s_texture7, coord.xy);
     return CKFF_DEPTH_TEXTURE_COLOR(color);
 #endif
+}
+#elif defined(CKFF_MIXED_SINGLE_SAMPLER_LAYOUT)
+#define CKFF_MIXED_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
+
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
+{
+    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
+    if (samplerType == 1) return textureCube(s_textureCube0, coord.xyz);
+    if (samplerType == 3) return texture3D(s_textureVolume0, coord.xyz);
+
+    vec4 color;
+    if (stage == 0) color = texture2D(s_texture0, coord.xy);
+    else if (stage == 1) color = texture2D(s_texture1, coord.xy);
+    else if (stage == 2) color = texture2D(s_texture2, coord.xy);
+    else if (stage == 3) color = texture2D(s_texture3, coord.xy);
+    else if (stage == 4) color = texture2D(s_texture4, coord.xy);
+    else if (stage == 5) color = texture2D(s_texture5, coord.xy);
+    else if (stage == 6) color = texture2D(s_texture6, coord.xy);
+    else color = texture2D(s_texture7, coord.xy);
+    return CKFF_MIXED_DEPTH_TEXTURE_COLOR(color);
 }
 #elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
 #define CKFF_STATIC_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))

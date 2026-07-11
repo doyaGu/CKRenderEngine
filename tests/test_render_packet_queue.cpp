@@ -986,6 +986,51 @@ void VertexBufferPacketBuildResultReportsRejectReasons()
 
         ffp.Shutdown();
     }
+
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        SetupPacketPipeline(&ffp, &context, &driver);
+        ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTexture(1, 102, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTexture(2, 103, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+
+        CKFFVertexBufferPacketBuildResult samplerLayout;
+        CKFFPipelineTestAccess::BuildVertexBufferPacket(
+            &ffp, &samplerLayout, &context.Encoder,
+            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+            100, 200, 0, 3, 0, 3,
+            CKRST_DP_TRANSFORM,
+            CKFF_VF_POSITION,
+            77);
+        TestCheck(!samplerLayout.Success,
+                  "Sampler-layout packet build must fail");
+        TestCheck(samplerLayout.RejectReason == CKFF_RENDER_PACKET_REJECT_SAMPLER_LAYOUT,
+                  "Sampler-layout packet build must preserve its reject reason");
+
+        ffp.Shutdown();
+    }
+}
+
+void ShaderBindingCacheRemainsBounded()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    for (CKDWORD value = 0; value <= CKFF_MAX_PROGRAM_BINDINGS; ++value) {
+        CKFFShaderKey key;
+        key.VS.Bits = value;
+        TestCheck(ffp.GetShaderCache().GetProgram(key).Program != 0,
+                  "bounded binding cache fixture must resolve a program");
+    }
+    TestCheck(ffp.GetShaderCache().CachedBindingCount() <=
+                  ffp.GetShaderCache().MaxCachedBindingCount(),
+              "shader binding cache must not grow past its configured limit");
+
+    ffp.Shutdown();
 }
 
 void OpaquePacketAdaptiveKeepsHighRepeatQueued()
@@ -1662,6 +1707,8 @@ int main()
               &StaticUniformPayloadIgnoresInactiveTextureMatrix);
     tests.Run("Vertex buffer packet build result reports reject reasons",
               &VertexBufferPacketBuildResultReportsRejectReasons);
+    tests.Run("Shader binding cache remains bounded",
+              &ShaderBindingCacheRemainsBounded);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",

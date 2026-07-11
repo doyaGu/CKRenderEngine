@@ -236,6 +236,128 @@ void UnsupportedRenderStatesRejectExplicitly() {
     ffp.Shutdown();
 }
 
+void InvalidStateValuesRejectBeforeBackendEncoding() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, 99);
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STATE_VALUE,
+              "invalid raster state values must reject before backend encoding");
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_PHONG);
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STATE_VALUE,
+              "unsupported Phong shade mode must not silently become Gouraud");
+    ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
+
+    ffp.SetTexture(0, 1);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, 99);
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STATE_VALUE,
+              "invalid sampler state values must reject before backend encoding");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "invalid state values must not reach backend submission");
+
+    ffp.Shutdown();
+}
+
+void UnsupportedTextureStageStatesRejectExplicitly() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
+
+    ffp.SetTextureStageState(
+        0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_ONE, VXBLEND_ONE));
+    CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STAGE_BLEND,
+              "Unsupported STAGEBLEND must reject instead of reusing prior texture ops");
+
+    ffp.ResetTextureStage(0);
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPLINEAR);
+    ffp.SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, FloatStageState(1.0f));
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL,
+              "Unsupported mip LOD controls must reject instead of being ignored");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, FloatStageState(0.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 4);
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(!drawn &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT,
+              "Unrepresentable anisotropy limits must reject explicitly");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(drawn &&
+                  context.Encoder.LastTextureSampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  context.Encoder.LastTextureSampler.MipFilter == CKRST_FILTER_LINEAR,
+              "MAXANISOTROPY one must reduce anisotropic filtering to linear filtering");
+
+    ffp.Shutdown();
+}
+
+void SingleCubeVolumeLayoutUsesGenericMixedSamplerModule() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTexture(1, 102, CKRST_TEXTURE_VALID);
+    ffp.SetTexture(2, 103, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "one cube and one volume texture must use the generic mixed sampler module");
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool sawCube = false;
+    bool sawVolume = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] &&
+            binding.Texture == 101) {
+            sawCube = true;
+        }
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] &&
+            binding.Texture == 103) {
+            sawVolume = true;
+        }
+    }
+    TestCheck(sawCube && sawVolume,
+              "generic mixed sampler module must use stable cube and volume slots");
+    ffp.Shutdown();
+}
+
 void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -883,7 +1005,7 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
         if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
             sawVolume = true;
-        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[1] && binding.Texture == 202)
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 202)
             sawCube = true;
     }
     TestCheck(sawVolume && sawCube,
@@ -899,7 +1021,7 @@ void VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback() {
     }
 }
 
-void RunVolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback(CK_SHADER_PROFILE profile) {
+void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE profile) {
     FFPDiagnosticDriver driver(profile);
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -928,20 +1050,32 @@ void RunVolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback(CK_SHADER
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "Non-manifest volume+cube layout must not draw through a lossy runtime fallback");
-    TestCheck(context.Encoder.TextureBindCount == 0,
-              "Non-manifest volume+cube layout must not bind textures after shader selection fails");
-    TestCheck(context.CreatedProgramCount == 0,
-              "Non-manifest volume+cube layout must not create an unrelated fallback program");
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "arbitrary single volume+cube placement must draw through the generic fallback");
+    TestCheck(context.Encoder.TextureBindCount == 2,
+              "generic mixed fallback must bind both non-2D textures");
+    TestCheck(context.CreatedProgramCount == 1,
+              "generic mixed fallback must create one canonical program");
+
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool sawVolume = false;
+    bool sawCube = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 211)
+            sawVolume = true;
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 212)
+            sawCube = true;
+    }
+    TestCheck(sawVolume && sawCube,
+              "generic mixed fallback must remap logical stages to canonical sampler slots");
 
     ffp.Shutdown();
 }
 
-void VolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback() {
+void ArbitrarySingleVolumeCubeLayoutUsesGenericFallback() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunVolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback(profile.Profile);
+        RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(profile.Profile);
     }
 }
 
@@ -1811,6 +1945,42 @@ void PositionTTextureTransformDoesNotUploadTextureMatrix() {
     ffp.Shutdown();
 }
 
+void TextureTransformCountOneUploadsTextureMatrix() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    const CKDWORD texMatrixUniform = ffp.GetShaderCache().GetUniforms().u_texMatrix;
+    context.Encoder.MatrixUniforms.insert(texMatrixUniform);
+
+    VxMatrix texMatrix;
+    texMatrix.Identity();
+    texMatrix[3][0] = 0.25f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix);
+    ffp.SetTexcoordComponentCount(0, 1);
+    ffp.SetTexture(0, 1);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT1);
+
+    VxVector positions[3] = {};
+    float texcoords[3] = {0.0f, 0.5f, 1.0f};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(float);
+
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                nullptr, 0, &data) == TRUE,
+              "COUNT1 texture transform draw must submit");
+    TestCheck(context.Encoder.UniformCounts[texMatrixUniform] == 1,
+              "COUNT1 texture transform must upload its matrix");
+
+    ffp.Shutdown();
+}
+
 void LegacyTexcoordComponentCountReadsOnlyXY() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -2124,6 +2294,43 @@ void IndexedVertexBlendRequiresIndexLayout() {
     ffp.Shutdown();
 }
 
+void IndexedVertexBlendRejectsPaletteOverflow() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    struct Vertex {
+        float Position[3];
+        float Weights[2];
+        CKDWORD Indices;
+    } vertices[3] = {};
+    vertices[0].Indices = 4;
+
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS2 | CKRST_DP_MATRIXPAL;
+    data.PositionPtr = vertices;
+    data.PositionStride = sizeof(Vertex);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
+    ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                nullptr, 0, &data) == FALSE,
+              "indexed blend must reject an out-of-range matrix index");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE,
+              "indexed blend palette overflow must expose its reject reason");
+    TestCheck(context.Encoder.SubmitCount == 0,
+              "indexed blend palette overflow must stop before backend submission");
+
+    VxMatrix matrix;
+    matrix.Identity();
+    TestCheck(ffp.SetVertexBlendMatrix(CKFF_VERTEX_BLEND_MATRIX_COUNT, matrix) == FALSE,
+              "setting a matrix outside the supported palette must fail");
+
+    ffp.Shutdown();
+}
+
 void PositionTVertexBlendDoesNotUploadMatrixPalette() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -2301,6 +2508,12 @@ int main() {
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
     tests.Run("Unsupported render states reject explicitly",
               &UnsupportedRenderStatesRejectExplicitly);
+    tests.Run("Invalid state values reject before backend encoding",
+              &InvalidStateValuesRejectBeforeBackendEncoding);
+    tests.Run("Unsupported texture-stage states reject explicitly",
+              &UnsupportedTextureStageStatesRejectExplicitly);
+    tests.Run("Single cube-volume layout uses generic mixed sampler module",
+              &SingleCubeVolumeLayoutUsesGenericMixedSamplerModule);
     tests.Run("DrawVertexBuffer propagates encoder failure",
               &DrawVertexBufferPropagatesEncoderFailure);
     tests.Run("DrawVertexBuffer stops before submit after binding failure",
@@ -2359,8 +2572,8 @@ int main() {
               &VolumeTextureStageSevenBindsVolumeSampler);
     tests.Run("Volume and cube cache miss uses static sampler layout fallback",
               &VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback);
-    tests.Run("Volume and cube missing static sampler layout does not use lossy fallback",
-              &VolumeAndCubeMissingStaticSamplerLayoutDoesNotUseLossyFallback);
+    tests.Run("Arbitrary single volume-cube layout uses generic fallback",
+              &ArbitrarySingleVolumeCubeLayoutUsesGenericFallback);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
@@ -2391,6 +2604,8 @@ int main() {
               &PointSpriteUsesPerVertexPointSize);
     tests.Run("POSITIONT texture transform does not upload texture matrix",
               &PositionTTextureTransformDoesNotUploadTextureMatrix);
+    tests.Run("COUNT1 texture transform uploads texture matrix",
+              &TextureTransformCountOneUploadsTextureMatrix);
     tests.Run("Legacy texcoord component count reads only xy",
               &LegacyTexcoordComponentCountReadsOnlyXY);
     tests.Run("Pipeline texcoord component count preserves source zw",
@@ -2415,6 +2630,8 @@ int main() {
               &VertexBlendWeightFlagsCreateWeightLayout);
     tests.Run("Indexed vertex blend requires index layout",
               &IndexedVertexBlendRequiresIndexLayout);
+    tests.Run("Indexed vertex blend rejects palette overflow",
+              &IndexedVertexBlendRejectsPaletteOverflow);
     tests.Run("POSITIONT vertex blend does not upload matrix palette",
               &PositionTVertexBlendDoesNotUploadMatrixPalette);
     tests.Run("LOCALVIEWER does not split shader when lighting disabled",

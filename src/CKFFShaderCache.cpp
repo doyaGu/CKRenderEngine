@@ -501,7 +501,8 @@ CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFS
     if (!set)
         return CKFFProgramBinding();
 
-    const CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key.FS);
+    const CKFFSamplerLayoutKey sourceLayout = CKFFBuildSamplerLayoutKey(key.FS);
+    const CKFFSamplerLayoutKey layout = CKFFCanonicalSamplerLayoutKey(sourceLayout);
     CKFFSamplerLayoutModule module;
     if (!CKFFFindSamplerLayoutModule(layout, m_Target.ShaderProfile, module)) {
         char stageTypes[32];
@@ -639,7 +640,30 @@ CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
 
     binding = CreateVariantProgram(key);
     if (binding.Program) {
+        if (m_ProgramCache.Size() >= CKFF_MAX_PROGRAM_BINDINGS)
+            m_ProgramCache.Clear();
         m_ProgramCache.Insert(key, binding);
     }
     return binding;
+}
+
+CKBOOL CKFFShaderCache::SupportsSamplerLayout(const CKFFShaderKey &key) const
+{
+    if (!CKFFShaderKeyNeedsVolumeSampler(key) ||
+        !CKFFShaderKeyNeedsCubeSampler(key)) {
+        return TRUE;
+    }
+
+    if (!m_UseUberShader && key.FS.LastActiveTextureStage <= 3) {
+        CKFFSpecializedModule specialized;
+        if (CKFFFindSpecializedModule(key, m_Target.ShaderProfile, specialized))
+            return TRUE;
+    }
+
+    CKFFSamplerLayoutModule module;
+    return CKFFFindSamplerLayoutModule(
+        CKFFCanonicalSamplerLayoutKey(CKFFBuildSamplerLayoutKey(key.FS)),
+        m_Target.ShaderProfile, module)
+        ? TRUE
+        : FALSE;
 }
