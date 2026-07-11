@@ -66,14 +66,16 @@ inline CKDWORD CKFFSamplerLayoutTypeCount(const CKFFSamplerLayoutKey &layout,
     return count;
 }
 
-inline bool CKFFSamplerLayoutHasSingleCubeVolume(const CKFFSamplerLayoutKey &layout) {
-    return CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_CUBE) == 1 &&
-           CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_VOLUME) == 1;
+inline bool CKFFSamplerLayoutSupportsGenericMixed(const CKFFSamplerLayoutKey &layout) {
+    const CKDWORD cubeCount = CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_CUBE);
+    const CKDWORD volumeCount = CKFFSamplerLayoutTypeCount(layout, CKFF_SAMPLER_VOLUME);
+    return cubeCount > 0 && cubeCount <= 4 &&
+           volumeCount > 0 && volumeCount <= 4;
 }
 
 inline CKFFSamplerLayoutKey CKFFCanonicalSamplerLayoutKey(
     const CKFFSamplerLayoutKey &layout) {
-    if (!CKFFSamplerLayoutHasSingleCubeVolume(layout))
+    if (!CKFFSamplerLayoutSupportsGenericMixed(layout))
         return layout;
     CKFFSamplerLayoutKey canonical;
     canonical.Bits = CKFF_SAMPLER_VOLUME | (CKFF_SAMPLER_CUBE << 2);

@@ -344,11 +344,11 @@ void SingleCubeVolumeLayoutUsesGenericMixedSamplerModule() {
     bool sawCube = false;
     bool sawVolume = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] &&
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureCube[0] &&
             binding.Texture == 101) {
             sawCube = true;
         }
-        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] &&
+        if (binding.Stage == 12 && binding.Uniform == u.s_textureVolume[0] &&
             binding.Texture == 103) {
             sawVolume = true;
         }
@@ -1003,9 +1003,9 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
     bool sawVolume = false;
     bool sawCube = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
+        if (binding.Stage == 12 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 201)
             sawVolume = true;
-        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 202)
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 202)
             sawCube = true;
     }
     TestCheck(sawVolume && sawCube,
@@ -1061,9 +1061,9 @@ void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE pro
     bool sawVolume = false;
     bool sawCube = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 211)
+        if (binding.Stage == 12 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 211)
             sawVolume = true;
-        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 212)
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 212)
             sawCube = true;
     }
     TestCheck(sawVolume && sawCube,
@@ -1076,6 +1076,47 @@ void ArbitrarySingleVolumeCubeLayoutUsesGenericFallback() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
         RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(profile.Profile);
+    }
+}
+
+void RunMultipleMixedSamplerLayoutUsesGenericFallback(CK_SHADER_PROFILE profile) {
+    FFPDiagnosticDriver driver(profile);
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    ffp.SetTexture(0, 401, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTexture(1, 402, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTexture(2, 403, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    ffp.SetTexture(3, 404, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                         1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    TestCheck(context.Encoder.SubmitCount == 1,
+              "multiple mixed samplers must draw through the generic fallback");
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool found[4] = {};
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        if (binding.Stage == 8 && binding.Uniform == u.s_textureCube[0] && binding.Texture == 401)
+            found[0] = true;
+        if (binding.Stage == 9 && binding.Uniform == u.s_textureCube[1] && binding.Texture == 402)
+            found[1] = true;
+        if (binding.Stage == 12 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 403)
+            found[2] = true;
+        if (binding.Stage == 13 && binding.Uniform == u.s_textureVolume[1] && binding.Texture == 404)
+            found[3] = true;
+    }
+    TestCheck(found[0] && found[1] && found[2] && found[3],
+              "multiple mixed samplers must use stable type-ranked slots");
+    ffp.Shutdown();
+}
+
+void MultipleMixedSamplerLayoutUsesGenericFallback() {
+    for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
+        printf("  profile %s\n", profile.Name);
+        RunMultipleMixedSamplerLayoutUsesGenericFallback(profile.Profile);
     }
 }
 
@@ -2616,6 +2657,8 @@ int main() {
               &VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback);
     tests.Run("Arbitrary single volume-cube layout uses generic fallback",
               &ArbitrarySingleVolumeCubeLayoutUsesGenericFallback);
+    tests.Run("Multiple mixed sampler layout uses generic fallback",
+              &MultipleMixedSamplerLayoutUsesGenericFallback);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",

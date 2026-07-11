@@ -89,7 +89,7 @@ SAMPLER3D(s_textureVolume7, 15);
 #else
 SAMPLER2D(s_texture7, 7);
 #endif
-#elif defined(CKFF_MIXED_SINGLE_SAMPLER_LAYOUT)
+#elif defined(CKFF_MIXED_SAMPLER_LAYOUT)
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
 SAMPLER2D(s_texture2, 2);
@@ -98,8 +98,14 @@ SAMPLER2D(s_texture4, 4);
 SAMPLER2D(s_texture5, 5);
 SAMPLER2D(s_texture6, 6);
 SAMPLER2D(s_texture7, 7);
-SAMPLER3D(s_textureVolume0, 8);
-SAMPLERCUBE(s_textureCube0, 9);
+SAMPLERCUBE(s_textureCube0, 8);
+SAMPLERCUBE(s_textureCube1, 9);
+SAMPLERCUBE(s_textureCube2, 10);
+SAMPLERCUBE(s_textureCube3, 11);
+SAMPLER3D(s_textureVolume0, 12);
+SAMPLER3D(s_textureVolume1, 13);
+SAMPLER3D(s_textureVolume2, 14);
+SAMPLER3D(s_textureVolume3, 15);
 #elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
 #if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
 SAMPLERCUBE(s_textureCube0, 8);
@@ -307,15 +313,37 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     return CKFF_DEPTH_TEXTURE_COLOR(color);
 #endif
 }
-#elif defined(CKFF_MIXED_SINGLE_SAMPLER_LAYOUT)
+#elif defined(CKFF_MIXED_SAMPLER_LAYOUT)
 #define CKFF_MIXED_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
+
+int getMixedSamplerIndex(int stage, int samplerType)
+{
+    int samplerIndex = 0;
+    for (int previousStage = 0; previousStage < 8; ++previousStage) {
+        if (previousStage >= stage) break;
+        if (ckffSpecSamplerType(previousStage) == samplerType)
+            ++samplerIndex;
+    }
+    return samplerIndex;
+}
 
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
-    if (samplerType == 1) return textureCube(s_textureCube0, coord.xyz);
-    if (samplerType == 3) return texture3D(s_textureVolume0, coord.xyz);
+    int samplerIndex = getMixedSamplerIndex(stage, samplerType);
+    if (samplerType == 1) {
+        if (samplerIndex == 0) return textureCube(s_textureCube0, coord.xyz);
+        if (samplerIndex == 1) return textureCube(s_textureCube1, coord.xyz);
+        if (samplerIndex == 2) return textureCube(s_textureCube2, coord.xyz);
+        return textureCube(s_textureCube3, coord.xyz);
+    }
+    if (samplerType == 3) {
+        if (samplerIndex == 0) return texture3D(s_textureVolume0, coord.xyz);
+        if (samplerIndex == 1) return texture3D(s_textureVolume1, coord.xyz);
+        if (samplerIndex == 2) return texture3D(s_textureVolume2, coord.xyz);
+        return texture3D(s_textureVolume3, coord.xyz);
+    }
 
     vec4 color;
     if (stage == 0) color = texture2D(s_texture0, coord.xy);
@@ -543,8 +571,8 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 current, vec4 diffuse, vec4 te
     if (op == 2) return a;
     if (op == 3) return b;
     if (op == 4) return a * b;
-    if (op == 5) return a * b * 2.0;
-    if (op == 6) return a * b * 4.0;
+    if (op == 5) return clamp(a * b * 2.0, 0.0, 1.0);
+    if (op == 6) return clamp(a * b * 4.0, 0.0, 1.0);
     if (op == 7) return clamp(a + b, 0.0, 1.0);
     if (op == 8) return clamp(a + b - 0.5, 0.0, 1.0);
     if (op == 9) return clamp((a + b - 0.5) * 2.0, 0.0, 1.0);

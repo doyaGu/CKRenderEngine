@@ -566,7 +566,7 @@ def sampler_layout_bits(stage_types: list[int]) -> int:
 
 def sampler_layout_defines(stage_types: list[int]) -> list[str]:
     if stage_types.count(1) == 1 and stage_types.count(3) == 1:
-        return ["CKFF_MIXED_SINGLE_SAMPLER_LAYOUT=1"]
+        return ["CKFF_MIXED_SAMPLER_LAYOUT=1"]
     defines = ["CKFF_STATIC_SAMPLER_LAYOUT=1"]
     for index, value in enumerate(stage_types):
         defines.append(f"CKFF_FS_STAGE{index}_SAMPLER_TYPE={value & 3}")

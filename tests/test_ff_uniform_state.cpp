@@ -520,6 +520,9 @@ void TextureCombinerOpFormulasStayDxvkCompatible() {
 
     TestCheck(!fs.empty(),
               "FFP fragment shader source must be readable from the test working directory");
+    TestCheck(fs.find("if (op == 5) return clamp(a * b * 2.0, 0.0, 1.0)") != std::string::npos &&
+                  fs.find("if (op == 6) return clamp(a * b * 4.0, 0.0, 1.0)") != std::string::npos,
+              "MODULATE2X and MODULATE4X must saturate before feeding the next texture stage");
     TestCheck(fs.find("if (op == 15) return clamp(a + b * (1.0 - textureColor.a), 0.0, 1.0)") != std::string::npos,
               "BLENDTEXTUREALPHAPM must stay texture-alpha premultiplied add");
     TestCheck(fs.find("if (op == 18) return clamp(a + vec4_splat(a.a) * b, 0.0, 1.0)") != std::string::npos &&
@@ -893,6 +896,18 @@ void SamplerLayoutKeyNormalizesInactiveAndDepthStages() {
                   CKFFSamplerLayoutNeedsVolumeSampler(layout) &&
                   CKFFSamplerLayoutNeedsMixedCubeVolume(layout),
               "Mixed cube+volume layouts must be detectable from the normalized key");
+
+    key.Stages[0].HasTexture = true;
+    key.Stages[0].SamplerType = CKFF_SAMPLER_CUBE;
+    key.Stages[1].HasTexture = true;
+    key.Stages[1].SamplerType = CKFF_SAMPLER_VOLUME;
+    layout = CKFFBuildSamplerLayoutKey(key);
+    TestCheck(CKFFSamplerLayoutSupportsGenericMixed(layout),
+              "Multiple cube+volume stages within the fixed sampler budget must use the generic layout");
+    const CKFFSamplerLayoutKey canonical = CKFFCanonicalSamplerLayoutKey(layout);
+    TestCheck(CKFFSamplerLayoutStageType(canonical, 0) == CKFF_SAMPLER_VOLUME &&
+                  CKFFSamplerLayoutStageType(canonical, 1) == CKFF_SAMPLER_CUBE,
+              "Generic mixed layouts must share the canonical generated module");
 }
 
 void SamplerLayoutMissDiagnosticsAreActionable() {

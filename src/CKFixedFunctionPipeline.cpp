@@ -516,16 +516,20 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
     m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
     bindingSet->ActiveStageCount = stageCount;
     const CKFFSamplerLayoutKey samplerLayout = CKFFBuildSamplerLayoutKey(shaderKey.FS);
-    if (CKFFSamplerLayoutHasSingleCubeVolume(samplerLayout)) {
+    if (CKFFSamplerLayoutSupportsGenericMixed(samplerLayout)) {
         const CKFFUniformHandles &uniforms = m_ShaderCache.GetUniforms();
+        CKDWORD cubeIndex = 0;
+        CKDWORD volumeIndex = 0;
         for (CKDWORD stage = 0; stage < bindingSet->ActiveTextureCount; ++stage) {
             CKFFRenderPacketTextureBinding &binding = bindingSet->Bindings[stage];
             if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME) {
-                binding.Stage = CKFF_MAX_TEXTURE_STAGES;
-                binding.Uniform = uniforms.s_textureVolume[0];
+                binding.Stage = CKFF_MAX_TEXTURE_STAGES + 4 + volumeIndex;
+                binding.Uniform = uniforms.s_textureVolume[volumeIndex];
+                ++volumeIndex;
             } else if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE) {
-                binding.Stage = CKFF_MAX_TEXTURE_STAGES + 1;
-                binding.Uniform = uniforms.s_textureCube[0];
+                binding.Stage = CKFF_MAX_TEXTURE_STAGES + cubeIndex;
+                binding.Uniform = uniforms.s_textureCube[cubeIndex];
+                ++cubeIndex;
             }
         }
     }
