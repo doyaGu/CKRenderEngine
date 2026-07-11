@@ -17,7 +17,18 @@ static int fopen_s(FILE **file, const char *path, const char *mode)
 
 static int _vsnprintf_s(char *buffer, size_t size, size_t, const char *format, va_list args)
 {
-    return vsnprintf(buffer, size, format, args);
+    if (!buffer || size == 0)
+        return 0;
+    int result = vsnprintf(buffer, size, format, args);
+    if (result < 0) {
+        buffer[0] = '\0';
+        return 0;
+    }
+    if ((size_t)result >= size) {
+        buffer[size - 1] = '\0';
+        return (int)(size - 1);
+    }
+    return result;
 }
 
 static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *format, ...)
@@ -83,8 +94,10 @@ static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
 
 void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enum code, const char *str)
 {
-    if (m_Context)
+    if (m_Context) {
         m_Context->m_DebugFatalCount.fetch_add(1, std::memory_order_relaxed);
+        m_Context->LatchFatalError(CKERR_INVALIDRENDERCONTEXT);
+    }
     CKBgfxLogf("Fatal", "code=%d at %s:%u: %s",
                (int)code, filePath ? filePath : "?", (unsigned)line, str ? str : "");
 }
@@ -138,5 +151,72 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
         CKBgfxLogf("Capture", "saved path=%s ok=%d size=%ux%u pitch=%u bytes=%u yflip=%d",
                    _filePath, ok ? 1 : 0, (unsigned)_width, (unsigned)_height,
                    (unsigned)_pitch, (unsigned)_size, _yflip ? 1 : 0);
+    }
+}
+
+void CKBgfxCallback::captureBegin(uint32_t _width, uint32_t _height,
+                                  uint32_t _pitch,
+                                  bgfx::TextureFormat::Enum _format,
+                                  bool _yflip)
+{
+    if (!m_Context)
+        return;
+    VxMutexLock lock(m_Context->m_ScreenShotMutex);
+    m_Context->m_CaptureWidth = (CKDWORD)_width;
+    m_Context->m_CaptureHeight = (CKDWORD)_height;
+    m_Context->m_CapturePitch = (CKDWORD)_pitch;
+    m_Context->m_CaptureFormat = _format;
+    m_Context->m_CaptureYFlip = _yflip ? TRUE : FALSE;
+}
+
+void CKBgfxCallback::captureEnd()
+{
+    if (!m_Context)
+        return;
+    VxMutexLock lock(m_Context->m_ScreenShotMutex);
+    m_Context->m_CaptureWidth = 0;
+    m_Context->m_CaptureHeight = 0;
+    m_Context->m_CapturePitch = 0;
+    m_Context->m_CaptureFormat = bgfx::TextureFormat::Count;
+    m_Context->m_CaptureYFlip = FALSE;
+}
+
+void CKBgfxCallback::captureFrame(const void *_data, uint32_t _size)
+{
+    if (!m_Context || !_data || _size == 0)
+        return;
+
+    XArray<CKBgfxScreenShotRequest> completed;
+    CKDWORD width = 0;
+    CKDWORD height = 0;
+    CKDWORD pitch = 0;
+    bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
+    CKBOOL yFlip = FALSE;
+    {
+        VxMutexLock lock(m_Context->m_ScreenShotMutex);
+        width = m_Context->m_CaptureWidth;
+        height = m_Context->m_CaptureHeight;
+        pitch = m_Context->m_CapturePitch;
+        nativeFormat = m_Context->m_CaptureFormat;
+        yFlip = m_Context->m_CaptureYFlip;
+        for (int i = m_Context->m_PendingScreenShots.Size() - 1; i >= 0; --i) {
+            if (!m_Context->m_PendingScreenShots[i].UseCaptureFrame)
+                continue;
+            CKBgfxScreenShotRequest request = {};
+            m_Context->m_PendingScreenShots.RemoveAt(
+                (unsigned int)i, request);
+            completed.PushBack(request);
+        }
+    }
+
+    VX_PIXELFORMAT format = UNKNOWN_PF;
+    CKBgfxTryPixelFormat(nativeFormat, format);
+    for (int i = 0; i < completed.Size(); ++i) {
+        CKBgfxScreenShotRequest &request = completed[i];
+        if (request.Callback) {
+            request.Callback(request.UserData, request.FrameBuffer,
+                             width, height, pitch, format,
+                             _data, (CKDWORD)_size, yFlip);
+        }
     }
 }

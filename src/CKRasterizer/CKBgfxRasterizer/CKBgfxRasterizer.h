@@ -51,9 +51,10 @@ public:
     void screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
                     uint32_t _pitch, bgfx::TextureFormat::Enum _format,
                     const void *_data, uint32_t _size, bool _yflip) override;
-    void captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum, bool) override {}
-    void captureEnd() override {}
-    void captureFrame(const void *, uint32_t) override {}
+    void captureBegin(uint32_t _width, uint32_t _height, uint32_t _pitch,
+                      bgfx::TextureFormat::Enum _format, bool _yflip) override;
+    void captureEnd() override;
+    void captureFrame(const void *_data, uint32_t _size) override;
 
 private:
     CKBgfxRasterizerContext *m_Context;
@@ -168,6 +169,15 @@ struct CKBgfxIndirectBufferRecord {
     CKDWORD MaxCommands;
 };
 
+template <typename T>
+struct CKBgfxResourceSlot {
+    CKBgfxResourceSlot() : Record(NULL), Generation(0), Retired(FALSE) {}
+
+    T *Record;
+    CKWORD Generation;
+    CKBOOL Retired;
+};
+
 // ===========================================================================
 // CKBgfxRasterizer
 // ===========================================================================
@@ -199,6 +209,7 @@ struct CKBgfxScreenShotRequest {
     CKScreenShotCallback Callback;
     void *UserData;
     XString Path;
+    CKBOOL UseCaptureFrame;
 };
 
 // ===========================================================================
@@ -315,6 +326,8 @@ public:
 
 class CKBgfxRasterizerContext : public CKRasterizerContext {
     friend class CKBgfxEncoder;
+    friend class CKBgfxCallback;
+    friend class CKBgfxRasterizerDriver;
 public:
     explicit CKBgfxRasterizerContext(CKBgfxRasterizerDriver *driver);
     ~CKBgfxRasterizerContext() override;
@@ -326,6 +339,9 @@ public:
     CKERROR Resize(int PosX, int PosY, int Width, int Height,
                    CKDWORD Flags) override;
     CKERROR GetTargetDesc(CKRasterizerTargetDesc *Target) const override;
+    CKBOOL IsIdle() const override;
+    CKERROR BeginShutdown() override;
+    CKERROR GetDeviceStatus() const override;
     CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const override;
     CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
                                  CKTextureFormatCaps *Caps) const override;
@@ -392,6 +408,7 @@ public:
     const CKRenderStats *GetStats() override;
 #ifdef CKRE_ENABLE_TEST_ACCESS
     CKDWORD GetFatalCountForTests() const { return m_DebugFatalCount.load(std::memory_order_relaxed); }
+    void InjectFatalForTests() { LatchFatalError(CKERR_INVALIDRENDERCONTEXT); }
     CKDWORD GetInvalidSubmitCountForTests() const { return m_DebugInvalidSubmitCount.load(std::memory_order_relaxed); }
     CKDWORD GetEncoderLeakCountForTests() const { return m_DebugEncoderLeakCount.load(std::memory_order_relaxed); }
     CKDWORD GetTransientAllocMissCountForTests() const { return m_DebugTransientAllocMissCount.load(std::memory_order_relaxed); }
@@ -399,6 +416,7 @@ public:
     void InjectUniformRecordForTests(CKDWORD Slot, uint16_t BgfxIdx, CK_UNIFORM_TYPE Type,
                                      CKDWORD Count, const char *Name)
     {
+        VxMutexLock lock(m_ResourceTableMutex);
         auto *rec = new CKBgfxUniformRecord();
         rec->Handle.idx = BgfxIdx;
         rec->Type = Type;
@@ -406,9 +424,10 @@ public:
         strncpy(rec->Name, Name ? Name : "", sizeof(rec->Name) - 1);
         rec->Name[sizeof(rec->Name) - 1] = '\0';
         while (m_Uniforms.Size() <= (int)Slot)
-            m_Uniforms.PushBack(NULL);
-        delete m_Uniforms[Slot];
-        m_Uniforms[Slot] = rec;
+            m_Uniforms.PushBack(CKBgfxResourceSlot<CKBgfxUniformRecord>());
+        delete m_Uniforms[Slot].Record;
+        m_Uniforms[Slot].Record = rec;
+        m_Uniforms[Slot].Generation = 1;
     }
 #endif
 
@@ -440,6 +459,7 @@ public:
     CKERROR RequestScreenShot(CKDWORD FrameBuffer,
                               CKScreenShotCallback Callback,
                               void *UserData = NULL) override;
+    CKERROR CancelScreenShots(void *UserData) override;
 
     // Render views
     CKERROR SetViewName(CKRenderView View, CKSTRING Name) override;
@@ -497,7 +517,13 @@ private:
     {
         return VxThread::GetCurrentVxThreadId() == m_ApiThreadId ? TRUE : FALSE;
     }
+    void LatchFatalError(CKERROR Error);
+    CKBOOL TryBeginShutdown();
+    void BeginForcedShutdown();
+    void EndCurrentThreadEncoders();
     CKDWORD FindUniformSlotByHandle(uint16_t BgfxIdx);
+    CKBOOL HasActiveEncoders() const;
+    CKBOOL HasCaptureFrameScreenShots();
 
     CKBOOL m_BgfxInitialized;
     const char *m_RendererName;
@@ -514,10 +540,18 @@ private:
     CKBgfxEncoder m_DefaultEncoder;
     CKBgfxEncoder m_Encoders[CKRST_MAX_ENCODERS];
     XUINTPTR m_ApiThreadId;
+    mutable VxMutex m_EncoderLifecycleMutex;
+    CKBOOL m_FrameInProgress;
+    std::atomic<CKBOOL> m_ShuttingDown;
 
     VxMutex m_ScreenShotMutex;
     XArray<CKBgfxScreenShotRequest> m_PendingScreenShots;
     uint64_t m_NextScreenShotToken;
+    CKDWORD m_CaptureWidth;
+    CKDWORD m_CaptureHeight;
+    CKDWORD m_CapturePitch;
+    bgfx::TextureFormat::Enum m_CaptureFormat;
+    CKBOOL m_CaptureYFlip;
 
     CKDWORD m_DebugFrameId;
     std::atomic<CKDWORD> m_DebugSubmitSerial;
@@ -527,6 +561,7 @@ private:
     std::atomic<CKDWORD> m_DebugMarkerStaleCount;
     std::atomic<CKDWORD> m_DebugInvalidSubmitCount;
     std::atomic<CKDWORD> m_DebugFatalCount;
+    std::atomic<CKERROR> m_FatalError;
     std::atomic<CKDWORD> m_DebugParsedAnnotationCount;
     std::atomic<CKDWORD> m_DebugRawPrimitiveCount;
     std::atomic<CKDWORD> m_DebugSourceSubmitCount[CKBGFX_DRAWMAP_SOURCE_COUNT];
@@ -568,18 +603,18 @@ private:
                            const CKBgfxTextureRecord *Source, CKDWORD SourceMip,
                            CKBOOL FullOverwrite);
 
-    XArray<CKBgfxShaderRecord *> m_Shaders;
-    XArray<CKBgfxProgramRecord *> m_Programs;
-    XArray<CKBgfxUniformRecord *> m_Uniforms;
-    XArray<CKBgfxVertexLayoutRecord *> m_VertexLayouts;
-    XArray<CKBgfxVertexBufferRecord *> m_VertexBuffers;
-    XArray<CKBgfxIndexBufferRecord *> m_IndexBuffers;
-    XArray<CKBgfxTextureRecord *> m_Textures;
-    XArray<CKBgfxFrameBufferRecord *> m_FrameBuffers;
-    XArray<CKBgfxOcclusionQueryRecord *> m_OcclusionQueries;
-    XArray<CKBgfxIndirectBufferRecord *> m_IndirectBuffers;
+    XArray<CKBgfxResourceSlot<CKBgfxShaderRecord> > m_Shaders;
+    XArray<CKBgfxResourceSlot<CKBgfxProgramRecord> > m_Programs;
+    XArray<CKBgfxResourceSlot<CKBgfxUniformRecord> > m_Uniforms;
+    XArray<CKBgfxResourceSlot<CKBgfxVertexLayoutRecord> > m_VertexLayouts;
+    XArray<CKBgfxResourceSlot<CKBgfxVertexBufferRecord> > m_VertexBuffers;
+    XArray<CKBgfxResourceSlot<CKBgfxIndexBufferRecord> > m_IndexBuffers;
+    XArray<CKBgfxResourceSlot<CKBgfxTextureRecord> > m_Textures;
+    XArray<CKBgfxResourceSlot<CKBgfxFrameBufferRecord> > m_FrameBuffers;
+    XArray<CKBgfxResourceSlot<CKBgfxOcclusionQueryRecord> > m_OcclusionQueries;
+    XArray<CKBgfxResourceSlot<CKBgfxIndirectBufferRecord> > m_IndirectBuffers;
 
-    VxMutex m_ResourceTableMutex;
+    mutable VxMutex m_ResourceTableMutex;
     VxMutex m_ResourceStateMutex;
     CKDWORD m_ViewFrameBuffer[CKRST_MAX_RENDER_VIEWS];
     CKRECT m_ViewRect[CKRST_MAX_RENDER_VIEWS];

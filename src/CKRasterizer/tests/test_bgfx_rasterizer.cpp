@@ -488,6 +488,19 @@ static void TestBackendProfileMapping()
 {
     TEST_SECTION("Backend Profile Mapping");
 
+    bgfx::RendererType::Enum parsedRenderer = bgfx::RendererType::Noop;
+    TEST_ASSERT(CKBgfxTryRendererType("auto", parsedRenderer) &&
+                    parsedRenderer == bgfx::RendererType::Count,
+                "Explicit auto renderer parses as automatic selection");
+    TEST_ASSERT(CKBgfxTryRendererType("vulkan", parsedRenderer) &&
+                    parsedRenderer == bgfx::RendererType::Vulkan,
+                "Explicit Vulkan renderer parses exactly");
+    TEST_ASSERT(CKBgfxTryRendererType("DIRECT3D12", parsedRenderer) &&
+                    parsedRenderer == bgfx::RendererType::Direct3D12,
+                "Renderer names remain case-insensitive");
+    TEST_ASSERT(!CKBgfxTryRendererType("vulakn", parsedRenderer),
+                "Unknown explicit renderer must not fall back to auto");
+
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Direct3D11) == CKRST_SHADER_PROFILE_DX11,
                 "D3D11 renderer maps to dx11 shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Direct3D12) == CKRST_SHADER_PROFILE_DX12,
@@ -496,12 +509,18 @@ static void TestBackendProfileMapping()
                 "Vulkan renderer maps to SPIR-V shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGL) == CKRST_SHADER_PROFILE_GLSL,
                 "OpenGL renderer maps to GLSL shader profile");
-    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGLES) == CKRST_SHADER_PROFILE_UNKNOWN,
-                "OpenGLES renderer is rejected without an ESSL shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::OpenGLES) == CKRST_SHADER_PROFILE_ESSL,
+                "OpenGLES renderer maps to ESSL shader profile");
     TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::Metal) == CKRST_SHADER_PROFILE_MSL,
                 "Metal renderer maps to MSL shader profile");
+    TEST_ASSERT(CKBgfxShaderProfile(bgfx::RendererType::WebGPU) == CKRST_SHADER_PROFILE_UNKNOWN,
+                "WebGPU remains unsupported while clip-distance shaders cannot be compiled");
+    TEST_ASSERT(strcmp(CKBgfxRendererTypeName(bgfx::RendererType::WebGPU), "WebGPU") == 0,
+                "Unsupported WebGPU requests must still be identified explicitly");
     TEST_ASSERT(strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_SPIRV), "spirv") == 0,
                 "Shader profile name must be stable for diagnostics");
+    TEST_ASSERT(strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_ESSL), "essl") == 0,
+                "ESSL shader profile name must be stable for diagnostics");
 }
 
 static void TestBgfxStateBackendConventions()
@@ -634,15 +653,13 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(driver != NULL, "driver exists after start");
     TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
-    TEST_ASSERT(HasDisplayMode(driver, 320, 240, 32, 60), "bgfx driver keeps low resolution display modes");
-    TEST_ASSERT(HasDisplayMode(driver, 640, 480, 32, 60), "bgfx driver includes default 640x480 mode");
-    TEST_ASSERT(HasDisplayMode(driver, 800, 600, 32, 60), "bgfx driver includes compatible 800x600x32 mode");
-    TEST_ASSERT(HasDisplayMode(driver, 800, 600, 16, 60), "bgfx driver includes legacy 800x600x16 alias");
-    TEST_ASSERT(HasDisplayMode(driver, 1024, 768, 32, 60), "bgfx driver includes compatible 1024x768 mode");
-    TEST_ASSERT(HasDisplayMode(driver, 1280, 720, 32, 60), "bgfx driver includes compatible 1280x720 mode");
-    TEST_ASSERT(HasDisplayMode(driver, 1920, 1080, 32, 60), "bgfx driver includes compatible 1920x1080 mode");
+    TEST_ASSERT(driver->m_DisplayModes.Size() > 0,
+                "bgfx driver exposes real modes or a minimal fallback list");
     TEST_ASSERT(DisplayModesAreSorted(driver), "bgfx display modes are sorted for screen-mode grouping");
-    TEST_ASSERT(CountDisplayMode(driver, 800, 600, 32, 60) == 1, "bgfx display mode list de-duplicates compatible modes");
+    TEST_ASSERT(!HasDisplayMode(driver, 800, 600, 16, 60),
+                "bgfx driver does not fabricate legacy 16-bit display modes");
+    TEST_ASSERT(driver->m_CapsUpToDate == FALSE,
+                "bgfx legacy caps remain provisional until a context initializes bgfx");
 
     rasterizer.Close();
     TEST_ASSERT(rasterizer.GetDriverCount() == 0, "close removes driver");
@@ -823,14 +840,15 @@ static void TestUniformReflectionUsesSlotHandles()
     // CK slot 5 wraps bgfx uniform idx 42; slot and idx deliberately differ so
     // any raw-idx passthrough is caught.
     context.InjectUniformRecordForTests(5, 42, CKRST_UNIFORM_MAT4, 8, "u_ffMatrices");
+    const CKDWORD uniformHandle = (1u << 16) | 5u;
 
-    TEST_ASSERT(context.FindUniformSlotByHandleForTests(42) == 5,
+    TEST_ASSERT(context.FindUniformSlotByHandleForTests(42) == uniformHandle,
                 "bgfx uniform idx resolves back to its CK slot handle");
     TEST_ASSERT(context.FindUniformSlotByHandleForTests(999) == 0,
                 "unknown bgfx uniform idx maps to invalid handle 0");
 
     CKUniformInfo info;
-    context.GetUniformInfo(5, &info);
+    context.GetUniformInfo(uniformHandle, &info);
     TEST_ASSERT(strcmp(info.Name, "u_ffMatrices") == 0,
                 "GetUniformInfo takes the CK slot handle and returns the record name");
     TEST_ASSERT(info.Type == CKRST_UNIFORM_MAT4,
