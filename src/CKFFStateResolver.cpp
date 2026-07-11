@@ -5,7 +5,7 @@
 #include "CKFFUniformState.h"
 #include "CKVertexLayoutCache.h"
 
-#include <cstring>
+#include <string.h>
 
 static CKBOOL CKFFShaderKeyLightingEnabled(const CKFFShaderKeyVS &vs)
 {
@@ -213,19 +213,27 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
 
     // Fragment state description mirrors the active fixed-function texture-stage contract.
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        const uint64_t stateSetMask = state.StageStateSetMasks[stage];
         const bool stageActive = (CKDWORD)stage < out->ActiveTextureCount;
         const bool hasTexture = stageActive && state.TextureHandles[stage] != 0;
         const CKDWORD colorOp = CKFFResolveStageColorOp(state.StageStates[stage], stageActive, hasTexture);
         const CKDWORD alphaOp = CKFFResolveStageAlphaOp(state.StageStates[stage], stageActive, hasTexture);
         stateDesc.FS.SetStageColorOp(stage, colorOp);
-        stateDesc.FS.SetStageColorArg0(stage, CKFFResolveStageColorArg0(state.StageStates[stage]));
-        stateDesc.FS.SetStageColorArg1(stage, CKFFResolveStageColorArg1(state.StageStates[stage], hasTexture));
-        stateDesc.FS.SetStageColorArg2(stage, CKFFResolveStageColorArg2(state.StageStates[stage]));
+        stateDesc.FS.SetStageColorArg0(stage, CKFFResolveStageColorArg0(
+            state.StageStates[stage], stateSetMask));
+        stateDesc.FS.SetStageColorArg1(stage, CKFFResolveStageColorArg1(
+            state.StageStates[stage], hasTexture, stateSetMask));
+        stateDesc.FS.SetStageColorArg2(stage, CKFFResolveStageColorArg2(
+            state.StageStates[stage], stateSetMask));
         stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
-        stateDesc.FS.SetStageAlphaArg0(stage, CKFFResolveStageAlphaArg0(state.StageStates[stage]));
-        stateDesc.FS.SetStageAlphaArg1(stage, CKFFResolveStageAlphaArg1(state.StageStates[stage], hasTexture));
-        stateDesc.FS.SetStageAlphaArg2(stage, CKFFResolveStageAlphaArg2(state.StageStates[stage]));
-        stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(CKFFResolveStageResultArg(state.StageStates[stage])) == CKRST_TA_TEMP);
+        stateDesc.FS.SetStageAlphaArg0(stage, CKFFResolveStageAlphaArg0(
+            state.StageStates[stage], stateSetMask));
+        stateDesc.FS.SetStageAlphaArg1(stage, CKFFResolveStageAlphaArg1(
+            state.StageStates[stage], hasTexture, stateSetMask));
+        stateDesc.FS.SetStageAlphaArg2(stage, CKFFResolveStageAlphaArg2(
+            state.StageStates[stage], stateSetMask));
+        stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(
+            CKFFResolveStageResultArg(state.StageStates[stage], stateSetMask)) == CKRST_TA_TEMP);
         stateDesc.FS.SetStageProjectedSampler(stage, (state.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
         stateDesc.FS.SetStageSamplerType(stage, CKFFResolverSamplerTypeFromTextureFlags(state.TextureFlags[stage]));
         stateDesc.FS.SetStageSamplerCompareFunc(stage, state.StageStates[stage][CKRST_TSS_COMPAREFUNC]);

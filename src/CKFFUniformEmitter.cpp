@@ -7,7 +7,7 @@
 #include "CKFFUniformState.h"
 #include "CKRasterizer.h"
 
-#include <cstring>
+#include <string.h>
 
 static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs)
 {
@@ -191,12 +191,23 @@ CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKDWORD uniform,
 {
     if (!sink || !data || count == 0)
         return TRUE;
+    if (sink->Failed)
+        return FALSE;
     if (objectUniform && !sink->EmitObject)
         return TRUE;
     if (!objectUniform && !sink->EmitStatic)
         return TRUE;
-    if (sink->Encoder)
+    if (sink->Encoder) {
+        if (sink->Encoder->GetStatus() != CK_OK) {
+            sink->Failed = TRUE;
+            return FALSE;
+        }
         UploadUniform(sink->Encoder, uniform, data, count);
+        if (sink->Encoder->GetStatus() != CK_OK) {
+            sink->Failed = TRUE;
+            return FALSE;
+        }
+    }
     CKFFRenderPacketUniformPayload *payload = objectUniform ? sink->ObjectPayload : sink->StaticPayload;
     if (payload && !CKFFRenderPacketAddUniform(payload, uniform, data, count, vec4Count)) {
         sink->Failed = TRUE;
@@ -290,7 +301,8 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         CKFFProgramUsesRenderTargetFlip(m_State, targetFlags, context->ActiveTextureCount)) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
-                            context->ActiveTextureCount, targetFlags, stageParams);
+                            context->ActiveTextureCount, targetFlags, stageParams,
+                            m_State.StageStateSetMasks);
         Emit(sink, u.u_stageParams, stageParams.Values,
              CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
@@ -375,7 +387,8 @@ void CKFFUniformEmitter::UploadUniforms(CKRasterizerEncoder *encoder,
     if (!encoder || !programContext)
         return;
     UploadObjectUniforms(encoder, programContext, activeTextureCount);
-    UploadStaticUniforms(encoder, programContext, activeTextureCount);
+    if (encoder->GetStatus() == CK_OK)
+        UploadStaticUniforms(encoder, programContext, activeTextureCount);
 }
 
 void CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerEncoder *encoder,
@@ -464,6 +477,7 @@ void CKFFUniformEmitter::UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uni
         return;
     encoder->SetUniform(uniform, data, count);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    m_Probes.OnUniform(m_ShaderCache.GetUniforms(), uniform, count);
+    if (encoder->GetStatus() == CK_OK)
+        m_Probes.OnUniform(m_ShaderCache.GetUniforms(), uniform, count);
 #endif
 }

@@ -22,6 +22,7 @@ struct CKFFStateStore {
     CKDWORD TextureHandles[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD TextureFlags[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
+    uint64_t StageStateSetMasks[CKFF_MAX_TEXTURE_STAGES];
     CKBYTE TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
     float Viewport[4];

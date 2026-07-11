@@ -48,6 +48,8 @@ enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_TEXTURE_OP,
     CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
     CKFF_DRAW_REJECT_BORDER_PALETTE,
+    CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER,
+    CKFF_DRAW_REJECT_ENCODER_ERROR,
     CKFF_DRAW_REJECT_COUNT
 };
 
@@ -161,7 +163,9 @@ public:
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
                                    CKDWORD formatFlags = 0,
                                    const CKBYTE *texcoordComponentCounts = nullptr);
-    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet, CKDWORD activeTextureCount);
+    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
+                                         CKDWORD activeTextureCount,
+                                         const CKFFShaderKey &shaderKey);
     CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
                                      const CKFFProgramContext *programContext,
                                      CKDWORD activeTextureCount);

@@ -2,7 +2,7 @@
 #include "CKFFStateDesc.h"
 #include "CKVertexLayoutCache.h"
 
-#include <cstring>
+#include <string.h>
 
 CKDWORD CKFFBaseTextureArg(CKDWORD arg) {
     return arg & ~(CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE);
@@ -122,43 +122,60 @@ CKDWORD CKFFResolveStageAlphaOp(const CKDWORD *stage, bool stageActive, bool has
     return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaOp : CKRST_TOP_DISABLE;
 }
 
-CKDWORD CKFFResolveStageColorArg1(const CKDWORD *stage, bool hasTexture) {
+static bool CKFFStageStateWasSet(uint64_t stateSetMask,
+                                CKRST_TEXTURESTAGESTATETYPE type) {
+    return (stateSetMask & (1ull << (CKDWORD)type)) != 0;
+}
+
+CKDWORD CKFFResolveStageColorArg1(const CKDWORD *stage, bool hasTexture,
+                                  uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_ARG1];
-    if (arg != 0)
+    if (arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_ARG1))
         return arg;
     return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg1 : CKRST_TA_DIFFUSE;
 }
 
-CKDWORD CKFFResolveStageColorArg2(const CKDWORD *stage) {
+CKDWORD CKFFResolveStageColorArg2(const CKDWORD *stage, uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_ARG2];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg2;
+    return arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_ARG2)
+        ? arg
+        : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg2;
 }
 
-CKDWORD CKFFResolveStageColorArg0(const CKDWORD *stage) {
+CKDWORD CKFFResolveStageColorArg0(const CKDWORD *stage, uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_COLORARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg0;
+    return arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_COLORARG0)
+        ? arg
+        : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ColorArg0;
 }
 
-CKDWORD CKFFResolveStageAlphaArg1(const CKDWORD *stage, bool hasTexture) {
+CKDWORD CKFFResolveStageAlphaArg1(const CKDWORD *stage, bool hasTexture,
+                                  uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_AARG1];
-    if (arg != 0)
+    if (arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_AARG1))
         return arg;
     return hasTexture ? CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg1 : CKRST_TA_DIFFUSE;
 }
 
-CKDWORD CKFFResolveStageAlphaArg2(const CKDWORD *stage) {
+CKDWORD CKFFResolveStageAlphaArg2(const CKDWORD *stage, uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_AARG2];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg2;
+    return arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_AARG2)
+        ? arg
+        : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg2;
 }
 
-CKDWORD CKFFResolveStageAlphaArg0(const CKDWORD *stage) {
+CKDWORD CKFFResolveStageAlphaArg0(const CKDWORD *stage, uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_ALPHAARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg0;
+    return arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_ALPHAARG0)
+        ? arg
+        : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).AlphaArg0;
 }
 
-CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage) {
+CKDWORD CKFFResolveStageResultArg(const CKDWORD *stage, uint64_t stateSetMask) {
     CKDWORD arg = stage[CKRST_TSS_RESULTARG0];
-    return arg != 0 ? arg : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ResultArg;
+    return arg != 0 || CKFFStageStateWasSet(stateSetMask, CKRST_TSS_RESULTARG0)
+        ? arg
+        : CKFFLegacyTextureBlendToStageOps(stage[CKRST_TSS_TEXTUREMAPBLEND]).ResultArg;
 }
 
 CKDWORD CKFFResolveMirrorOnceAddressMask(const CKDWORD *stage) {

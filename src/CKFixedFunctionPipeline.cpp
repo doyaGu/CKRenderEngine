@@ -129,6 +129,8 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_TEXTURE_OP: return "texture-operation";
     case CKFF_DRAW_REJECT_RENDER_TARGET_TYPE: return "render-target-type";
     case CKFF_DRAW_REJECT_BORDER_PALETTE: return "border-palette";
+    case CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER: return "filtered-depth-compare";
+    case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
     default: return "none";
     }
 }
@@ -173,32 +175,67 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
 
     if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE)) {
-        for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
-            if (m_State.TextureHandles[stage] != 0)
-                return RecordDrawReject(CKFF_DRAW_REJECT_AFFINE_TEXCOORD);
-        }
-    }
+    const CKBOOL perspectiveTexture =
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0;
     const CKBOOL originBottomLeft =
         (m_ShaderCache.GetTargetFlags() & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
+    CKDWORD previousColorOp = 0;
+    CKDWORD previousAlphaOp = 0;
     for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
-        const CKBOOL hasTexture = m_State.TextureHandles[stage] != 0;
+        const uint64_t stateSetMask = m_State.StageStateSetMasks[stage];
+        const CKBOOL textureBound = m_State.TextureHandles[stage] != 0;
         const CKDWORD colorOp = CKFFResolveStageColorOp(
-            m_State.StageStates[stage], TRUE, hasTexture);
+            m_State.StageStates[stage], TRUE, textureBound);
+        if (colorOp == CKRST_TOP_DISABLE)
+            break;
         const CKDWORD alphaOp = CKFFResolveStageAlphaOp(
-            m_State.StageStates[stage], TRUE, hasTexture);
+            m_State.StageStates[stage], TRUE, textureBound);
         if (CKFFClassifyTextureOpCoverage(colorOp) !=
                 CKFF_COVERAGE_EXACT ||
             CKFFClassifyTextureOpCoverage(alphaOp) !=
                 CKFF_COVERAGE_EXACT) {
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
-        if (originBottomLeft && hasTexture &&
+        CKFFShaderKeyFSStage shaderStage = {};
+        shaderStage.ColorOp = colorOp;
+        shaderStage.ColorArg0 = CKFFResolveStageColorArg0(
+            m_State.StageStates[stage], stateSetMask);
+        shaderStage.ColorArg1 = CKFFResolveStageColorArg1(
+            m_State.StageStates[stage], textureBound, stateSetMask);
+        shaderStage.ColorArg2 = CKFFResolveStageColorArg2(
+            m_State.StageStates[stage], stateSetMask);
+        shaderStage.AlphaOp = alphaOp;
+        shaderStage.AlphaArg0 = CKFFResolveStageAlphaArg0(
+            m_State.StageStates[stage], stateSetMask);
+        shaderStage.AlphaArg1 = CKFFResolveStageAlphaArg1(
+            m_State.StageStates[stage], textureBound, stateSetMask);
+        shaderStage.AlphaArg2 = CKFFResolveStageAlphaArg2(
+            m_State.StageStates[stage], stateSetMask);
+        const CKBOOL samplesTexture = textureBound &&
+            CKFFShaderKeyStageUsesTexture(
+                shaderStage, previousColorOp, previousAlphaOp);
+        if (!perspectiveTexture && samplesTexture)
+            return RecordDrawReject(CKFF_DRAW_REJECT_AFFINE_TEXCOORD);
+        if (originBottomLeft && samplesTexture &&
             (m_State.TextureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
             (m_State.TextureFlags[stage] &
                 (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0) {
             return RecordDrawReject(CKFF_DRAW_REJECT_RENDER_TARGET_TYPE);
         }
+        if (samplesTexture &&
+            (m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
+            m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE) {
+            const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
+            if (sampler.MinFilter != CKRST_FILTER_NEAREST ||
+                sampler.MagFilter != CKRST_FILTER_NEAREST ||
+                (sampler.MipFilter != CKRST_FILTER_NONE &&
+                 sampler.MipFilter != CKRST_FILTER_NEAREST &&
+                 sampler.MipFilter != CKRST_FILTER_MIPNEAREST)) {
+                return RecordDrawReject(CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER);
+            }
+        }
+        previousColorOp = colorOp;
+        previousAlphaOp = alphaOp;
     }
     return TRUE;
 }
@@ -226,7 +263,8 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
-                                                               CKDWORD activeTextureCount)
+                                                               CKDWORD activeTextureCount,
+                                                               const CKFFShaderKey &shaderKey)
 {
     if (!bindingSet || !m_Context)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -236,7 +274,15 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
         m_BorderPaletteCount = 0;
         memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
     }
-    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount);
+    CKDWORD sampledTextureMask = 0;
+    CKDWORD stageCount = activeTextureCount;
+    if (stageCount > CKFF_MAX_TEXTURE_STAGES)
+        stageCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < stageCount; ++stage) {
+        if (shaderKey.FS.Stages[stage].HasTexture)
+            sampledTextureMask |= 1u << stage;
+    }
+    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
     for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
         CKSamplerDesc &sampler = bindingSet->Bindings[i].Sampler;
         if (sampler.AddressU != CKRST_ADDRESS_BORDER &&
@@ -396,18 +442,27 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.StateDesc = &preparedState.StateDesc;
         debugInfo.DrawState = &m_DrawStateCache;
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
-        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(m_State.StageStates[0], preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_State.StageStates[0]);
+        debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
+            m_State.StageStates[0],
+            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0,
+            m_State.StageStateSetMasks[0]);
+        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(
+            m_State.StageStates[0], m_State.StageStateSetMasks[0]);
         debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(m_State.StageStates[0], preparedState.ActiveTextureCount > 0, m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(m_State.StageStates[0], preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_State.StageStates[0]);
+        debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(
+            m_State.StageStates[0],
+            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0,
+            m_State.StageStateSetMasks[0]);
+        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(
+            m_State.StageStates[0], m_State.StageStateSetMasks[0]);
         debugInfo.Stage0.Texture = m_State.TextureHandles[0];
         m_DebugState.LogDrawPrimitiveDetails(debugInfo);
     }
 #endif
 
     CKFFTextureBindingSet textureBindingSet;
-    if (!BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount))
+    if (!BuildCurrentTextureBindingSet(
+            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey))
         return FALSE;
 
     VXPRIMITIVETYPE drawStateType =
@@ -458,11 +513,15 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
     const CKFFTextureBindingSet *textures = submission.Textures;
     if (!encoder || !programContext || !textures)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
 
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         m_UniformEmitter.UploadUniforms(encoder, programContext, textures->ActiveTextureCount);
     }
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
 
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
     CKDWORD transformIdx = m_Context->AllocTransform(&m_State.World, 1);
@@ -470,6 +529,8 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
         CKFF_SCOPE_TIME(m_Probes, TransformUs);
         encoder->SetTransform(transformIdx, 1);
     }
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
     CKFF_PROBE(m_Probes, OnTransformSet());
 
     CKDrawState drawState;
@@ -485,11 +546,17 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
         CKFF_SCOPE_TIME(m_Probes, EncoderStateUs);
         encoder->SetState(drawState);
     }
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
     {
         CKFF_SCOPE_TIME(m_Probes, StencilUs);
         encoder->SetStencilRef(stencilRef);
+        if (encoder->GetStatus() != CK_OK)
+            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
         encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
     }
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
 
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
@@ -500,9 +567,13 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
             CKFF_SCOPE_TIME(m_Probes, BufferBindUs);
             encoder->SetVertexBuffer(0, submission.VertexBuffer, submission.BaseVertex,
                                      submission.VertexCount, submission.VertexLayout);
+            if (encoder->GetStatus() != CK_OK)
+                return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
             if (submission.IndexBuffer)
                 encoder->SetIndexBuffer(submission.IndexBuffer, submission.StartIndex, submission.IndexCount);
         }
+        if (encoder->GetStatus() != CK_OK)
+            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
         CKFF_PROBE(m_Probes, OnVertexBufferSet());
         if (submission.IndexBuffer)
             CKFF_PROBE(m_Probes, OnIndexBufferSet());
@@ -512,11 +583,15 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
         CKFF_SCOPE_TIME(m_Probes, TextureUs);
         BindTextures(encoder, textures);
     }
+    if (encoder->GetStatus() != CK_OK)
+        return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
 
-    float depth = ComputeDepthKey();
+    const CKDWORD depth = CKFFEncodeDepthKey(ComputeDepthKey());
     {
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
-        encoder->Submit(submission.View, programContext->Program, *(CKDWORD *)&depth, SubmitDiscardFlags());
+        encoder->Submit(submission.View, programContext->Program, depth, SubmitDiscardFlags());
+        if (encoder->GetStatus() != CK_OK)
+            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {
@@ -618,23 +693,28 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
         debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
             m_State.StageStates[0],
-            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(m_State.StageStates[0]);
+            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0,
+            m_State.StageStateSetMasks[0]);
+        debugInfo.Stage0.ColorArg2 = CKFFResolveStageColorArg2(
+            m_State.StageStates[0], m_State.StageStateSetMasks[0]);
         debugInfo.Stage0.AlphaOp = CKFFResolveStageAlphaOp(
             m_State.StageStates[0],
             preparedState.ActiveTextureCount > 0,
             m_State.TextureHandles[0] != 0);
         debugInfo.Stage0.AlphaArg1 = CKFFResolveStageAlphaArg1(
             m_State.StageStates[0],
-            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0);
-        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(m_State.StageStates[0]);
+            preparedState.ActiveTextureCount > 0 && m_State.TextureHandles[0] != 0,
+            m_State.StageStateSetMasks[0]);
+        debugInfo.Stage0.AlphaArg2 = CKFFResolveStageAlphaArg2(
+            m_State.StageStates[0], m_State.StageStateSetMasks[0]);
         debugInfo.Stage0.Texture = m_State.TextureHandles[0];
         m_DebugState.LogDrawVertexBufferDetails(debugInfo);
     }
 #endif
 
     CKFFTextureBindingSet textureBindingSet;
-    if (!BuildCurrentTextureBindingSet(&textureBindingSet, preparedState.ActiveTextureCount))
+    if (!BuildCurrentTextureBindingSet(
+            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey))
         return FALSE;
 
     CKFFDrawSubmission submission = {};
