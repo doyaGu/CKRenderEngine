@@ -329,6 +329,12 @@ void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
     frameBufferDesc.DepthStencil.Layer = 0;
     TestCheck(context->CreateFrameBuffer(&frameBufferDesc, &resources.FrameBuffer) == CK_OK,
               "Backend pixel gate must create an offscreen framebuffer");
+    TestCheck(context->IsFrameBufferValid(
+                  frameBufferDesc.ColorCount, frameBufferDesc.Color,
+                  &frameBufferDesc.DepthStencil) == TRUE,
+              "Framebuffer validation must agree with framebuffer creation");
+    TestCheck(context->IsFrameBufferValid(0, NULL, NULL) == FALSE,
+              "Framebuffer validation must reject an empty attachment set");
 }
 
 void DestroyPixelFrameBuffer(CKBgfxRasterizerContext *context,

@@ -524,6 +524,13 @@ private:
     CKDWORD FindUniformSlotByHandle(uint16_t BgfxIdx);
     CKBOOL HasActiveEncoders() const;
     CKBOOL HasCaptureFrameScreenShots();
+    CKERROR BuildFrameBufferAttachments(
+        CKDWORD ColorCount,
+        const CKFrameBufferAttachmentDesc *Color,
+        const CKFrameBufferAttachmentDesc *DepthStencil,
+        bgfx::Attachment *Attachments,
+        CKDWORD Capacity,
+        CKDWORD &AttachmentCount);
 
     CKBOOL m_BgfxInitialized;
     const char *m_RendererName;
