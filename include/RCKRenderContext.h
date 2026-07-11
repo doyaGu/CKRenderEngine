@@ -239,6 +239,7 @@ private:
     CKBOOL QueueSpriteCopy(RCKSprite *Sprite, const VxRect *Source,
                            const VxRect *Destination);
     void ProcessPendingScreenCaptures();
+    void CancelPendingScreenCaptures();
     static void ScreenCaptureCallback(void *UserData, CKDWORD FrameBuffer,
                                       CKDWORD Width, CKDWORD Height,
                                       CKDWORD Pitch, VX_PIXELFORMAT Format,

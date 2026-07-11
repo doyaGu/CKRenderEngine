@@ -31,6 +31,39 @@ struct PixelResources {
         : ColorTexture(0), DepthTexture(0), FrameBuffer(0), ReadbackTexture(0) {}
 };
 
+struct ScreenShotResult {
+    ScreenShotResult()
+        : Calls(0), Width(0), Height(0), Format(UNKNOWN_PF), DataSize(0) {}
+
+    VxMutex Mutex;
+    int Calls;
+    CKDWORD Width;
+    CKDWORD Height;
+    VX_PIXELFORMAT Format;
+    CKDWORD DataSize;
+};
+
+void ScreenShotCallback(void *userData, CKDWORD, CKDWORD width, CKDWORD height,
+                        CKDWORD, VX_PIXELFORMAT format, const void *,
+                        CKDWORD size, CKBOOL)
+{
+    ScreenShotResult *result = static_cast<ScreenShotResult *>(userData);
+    if (!result)
+        return;
+    VxMutexLock lock(result->Mutex);
+    ++result->Calls;
+    result->Width = width;
+    result->Height = height;
+    result->Format = format;
+    result->DataSize = size;
+}
+
+int ScreenShotCallCount(ScreenShotResult &result)
+{
+    VxMutexLock lock(result.Mutex);
+    return result.Calls;
+}
+
 void TestCheckf(bool condition, const char *format, ...)
 {
     if (condition)
@@ -157,6 +190,64 @@ void RunShaderProgramCase(CKBgfxRasterizerContext *context,
     cache.Shutdown();
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
+}
+
+void ValidateEncoderFrameBoundary(CKRasterizerDriver *driver,
+                                  CKBgfxRasterizerContext *context)
+{
+    CKUniformDesc desc;
+    desc.Name = (CKSTRING)"u_encoderBoundaryTest";
+    desc.Type = CKRST_UNIFORM_VEC4;
+    desc.Count = 1;
+
+    CKDWORD uniform = 0;
+    TestCheck(context->CreateUniform(&desc, &uniform) == CK_OK && uniform != 0,
+              "Encoder boundary test must create a uniform");
+
+    CKRasterizerEncoder *encoder = context->BeginEncoder();
+    TestCheck(encoder != NULL,
+              "Encoder boundary test must begin an encoder");
+    TestCheck(!context->IsIdle(),
+              "Context must report an active encoder as non-idle");
+    TestCheck(!driver->DestroyContext(context),
+              "Driver must reject context destruction while an encoder is active");
+
+    CKDWORD frameNumber = 0;
+    TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE,
+                             CKRST_FRAME_NONE, &frameNumber) ==
+                  CKERR_INVALIDOPERATION &&
+                  frameNumber == 0,
+              "Frame must reject an active encoder without advancing");
+    TestCheck(context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) ==
+                  CKERR_INVALIDOPERATION &&
+                  context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM),
+              "Resource deletion must reject an active encoder without consuming the handle");
+    TestCheck(context->Resize(0, 0, 64, 64, 0) == CKERR_INVALIDOPERATION &&
+                  context->SetAntialias(4) == CKERR_INVALIDOPERATION,
+              "Device reset operations must reject an active encoder");
+
+    TestCheck(context->EndEncoder(encoder) == CK_OK,
+              "Encoder boundary test must end the encoder");
+    TestCheck(context->IsIdle(),
+              "Context must become idle after the encoder ends");
+    TestCheck(context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) == CK_OK &&
+                  !context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM),
+              "Resource deletion must succeed after all encoders end");
+
+    desc.Name = (CKSTRING)"u_encoderBoundaryReplacement";
+    CKDWORD replacement = 0;
+    TestCheck(context->CreateUniform(&desc, &replacement) == CK_OK &&
+                  replacement != 0 && replacement != uniform,
+              "Reused resource slots must receive a new generation handle");
+    TestCheck(!context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM) &&
+                  context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) ==
+                      CKERR_INVALIDPARAMETER &&
+                  context->IsObjectAlive(replacement, CKRST_OBJ_UNIFORM),
+              "A stale generation handle must not alias its replacement");
+    TestCheck(context->DeleteObject(replacement, CKRST_OBJ_UNIFORM) == CK_OK,
+              "Replacement resource must remain independently deletable");
+    TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE) == CK_OK,
+              "Frame must succeed after all encoders end");
 }
 
 CKBOOL DrawColorTriangle(CKFixedFunctionPipeline &ffp,
@@ -382,9 +473,12 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
         VxVector( 0.0f,  0.9f, 0.5f)
     };
     const CKDWORD flatColors[3] = {0xFFFF0000u, 0xFF00FF00u, 0xFF0000FFu};
-    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
-                                flatPositions, flatColors),
-              "Flat-shaded backend pixel draw must submit");
+    const CKBOOL flatSubmitted = DrawColorTriangle(
+        ffp, ffp.GetRenderPipeline().GetEncoder(), flatPositions, flatColors);
+    TestCheckf(flatSubmitted,
+               "Flat-shaded backend pixel draw must submit: reason=%u encoder=%p",
+               (unsigned)ffp.GetLastDrawRejectReason(),
+               ffp.GetRenderPipeline().GetEncoder());
     EndPixelFrameAndRead(ffp, context, resources, pixels);
     TestCheckf(PixelNear(pixels, 32, 32, 255, 0, 0),
                "flat-shade center pixel mismatch: BGRA=(%u,%u,%u,%u)",
@@ -443,6 +537,10 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
               "ReadFrameBuffer must normalize backend output to top-first rows");
 
     ffp.Shutdown();
+    TestCheck(context->RequestScreenShot(resources.FrameBuffer,
+                                         ScreenShotCallback) ==
+                  CKERR_NOTIMPLEMENTED,
+              "Texture-backed framebuffer screenshot must report the bgfx limitation");
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
@@ -482,6 +580,8 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     CKRasterizerContext *baseContext = driver->CreateContext();
     TestCheck(baseContext != NULL,
               "CKBgfxRasterizer driver must create a context");
+    TestCheck(driver->CreateContext() == NULL,
+              "CKBgfxRasterizer must reject a second context immediately");
 
     CKBgfxRasterizerContext *context = static_cast<CKBgfxRasterizerContext *>(baseContext);
     TestCheck(context->Create((WIN_HANDLE)window, 0, 0, 64, 64, 32,
@@ -491,7 +591,14 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     CKRasterizerTargetDesc target;
     TestCheck(context->GetTargetDesc(&target) == CK_OK,
               "backend runtime context must expose a target descriptor");
-    if (target.ShaderProfile == CKRST_SHADER_PROFILE_GLSL) {
+    CKRasterizerCapsDesc caps;
+    TestCheck(context->GetCaps(&caps) == CK_OK &&
+                  driver->m_CapsUpToDate &&
+                  driver->m_3DCaps.MaxTextureWidth == caps.MaxTextureSize &&
+                  driver->m_TextureFormats.Size() > 0,
+              "Context creation must refresh legacy driver caps from bgfx");
+    if (target.ShaderProfile == CKRST_SHADER_PROFILE_GLSL ||
+        target.ShaderProfile == CKRST_SHADER_PROFILE_ESSL) {
         TestCheck(target.HomogeneousDepth && target.OriginBottomLeft,
                   "Desktop OpenGL must advertise homogeneous depth and bottom-left origin");
     } else {
@@ -506,6 +613,8 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     printf("  backend: requested=%s profile=%s\n",
            requestedBackend,
            CKBgfxShaderProfileName(target.ShaderProfile));
+
+    ValidateEncoderFrameBoundary(driver, context);
 
     RunShaderProgramCase(context, fullEntry->Key, false, true,
                          "full-specialized backend route");
@@ -523,7 +632,58 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
 
     BackendRuntimeMatchesFFPPixelSemantics(context);
 
-    driver->DestroyContext(context);
+    TestCheck(SDL_SetWindowSize(window, 48, 96),
+              "Backend runtime window must accept a portrait resize");
+    TestCheck(SDL_SyncWindow(window),
+              "Backend runtime window portrait resize must complete");
+    TestCheck(context->Resize(0, 0, 48, 96, 0) == CK_OK,
+              "Backend runtime context must resize to a portrait target");
+    ScreenShotResult completedScreenShot;
+    TestCheck(context->RequestScreenShot(0, ScreenShotCallback,
+                                         &completedScreenShot) == CK_OK,
+              "Backbuffer screenshot request must be accepted");
+    for (int i = 0; i < 16 && ScreenShotCallCount(completedScreenShot) == 0; ++i)
+        TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE) == CK_OK,
+                  "Backbuffer screenshot frame advance must succeed");
+    {
+        VxMutexLock lock(completedScreenShot.Mutex);
+        TestCheckf(completedScreenShot.Calls == 1 &&
+                       completedScreenShot.Width == 48 &&
+                       completedScreenShot.Height == 96 &&
+                       completedScreenShot.Format != UNKNOWN_PF &&
+                       completedScreenShot.DataSize != 0,
+                   "Backbuffer screenshot callback invalid: calls=%d size=%ux%u format=%u bytes=%u",
+                   completedScreenShot.Calls,
+                   (unsigned)completedScreenShot.Width,
+                   (unsigned)completedScreenShot.Height,
+                   (unsigned)completedScreenShot.Format,
+                   (unsigned)completedScreenShot.DataSize);
+    }
+
+    ScreenShotResult cancelledScreenShot;
+    TestCheck(context->RequestScreenShot(0, ScreenShotCallback,
+                                         &cancelledScreenShot) == CK_OK &&
+                  context->CancelScreenShots(&cancelledScreenShot) == CK_OK &&
+                  ScreenShotCallCount(cancelledScreenShot) == 1 &&
+                  context->CancelScreenShots(&cancelledScreenShot) ==
+                      CKERR_NOTFOUND,
+              "Cancelling a screenshot must complete its callback exactly once");
+    TestCheck(context->Frame(CKRST_FRAME_SYNC_IMMEDIATE) == CK_OK &&
+                  ScreenShotCallCount(cancelledScreenShot) == 1,
+              "A cancelled screenshot must not re-enter its callback on a later frame");
+
+    context->InjectFatalForTests();
+    TestCheck(context->GetDeviceStatus() == CKERR_INVALIDRENDERCONTEXT &&
+                  context->BeginEncoder() == NULL &&
+                  context->Frame(CKRST_FRAME_SYNC_IMMEDIATE) ==
+                      CKERR_INVALIDRENDERCONTEXT,
+              "A latched bgfx fatal must block encoder and frame submission");
+    TestCheck(context->BeginShutdown() == CK_OK &&
+                  context->BeginEncoder() == NULL,
+              "An idle bgfx context must enter shutdown and reject new encoders");
+
+    TestCheck(driver->DestroyContext(context),
+              "A fatal but idle bgfx context must remain safely destructible");
     rasterizer.Close();
     SDL_DestroyWindow(window);
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
