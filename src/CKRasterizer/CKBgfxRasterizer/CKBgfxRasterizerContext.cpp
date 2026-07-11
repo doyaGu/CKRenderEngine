@@ -3375,6 +3375,69 @@ CKERROR CKBgfxRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *De
     return CK_OK;
 }
 
+CKERROR CKBgfxRasterizerContext::BuildFrameBufferAttachments(
+    CKDWORD ColorCount,
+    const CKFrameBufferAttachmentDesc *Color,
+    const CKFrameBufferAttachmentDesc *DepthStencil,
+    bgfx::Attachment *Attachments,
+    CKDWORD Capacity,
+    CKDWORD &AttachmentCount)
+{
+    AttachmentCount = 0;
+    if (!Attachments || Capacity == 0 ||
+        ColorCount > m_CapsDesc.MaxColorAttachments ||
+        ColorCount > Capacity || (ColorCount != 0 && !Color))
+        return CKERR_INVALIDPARAMETER;
+
+    const CKBOOL hasDepth = DepthStencil && DepthStencil->Texture != 0;
+    const CKDWORD totalAttachments = ColorCount + (hasDepth ? 1u : 0u);
+    if (totalAttachments == 0 || totalAttachments > Capacity)
+        return CKERR_INVALIDPARAMETER;
+
+    for (CKDWORD i = 0; i < ColorCount; ++i)
+    {
+        CKBgfxTextureRecord *tex = GetTexture(Color[i].Texture);
+        const CKBOOL cube = tex && (tex->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
+        const CKBOOL volume = tex &&
+            (tex->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && tex->Depth > 1;
+        if (!tex || tex->IsDepth ||
+            (tex->Flags & CKRST_TEXTURE_RENDERTARGET) == 0 ||
+            Color[i].Mip >= tex->MipCount ||
+            (!cube && !volume && Color[i].Layer != 0) ||
+            (cube && Color[i].Layer >= 6) ||
+            (volume && Color[i].Layer >=
+                XMax((CKDWORD)1, tex->Depth >> Color[i].Mip)))
+        {
+            return CKERR_INVALIDPARAMETER;
+        }
+        const uint8_t resolve = tex->RequestedAutoMips && tex->MipCount > 1
+            ? BGFX_RESOLVE_AUTO_GEN_MIPS : BGFX_RESOLVE_NONE;
+        Attachments[AttachmentCount].init(
+            tex->Handle, bgfx::Access::Write,
+            (uint16_t)Color[i].Layer, 1,
+            (uint16_t)Color[i].Mip, resolve);
+        ++AttachmentCount;
+    }
+
+    if (hasDepth)
+    {
+        CKBgfxTextureRecord *depthTex = GetTexture(DepthStencil->Texture);
+        if (!depthTex || !depthTex->IsDepth ||
+            DepthStencil->Mip >= depthTex->MipCount ||
+            DepthStencil->Layer != 0)
+        {
+            return CKERR_INVALIDPARAMETER;
+        }
+        Attachments[AttachmentCount].init(
+            depthTex->Handle, bgfx::Access::Write,
+            (uint16_t)DepthStencil->Layer, 1,
+            (uint16_t)DepthStencil->Mip, BGFX_RESOLVE_NONE);
+        ++AttachmentCount;
+    }
+
+    return CK_OK;
+}
+
 CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc,
                                                     CKDWORD *OutFrameBuffer)
 {
@@ -3387,61 +3450,15 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
         return CKERR_INVALIDPARAMETER;
     if ((m_CapsDesc.Features & CKRST_CAPS_FRAMEBUFFER) == 0)
         return CKERR_NOTIMPLEMENTED;
-    if (Desc->ColorCount > m_CapsDesc.MaxColorAttachments ||
-        Desc->ColorCount > CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS ||
-        (Desc->ColorCount != 0 && !Desc->Color))
-        return CKERR_INVALIDPARAMETER;
-
-    CKDWORD totalAttachments = Desc->ColorCount;
-    CKBOOL hasDepth = (Desc->DepthStencil.Texture != 0);
-    if (hasDepth) totalAttachments++;
-
-    if (totalAttachments == 0 ||
-        totalAttachments > CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS)
-        return CKERR_INVALIDPARAMETER;
 
     bgfx::Attachment attachments[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];
-    CKDWORD idx = 0;
-
-    for (CKDWORD i = 0; i < Desc->ColorCount; ++i)
-    {
-        CKBgfxTextureRecord *tex = GetTexture(Desc->Color[i].Texture);
-        const CKBOOL cube = tex && (tex->Flags & CKRST_TEXTURE_CUBEMAP) != 0;
-        const CKBOOL volume = tex &&
-            (tex->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && tex->Depth > 1;
-        if (!tex || tex->IsDepth ||
-            (tex->Flags & CKRST_TEXTURE_RENDERTARGET) == 0 ||
-            Desc->Color[i].Mip >= tex->MipCount ||
-            (!cube && !volume && Desc->Color[i].Layer != 0) ||
-            (cube && Desc->Color[i].Layer >= 6) ||
-            (volume && Desc->Color[i].Layer >=
-                XMax((CKDWORD)1, tex->Depth >> Desc->Color[i].Mip)))
-        {
-            return CKERR_INVALIDPARAMETER;
-        }
-        const uint8_t resolve = tex->RequestedAutoMips
-            ? BGFX_RESOLVE_AUTO_GEN_MIPS : BGFX_RESOLVE_NONE;
-        attachments[idx].init(tex->Handle, bgfx::Access::Write,
-                              (uint16_t)Desc->Color[i].Layer, 1,
-                              (uint16_t)Desc->Color[i].Mip, resolve);
-        idx++;
-    }
-
-    if (hasDepth)
-    {
-        CKBgfxTextureRecord *depthTex = GetTexture(Desc->DepthStencil.Texture);
-        if (!depthTex || !depthTex->IsDepth ||
-            Desc->DepthStencil.Mip >= depthTex->MipCount ||
-            Desc->DepthStencil.Layer != 0)
-        {
-            return CKERR_INVALIDPARAMETER;
-        }
-        attachments[idx].init(depthTex->Handle, bgfx::Access::Write,
-                              (uint16_t)Desc->DepthStencil.Layer, 1,
-                              (uint16_t)Desc->DepthStencil.Mip,
-                              BGFX_RESOLVE_NONE);
-        idx++;
-    }
+    CKDWORD totalAttachments = 0;
+    const CKERROR attachmentError = BuildFrameBufferAttachments(
+        Desc->ColorCount, Desc->Color, &Desc->DepthStencil,
+        attachments, CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS,
+        totalAttachments);
+    if (attachmentError != CK_OK)
+        return attachmentError;
 
     if (!bgfx::isFrameBufferValid((uint8_t)totalAttachments, attachments)) {
         return CKERR_NOTIMPLEMENTED;
@@ -5148,42 +5165,16 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
                                                     const CKFrameBufferAttachmentDesc *Color,
                                                     const CKFrameBufferAttachmentDesc *DepthStencil)
 {
-    static const CKDWORD MAX_ATTACHMENTS = 16;
-    if (!m_BgfxInitialized || !IsApiThread() || ColorCount > MAX_ATTACHMENTS ||
-        (ColorCount != 0 && !Color))
+    if (!m_BgfxInitialized || !IsApiThread() ||
+        (m_CapsDesc.Features & CKRST_CAPS_FRAMEBUFFER) == 0)
         return FALSE;
-    bgfx::Attachment attachments[MAX_ATTACHMENTS];
+
+    bgfx::Attachment attachments[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];
     CKDWORD count = 0;
-
-    for (CKDWORD i = 0; i < ColorCount && count < MAX_ATTACHMENTS; ++i)
-    {
-        CKBgfxTextureRecord *tex = GetTexture(Color[i].Texture);
-        if (!tex || tex->IsDepth || Color[i].Mip >= tex->MipCount ||
-            Color[i].Layer != 0)
-            return FALSE;
-        const uint8_t resolve = tex->RequestedAutoMips
-            ? BGFX_RESOLVE_AUTO_GEN_MIPS : BGFX_RESOLVE_NONE;
-        attachments[count].init(tex->Handle, bgfx::Access::Write,
-                                (uint16_t)Color[i].Layer, 1,
-                                (uint16_t)Color[i].Mip, resolve);
-        ++count;
-    }
-
-    if (DepthStencil && DepthStencil->Texture != 0)
-    {
-        CKBgfxTextureRecord *tex = GetTexture(DepthStencil->Texture);
-        if (!tex || !tex->IsDepth || DepthStencil->Mip >= tex->MipCount ||
-            DepthStencil->Layer != 0)
-            return FALSE;
-        if (count < MAX_ATTACHMENTS)
-        {
-            attachments[count].init(tex->Handle, bgfx::Access::Write,
-                                    (uint16_t)DepthStencil->Layer, 1,
-                                    (uint16_t)DepthStencil->Mip,
-                                    BGFX_RESOLVE_NONE);
-            ++count;
-        }
-    }
+    if (BuildFrameBufferAttachments(
+            ColorCount, Color, DepthStencil, attachments,
+            CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS, count) != CK_OK)
+        return FALSE;
 
     return bgfx::isFrameBufferValid((uint8_t)count, attachments) ? TRUE : FALSE;
 }
