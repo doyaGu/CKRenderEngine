@@ -43,6 +43,8 @@ static void CKFFReplayUploadObjectUniforms(CKFFRenderPacketReplayContext *contex
     if (uniforms.MatrixCount > 0) {
         context->Encoder->SetUniform(uniforms.MatrixUniform, uniforms.Matrices,
                                      uniforms.MatrixCount);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return;
         CKFFReplayRecordUniform(&context->Diagnostics, uniforms.MatrixUniform,
                                 uniforms.MatrixCount);
     } else {
@@ -50,6 +52,8 @@ static void CKFFReplayUploadObjectUniforms(CKFFRenderPacketReplayContext *contex
         Vx3DMultiplyMatrix4(matrices[0], packet.ViewProjection, packet.World);
         matrices[1] = packet.World;
         context->Encoder->SetUniform(uniforms.MatrixUniform, matrices, 2);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return;
         CKFFReplayRecordUniform(&context->Diagnostics, uniforms.MatrixUniform, 2);
     }
 }
@@ -64,6 +68,8 @@ static void CKFFReplayUploadUniformPayload(CKFFRenderPacketReplayContext *contex
         context->Encoder->SetUniform(entry.Uniform,
                                      &payload.Values[entry.Offset][0],
                                      entry.Count);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return;
         CKFFReplayRecordUniform(&context->Diagnostics, entry.Uniform, entry.Count);
     }
 }
@@ -86,6 +92,8 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
 
     if (!cache->HasState || !CKFFDrawStateEquals(cache->DrawState, packet.DrawState)) {
         encoder->SetState(packet.DrawState);
+        if (encoder->GetStatus() != CK_OK)
+            return;
         cache->DrawState = packet.DrawState;
         cache->HasState = TRUE;
     } else {
@@ -97,7 +105,11 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
         cache->StencilReadMask != packet.StencilReadMask ||
         cache->StencilWriteMask != packet.StencilWriteMask) {
         encoder->SetStencilRef(packet.StencilRef);
+        if (encoder->GetStatus() != CK_OK)
+            return;
         encoder->SetStencilMask(packet.StencilReadMask, packet.StencilWriteMask);
+        if (encoder->GetStatus() != CK_OK)
+            return;
         cache->StencilRef = packet.StencilRef;
         cache->StencilReadMask = packet.StencilReadMask;
         cache->StencilWriteMask = packet.StencilWriteMask;
@@ -116,6 +128,8 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
         encoder->SetVertexBuffer(0, packet.VertexBuffer,
                                  packet.BaseVertex, packet.VertexCount,
                                  packet.VertexLayout);
+        if (encoder->GetStatus() != CK_OK)
+            return;
         cache->VertexLayout = packet.VertexLayout;
         cache->HasVertexLayout = TRUE;
         cache->VertexBuffer = packet.VertexBuffer;
@@ -135,6 +149,8 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
             encoder->SetIndexBuffer(packet.IndexBuffer,
                                     packet.StartIndex,
                                     packet.IndexCount);
+            if (encoder->GetStatus() != CK_OK)
+                return;
             cache->IndexBuffer = packet.IndexBuffer;
             cache->StartIndex = packet.StartIndex;
             cache->IndexCount = packet.IndexCount;
@@ -166,6 +182,8 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
                                 packet.Textures[i].Uniform,
                                 packet.Textures[i].Texture,
                                 (CKSamplerDesc *)&packet.Textures[i].Sampler);
+            if (encoder->GetStatus() != CK_OK)
+                return;
             CKFFReplayIncrement(diagnostics->TextureBinds, 1);
         }
         cache->ActiveTextureCount = packet.ActiveTextureCount;
@@ -182,6 +200,8 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
         const CKFFRenderPacketUniformPayload &staticUniforms =
             context->Queue->GetStaticUniformPayload(packet.StaticUniformIndex);
         CKFFReplayUploadUniformPayload(context, staticUniforms);
+        if (encoder->GetStatus() != CK_OK)
+            return;
         cache->StaticUniformIndex = packet.StaticUniformIndex;
         cache->HasStaticUniforms = TRUE;
         CKFFReplayIncrement(diagnostics->RenderPacketStaticUniformUploads, 1);
@@ -196,20 +216,29 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
                                   CKRenderPacketReplayCache *cache,
                                   CKBOOL lastPacket)
 {
-    if (!context || !context->Encoder || !context->Context || !cache)
+    if (!context || !context->Encoder || !context->Context || !cache ||
+        context->Encoder->GetStatus() != CK_OK)
         return;
 
     CKFFBindRenderPacketSharedState(context, packet, cache);
+    if (context->Encoder->GetStatus() != CK_OK)
+        return;
     CKFFReplayUploadObjectUniforms(context, packet);
+    if (context->Encoder->GetStatus() != CK_OK)
+        return;
     CKFFReplayIncrement(context->Diagnostics.RenderPacketObjectUniformUploads, 1);
 
     CKDWORD transformIdx = context->Context->AllocTransform((VxMatrix *)&packet.World, 1);
     context->Encoder->SetTransform(transformIdx, 1);
+    if (context->Encoder->GetStatus() != CK_OK)
+        return;
     CKFFReplayIncrement(context->Diagnostics.TransformSets, 1);
     if (packet.Marker[0] != '\0')
         context->Encoder->SetMarker((CKSTRING)packet.Marker);
     context->Encoder->Submit(packet.View, packet.Program, packet.Depth,
                              lastPacket ? CKRST_DISCARD_ALL : CKRST_DISCARD_NONE);
+    if (context->Encoder->GetStatus() != CK_OK)
+        return;
     CKFFReplayIncrement(context->Diagnostics.SubmittedDraws, 1);
     CKFFReplayIncrement(context->Diagnostics.ReplayedRenderPackets, 1);
 }
@@ -229,6 +258,8 @@ void CKFFReplayVertexBufferPacketRange(CKFFRenderPacketReplayContext *context,
         return;
 
     for (int i = 0; i < packetCount; ++i) {
+        if (!context->Encoder || context->Encoder->GetStatus() != CK_OK)
+            break;
         const int packetIndex = directReplay
             ? start + offset + i
             : (int)(*indices)[start + offset + i];
@@ -249,6 +280,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
     if (!context || !context->Encoder || !context->Context ||
         !context->Queue || !cache || !context->InstanceLayout)
         return FALSE;
+    if (context->Encoder->GetStatus() != CK_OK)
+        return TRUE;
     if (packetCount < CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT)
         return FALSE;
 
@@ -305,9 +338,13 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
         }
 
         CKFFBindRenderPacketSharedState(context, first, cache);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return TRUE;
         if (first.ObjectUniforms.MatrixUniform) {
             context->Encoder->SetUniform(first.ObjectUniforms.MatrixUniform,
                                          &first.ViewProjection, 1);
+            if (context->Encoder->GetStatus() != CK_OK)
+                return TRUE;
             CKFFReplayRecordUniform(&context->Diagnostics,
                                     first.ObjectUniforms.MatrixUniform, 1);
         }
@@ -315,6 +352,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
         CKFFReplayIncrement(context->Diagnostics.RenderPacketInstanceBufferBytes,
                             instanceBuffer.Stride * available);
         context->Encoder->SetTransientInstanceBuffer(0, &instanceBuffer);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return TRUE;
         if (first.Marker[0] != '\0')
             context->Encoder->SetMarker((CKSTRING)first.Marker);
 
@@ -323,6 +362,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
             ? CKRST_DISCARD_ALL
             : CKRST_DISCARD_INSTANCE_DATA;
         context->Encoder->Submit(first.View, first.InstancedProgram, first.Depth, discardFlags);
+        if (context->Encoder->GetStatus() != CK_OK)
+            return TRUE;
         CKFFReplayIncrement(context->Diagnostics.SubmittedDraws, 1);
         CKFFReplayIncrement(context->Diagnostics.ReplayedRenderPackets, available);
         CKFFReplayIncrement(context->Diagnostics.RenderPacketInstancedRuns, 1);
