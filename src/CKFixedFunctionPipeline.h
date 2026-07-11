@@ -57,7 +57,8 @@ public:
     ~CKFixedFunctionPipeline();
 
     bool Init(CKRasterizerContext *ctx);
-    void Shutdown();
+    CKERROR PrepareShutdown();
+    CKERROR Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                           CKBOOL ForceAnisotropicFiltering = FALSE);
 

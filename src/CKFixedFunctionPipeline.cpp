@@ -56,14 +56,25 @@ CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
 }
 
 bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
-    Shutdown();
+    if (Shutdown() != CK_OK)
+        return false;
     m_Context = ctx;
     m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     m_BorderPaletteCount = 0;
     m_BorderPaletteFrameSerial = (CKDWORD)-1;
     memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
-    if (!m_ShaderCache.Init(ctx)) {
+    if (!ctx)
+        return false;
+    CKBOOL shaderBackend = TRUE;
+    CKRasterizerCapsDesc caps;
+    if (ctx->GetCaps(&caps) == CK_OK) {
+        shaderBackend =
+            (caps.Features & (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)) ==
+                (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)
+            ? TRUE : FALSE;
+    }
+    if (shaderBackend && !m_ShaderCache.Init(ctx)) {
         Shutdown();
         return false;
     }
@@ -82,14 +93,21 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     return true;
 }
 
-void CKFixedFunctionPipeline::Shutdown() {
+CKERROR CKFixedFunctionPipeline::Shutdown() {
+    const CKERROR status = m_RenderPipeline.Shutdown();
+    if (status != CK_OK)
+        return status;
     m_OpaquePackets.ClearRenderPackets();
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
     m_OpaquePackets.SetInstanceLayout(0);
     m_ShaderCache.Shutdown();
-    m_RenderPipeline.Shutdown();
     m_Context = nullptr;
+    return CK_OK;
+}
+
+CKERROR CKFixedFunctionPipeline::PrepareShutdown() {
+    return m_RenderPipeline.PrepareShutdown();
 }
 
 void CKFixedFunctionPipeline::SetOpaqueSortingEnabled(CKBOOL enabled)

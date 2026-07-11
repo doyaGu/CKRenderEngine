@@ -197,6 +197,10 @@ public:
         AllowTransientInstanceBuffer = TRUE;
         FailTransientInstanceBuffer = FALSE;
         FailCreateProgram = FALSE;
+        EndEncoderResult = CK_OK;
+        FrameResult = CK_OK;
+        DeviceStatus = CK_OK;
+        FailBeginEncoder = FALSE;
     }
 
     CKERROR GetTargetDesc(CKRasterizerTargetDesc *target) const override {
@@ -207,12 +211,18 @@ public:
         return CK_OK;
     }
 
+    CKERROR GetDeviceStatus() const override { return DeviceStatus; }
+
     FFPDiagnosticEncoder Encoder;
     CKBOOL AllowTransientInstanceBuffer = TRUE;
     CKBOOL FailTransientInstanceBuffer = FALSE;
     CKBOOL FailCreateProgram = FALSE;
     CKBOOL FailCreateTexture = FALSE;
     CKBOOL FailUpdateTexture = FALSE;
+    CKERROR EndEncoderResult = CK_OK;
+    CKERROR FrameResult = CK_OK;
+    CKERROR DeviceStatus = CK_OK;
+    CKBOOL FailBeginEncoder = FALSE;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     CKDWORD CreatedTextureCount = 0;
@@ -414,16 +424,20 @@ public:
             return 0;
         return m_LayoutStride[layout] > 0 ? instanceCount : 0;
     }
-    CKRasterizerEncoder *BeginEncoder(CKBOOL = FALSE) override { return &Encoder; }
+    CKRasterizerEncoder *BeginEncoder(CKBOOL = FALSE) override {
+        return FailBeginEncoder ? nullptr : &Encoder;
+    }
     CKERROR EndEncoder(CKRasterizerEncoder *encoder) override {
-        return encoder ? encoder->GetStatus() : CKERR_INVALIDPARAMETER;
+        if (!encoder)
+            return CKERR_INVALIDPARAMETER;
+        return EndEncoderResult != CK_OK ? EndEncoderResult : encoder->GetStatus();
     }
     CKERROR Frame(CKRST_FRAME_SYNC_MODE, CKDWORD = CKRST_FRAME_NONE,
                   CKDWORD *frameNumber = nullptr) override {
         ++FrameSerial;
         if (frameNumber)
             *frameNumber = FrameSerial;
-        return CK_OK;
+        return FrameResult;
     }
 
 private:
