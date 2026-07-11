@@ -62,40 +62,47 @@ void PositionTForcesNoLighting()
     Check(BuildKey(first) == BuildKey(second), "identical PositionT input must build a stable key");
 }
 
-void DeclaredTextureStagesIgnoreStaleHigherStageState()
+void TextureStageChainIsIndependentOfTexcoordDeclarations()
 {
     CKFFStateStore state;
     state.Reset();
     state.TextureHandles[0] = 101;
     state.TextureFlags[0] = CKRST_TEXTURE_VALID;
-    state.TextureHandles[1] = 202;
-    state.TextureFlags[1] = CKRST_TEXTURE_VALID;
-    state.StageStates[1][CKRST_TSS_OP] = CKRST_TOP_ADD;
+    state.StageStates[1][CKRST_TSS_OP] = CKRST_TOP_SELECTARG1;
+    state.StageStates[1][CKRST_TSS_ARG1] = CKRST_TA_CONSTANT;
 
     CKDrawStateCache drawState;
     drawState.Reset();
 
     const CKDWORD dpFlags = CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;
-    const CKDWORD activeCount = (CKDWORD)CKFFResolveActiveTextureCount(
-        dpFlags, state.TextureHandles, state.StageStates);
-    Check(activeCount == 1, "declared stage flags must cap stale texture state");
+    const CKDWORD activeCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
+        state.TextureHandles, state.StageStates);
+    Check(activeCount == 2,
+          "an untextured stage must remain active when only texcoord 0 is declared");
 
     CKFFPreparedState prepared;
     CKFFStateResolver::BuildPreparedState(state, drawState, &prepared,
                                           dpFlags, activeCount,
                                           CKFF_VF_POSITION | CKFF_VF_TEXCOORD0,
                                           nullptr);
-    Check(prepared.ActiveTextureCount == 1, "prepared state must keep only declared stage 0 active");
-    Check(prepared.TextureBoundMask == 0x1u, "shader texture mask must not include stale stage 1 texture");
-    Check(prepared.StateDesc.FS.GetStageColorOp(1) == CKRST_TOP_DISABLE,
-          "stage 1 shader op must be disabled for a stage-0 draw");
+    Check(prepared.ActiveTextureCount == 2,
+          "prepared state must use the fixed-function stage chain length");
+    Check(prepared.TextureBoundMask == 0x1u,
+          "the untextured stage must not add a texture binding");
+    Check(prepared.StateDesc.FS.GetStageColorOp(1) == CKRST_TOP_SELECTARG1,
+          "stage 1 shader op must remain active without texcoord 1");
+
+    state.StageStates[0][CKRST_TSS_OP] = CKRST_TOP_DISABLE;
+    Check(CKFFResolveActiveTextureStageCount(
+              state.TextureHandles, state.StageStates) == 0,
+          "COLOROP disable must terminate the complete stage chain");
 }
 
 int main()
 {
     TransformedNormalInputKeepsLighting();
     PositionTForcesNoLighting();
-    DeclaredTextureStagesIgnoreStaleHigherStageState();
+    TextureStageChainIsIndependentOfTexcoordDeclarations();
 
     if (g_failures) {
         printf("%d failure(s)\n", g_failures);

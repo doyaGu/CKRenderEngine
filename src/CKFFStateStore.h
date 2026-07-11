@@ -13,6 +13,7 @@ struct CKFFStateStore {
     VxMatrix TexMatrix[CKFF_MAX_TEXTURE_STAGES];
     VxMatrix VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
     CKBOOL VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
+    CKBOOL VertexBlendPaletteOverflow;
 
     CKFFMaterialData Material;
     CKFFLightData Lights[CKFF_MAX_LIGHTS];

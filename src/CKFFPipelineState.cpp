@@ -65,12 +65,15 @@ CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
     return m_State.AlphaTestPrecision;
 }
 
-void CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
-    if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT)
-        return;
+CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
+    if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT) {
+        m_State.VertexBlendPaletteOverflow = TRUE;
+        return FALSE;
+    }
     m_State.VertexBlendMatrices[index] = matrix;
     m_State.VertexBlendMatrixSet[index] = TRUE;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    return TRUE;
 }
 
 void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
@@ -78,6 +81,7 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
         Vx3DMatrixIdentity(m_State.VertexBlendMatrices[i]);
         m_State.VertexBlendMatrixSet[i] = FALSE;
     }
+    m_State.VertexBlendPaletteOverflow = FALSE;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 

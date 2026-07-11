@@ -291,6 +291,72 @@ static void FourComponentTexcoordQuadUsesGenericPath()
 #endif
 }
 
+static void MultipleTextureStagesApplyIndependentWrapModes()
+{
+    TransientGeometryHarness harness;
+    VxDrawPrimitiveData data = {};
+    float positions[12] = {
+        0.0f, 0.0f, 0.0f, 1.0f,
+        1.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 1.0f, 0.0f, 1.0f
+    };
+    float texcoords0[6] = {
+        0.2f, 0.3f,
+        0.4f, 0.5f,
+        0.6f, 0.7f
+    };
+    float texcoords1[9] = {
+        0.9f, 0.0f, 0.9f,
+        0.1f, 0.0f, 0.1f,
+        0.15f, 0.0f, 0.15f
+    };
+    CKBYTE texcoordCounts[CKRST_MAX_STAGES] = {};
+    CKDWORD wrapModes[CKRST_MAX_STAGES] = {};
+
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_CL_V | CKRST_DP_STAGES0 | CKRST_DP_STAGES1;
+    data.PositionPtr = positions;
+    data.PositionStride = 4 * sizeof(float);
+    data.TexCoordPtr = texcoords0;
+    data.TexCoordStride = 2 * sizeof(float);
+    data.TexCoordPtrs[0] = texcoords1;
+    data.TexCoordStrides[0] = 3 * sizeof(float);
+    texcoordCounts[0] = 2;
+    texcoordCounts[1] = 3;
+    wrapModes[1] = VXWRAP_U | VXWRAP_S;
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_TRIANGLELIST,
+                                       NULL,
+                                       0,
+                                       &data,
+                                       0,
+                                       FALSE,
+                                       NULL,
+                                       texcoordCounts,
+                                       wrapModes) == TRUE,
+              "independent stage wrap prepare should succeed");
+
+    const CKDWORD stride = 56;
+    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == stride * 3,
+              "independent stage wrap should emit one expanded triangle");
+    if (harness.Context.Encoder.LastVertexBytes.size() == stride * 3) {
+        const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+        TestCheck(ReadFloat(vertices + 16) == 0.2f &&
+                  ReadFloat(vertices + stride + 16) == 0.4f &&
+                  ReadFloat(vertices + stride * 2 + 16) == 0.6f,
+                  "stage zero coordinates must remain unchanged");
+        TestCheck(ReadFloat(vertices + 32) == 0.9f &&
+                  ReadFloat(vertices + stride + 32) == 1.1f &&
+                  ReadFloat(vertices + stride * 2 + 32) == 1.15f,
+                  "stage one U wrap must remove interpolation discontinuity");
+        TestCheck(ReadFloat(vertices + 40) == 0.9f &&
+                  ReadFloat(vertices + stride + 40) == 1.1f &&
+                  ReadFloat(vertices + stride * 2 + 40) == 1.15f,
+                  "stage one S wrap must support three-component coordinates");
+    }
+}
+
 static void InitSpriteBatchData(VxDrawPrimitiveData *data,
                                 CKVertex *vertices,
                                 int vertexCount,
@@ -420,6 +486,8 @@ int main()
     tests.Run("indexed triangle fan uses generic path", &IndexedTriangleFanUsesGenericPath);
     tests.Run("extended texcoord data uses generic path", &ExtendedTexcoordDataUsesGenericPath);
     tests.Run("four-component texcoord quad uses generic path", &FourComponentTexcoordQuadUsesGenericPath);
+    tests.Run("multiple texture stages apply independent wrap modes",
+              &MultipleTextureStagesApplyIndependentWrapModes);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
     tests.Run("non-batch triangle list uses generic path", &NonBatchTriangleListUsesGenericPath);
     return tests.ExitCode();

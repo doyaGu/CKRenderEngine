@@ -383,7 +383,7 @@ vec4 generateTexcoord(int stage, int packedIndex, vec4 tc0, vec4 tc1, vec4 tc2, 
     vec4 result = selectTexcoord(index & 7, tc0, tc1, tc2, tc3, tc4, tc5, tc6, tc7);
     if (declaredCount <= 1) result.y = 0.0;
     if (declaredCount <= 2) result.z = 0.0;
-    if (declaredCount <= 3) result.w = 0.0;
+    if (declaredCount <= 3) result.w = 1.0;
     return result;
 }
 
@@ -391,25 +391,14 @@ vec4 transformTexcoord(int stage, vec4 coord)
 {
 #if defined(CKFF_FULL_SPECIALIZED)
     int flags = ckffVsTexTransformFlags(stage, 0.0);
-    int packedIndex = 0;
 #else
     vec4 params = u_stageParams[stage * 4 + 2];
     int flags = ckffVsTexTransformFlags(stage, params.z);
-    int packedIndex = int(params.y);
 #endif
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
-    bool applyTransform = count > 1 && count <= 4;
-
-    int generation = ckffVsTexGenMode(stage, packedIndex);
-    int inputIndex = ckffVsTexcoordIndex(stage, packedIndex);
-    int declaredCount = ckffVsTexcoordComponentCount(inputIndex & 7);
-    if (generation == 0 && applyTransform && declaredCount >= 1 && declaredCount < count) {
-        if (declaredCount == 1) coord.y = 1.0;
-        else if (declaredCount == 2) coord.z = 1.0;
-        else if (declaredCount == 3) coord.w = 1.0;
-    }
+    bool applyTransform = count >= 1 && count <= 4;
 
     vec4 transformed = applyTransform ? mul(u_texMatrix[stage], coord) : coord;
     if ((flags & 0x100) != 0) {

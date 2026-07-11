@@ -43,7 +43,8 @@ public:
         CKDWORD wrapMode = 0,
         CKBOOL pointSprites = FALSE,
         const CKFFPointSpriteParams *pointParams = nullptr,
-        const CKBYTE *texcoordComponentCounts = nullptr);
+        const CKBYTE *texcoordComponentCounts = nullptr,
+        const CKDWORD *wrapModes = nullptr);
 
     // Get the layout handle for the last Prepare call
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
@@ -57,6 +58,8 @@ public:
                                               CKWORD *dst);
 
     static void AdjustTriangleWrapTexcoords(float uv[3][2], CKDWORD wrapMode);
+    static void AdjustTriangleWrapTexcoords(float texcoords[3][4], CKDWORD wrapMode,
+                                            CKDWORD componentCount);
     static float ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
                                                    CKBOOL scaleEnable,
                                                    float scaleA, float scaleB, float scaleC,
@@ -73,7 +76,8 @@ public:
                                  VxDrawPrimitiveData *data,
                                  const float *texcoord0Override = nullptr,
                                  const float *positionOverride = nullptr,
-                                 const CKBYTE *texcoordComponentCounts = nullptr);
+                                 const CKBYTE *texcoordComponentCounts = nullptr,
+                                 const float *texcoordOverrides = nullptr);
 
 private:
     CKRasterizerContext *m_Context;

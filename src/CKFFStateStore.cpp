@@ -31,6 +31,7 @@ void CKFFStateStore::Reset()
         Vx3DMatrixIdentity(VertexBlendMatrices[i]);
         VertexBlendMatrixSet[i] = FALSE;
     }
+    VertexBlendPaletteOverflow = FALSE;
 
     memset(&Material, 0, sizeof(Material));
     Material.Diffuse[0] = 1.0f;

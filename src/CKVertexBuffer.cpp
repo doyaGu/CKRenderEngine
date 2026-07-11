@@ -21,6 +21,16 @@ int GetActiveTexcoordCount(CKRST_DPFLAGS flags) {
     return count;
 }
 
+CKBOOL HasTextureCoordinateWrap(const CKFixedFunctionPipeline &pipeline) {
+    for (int stage = 0; stage < CKRST_MAX_STAGES; ++stage) {
+        if ((pipeline.GetRenderState(
+                 (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 void ClearVertexBufferStaging(VxDrawPrimitiveData &data) {
     VxDeleteAligned(data.PositionPtr);
     VxDeleteAligned(data.NormalPtr);
@@ -296,7 +306,8 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(Ctx);
     if (m_HardwareValid && !Indices &&
         rctx && rctx->m_RasterizerContext &&
-        rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_WRAP0) == 0 &&
+        !HasTextureCoordinateWrap(rctx->m_FFPipeline) &&
+        !rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
         !(pType == VX_POINTLIST && rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
         CKRenderView view = (m_DpData.Flags & CKRST_DP_TRANSFORM)
             ? rctx->m_Current3DView
