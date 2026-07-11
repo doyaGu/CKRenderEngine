@@ -61,6 +61,7 @@ enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_SAMPLER_LAYOUT,
     CKFF_DRAW_REJECT_STATE_VALUE,
     CKFF_DRAW_REJECT_ENCODER_ERROR,
+    CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
     CKFF_DRAW_REJECT_COUNT
 };
 
@@ -173,7 +174,8 @@ public:
     // === Packet-build support ===
     void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
                                    CKDWORD formatFlags = 0,
-                                   const CKBYTE *texcoordComponentCounts = nullptr);
+                                   const CKBYTE *texcoordComponentCounts = nullptr,
+                                   CKBOOL pointSprite = FALSE);
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);

@@ -12,7 +12,8 @@ struct CKFFStateResolver {
                                    CKDWORD dpFlags,
                                    CKDWORD activeTextureCount,
                                    CKDWORD formatFlags,
-                                   const CKBYTE *texcoordComponentCounts);
+                                   const CKBYTE *texcoordComponentCounts,
+                                   CKBOOL pointSprite = FALSE);
 
     static CKDWORD BuildDrawParams(const CKFFStateStore &state,
                                    const CKDrawStateCache &drawState,

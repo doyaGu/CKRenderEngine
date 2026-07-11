@@ -109,7 +109,8 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
                                            CKDWORD dpFlags,
                                            CKDWORD activeTextureCount,
                                            CKDWORD formatFlags,
-                                           const CKBYTE *texcoordComponentCounts)
+                                           const CKBYTE *texcoordComponentCounts,
+                                           CKBOOL pointSprite)
 {
     if (!out)
         return;
@@ -126,6 +127,7 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     const bool hasFormat = formatFlags != 0;
     const bool positionT = hasFormat ? ((formatFlags & CKFF_VF_POSITIONT) != 0) : ((dpFlags & CKRST_DP_TRANSFORM) == 0);
     out->PositionT = positionT ? TRUE : FALSE;
+    stateDesc.VS.SetPointSprite(pointSprite != FALSE);
 
     // Vertex state description
     stateDesc.VS.SetHasPosition(!positionT);
@@ -139,11 +141,13 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
             hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (out->ActiveTextureCount > (CKDWORD)stage));
         const CKDWORD packedTexcoord = state.StageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         const CKDWORD transformFlags = state.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS];
-        stateDesc.VS.SetTexCoordIndex(stage, CKFFTexcoordIndex(packedTexcoord));
-        stateDesc.VS.SetTextureTransformFlags(stage, transformFlags);
+        stateDesc.VS.SetTexCoordIndex(
+            stage, pointSprite ? 0 : CKFFTexcoordIndex(packedTexcoord));
+        stateDesc.VS.SetTextureTransformFlags(
+            stage, pointSprite ? 0 : transformFlags);
         const CKDWORD componentCount = texcoordComponentCounts ? texcoordComponentCounts[stage] : 2;
         stateDesc.VS.SetTexcoordComponentCount(stage, CKFFResolverTexcoordComponentCount(componentCount));
-        if (!positionT) {
+        if (!positionT && !pointSprite) {
             const CKDWORD texgen = (packedTexcoord >> 16) & 0xFFFFu;
             const bool hasTransform = transformFlags != 0;
             stateDesc.VS.SetTexGen(stage, texgen, hasTransform);
@@ -206,6 +210,7 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
             vertexFogMode = VXFOG_NONE;
         stateDesc.VS.SetFogMode(vertexFogMode);
         stateDesc.VS.SetRangeFog(drawState.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
+        stateDesc.VS.SetPixelFog(pixelFogMode != VXFOG_NONE);
         stateDesc.FS.SetVertexFogMode(vertexFogMode);
         stateDesc.FS.SetPixelFogMode(pixelFogMode);
         stateDesc.FS.SetRangeFog(drawState.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
@@ -234,7 +239,10 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
             state.StageStates[stage], stateSetMask));
         stateDesc.FS.SetStageResultIsTemp(stage, CKFFBaseTextureArg(
             CKFFResolveStageResultArg(state.StageStates[stage], stateSetMask)) == CKRST_TA_TEMP);
-        stateDesc.FS.SetStageProjectedSampler(stage, (state.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] & CKRST_TTF_PROJECTED) != 0);
+        stateDesc.FS.SetStageProjectedSampler(
+            stage, !pointSprite &&
+            (state.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] &
+             CKRST_TTF_PROJECTED) != 0);
         stateDesc.FS.SetStageSamplerType(stage, CKFFResolverSamplerTypeFromTextureFlags(state.TextureFlags[stage]));
         stateDesc.FS.SetStageSamplerCompareFunc(stage, state.StageStates[stage][CKRST_TSS_COMPAREFUNC]);
         stateDesc.FS.SetStageMirrorOnceMask(stage, CKFFResolveMirrorOnceAddressMask(state.StageStates[stage]) >> 9);

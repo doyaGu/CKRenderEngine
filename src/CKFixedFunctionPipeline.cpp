@@ -143,6 +143,7 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_SAMPLER_LAYOUT: return "sampler-layout";
     case CKFF_DRAW_REJECT_STATE_VALUE: return "state-value";
     case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
+    case CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER: return "point-vertex-buffer";
     default: return "none";
     }
 }
@@ -257,6 +258,15 @@ static CKBOOL CKFFValidTextureStageValues(const CKDWORD *stageState)
            CKFFValueInRange(compareFunc, VXCMP_NEVER, VXCMP_ALWAYS);
 }
 
+static float CKFFResolveConstantPointSize(const CKDrawStateCache &drawState)
+{
+    return CKTransientGeometry::ComputePointSpriteSizeForDistance(
+        CKFFReadFloatRenderState(drawState, VXRENDERSTATE_POINTSIZE, 1.0f),
+        CKFFReadFloatRenderState(drawState, VXRENDERSTATE_POINTSIZE_MIN, 1.0f),
+        CKFFReadFloatRenderState(drawState, VXRENDERSTATE_POINTSIZE_MAX, 64.0f),
+        FALSE, 1.0f, 0.0f, 0.0f, 0.0f);
+}
+
 CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 {
     m_LastDrawRejectReason = reason;
@@ -347,6 +357,14 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                 CKFF_COVERAGE_EXACT ||
             CKFFClassifyTextureOpCoverage(alphaOp) !=
                 CKFF_COVERAGE_EXACT) {
+            return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
+        }
+        if (alphaOp == CKRST_TOP_BUMPENVMAP ||
+            alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE) {
+            return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
+        }
+        if (colorOp == CKRST_TOP_BUMPENVMAP &&
+            (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPDUDV) == 0) {
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
         CKFFShaderKeyFSStage shaderStage = {};
@@ -591,6 +609,8 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     bool hasNormal = (data->NormalPtr != nullptr);
     bool hasUV = (data->TexCoordPtr != nullptr);
     CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV, data->PositionStride);
+    const CKBOOL pointSprites = type == VX_POINTLIST &&
+        m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
@@ -626,7 +646,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
             (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage));
         const void *texcoord = stage == 0
             ? data->TexCoordPtr
-            : data->TexCoordPtrs[stage];
+            : data->TexCoordPtrs[stage - 1];
         if ((wrapModes[stage] & VXWRAP_MASK) != 0 &&
             (formatFlags & CKFF_VF_TEXCOORD(stage)) != 0 && texcoord)
             wrapsTexcoords = TRUE;
@@ -641,12 +661,17 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     pointParams.ScaleC = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
     pointParams.World = m_State.World;
     pointParams.View = m_State.View;
+    pointParams.Projection = m_State.Projection;
+    pointParams.ViewportWidth = m_State.Viewport[0] != 0.0f
+        ? fabsf(2.0f / m_State.Viewport[0]) : 1.0f;
+    pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
+        ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     CKBOOL prepared = FALSE;
     {
         CKFF_SCOPE_TIME(m_Probes, PrepareUs);
         prepared = m_TransientGeometry.Prepare(
             encoder, type, indices, indexCount, data, wrapModes[0],
-            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE), &pointParams,
+            pointSprites, &pointParams,
             m_State.TexcoordComponentCounts, wrapModes);
     }
     if (!prepared) {
@@ -666,7 +691,8 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     {
         CKFF_SCOPE_TIME(m_Probes, StateUs);
         BuildCurrentPreparedState(&preparedState, data->Flags, activeTextureCount,
-                                  formatFlags, m_State.TexcoordComponentCounts);
+                                  formatFlags, m_State.TexcoordComponentCounts,
+                                  pointSprites);
         shaderKey = CKFFBuildShaderKeyFromPreparedState(&preparedState);
     }
     if (!ValidateProgramSupport(shaderKey))
@@ -733,8 +759,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
 
     VXPRIMITIVETYPE drawStateType = type;
     if (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
-        (type == VX_POINTLIST &&
-         m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
+        type == VX_POINTLIST) {
         drawStateType = VX_TRIANGLELIST;
     } else if (type == VX_LINESTRIP && wrapsTexcoords) {
         drawStateType = VX_LINELIST;
@@ -765,6 +790,16 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
         return RecordDrawReject(CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE);
+    }
+    if (type == VX_POINTLIST) {
+        if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
+            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
+            (dpFlags & CKRST_DP_PSIZE) != 0) {
+            return RecordDrawReject(CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER);
+        }
+        const float pointSize = CKFFResolveConstantPointSize(m_DrawStateCache);
+        if (pointSize > 15.0f || floorf(pointSize) != pointSize)
+            return RecordDrawReject(CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER);
     }
     const CKBOOL drawn = m_OpaquePackets.DrawVertexBuffer(
         *this, encoder, view, type, vb, ib,
@@ -818,6 +853,8 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
     const CKDWORD stencilWriteMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK);
     {
         CKFF_SCOPE_TIME(m_Probes, EncoderStateUs);
+        if (submission.DrawStateType == VX_POINTLIST)
+            encoder->SetPointSize(CKFFResolveConstantPointSize(m_DrawStateCache));
         encoder->SetState(drawState);
     }
     if (encoder->GetStatus() != CK_OK)
@@ -1011,9 +1048,11 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
 
 void CKFixedFunctionPipeline::BuildCurrentPreparedState(
     CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
-    CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts) {
+    CKDWORD formatFlags, const CKBYTE *texcoordComponentCounts,
+    CKBOOL pointSprite) {
     CKFFStateResolver::BuildPreparedState(m_State, m_DrawStateCache, prepared, dpFlags,
-                                          activeTextureCount, formatFlags, texcoordComponentCounts);
+                                          activeTextureCount, formatFlags,
+                                          texcoordComponentCounts, pointSprite);
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,

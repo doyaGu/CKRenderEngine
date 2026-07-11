@@ -61,18 +61,18 @@ static CKDWORD TexcoordComponentCount(const CKBYTE *texcoordComponentCounts, int
     return count;
 }
 
-static float ComputePointSpriteSize(const VxVector &localPos, const CKFFPointSpriteParams &params) {
-    float distance = 0.0f;
-    if (params.ScaleEnable) {
-        const VxVector worldPos = TransformPoint(localPos, params.World);
-        const VxVector viewPos = TransformPoint(worldPos, params.View);
-        const float magnitude = viewPos.Magnitude();
-        distance = magnitude > 0.0f ? magnitude : 0.0f;
-    }
+static float HomogeneousW(const VxVector &point, const VxMatrix &matrix) {
+    return point.x * matrix[0][3] + point.y * matrix[1][3] +
+           point.z * matrix[2][3] + matrix[3][3];
+}
 
+static float ComputePointSpritePixelSize(const VxVector &viewPos,
+                                         const CKFFPointSpriteParams &params) {
+    const float distance = params.ScaleEnable ? viewPos.Magnitude() : 0.0f;
     return CKTransientGeometry::ComputePointSpriteSizeForDistance(
         params.Size, params.MinSize, params.MaxSize, params.ScaleEnable,
-        params.ScaleA, params.ScaleB, params.ScaleC, distance);
+        params.ScaleA, params.ScaleB, params.ScaleC, distance,
+        params.ViewportHeight);
 }
 
 static CKDWORD PointSpriteSizeOffset(CKDWORD flags, CKDWORD formatFlags) {
@@ -107,7 +107,8 @@ static CKFFPointSpriteParams PointSpriteParamsForVertex(
 float CKTransientGeometry::ComputePointSpriteSizeForDistance(float size, float minSize, float maxSize,
                                                              CKBOOL scaleEnable,
                                                              float scaleA, float scaleB, float scaleC,
-                                                             float distance) {
+                                                             float distance,
+                                                             float viewportHeight) {
     if (size <= 0.0f)
         size = 1.0f;
     if (scaleEnable) {
@@ -115,7 +116,8 @@ float CKTransientGeometry::ComputePointSpriteSizeForDistance(float size, float m
             distance = 0.0f;
         const float denomSq = scaleA + scaleB * distance + scaleC * distance * distance;
         if (denomSq > 0.000001f)
-            size /= sqrtf(denomSq);
+            size = (viewportHeight > 0.0f ? viewportHeight : 1.0f) *
+                   size / sqrtf(denomSq);
     }
 
     if (minSize <= 0.0f)
@@ -321,8 +323,14 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastLayout = layoutHandle;
 
     CKDWORD vertexCount = data->VertexCount;
+    if (indices && indexCount > 0) {
+        for (int i = 0; i < indexCount; ++i) {
+            if (indices[i] >= vertexCount)
+                return FALSE;
+        }
+    }
 
-    if (pointSprites && primType == VX_POINTLIST && data->PositionPtr) {
+    if ((pointSprites || pointParams) && primType == VX_POINTLIST && data->PositionPtr) {
         CKFFPointSpriteParams params;
         if (pointParams) {
             params = *pointParams;
@@ -336,13 +344,18 @@ CKBOOL CKTransientGeometry::Prepare(
             params.ScaleC = 0.0f;
             params.World = VxMatrix::Identity();
             params.View = VxMatrix::Identity();
+            params.Projection = VxMatrix::Identity();
+            params.ViewportWidth = 1.0f;
+            params.ViewportHeight = 1.0f;
         }
+        const CKDWORD pointCount = indices && indexCount > 0
+            ? (CKDWORD)indexCount : vertexCount;
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
-        if (vertexCount > 0x2aaaaaaau)
+        if (pointCount > 0x2aaaaaaau)
             return FALSE;
-        const CKDWORD spriteIndexCount = vertexCount * 6;
-        const CKDWORD spriteVertexCount = vertexCount * 4;
+        const CKDWORD spriteIndexCount = pointCount * 6;
+        const CKDWORD spriteVertexCount = pointCount * 4;
         if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
             return FALSE;
         m_LastVertexBytes = tvb.Size;
@@ -362,8 +375,6 @@ CKBOOL CKTransientGeometry::Prepare(
         VxVector cameraUpWorld(invView[1][0], invView[1][1], invView[1][2]);
         VxVector cameraRightLocal = TransformDirection(cameraRightWorld, invWorld);
         VxVector cameraUpLocal = TransformDirection(cameraUpWorld, invWorld);
-        cameraRightLocal.Normalize();
-        cameraUpLocal.Normalize();
 
         const float uv[4][2] = {
             {0.0f, 0.0f},
@@ -371,16 +382,31 @@ CKBOOL CKTransientGeometry::Prepare(
             {1.0f, 1.0f},
             {0.0f, 1.0f}
         };
-        for (CKDWORD i = 0; i < vertexCount; ++i) {
-            const CKFFPointSpriteParams vertexParams = PointSpriteParamsForVertex(data, i, formatFlags, params);
-            const CKBYTE *src = (const CKBYTE *)data->PositionPtr + i * data->PositionStride;
+        for (CKDWORD i = 0; i < pointCount; ++i) {
+            const CKDWORD srcIndex = indices && indexCount > 0 ? indices[i] : i;
+            const CKFFPointSpriteParams vertexParams = PointSpriteParamsForVertex(
+                data, srcIndex, formatFlags, params);
+            float pointTexcoords[4][CKFF_MAX_TEXTURE_STAGES][4] = {};
+            if (pointSprites) {
+                for (int corner = 0; corner < 4; ++corner) {
+                    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+                        pointTexcoords[corner][stage][0] = uv[corner][0];
+                        pointTexcoords[corner][stage][1] = uv[corner][1];
+                    }
+                }
+            }
+            const CKBYTE *src = (const CKBYTE *)data->PositionPtr +
+                                srcIndex * data->PositionStride;
             float pos3[4] = {};
             if (formatFlags & CKFF_VF_POSITIONT) {
                 memcpy(pos3, src, 16);
                 const float x = pos3[0];
                 const float y = pos3[1];
                 const VxVector center(x, y, pos3[2]);
-                const float half = ComputePointSpriteSize(center, vertexParams) * 0.5f;
+                const float half = ComputePointSpriteSizeForDistance(
+                    vertexParams.Size, vertexParams.MinSize, vertexParams.MaxSize,
+                    FALSE, vertexParams.ScaleA, vertexParams.ScaleB,
+                    vertexParams.ScaleC, 0.0f) * 0.5f;
                 float corners[4][4] = {
                     {x - half, y - half, pos3[2], pos3[3]},
                     {x + half, y - half, pos3[2], pos3[3]},
@@ -388,13 +414,38 @@ CKBOOL CKTransientGeometry::Prepare(
                     {x - half, y + half, pos3[2], pos3[3]}
                 };
                 for (int j = 0; j < 4; ++j)
-                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j], texcoordComponentCounts);
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, srcIndex,
+                                     formatFlags, data,
+                                     nullptr, corners[j],
+                                     texcoordComponentCounts,
+                                     pointSprites
+                                         ? &pointTexcoords[j][0][0]
+                                         : nullptr);
             } else {
                 memcpy(pos3, src, 12);
                 const VxVector center(pos3[0], pos3[1], pos3[2]);
-                const float half = ComputePointSpriteSize(center, vertexParams) * 0.5f;
-                const VxVector right = cameraRightLocal * half;
-                const VxVector up = cameraUpLocal * half;
+                const VxVector worldPos = TransformPoint(center, vertexParams.World);
+                const VxVector viewPos = TransformPoint(worldPos, vertexParams.View);
+                const float pixelSize = ComputePointSpritePixelSize(viewPos, vertexParams);
+                float clipW = HomogeneousW(viewPos, vertexParams.Projection);
+                if (clipW < 0.0f)
+                    clipW = -clipW;
+                if (clipW < 0.000001f)
+                    clipW = 1.0f;
+                const float projectionX = fabsf(vertexParams.Projection[0][0]);
+                const float projectionY = fabsf(vertexParams.Projection[1][1]);
+                const float viewportWidth = vertexParams.ViewportWidth > 0.0f
+                    ? vertexParams.ViewportWidth : 1.0f;
+                const float viewportHeight = vertexParams.ViewportHeight > 0.0f
+                    ? vertexParams.ViewportHeight : 1.0f;
+                const float halfX = projectionX > 0.000001f
+                    ? pixelSize * clipW / (viewportWidth * projectionX)
+                    : pixelSize * 0.5f;
+                const float halfY = projectionY > 0.000001f
+                    ? pixelSize * clipW / (viewportHeight * projectionY)
+                    : pixelSize * 0.5f;
+                const VxVector right = cameraRightLocal * halfX;
+                const VxVector up = cameraUpLocal * halfY;
                 VxVector cornerVecs[4] = {
                     center - right - up,
                     center + right - up,
@@ -408,7 +459,13 @@ CKBOOL CKTransientGeometry::Prepare(
                     {cornerVecs[3].x, cornerVecs[3].y, cornerVecs[3].z}
                 };
                 for (int j = 0; j < 4; ++j)
-                    InterleaveVertex(tvb.Data, stride, i * 4 + j, i, formatFlags, data, uv[j], corners[j], texcoordComponentCounts);
+                    InterleaveVertex(tvb.Data, stride, i * 4 + j, srcIndex,
+                                     formatFlags, data,
+                                     nullptr, corners[j],
+                                     texcoordComponentCounts,
+                                     pointSprites
+                                         ? &pointTexcoords[j][0][0]
+                                         : nullptr);
             }
 
             const CKDWORD base = i * 4;
