@@ -206,8 +206,9 @@ void CKFFShaderCache::Shutdown() {
         }
         m_ModuleProgramCache.Clear();
         m_ProgramCache.Clear();
-        CKDWORD *uniforms = reinterpret_cast<CKDWORD *>(&m_Uniforms);
-        const size_t uniformCount = sizeof(m_Uniforms) / sizeof(CKDWORD);
+        CKDWORD uniforms[sizeof(m_Uniforms) / sizeof(CKDWORD)];
+        memcpy(uniforms, &m_Uniforms, sizeof(uniforms));
+        const size_t uniformCount = sizeof(uniforms) / sizeof(uniforms[0]);
         for (size_t i = 0; i < uniformCount; ++i) {
             if (uniforms[i])
                 m_Context->DeleteObject(uniforms[i], CKRST_OBJ_UNIFORM);
@@ -348,8 +349,9 @@ bool CKFFShaderCache::CreateUniforms() {
         m_Context->CreateUniform(&desc, &m_Uniforms.s_textureVolume[i]);
     }
 
-    CKDWORD *uniforms = reinterpret_cast<CKDWORD *>(&m_Uniforms);
-    const size_t uniformCount = sizeof(m_Uniforms) / sizeof(CKDWORD);
+    CKDWORD uniforms[sizeof(m_Uniforms) / sizeof(CKDWORD)];
+    memcpy(uniforms, &m_Uniforms, sizeof(uniforms));
+    const size_t uniformCount = sizeof(uniforms) / sizeof(uniforms[0]);
     for (size_t i = 0; i < uniformCount; ++i) {
         if (uniforms[i] != 0)
             continue;
