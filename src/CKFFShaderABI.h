@@ -25,7 +25,8 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_FOG = 10,
     CKFF_DRAW_PARAM_FOG_COLOR = 11,
     CKFF_DRAW_PARAM_INLINE_LIGHT_BASE = 12,
-    CKFF_DRAW_PARAM_VEC4_COUNT = 19,
+    CKFF_DRAW_PARAM_TWEEN = 19,
+    CKFF_DRAW_PARAM_VEC4_COUNT = 20,
 };
 
 enum CKFFStageParamSlot {
@@ -60,7 +61,7 @@ inline CKDWORD CKFFSamplerBindStage(CKDWORD stage, CKDWORD samplerType) {
     return stage;
 }
 
-static_assert(CKFF_DRAW_PARAM_VEC4_COUNT == 19, "ABI break: draw param vec4 count changed");
+static_assert(CKFF_DRAW_PARAM_VEC4_COUNT == 20, "ABI break: draw param vec4 count changed");
 static_assert(CKFF_STAGE_PARAM_VEC4S_PER_STAGE == 4, "ABI break: stage param vec4s per stage changed");
 static_assert(CKFF_MATRIX_VEC4_COUNT == 8, "ABI break: matrix vec4 count changed");
 static_assert(CKFF_CLIP_PLANE_COUNT == 6, "ABI break: clip plane count changed");

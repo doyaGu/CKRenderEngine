@@ -115,6 +115,10 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
             (textureFlags[stage] & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) == 0) {
             textureTransformFlags |= CKFF_TTF_RENDER_TARGET_FLIP_V;
         }
+        if (hasTexture && textureFlags &&
+            (textureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) != 0) {
+            textureTransformFlags |= CKFF_TTF_BUMP_UNORM;
+        }
         float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
         float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];
         float *colorExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];

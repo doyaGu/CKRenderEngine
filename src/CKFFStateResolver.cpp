@@ -332,6 +332,24 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
 
     CKDWORD fogColor = drawState.GetRenderState(VXRENDERSTATE_FOGCOLOR);
     CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][0] = CKFFReadFloatRenderState(
+        drawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
+    const CKDWORD vertexBlend = drawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][1] = vertexBlend == VXVBLEND_TWEENING
+        ? (float)CKFF_VERTEX_BLEND_TWEEN
+        : (vertexBlend == VXVBLEND_DISABLE
+               ? (float)CKFF_VERTEX_BLEND_DISABLED
+               : (float)CKFF_VERTEX_BLEND_NORMAL);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][2] =
+        (float)CKFFExplicitVertexBlendWeightCount(vertexBlend);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][3] =
+        drawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) ? 1.0f : 0.0f;
+    const CKDWORD shaderVertexBlendMode =
+        (CKDWORD)((shaderKey.VS.Bits >> 35) & 3u);
+    if (!context->FullSpecialized ||
+        shaderVertexBlendMode == CKFF_VERTEX_BLEND_TWEEN) {
+        drawParamCount = CKFF_DRAW_PARAM_VEC4_COUNT;
+    }
 
     CKDWORD fragmentParamCount = 0;
     if (!context->FullSpecialized) {

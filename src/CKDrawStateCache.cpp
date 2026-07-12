@@ -74,6 +74,7 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_POINTSCALE_A] = FloatState(1.0f);
     m_States[VXRENDERSTATE_POINTSCALE_B] = FloatState(0.0f);
     m_States[VXRENDERSTATE_POINTSCALE_C] = FloatState(0.0f);
+    m_States[VXRENDERSTATE_TWEENFACTOR] = FloatState(0.0f);
     m_States[VXRENDERSTATE_FOGENABLE] = FALSE;
     m_States[VXRENDERSTATE_FOGSTART] = FloatState(0.0f);
     m_States[VXRENDERSTATE_FOGEND] = FloatState(1.0f);
