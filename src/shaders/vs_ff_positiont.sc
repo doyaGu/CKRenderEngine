@@ -23,7 +23,7 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 }
 
 uniform vec4 u_viewport;
-uniform vec4 u_ffDrawParams[12];
+uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_stageParams[32];
 uniform mat4 u_texMatrix[8];
 #if CKFF_VS_CLIP_DISTANCE
