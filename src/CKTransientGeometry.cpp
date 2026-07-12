@@ -182,6 +182,31 @@ void CKTransientGeometry::InterleaveVertex(
         offset += 12;
     }
 
+    if (formatFlags & CKFF_VF_TWEENPOSITION) {
+        if (data->TweenPositionPtr) {
+            memcpy(out + offset,
+                   (CKBYTE *)data->TweenPositionPtr +
+                       srcIndex * data->TweenPositionStride,
+                   12);
+        } else {
+            memset(out + offset, 0, 12);
+        }
+        offset += 12;
+    }
+
+    if (formatFlags & CKFF_VF_TWEENNORMAL) {
+        if (data->TweenNormalPtr) {
+            memcpy(out + offset,
+                   (CKBYTE *)data->TweenNormalPtr +
+                       srcIndex * data->TweenNormalStride,
+                   12);
+        } else {
+            float defNormal[3] = {0.0f, 0.0f, 1.0f};
+            memcpy(out + offset, defNormal, 12);
+        }
+        offset += 12;
+    }
+
     if (formatFlags & CKFF_VF_BLENDWEIGHT) {
         float weights[3] = {};
         const CKDWORD weightCount = CKVertexLayoutCache::DPFlagsToBlendWeightCount(data->Flags);
@@ -313,10 +338,8 @@ CKBOOL CKTransientGeometry::Prepare(
     m_LastIndexBytes = 0;
 
     // Determine vertex format from data
-    bool hasNormal = (data->NormalPtr != nullptr);
-    bool hasUV = (data->TexCoordPtr != nullptr);
-    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
-        data->Flags, hasNormal, hasUV, data->PositionStride);
+    const CKDWORD formatFlags =
+        CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
 
     CKDWORD stride = 0;
     CKDWORD layoutHandle = m_LayoutCache->GetLayout(formatFlags, &stride);

@@ -1839,12 +1839,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE();
 
     VxDrawPrimitiveData drawData;
-    memset(&drawData, 0, sizeof(drawData));
-    if ((data->Flags & (CKRST_DP_STAGESMASK & ~CKRST_DP_STAGES0)) != 0) {
-        drawData = *data;
-    } else {
-        memcpy(&drawData, data, sizeof(VxDrawPrimitiveDataSimple));
-    }
+    UserDrawPrimitiveDataClass::CopySubmissionData(drawData, data);
     drawData.Flags &= ~CKRST_DP_VBUFFER;
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE_SANITIZE();
     if (m_DrawAnnotationState) {
@@ -4217,6 +4212,12 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
         cached->ColorPtr = nullptr;
     if (!(DpFlags & CKRST_DP_LIGHT))
         cached->NormalPtr = nullptr;
+    if (!(DpFlags & CKRST_DP_TWEEN)) {
+        cached->TweenPositionPtr = nullptr;
+        cached->TweenNormalPtr = nullptr;
+    } else if (!(DpFlags & CKRST_DP_LIGHT)) {
+        cached->TweenNormalPtr = nullptr;
+    }
 
     if ((DpFlags & CKRST_DP_SPECULAR) && cached->SpecularColorPtr) {
         const bool positionT = (DpFlags & CKRST_DP_TRANSFORM) == 0;
@@ -4235,6 +4236,8 @@ void UserDrawPrimitiveDataClass::ClearStructure() {
     // IDA: 0x1006e0f7
     VxDeleteAligned(PositionPtr);
     VxDeleteAligned(NormalPtr);
+    VxDeleteAligned(TweenPositionPtr);
+    VxDeleteAligned(TweenNormalPtr);
     VxDeleteAligned(ColorPtr);
     VxDeleteAligned(SpecularColorPtr);
     VxDeleteAligned(TexCoordPtr);
@@ -4254,6 +4257,8 @@ void UserDrawPrimitiveDataClass::AllocateStructure() {
     // Strides must be valid; many callers rely on them.
     PositionStride = sizeof(VxVector4);
     NormalStride = sizeof(VxVector);
+    TweenPositionStride = sizeof(VxVector);
+    TweenNormalStride = sizeof(VxVector);
     ColorStride = sizeof(CKDWORD);
     SpecularColorStride = sizeof(CKDWORD);
     TexCoordStride = sizeof(Vx2DVector);
@@ -4263,6 +4268,8 @@ void UserDrawPrimitiveDataClass::AllocateStructure() {
     ColorPtr = VxNewAligned(sizeof(CKDWORD) * maxVertices, 16);         // DWORD per vertex
     SpecularColorPtr = VxNewAligned(sizeof(CKDWORD) * maxVertices, 16); // DWORD per vertex
     NormalPtr = VxNewAligned(sizeof(VxVector) * maxVertices, 16);       // VxVector (12 bytes) per vertex
+    TweenPositionPtr = VxNewAligned(sizeof(VxVector) * maxVertices, 16);
+    TweenNormalPtr = VxNewAligned(sizeof(VxVector) * maxVertices, 16);
     PositionPtr = VxNewAligned(sizeof(VxVector4) * maxVertices, 16);     // VxVector4 (16 bytes) per vertex
     TexCoordPtr = VxNewAligned(sizeof(Vx2DVector) * maxVertices, 16);      // Vx2DVector (8 bytes) per vertex
 
@@ -4271,6 +4278,22 @@ void UserDrawPrimitiveDataClass::AllocateStructure() {
     }
 
     memcpy(m_CachedDP, (VxDrawPrimitiveData *) this, sizeof(VxDrawPrimitiveData));
+}
+
+void UserDrawPrimitiveDataClass::CopySubmissionData(
+    VxDrawPrimitiveData &destination,
+    const VxDrawPrimitiveData *source) {
+    memset(&destination, 0, sizeof(destination));
+    if (!source)
+        return;
+
+    const CKDWORD extendedFlags =
+        (CKRST_DP_STAGESMASK & ~CKRST_DP_STAGES0) | CKRST_DP_TWEEN;
+    if ((source->Flags & extendedFlags) != 0) {
+        destination = *source;
+    } else {
+        memcpy(&destination, source, sizeof(VxDrawPrimitiveDataSimple));
+    }
 }
 
 CKWORD *UserDrawPrimitiveDataClass::GetIndices(int IndicesCount) {

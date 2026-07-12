@@ -42,6 +42,7 @@ public:
     CKDWORD GetLayout(CKDWORD formatFlags, CKDWORD *outStride = nullptr);
 
     // Compute format flags from VxDrawPrimitiveData CKRST_DP_* flags
+    static CKDWORD DrawPrimitiveDataToFormatFlags(const VxDrawPrimitiveData *data);
     static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV);
     static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride);
     static CKDWORD DPFlagsToBlendWeightCount(CKDWORD dpFlags);
