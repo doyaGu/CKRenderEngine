@@ -3,7 +3,7 @@ $input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1,
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 
-uniform vec4 u_ffDrawParams[19];
+uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
@@ -626,6 +626,13 @@ bool alphaPass(float alpha, int func)
     return true;
 }
 
+vec2 ckffDecodeBump(vec2 bump, bool unormEncoded)
+{
+    return unormEncoded
+        ? clamp((bump * 255.0 - 128.0) / 127.0, vec2(-1.0, -1.0), vec2(1.0, 1.0))
+        : bump;
+}
+
 #if defined(CKFF_FULL_SPECIALIZED)
 #define CKFF_APPLY_STAGE_CONST(STAGE_INDEX, STAGE_COORD_EXPR) \
     if (stagesEnabled) { \
@@ -642,7 +649,7 @@ bool alphaPass(float alpha, int func)
         } else { \
             vec4 sampleCoord = getSampleCoord((STAGE_COORD_EXPR), stageParams.TexcoordTransformFlags); \
             if ((STAGE_INDEX) != 0 && (previousColorOp == 22 || previousColorOp == 23)) { \
-                vec2 bump = previousTexture.xy; \
+                vec2 bump = ckffDecodeBump(previousTexture.xy, previousBumpUnorm); \
                 int bumpBase = ((STAGE_INDEX) - 1) * 2; \
                 sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump); \
                 sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump); \
@@ -676,6 +683,7 @@ bool alphaPass(float alpha, int func)
                 current = stageResult; \
             } \
             previousTexture = texColor; \
+            previousBumpUnorm = stageParams.BumpUnorm; \
             previousColorOp = colorOp; \
             previousAlphaOp = alphaOp; \
         } \
@@ -690,6 +698,7 @@ void main()
     vec4 current = diffuse;
     vec4 temp = vec4(0.0, 0.0, 0.0, 0.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
+    bool previousBumpUnorm = false;
     int previousColorOp = 0;
     int previousAlphaOp = 0;
 
@@ -733,7 +742,7 @@ void main()
         vec4 sampleCoord = getSampleCoord(stageCoord, stageParams.TexcoordTransformFlags);
 
         if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {
-            vec2 bump = previousTexture.xy;
+            vec2 bump = ckffDecodeBump(previousTexture.xy, previousBumpUnorm);
             int bumpBase = (stage - 1) * 2;
             sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump);
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
@@ -771,6 +780,7 @@ void main()
         }
 
         previousTexture = texColor;
+        previousBumpUnorm = stageParams.BumpUnorm;
         previousColorOp = colorOp;
         previousAlphaOp = alphaOp;
     }

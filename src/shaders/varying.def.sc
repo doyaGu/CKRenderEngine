@@ -16,6 +16,8 @@ vec4 v_clipDistance1 : SV_ClipDistance1 = vec4(0.0, 0.0, 0.0, 0.0);
 
 vec4 a_position   : POSITION;
 vec3 a_normal     : NORMAL;
+vec3 a_tangent    : TANGENT;
+vec3 a_bitangent  : BITANGENT;
 uvec4 a_indices   : BLENDINDICES;
 vec3 a_weight     : BLENDWEIGHT;
 vec4 a_texcoord0  : TEXCOORD0;

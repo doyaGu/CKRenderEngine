@@ -13,6 +13,7 @@ struct CKFFStageParams
     int MirrorOnceMask;
     int SamplerType;
     int SamplerCompareFunc;
+    bool BumpUnorm;
     bool HasTexture;
     vec4 Constant;
 };
@@ -197,10 +198,11 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.AlphaArg1 = 0;
     params.AlphaArg2 = 0;
     params.ResultArg = 1;
-    params.TexcoordTransformFlags = int(colorExtra.z) & 0x1000;
+    params.TexcoordTransformFlags = int(colorExtra.z) & 0x3000;
     params.MirrorOnceMask = ckffSpecMirrorOnceMask(stage);
     params.SamplerType = ckffSpecSamplerType(stage);
     params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
+    params.BumpUnorm = (int(colorExtra.z) & 0x2000) != 0;
     params.HasTexture = ckffSpecStageHasTexture(stage);
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #else
@@ -217,6 +219,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.MirrorOnceMask = int((uint(int(colorExtra.z)) >> uint(9)) & uint(7));
     params.SamplerType = ckffSpecSamplerType(stage);
     params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
+    params.BumpUnorm = (int(colorExtra.z) & 0x2000) != 0;
     params.HasTexture = colorParams.w > 0.5;
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
 #endif

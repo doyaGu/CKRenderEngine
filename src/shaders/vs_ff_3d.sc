@@ -6,10 +6,8 @@
 #endif
 #if CKFF_VS_INSTANCED
 $input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_color0, a_color1, i_data0, i_data1, i_data2, i_data3
-#elif CKFF_VS_VERTEX_BLEND_MODE != 0
-$input a_position, a_normal, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #else
-$input a_position, a_normal, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
+$input a_position, a_normal, a_tangent, a_bitangent, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #endif
 #if CKFF_VS_CLIP_DISTANCE
 $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
@@ -34,7 +32,7 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 uniform mat4 u_ffMatrices[8];
 uniform mat4 u_vertexBlendMatrices[4];
 uniform mat4 u_texMatrix[8];
-uniform vec4 u_ffDrawParams[19];
+uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[32];
 #if CKFF_VS_CLIP_DISTANCE
@@ -274,7 +272,7 @@ int ckffVsVertexBlendMode()
 #if defined(CKFF_FULL_SPECIALIZED)
     return CKFF_VS_VERTEX_BLEND_MODE;
 #else
-    return 0;
+    return int(u_ffDrawParams[19].y + 0.5);
 #endif
 }
 
@@ -283,7 +281,7 @@ int ckffVsVertexBlendCount()
 #if defined(CKFF_FULL_SPECIALIZED)
     return CKFF_VS_VERTEX_BLEND_COUNT;
 #else
-    return 0;
+    return int(u_ffDrawParams[19].z + 0.5);
 #endif
 }
 
@@ -292,7 +290,7 @@ bool ckffVsVertexBlendIndexed()
 #if defined(CKFF_FULL_SPECIALIZED)
     return CKFF_VS_VERTEX_BLEND_INDEXED != 0;
 #else
-    return false;
+    return u_ffDrawParams[19].w > 0.5;
 #endif
 }
 
@@ -314,7 +312,7 @@ bool ckffVsHasColor1()
 #endif
 }
 
-#if CKFF_VS_VERTEX_BLEND_MODE != 0
+#if !defined(CKFF_FULL_SPECIALIZED) || CKFF_VS_VERTEX_BLEND_MODE == 1
 float ckffBlendWeight(int index, vec3 blendWeight)
 {
     if (index == 0) return blendWeight.x;
@@ -419,6 +417,13 @@ vec4 transformTexcoord(int stage, vec4 coord)
 void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
+    vec3 localNormal = a_normal;
+#if !CKFF_VS_INSTANCED && (!defined(CKFF_FULL_SPECIALIZED) || CKFF_VS_VERTEX_BLEND_MODE == 2)
+    if (ckffVsVertexBlendMode() == 2) {
+        localPos.xyz = mix(a_position.xyz, a_tangent.xyz, u_ffDrawParams[19].x);
+        localNormal = mix(a_normal, a_bitangent, u_ffDrawParams[19].x);
+    }
+#endif
 #if CKFF_VS_INSTANCED
     vec4 a_texcoord4 = vec4(0.0, 0.0, 0.0, 1.0);
     vec4 a_texcoord5 = vec4(0.0, 0.0, 0.0, 1.0);
@@ -431,7 +436,7 @@ void main()
     vec4 viewPos;
     vec3 viewNormal;
     vec4 worldClipPos;
-#if CKFF_VS_VERTEX_BLEND_MODE != 0
+#if !CKFF_VS_INSTANCED && (!defined(CKFF_FULL_SPECIALIZED) || CKFF_VS_VERTEX_BLEND_MODE == 1)
     bool vertexBlendActive = vertexBlendMode == 1;
     if (vertexBlendActive) {
         float remainingWeight = 1.0;
@@ -446,7 +451,7 @@ void main()
                 }
                 mat4 blendMatrix = ckffBlendMatrix(ckffBlendIndex(blendSlot, a_indices));
                 blendedWorldPos += mul(blendMatrix, localPos) * weight;
-                blendedNormal += mul(blendMatrix, vec4(a_normal, 0.0)).xyz * weight;
+                blendedNormal += mul(blendMatrix, vec4(localNormal, 0.0)).xyz * weight;
             }
         }
         viewPos = mul(u_ffMatrices[2], blendedWorldPos);
@@ -469,7 +474,7 @@ void main()
 #if CKFF_VS_INSTANCED || defined(CKFF_FULL_SPECIALIZED)
         v_fogPos = gl_Position;
 #endif
-#if CKFF_VS_VERTEX_BLEND_MODE != 0
+#if !CKFF_VS_INSTANCED && (!defined(CKFF_FULL_SPECIALIZED) || CKFF_VS_VERTEX_BLEND_MODE == 1)
     }
 #endif
 #if CKFF_VS_CLIP_DISTANCE
@@ -483,14 +488,14 @@ void main()
     v_clipDistance1.zw = vec2(0.0, 0.0);
 #endif
 #if CKFF_VS_NEEDS_VIEW_SPACE
-#if CKFF_VS_VERTEX_BLEND_MODE != 0
+#if !CKFF_VS_INSTANCED && (!defined(CKFF_FULL_SPECIALIZED) || CKFF_VS_VERTEX_BLEND_MODE == 1)
     if (!vertexBlendActive) {
         viewPos = mul(u_ffMatrices[2], localPos);
-        viewNormal = mul(u_ffMatrices[3], vec4(a_normal, 0.0)).xyz;
+        viewNormal = mul(u_ffMatrices[3], vec4(localNormal, 0.0)).xyz;
     }
 #else
     viewPos = mul(u_ffMatrices[2], localPos);
-    viewNormal = mul(u_ffMatrices[3], vec4(a_normal, 0.0)).xyz;
+    viewNormal = mul(u_ffMatrices[3], vec4(localNormal, 0.0)).xyz;
 #endif
 #if defined(CKFF_FULL_SPECIALIZED)
     if ((CKFF_VS_BITS & (1 << 14)) != 0) {
