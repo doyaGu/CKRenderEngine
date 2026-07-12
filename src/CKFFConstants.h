@@ -81,7 +81,7 @@ struct CKFFUniformHandles {
     CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
     CKDWORD u_ffMatrices;   // mat4 array: MVP/projection, model, modelView, normal, blend worldView[4]
     CKDWORD u_vertexBlendMatrices; // mat4 array: fixed-function vertex blend world matrix palette
-    CKDWORD u_ffDrawParams; // vec4 array: vertex params[0..7], fragment params[8..11], inline light[12..18]
+    CKDWORD u_ffDrawParams; // vec4 array: vertex/fragment params[0..11], inline light[12..18], tween[19]
     CKDWORD u_texMatrix;   // mat4 array: one texture matrix per stage
     CKDWORD u_bumpEnv;      // vec4 array: 2 elements per texture stage (matrix, luminance)
     CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY

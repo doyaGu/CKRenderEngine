@@ -363,8 +363,13 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE) {
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
-        if (colorOp == CKRST_TOP_BUMPENVMAP &&
+        if ((colorOp == CKRST_TOP_BUMPENVMAP ||
+             colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE) &&
             (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPDUDV) == 0) {
+            return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
+        }
+        if (colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE &&
+            (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) == 0) {
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
         CKFFShaderKeyFSStage shaderStage = {};
@@ -606,9 +611,8 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         FlushOpaqueRenderPackets(encoder, FALSE, FALSE);
     CKFF_PROBE(m_Probes, OnSoftwareDraw());
 
-    bool hasNormal = (data->NormalPtr != nullptr);
-    bool hasUV = (data->TexCoordPtr != nullptr);
-    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV, data->PositionStride);
+    const CKDWORD formatFlags =
+        CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
     const CKBOOL pointSprites = type == VX_POINTLIST &&
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS

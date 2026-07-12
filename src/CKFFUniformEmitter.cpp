@@ -110,7 +110,7 @@ static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
         return true;
 
     const uint64_t bits = shaderKey.VS.Bits;
-    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL)
+    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) != CKFF_VERTEX_BLEND_DISABLED)
         return true;
     if ((bits & (1ull << 13)) != 0)
         return true;
@@ -300,6 +300,7 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
 
     const CKDWORD targetFlags = m_ShaderCache.GetTargetFlags();
     if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey) ||
+        CKFFProgramUsesBumpEnv(context->ShaderKey) ||
         CKFFProgramUsesRenderTargetFlip(m_State, targetFlags, context->ActiveTextureCount)) {
         CKFFStageParamsUniform stageParams;
         CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
@@ -316,7 +317,8 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
                 const CKDWORD samplingFlags =
                     (CKDWORD)colorExtra[2] &
                     (CKFF_TTF_MIRRORONCE_MASK |
-                     CKFF_TTF_RENDER_TARGET_FLIP_V);
+                     CKFF_TTF_RENDER_TARGET_FLIP_V |
+                     CKFF_TTF_BUMP_UNORM);
                 colorExtra[2] = (float)samplingFlags;
             }
         }

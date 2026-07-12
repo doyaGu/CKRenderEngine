@@ -267,8 +267,24 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
     }
 
     if (vertexBlend == VXVBLEND_TWEENING) {
-        state.Supported = FALSE;
-        state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_TWEENING;
+        if (indexed) {
+            state.Supported = FALSE;
+            state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_INDEXED_TWEEN;
+            return state;
+        }
+        if ((formatFlags & CKFF_VF_TWEENPOSITION) == 0) {
+            state.Supported = FALSE;
+            state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_POSITION;
+            return state;
+        }
+        if ((formatFlags & CKFF_VF_NORMAL) != 0 &&
+            (formatFlags & CKFF_VF_TWEENNORMAL) == 0) {
+            state.Supported = FALSE;
+            state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_NORMAL;
+            return state;
+        }
+        state.Mode = CKFF_VERTEX_BLEND_TWEEN;
+        state.Supported = TRUE;
         return state;
     }
 
@@ -448,9 +464,8 @@ CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op) {
     case CKRST_TOP_MULTIPLYADD:
     case CKRST_TOP_LERP:
     case CKRST_TOP_BUMPENVMAP:
-        return CKFF_COVERAGE_EXACT;
     case CKRST_TOP_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_UNTESTED;
+        return CKFF_COVERAGE_EXACT;
     default:
         return CKFF_COVERAGE_UNTESTED;
     }
@@ -475,9 +490,8 @@ CKFFCoverage CKFFClassifyShaderSemanticCoverage(CKFFShaderSemantic semantic) {
     case CKFF_SHADER_SEMANTIC_TEXGEN_CAMERASPACEREFLECTION:
     case CKFF_SHADER_SEMANTIC_TEXGEN_SPHEREMAP:
     case CKFF_SHADER_SEMANTIC_BUMPENVMAP:
-        return CKFF_COVERAGE_EXACT;
     case CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE:
-        return CKFF_COVERAGE_UNTESTED;
+        return CKFF_COVERAGE_EXACT;
     default:
         return CKFF_COVERAGE_UNTESTED;
     }
