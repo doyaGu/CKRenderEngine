@@ -3,6 +3,7 @@
 #include "CKVertexLayoutCache.h"
 #include "CKRenderFrameCostStats.h"
 #include "CKRenderSettings.h"
+#include "RCKRenderContext.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -664,6 +665,126 @@ static void NonBatchTriangleListUsesGenericPath()
 #endif
 }
 
+static void TweenInputsUseDedicatedVertexAttributes()
+{
+    VxVector position(1.0f, 2.0f, 3.0f);
+    VxVector normal(0.0f, 0.0f, 1.0f);
+    VxVector tweenPosition(4.0f, 5.0f, 6.0f);
+    VxVector tweenNormal(0.0f, 1.0f, 0.0f);
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_TWEEN;
+    data.PositionPtr = &position;
+    data.PositionStride = sizeof(position);
+    data.NormalPtr = &normal;
+    data.NormalStride = sizeof(normal);
+    data.TweenPositionPtr = &tweenPosition;
+    data.TweenPositionStride = sizeof(tweenPosition);
+    data.TweenNormalPtr = &tweenNormal;
+    data.TweenNormalStride = sizeof(tweenNormal);
+
+    const CKDWORD formatFlags = CKFF_VF_POSITION | CKFF_VF_NORMAL |
+        CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL;
+    const CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
+    CKBYTE vertex[48] = {};
+    TestCheck(stride == sizeof(vertex),
+              "Tween vertex layout must contain four float3 attributes");
+    CKTransientGeometry::InterleaveVertices(
+        vertex, stride, 1, formatFlags, &data);
+    TestCheck(ReadFloat(vertex + 0) == 1.0f &&
+                  ReadFloat(vertex + 12) == 0.0f &&
+                  ReadFloat(vertex + 24) == 4.0f &&
+                  ReadFloat(vertex + 28) == 5.0f &&
+                  ReadFloat(vertex + 32) == 6.0f &&
+                  ReadFloat(vertex + 36) == 0.0f &&
+                  ReadFloat(vertex + 40) == 1.0f,
+              "Tween position and normal must retain their dedicated byte ranges");
+}
+
+static void TweenPrepareKeepsDedicatedVertexAttributes()
+{
+    TransientGeometryHarness harness;
+    VxVector position(1.0f, 2.0f, 3.0f);
+    VxVector normal(0.0f, 0.0f, 1.0f);
+    VxVector tweenPosition(4.0f, 5.0f, 6.0f);
+    VxVector tweenNormal(0.0f, 1.0f, 0.0f);
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 1;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_TWEEN;
+    data.PositionPtr = &position;
+    data.PositionStride = sizeof(position);
+    data.NormalPtr = &normal;
+    data.NormalStride = sizeof(normal);
+    data.TweenPositionPtr = &tweenPosition;
+    data.TweenPositionStride = sizeof(tweenPosition);
+    data.TweenNormalPtr = &tweenNormal;
+    data.TweenNormalStride = sizeof(tweenNormal);
+
+    TestCheck(harness.Geometry.Prepare(
+                  &harness.Context.Encoder, VX_POINTLIST,
+                  NULL, 0, &data, 0, FALSE, NULL, NULL),
+              "Tween transient prepare must succeed");
+
+    CKBOOL hasTangent = FALSE;
+    CKBOOL hasBitangent = FALSE;
+    for (size_t i = 0; i < harness.Context.LastVertexLayoutElements.size(); ++i) {
+        const CK_VERTEX_ATTRIB attrib =
+            harness.Context.LastVertexLayoutElements[i].Attrib;
+        hasTangent = hasTangent || attrib == CKRST_ATTRIB_TANGENT;
+        hasBitangent = hasBitangent || attrib == CKRST_ATTRIB_BITANGENT;
+    }
+    TestCheck(hasTangent && hasBitangent,
+              "Tween transient prepare must retain both dedicated attributes");
+    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 72,
+              "Tween transient prepare must allocate the complete vertex stride");
+}
+
+static void UserDrawStructureAllocatesTweenStreams()
+{
+    UserDrawPrimitiveDataClass userData;
+    VxDrawPrimitiveData *data = userData.GetStructure(
+        (CKRST_DPFLAGS)(CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_TWEEN), 3);
+    TestCheck(data && data->TweenPositionPtr && data->TweenNormalPtr,
+              "GetDrawPrimitiveStructure must allocate requested tween streams");
+    TestCheck(data && data->TweenPositionStride == sizeof(VxVector) &&
+                  data->TweenNormalStride == sizeof(VxVector),
+              "GetDrawPrimitiveStructure must expose valid tween strides");
+
+    data = userData.GetStructure(CKRST_DP_TRANSFORM, 3);
+    TestCheck(data && !data->TweenPositionPtr && !data->TweenNormalPtr,
+              "GetDrawPrimitiveStructure must hide unrequested tween streams");
+}
+
+static void SubmissionCopyPreservesTweenStreams()
+{
+    VxVector position;
+    VxVector tweenPosition;
+    VxDrawPrimitiveData source = {};
+    source.VertexCount = 1;
+    source.Flags = CKRST_DP_TRANSFORM | CKRST_DP_TWEEN;
+    source.PositionPtr = &position;
+    source.PositionStride = sizeof(position);
+    source.TweenPositionPtr = &tweenPosition;
+    source.TweenPositionStride = sizeof(tweenPosition);
+
+    VxDrawPrimitiveData destination;
+    UserDrawPrimitiveDataClass::CopySubmissionData(destination, &source);
+    TestCheck(destination.TweenPositionPtr == &tweenPosition &&
+                  destination.TweenPositionStride == sizeof(tweenPosition),
+              "RenderContext submission copy must preserve tween metadata");
+
+    VxDrawPrimitiveDataSimple simple = {};
+    simple.VertexCount = 1;
+    simple.Flags = CKRST_DP_TRANSFORM;
+    simple.PositionPtr = &position;
+    simple.PositionStride = sizeof(position);
+    UserDrawPrimitiveDataClass::CopySubmissionData(
+        destination, (VxDrawPrimitiveData *)&simple);
+    TestCheck(destination.PositionPtr == &position &&
+                  !destination.TweenPositionPtr && !destination.TweenNormalPtr,
+              "RenderContext submission copy must retain the simple-data contract");
+}
+
 int main()
 {
     TestFramework tests;
@@ -687,5 +808,13 @@ int main()
               &PointScaleClampsAfterViewportConversion);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);
     tests.Run("non-batch triangle list uses generic path", &NonBatchTriangleListUsesGenericPath);
+    tests.Run("tween inputs use dedicated vertex attributes",
+              &TweenInputsUseDedicatedVertexAttributes);
+    tests.Run("tween prepare keeps dedicated vertex attributes",
+              &TweenPrepareKeepsDedicatedVertexAttributes);
+    tests.Run("user draw structure allocates tween streams",
+              &UserDrawStructureAllocatesTweenStreams);
+    tests.Run("submission copy preserves tween streams",
+              &SubmissionCopyPreservesTweenStreams);
     return tests.ExitCode();
 }
