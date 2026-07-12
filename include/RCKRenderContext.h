@@ -32,6 +32,8 @@ struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
 
     VxDrawPrimitiveData *GetStructure(CKRST_DPFLAGS DpFlags, int VertexCount);
     CKWORD *GetIndices(int IndicesCount);
+    static void CopySubmissionData(VxDrawPrimitiveData &Destination,
+                                   const VxDrawPrimitiveData *Source);
     void ClearStructure();
     void AllocateStructure();
 };

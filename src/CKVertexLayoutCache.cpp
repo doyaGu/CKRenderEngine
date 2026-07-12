@@ -43,6 +43,8 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
     if (formatFlags & CKFF_VF_POSITION)  stride += 12; // float3
     if (formatFlags & CKFF_VF_POSITIONT) stride += 16; // float4 XYZRHW
     if (formatFlags & CKFF_VF_NORMAL)    stride += 12; // float3
+    if (formatFlags & CKFF_VF_TWEENPOSITION) stride += 12; // float3
+    if (formatFlags & CKFF_VF_TWEENNORMAL)   stride += 12; // float3
     if (formatFlags & CKFF_VF_BLENDWEIGHT) stride += 12; // float3 blend weights
     if (formatFlags & CKFF_VF_BLENDINDEX)  stride += 4;  // uint8x4 blend indices
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
@@ -56,6 +58,23 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
 
 CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV) {
     return DPFlagsToFormatFlags(dpFlags, hasNormal, hasUV, 0);
+}
+
+CKDWORD CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(
+    const VxDrawPrimitiveData *data) {
+    if (!data)
+        return 0;
+
+    const bool hasNormal = data->NormalPtr != nullptr;
+    const bool hasUV = data->TexCoordPtr != nullptr;
+    CKDWORD flags = DPFlagsToFormatFlags(
+        data->Flags, hasNormal, hasUV, data->PositionStride);
+    if ((data->Flags & CKRST_DP_TWEEN) != 0 && data->TweenPositionPtr) {
+        flags |= CKFF_VF_TWEENPOSITION;
+        if (hasNormal && data->TweenNormalPtr)
+            flags |= CKFF_VF_TWEENNORMAL;
+    }
+    return flags;
 }
 
 CKDWORD CKVertexLayoutCache::DPFlagsToBlendWeightCount(CKDWORD dpFlags) {
@@ -150,6 +169,26 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
     }
     if (formatFlags & CKFF_VF_NORMAL) {
         elements[count].Attrib = CKRST_ATTRIB_NORMAL;
+        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+        elements[count].Count = 3;
+        elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
+        elements[count].Offset = offset;
+        count++;
+        offset += 12;
+    }
+    if (formatFlags & CKFF_VF_TWEENPOSITION) {
+        elements[count].Attrib = CKRST_ATTRIB_TANGENT;
+        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+        elements[count].Count = 3;
+        elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
+        elements[count].Offset = offset;
+        count++;
+        offset += 12;
+    }
+    if (formatFlags & CKFF_VF_TWEENNORMAL) {
+        elements[count].Attrib = CKRST_ATTRIB_BITANGENT;
         elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
         elements[count].Count = 3;
         elements[count].Normalized = FALSE;

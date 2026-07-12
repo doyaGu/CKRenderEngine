@@ -34,6 +34,8 @@ CKBOOL HasTextureCoordinateWrap(const CKFixedFunctionPipeline &pipeline) {
 void ClearVertexBufferStaging(VxDrawPrimitiveData &data) {
     VxDeleteAligned(data.PositionPtr);
     VxDeleteAligned(data.NormalPtr);
+    VxDeleteAligned(data.TweenPositionPtr);
+    VxDeleteAligned(data.TweenNormalPtr);
     VxDeleteAligned(data.ColorPtr);
     VxDeleteAligned(data.SpecularColorPtr);
     VxDeleteAligned(data.TexCoordPtr);
@@ -48,6 +50,12 @@ void OffsetDrawPrimitiveData(VxDrawPrimitiveData &data, CKDWORD startVertex, CKD
         data.PositionPtr = (CKBYTE *)data.PositionPtr + startVertex * data.PositionStride;
     if (data.NormalPtr)
         data.NormalPtr = (CKBYTE *)data.NormalPtr + startVertex * data.NormalStride;
+    if (data.TweenPositionPtr)
+        data.TweenPositionPtr = (CKBYTE *)data.TweenPositionPtr +
+                                startVertex * data.TweenPositionStride;
+    if (data.TweenNormalPtr)
+        data.TweenNormalPtr = (CKBYTE *)data.TweenNormalPtr +
+                              startVertex * data.TweenNormalStride;
     if (data.ColorPtr)
         data.ColorPtr = (CKBYTE *)data.ColorPtr + startVertex * data.ColorStride;
     if (data.SpecularColorPtr)
@@ -66,6 +74,11 @@ CKDWORD ComputeVertexStagingSize(CKRST_DPFLAGS flags) {
         size = CKVertexLayoutCache::DPFlagsToBlendRecordSize(flags);
     if (flags & CKRST_DP_LIGHT)
         size += sizeof(VxVector);
+    if (flags & CKRST_DP_TWEEN) {
+        size += sizeof(VxVector);
+        if (flags & CKRST_DP_LIGHT)
+            size += sizeof(VxVector);
+    }
     if (flags & CKRST_DP_DIFFUSE)
         size += sizeof(CKDWORD);
     if (flags & CKRST_DP_SPECULAR)
@@ -95,6 +108,21 @@ CKBOOL AllocateVertexBufferStaging(VxDrawPrimitiveData &data, CKRST_DPFLAGS flag
         data.NormalPtr = VxNewAligned(data.NormalStride * maxVertexCount, 16);
         if (!data.NormalPtr)
             return FALSE;
+    }
+
+    if (flags & CKRST_DP_TWEEN) {
+        data.TweenPositionStride = sizeof(VxVector);
+        data.TweenPositionPtr = VxNewAligned(
+            data.TweenPositionStride * maxVertexCount, 16);
+        if (!data.TweenPositionPtr)
+            return FALSE;
+        if (flags & CKRST_DP_LIGHT) {
+            data.TweenNormalStride = sizeof(VxVector);
+            data.TweenNormalPtr = VxNewAligned(
+                data.TweenNormalStride * maxVertexCount, 16);
+            if (!data.TweenNormalPtr)
+                return FALSE;
+        }
     }
 
     if (flags & CKRST_DP_DIFFUSE) {
@@ -242,9 +270,8 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
         m_HardwareValid = FALSE;
     }
 
-    const bool hasNormal = m_DpData.NormalPtr != nullptr;
-    const bool hasUV = m_DpData.TexCoordPtr != nullptr;
-    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(m_DpData.Flags, hasNormal, hasUV);
+    const CKDWORD formatFlags =
+        CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(&m_DpData);
     CKDWORD stride = 0;
     CKDWORD layout = rctx->m_FFPipeline.GetVertexLayoutCache().GetLayout(formatFlags, &stride);
     if (stride == 0 || layout == 0)
@@ -308,7 +335,7 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
         rctx && rctx->m_RasterizerContext &&
         !HasTextureCoordinateWrap(rctx->m_FFPipeline) &&
         !rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
-        !(pType == VX_POINTLIST && rctx->m_FFPipeline.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
+        pType != VX_POINTLIST) {
         CKRenderView view = (m_DpData.Flags & CKRST_DP_TRANSFORM)
             ? rctx->m_Current3DView
             : rctx->m_Current2DView;

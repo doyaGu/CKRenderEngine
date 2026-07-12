@@ -5380,9 +5380,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
     CKVertexLayoutCache &layoutCache =
         renderContext->m_FFPipeline.GetVertexLayoutCache();
 
-    bool hasNormal = (data->NormalPtr != nullptr);
-    bool hasUV = (data->TexCoordPtr != nullptr);
-    CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(data->Flags, hasNormal, hasUV);
+    const CKDWORD formatFlags =
+        CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
     CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
     CKDWORD layoutHandle = layoutCache.GetLayout(formatFlags);
     if (layoutHandle == 0)
