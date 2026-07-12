@@ -43,6 +43,19 @@ bool CKBgfxTryAttrib(CK_VERTEX_ATTRIB Attrib, bgfx::Attrib::Enum &Result);
 bool CKBgfxTryAttribType(CK_VERTEX_ATTRIB_TYPE Type, bgfx::AttribType::Enum &Result);
 bool CKBgfxTryTextureFormat(VX_PIXELFORMAT Format, bgfx::TextureFormat::Enum &Result);
 bool CKBgfxTryPixelFormat(bgfx::TextureFormat::Enum Format, VX_PIXELFORMAT &Result);
+bool CKBgfxTryTextureStorageFormat(VX_PIXELFORMAT Format, bgfx::TextureFormat::Enum &Result);
+CKBOOL CKBgfxConvertBumpLuminancePixels(VX_PIXELFORMAT Format,
+                                        const void *Source, CKDWORD SourcePitch,
+                                        CKDWORD Width, CKDWORD Height,
+                                        void *Destination, CKDWORD DestinationPitch);
+CKBOOL CKBgfxConvertBumpLuminanceMipChain(
+    VX_PIXELFORMAT Format, const void *Source, CKDWORD SourceSize,
+    CKDWORD Width, CKDWORD Height, CKDWORD MipCount,
+    void *Destination, CKDWORD DestinationSize);
+CKBOOL CKBgfxConvertBumpLuminanceMipChain(
+    VX_PIXELFORMAT Format, const void *Source, CKDWORD SourceSize,
+    CKDWORD Width, CKDWORD Height, CKDWORD MipCount,
+    void *Destination, CKDWORD DestinationSize);
 bool CKBgfxTryDepthFormat(CK_DEPTH_FORMAT Format, bgfx::TextureFormat::Enum &Result);
 CKDWORD CKBgfxImageRowBytes(CKDWORD Width, CKDWORD BitsPerPixel);
 CKDWORD CKBgfxResolveImagePitch(CKDWORD Width, CKDWORD Height,

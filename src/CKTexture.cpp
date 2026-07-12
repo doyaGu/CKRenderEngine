@@ -482,6 +482,8 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     const VX_PIXELFORMAT actualVideoFormat = VxImageDesc2PixelFormat(desc.Format);
     if (actualVideoFormat >= _16_V8U8 && actualVideoFormat <= _32_X8L8V8U8)
         desc.Flags |= CKRST_TEXTURE_BUMPDUDV;
+    if (actualVideoFormat == _16_L6V5U5 || actualVideoFormat == _32_X8L8V8U8)
+        desc.Flags |= CKRST_TEXTURE_BUMPLUMINANCE;
 
     // If no alpha format and we need alpha, find nearest format with alpha
     if (!HasAlphaFormat(desc.Format)) {

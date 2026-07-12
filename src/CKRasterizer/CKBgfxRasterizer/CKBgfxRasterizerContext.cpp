@@ -195,6 +195,11 @@ static bool CKBgfxIsCompressedTextureFormat(bgfx::TextureFormat::Enum fmt)
            fmt == bgfx::TextureFormat::BC3;
 }
 
+static bool CKBgfxIsBumpLuminanceFormat(VX_PIXELFORMAT format)
+{
+    return format == _16_L6V5U5 || format == _32_X8L8V8U8;
+}
+
 static bool CKBgfxCanExposeReadback(VX_PIXELFORMAT pf,
                                     bgfx::TextureFormat::Enum fmt)
 {
@@ -2452,7 +2457,7 @@ CKERROR CKBgfxRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
     if (!m_BgfxInitialized || !m_Created || !IsApiThread())
         return CKERR_INVALIDOPERATION;
     bgfx::TextureFormat::Enum nativeFormat;
-    if (!CKBgfxTryTextureFormat(Format, nativeFormat))
+    if (!CKBgfxTryTextureStorageFormat(Format, nativeFormat))
         return CKERR_INVALIDPARAMETER;
     *Caps = CKTextureFormatCaps();
     Caps->Format = Format;
@@ -2462,6 +2467,8 @@ CKERROR CKBgfxRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
             ? TRUE : FALSE;
     Caps->Caps = CKBgfxMapFormatCaps(
         m_NativeFormatCaps[nativeFormat], allowReadback, FALSE);
+    if (CKBgfxIsBumpLuminanceFormat(Format))
+        Caps->Caps &= CKRST_FORMAT_CAPS_TEXTURE_2D;
     return CK_OK;
 }
 
@@ -2860,8 +2867,17 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
 
     VX_PIXELFORMAT pf = VxImageDesc2PixelFormat(Desc->Format);
     bgfx::TextureFormat::Enum fmt;
-    if (!CKBgfxTryTextureFormat(pf, fmt))
+    if (!CKBgfxTryTextureStorageFormat(pf, fmt))
         return CKERR_INVALIDPARAMETER;
+    const CKBOOL bumpLuminance = CKBgfxIsBumpLuminanceFormat(pf) ? TRUE : FALSE;
+    if (bumpLuminance &&
+        (cubeRequested || volumeRequested ||
+         (Desc->Flags & (CKRST_TEXTURE_RENDERTARGET |
+                         CKRST_TEXTURE_READBACK |
+                         CKRST_TEXTURE_BLIT_DST |
+                         CKRST_TEXTURE_COMPUTE_WRITE)) != 0)) {
+        return CKERR_NOTIMPLEMENTED;
+    }
     const CKBOOL allowReadback =
         (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) != 0 &&
         CKBgfxCanExposeReadback(pf, fmt)
@@ -2923,42 +2939,80 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
         const CKBOOL compressed = pf == _DXT1 || pf == _DXT3 || pf == _DXT5;
         if (Data->Width != w || Data->Height != h)
             return CKERR_INVALIDPARAMETER;
-        const CKBOOL packedResource = hasMips || compressed || cube || volume;
-        if (packedResource) {
-            bgfx::TextureInfo textureInfo;
-            bgfx::calcTextureSize(textureInfo, w, h, d, cube != FALSE,
-                                  hasMips, 1, fmt);
-            if (textureInfo.storageSize == 0 || Data->TotalImageSize <= 0 ||
-                static_cast<CKDWORD>(Data->TotalImageSize) < textureInfo.storageSize)
-                return CKERR_INVALIDPARAMETER;
-            if (!compressed) {
+        if (bumpLuminance) {
+            const CKDWORD sourceBytes = pf == _16_L6V5U5 ? 2u : 4u;
+            if (hasMips) {
+                if (Data->TotalImageSize <= 0) {
+                    return CKERR_INVALIDPARAMETER;
+                }
+                bgfx::TextureInfo textureInfo;
+                bgfx::calcTextureSize(textureInfo, w, h, 1, false, true, 1, fmt);
+                copiedBytes = textureInfo.storageSize;
+                if (copiedBytes == 0)
+                    return CKERR_INVALIDPARAMETER;
+                CKBYTE *converted = (CKBYTE *)VxMalloc(copiedBytes);
+                if (!converted)
+                    return CKERR_OUTOFMEMORY;
+                if (!CKBgfxConvertBumpLuminanceMipChain(
+                        pf, Data->Image, (CKDWORD)Data->TotalImageSize,
+                        w, h, fullMipCount, converted, copiedBytes)) {
+                    VxFree(converted);
+                    return CKERR_INVALIDPARAMETER;
+                }
+                mem = bgfx::copy(converted, copiedBytes);
+                VxFree(converted);
+            } else {
+                const CKDWORD sourcePitch = Data->BytesPerLine > 0
+                    ? (CKDWORD)Data->BytesPerLine : (CKDWORD)w * sourceBytes;
+                if (sourcePitch < (CKDWORD)w * sourceBytes)
+                    return CKERR_INVALIDPARAMETER;
+                copiedBytes = (CKDWORD)w * (CKDWORD)h * 4u;
+                CKBYTE *converted = (CKBYTE *)VxMalloc(copiedBytes);
+                if (!converted)
+                    return CKERR_OUTOFMEMORY;
+                if (!CKBgfxConvertBumpLuminancePixels(
+                        pf, Data->Image, sourcePitch, w, h,
+                        converted, (CKDWORD)w * 4u)) {
+                    VxFree(converted);
+                    return CKERR_INVALIDPARAMETER;
+                }
+                mem = bgfx::copy(converted, copiedBytes);
+                VxFree(converted);
+            }
+        } else {
+            const CKBOOL packedResource = hasMips || compressed || cube || volume;
+            if (packedResource) {
+                bgfx::TextureInfo textureInfo;
+                bgfx::calcTextureSize(textureInfo, w, h, d, cube != FALSE,
+                                      hasMips, 1, fmt);
+                if (textureInfo.storageSize == 0 || Data->TotalImageSize <= 0 ||
+                    static_cast<CKDWORD>(Data->TotalImageSize) < textureInfo.storageSize)
+                    return CKERR_INVALIDPARAMETER;
+                if (!compressed) {
+                    if (bpp == 0 || (bpp % 8) != 0)
+                        return CKERR_INVALIDPARAMETER;
+                }
+                copiedBytes = textureInfo.storageSize;
+                mem = bgfx::copy(Data->Image, copiedBytes);
+            } else {
                 if (bpp == 0 || (bpp % 8) != 0)
                     return CKERR_INVALIDPARAMETER;
                 const CKDWORD rowBytes = static_cast<CKDWORD>(w) * (bpp / 8u);
-                if (Data->BytesPerLine > 0 &&
-                    static_cast<CKDWORD>(Data->BytesPerLine) != rowBytes)
+                const CKDWORD pitch = CKBgfxResolveImagePitch(
+                    w, h, bpp,
+                    Data->BytesPerLine > 0 ? static_cast<CKDWORD>(Data->BytesPerLine) : 0);
+                if (rowBytes == 0 || pitch == 0)
                     return CKERR_INVALIDPARAMETER;
-            }
-            copiedBytes = textureInfo.storageSize;
-            mem = bgfx::copy(Data->Image, copiedBytes);
-        } else {
-            if (bpp == 0 || (bpp % 8) != 0)
-                return CKERR_INVALIDPARAMETER;
-            const CKDWORD rowBytes = static_cast<CKDWORD>(w) * (bpp / 8u);
-            const CKDWORD pitch = CKBgfxResolveImagePitch(
-                w, h, bpp,
-                Data->BytesPerLine > 0 ? static_cast<CKDWORD>(Data->BytesPerLine) : 0);
-            if (rowBytes == 0 || pitch == 0)
-                return CKERR_INVALIDPARAMETER;
-            copiedBytes = rowBytes * h;
-            if (pitch == rowBytes) {
-                mem = bgfx::copy(Data->Image, copiedBytes);
-            } else {
-                mem = bgfx::alloc(copiedBytes);
-                for (uint16_t row = 0; row < h; ++row)
-                    memcpy(mem->data + row * rowBytes,
-                           static_cast<const CKBYTE *>(Data->Image) + row * pitch,
-                           rowBytes);
+                copiedBytes = rowBytes * h;
+                if (pitch == rowBytes) {
+                    mem = bgfx::copy(Data->Image, copiedBytes);
+                } else {
+                    mem = bgfx::alloc(copiedBytes);
+                    for (uint16_t row = 0; row < h; ++row)
+                        memcpy(mem->data + row * rowBytes,
+                               static_cast<const CKBYTE *>(Data->Image) + row * pitch,
+                               rowBytes);
+                }
             }
         }
     }
@@ -3010,11 +3064,36 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
             bgfx::TextureInfo baseInfo;
             bgfx::calcTextureSize(baseInfo, w, h, 1, false, false, 1, fmt);
             if (baseInfo.storageSize > 0 && baseInfo.storageSize <= copiedBytes) {
-                const bgfx::Memory *baseMem =
-                    bgfx::copy(Data->Image, baseInfo.storageSize);
-                bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0,
-                                      0, 0, w, h, baseMem);
-                rec->SamplerBaseValid = TRUE;
+                const bgfx::Memory *baseMem = NULL;
+                if (bumpLuminance) {
+                    const CKDWORD sourceBytes = pf == _16_L6V5U5 ? 2u : 4u;
+                    const CKDWORD sourcePitch = hasMips
+                        ? (CKDWORD)w * sourceBytes
+                        : (Data->BytesPerLine > 0
+                               ? (CKDWORD)Data->BytesPerLine
+                               : (CKDWORD)w * sourceBytes);
+                    CKBYTE *converted = (CKBYTE *)VxMalloc(baseInfo.storageSize);
+                    if (!converted) {
+                        DestroyRecord(rec);
+                        return CKERR_OUTOFMEMORY;
+                    }
+                    if (!CKBgfxConvertBumpLuminancePixels(
+                            pf, Data->Image, sourcePitch, w, h,
+                            converted, (CKDWORD)w * 4u)) {
+                        VxFree(converted);
+                        DestroyRecord(rec);
+                        return CKERR_INVALIDPARAMETER;
+                    }
+                    baseMem = bgfx::copy(converted, baseInfo.storageSize);
+                    VxFree(converted);
+                } else {
+                    baseMem = bgfx::copy(Data->Image, baseInfo.storageSize);
+                }
+                if (baseMem) {
+                    bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0,
+                                          0, 0, w, h, baseMem);
+                    rec->SamplerBaseValid = TRUE;
+                }
             }
         }
     }
@@ -3027,13 +3106,17 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
 
     if (m_DebugLogTextures &&
         s_CreateTextureLogCount < 80) {
+        const CKDWORD sourceLogBytes = bumpLuminance && Data && Data->Image
+            ? (CKDWORD)w * (CKDWORD)h *
+                  (pf == _16_L6V5U5 ? 2u : 4u)
+            : copiedBytes;
         CKBgfxLogf("CreateTexture",
                  "id=%u handle=%u size=%ux%u flags=0x%X pf=%d bgfxFmt=%d bpp=%u requestedMips=%u actualMips=%u autoMips=%u initBytes=%u initFirst=0x%08X initHash=0x%08X",
                  texture, rec->Handle.idx, rec->Width, rec->Height, Desc->Flags,
                  (int)pf, (int)fmt, rec->BitsPerPixel, requestedMipCount,
                  rec->MipCount, requestedAutoMips, copiedBytes,
-                 FirstDword(Data ? Data->Image : nullptr, copiedBytes),
-                 SampleBytesChecksum(Data ? Data->Image : nullptr, copiedBytes));
+                 FirstDword(Data ? Data->Image : nullptr, sourceLogBytes),
+                 SampleBytesChecksum(Data ? Data->Image : nullptr, sourceLogBytes));
         s_CreateTextureLogCount++;
     }
 
@@ -3805,6 +3888,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     const bool fullMipUpdate = x == 0 && y == 0 && w == mipWidth && h == mipHeight;
 
     bool compressed = CKBgfxIsCompressedTextureFormat(rec->Format);
+    const bool bumpLuminance = CKBgfxIsBumpLuminanceFormat(rec->PixelFormat);
     if (compressed &&
         ((x % 4) != 0 || (y % 4) != 0 ||
          ((w % 4) != 0 && x + w != mipWidth) ||
@@ -3866,6 +3950,28 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         mem = bgfx::copy(Data->Image, imgSize);
         if (updateSamplerBase)
             samplerBaseMem = bgfx::copy(Data->Image, imgSize);
+    }
+    else if (bumpLuminance)
+    {
+        const CKDWORD sourceBytes = rec->PixelFormat == _16_L6V5U5 ? 2u : 4u;
+        const CKDWORD sourcePitch = Data->BytesPerLine > 0
+            ? (CKDWORD)Data->BytesPerLine : (CKDWORD)w * sourceBytes;
+        if (sourcePitch < (CKDWORD)w * sourceBytes)
+            return CKERR_INVALIDPARAMETER;
+        const CKDWORD convertedSize = (CKDWORD)w * (CKDWORD)h * 4u;
+        CKBYTE *converted = (CKBYTE *)VxMalloc(convertedSize);
+        if (!converted)
+            return CKERR_OUTOFMEMORY;
+        if (!CKBgfxConvertBumpLuminancePixels(
+                rec->PixelFormat, Data->Image, sourcePitch, w, h,
+                converted, (CKDWORD)w * 4u)) {
+            VxFree(converted);
+            return CKERR_INVALIDPARAMETER;
+        }
+        mem = bgfx::copy(converted, convertedSize);
+        if (updateSamplerBase)
+            samplerBaseMem = bgfx::copy(converted, convertedSize);
+        VxFree(converted);
     }
     else
     {
@@ -5316,4 +5422,3 @@ CKBgfxIndirectBufferRecord *CKBgfxRasterizerContext::GetIndirectBuffer(CKDWORD H
 {
     return GetSlot(m_IndirectBuffers, Handle, m_ResourceTableMutex);
 }
-

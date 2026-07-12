@@ -14,6 +14,7 @@
 #endif
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -430,6 +431,109 @@ bool CKBgfxTryPixelFormat(bgfx::TextureFormat::Enum format, VX_PIXELFORMAT &resu
     default:                          return false;
     }
     return true;
+}
+
+bool CKBgfxTryTextureStorageFormat(VX_PIXELFORMAT format,
+                                   bgfx::TextureFormat::Enum &result)
+{
+    if (format == _16_L6V5U5 || format == _32_X8L8V8U8) {
+        result = bgfx::TextureFormat::RGBA8;
+        return true;
+    }
+    return CKBgfxTryTextureFormat(format, result);
+}
+
+static CKBYTE CKBgfxEncodeSignedBump(int value, int maximum)
+{
+    const float normalized = (float)value / (float)maximum;
+    int encoded = (int)((normalized * 0.5f + 0.5f) * 255.0f + 0.5f);
+    XThreshold(encoded, 0, 255);
+    return (CKBYTE)encoded;
+}
+
+CKBOOL CKBgfxConvertBumpLuminancePixels(VX_PIXELFORMAT format,
+                                        const void *source, CKDWORD sourcePitch,
+                                        CKDWORD width, CKDWORD height,
+                                        void *destination, CKDWORD destinationPitch)
+{
+    if (!source || !destination || width == 0 || height == 0 ||
+        (format != _16_L6V5U5 && format != _32_X8L8V8U8)) {
+        return FALSE;
+    }
+
+    const CKDWORD sourceBytes = format == _16_L6V5U5 ? 2u : 4u;
+    if (sourcePitch < width * sourceBytes || destinationPitch < width * 4u)
+        return FALSE;
+
+    for (CKDWORD y = 0; y < height; ++y) {
+        const CKBYTE *src = (const CKBYTE *)source + y * sourcePitch;
+        CKBYTE *dst = (CKBYTE *)destination + y * destinationPitch;
+        for (CKDWORD x = 0; x < width; ++x) {
+            int u = 0;
+            int v = 0;
+            CKBYTE luminance = 0;
+            if (format == _16_L6V5U5) {
+                CKWORD packed = 0;
+                memcpy(&packed, src + x * 2u, sizeof(packed));
+                u = (int)(packed & 0x1fu);
+                v = (int)((packed >> 5) & 0x1fu);
+                if (u & 0x10) u -= 0x20;
+                if (v & 0x10) v -= 0x20;
+                luminance = (CKBYTE)(((packed >> 10) & 0x3fu) * 255u / 63u);
+                dst[x * 4u + 0] = CKBgfxEncodeSignedBump(u, 15);
+                dst[x * 4u + 1] = CKBgfxEncodeSignedBump(v, 15);
+            } else {
+                CKDWORD packed = 0;
+                memcpy(&packed, src + x * 4u, sizeof(packed));
+                u = (int)(signed char)(packed & 0xffu);
+                v = (int)(signed char)((packed >> 8) & 0xffu);
+                luminance = (CKBYTE)((packed >> 16) & 0xffu);
+                dst[x * 4u + 0] = CKBgfxEncodeSignedBump(u, 127);
+                dst[x * 4u + 1] = CKBgfxEncodeSignedBump(v, 127);
+            }
+            dst[x * 4u + 2] = luminance;
+            dst[x * 4u + 3] = 255;
+        }
+    }
+    return TRUE;
+}
+
+CKBOOL CKBgfxConvertBumpLuminanceMipChain(
+    VX_PIXELFORMAT format, const void *source, CKDWORD sourceSize,
+    CKDWORD width, CKDWORD height, CKDWORD mipCount,
+    void *destination, CKDWORD destinationSize)
+{
+    if (!source || !destination || width == 0 || height == 0 || mipCount == 0 ||
+        (format != _16_L6V5U5 && format != _32_X8L8V8U8)) {
+        return FALSE;
+    }
+
+    const CKDWORD sourceBytes = format == _16_L6V5U5 ? 2u : 4u;
+    uint64_t sourceOffset = 0;
+    uint64_t destinationOffset = 0;
+    for (CKDWORD mip = 0; mip < mipCount; ++mip) {
+        const uint64_t sourceLevelSize =
+            (uint64_t)width * (uint64_t)height * sourceBytes;
+        const uint64_t destinationLevelSize =
+            (uint64_t)width * (uint64_t)height * 4u;
+        if (sourceOffset + sourceLevelSize > sourceSize ||
+            destinationOffset + destinationLevelSize > destinationSize) {
+            return FALSE;
+        }
+        if (!CKBgfxConvertBumpLuminancePixels(
+                format,
+                (const CKBYTE *)source + (CKDWORD)sourceOffset,
+                width * sourceBytes, width, height,
+                (CKBYTE *)destination + (CKDWORD)destinationOffset,
+                width * 4u)) {
+            return FALSE;
+        }
+        sourceOffset += sourceLevelSize;
+        destinationOffset += destinationLevelSize;
+        width = XMax((CKDWORD)1, width >> 1);
+        height = XMax((CKDWORD)1, height >> 1);
+    }
+    return TRUE;
 }
 
 bool CKBgfxTryDepthFormat(CK_DEPTH_FORMAT fmt, bgfx::TextureFormat::Enum &result)

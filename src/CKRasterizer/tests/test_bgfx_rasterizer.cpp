@@ -919,14 +919,75 @@ static void TestExactPixelFormatMapping()
         _24_RGB888,
         _16_RGB555,
         _16_BGR555,
-        _16_L6V5U5,
-        _32_X8L8V8U8,
     };
     for (int i = 0; i < (int)(sizeof(incompatibleFormats) / sizeof(incompatibleFormats[0])); ++i) {
         bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
         TEST_ASSERT(!CKBgfxTryTextureFormat(incompatibleFormats[i], nativeFormat),
                     "incompatible channel layout is rejected instead of aliased");
     }
+
+    bgfx::TextureFormat::Enum storageFormat = bgfx::TextureFormat::Count;
+    TEST_ASSERT(CKBgfxTryTextureStorageFormat(_16_L6V5U5, storageFormat) &&
+                    storageFormat == bgfx::TextureFormat::RGBA8,
+                "L6V5U5 uses portable RGBA8 storage");
+    TEST_ASSERT(CKBgfxTryTextureStorageFormat(_32_X8L8V8U8, storageFormat) &&
+                    storageFormat == bgfx::TextureFormat::RGBA8,
+                "X8L8V8U8 uses portable RGBA8 storage");
+
+    const CKWORD l6v5u5[] = {
+        (CKWORD)(15u | (16u << 5) | (63u << 10)),
+        (CKWORD)(16u | (15u << 5))
+    };
+    CKBYTE converted16[8] = {};
+    TEST_ASSERT(CKBgfxConvertBumpLuminancePixels(
+                    _16_L6V5U5, l6v5u5, sizeof(l6v5u5), 2, 1,
+                    converted16, sizeof(converted16)),
+                "L6V5U5 conversion succeeds");
+    TEST_ASSERT(converted16[0] == 255 && converted16[1] == 0 &&
+                    converted16[2] == 255 && converted16[3] == 255,
+                "L6V5U5 positive U negative V and luminance decode exactly");
+    TEST_ASSERT(converted16[4] == 0 && converted16[5] == 255 &&
+                    converted16[6] == 0 && converted16[7] == 255,
+                "L6V5U5 negative U positive V and zero luminance decode exactly");
+
+    const CKDWORD x8l8v8u8 = 0x007F0180u;
+    CKBYTE converted32[4] = {};
+    TEST_ASSERT(CKBgfxConvertBumpLuminancePixels(
+                    _32_X8L8V8U8, &x8l8v8u8, sizeof(x8l8v8u8), 1, 1,
+                    converted32, sizeof(converted32)),
+                "X8L8V8U8 conversion succeeds");
+    TEST_ASSERT(converted32[0] == 0 && converted32[1] == 129 &&
+                    converted32[2] == 127 && converted32[3] == 255,
+                "X8L8V8U8 signed DuDv and luminance decode exactly");
+
+    CKDWORD mipChain[21];
+    for (int i = 0; i < 21; ++i)
+        mipChain[i] = 0x00800000u;
+    mipChain[16] = 0x0040007Fu;
+    mipChain[20] = 0x00FF7F00u;
+    CKBYTE convertedMipChain[21 * 4] = {};
+    TEST_ASSERT(CKBgfxConvertBumpLuminanceMipChain(
+                    _32_X8L8V8U8, mipChain, sizeof(mipChain),
+                    4, 4, 3, convertedMipChain, sizeof(convertedMipChain)),
+                "packed luminance bump mip-chain conversion succeeds");
+    TEST_ASSERT(convertedMipChain[16 * 4 + 0] == 255 &&
+                    convertedMipChain[16 * 4 + 1] == 128 &&
+                    convertedMipChain[16 * 4 + 2] == 64,
+                "first non-base bump mip starts at the expected offset");
+    TEST_ASSERT(convertedMipChain[20 * 4 + 0] == 128 &&
+                    convertedMipChain[20 * 4 + 1] == 255 &&
+                    convertedMipChain[20 * 4 + 2] == 255,
+                "last bump mip starts at the expected offset");
+    TEST_ASSERT(!CKBgfxConvertBumpLuminanceMipChain(
+                    _32_X8L8V8U8, mipChain, sizeof(mipChain) - 1,
+                    4, 4, 3, convertedMipChain, sizeof(convertedMipChain)),
+                "short packed luminance bump mip chains are rejected");
+
+    bgfx::TextureInfo mipInfo;
+    bgfx::calcTextureSize(mipInfo, 4, 4, 1, false, true, 1,
+                          bgfx::TextureFormat::RGBA8);
+    TEST_ASSERT(mipInfo.storageSize == sizeof(convertedMipChain),
+                "RGBA8 mip-chain storage matches tightly packed converted data");
 }
 
 // ============================================================================
