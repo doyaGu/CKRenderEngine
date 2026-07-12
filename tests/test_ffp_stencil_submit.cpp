@@ -2122,9 +2122,28 @@ void UnsupportedBumpInputsRejectExplicitly() {
         TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
                                         1, 0, 0, 3, 0, 0,
                                         CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "unsupported luminance bump mapping must reject");
+                  "luminance bump mapping without a luminance channel must reject");
         TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
-                  "luminance bump mapping must report texture-op rejection");
+                  "missing luminance bump channel must report texture-op rejection");
+        ffp.Shutdown();
+    }
+    {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        CKFixedFunctionPipeline ffp;
+        ffp.Init(&context);
+        ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID |
+                              CKRST_TEXTURE_BUMPDUDV |
+                              CKRST_TEXTURE_BUMPLUMINANCE);
+        ffp.SetTexture(1, 101);
+        ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+        ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                       1, 0, 0, 3, 0, 0,
+                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "packed luminance bump mapping must submit");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+                  "supported luminance bump mapping must not report rejection");
         ffp.Shutdown();
     }
     {

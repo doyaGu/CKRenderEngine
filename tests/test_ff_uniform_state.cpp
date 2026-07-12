@@ -257,8 +257,8 @@ void TextureArgModifierRepackRoundTripsBothModifierBits() {
 }
 
 void ShaderABIConstantsMatchShaderUniformDeclarations() {
-    TestCheck(CKFF_DRAW_PARAM_VEC4_COUNT == 19,
-              "u_ffDrawParams ABI must remain 19 vec4s");
+    TestCheck(CKFF_DRAW_PARAM_VEC4_COUNT == 20,
+              "u_ffDrawParams ABI must include the tween parameter vec4");
     TestCheck(CKFF_STAGE_PARAM_VEC4_COUNT == 32,
               "u_stageParams ABI must remain 32 vec4s");
     TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFFSpecializationInfo::MaxSpecDwords,
@@ -273,8 +273,8 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
 
     const std::string fs = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
     const std::string vs = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
-    TestCheck(fs.find("uniform vec4 u_ffDrawParams[19]") != std::string::npos &&
-                  vs.find("uniform vec4 u_ffDrawParams[19]") != std::string::npos,
+    TestCheck(fs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos &&
+                  vs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos,
               "Shader sources must declare u_ffDrawParams with the ABI count");
     TestCheck(fs.find("uniform vec4 u_stageParams[32]") != std::string::npos &&
                   vs.find("uniform vec4 u_stageParams[32]") != std::string::npos,
@@ -570,11 +570,11 @@ void PremodulateCoverageIsExact() {
               "MODULATE coverage must remain exact as a control case");
     TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAP) == CKFF_COVERAGE_EXACT,
               "signed DuDv bump mapping must remain exact");
-    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_UNTESTED,
-              "luminance bump mapping must remain explicit until its packed formats are supported");
+    TestCheck(CKFFClassifyTextureOpCoverage(CKRST_TOP_BUMPENVMAPLUMINANCE) == CKFF_COVERAGE_EXACT,
+              "luminance bump mapping must be marked exact after packed format conversion");
     TestCheck(CKFFClassifyShaderSemanticCoverage(
                   CKFF_SHADER_SEMANTIC_BUMPENVMAPLUMINANCE) ==
-                  CKFF_COVERAGE_UNTESTED,
+                  CKFF_COVERAGE_EXACT,
               "luminance bump shader semantics must match texture-op coverage");
 }
 
@@ -771,45 +771,60 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
                   positionT.UnsupportedReason == CKFF_VERTEX_BLEND_UNSUPPORTED_POSITIONT,
               "POSITIONT must not enable vertex blend");
 
+    CKFFVertexBlendState missingTweenPosition = CKFFResolveVertexBlendState(
+        VXVBLEND_TWEENING, FALSE, CKFF_VF_POSITION);
+    TestCheck(!missingTweenPosition.Supported &&
+                  missingTweenPosition.UnsupportedReason ==
+                      CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_POSITION,
+              "Tweening must reject a missing second position");
+
+    CKFFVertexBlendState missingTweenNormal = CKFFResolveVertexBlendState(
+        VXVBLEND_TWEENING, FALSE,
+        CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_TWEENPOSITION);
+    TestCheck(!missingTweenNormal.Supported &&
+                  missingTweenNormal.UnsupportedReason ==
+                      CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_NORMAL,
+              "Lit tweening must reject a missing second normal");
+
     CKFFVertexBlendState tween = CKFFResolveVertexBlendState(
-        VXVBLEND_TWEENING, FALSE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
-    TestCheck(!tween.Supported && tween.Mode == CKFF_VERTEX_BLEND_DISABLED &&
-                  tween.UnsupportedReason == CKFF_VERTEX_BLEND_UNSUPPORTED_TWEENING,
-              "Tweening must report a distinct unsupported reason until second position/normal inputs exist");
+        VXVBLEND_TWEENING, FALSE,
+        CKFF_VF_POSITION | CKFF_VF_NORMAL |
+        CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL);
+    TestCheck(tween.Supported && tween.Mode == CKFF_VERTEX_BLEND_TWEEN &&
+                  tween.UnsupportedReason == CKFF_VERTEX_BLEND_UNSUPPORTED_NONE,
+              "Tweening must accept complete second position and normal inputs");
+
+    CKFFVertexBlendState indexedTween = CKFFResolveVertexBlendState(
+        VXVBLEND_TWEENING, TRUE,
+        CKFF_VF_POSITION | CKFF_VF_TWEENPOSITION);
+    TestCheck(!indexedTween.Supported &&
+                  indexedTween.UnsupportedReason ==
+                      CKFF_VERTEX_BLEND_UNSUPPORTED_INDEXED_TWEEN,
+              "Tweening and indexed matrix blending must remain mutually exclusive");
 }
 
-void TweeningDiagnosticsAndShaderRemainPreImplementation() {
-    const std::string debug = ReadTextFile("Source/RenderEngine/src/CKFFDebug.cpp");
-    const std::string packet = ReadTextFile("Source/RenderEngine/src/CKFFOpaquePacketCoordinator.cpp");
+void TweeningInputsAndShaderAreWired() {
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
     const std::string layout = ReadTextFile("Source/RenderEngine/src/CKVertexLayoutCache.cpp");
     const std::string transient = ReadTextFile("Source/RenderEngine/src/CKTransientGeometry.cpp");
-    const std::string mesh = ReadTextFile("Source/RenderEngine/src/CKMesh.cpp");
     const std::string vertexBuffer = ReadTextFile("Source/RenderEngine/src/CKVertexBuffer.cpp");
 
-    TestCheck(!debug.empty() && !packet.empty() && !vs3d.empty() &&
-                  !layout.empty() && !transient.empty() && !mesh.empty() &&
+    TestCheck(!vs3d.empty() && !layout.empty() && !transient.empty() &&
                   !vertexBuffer.empty(),
-              "TWEENING diagnostic source files must be readable");
-    TestCheck(debug.find("vertexBlend=%s(%u)") != std::string::npos &&
-                  debug.find("TWEENING") != std::string::npos &&
-                  debug.find("positionStride=%u") != std::string::npos &&
-                  debug.find("dpFlags=0x%X") != std::string::npos &&
-                  debug.find("path=DrawPrimitive") != std::string::npos &&
-                  debug.find("path=DrawVertexBuffer") != std::string::npos,
-              "FFP diagnostics must expose enough TWEENING context to locate missing tween inputs");
-    TestCheck(packet.find("CKFF_RENDER_PACKET_REJECT_VERTEX_BLEND_TWEENING") != std::string::npos,
-              "Opaque packet coordinator must keep TWEENING separate from normal vertex blend rejects");
-    TestCheck(vs3d.find("vertexBlendMode == 1") != std::string::npos &&
-                  vs3d.find("vertexBlendMode == 2") == std::string::npos &&
-                  vs3d.find("a_tween") == std::string::npos,
-              "Vertex shader must not fake TWEENING before second position/normal inputs are wired");
-    TestCheck(layout.find("CKFF_VF_TWEENPOSITION") == std::string::npos &&
-                  transient.find("CKFF_VF_TWEENPOSITION") == std::string::npos,
-              "Vertex layout/interleave code must not claim tween input support before a data source exists");
-    TestCheck(mesh.find("TweenPosition") == std::string::npos &&
-                  vertexBuffer.find("TweenPosition") == std::string::npos,
-              "Current mesh and vertex-buffer paths must not hide a second tween stream");
+              "TWEENING implementation source files must be readable");
+    TestCheck(vs3d.find("a_tangent") != std::string::npos &&
+                  vs3d.find("a_bitangent") != std::string::npos &&
+                  vs3d.find("mix(a_position.xyz, a_tangent.xyz") != std::string::npos &&
+                  vs3d.find("u_ffDrawParams[19].x") != std::string::npos,
+              "Vertex shader must blend both tween input sets with TWEENFACTOR");
+    TestCheck(layout.find("CKFF_VF_TWEENPOSITION") != std::string::npos &&
+                  layout.find("CKRST_ATTRIB_TANGENT") != std::string::npos &&
+                  transient.find("TweenPositionPtr") != std::string::npos &&
+                  transient.find("TweenNormalPtr") != std::string::npos,
+              "Vertex layout and transient interleave must carry both tween streams");
+    TestCheck(vertexBuffer.find("CKRST_DP_TWEEN") != std::string::npos &&
+                  vertexBuffer.find("TweenPositionPtr") != std::string::npos,
+              "Managed vertex buffers must allocate tween staging explicitly");
 }
 
 void DPWeightFlagsAddBlendLayoutFlags() {
@@ -1360,8 +1375,8 @@ int main() {
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
               &VertexBlendResolverRejectsMissingIndexedInputAndPositionT);
-    tests.Run("TWEENING diagnostics and shader remain pre-implementation",
-              &TweeningDiagnosticsAndShaderRemainPreImplementation);
+    tests.Run("TWEENING inputs and shader are wired",
+              &TweeningInputsAndShaderAreWired);
     tests.Run("DP weight flags add blend layout flags",
               &DPWeightFlagsAddBlendLayoutFlags);
     tests.Run("Sampler types pack into specialization",

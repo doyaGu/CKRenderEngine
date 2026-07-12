@@ -538,7 +538,7 @@ void OpaquePacketReplayStopsBeforeSubmitAfterBindingFailure()
     ffp.Shutdown();
 }
 
-void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
+void OpaquePacketTweeningFallsBackImmediate()
 {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -553,7 +553,8 @@ void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
         CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
         100, 200, 0, 3, 0, 3,
         CKRST_DP_TRANSFORM,
-        CKFF_VF_POSITION | CKFF_VF_NORMAL,
+        CKFF_VF_POSITION | CKFF_VF_NORMAL |
+            CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL,
         77);
     TestCheck(!tweenBuild.Success,
               "TWEENING packet build must fail before capture");
@@ -562,14 +563,15 @@ void OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate()
 
     const CKBOOL drawn = DrawPacketCandidateWithFormat(
         &ffp, &context, CKRP_VIEW_OPAQUE3D,
-        100, 200, CKFF_VF_POSITION | CKFF_VF_NORMAL);
+        100, 200, CKFF_VF_POSITION | CKFF_VF_NORMAL |
+            CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL);
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "TWEENING opaque mesh must not enter the packet queue");
-    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
-              "Unrepresentable TWEENING input must fail instead of rendering approximately");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_TWEEN,
-              "TWEENING draw rejection must report its public reason");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Representable TWEENING input must fall back to immediate submission");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "Supported TWEENING immediate draw must not report rejection");
 
     ffp.Shutdown();
 }
@@ -776,7 +778,7 @@ void StaticUniformPayloadOrderAndHashStaysStable()
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     TestCheck(payload.EntryCount == 4,
               "Textured static payload must keep its entry count stable");
-    TestCheck(payload.Vec4Count == 55,
+    TestCheck(payload.Vec4Count == 63,
               "Textured static payload must keep its vec4 count stable");
     CKFFRenderPacketUniformPayload repeatedPayload;
     TestCheck(CKFFPipelineTestAccess::BuildStaticUniformPayload(
@@ -786,21 +788,21 @@ void StaticUniformPayloadOrderAndHashStaysStable()
               "Textured static payload hash must be deterministic");
     TestCheck(payload.Entries[0].Uniform == u.u_ffDrawParams &&
                   payload.Entries[0].Offset == 0 &&
-                  payload.Entries[0].Count == 12 &&
-                  payload.Entries[0].Vec4Count == 12,
+                  payload.Entries[0].Count == CKFF_DRAW_PARAM_VEC4_COUNT &&
+                  payload.Entries[0].Vec4Count == CKFF_DRAW_PARAM_VEC4_COUNT,
               "Static payload entry 0 must remain draw params");
     TestCheck(payload.Entries[1].Uniform == u.u_stageParams &&
-                  payload.Entries[1].Offset == 12 &&
+                  payload.Entries[1].Offset == CKFF_DRAW_PARAM_VEC4_COUNT &&
                   payload.Entries[1].Count == CKFF_STAGE_PARAM_VEC4_COUNT &&
                   payload.Entries[1].Vec4Count == CKFF_STAGE_PARAM_VEC4_COUNT,
               "Static payload entry 1 must remain stage params");
     TestCheck(payload.Entries[2].Uniform == u.u_ffSpec &&
-                  payload.Entries[2].Offset == 44 &&
+                  payload.Entries[2].Offset == 52 &&
                   payload.Entries[2].Count == CKFFSpecializationInfo::MaxSpecDwords &&
                   payload.Entries[2].Vec4Count == CKFFSpecializationInfo::MaxSpecDwords,
               "Static payload entry 2 must remain fixed-function specialization params");
     TestCheck(payload.Entries[3].Uniform == u.u_clipParams &&
-                  payload.Entries[3].Offset == 54 &&
+                  payload.Entries[3].Offset == 62 &&
                   payload.Entries[3].Count == 1 &&
                   payload.Entries[3].Vec4Count == 1,
               "Static payload entry 3 must remain clip params");
@@ -1726,8 +1728,8 @@ int main()
               &OpaquePacketInstancedMatrixMatchesObjectUniformMVP);
     tests.Run("Opaque packet vertex blend falls back immediate",
               &OpaquePacketVertexBlendFallsBackImmediate);
-    tests.Run("Opaque packet TWEENING reports specific reject and fails draw",
-              &OpaquePacketTweeningReportsSpecificRejectAndFallsBackImmediate);
+    tests.Run("Opaque packet TWEENING falls back immediate",
+              &OpaquePacketTweeningFallsBackImmediate);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet ignores unused texture bindings",

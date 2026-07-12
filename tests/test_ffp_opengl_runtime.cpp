@@ -35,10 +35,11 @@ struct PixelResources {
     CKDWORD ColorFrameBuffer;
     CKDWORD ReadbackTexture;
     CKDWORD TransformTexture;
+    CKDWORD BumpLuminanceTexture;
 
     PixelResources()
         : ColorTexture(0), DepthTexture(0), FrameBuffer(0), ColorFrameBuffer(0),
-          ReadbackTexture(0), TransformTexture(0) {}
+          ReadbackTexture(0), TransformTexture(0), BumpLuminanceTexture(0) {}
 };
 
 struct ScreenShotResult {
@@ -295,6 +296,25 @@ CKBOOL DrawTexturedTriangle(CKFixedFunctionPipeline &ffp,
                              VX_TRIANGLELIST, NULL, 0, &data);
 }
 
+CKBOOL DrawTweenTriangle(CKFixedFunctionPipeline &ffp,
+                         CKRasterizerEncoder *encoder,
+                         const VxVector positions[3],
+                         const VxVector tweenPositions[3],
+                         const CKDWORD colors[3])
+{
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_VC | CKRST_DP_TWEEN;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.TweenPositionPtr = const_cast<VxVector *>(tweenPositions);
+    data.TweenPositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    return ffp.DrawPrimitive(encoder, CKRP_VIEW_OPAQUE3D,
+                             VX_TRIANGLELIST, NULL, 0, &data);
+}
+
 bool PixelNear(const XArray<CKBYTE> &pixels,
                int x, int y, int r, int g, int b, int tolerance = 24)
 {
@@ -348,6 +368,84 @@ void CreatePixelFrameBuffer(CKBgfxRasterizerContext *context,
     TestCheck(context->CreateTexture(&transformDesc, &transformData,
                                      &resources.TransformTexture) == CK_OK,
               "Backend pixel gate must create a texture-transform source texture");
+
+    CKTextureDesc bumpDesc;
+    VxPixelFormat2ImageDesc(_32_X8L8V8U8, bumpDesc.Format);
+    bumpDesc.Format.Width = 4;
+    bumpDesc.Format.Height = 4;
+    bumpDesc.MipMapCount = 3;
+    bumpDesc.Depth = 1;
+    bumpDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV |
+                     CKRST_TEXTURE_BUMPLUMINANCE;
+    CKDWORD bumpPixels[16];
+    CKDWORD bumpMipPixels[4];
+    for (int i = 0; i < 16; ++i)
+        bumpPixels[i] = 0x00800000u;
+    for (int i = 0; i < 4; ++i)
+        bumpMipPixels[i] = 0x00800000u;
+    VxImageDescEx bumpData = bumpDesc.Format;
+    bumpData.BytesPerLine = 4 * sizeof(CKDWORD);
+    bumpData.Image = (XBYTE *)bumpPixels;
+    CKDWORD bumpChainPixels[21];
+    for (int i = 0; i < 21; ++i)
+        bumpChainPixels[i] = 0x00800000u;
+    VxImageDescEx bumpChainData = bumpData;
+    bumpChainData.Image = (XBYTE *)bumpChainPixels;
+    bumpChainData.TotalImageSize = sizeof(bumpChainPixels);
+    TestCheckf(VxImageDesc2PixelFormat(bumpChainData) == _32_X8L8V8U8,
+               "Complete luminance bump mip-chain format mismatch: format=%d",
+               VxImageDesc2PixelFormat(bumpChainData));
+    TestCheckf(bumpChainData.Width == 4 && bumpChainData.Height == 4 &&
+                   bumpChainData.TotalImageSize == sizeof(bumpChainPixels),
+               "Complete luminance bump mip-chain descriptor mismatch: size=%dx%d bytes=%d",
+               bumpChainData.Width, bumpChainData.Height,
+               bumpChainData.TotalImageSize);
+    CKBYTE convertedBumpChain[21 * 4];
+    TestCheck(CKBgfxConvertBumpLuminanceMipChain(
+                  _32_X8L8V8U8, bumpChainData.Image,
+                  (CKDWORD)bumpChainData.TotalImageSize, 4, 4, 3,
+                  convertedBumpChain, sizeof(convertedBumpChain)),
+              "Complete luminance bump mip-chain preflight conversion must succeed");
+    CKDWORD initializedBumpTexture = 0;
+    const CKERROR bumpChainCreate = context->CreateTexture(
+        &bumpDesc, &bumpChainData, &initializedBumpTexture);
+    TestCheckf(bumpChainCreate == CK_OK,
+               "Complete luminance bump mip-chain creation failed: error=%d",
+               bumpChainCreate);
+    context->DeleteObject(initializedBumpTexture, CKRST_OBJ_TEXTURE);
+    TestCheck(context->CreateTexture(&bumpDesc, NULL,
+                                     &resources.BumpLuminanceTexture) == CK_OK,
+              "Backend pixel gate must create a mipmapped luminance bump texture");
+    TestCheck(context->UpdateTexture(resources.BumpLuminanceTexture, 0, 0,
+                                     NULL, &bumpData) == CK_OK,
+              "Backend pixel gate must update the base luminance bump mip");
+    VxImageDescEx bumpMipData = bumpData;
+    bumpMipData.Width = 2;
+    bumpMipData.Height = 2;
+    bumpMipData.BytesPerLine = 2 * sizeof(CKDWORD);
+    bumpMipData.Image = (XBYTE *)bumpMipPixels;
+    TestCheck(context->UpdateTexture(resources.BumpLuminanceTexture, 1, 0,
+                                     NULL, &bumpMipData) == CK_OK,
+              "Backend pixel gate must update a non-base luminance bump mip");
+
+    CKTextureDesc packedMipDesc;
+    VxPixelFormat2ImageDesc(_32_ABGR8888, packedMipDesc.Format);
+    packedMipDesc.Format.Width = 4;
+    packedMipDesc.Format.Height = 4;
+    packedMipDesc.MipMapCount = 3;
+    packedMipDesc.Depth = 1;
+    packedMipDesc.Flags = CKRST_TEXTURE_VALID;
+    CKDWORD packedMipPixels[21];
+    for (int i = 0; i < 21; ++i)
+        packedMipPixels[i] = 0xFFFFFFFFu;
+    VxImageDescEx packedMipData = packedMipDesc.Format;
+    packedMipData.TotalImageSize = sizeof(packedMipPixels);
+    packedMipData.Image = (XBYTE *)packedMipPixels;
+    CKDWORD packedMipTexture = 0;
+    TestCheck(context->CreateTexture(&packedMipDesc, &packedMipData,
+                                     &packedMipTexture) == CK_OK,
+              "Backend pixel gate must accept a packed uncompressed mip chain");
+    context->DeleteObject(packedMipTexture, CKRST_OBJ_TEXTURE);
 
     CKDepthTextureDesc depthDesc = {};
     depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
@@ -406,6 +504,7 @@ void DestroyPixelFrameBuffer(CKBgfxRasterizerContext *context,
     context->DeleteObject(resources.ColorTexture, CKRST_OBJ_TEXTURE);
     context->DeleteObject(resources.ReadbackTexture, CKRST_OBJ_TEXTURE);
     context->DeleteObject(resources.TransformTexture, CKRST_OBJ_TEXTURE);
+    context->DeleteObject(resources.BumpLuminanceTexture, CKRST_OBJ_TEXTURE);
     resources = PixelResources();
 }
 
@@ -634,6 +733,64 @@ void CaptureUntexturedConstantPixel(CKFixedFunctionPipeline &ffp,
         memset(center, 0, 4);
 }
 
+void CaptureTweenPixel(CKFixedFunctionPipeline &ffp,
+                       CKBgfxRasterizerContext *context,
+                       const PixelResources &resources,
+                       CKBOOL uberShader,
+                       CKBYTE center[4])
+{
+    ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_COLORVERTEX, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.DisableTextureStagesFrom(1);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ffp.SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatRenderState(0.5f));
+
+    // Neither endpoint covers the center; the half-way tween does.
+    const VxVector tweenFrom[3] = {
+        VxVector(-1.9f, -0.9f, 0.5f),
+        VxVector(-0.1f, -0.9f, 0.5f),
+        VxVector(-1.0f,  0.9f, 0.5f)
+    };
+    const VxVector tweenTo[3] = {
+        VxVector(0.1f, -0.9f, 0.5f),
+        VxVector(1.9f, -0.9f, 0.5f),
+        VxVector(1.0f,  0.9f, 0.5f)
+    };
+    const CKDWORD red[3] = {0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u};
+
+    BeginPixelFrame(ffp, context, resources);
+    TestCheck(DrawTweenTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                tweenFrom, tweenTo, red),
+              uberShader
+                  ? "Uber vertex-tween pixel draw must submit"
+                  : "Specialized vertex-tween pixel draw must submit");
+
+    XArray<CKBYTE> pixels;
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 255, 0, 0),
+               "%s half-way vertex tween must cover the center: BGRA=(%u,%u,%u,%u)",
+               uberShader ? "Uber" : "Specialized",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    const size_t offset = (32u * 64u + 32u) * 4u;
+    if (offset + 3u < (size_t)pixels.Size())
+        memcpy(center, &pixels[(int)offset], 4);
+    else
+        memset(center, 0, 4);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_DISABLE);
+    ffp.SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatRenderState(0.0f));
+}
+
 void RunSpecializedUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
                                                 const PixelResources &resources,
                                                 CKBYTE center[4])
@@ -645,6 +802,21 @@ void RunSpecializedUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
     CKFixedFunctionPipeline ffp;
     ffp.Init(context);
     CaptureUntexturedConstantPixel(ffp, context, resources, FALSE, center);
+    ffp.Shutdown();
+    context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
+}
+
+void RunSpecializedTweenPixelCase(CKBgfxRasterizerContext *context,
+                                  const PixelResources &resources,
+                                  CKBYTE center[4])
+{
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "UberShader", "0");
+
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context);
+    CaptureTweenPixel(ffp, context, resources, FALSE, center);
     ffp.Shutdown();
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
 }
@@ -879,6 +1051,47 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     ffp.ResetTextureStage(0);
     ffp.ResetTexcoordComponentCounts();
 
+    ffp.SetTexture(0, resources.BumpLuminanceTexture,
+                   CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV |
+                   CKRST_TEXTURE_BUMPLUMINANCE);
+    ffp.SetTexture(1, resources.TransformTexture, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLSCALE, FloatRenderState(1.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLOFFSET, FloatRenderState(0.0f));
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    for (int stage = 0; stage < 2; ++stage) {
+        ffp.SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+        ffp.SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    }
+    BeginPixelFrame(ffp, context, resources);
+    float bumpTexcoords[3][4] = {
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f}
+    };
+    TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                   flatPositions, depthWhite, bumpTexcoords),
+              "luminance-bump backend pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheckf(PixelNear(pixels, 32, 32, 128, 0, 0),
+               "luminance-bump modulation mismatch: BGRA=(%u,%u,%u,%u)",
+               pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
+               pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    ffp.SetTexture(0, 0, 0);
+    ffp.SetTexture(1, 0, 0);
+    ffp.ResetTextureStage(0);
+    ffp.ResetTextureStage(1);
+
+    CKBYTE uberTweenCenter[4] = {};
+    CaptureTweenPixel(ffp, context, resources, TRUE, uberTweenCenter);
+
     // Table fog consumes eye-space depth. Projection-space z/w would leave this nearly white.
     VxMatrix fogProjection;
     Vx3DMatrixIdentity(fogProjection);
@@ -911,6 +1124,8 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     CaptureUntexturedConstantPixel(ffp, context, resources, TRUE, uberCenter);
     ffp.Shutdown();
     RunSpecializedUntexturedConstantPixelCase(context, resources, specializedCenter);
+    CKBYTE specializedTweenCenter[4] = {};
+    RunSpecializedTweenPixelCase(context, resources, specializedTweenCenter);
     CKBOOL routesMatch = TRUE;
     for (int channel = 0; channel < 4; ++channel) {
         routesMatch = routesMatch &&
@@ -918,6 +1133,14 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     }
     TestCheck(routesMatch,
               "Specialized and uber untextured-stage pixels must match");
+    CKBOOL tweenRoutesMatch = TRUE;
+    for (int channel = 0; channel < 4; ++channel) {
+        tweenRoutesMatch = tweenRoutesMatch &&
+            abs((int)specializedTweenCenter[channel] -
+                (int)uberTweenCenter[channel]) <= 4;
+    }
+    TestCheck(tweenRoutesMatch,
+              "Specialized and uber vertex-tween pixels must match");
 
     TestCheck(context->RequestScreenShot(resources.FrameBuffer,
                                          ScreenShotCallback) ==
@@ -926,7 +1149,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=12 tolerance=24\n");
+    printf("  coverage: backendPixelCases=15 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()
