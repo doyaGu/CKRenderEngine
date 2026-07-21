@@ -606,8 +606,8 @@ static void TestOpenGLAutoMipPolicy()
                 "OpenGL defers automatic mips until data can populate the full chain");
     TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, TRUE) == TRUE,
                 "OpenGL creates automatic mip chain when complete data is available");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, FALSE, FALSE) == TRUE,
-                "non-OpenGL preserves legacy automatic mip allocation");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, FALSE, FALSE) == FALSE,
+                "all backends defer automatic mips until data can populate the full chain");
     TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(0, full, TRUE, TRUE) == FALSE,
                 "zero mip request creates a base-level texture");
     TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(1, full, TRUE, TRUE) == FALSE,

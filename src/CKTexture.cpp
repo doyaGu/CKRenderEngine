@@ -465,14 +465,18 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     }
     desc.Format.Width = GetWidth();
     desc.Format.Height = GetHeight();
-    desc.MipMapCount = m_MipMapLevel;
+    desc.MipMapCount = 0;
     desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
 
     // Check texture cache management
     if (rm && rm->m_TextureCacheManagement.Value)
         desc.Flags |= CKRST_TEXTURE_MANAGED;
-    if (rm && rm->m_DisableMipmap.Value)
-        desc.MipMapCount = 0;
+    if (!(rm && rm->m_DisableMipmap.Value) && m_MipMapLevel != 0) {
+        if (m_MipMaps)
+            desc.MipMapCount = (CKDWORD)m_MipMaps->Size() + 1;
+        else
+            desc.MipMapCount = (CKDWORD)-1;
+    }
 
     // Check for cube map
     if ((m_BitmapFlags & CKBITMAPDATA_CUBEMAP) != 0 && GetSlotCount() == 6 && GetWidth() == GetHeight()) {
@@ -499,7 +503,7 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     if (m_RasterizerContext->CreateTexture(&desc, nullptr, &m_ObjectIndex) == CK_OK) {
         m_InVideoMemory = TRUE;
         m_TextureFlags = desc.Flags;
-        m_CachedMipMapCount = desc.MipMapCount;
+        m_CachedMipMapCount = m_MipMapLevel;
         m_VideoFormat = desc.Format;
         if (Restore(Clamping))
             return TRUE;
