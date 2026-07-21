@@ -1090,7 +1090,7 @@ CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
-    CKFF_PROBE(m_Probes, LogAndReset(m_DrawStateCache, m_ShaderCache.GetUniforms()));
+    CKFF_PROBE(m_Probes, LogAndReset(m_DrawStateCache, m_ShaderCache));
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {

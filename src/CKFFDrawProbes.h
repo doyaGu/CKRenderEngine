@@ -19,6 +19,9 @@ struct CKFFFrameStats {
     CKDWORD SubmittedDraws;
     CKDWORD PrepareFailures;
     CKDWORD ProgramMisses;
+    CKDWORD ProgramBindingCacheHits;
+    CKDWORD ProgramBindingCacheMisses;
+    CKDWORD ProgramBindingCacheEvictions;
     CKDWORD UniformSets;
     CKDWORD UniformVec4s;
     CKDWORD UniformHandleSets[64];
@@ -129,7 +132,7 @@ private:
 
 class CKFFDrawProbes {
 public:
-    CKFFDrawProbes() : Stats(), Config() {}
+    CKFFDrawProbes() : Stats(), Config(), m_PreviousShaderCacheStats() {}
 
     bool StatsEnabled() const { return Config.StatsEnabled || Config.UniformHistEnabled; }
     bool TimingEnabled() const { return Config.StatsEnabled; }
@@ -165,10 +168,14 @@ public:
     void OnRenderPacketRuns(CKDWORD runCount, CKDWORD maxRun);
     void FillReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *diagnostics,
                                const CKFFUniformHandles &uniforms);
-    void LogAndReset(CKDrawStateCache &drawStateCache, const CKFFUniformHandles &uniforms);
+    void LogAndReset(CKDrawStateCache &drawStateCache,
+                     const CKFFShaderCache &shaderCache);
 
     CKFFFrameStats Stats;
     CKFFDiagnosticConfig Config;
+
+private:
+    CKFFShaderCacheStats m_PreviousShaderCacheStats;
 };
 
 #define CKFF_SCOPE_TIME(probes, field) \

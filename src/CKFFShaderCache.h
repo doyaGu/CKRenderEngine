@@ -5,6 +5,7 @@
 #include "CKFFConstants.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
+#include "XArray.h"
 #include "XHashTable.h"
 #include <stdint.h>
 
@@ -13,7 +14,7 @@
 class CKRasterizerContext;
 
 enum CKFFShaderMode {
-    CKFF_SHADER_MODE_UBER_SPECIALIZED = 0,
+    CKFF_SHADER_MODE_RUNTIME_SPECIALIZED = 0,
     CKFF_SHADER_MODE_FULL_SPECIALIZED = 1
 };
 
@@ -40,6 +41,15 @@ struct CKFFProgramContext {
         : ShaderKey(), Binding(), Program(0), FullSpecialized(FALSE), Specialization() {}
 };
 
+struct CKFFShaderCacheStats {
+    uint64_t BindingHits;
+    uint64_t BindingMisses;
+    uint64_t BindingEvictions;
+
+    CKFFShaderCacheStats()
+        : BindingHits(0), BindingMisses(0), BindingEvictions(0) {}
+};
+
 void CKFFInitProgramContext(CKFFProgramContext *context,
                             const CKFFShaderKey &key,
                             const CKFFProgramBinding &binding);
@@ -52,8 +62,6 @@ struct CKFFShaderKeyXHash {
         return (int)hash(key);
     }
 };
-
-typedef XHashTable<CKFFProgramBinding, CKFFShaderKey, CKFFShaderKeyXHash> CKFFProgramCacheTable;
 
 struct CKFFProgramModuleKey {
     CK_SHADER_PROFILE Profile;
@@ -112,27 +120,48 @@ public:
         return flags;
     }
 
-    bool UsesUberShader() const { return m_UseUberShader; }
-    CKFFShaderMode GetShaderMode() const {
-        return m_UseUberShader ? CKFF_SHADER_MODE_UBER_SPECIALIZED : CKFF_SHADER_MODE_FULL_SPECIALIZED;
+    bool UsesRuntimeSpecializedShader() const {
+        return m_ShaderMode == CKFF_SHADER_MODE_RUNTIME_SPECIALIZED;
     }
+    CKFFShaderMode GetShaderMode() const { return m_ShaderMode; }
     size_t CachedProgramCount() const { return (size_t)m_ModuleProgramCache.Size(); }
     size_t CachedBindingCount() const { return (size_t)m_ProgramCache.Size(); }
     size_t MaxCachedBindingCount() const { return CKFF_MAX_PROGRAM_BINDINGS; }
+    const CKFFShaderCacheStats &GetCacheStats() const { return m_CacheStats; }
 
 private:
+    struct CKFFProgramBindingCacheEntry {
+        CKFFProgramBinding Binding;
+        bool RecentlyUsed;
+
+        CKFFProgramBindingCacheEntry()
+            : Binding(), RecentlyUsed(false) {}
+        explicit CKFFProgramBindingCacheEntry(const CKFFProgramBinding &binding)
+            : Binding(binding), RecentlyUsed(false) {}
+    };
+
+    typedef XHashTable<CKFFProgramBindingCacheEntry, CKFFShaderKey, CKFFShaderKeyXHash>
+        CKFFProgramCacheTable;
+
     CKRasterizerContext *m_Context;
     CKFFUniformHandles m_Uniforms;
     CKRasterizerTargetDesc m_Target;
     const void *m_BlobSet;
-    bool m_UseUberShader;
+    CKFFShaderMode m_ShaderMode;
+    bool m_PrewarmPrograms;
     CKFFProgramCacheTable m_ProgramCache;
+    XArray<CKFFShaderKey> m_ProgramBindingClock;
+    int m_ProgramBindingClockHand;
     CKFFProgramModuleCacheTable m_ModuleProgramCache;
+    CKFFShaderCacheStats m_CacheStats;
 
     bool CreateUniforms();
     bool ResolveShaderTarget();
+    void PrewarmPrograms();
+    void CacheProgramBinding(const CKFFShaderKey &key,
+                             const CKFFProgramBinding &binding);
     CKFFProgramBinding CreateVariantProgram(const CKFFShaderKey &key);
-    CKFFProgramBinding CreateUberSpecializedProgram(const CKFFShaderKey &key);
+    CKFFProgramBinding CreateRuntimeSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateFullSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateVolumeSamplerLayoutProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateStaticSamplerLayoutProgram(const CKFFShaderKey &key);

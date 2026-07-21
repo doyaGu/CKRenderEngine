@@ -895,7 +895,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     ffp.Shutdown();
 }
 
-void VolumeTextureModulateCacheMissUsesUberShader() {
+void VolumeTextureModulateCacheMissUsesRuntimeSpecializedShader() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1073,10 +1073,14 @@ void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE pro
 }
 
 void ArbitrarySingleVolumeCubeLayoutUsesGenericFallback() {
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "PrewarmPrograms", "0");
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
         RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(profile.Profile);
     }
+    CKRenderSettingsClearOverridesForTests();
 }
 
 void RunMultipleMixedSamplerLayoutUsesGenericFallback(CK_SHADER_PROFILE profile) {
@@ -1590,10 +1594,10 @@ void PremodulateImplicitTextureDependencyBindsNextStage() {
     ffp.Shutdown();
 }
 
-void UberShaderProgramModulesAreSharedAcrossStateBindings() {
+void RuntimeSpecializedProgramModulesAreSharedAcrossStateBindings() {
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", "1");
+                                        "ShaderMode", "runtime-specialized");
 
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -1613,14 +1617,64 @@ void UberShaderProgramModulesAreSharedAcrossStateBindings() {
 
     const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
     TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
-              "Uber state variants sharing shader blobs must create one backend program");
+              "Runtime-specialized state variants sharing shader blobs must create one backend program");
     TestCheck(ffp.GetShaderCache().CachedProgramCount() == 1 &&
                   ffp.GetShaderCache().CachedBindingCount() == 2,
               "Program-module cache and state-binding cache must have separate cardinality");
     TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
-              "Shared uber programs must still upload current-draw specialization state");
+              "Shared runtime-specialized programs must upload current-draw specialization state");
 
     ffp.Shutdown();
+    CKRenderSettingsClearOverridesForTests();
+}
+
+void ShaderModeNameResolvesRuntimeSpecialized() {
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "ShaderMode", "runtime-specialized");
+
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(&context) &&
+                  cache.GetShaderMode() == CKFF_SHADER_MODE_RUNTIME_SPECIALIZED,
+              "ShaderMode must select runtime-specialized mode");
+    cache.Shutdown();
+    CKRenderSettingsClearOverridesForTests();
+}
+
+void LegacyUberShaderEnablesRuntimeSpecializedMode() {
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "UberShader", "1");
+
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(&context) &&
+                  cache.GetShaderMode() == CKFF_SHADER_MODE_RUNTIME_SPECIALIZED,
+              "Legacy UberShader=1 must select runtime-specialized mode");
+    cache.Shutdown();
+    CKRenderSettingsClearOverridesForTests();
+}
+
+void RuntimeSpecializedProgramFamilyCanBePrewarmed() {
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "ShaderMode", "runtime-specialized");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "PrewarmPrograms", "1");
+
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(&context),
+              "Runtime-specialized program prewarm must initialize");
+    TestCheck(context.CreatedProgramCount == 18 &&
+                  cache.CachedProgramCount() == 18,
+              "Runtime-specialized prewarm must create six vertex variants for each sampler family");
+
+    cache.Shutdown();
     CKRenderSettingsClearOverridesForTests();
 }
 
@@ -2828,7 +2882,7 @@ int main() {
     tests.Run("Cube texture uses cube sampler specialization and binding",
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
     tests.Run("Volume texture modulate cache miss uses runtime shader",
-              &VolumeTextureModulateCacheMissUsesUberShader);
+              &VolumeTextureModulateCacheMissUsesRuntimeSpecializedShader);
     tests.Run("Volume texture stage seven binds volume sampler",
               &VolumeTextureStageSevenBindsVolumeSampler);
     tests.Run("Volume and cube cache miss uses static sampler layout fallback",
@@ -2855,8 +2909,14 @@ int main() {
               &UntexturedStageKeepsRuntimeStageParams);
     tests.Run("PREMODULATE implicit texture dependency binds next stage",
               &PremodulateImplicitTextureDependencyBindsNextStage);
-    tests.Run("Uber shader program modules are shared across state bindings",
-              &UberShaderProgramModulesAreSharedAcrossStateBindings);
+    tests.Run("Runtime-specialized program modules are shared across state bindings",
+              &RuntimeSpecializedProgramModulesAreSharedAcrossStateBindings);
+    tests.Run("Shader mode name resolves runtime-specialized",
+              &ShaderModeNameResolvesRuntimeSpecialized);
+    tests.Run("Legacy UberShader enables runtime-specialized mode",
+              &LegacyUberShaderEnablesRuntimeSpecializedMode);
+    tests.Run("Runtime-specialized program family can be prewarmed",
+              &RuntimeSpecializedProgramFamilyCanBePrewarmed);
     tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",
               &LegacyStageBlendZeroTerminatesStaleMultitextureState);
     tests.Run("Legacy TEXTUREMAPBLEND clears explicit stage ops",

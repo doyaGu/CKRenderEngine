@@ -21,6 +21,14 @@ size_t CKFFSpecializedModuleCount() {
     return g_CKFFSpecializedModuleCount;
 }
 
+bool CKFFGetSpecializedModule(size_t index,
+                              CKFFSpecializedModuleEntry &entry) {
+    if (index >= g_CKFFSpecializedModuleCount)
+        return false;
+    entry = g_CKFFSpecializedModules[index];
+    return true;
+}
+
 CKDWORD CKFFGeneratedShaderABIVersion() {
     return g_CKFFGeneratedShaderABIVersion;
 }
@@ -42,6 +50,14 @@ bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
 
     module = CKFFSamplerLayoutModule{};
     return false;
+}
+
+bool CKFFGetSamplerLayoutModule(size_t index,
+                                CKFFSamplerLayoutModuleEntry &entry) {
+    if (index >= g_CKFFSamplerLayoutModuleCount)
+        return false;
+    entry = g_CKFFSamplerLayoutModules[index];
+    return true;
 }
 
 size_t CKFFSamplerLayoutModuleCount() {
