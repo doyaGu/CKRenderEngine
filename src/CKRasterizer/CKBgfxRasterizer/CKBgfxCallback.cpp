@@ -1,5 +1,7 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
+#include "CKBgfxConfig.h"
+#include "VxWindowFunctions.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -100,6 +102,122 @@ void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enu
     }
     CKBgfxLogf("Fatal", "code=%d at %s:%u: %s",
                (int)code, filePath ? filePath : "?", (unsigned)line, str ? str : "");
+}
+
+static const uint32_t CKBGFX_CACHE_MAX_FILE_SIZE = 64u * 1024u * 1024u;
+
+static bool CKBgfxCacheEnabled()
+{
+    return CKBgfxConfigBool("Cache", "Enabled", true);
+}
+
+static uint32_t CKBgfxCacheMaxFileSize()
+{
+    const int megabytes = CKBgfxConfigInt("Cache", "MaxFileSizeMB", 64);
+    if (megabytes <= 0 || megabytes > 1024)
+        return CKBGFX_CACHE_MAX_FILE_SIZE;
+    return (uint32_t)megabytes * 1024u * 1024u;
+}
+
+static bool CKBgfxCachePath(uint64_t id, bool temporary, XString &path)
+{
+    XString directory = CKBgfxModuleSiblingFile(
+        (const void *)&CKBgfxCachePath, "CKBgfxCache");
+    if (directory.Length() == 0)
+        directory = "CKBgfxCache";
+    if (!VxDirectoryExists(directory.CStr()) &&
+        !VxMakeDirectory(directory.CStr()))
+        return false;
+
+    char fileName[48];
+    _snprintf_s(fileName, sizeof(fileName), _TRUNCATE,
+                "%016llX.bin%s", (unsigned long long)id,
+                temporary ? ".tmp" : "");
+    path = directory;
+    path << "/" << fileName;
+    return true;
+}
+
+uint32_t CKBgfxCallback::cacheReadSize(uint64_t id)
+{
+    if (!CKBgfxCacheEnabled())
+        return 0;
+
+    VxMutexLock lock(m_CacheMutex);
+    XString path;
+    if (!CKBgfxCachePath(id, false, path))
+        return 0;
+
+    FILE *file = nullptr;
+    if (fopen_s(&file, path.CStr(), "rb") != 0 || !file)
+        return 0;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return 0;
+    }
+    const long size = ftell(file);
+    fclose(file);
+    if (size <= 0 || (uint64_t)size > CKBgfxCacheMaxFileSize())
+        return 0;
+    return (uint32_t)size;
+}
+
+bool CKBgfxCallback::cacheRead(uint64_t id, void *data, uint32_t size)
+{
+    if (!CKBgfxCacheEnabled() || !data || size == 0 ||
+        size > CKBgfxCacheMaxFileSize())
+        return false;
+
+    VxMutexLock lock(m_CacheMutex);
+    XString path;
+    if (!CKBgfxCachePath(id, false, path))
+        return false;
+
+    FILE *file = nullptr;
+    if (fopen_s(&file, path.CStr(), "rb") != 0 || !file)
+        return false;
+    const size_t read = fread(data, 1, size, file);
+    const int trailing = fgetc(file);
+    fclose(file);
+    const bool valid = read == size && trailing == EOF;
+    if (valid && CKBgfxLogEnabled("Config", false))
+        CKBgfxLogf("Cache", "read id=%016llX bytes=%u",
+                   (unsigned long long)id, (unsigned)size);
+    return valid;
+}
+
+void CKBgfxCallback::cacheWrite(uint64_t id, const void *data, uint32_t size)
+{
+    if (!CKBgfxCacheEnabled() || !data || size == 0 ||
+        size > CKBgfxCacheMaxFileSize())
+        return;
+
+    VxMutexLock lock(m_CacheMutex);
+    XString path;
+    XString temporaryPath;
+    if (!CKBgfxCachePath(id, false, path) ||
+        !CKBgfxCachePath(id, true, temporaryPath))
+        return;
+
+    FILE *file = nullptr;
+    if (fopen_s(&file, temporaryPath.CStr(), "wb") != 0 || !file)
+        return;
+    const size_t written = fwrite(data, 1, size, file);
+    const bool closed = fclose(file) == 0;
+    if (written != size || !closed) {
+        remove(temporaryPath.CStr());
+        return;
+    }
+
+    remove(path.CStr());
+    if (rename(temporaryPath.CStr(), path.CStr()) != 0) {
+        remove(temporaryPath.CStr());
+        return;
+    }
+    if (CKBgfxLogEnabled("Config", false)) {
+        CKBgfxLogf("Cache", "write id=%016llX bytes=%u",
+                   (unsigned long long)id, (unsigned)size);
+    }
 }
 
 void CKBgfxCallback::traceVargs(const char *filePath, uint16_t line, const char *format, va_list argList)

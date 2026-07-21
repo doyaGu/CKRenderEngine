@@ -45,9 +45,9 @@ public:
     void profilerBegin(const char *, uint32_t, const char *, uint16_t) override {}
     void profilerBeginLiteral(const char *, uint32_t, const char *, uint16_t) override {}
     void profilerEnd() override {}
-    uint32_t cacheReadSize(uint64_t) override { return 0; }
-    bool cacheRead(uint64_t, void *, uint32_t) override { return false; }
-    void cacheWrite(uint64_t, const void *, uint32_t) override {}
+    uint32_t cacheReadSize(uint64_t _id) override;
+    bool cacheRead(uint64_t _id, void *_data, uint32_t _size) override;
+    void cacheWrite(uint64_t _id, const void *_data, uint32_t _size) override;
     void screenShot(const char *_filePath, uint32_t _width, uint32_t _height,
                     uint32_t _pitch, bgfx::TextureFormat::Enum _format,
                     const void *_data, uint32_t _size, bool _yflip) override;
@@ -58,6 +58,7 @@ public:
 
 private:
     CKBgfxRasterizerContext *m_Context;
+    VxMutex m_CacheMutex;
 };
 
 // ===========================================================================
