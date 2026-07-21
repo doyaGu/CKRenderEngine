@@ -24,6 +24,8 @@ struct CKFFSpecializedModuleEntry {
 bool CKFFFindSpecializedModule(const CKFFShaderKey &key,
                                CK_SHADER_PROFILE profile,
                                CKFFSpecializedModule &module);
+bool CKFFGetSpecializedModule(size_t index,
+                              CKFFSpecializedModuleEntry &entry);
 size_t CKFFSpecializedModuleCount();
 CKDWORD CKFFGeneratedShaderABIVersion();
 CKDWORD CKFFGeneratedShaderInterfaceHash();
@@ -42,6 +44,8 @@ struct CKFFSamplerLayoutModuleEntry {
 bool CKFFFindSamplerLayoutModule(const CKFFSamplerLayoutKey &key,
                                  CK_SHADER_PROFILE profile,
                                  CKFFSamplerLayoutModule &module);
+bool CKFFGetSamplerLayoutModule(size_t index,
+                                CKFFSamplerLayoutModuleEntry &entry);
 size_t CKFFSamplerLayoutModuleCount();
 
 #endif // CKFFSPECIALIZEDMODULETABLE_H

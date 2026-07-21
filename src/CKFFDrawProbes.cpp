@@ -175,10 +175,26 @@ void CKFFDrawProbes::FillReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *di
     diagnostics->RenderPacketInstancingFallbacks = &Stats.RenderPacketInstancingFallbacks;
 }
 
-void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache, const CKFFUniformHandles &uniforms)
+static CKDWORD CKFFCacheCounterDelta(uint64_t current, uint64_t previous)
+{
+    const uint64_t delta = current >= previous ? current - previous : current;
+    return delta > 0xffffffffull ? 0xffffffffu : (CKDWORD)delta;
+}
+
+void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache,
+                                 const CKFFShaderCache &shaderCache)
 {
     if (!StatsEnabled())
         return;
+
+    const CKFFShaderCacheStats &cacheStats = shaderCache.GetCacheStats();
+    Stats.ProgramBindingCacheHits = CKFFCacheCounterDelta(
+        cacheStats.BindingHits, m_PreviousShaderCacheStats.BindingHits);
+    Stats.ProgramBindingCacheMisses = CKFFCacheCounterDelta(
+        cacheStats.BindingMisses, m_PreviousShaderCacheStats.BindingMisses);
+    Stats.ProgramBindingCacheEvictions = CKFFCacheCounterDelta(
+        cacheStats.BindingEvictions, m_PreviousShaderCacheStats.BindingEvictions);
+    m_PreviousShaderCacheStats = cacheStats;
 
     Stats.DrawStateCacheHits = drawStateCache.GetBuildCacheHits();
     Stats.DrawStateRebuilds = drawStateCache.GetBuildRebuilds();
@@ -194,13 +210,16 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache, const CKFFUni
             ? (double)Stats.TextureBinds / (double)Stats.SubmittedDraws
             : 0.0;
         CK_LOG_FMT("FFPStats.Core",
-                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u",
+                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u bindingHits=%u bindingMisses=%u bindingEvictions=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u",
                    Stats.FrameIndex,
                    Stats.SoftwareDraws,
                    Stats.HardwareDraws,
                    Stats.SubmittedDraws,
                    Stats.PrepareFailures,
                    Stats.ProgramMisses,
+                   Stats.ProgramBindingCacheHits,
+                   Stats.ProgramBindingCacheMisses,
+                   Stats.ProgramBindingCacheEvictions,
                    Stats.UniformSets,
                    uniformsPerDraw,
                    Stats.UniformVec4s,
@@ -282,6 +301,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache, const CKFFUni
                    Stats.RenderPacketSortUs,
                    Stats.RenderPacketReplayUs);
         if (Config.UniformHistEnabled) {
+            const CKFFUniformHandles &uniforms = shaderCache.GetUniforms();
             for (CKDWORD slot = 0; slot < 64; ++slot) {
                 if (Stats.UniformHandleSets[slot] == 0)
                     continue;

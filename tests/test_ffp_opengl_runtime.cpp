@@ -170,14 +170,16 @@ CKFFShaderKey MakeVolumeCubeStaticLayoutKey(CK_SHADER_PROFILE profile)
 
 void RunShaderProgramCase(CKBgfxRasterizerContext *context,
                           const CKFFShaderKey &key,
-                          bool uberShader,
+                          bool runtimeSpecialized,
                           bool expectedFullSpecialized,
                           const char *caseName)
 {
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader",
-                                        uberShader ? "1" : "0");
+                                        "ShaderMode",
+                                        runtimeSpecialized
+                                            ? "runtime-specialized"
+                                            : "full-specialized");
 
     const CKDWORD fatalBefore = context->GetFatalCountForTests();
 
@@ -326,6 +328,35 @@ bool PixelNear(const XArray<CKBYTE> &pixels,
     const int dr = abs((int)pixels[offset + 2] - r);
     return dr <= tolerance && dg <= tolerance && db <= tolerance;
 }
+
+void CopyPixel(const XArray<CKBYTE> &pixels, int x, int y, CKBYTE color[4])
+{
+    const int offset = (y * 64 + x) * 4;
+    if (offset >= 0 && offset + 3 < pixels.Size())
+        memcpy(color, &pixels[offset], 4);
+    else
+        memset(color, 0, 4);
+}
+
+CKBOOL PixelsMatch(const CKBYTE first[4], const CKBYTE second[4], int tolerance)
+{
+    for (int channel = 0; channel < 4; ++channel) {
+        if (abs((int)first[channel] - (int)second[channel]) > tolerance)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+struct CriticalRoutePixels {
+    CKBYTE TextureTransform[4];
+    CKBYTE BumpLuminance[4];
+    CKBYTE PixelFog[4];
+
+    CriticalRoutePixels()
+    {
+        memset(this, 0, sizeof(*this));
+    }
+};
 
 void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
                           CKBgfxRasterizerContext *context,
@@ -693,7 +724,7 @@ void EndPixelFrameAndRead(CKFixedFunctionPipeline &ffp,
 void CaptureUntexturedConstantPixel(CKFixedFunctionPipeline &ffp,
                                     CKBgfxRasterizerContext *context,
                                     const PixelResources &resources,
-                                    CKBOOL uberShader,
+                                    CKBOOL runtimeSpecialized,
                                     CKBYTE center[4])
 {
     ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
@@ -716,15 +747,15 @@ void CaptureUntexturedConstantPixel(CKFixedFunctionPipeline &ffp,
     const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
                                 positions, white),
-              uberShader
-                  ? "Uber untextured-stage pixel draw must submit"
+              runtimeSpecialized
+                  ? "Runtime-specialized untextured-stage pixel draw must submit"
                   : "Specialized untextured-stage pixel draw must submit");
 
     XArray<CKBYTE> pixels;
     EndPixelFrameAndRead(ffp, context, resources, pixels);
     TestCheck(PixelNear(pixels, 32, 32, 64, 32, 16),
-              uberShader
-                  ? "Uber shader must preserve an active untextured constant stage"
+              runtimeSpecialized
+                  ? "Runtime-specialized shader must preserve an active untextured constant stage"
                   : "Specialized shader must preserve an active untextured constant stage");
     const size_t offset = (32u * 64u + 32u) * 4u;
     if (offset + 3u < (size_t)pixels.Size())
@@ -736,7 +767,7 @@ void CaptureUntexturedConstantPixel(CKFixedFunctionPipeline &ffp,
 void CaptureTweenPixel(CKFixedFunctionPipeline &ffp,
                        CKBgfxRasterizerContext *context,
                        const PixelResources &resources,
-                       CKBOOL uberShader,
+                       CKBOOL runtimeSpecialized,
                        CKBYTE center[4])
 {
     ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
@@ -770,15 +801,15 @@ void CaptureTweenPixel(CKFixedFunctionPipeline &ffp,
     BeginPixelFrame(ffp, context, resources);
     TestCheck(DrawTweenTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
                                 tweenFrom, tweenTo, red),
-              uberShader
-                  ? "Uber vertex-tween pixel draw must submit"
+              runtimeSpecialized
+                  ? "Runtime-specialized vertex-tween pixel draw must submit"
                   : "Specialized vertex-tween pixel draw must submit");
 
     XArray<CKBYTE> pixels;
     EndPixelFrameAndRead(ffp, context, resources, pixels);
     TestCheckf(PixelNear(pixels, 32, 32, 255, 0, 0),
                "%s half-way vertex tween must cover the center: BGRA=(%u,%u,%u,%u)",
-               uberShader ? "Uber" : "Specialized",
+               runtimeSpecialized ? "Runtime-specialized" : "Specialized",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
     const size_t offset = (32u * 64u + 32u) * 4u;
@@ -797,7 +828,7 @@ void RunSpecializedUntexturedConstantPixelCase(CKBgfxRasterizerContext *context,
 {
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", "0");
+                                        "ShaderMode", "full-specialized");
 
     CKFixedFunctionPipeline ffp;
     ffp.Init(context);
@@ -812,7 +843,7 @@ void RunSpecializedTweenPixelCase(CKBgfxRasterizerContext *context,
 {
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", "0");
+                                        "ShaderMode", "full-specialized");
 
     CKFixedFunctionPipeline ffp;
     ffp.Init(context);
@@ -821,11 +852,138 @@ void RunSpecializedTweenPixelCase(CKBgfxRasterizerContext *context,
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
 }
 
+void RunSpecializedCriticalPixelCases(CKBgfxRasterizerContext *context,
+                                      const PixelResources &resources,
+                                      CriticalRoutePixels &samples)
+{
+    CKRenderSettingsClearOverridesForTests();
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
+                                        "ShaderMode", "full-specialized");
+
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context);
+    ffp.GetRenderPipeline().SetExternalRenderTarget(TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_COLORVERTEX, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_DIFFUSEFROMVERTEX, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+
+    const VxVector positions[3] = {
+        VxVector(-0.9f, -0.9f, 0.5f),
+        VxVector( 0.9f, -0.9f, 0.5f),
+        VxVector( 0.0f,  0.9f, 0.5f)
+    };
+    const CKDWORD white[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    XArray<CKBYTE> pixels;
+
+    ffp.SetTexture(0, resources.TransformTexture, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+    ffp.DisableTextureStagesFrom(1);
+    ffp.SetTexcoordComponentCount(0, 2);
+    VxMatrix textureMatrix;
+    Vx3DMatrixIdentity(textureMatrix);
+    textureMatrix[3][0] = 0.5f;
+    ffp.SetTransform(VXMATRIX_TEXTURE0, textureMatrix);
+    float translatedTexcoords[3][4] = {
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f}
+    };
+    BeginPixelFrame(ffp, context, resources);
+    TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                   positions, white, translatedTexcoords),
+              "Specialized texture-matrix pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 0, 255, 0),
+              "Specialized texture-matrix pixel must be green");
+    CopyPixel(pixels, 32, 32, samples.TextureTransform);
+    ffp.SetTexture(0, 0, 0);
+    ffp.ResetTextureStage(0);
+    ffp.ResetTexcoordComponentCounts();
+
+    ffp.SetTexture(0, resources.BumpLuminanceTexture,
+                   CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV |
+                   CKRST_TEXTURE_BUMPLUMINANCE);
+    ffp.SetTexture(1, resources.TransformTexture, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLSCALE, FloatRenderState(1.0f));
+    ffp.SetTextureStageState(0, CKRST_TSS_BUMPENVLOFFSET, FloatRenderState(0.0f));
+    ffp.SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    for (int stage = 0; stage < 2; ++stage) {
+        ffp.SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+        ffp.SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    }
+    float bumpTexcoords[3][4] = {
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f}
+    };
+    BeginPixelFrame(ffp, context, resources);
+    TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                   positions, white, bumpTexcoords),
+              "Specialized luminance-bump pixel draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 128, 0, 0),
+              "Specialized luminance-bump pixel must preserve luminance modulation");
+    CopyPixel(pixels, 32, 32, samples.BumpLuminance);
+    ffp.SetTexture(0, 0, 0);
+    ffp.SetTexture(1, 0, 0);
+    ffp.ResetTextureStage(0);
+    ffp.ResetTextureStage(1);
+
+    VxMatrix fogProjection;
+    Vx3DMatrixIdentity(fogProjection);
+    fogProjection[2][2] = 0.01f;
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    ffp.DisableTextureStagesFrom(1);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, VXFOG_LINEAR);
+    ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(0.0f));
+    ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(20.0f));
+    ffp.SetRenderState(VXRENDERSTATE_FOGCOLOR, 0xFF000000u);
+    const VxVector fogPositions[3] = {
+        VxVector(-0.9f, -0.9f, 10.0f),
+        VxVector( 0.9f, -0.9f, 10.0f),
+        VxVector( 0.0f,  0.9f, 10.0f)
+    };
+    BeginPixelFrame(ffp, context, resources, &fogProjection);
+    TestCheck(DrawColorTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
+                                fogPositions, white),
+              "Specialized pixel-fog draw must submit");
+    EndPixelFrameAndRead(ffp, context, resources, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 128, 128, 128),
+              "Specialized pixel fog must use eye-space depth");
+    CopyPixel(pixels, 32, 32, samples.PixelFog);
+
+    ffp.Shutdown();
+    context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
+}
+
 void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
 {
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", "1");
+                                        "ShaderMode", "runtime-specialized");
 
     CKFixedFunctionPipeline ffp;
     ffp.Init(context);
@@ -845,6 +1003,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     ffp.DisableTextureStagesFrom(1);
 
     XArray<CKBYTE> pixels;
+    CriticalRoutePixels runtimeCritical;
 
     // D3D8 flat shading uses the first vertex of a triangle as the provoking vertex.
     ffp.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
@@ -1048,6 +1207,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                "texture-matrix translation mismatch: BGRA=(%u,%u,%u,%u)",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    CopyPixel(pixels, 32, 32, runtimeCritical.TextureTransform);
     ffp.ResetTextureStage(0);
     ffp.ResetTexcoordComponentCounts();
 
@@ -1084,13 +1244,14 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                "luminance-bump modulation mismatch: BGRA=(%u,%u,%u,%u)",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    CopyPixel(pixels, 32, 32, runtimeCritical.BumpLuminance);
     ffp.SetTexture(0, 0, 0);
     ffp.SetTexture(1, 0, 0);
     ffp.ResetTextureStage(0);
     ffp.ResetTextureStage(1);
 
-    CKBYTE uberTweenCenter[4] = {};
-    CaptureTweenPixel(ffp, context, resources, TRUE, uberTweenCenter);
+    CKBYTE runtimeTweenCenter[4] = {};
+    CaptureTweenPixel(ffp, context, resources, TRUE, runtimeTweenCenter);
 
     // Table fog consumes eye-space depth. Projection-space z/w would leave this nearly white.
     VxMatrix fogProjection;
@@ -1117,30 +1278,31 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
                "eye-space pixel fog mismatch: BGRA=(%u,%u,%u,%u)",
                pixels[(32 * 64 + 32) * 4 + 0], pixels[(32 * 64 + 32) * 4 + 1],
                pixels[(32 * 64 + 32) * 4 + 2], pixels[(32 * 64 + 32) * 4 + 3]);
+    CopyPixel(pixels, 32, 32, runtimeCritical.PixelFog);
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
 
     CKBYTE specializedCenter[4] = {};
-    CKBYTE uberCenter[4] = {};
-    CaptureUntexturedConstantPixel(ffp, context, resources, TRUE, uberCenter);
+    CKBYTE runtimeCenter[4] = {};
+    CaptureUntexturedConstantPixel(ffp, context, resources, TRUE, runtimeCenter);
     ffp.Shutdown();
     RunSpecializedUntexturedConstantPixelCase(context, resources, specializedCenter);
     CKBYTE specializedTweenCenter[4] = {};
     RunSpecializedTweenPixelCase(context, resources, specializedTweenCenter);
-    CKBOOL routesMatch = TRUE;
-    for (int channel = 0; channel < 4; ++channel) {
-        routesMatch = routesMatch &&
-            abs((int)specializedCenter[channel] - (int)uberCenter[channel]) <= 4;
-    }
-    TestCheck(routesMatch,
-              "Specialized and uber untextured-stage pixels must match");
-    CKBOOL tweenRoutesMatch = TRUE;
-    for (int channel = 0; channel < 4; ++channel) {
-        tweenRoutesMatch = tweenRoutesMatch &&
-            abs((int)specializedTweenCenter[channel] -
-                (int)uberTweenCenter[channel]) <= 4;
-    }
-    TestCheck(tweenRoutesMatch,
-              "Specialized and uber vertex-tween pixels must match");
+    CriticalRoutePixels specializedCritical;
+    RunSpecializedCriticalPixelCases(context, resources, specializedCritical);
+    TestCheck(PixelsMatch(specializedCenter, runtimeCenter, 4),
+              "Specialized and runtime untextured-stage pixels must match");
+    TestCheck(PixelsMatch(specializedTweenCenter, runtimeTweenCenter, 4),
+              "Specialized and runtime vertex-tween pixels must match");
+    TestCheck(PixelsMatch(specializedCritical.TextureTransform,
+                           runtimeCritical.TextureTransform, 4),
+              "Specialized and runtime texture-transform pixels must match");
+    TestCheck(PixelsMatch(specializedCritical.BumpLuminance,
+                           runtimeCritical.BumpLuminance, 4),
+              "Specialized and runtime luminance-bump pixels must match");
+    TestCheck(PixelsMatch(specializedCritical.PixelFog,
+                           runtimeCritical.PixelFog, 4),
+              "Specialized and runtime pixel-fog pixels must match");
 
     TestCheck(context->RequestScreenShot(resources.FrameBuffer,
                                          ScreenShotCallback) ==
@@ -1149,7 +1311,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     DestroyPixelFrameBuffer(context, resources);
     context->Frame(CKRST_FRAME_SYNC_IMMEDIATE);
     CKRenderSettingsClearOverridesForTests();
-    printf("  coverage: backendPixelCases=15 tolerance=24\n");
+    printf("  coverage: backendPixelCases=18 tolerance=24\n");
 }
 
 void BackendRuntimeCreatesRepresentativeFFPPrograms()
@@ -1225,7 +1387,7 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
                          "full-specialized backend route");
     RunShaderProgramCase(context, MakeStageFourFallbackKey(target.ShaderProfile, CKFF_SAMPLER_2D),
                          false, false,
-                         "stage 4 uber fallback backend route");
+                          "stage 4 runtime fallback backend route");
     RunShaderProgramCase(context, MakeStageFourFallbackKey(target.ShaderProfile, CKFF_SAMPLER_VOLUME),
                          false, false,
                          "stage 4 volume fallback backend route");
@@ -1233,7 +1395,7 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
                          false, false,
                          "volume+cube static sampler backend route");
     RunShaderProgramCase(context, fullEntry->Key, true, false,
-                         "forced uber backend route");
+                          "forced runtime-specialized backend route");
 
     BackendRuntimeMatchesFFPPixelSemantics(context);
 
