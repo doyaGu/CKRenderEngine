@@ -1456,9 +1456,11 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     VxMatrix callbackTextureMatrix;
     CKDWORD callbackTextureTransformFlags = CKRST_TTF_NONE;
     if (skipTextureMatrix) {
-        callbackTextureMatrix = ffp.GetStateStore().TexMatrix[TextureStage];
-        callbackTextureTransformFlags = ffp.GetTextureStageState(
-            TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS);
+        CKFFTextureStageSnapshot callbackStage;
+        ffp.SaveTextureStage(TextureStage, callbackStage);
+        callbackTextureMatrix = callbackStage.TextureMatrix;
+        callbackTextureTransformFlags =
+            callbackStage.States[CKRST_TSS_TEXTURETRANSFORMFLAGS];
     }
 
     if (!skipAllTextures) {

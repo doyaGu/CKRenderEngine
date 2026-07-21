@@ -167,8 +167,9 @@ void ChannelTextureBindingPreservesTextureFlags() {
     TestCheck(material.BindTextureSlotToStage(world.renderContext, 0, 1),
               "BindTextureSlotToStage should bind cubemap texture");
 
-    const CKFFStateStore &state = world.renderContext->m_FFPipeline.GetStateStore();
-    TestCheck((state.TextureFlags[1] & CKRST_TEXTURE_CUBEMAP) != 0,
+    CKFFTextureStageSnapshot stage;
+    world.renderContext->m_FFPipeline.SaveTextureStage(1, stage);
+    TestCheck((stage.TextureFlags & CKRST_TEXTURE_CUBEMAP) != 0,
               "channel texture binding must preserve cubemap texture flags");
 }
 
@@ -288,8 +289,9 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
     material.SetEffect(static_cast<VX_EFFECT>(effectIndex));
     TestCheck(material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent should preserve callback-owned texture matrices");
-    const CKFFStateStore &state = world.renderContext->m_FFPipeline.GetStateStore();
-    TestCheck(state.TexMatrix[0][3][0] == 3.25f,
+    CKFFTextureStageSnapshot stage;
+    world.renderContext->m_FFPipeline.SaveTextureStage(0, stage);
+    TestCheck(stage.TextureMatrix[3][0] == 3.25f,
               "SKIPTEXMAT callback matrix must survive material texture setup");
     TestCheck(world.renderContext->m_FFPipeline.GetTextureStageState(
                   0, CKRST_TSS_TEXTURETRANSFORMFLAGS) == CKRST_TTF_COUNT2,
