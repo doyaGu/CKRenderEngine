@@ -35,10 +35,32 @@ struct CKFFVertexBlendState {
     CKDWORD UnsupportedReason;
 };
 
+struct CKFFSamplerOverrides {
+    CKBOOL DisableTextureFiltering;
+    CKBOOL DisableMipmaps;
+    CKBOOL ForceAnisotropicFiltering;
+
+    CKFFSamplerOverrides(CKBOOL disableTextureFiltering = FALSE,
+                         CKBOOL disableMipmaps = FALSE,
+                         CKBOOL forceAnisotropicFiltering = FALSE)
+        : DisableTextureFiltering(disableTextureFiltering ? TRUE : FALSE),
+          DisableMipmaps(disableMipmaps ? TRUE : FALSE),
+          ForceAnisotropicFiltering(forceAnisotropicFiltering ? TRUE : FALSE) {}
+
+    bool operator==(const CKFFSamplerOverrides &other) const {
+        return DisableTextureFiltering == other.DisableTextureFiltering &&
+               DisableMipmaps == other.DisableMipmaps &&
+               ForceAnisotropicFiltering == other.ForceAnisotropicFiltering;
+    }
+
+    bool operator!=(const CKFFSamplerOverrides &other) const {
+        return !(*this == other);
+    }
+};
+
 enum CKFFVertexBlendUnsupportedReason {
     CKFF_VERTEX_BLEND_UNSUPPORTED_NONE = 0,
     CKFF_VERTEX_BLEND_UNSUPPORTED_POSITIONT,
-    CKFF_VERTEX_BLEND_UNSUPPORTED_TWEENING,
     CKFF_VERTEX_BLEND_UNSUPPORTED_INVALID_MODE,
     CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_WEIGHT,
     CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_INDEX,
@@ -132,6 +154,8 @@ int CKFFResolveActiveTextureStageCount(
     const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
     const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES]);
 CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState);
+CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState,
+                                   const CKFFSamplerOverrides &overrides);
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation);
 CKDWORD CKFFTexcoordIndex(CKDWORD packed);
 CKDWORD CKFFTexcoordGeneration(CKDWORD packed);

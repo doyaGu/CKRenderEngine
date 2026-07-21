@@ -4,6 +4,7 @@
 #include "CKFFDrawProbes.h"
 #include "CKFFDrawTypes.h"
 #include "CKFFShaderCache.h"
+#include "CKFFStageState.h"
 #include "CKFFStateStore.h"
 
 class CKRasterizerEncoder;
@@ -31,9 +32,7 @@ private:
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes &m_Probes;
 #endif
-    CKBOOL m_DisableTextureFiltering;
-    CKBOOL m_DisableMipmaps;
-    CKBOOL m_ForceAnisotropicFiltering;
+    CKFFSamplerOverrides m_SamplerOverrides;
 };
 
 #endif // CKFFTEXTUREBINDER_H
