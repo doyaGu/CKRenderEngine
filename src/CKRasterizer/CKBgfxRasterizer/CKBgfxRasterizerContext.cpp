@@ -628,7 +628,7 @@ static uint8_t ToBgfxDiscardFlags(CKDWORD flags)
 
 CKBgfxEncoder::CKBgfxEncoder()
     : m_Active{FALSE}, m_Context(NULL), m_Encoder(NULL),
-      m_OwnsNativeEncoder(FALSE), m_Status(CK_OK),
+      m_OwnsNativeEncoder(FALSE), m_Status(CK_OK), m_FrameStatus(CK_OK),
       m_StencilRef(0), m_StencilReadMask(0xFF), m_StencilWriteMask(0xFF),
       m_CurrentLayout(0), m_PointSize(0),
       m_CachedDrawState(), m_CachedBgfxState(0),
@@ -648,10 +648,41 @@ CKERROR CKBgfxEncoder::GetStatus() const
     return m_Status;
 }
 
-void CKBgfxEncoder::SetError(CKERROR Error)
+void CKBgfxEncoder::SetError(CKERROR Error, CKSTRING Operation)
 {
-    if (m_Status == CK_OK && Error != CK_OK)
+    if (Error == CK_OK)
+        return;
+    if (m_Status == CK_OK)
         m_Status = Error;
+    if (m_FrameStatus == CK_OK) {
+        m_FrameStatus = Error;
+        CKBgfxLogf("EncoderError",
+                   "frame=%u operation=%s error=0x%08X marker=\"%s\"",
+                   m_Context ? m_Context->m_DebugFrameId : 0u,
+                   Operation ? Operation : "unknown",
+                   (unsigned)Error,
+                   m_LastMarker);
+    }
+}
+
+void CKBgfxEncoder::ResetDebugBindings(CKDWORD Flags)
+{
+    if (Flags == CKRST_DISCARD_ALL || (Flags & CKRST_DISCARD_VERTEX_STREAMS)) {
+        memset(m_DebugVertexBindings, 0, sizeof(m_DebugVertexBindings));
+        m_DebugVertexBindingMask = 0;
+    }
+    if (Flags == CKRST_DISCARD_ALL || (Flags & CKRST_DISCARD_INDEX_BUFFER)) {
+        m_DebugIndexBuffer = 0;
+        m_DebugIndexStart = 0;
+        m_DebugIndexCount = 0;
+        m_DebugIndexHandle = 0;
+    }
+    if (Flags == CKRST_DISCARD_ALL || (Flags & CKRST_DISCARD_BINDINGS)) {
+        memset(m_DebugTextureBindings, 0, sizeof(m_DebugTextureBindings));
+        m_DebugTextureBindingMask = 0;
+    }
+    m_DebugSpecializationHash = 0;
+    m_DebugSpecializationValid = FALSE;
 }
 
 CKBOOL CKBgfxEncoder::CanSubmit()
@@ -925,7 +956,7 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
         return;
     if (!Buffer || !Buffer->Data || !m_Context ||
         Stream >= m_Context->m_CapsDesc.MaxVertexStreams || Buffer->VertexCount == 0) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientVertexBuffer");
         return;
     }
     VxMutexLock poolLock(m_Context->m_TransientPoolMutex);
@@ -940,7 +971,7 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
         }
     }
     if (!tvb) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientVertexBuffer");
         return;
     }
     CKBgfxVertexLayoutRecord *layout = m_Context->GetVertexLayout(Buffer->Layout);
@@ -949,13 +980,23 @@ void CKBgfxEncoder::SetTransientVertexBuffer(CKDWORD Stream,
         Buffer->Stride != tvb->stride ||
         layout->Handle.idx != tvb->layoutHandle.idx ||
         Buffer->VertexCount > tvb->size / tvb->stride) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientVertexBuffer");
         return;
     }
     if (m_Encoder)
         m_Encoder->setVertexBuffer((uint8_t)Stream, tvb, 0, Buffer->VertexCount);
     else
         bgfx::setVertexBuffer((uint8_t)Stream, tvb, 0, Buffer->VertexCount);
+    if (m_Context->m_DrawMapSubmitActive) {
+        CKBgfxDrawMapVertexBinding &binding = m_DebugVertexBindings[Stream];
+        binding.Buffer = 0;
+        binding.Start = tvb->startVertex;
+        binding.Count = Buffer->VertexCount;
+        binding.BgfxHandle = tvb->handle.idx;
+        binding.LayoutHandle = tvb->layoutHandle.idx;
+        m_DebugVertexBindingMask |= (1u << Stream);
+        m_CurrentLayout = Buffer->Layout;
+    }
 }
 
 void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
@@ -963,7 +1004,7 @@ void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
     if (!CanSubmit())
         return;
     if (!Buffer || !Buffer->Data || !m_Context || Buffer->IndexCount == 0) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientIndexBuffer");
         return;
     }
     VxMutexLock poolLock(m_Context->m_TransientPoolMutex);
@@ -978,20 +1019,26 @@ void CKBgfxEncoder::SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer)
         }
     }
     if (!tib) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientIndexBuffer");
         return;
     }
     const CKDWORD indexSize = tib->isIndex16 ? 2u : 4u;
     if (Buffer->Size != tib->size || Buffer->StartIndex != tib->startIndex ||
         (Buffer->Index32 != FALSE) == tib->isIndex16 ||
         Buffer->IndexCount > tib->size / indexSize) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTransientIndexBuffer");
         return;
     }
     if (m_Encoder)
         m_Encoder->setIndexBuffer(tib, 0, Buffer->IndexCount);
     else
         bgfx::setIndexBuffer(tib, 0, Buffer->IndexCount);
+    if (m_Context->m_DrawMapSubmitActive) {
+        m_DebugIndexBuffer = 0;
+        m_DebugIndexStart = tib->startIndex;
+        m_DebugIndexCount = Buffer->IndexCount;
+        m_DebugIndexHandle = tib->handle.idx;
+    }
 }
 
 void CKBgfxEncoder::SetTransientInstanceBuffer(CKDWORD Stream,
@@ -1043,23 +1090,23 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     if (!CanSubmit())
         return;
     if (!m_Context) {
-        SetError(CKERR_INVALIDOPERATION);
+        SetError(CKERR_INVALIDOPERATION, (CKSTRING)"SetTexture");
         return;
     }
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
     if (Stage >= m_Context->m_CapsDesc.MaxTextureStages || !uniRec ||
         uniRec->Type != CKRST_UNIFORM_SAMPLER || (Texture != 0 && !texRec)) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTexture");
         return;
     }
     if (texRec && (texRec->Flags & CKRST_TEXTURE_READBACK) != 0) {
-        SetError(CKERR_NOTIMPLEMENTED);
+        SetError(CKERR_NOTIMPLEMENTED, (CKSTRING)"SetTexture");
         return;
     }
     uint32_t flags = BGFX_SAMPLER_NONE;
     if (!CKBgfxTrySamplerFlags(Sampler, flags)) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTexture");
         return;
     }
     if (Sampler) {
@@ -1069,7 +1116,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
                 (CKBgfxMapFormatCaps(m_Context->m_NativeFormatCaps[texRec->Format],
                                      FALSE, TRUE) &
                  CKRST_FORMAT_CAPS_TEXTURE_COMPARE) == 0) {
-                SetError(CKERR_NOTIMPLEMENTED);
+                SetError(CKERR_NOTIMPLEMENTED, (CKSTRING)"SetTexture");
                 return;
             }
         }
@@ -1079,7 +1126,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     if (texRec && !CKBgfxSamplerWantsMipMaps(Sampler) && texRec->MipCount > 1) {
         if (!texRec->SamplerBaseValid ||
             !bgfx::isValid(texRec->SamplerBaseHandle)) {
-            SetError(CKERR_NOTIMPLEMENTED);
+            SetError(CKERR_NOTIMPLEMENTED, (CKSTRING)"SetTexture");
             return;
         }
         textureHandle = texRec->SamplerBaseHandle;
@@ -1099,7 +1146,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
         s_SetTextureLogCount++;
     }
     if (!bgfx::isValid(textureHandle)) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTexture");
         return;
     }
     if (m_Encoder)
@@ -1122,13 +1169,13 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
     if (!CanSubmit())
         return;
     if (!m_Context) {
-        SetError(CKERR_INVALIDOPERATION);
+        SetError(CKERR_INVALIDOPERATION, (CKSTRING)"SetUniform");
         return;
     }
     CKBgfxUniformRecord *rec = m_Context->GetUniform(Uniform);
     if (!rec || rec->Type == CKRST_UNIFORM_SAMPLER || !Data || Count == 0 ||
         Count > rec->Count) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetUniform");
         return;
     }
     static int s_uniformLogCount = 0;
@@ -1150,6 +1197,42 @@ void CKBgfxEncoder::SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count)
         m_Encoder->setUniform(rec->Handle, Data, (uint16_t)Count);
     else
         bgfx::setUniform(rec->Handle, Data, (uint16_t)Count);
+    if (m_Context->m_DrawMapSubmitActive &&
+        strcmp(rec->Name, "u_ffSpec") == 0) {
+        m_DebugSpecializationHash = SampleBytesChecksum(
+            Data, Count * 4u * (CKDWORD)sizeof(float));
+        m_DebugSpecializationValid = TRUE;
+    }
+}
+
+void CKBgfxEncoder::Discard(CKDWORD Flags)
+{
+    uint8_t discard = BGFX_DISCARD_NONE;
+    if (!CKBgfxTryDiscardFlags(Flags, discard)) {
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"Discard");
+        return;
+    }
+    if (!m_Active.load(std::memory_order_acquire) || !m_Context ||
+        m_OwnerThread != VxThread::GetCurrentVxThreadId()) {
+        SetError(CKERR_INVALIDOPERATION, (CKSTRING)"Discard");
+        return;
+    }
+    if (m_Context->m_ShuttingDown.load(std::memory_order_acquire)) {
+        SetError(CKERR_INVALIDOPERATION, (CKSTRING)"Discard");
+        return;
+    }
+    const CKERROR fatalError =
+        m_Context->m_FatalError.load(std::memory_order_acquire);
+    if (fatalError != CK_OK) {
+        SetError(fatalError, (CKSTRING)"Discard");
+        return;
+    }
+    if (m_Encoder)
+        m_Encoder->discard(discard);
+    else
+        bgfx::discard(discard);
+    ResetDebugBindings(Flags);
+    m_Status = CK_OK;
 }
 
 void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
@@ -1162,13 +1245,13 @@ void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
     uint8_t discard = BGFX_DISCARD_NONE;
     if (View >= CKRST_MAX_RENDER_VIEWS ||
         !CKBgfxTryDiscardFlags(Flags, discard)) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"Submit");
         m_DebugSpecializationValid = FALSE;
         return;
     }
     CKBgfxProgramRecord *rec = m_Context->GetProgram(Program);
     if (!rec || !bgfx::isValid(rec->Handle) || rec->PixelShader == 0) {
-        SetError(CKERR_INVALIDPARAMETER);
+        SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"Submit");
         m_Context->RecordInvalidSubmit((CKSTRING)"Submit", View, Program,
                                        (CKSTRING)"invalid_program");
         if (m_Context->m_DrawMapMarkerCaptureActive)
@@ -1185,7 +1268,7 @@ void CKBgfxEncoder::Submit(CKRenderView View, CKDWORD Program,
         bgfx::submit((bgfx::ViewId)View, rec->Handle, Depth, discard);
     if (m_Context->m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
-    m_DebugSpecializationValid = FALSE;
+    ResetDebugBindings(Flags);
 }
 
 void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
@@ -1320,7 +1403,8 @@ void CKBgfxEncoder::TraceSubmit(CKSTRING Kind,
         submitTrace.Program = Program;
         submitTrace.BgfxProgram = bgfx::isValid(ProgramHandle) ? ProgramHandle.idx : 0xffff;
         submitTrace.ProgramHash = programHash;
-        submitTrace.SpecHash = 0;
+        submitTrace.SpecHash = m_DebugSpecializationValid
+            ? m_DebugSpecializationHash : 0;
         submitTrace.ShaderProfile = (CKSTRING)CKBgfxShaderProfileName(shaderProfile);
         submitTrace.StateHash = stateHash;
         submitTrace.BgfxStateLo = (CKDWORD)(finalState & 0xffffffffu);
@@ -1658,7 +1742,7 @@ void CKBgfxEncoder::SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
         bgfx::submit((bgfx::ViewId)View, prog->Handle, oq->Handle, Depth, discard);
     if (m_Context->m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
-    m_DebugSpecializationValid = FALSE;
+    ResetDebugBindings(Flags);
 }
 
 void CKBgfxEncoder::SubmitIndirect(CKRenderView View, CKDWORD Program,
@@ -1702,7 +1786,7 @@ void CKBgfxEncoder::SubmitIndirect(CKRenderView View, CKDWORD Program,
                      Start, Count, Depth, discard);
     if (m_Context->m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
-    m_DebugSpecializationValid = FALSE;
+    ResetDebugBindings(Flags);
 }
 
 void CKBgfxEncoder::Dispatch(CKRenderView View, CKDWORD Program,
@@ -4472,6 +4556,7 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer(
     bgfx::allocTransientVertexBuffer(tvb, VertexCount, layoutRec->Layout);
     if (tvb->data == NULL)
     {
+        m_TransientVBCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("vertex-alloc", VertexCount, available);
         return FALSE;
     }
@@ -4513,6 +4598,7 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
     bgfx::allocTransientIndexBuffer(tib, IndexCount, Index32 ? true : false);
     if (tib->data == NULL)
     {
+        m_TransientIBCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("index-alloc", IndexCount, available);
         return FALSE;
     }
@@ -4561,6 +4647,7 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
     bgfx::allocInstanceDataBuffer(idb, InstanceCount, stride);
     if (idb->data == NULL)
     {
+        m_TransientInstCount.fetch_sub(1, std::memory_order_relaxed);
         RecordTransientAllocMiss("instance-alloc", InstanceCount, available);
         return FALSE;
     }
@@ -4623,6 +4710,7 @@ static void CKBgfxResetEncoderWrapper(CKBgfxEncoder &Encoder,
     Encoder.m_Encoder = NativeEncoder;
     Encoder.m_OwnsNativeEncoder = OwnsNativeEncoder;
     Encoder.m_Status = CK_OK;
+    Encoder.m_FrameStatus = CK_OK;
     Encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
     Encoder.m_StencilRef = 0;
     Encoder.m_StencilReadMask = 0xFF;
@@ -4731,7 +4819,7 @@ CKERROR CKBgfxRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
         enc->m_Encoder = NULL;
     }
 
-    const CKERROR status = enc->GetStatus();
+    const CKERROR status = enc->m_FrameStatus;
     enc->m_Context = NULL;
     enc->m_OwnsNativeEncoder = FALSE;
     enc->m_Active.store(FALSE, std::memory_order_release);
