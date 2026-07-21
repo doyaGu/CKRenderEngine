@@ -8,6 +8,7 @@
 #include "CKBgfxRasterizer.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
+#include "VxWindowFunctions.h"
 
 // Pull in bgfx defines for PT mask constants
 #include <bgfx/defines.h>
@@ -781,6 +782,31 @@ static void TestDrawMapTraceContractHelpers()
                 "vertex binding formatter keeps contract order");
 }
 
+static void TestPersistentCacheCallback()
+{
+    TEST_SECTION("Persistent Cache Callback");
+
+    const uint64_t cacheId = 0x434B525354544553ull;
+    const unsigned char source[] = {0x43, 0x4B, 0x52, 0x53, 0x54, 0x01};
+    unsigned char destination[sizeof(source)] = {};
+    CKBgfxCallback callback;
+
+    callback.cacheWrite(cacheId, source, (uint32_t)sizeof(source));
+    TEST_ASSERT(callback.cacheReadSize(cacheId) == sizeof(source),
+                "Cache callback reports the persisted byte count");
+    TEST_ASSERT(callback.cacheRead(cacheId, destination,
+                                   (uint32_t)sizeof(destination)),
+                "Cache callback reads a complete persisted entry");
+    TEST_ASSERT(memcmp(source, destination, sizeof(source)) == 0,
+                "Cache callback preserves entry contents");
+
+    XString cacheFile = CKBgfxModuleSiblingFile(
+        (const void *)&TestPersistentCacheCallback,
+        "CKBgfxCache/434B525354544553.bin");
+    if (cacheFile.Length() > 0)
+        VxDeleteFile(cacheFile.CStr());
+}
+
 // ============================================================================
 // Test 8: Debug overlay view map contract
 // ============================================================================
@@ -1012,6 +1038,7 @@ int main()
     TestBgfxRasterizerLifecycle();
     TestEncoderSlotReuse();
     TestDrawMapTraceContractHelpers();
+    TestPersistentCacheCallback();
     TestDebugOverlayViewMapContract();
     TestInvalidProgramSubmitIsRejected();
     TestUniformReflectionUsesSlotHandles();
