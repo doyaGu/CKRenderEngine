@@ -37,49 +37,23 @@ CKFFOpaquePacketCoordinator::CKFFOpaquePacketCoordinator()
     : m_InstancingEnabled(TRUE),
       m_InstanceLayout(0),
       m_SortingEnabled(FALSE),
-      m_PacketsAllowed(TRUE),
-      m_PacketProgramCacheValid(FALSE),
-      m_PacketProgramCacheDPFlags(0),
-      m_PacketProgramCacheFormatFlags(0),
-      m_PacketProgramCacheActiveTextureCount(0)
-{
-    CKFFInitPreparedState(&m_PacketProgramCachePreparedState);
-    memset(&m_PacketProgramCacheContext, 0, sizeof(m_PacketProgramCacheContext));
-}
+      m_PacketsAllowed(TRUE) {}
 
-CKBOOL CKFFOpaquePacketCoordinator::TryGetCachedProgram(CKDWORD dpFlags,
-                                                        CKDWORD formatFlags,
-                                                        CKDWORD activeTextureCount,
-                                                        CKFFPreparedState *preparedState,
-                                                        CKFFProgramContext *programContext) const
+CKFFOpaquePacketAdaptiveStats CKFFOpaquePacketCoordinator::GetAdaptiveStats() const
 {
-    if (!preparedState || !programContext)
-        return FALSE;
-    if (!m_PacketProgramCacheValid)
-        return FALSE;
-    if (m_PacketProgramCacheDPFlags != dpFlags ||
-        m_PacketProgramCacheFormatFlags != formatFlags ||
-        m_PacketProgramCacheActiveTextureCount != activeTextureCount) {
-        return FALSE;
-    }
-
-    *preparedState = m_PacketProgramCachePreparedState;
-    *programContext = m_PacketProgramCacheContext;
-    return TRUE;
-}
-
-void CKFFOpaquePacketCoordinator::CacheProgram(CKDWORD dpFlags,
-                                               CKDWORD formatFlags,
-                                               CKDWORD activeTextureCount,
-                                               const CKFFPreparedState &preparedState,
-                                               const CKFFProgramContext &programContext)
-{
-    m_PacketProgramCacheDPFlags = dpFlags;
-    m_PacketProgramCacheFormatFlags = formatFlags;
-    m_PacketProgramCacheActiveTextureCount = activeTextureCount;
-    m_PacketProgramCachePreparedState = preparedState;
-    m_PacketProgramCacheContext = programContext;
-    m_PacketProgramCacheValid = TRUE;
+    CKFFOpaquePacketAdaptiveStats stats = {};
+    stats.Samples = m_Queue.GetAdaptiveSamples();
+    stats.Bypasses = m_Queue.GetAdaptiveBypasses();
+    stats.SavedBindEstimate = m_Queue.GetAdaptiveSavedBindEstimate();
+    stats.RunBypasses = m_Queue.GetAdaptiveRunBypasses();
+    stats.SampleRuns = m_Queue.GetAdaptiveSampleRuns();
+    stats.SampleMaxRun = m_Queue.GetAdaptiveSampleMaxRun();
+    stats.SubmitSavedEstimate = m_Queue.GetAdaptiveSubmitSavedEstimate();
+    stats.CooldownBypasses = m_Queue.GetAdaptiveCooldownBypasses();
+    stats.CooldownFrames = m_Queue.GetAdaptiveCooldownFrames();
+    stats.FrameEndEvaluations = m_Queue.GetAdaptiveFrameEndEvaluations();
+    stats.FrameEndRunBypasses = m_Queue.GetAdaptiveFrameEndRunBypasses();
+    return stats;
 }
 
 CKDWORD CKFFOpaquePacketCoordinator::GetPacketObjectUniformRejectReason(
@@ -224,34 +198,6 @@ CKBOOL CKFFOpaquePacketCoordinator::CheckAdaptiveBypass(CKFixedFunctionPipeline 
     UpdateAdaptiveStats(pipeline);
     FlushRenderPackets(pipeline, encoder, TRUE, FALSE);
     return TRUE;
-}
-
-CKBOOL CKFFOpaquePacketCoordinator::ResolveVertexBufferPacketProgram(
-    CKFixedFunctionPipeline &pipeline,
-    CKDWORD dpFlags,
-    CKDWORD formatFlags,
-    CKFFPreparedState *preparedState,
-    CKFFProgramContext *programContext)
-{
-    if (!preparedState || !programContext)
-        return FALSE;
-
-    const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
-        pipeline.GetStateStore().TextureHandles, pipeline.GetStateStore().StageStates);
-    if (TryGetCachedProgram(dpFlags, formatFlags, activeTextureCount,
-                            preparedState, programContext)) {
-        return programContext->Program != 0 ? TRUE : FALSE;
-    }
-
-    pipeline.BuildCurrentPreparedState(preparedState, dpFlags, activeTextureCount, formatFlags);
-    CKFFShaderKey shaderKey = CKFFBuildShaderKeyFromPreparedState(preparedState);
-    CKFFInitProgramContext(programContext, shaderKey, CKFFProgramBinding());
-    if (!pipeline.ValidateProgramSupport(shaderKey))
-        return FALSE;
-    CKFFProgramBinding programBinding = pipeline.GetShaderCache().GetProgram(shaderKey);
-    CKFFInitProgramContext(programContext, shaderKey, programBinding);
-    CacheProgram(dpFlags, formatFlags, activeTextureCount, *preparedState, *programContext);
-    return programContext->Program != 0 ? TRUE : FALSE;
 }
 
 void CKFFOpaquePacketCoordinator::CaptureVertexBufferPacketIdentity(
@@ -437,12 +383,12 @@ CKDWORD CKFFOpaquePacketCoordinator::GetOpaqueVertexBufferPacketRejectReason(
 void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
     CKFixedFunctionPipeline &pipeline,
     CKFFVertexBufferPacketBuildResult *result,
+    const CKFFProgramPreparation &preparation,
     CKRasterizerEncoder *encoder,
     CKRenderView view,
     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
     CKDWORD baseVertex, CKDWORD vertexCount,
     CKDWORD startIndex, CKDWORD indexCount,
-    CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
     if (!result)
@@ -463,19 +409,8 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
 #endif
     CKFF_PROBE(pipeline.GetProbes(), OnHardwareDraw());
 
-    CKFFPreparedState preparedState;
-    CKFFProgramContext programContext;
-    if (!ResolveVertexBufferPacketProgram(pipeline, dpFlags, formatFlags,
-                                          &preparedState, &programContext)) {
-        if (collectStats)
-            CKFF_PROBE(pipeline.GetProbes(), OnProgramMiss());
-        result->ProgramContext = programContext;
-        result->RejectReason = pipeline.GetShaderCache().SupportsSamplerLayout(
-            programContext.ShaderKey)
-            ? CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING
-            : CKFF_RENDER_PACKET_REJECT_SAMPLER_LAYOUT;
-        return;
-    }
+    const CKFFPreparedState &preparedState = preparation.PreparedState;
+    const CKFFProgramContext &programContext = preparation.ProgramContext;
     result->ProgramContext = programContext;
     if (!pipeline.BuildCurrentTextureBindingSet(
             &result->TextureBindingSet, preparedState.ActiveTextureCount,
@@ -521,6 +456,7 @@ void CKFFOpaquePacketCoordinator::BuildVertexBufferPacket(
 
 CKBOOL CKFFOpaquePacketCoordinator::DrawVertexBuffer(
     CKFixedFunctionPipeline &pipeline,
+    const CKFFProgramPreparation &preparation,
     CKRasterizerEncoder *encoder,
     CKRenderView view,
     VXPRIMITIVETYPE type,
@@ -538,10 +474,10 @@ CKBOOL CKFFOpaquePacketCoordinator::DrawVertexBuffer(
         GetOpaqueVertexBufferPacketRejectReason(pipeline, view, type, vb, ib, vertexLayout);
     if (packetRejectReason == CKFF_RENDER_PACKET_ELIGIBLE) {
         CKFFVertexBufferPacketBuildResult buildResult;
-        BuildVertexBufferPacket(pipeline, &buildResult, encoder, view, type, vb, ib,
+        BuildVertexBufferPacket(pipeline, &buildResult, preparation,
+                                encoder, view, type, vb, ib,
                                 baseVertex, vertexCount,
                                 startIndex, indexCount,
-                                dpFlags, formatFlags,
                                 vertexLayout);
         if (buildResult.Success) {
             TrackOpaqueRenderPacket(pipeline, buildResult.Packet);
@@ -557,7 +493,8 @@ CKBOOL CKFFOpaquePacketCoordinator::DrawVertexBuffer(
 
     if (HasPackets())
         FlushRenderPackets(pipeline, encoder, FALSE, FALSE);
-    return pipeline.SubmitVertexBufferImmediate(encoder, view, type, vb, ib,
+    return pipeline.SubmitVertexBufferImmediate(encoder, preparation,
+                                                view, type, vb, ib,
                                                 baseVertex, vertexCount,
                                                 startIndex, indexCount,
                                                 dpFlags, formatFlags,
@@ -657,6 +594,9 @@ void CKFFOpaquePacketCoordinator::FlushRenderPackets(CKFixedFunctionPipeline &pi
                                               plan.Count, directReplay, &cache, lastPlan);
         }
     }
+
+    if (encoder->GetStatus() != CK_OK)
+        encoder->Discard(CKRST_DISCARD_ALL);
 
     ClearRenderPackets();
     CKFF_PROBE(pipeline.GetProbes(), OnRenderPacketFlush());

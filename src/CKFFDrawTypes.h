@@ -29,6 +29,18 @@ struct CKFFPreparedState {
     CKDWORD TextureBoundMask;
 };
 
+enum CKFFProgramPrepareStatus {
+    CKFF_PROGRAM_PREPARE_OK = 0,
+    CKFF_PROGRAM_PREPARE_INVALID_INPUT,
+    CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT,
+    CKFF_PROGRAM_PREPARE_PROGRAM_MISSING
+};
+
+struct CKFFProgramPreparation {
+    CKFFPreparedState PreparedState;
+    CKFFProgramContext ProgramContext;
+};
+
 struct CKFFTextureBindingSet {
     CKDWORD ActiveStageCount;
     CKDWORD ActiveTextureCount;

@@ -13,6 +13,7 @@
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
 #include "CKFFDrawTypes.h"
+#include "CKFFDrawPreparer.h"
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
@@ -134,28 +135,14 @@ public:
     void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaquePackets.SetInstancingEnabled(enabled); }
     void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePackets.SetPacketsAllowed(allowed); }
     CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePackets.PacketsAllowed(); }
-    CKDWORD GetOpaquePacketAdaptiveSamples() const { return m_OpaquePackets.GetAdaptiveSamples(); }
-    CKDWORD GetOpaquePacketAdaptiveBypasses() const { return m_OpaquePackets.GetAdaptiveBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSavedBindEstimate() const { return m_OpaquePackets.GetAdaptiveSavedBindEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveRunBypasses() const { return m_OpaquePackets.GetAdaptiveRunBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleRuns() const { return m_OpaquePackets.GetAdaptiveSampleRuns(); }
-    CKDWORD GetOpaquePacketAdaptiveSampleMaxRun() const { return m_OpaquePackets.GetAdaptiveSampleMaxRun(); }
-    CKDWORD GetOpaquePacketAdaptiveSubmitSavedEstimate() const { return m_OpaquePackets.GetAdaptiveSubmitSavedEstimate(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownBypasses() const { return m_OpaquePackets.GetAdaptiveCooldownBypasses(); }
-    CKDWORD GetOpaquePacketAdaptiveCooldownFrames() const { return m_OpaquePackets.GetAdaptiveCooldownFrames(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndEvaluations() const { return m_OpaquePackets.GetAdaptiveFrameEndEvaluations(); }
-    CKDWORD GetOpaquePacketAdaptiveFrameEndRunBypasses() const { return m_OpaquePackets.GetAdaptiveFrameEndRunBypasses(); }
+    CKFFOpaquePacketAdaptiveStats GetOpaquePacketAdaptiveStats() const {
+        return m_OpaquePackets.GetAdaptiveStats();
+    }
 
     // === Subsystem access ===
-    CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
-    const CKDrawStateCache &GetDrawStateCache() const { return m_DrawStateCache; }
     CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
-    CKTransientGeometry &GetTransientGeometry() { return m_TransientGeometry; }
     CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
     CKRenderPipeline &GetRenderPipeline() { return m_RenderPipeline; }
-    CKFrustumCuller &GetFrustumCuller() { return m_FrustumCuller; }
-    CKRasterizerContext *GetContext() const { return m_Context; }
-    const CKFFStateStore &GetStateStore() const { return m_State; }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes &GetProbes() { return m_Probes; }
 #endif
@@ -171,30 +158,8 @@ public:
     const CKFFFrameStats &GetFrameStats() const;
 #endif
 
-    // === Packet-build support ===
-    void BuildCurrentPreparedState(CKFFPreparedState *prepared, CKDWORD dpFlags, CKDWORD activeTextureCount,
-                                   CKDWORD formatFlags = 0,
-                                   const CKBYTE *texcoordComponentCounts = nullptr,
-                                   CKBOOL pointSprite = FALSE);
-    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
-                                         CKDWORD activeTextureCount,
-                                         const CKFFShaderKey &shaderKey);
-    CKBOOL ValidateProgramSupport(const CKFFShaderKey &shaderKey);
-    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext,
-                                     CKDWORD activeTextureCount);
-    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                                     const CKFFProgramContext *programContext);
-    void UpdateViewProjectionCache();
-    float ComputeDepthKey() const;
-    CKBOOL SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder, CKRenderView view,
-                                       VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-                                       CKDWORD baseVertex, CKDWORD vertexCount,
-                                       CKDWORD startIndex, CKDWORD indexCount,
-                                       CKDWORD dpFlags, CKDWORD formatFlags,
-                                       CKDWORD vertexLayout);
-
 private:
+    friend class CKFFOpaquePacketCoordinator;
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
@@ -218,10 +183,6 @@ private:
     };
 
     CKRasterizerContext *m_Context;
-    CKBOOL m_DisableTextureFiltering;
-    CKBOOL m_DisableMipmaps;
-    CKBOOL m_ForceAnisotropicFiltering;
-
     // Subsystems
     CKFFShaderCache m_ShaderCache;
     CKDrawStateCache m_DrawStateCache;
@@ -237,6 +198,7 @@ private:
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes m_Probes;
 #endif
+    CKFFDrawPreparer m_DrawPreparer;
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
     CKFFOpaquePacketCoordinator m_OpaquePackets;
@@ -249,15 +211,47 @@ private:
     // Internal methods
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkStaticUniformsDirty();
-    void MarkPacketProgramDirty();
+    void MarkPreparedProgramDirty();
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags);
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
+    CKBOOL RejectPendingSubmission(CKRasterizerEncoder *encoder,
+                                   CKFFDrawRejectReason reason);
     CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
     void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
+
+    // Opaque-packet implementation support. These methods are intentionally
+    // private so packet capture does not expand the pipeline's caller interface.
+    CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
+    const CKDrawStateCache &GetDrawStateCache() const { return m_DrawStateCache; }
+    const CKFFStateStore &GetStateStore() const { return m_State; }
+    CKRasterizerContext *GetContext() const { return m_Context; }
+    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
+                                         CKDWORD activeTextureCount,
+                                         const CKFFShaderKey &shaderKey);
+    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
+                                     const CKFFProgramContext *programContext,
+                                     CKDWORD activeTextureCount);
+    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
+                                     const CKFFProgramContext *programContext);
+    void UpdateViewProjectionCache();
+    float ComputeDepthKey() const;
+    CKBOOL SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder,
+                                       const CKFFProgramPreparation &preparation,
+                                       CKRenderView view,
+                                       VXPRIMITIVETYPE type,
+                                       CKDWORD vb,
+                                       CKDWORD ib,
+                                       CKDWORD baseVertex,
+                                       CKDWORD vertexCount,
+                                       CKDWORD startIndex,
+                                       CKDWORD indexCount,
+                                       CKDWORD dpFlags,
+                                       CKDWORD formatFlags,
+                                       CKDWORD vertexLayout);
 
 };
 

@@ -8,6 +8,20 @@ class CKFixedFunctionPipeline;
 struct CKFFRenderPacketReplayContext;
 struct CKFFPipelineTestAccess;
 
+struct CKFFOpaquePacketAdaptiveStats {
+    CKDWORD Samples;
+    CKDWORD Bypasses;
+    CKDWORD SavedBindEstimate;
+    CKDWORD RunBypasses;
+    CKDWORD SampleRuns;
+    CKDWORD SampleMaxRun;
+    CKDWORD SubmitSavedEstimate;
+    CKDWORD CooldownBypasses;
+    CKDWORD CooldownFrames;
+    CKDWORD FrameEndEvaluations;
+    CKDWORD FrameEndRunBypasses;
+};
+
 class CKFFOpaquePacketCoordinator {
 public:
     CKFFOpaquePacketCoordinator();
@@ -17,7 +31,6 @@ public:
     void ResetFrameState() { m_Queue.ResetFrameState(); }
 
     void MarkStaticUniformsDirty() { m_Queue.MarkStaticUniformsDirty(); }
-    void MarkPacketProgramDirty() { m_PacketProgramCacheValid = FALSE; }
 
     void SetSortingEnabled(CKBOOL enabled) { m_SortingEnabled = enabled; }
     CKBOOL SortingEnabled() const { return m_SortingEnabled; }
@@ -31,31 +44,22 @@ public:
     void SetInstanceLayout(CKDWORD instanceLayout) { m_InstanceLayout = instanceLayout; }
     CKDWORD InstanceLayout() const { return m_InstanceLayout; }
 
-    CKDWORD GetAdaptiveSamples() const { return m_Queue.GetAdaptiveSamples(); }
-    CKDWORD GetAdaptiveBypasses() const { return m_Queue.GetAdaptiveBypasses(); }
-    CKDWORD GetAdaptiveSavedBindEstimate() const { return m_Queue.GetAdaptiveSavedBindEstimate(); }
-    CKDWORD GetAdaptiveRunBypasses() const { return m_Queue.GetAdaptiveRunBypasses(); }
-    CKDWORD GetAdaptiveSampleRuns() const { return m_Queue.GetAdaptiveSampleRuns(); }
-    CKDWORD GetAdaptiveSampleMaxRun() const { return m_Queue.GetAdaptiveSampleMaxRun(); }
-    CKDWORD GetAdaptiveSubmitSavedEstimate() const { return m_Queue.GetAdaptiveSubmitSavedEstimate(); }
-    CKDWORD GetAdaptiveCooldownBypasses() const { return m_Queue.GetAdaptiveCooldownBypasses(); }
-    CKDWORD GetAdaptiveCooldownFrames() const { return m_Queue.GetAdaptiveCooldownFrames(); }
-    CKDWORD GetAdaptiveFrameEndEvaluations() const { return m_Queue.GetAdaptiveFrameEndEvaluations(); }
-    CKDWORD GetAdaptiveFrameEndRunBypasses() const { return m_Queue.GetAdaptiveFrameEndRunBypasses(); }
+    CKFFOpaquePacketAdaptiveStats GetAdaptiveStats() const;
 
     CKBOOL DrawVertexBuffer(CKFixedFunctionPipeline &pipeline,
-                          CKRasterizerEncoder *encoder,
-                          CKRenderView view,
-                          VXPRIMITIVETYPE type,
-                          CKDWORD vb,
-                          CKDWORD ib,
-                          CKDWORD baseVertex,
-                          CKDWORD vertexCount,
-                          CKDWORD startIndex,
-                          CKDWORD indexCount,
-                          CKDWORD dpFlags,
-                          CKDWORD formatFlags,
-                          CKDWORD vertexLayout);
+                           const CKFFProgramPreparation &preparation,
+                           CKRasterizerEncoder *encoder,
+                           CKRenderView view,
+                           VXPRIMITIVETYPE type,
+                           CKDWORD vb,
+                           CKDWORD ib,
+                           CKDWORD baseVertex,
+                           CKDWORD vertexCount,
+                           CKDWORD startIndex,
+                           CKDWORD indexCount,
+                           CKDWORD dpFlags,
+                           CKDWORD formatFlags,
+                           CKDWORD vertexLayout);
     void ClearRenderPackets() { m_Queue.Clear(); }
     void ResetRenderPacketFrameState(CKFixedFunctionPipeline &pipeline);
     void FlushRenderPackets(CKFixedFunctionPipeline &pipeline,
@@ -68,16 +72,6 @@ private:
     friend struct CKFFPipelineTestAccess;
 #endif
 
-    CKBOOL TryGetCachedProgram(CKDWORD dpFlags,
-                               CKDWORD formatFlags,
-                               CKDWORD activeTextureCount,
-                               CKFFPreparedState *preparedState,
-                               CKFFProgramContext *programContext) const;
-    void CacheProgram(CKDWORD dpFlags,
-                      CKDWORD formatFlags,
-                      CKDWORD activeTextureCount,
-                      const CKFFPreparedState &preparedState,
-                      const CKFFProgramContext &programContext);
     CKDWORD GetPacketObjectUniformRejectReason(const CKFFProgramContext *programContext) const;
     CKDWORD GetVertexBufferPacketInstancingRejectReason(
         const CKFFProgramContext *programContext) const;
@@ -89,11 +83,6 @@ private:
     void TrackOpaqueRenderPacketReject(CKFixedFunctionPipeline &pipeline, CKDWORD rejectReason);
     void UpdateAdaptiveStats(CKFixedFunctionPipeline &pipeline);
     CKBOOL CheckAdaptiveBypass(CKFixedFunctionPipeline &pipeline, CKRasterizerEncoder *encoder);
-    CKBOOL ResolveVertexBufferPacketProgram(CKFixedFunctionPipeline &pipeline,
-                                            CKDWORD dpFlags,
-                                            CKDWORD formatFlags,
-                                            CKFFPreparedState *preparedState,
-                                            CKFFProgramContext *programContext);
     void CaptureVertexBufferPacketIdentity(CKFixedFunctionPipeline &pipeline,
                                            CKRenderPacket *packet,
                                            const CKFFProgramContext *programContext,
@@ -126,6 +115,7 @@ private:
                                                     CKDWORD vertexLayout) const;
     void BuildVertexBufferPacket(CKFixedFunctionPipeline &pipeline,
                                  CKFFVertexBufferPacketBuildResult *result,
+                                 const CKFFProgramPreparation &preparation,
                                  CKRasterizerEncoder *encoder,
                                  CKRenderView view,
                                  VXPRIMITIVETYPE type,
@@ -135,8 +125,6 @@ private:
                                  CKDWORD vertexCount,
                                  CKDWORD startIndex,
                                  CKDWORD indexCount,
-                                 CKDWORD dpFlags,
-                                 CKDWORD formatFlags,
                                  CKDWORD vertexLayout);
     void SortRenderPackets(XArray<CKDWORD> &indices);
     void InitRenderPacketReplayContext(CKFixedFunctionPipeline &pipeline,
@@ -149,12 +137,6 @@ private:
     CKBOOL m_SortingEnabled;
     CKBOOL m_PacketsAllowed;
 
-    CKBOOL m_PacketProgramCacheValid;
-    CKDWORD m_PacketProgramCacheDPFlags;
-    CKDWORD m_PacketProgramCacheFormatFlags;
-    CKDWORD m_PacketProgramCacheActiveTextureCount;
-    CKFFPreparedState m_PacketProgramCachePreparedState;
-    CKFFProgramContext m_PacketProgramCacheContext;
 };
 
 #endif // CKFFOPAQUEPACKETCOORDINATOR_H

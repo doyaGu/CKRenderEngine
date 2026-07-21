@@ -170,21 +170,21 @@ static BenchResult RunBenchScenario(const BenchScenario *scenario, CKBOOL packet
         phaseStart = BenchNow();
         ffp.FlushOpaqueRenderPackets(&context.Encoder);
         flushUs += BenchElapsedUs(phaseStart);
-        result.AdaptiveSamples += ffp.GetOpaquePacketAdaptiveSamples();
-        result.AdaptiveBypasses += ffp.GetOpaquePacketAdaptiveBypasses();
-        result.AdaptiveSavedBindEstimate += ffp.GetOpaquePacketAdaptiveSavedBindEstimate();
-        result.AdaptiveRunBypasses += ffp.GetOpaquePacketAdaptiveRunBypasses();
-        result.AdaptiveCooldownBypasses += ffp.GetOpaquePacketAdaptiveCooldownBypasses();
-        if (ffp.GetOpaquePacketAdaptiveCooldownFrames() > result.AdaptiveCooldownFrames)
-            result.AdaptiveCooldownFrames = ffp.GetOpaquePacketAdaptiveCooldownFrames();
-        result.AdaptiveFrameEndEvaluations +=
-            ffp.GetOpaquePacketAdaptiveFrameEndEvaluations();
-        result.AdaptiveFrameEndRunBypasses +=
-            ffp.GetOpaquePacketAdaptiveFrameEndRunBypasses();
-        result.AdaptiveSampleRuns += ffp.GetOpaquePacketAdaptiveSampleRuns();
-        if (ffp.GetOpaquePacketAdaptiveSampleMaxRun() > result.AdaptiveSampleMaxRun)
-            result.AdaptiveSampleMaxRun = ffp.GetOpaquePacketAdaptiveSampleMaxRun();
-        result.AdaptiveSubmitSavedEstimate += ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate();
+        const CKFFOpaquePacketAdaptiveStats adaptive =
+            ffp.GetOpaquePacketAdaptiveStats();
+        result.AdaptiveSamples += adaptive.Samples;
+        result.AdaptiveBypasses += adaptive.Bypasses;
+        result.AdaptiveSavedBindEstimate += adaptive.SavedBindEstimate;
+        result.AdaptiveRunBypasses += adaptive.RunBypasses;
+        result.AdaptiveCooldownBypasses += adaptive.CooldownBypasses;
+        if (adaptive.CooldownFrames > result.AdaptiveCooldownFrames)
+            result.AdaptiveCooldownFrames = adaptive.CooldownFrames;
+        result.AdaptiveFrameEndEvaluations += adaptive.FrameEndEvaluations;
+        result.AdaptiveFrameEndRunBypasses += adaptive.FrameEndRunBypasses;
+        result.AdaptiveSampleRuns += adaptive.SampleRuns;
+        if (adaptive.SampleMaxRun > result.AdaptiveSampleMaxRun)
+            result.AdaptiveSampleMaxRun = adaptive.SampleMaxRun;
+        result.AdaptiveSubmitSavedEstimate += adaptive.SubmitSavedEstimate;
         AddFrameStats(&result, &ffp.GetFrameStats());
     }
     const double elapsedUs = BenchElapsedUs(start);
