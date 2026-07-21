@@ -425,6 +425,25 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     return desc;
 }
 
+CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState,
+                                   const CKFFSamplerOverrides &overrides) {
+    CKSamplerDesc desc = CKFFBuildSamplerDesc(stageState);
+    if (overrides.DisableTextureFiltering) {
+        desc.MinFilter = CKRST_FILTER_NEAREST;
+        desc.MagFilter = CKRST_FILTER_NEAREST;
+        desc.MipFilter = overrides.DisableMipmaps
+            ? CKRST_FILTER_NONE
+            : CKRST_FILTER_NEAREST;
+    } else if (overrides.DisableMipmaps) {
+        desc.MipFilter = CKRST_FILTER_NONE;
+    } else if (overrides.ForceAnisotropicFiltering) {
+        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
+        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
+    }
+    return desc;
+}
+
 CKDWORD CKFFPackTexcoordIndex(CKDWORD index, CKDWORD generation) {
     return (index & 0xFFFFu) | ((generation & 0xFFFFu) << 16);
 }

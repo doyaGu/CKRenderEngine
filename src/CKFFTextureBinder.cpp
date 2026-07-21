@@ -77,17 +77,15 @@ CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
       m_Probes(probes),
 #endif
-      m_DisableTextureFiltering(FALSE),
-      m_DisableMipmaps(FALSE),
-      m_ForceAnisotropicFiltering(FALSE)
+      m_SamplerOverrides()
 {
 }
 
 void CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso)
 {
-    m_DisableTextureFiltering = disableFilter;
-    m_DisableMipmaps = disableMipmaps;
-    m_ForceAnisotropicFiltering = forceAniso;
+    const CKFFSamplerOverrides overrides(disableFilter, disableMipmaps, forceAniso);
+    if (m_SamplerOverrides != overrides)
+        m_SamplerOverrides = overrides;
 }
 
 void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
@@ -139,17 +137,5 @@ CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const
 {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return CKFFBuildSamplerDesc(nullptr);
-    CKSamplerDesc desc = CKFFBuildSamplerDesc(m_State.StageStates[stage]);
-    if (m_DisableTextureFiltering) {
-        desc.MinFilter = CKRST_FILTER_NEAREST;
-        desc.MagFilter = CKRST_FILTER_NEAREST;
-        desc.MipFilter = m_DisableMipmaps ? CKRST_FILTER_NONE : CKRST_FILTER_NEAREST;
-    } else if (m_DisableMipmaps) {
-        desc.MipFilter = CKRST_FILTER_NONE;
-    } else if (m_ForceAnisotropicFiltering) {
-        desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
-        desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
-    }
-    return desc;
+    return CKFFBuildSamplerDesc(m_State.StageStates[stage], m_SamplerOverrides);
 }

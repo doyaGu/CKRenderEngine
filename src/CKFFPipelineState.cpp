@@ -43,13 +43,6 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
 
 void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                                                CKBOOL ForceAnisotropicFiltering) {
-    if (m_DisableTextureFiltering == DisableTextureFiltering &&
-        m_DisableMipmaps == DisableMipmaps &&
-        m_ForceAnisotropicFiltering == ForceAnisotropicFiltering)
-        return;
-    m_DisableTextureFiltering = DisableTextureFiltering;
-    m_DisableMipmaps = DisableMipmaps;
-    m_ForceAnisotropicFiltering = ForceAnisotropicFiltering;
     m_TextureBinder.SetRenderOptions(DisableTextureFiltering, DisableMipmaps, ForceAnisotropicFiltering);
 }
 
