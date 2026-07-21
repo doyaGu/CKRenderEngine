@@ -796,6 +796,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
 
     // Update extents (returns FALSE if completely clipped)
     CKBOOL clipped = !UpdateExtents(context);
+    CKERROR renderStatus = CK_OK;
 
     // Execute pre-render callbacks if visible and has callbacks
     if (visible && m_Callbacks && m_Callbacks->m_PreCallBacks.Size() > 0) {
@@ -808,14 +809,17 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
 
     // Draw if visible and not completely clipped
     if (!clipped && visible)
-        Draw(context);
+        renderStatus = Draw(context);
 
     // Render children
     for (auto it = m_Children.Begin(); it != m_Children.End(); ++it) {
         RCK2dEntity *child = (RCK2dEntity *) *it;
         // Skip children that clip to parent if we're completely clipped
-        if (!clipped || !(child->m_Flags & CK_2DENTITY_CLIPTOPARENT))
-            child->Render(context);
+        if (!clipped || !(child->m_Flags & CK_2DENTITY_CLIPTOPARENT)) {
+            const CKERROR childStatus = child->Render(context);
+            if (renderStatus == CK_OK && childStatus != CK_OK)
+                renderStatus = childStatus;
+        }
     }
 
     // Execute post-render callbacks if visible and has callbacks
@@ -827,7 +831,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
         dev->m_Stats.SpriteCallbacksTime += dev->m_SpriteCallbacksTimeProfiler.Current();
     }
 
-    return CK_OK;
+    return renderStatus;
 }
 
 CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
@@ -853,7 +857,11 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         CKFFStateGuard ffpState(dev->m_FFPipeline);
 
         // Set material
-        m_Material->SetAsCurrent(dev, TRUE, FALSE);
+        if (!m_Material->SetAsCurrent(dev, TRUE, FALSE)) {
+            if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW))
+                dev->SetViewRect(savedViewRect);
+            return CKERR_INVALIDOPERATION;
+        }
 
         // Set render states
         dev->SetState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
@@ -867,6 +875,12 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 
         // Get draw primitive structure for 4 vertices (quad)
         VxDrawPrimitiveData *data = dev->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
+        if (!data || !data->PositionPtr || !data->ColorPtr ||
+            (m_Material->GetTexture(0) && !data->TexCoordPtr)) {
+            if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW))
+                dev->SetViewRect(savedViewRect);
+            return CKERR_INVALIDOPERATION;
+        }
         CKDWORD *texCoordPtr = (CKDWORD *) data->TexCoordPtr;
         float *positionPtr = (float *) data->PositionPtr;
         void *colorPtr = data->ColorPtr;
@@ -925,7 +939,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         // Draw quad as triangle fan
         CK2dSetDrawAnnotation(dev, (CKSTRING)"2D", this, (CKObject *)m_Material,
                               VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
-        dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
+        const CKBOOL submitted = dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
 
         // Restore fog state
         dev->SetState(VXRENDERSTATE_FOGENABLE, dev->m_RenderedScene->m_FogMode != 0);
@@ -934,6 +948,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         if (!(m_Flags & CK_2DENTITY_CLIPTOCAMERAVIEW)) {
             dev->SetViewRect(savedViewRect);
         }
+        if (!submitted)
+            return CKERR_INVALIDOPERATION;
     } else {
         // No material - draw placeholder (editor mode only)
         if (m_Context->IsPlaying())
@@ -954,6 +970,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 
         // Get draw primitive structure
         VxDrawPrimitiveData *data = dev->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
+        if (!data || !data->PositionPtr || !data->ColorPtr)
+            return CKERR_INVALIDOPERATION;
         float *positionPtr = (float *) data->PositionPtr;
         void *colorPtr = data->ColorPtr;
         int posStride = data->PositionStride;
@@ -993,10 +1011,13 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         // Draw filled quad
         CK2dSetDrawAnnotation(dev, (CKSTRING)"2D_PLACEHOLDER_FILL", this, NULL,
                               VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
-        dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
+        if (!dev->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data))
+            return CKERR_INVALIDOPERATION;
 
         // Draw white outline
         CKWORD *indices = dev->GetDrawPrimitiveIndices(5);
+        if (!indices)
+            return CKERR_INVALIDOPERATION;
         indices[0] = 0;
         indices[1] = 1;
         indices[2] = 2;
@@ -1021,7 +1042,8 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         // Draw outline as line strip
         CK2dSetDrawAnnotation(dev, (CKSTRING)"2D_PLACEHOLDER_OUTLINE", this, NULL,
                               VX_LINESTRIP, 5, (CKDWORD)data->VertexCount);
-        dev->DrawPrimitive(VX_LINESTRIP, indices, 5, data);
+        if (!dev->DrawPrimitive(VX_LINESTRIP, indices, 5, data))
+            return CKERR_INVALIDOPERATION;
 
         // Restore fog state
         dev->SetState(VXRENDERSTATE_FOGENABLE, dev->m_RenderedScene->m_FogMode != 0);

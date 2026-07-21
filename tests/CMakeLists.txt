@@ -70,6 +70,10 @@ ckre_add_test(scene_graph_tests
     test_scene_graph.cpp
 )
 
+ckre_add_test(ck2d_entity_tests
+    test_ck2d_entity.cpp
+)
+
 ckre_add_test(ckmesh_tests
     test_ckmesh.cpp
 )
