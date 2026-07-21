@@ -1059,15 +1059,55 @@ void ShaderBindingCacheRemainsBounded()
     CKFixedFunctionPipeline ffp;
     ffp.Init(&context);
 
-    for (CKDWORD value = 0; value <= CKFF_MAX_PROGRAM_BINDINGS; ++value) {
+    for (CKDWORD value = 0; value < CKFF_MAX_PROGRAM_BINDINGS; ++value) {
         CKFFShaderKey key;
         key.VS.Bits = value;
         TestCheck(ffp.GetShaderCache().GetProgram(key).Program != 0,
-                  "bounded binding cache fixture must resolve a program");
+                   "bounded binding cache fixture must resolve a program");
     }
-    TestCheck(ffp.GetShaderCache().CachedBindingCount() <=
+
+    TestCheck(ffp.GetShaderCache().CachedBindingCount() ==
                   ffp.GetShaderCache().MaxCachedBindingCount(),
-              "shader binding cache must not grow past its configured limit");
+              "shader binding cache fixture must fill the configured limit");
+    const CKFFShaderCacheStats filledStats =
+        ffp.GetShaderCache().GetCacheStats();
+    TestCheck(filledStats.BindingMisses == CKFF_MAX_PROGRAM_BINDINGS &&
+                  filledStats.BindingHits == 0 &&
+                  filledStats.BindingEvictions == 0,
+              "filling the shader binding cache must report misses without eviction");
+
+    CKFFShaderKey hotKey;
+    hotKey.VS.Bits = 0;
+    TestCheck(ffp.GetShaderCache().GetProgram(hotKey).Program != 0,
+              "shader binding cache fixture must hit a retained key");
+
+    CKFFShaderKey overflowKey;
+    overflowKey.VS.Bits = CKFF_MAX_PROGRAM_BINDINGS;
+    TestCheck(ffp.GetShaderCache().GetProgram(overflowKey).Program != 0,
+              "shader binding cache fixture must resolve an overflow key");
+    TestCheck(ffp.GetShaderCache().CachedBindingCount() ==
+                  ffp.GetShaderCache().MaxCachedBindingCount(),
+              "shader binding cache must stay full after one incremental eviction");
+
+    const CKFFShaderCacheStats overflowStats =
+        ffp.GetShaderCache().GetCacheStats();
+    TestCheck(overflowStats.BindingHits == 1 &&
+                  overflowStats.BindingMisses == CKFF_MAX_PROGRAM_BINDINGS + 1 &&
+                  overflowStats.BindingEvictions == 1,
+              "overflow must evict one binding instead of clearing the whole cache");
+
+    TestCheck(ffp.GetShaderCache().GetProgram(hotKey).Program != 0,
+              "recently used shader binding must survive clock eviction");
+    CKFFShaderKey coldKey;
+    coldKey.VS.Bits = 1;
+    TestCheck(ffp.GetShaderCache().GetProgram(coldKey).Program != 0,
+              "evicted shader binding must remain resolvable");
+    const CKFFShaderCacheStats probeStats =
+        ffp.GetShaderCache().GetCacheStats();
+    TestCheck(probeStats.BindingHits == 2 &&
+                  probeStats.BindingMisses == CKFF_MAX_PROGRAM_BINDINGS + 2 &&
+                  probeStats.BindingEvictions == 2,
+              "clock eviction must retain the hot binding and replace only the cold binding");
 
     ffp.Shutdown();
 }
