@@ -1,6 +1,7 @@
 #include "CKRenderPipeline.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
+#include "CKRenderPerfStats.h"
 #include "CKRenderSettings.h"
 
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
@@ -409,11 +410,7 @@ CKERROR CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
 #else
         false;
 #endif
-    static int s_PresentSyncLogCount = 0;
-    if (logPresentSync && s_PresentSyncLogCount < 64) {
-        CK_LOG_FMT("PresentSync", "RenderPipeline/EndFrame syncMode=%d", syncMode);
-        ++s_PresentSyncLogCount;
-    }
+    const double frameStart = logPresentSync ? CKRenderPerfNow() : 0.0;
 
     CKERROR encoderStatus = CK_OK;
     if (m_Encoder) {
@@ -424,6 +421,19 @@ CKERROR CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     CKDWORD frameNumber = 0;
     const CKERROR frameStatus = m_Context->Frame(
         syncMode, CKRST_FRAME_NONE, &frameNumber);
+    if (logPresentSync) {
+        const CKRenderStats *stats = m_Context->GetStats();
+        CK_LOG_FMT("PresentSync",
+                   "frame=%u syncMode=%d frameUs=%.1f cpuFrame=%lld waitSubmit=%lld waitRender=%lld draws=%u maxGpuLatency=%u transientVB=%u transientIB=%u",
+                   frameNumber, syncMode, CKRenderPerfElapsedUs(frameStart),
+                   stats ? (long long)stats->CpuTimeFrame : 0ll,
+                   stats ? (long long)stats->WaitSubmit : 0ll,
+                   stats ? (long long)stats->WaitRender : 0ll,
+                   stats ? (unsigned)stats->DrawCalls : 0u,
+                   stats ? (unsigned)stats->MaxGpuLatency : 0u,
+                   stats ? (unsigned)stats->NumTransientVertexBuffers : 0u,
+                   stats ? (unsigned)stats->NumTransientIndexBuffers : 0u);
+    }
     if (encoderStatus != CK_OK || frameStatus != CK_OK) {
         CK_LOG_FMT("Rasterizer",
                    "frame submission failed encoderStatus=0x%08X frameStatus=0x%08X",
