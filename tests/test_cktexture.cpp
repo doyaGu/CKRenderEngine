@@ -159,6 +159,28 @@ void MipmapRequestsKeepLegacyBoolAndExplicitCounts() {
               "FALSE should disable mipmaps");
 }
 
+void GeneratedAndUserMipmapsUseInitializedCreationModes() {
+    TextureTestWorld world;
+    RCKTexture generated(world.context, "GeneratedMips");
+
+    TestCheck(generated.Create(4, 4, 32, 0), "generated texture Create failed");
+    FillTexture(generated, 0xFF102030u);
+    TestCheck(generated.UseMipmap(3), "generated UseMipmap failed");
+    TestCheck(generated.SystemToVideoMemory(world.renderContext, FALSE),
+              "generated mip texture upload failed");
+    TestCheck(world.rasterizer.LastTextureDesc.MipMapCount == (CKDWORD)-1,
+              "base-only system data must request generated mipmaps");
+
+    RCKTexture user(world.context, "UserMips");
+    TestCheck(user.Create(4, 4, 32, 0), "user texture Create failed");
+    FillTexture(user, 0xFF405060u);
+    TestCheck(user.SetUserMipMapMode(TRUE), "user mipmap mode failed");
+    TestCheck(user.SystemToVideoMemory(world.renderContext, FALSE),
+              "user mip texture upload failed");
+    TestCheck(world.rasterizer.LastTextureDesc.MipMapCount == 3,
+              "complete user mip data must request the explicit full chain");
+}
+
 void SavedAutomaticMipmapLoadsAsAutomaticRequest() {
     TextureTestWorld world;
     RCKTexture source(world.context, "SaveAutoMipSource");
@@ -370,6 +392,8 @@ int main() {
               &SystemToVideoMemoryRejectsMissingRasterizerDriver);
     tests.Run("Mipmap requests keep legacy bool and explicit counts",
               &MipmapRequestsKeepLegacyBoolAndExplicitCounts);
+    tests.Run("Generated and user mipmaps use initialized creation modes",
+              &GeneratedAndUserMipmapsUseInitializedCreationModes);
     tests.Run("Saved automatic mipmap loads as automatic request",
               &SavedAutomaticMipmapLoadsAsAutomaticRequest);
     tests.Run("Failed user mipmap enable has no side effects",

@@ -605,7 +605,8 @@ CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD requestedMipCount,
                                           CKBOOL openGL,
                                           CKBOOL autoMipDataAvailable)
 {
-    if (openGL && CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount))
+    (void)openGL;
+    if (CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount))
         return autoMipDataAvailable ? TRUE : FALSE;
 
     return requestedMipCount > 1 ? TRUE : FALSE;
