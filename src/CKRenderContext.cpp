@@ -3756,11 +3756,11 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
 
     const int clipWidth = right - left;
     const int clipHeight = bottom - top;
-    const int safeClipWidth = (clipWidth >= 1) ? clipWidth : 1;
-    const int safeClipHeight = (clipHeight >= 1) ? clipHeight : 1;
+    if (clipWidth <= 0 || clipHeight <= 0)
+        return;
 
     // Viewport clip rect applied per-view in v2
-    (void)left; (void)top; (void)safeClipWidth; (void)safeClipHeight;
+    (void)left; (void)top;
 
     const float invW = (float) (1.0 / (double) clipWidth);
     const float invH = (float) (1.0 / (double) clipHeight);
@@ -3786,6 +3786,9 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
         return;
 
     if (!m_RasterizerContext)
+        return;
+
+    if (m_ViewportData.ViewWidth <= 0 || m_ViewportData.ViewHeight <= 0)
         return;
 
     const float aspect = (float) ((double) m_ViewportData.ViewWidth / (double) m_ViewportData.ViewHeight);
