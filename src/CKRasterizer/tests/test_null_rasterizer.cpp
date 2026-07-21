@@ -159,6 +159,28 @@ int main()
     if (context->DeleteObject(uniform, CKRST_OBJ_UNIFORM) != CK_OK ||
         context->IsObjectAlive(uniform, CKRST_OBJ_UNIFORM))
         return Fail();
+
+    encoder = context->BeginEncoder();
+    if (!encoder)
+        return Fail();
+    encoder->SetStencilRef(0x100);
+    if (encoder->GetStatus() != CKERR_INVALIDPARAMETER)
+        return Fail();
+    encoder->Discard(CKRST_DISCARD_ALL);
+    if (encoder->GetStatus() != CK_OK)
+        return Fail();
+    encoder->Touch(0);
+    if (encoder->GetStatus() != CK_OK ||
+        context->EndEncoder(encoder) != CKERR_INVALIDPARAMETER)
+        return Fail();
+
+    encoder = context->BeginEncoder();
+    if (!encoder)
+        return Fail();
+    encoder->Touch(0);
+    if (context->EndEncoder(encoder) != CK_OK)
+        return Fail();
+
     CKDWORD replacementUniform = 0;
     if (context->CreateUniform(&uniformDesc, &replacementUniform) != CK_OK ||
         replacementUniform == 0 || replacementUniform == uniform ||

@@ -261,18 +261,21 @@ static void CKNullResetView(CKNullViewRecord &View)
 class CKNullRasterizerEncoder : public CKRasterizerEncoder {
 public:
     CKNullRasterizerEncoder()
-        : m_Active(false), m_Context(NULL), m_State(NULL), m_Status(CK_OK)
+        : m_Active(false), m_Context(NULL), m_State(NULL),
+          m_Status(CK_OK), m_FrameStatus(CK_OK)
     {
         ResetSnapshot();
     }
 
     CKERROR GetStatus() const override { return m_Status.load(std::memory_order_acquire); }
+    CKERROR GetFrameStatus() const { return m_FrameStatus.load(std::memory_order_acquire); }
 
     void Reset(CKRasterizerContext *Context, CKNullContextState *State)
     {
         m_Context = Context;
         m_State = State;
         m_Status.store(CK_OK, std::memory_order_release);
+        m_FrameStatus.store(CK_OK, std::memory_order_release);
         m_OwnerThread = VxThread::GetCurrentVxThreadId();
         m_Marker.Clear();
         ResetSnapshot();
@@ -281,8 +284,12 @@ public:
     void SetError(CKERROR Error)
     {
         CKERROR expected = CK_OK;
-        if (Error != CK_OK)
+        if (Error != CK_OK) {
             m_Status.compare_exchange_strong(expected, Error, std::memory_order_acq_rel);
+            expected = CK_OK;
+            m_FrameStatus.compare_exchange_strong(expected, Error,
+                                                  std::memory_order_acq_rel);
+        }
     }
 
     CKBOOL CanRecord()
@@ -463,6 +470,22 @@ public:
         }
     }
 
+    void Discard(CKDWORD Flags) override
+    {
+        const CKERROR validation = CKRasterizerValidateDiscard(Flags);
+        if (validation != CK_OK) {
+            SetError(validation);
+            return;
+        }
+        if (!m_Active.load(std::memory_order_acquire) || !m_Context || !m_State ||
+            m_OwnerThread != VxThread::GetCurrentVxThreadId()) {
+            SetError(CKERR_INVALIDOPERATION);
+            return;
+        }
+        ApplyDiscard(Flags);
+        m_Status.store(CK_OK, std::memory_order_release);
+    }
+
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override
     {
         if (CanRecord()) SetError(CKERR_NOTIMPLEMENTED);
@@ -615,6 +638,7 @@ private:
     CKRasterizerContext *m_Context;
     CKNullContextState *m_State;
     std::atomic<CKERROR> m_Status;
+    std::atomic<CKERROR> m_FrameStatus;
     CKNullEncoderSnapshot m_Snapshot;
     XString m_Marker;
 };
@@ -1634,7 +1658,7 @@ CKERROR CKRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
         encoder->SetError(CKERR_INVALIDOPERATION);
         return encoder->GetStatus();
     }
-    const CKERROR status = encoder->GetStatus();
+    const CKERROR status = encoder->GetFrameStatus();
     encoder->m_Active.store(false, std::memory_order_release);
     return status;
 }

@@ -121,6 +121,9 @@ public:
                             CKDWORD Texture, CKSamplerDesc *Sampler = NULL);
     virtual void SetUniform(CKDWORD Uniform, const void *Data,
                             CKDWORD Count = 1);
+
+    // Clear pending encoder state and recover from a rejected draw.
+    virtual void Discard(CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
     // Compute binding
     virtual void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                                   CK_ACCESS_MODE Access);

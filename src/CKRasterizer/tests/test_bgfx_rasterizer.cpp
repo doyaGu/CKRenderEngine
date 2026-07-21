@@ -855,6 +855,36 @@ static void TestInvalidProgramSubmitIsRejected()
                 "invalid submit consumes the pending marker instead of leaking it to the next draw");
 }
 
+static void TestDiscardRejectsInactiveEncoder()
+{
+    TEST_SECTION("Discard Requires an Active Encoder");
+
+    CKBgfxRasterizerContext context(NULL);
+    CKBgfxEncoder encoder;
+    encoder.m_Context = &context;
+    encoder.m_Status = CK_OK;
+    encoder.m_FrameStatus = CK_OK;
+    encoder.m_Active.store(FALSE, std::memory_order_release);
+
+    encoder.Discard(CKRST_DISCARD_ALL);
+
+    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDOPERATION,
+                "discard rejects an inactive encoder instead of silently succeeding");
+
+    encoder.m_Status = CK_OK;
+    encoder.m_FrameStatus = CK_OK;
+    encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
+    encoder.m_Active.store(TRUE, std::memory_order_release);
+    std::thread wrongThread([&encoder]() {
+        encoder.Discard(CKRST_DISCARD_ALL);
+    });
+    wrongThread.join();
+
+    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDOPERATION,
+                "discard rejects calls from a thread that does not own the encoder");
+    encoder.m_Active.store(FALSE, std::memory_order_release);
+}
+
 // ============================================================================
 // Test 10: Uniform reflection handle contract
 // ============================================================================
@@ -1041,6 +1071,7 @@ int main()
     TestPersistentCacheCallback();
     TestDebugOverlayViewMapContract();
     TestInvalidProgramSubmitIsRejected();
+    TestDiscardRejectsInactiveEncoder();
     TestUniformReflectionUsesSlotHandles();
     TestExactPixelFormatMapping();
 

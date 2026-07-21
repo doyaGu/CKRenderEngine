@@ -247,6 +247,7 @@ public:
     void SetTexture(CKDWORD Stage, CKDWORD Uniform,
                     CKDWORD Texture, CKSamplerDesc *Sampler) override;
     void SetUniform(CKDWORD Uniform, const void *Data, CKDWORD Count) override;
+    void Discard(CKDWORD Flags) override;
     void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
                           CK_ACCESS_MODE Access) override;
     void SetComputeImage(CKDWORD Stage, CKDWORD Texture,
@@ -287,6 +288,7 @@ public:
     bgfx::Encoder *m_Encoder;
     CKBOOL m_OwnsNativeEncoder;
     CKERROR m_Status;
+    CKERROR m_FrameStatus;
     XUINTPTR m_OwnerThread;
 
     CKDWORD m_StencilRef;
@@ -317,7 +319,8 @@ public:
                      CKDWORD Extra0,
                      CKDWORD Extra1,
                      CKDWORD Extra2);
-    void SetError(CKERROR Error);
+    void ResetDebugBindings(CKDWORD Flags);
+    void SetError(CKERROR Error, CKSTRING Operation = NULL);
     CKBOOL CanSubmit();
 };
 
