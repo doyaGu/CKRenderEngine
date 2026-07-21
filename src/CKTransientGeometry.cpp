@@ -639,21 +639,20 @@ CKBOOL CKTransientGeometry::Prepare(
     // Interleave vertex data into the transient buffer
     InterleaveVertices(tvb.Data, stride, vertexCount, formatFlags, data, texcoordComponentCounts);
 
-    // Bind transient VB
-    encoder->SetTransientVertexBuffer(0, &tvb);
-
     // Handle indices and topology conversion
+    CKTransientIndexBuffer tib;
+    memset(&tib, 0, sizeof(tib));
+    CKBOOL hasIndexBuffer = FALSE;
     if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
         // Must convert to triangle list (bgfx doesn't support fan/strip natively)
         int srcCount = (indices && indexCount > 0) ? indexCount : (int)vertexCount;
         int maxTriListIndices = (srcCount - 2) * 3;
         if (maxTriListIndices <= 0) return FALSE;
 
-        CKTransientIndexBuffer tib;
-        memset(&tib, 0, sizeof(tib));
         if (!m_Context->AllocTransientIndexBuffer(&tib, maxTriListIndices, FALSE))
             return FALSE;
         m_LastIndexBytes = tib.Size;
+        hasIndexBuffer = TRUE;
 
         if (indices && indexCount > 0) {
             ConvertPrimitiveToTriangleList(primType, indices, srcCount, (CKWORD *)tib.Data);
@@ -664,17 +663,18 @@ CKBOOL CKTransientGeometry::Prepare(
                 m_TempIndices[i] = (CKWORD)i;
             ConvertPrimitiveToTriangleList(primType, m_TempIndices.Begin(), srcCount, (CKWORD *)tib.Data);
         }
-        encoder->SetTransientIndexBuffer(&tib);
     } else if (indices && indexCount > 0) {
         // Triangle list or line list with explicit indices
-        CKTransientIndexBuffer tib;
-        memset(&tib, 0, sizeof(tib));
         if (!m_Context->AllocTransientIndexBuffer(&tib, indexCount, FALSE))
             return FALSE;
         m_LastIndexBytes = tib.Size;
+        hasIndexBuffer = TRUE;
         memcpy(tib.Data, indices, indexCount * sizeof(CKWORD));
-        encoder->SetTransientIndexBuffer(&tib);
     }
+
+    encoder->SetTransientVertexBuffer(0, &tvb);
+    if (hasIndexBuffer)
+        encoder->SetTransientIndexBuffer(&tib);
 
     CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                               m_LastIndexBytes,
