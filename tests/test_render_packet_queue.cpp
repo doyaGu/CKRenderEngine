@@ -139,18 +139,30 @@ CKBOOL PacketMatrixAlmostEqual(const VxMatrix &a, const VxMatrix &b)
 }
 
 struct CKFFPipelineTestAccess {
-    static CKBOOL ResolveVertexBufferPacketProgram(CKFixedFunctionPipeline *ffp,
-                                                   CKDWORD dpFlags,
-                                                   CKDWORD formatFlags,
-                                                   CKFFProgramContext *programContext,
-                                                   CKFFPreparedState *preparedStateOut = nullptr)
+    static CKFFProgramPrepareStatus PrepareVertexBufferProgram(
+        CKFixedFunctionPipeline *ffp,
+        CKDWORD dpFlags,
+        CKDWORD formatFlags,
+        CKFFProgramPreparation *preparation)
     {
-        CKFFPreparedState preparedState;
-        CKBOOL result = ffp->m_OpaquePackets.ResolveVertexBufferPacketProgram(
-            *ffp, dpFlags, formatFlags, &preparedState, programContext);
+        return ffp->m_DrawPreparer.PrepareVertexBufferProgram(
+            preparation, dpFlags, formatFlags);
+    }
+
+    static CKBOOL PrepareVertexBufferProgramContext(
+        CKFixedFunctionPipeline *ffp,
+        CKDWORD dpFlags,
+        CKDWORD formatFlags,
+        CKFFProgramContext *programContext,
+        CKFFPreparedState *preparedStateOut = nullptr)
+    {
+        CKFFProgramPreparation preparation;
+        const CKFFProgramPrepareStatus status = PrepareVertexBufferProgram(
+            ffp, dpFlags, formatFlags, &preparation);
+        *programContext = preparation.ProgramContext;
         if (preparedStateOut)
-            *preparedStateOut = preparedState;
-        return result;
+            *preparedStateOut = preparation.PreparedState;
+        return status == CKFF_PROGRAM_PREPARE_OK ? TRUE : FALSE;
     }
 
     static CKBOOL BuildStaticUniformPayload(CKFixedFunctionPipeline *ffp,
@@ -176,10 +188,20 @@ struct CKFFPipelineTestAccess {
                                         CKDWORD formatFlags,
                                         CKDWORD vertexLayout)
     {
+        CKFFProgramPreparation preparation;
+        const CKFFProgramPrepareStatus status = PrepareVertexBufferProgram(
+            ffp, dpFlags, formatFlags, &preparation);
+        if (status != CKFF_PROGRAM_PREPARE_OK) {
+            memset(result, 0, sizeof(*result));
+            result->RejectReason = status == CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT
+                ? CKFF_RENDER_PACKET_REJECT_SAMPLER_LAYOUT
+                : CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING;
+            return;
+        }
         ffp->m_OpaquePackets.BuildVertexBufferPacket(
-            *ffp, result, encoder, view, type, vb, ib,
+            *ffp, result, preparation, encoder, view, type, vb, ib,
             baseVertex, vertexCount, startIndex, indexCount,
-            dpFlags, formatFlags, vertexLayout);
+            vertexLayout);
     }
 
 };
@@ -503,8 +525,9 @@ void OpaquePacketReplayStopsAfterEncoderFailure()
 
     TestCheck(context.Encoder.SubmitCount == 1,
               "Opaque packet replay must stop after the first failed submit");
-    TestCheck(context.Encoder.GetStatus() == CKERR_INVALIDPARAMETER,
-              "Opaque packet replay must preserve the encoder failure");
+    TestCheck(context.Encoder.GetStatus() == CK_OK &&
+                  context.Encoder.DiscardCount == 1,
+              "Opaque packet replay must discard and recover after the encoder failure");
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "Failed opaque packet replay must clear the consumed frame queue");
 
@@ -528,8 +551,9 @@ void OpaquePacketReplayStopsBeforeSubmitAfterBindingFailure()
 
     TestCheck(context.Encoder.SubmitCount == 0,
               "Opaque packet binding failure must stop before backend submit");
-    TestCheck(context.Encoder.GetStatus() == CKERR_INVALIDPARAMETER,
-              "Opaque packet replay must preserve a state-binding failure");
+    TestCheck(context.Encoder.GetStatus() == CK_OK &&
+                  context.Encoder.DiscardCount == 1,
+              "Opaque packet replay must discard and recover after a state-binding failure");
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "Failed opaque packet replay must clear the consumed frame queue");
 
@@ -572,6 +596,83 @@ void OpaquePacketTweeningFallsBackImmediate()
               "Representable TWEENING input must fall back to immediate submission");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
               "Supported TWEENING immediate draw must not report rejection");
+
+    ffp.Shutdown();
+}
+
+void OpaquePacketFallbackReusesPreparedProgram()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+
+    SetupPacketPipeline(&ffp, &context, &driver);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
+    const CKFFShaderCacheStats before = ffp.GetShaderCache().GetCacheStats();
+
+    const CKBOOL drawn = DrawPacketCandidateWithFormat(
+        &ffp, &context, CKRP_VIEW_OPAQUE3D,
+        100, 200, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
+
+    const CKFFShaderCacheStats after = ffp.GetShaderCache().GetCacheStats();
+    const uint64_t prepareLookups =
+        (after.BindingHits - before.BindingHits) +
+        (after.BindingMisses - before.BindingMisses);
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Packet-ineligible vertex blend must fall back to immediate submission");
+    TestCheck(!ffp.HasOpaqueRenderPackets(),
+              "Packet fallback must not leave a deferred packet queued");
+    TestCheck(prepareLookups == 1,
+              "Packet fallback must reuse the resolved program instead of preparing twice");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "Successful packet fallback must not report a hard draw rejection");
+
+    ffp.Shutdown();
+}
+
+void PreparedProgramCacheTracksShaderState()
+{
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    SetupPacketPipeline(&ffp, &context, &driver);
+
+    const CKDWORD formatFlags = CKFF_VF_POSITION | CKFF_VF_NORMAL;
+    CKFFProgramPreparation first;
+    const CKFFShaderCacheStats before = ffp.GetShaderCache().GetCacheStats();
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgram(
+                  &ffp, CKRST_DP_TRANSFORM, formatFlags, &first) ==
+                  CKFF_PROGRAM_PREPARE_OK,
+              "Initial vertex-buffer program preparation must succeed");
+    const CKFFShaderCacheStats afterFirst = ffp.GetShaderCache().GetCacheStats();
+
+    CKFFProgramPreparation repeated;
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgram(
+                  &ffp, CKRST_DP_TRANSFORM, formatFlags, &repeated) ==
+                  CKFF_PROGRAM_PREPARE_OK,
+              "Repeated vertex-buffer program preparation must succeed");
+    const CKFFShaderCacheStats afterRepeated = ffp.GetShaderCache().GetCacheStats();
+    TestCheck(first.ProgramContext.ShaderKey == repeated.ProgramContext.ShaderKey &&
+                  afterRepeated.BindingHits == afterFirst.BindingHits &&
+                  afterRepeated.BindingMisses == afterFirst.BindingMisses,
+              "Unchanged vertex-buffer state must reuse the prepared program cache");
+
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    CKFFProgramPreparation changed;
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgram(
+                  &ffp, CKRST_DP_TRANSFORM, formatFlags, &changed) ==
+                  CKFF_PROGRAM_PREPARE_OK,
+              "Shader-affecting state change must prepare a new program");
+    const CKFFShaderCacheStats afterChanged = ffp.GetShaderCache().GetCacheStats();
+    const uint64_t firstLookups =
+        (afterFirst.BindingHits - before.BindingHits) +
+        (afterFirst.BindingMisses - before.BindingMisses);
+    const uint64_t changedLookups =
+        (afterChanged.BindingHits - afterRepeated.BindingHits) +
+        (afterChanged.BindingMisses - afterRepeated.BindingMisses);
+    TestCheck(firstLookups == 1 && changedLookups == 1 &&
+                  changed.ProgramContext.ShaderKey != first.ProgramContext.ShaderKey,
+              "Shader-affecting state must invalidate and rebuild the prepared program");
 
     ffp.Shutdown();
 }
@@ -766,8 +867,9 @@ void StaticUniformPayloadOrderAndHashStaysStable()
 
     CKFFProgramContext programContext;
     CKFFPreparedState preparedState;
-    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(&ffp, CKRST_DP_TRANSFORM, 0,
-                                                                       &programContext, &preparedState),
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgramContext(
+                  &ffp, CKRST_DP_TRANSFORM, 0,
+                  &programContext, &preparedState),
               "Static payload order test must resolve a fixed-function program");
 
     CKFFRenderPacketUniformPayload payload;
@@ -827,7 +929,7 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
 
     CKFFProgramContext texturedContext;
     CKFFPreparedState texturedPreparedState;
-    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgramContext(
                   &ffp, CKRST_DP_TRANSFORM,
                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
                   &texturedContext, &texturedPreparedState),
@@ -836,7 +938,7 @@ void StaticUniformPayloadUsesSuppliedProgramContext()
               "Textured payload context test must capture one active texture");
 
     CKFFProgramContext positionTContext;
-    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgramContext(
                   &ffp, CKRST_DP_CL_V,
                   CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0,
                   &positionTContext),
@@ -881,7 +983,7 @@ void StaticUniformPayloadIgnoresInactiveTextureMatrix()
 
     CKFFProgramContext texturedContext;
     CKFFPreparedState texturedPreparedState;
-    TestCheck(CKFFPipelineTestAccess::ResolveVertexBufferPacketProgram(
+    TestCheck(CKFFPipelineTestAccess::PrepareVertexBufferProgramContext(
                   &ffp, CKRST_DP_TRANSFORM,
                   CKFF_VF_POSITION | CKFF_VF_TEXCOORD(0),
                   &texturedContext, &texturedPreparedState),
@@ -1007,18 +1109,21 @@ void VertexBufferPacketBuildResultReportsRejectReasons()
         CKFixedFunctionPipeline ffp;
         SetupPacketPipeline(&ffp, &context, &driver);
 
-        CKFFVertexBufferPacketBuildResult programMissing;
-        CKFFPipelineTestAccess::BuildVertexBufferPacket(
-            &ffp, &programMissing, &context.Encoder,
-            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
-            100, 200, 0, 3, 0, 3,
-            CKRST_DP_TRANSFORM,
-            CKFF_VF_POSITION,
-            77);
-        TestCheck(!programMissing.Success,
-                  "Program-missing packet build must fail");
-        TestCheck(programMissing.RejectReason == CKFF_RENDER_PACKET_REJECT_PROGRAM_MISSING,
-                  "Program-missing packet build must report its reject reason");
+        CKFFProgramPreparation programMissing;
+        const CKFFProgramPrepareStatus programMissingStatus =
+            CKFFPipelineTestAccess::PrepareVertexBufferProgram(
+                &ffp, CKRST_DP_TRANSFORM, CKFF_VF_POSITION,
+                &programMissing);
+        TestCheck(programMissingStatus == CKFF_PROGRAM_PREPARE_PROGRAM_MISSING,
+                  "Program preparation must preserve the program-missing reason");
+        TestCheck(!ffp.DrawVertexBuffer(
+                      &context.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+                      100, 200, 0, 3, 0, 3,
+                      CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77),
+                  "Program-missing draw must fail before packet selection");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PROGRAM_MISSING &&
+                      ffp.GetRejectedDrawCount(CKFF_DRAW_REJECT_PROGRAM_MISSING) == 1,
+                  "Program-missing draw must be recorded exactly once");
 
         ffp.Shutdown();
     }
@@ -1035,24 +1140,57 @@ void VertexBufferPacketBuildResultReportsRejectReasons()
         ffp.SetTexture(4, 105, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
         ffp.SetTexture(5, 106, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
 
-        CKFFVertexBufferPacketBuildResult samplerLayout;
-        CKFFPipelineTestAccess::BuildVertexBufferPacket(
-            &ffp, &samplerLayout, &context.Encoder,
-            CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
-            100, 200, 0, 3, 0, 3,
-            CKRST_DP_TRANSFORM,
-            CKFF_VF_POSITION,
-            77);
-        TestCheck(!samplerLayout.Success,
-                  "Sampler-layout packet build must fail");
-        TestCheck(samplerLayout.RejectReason == CKFF_RENDER_PACKET_REJECT_SAMPLER_LAYOUT,
-                  "Sampler-layout packet build must preserve its reject reason");
+        CKFFProgramPreparation samplerLayout;
+        const CKFFProgramPrepareStatus samplerLayoutStatus =
+            CKFFPipelineTestAccess::PrepareVertexBufferProgram(
+                &ffp, CKRST_DP_TRANSFORM, CKFF_VF_POSITION,
+                &samplerLayout);
+        TestCheck(samplerLayoutStatus == CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT,
+                  "Program preparation must preserve the sampler-layout reason");
+        TestCheck(!ffp.DrawVertexBuffer(
+                      &context.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+                      100, 200, 0, 3, 0, 3,
+                      CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77),
+                  "Sampler-layout draw must fail before packet selection");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_SAMPLER_LAYOUT &&
+                      ffp.GetRejectedDrawCount(CKFF_DRAW_REJECT_SAMPLER_LAYOUT) == 1,
+                  "Sampler-layout draw must be recorded exactly once");
 
         ffp.Shutdown();
     }
 }
 
-void ShaderBindingCacheRemainsBounded()
+void VertexBufferHardRejectDoesNotDependOnPacketSorting()
+{
+    CKFFDrawRejectReason reasons[2] = {
+        CKFF_DRAW_REJECT_NONE, CKFF_DRAW_REJECT_NONE
+    };
+    for (int sorting = 0; sorting < 2; ++sorting) {
+        FFPDiagnosticDriver driver;
+        FFPDiagnosticContext context(&driver);
+        context.FailCreateProgram = TRUE;
+        CKFixedFunctionPipeline ffp;
+        SetupPacketPipeline(&ffp, &context, &driver);
+        ffp.SetOpaqueSortingEnabled(sorting ? TRUE : FALSE);
+
+        const CKBOOL drawn = ffp.DrawVertexBuffer(
+            &context.Encoder, CKRP_VIEW_OPAQUE3D, VX_TRIANGLELIST,
+            100, 200, 0, 3, 0, 3,
+            CKRST_DP_TRANSFORM, CKFF_VF_POSITION, 77);
+        reasons[sorting] = ffp.GetLastDrawRejectReason();
+        TestCheck(!drawn && !ffp.HasOpaqueRenderPackets(),
+                  "Hard program failure must stop before immediate or packet submission");
+        TestCheck(ffp.GetRejectedDrawCount(CKFF_DRAW_REJECT_PROGRAM_MISSING) == 1,
+                  "Hard program failure must be recorded once per public draw");
+        ffp.Shutdown();
+    }
+
+    TestCheck(reasons[0] == CKFF_DRAW_REJECT_PROGRAM_MISSING &&
+                  reasons[1] == CKFF_DRAW_REJECT_PROGRAM_MISSING,
+              "Packet sorting must not change the hard draw rejection reason");
+}
+
+void ShaderBindingCacheEvictsIncrementally()
 {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -1161,7 +1299,7 @@ void OpaquePacketAdaptiveBypassesLowBenefitFrame()
               "Adaptive bypass must keep remaining same-frame opaque draws immediate");
     TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 1,
               "Adaptive bypass must submit later same-frame opaque draws immediately");
-    TestCheck(ffp.GetOpaquePacketAdaptiveBypasses() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().Bypasses == 1,
               "Adaptive bypass counter must report the low-benefit frame bypass");
 
     ffp.Shutdown();
@@ -1183,7 +1321,7 @@ void OpaquePacketAdaptiveBypassesNoRepeatBindings()
               "Adaptive sample without repeated texture or buffers must bypass");
     TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
               "No-repeat adaptive bypass must flush the sampled queue");
-    TestCheck(ffp.GetOpaquePacketAdaptiveBypasses() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().Bypasses == 1,
               "No-repeat adaptive bypass must be counted");
 
     ffp.Shutdown();
@@ -1205,10 +1343,10 @@ void OpaquePacketAdaptiveRunGateKeepsHighRepeatQueued()
               "Run-aware adaptive must keep a sample with an instanceable run queued");
     TestCheck(context.Encoder.SubmitCount == 0,
               "Run-aware adaptive must not flush high-repeat samples early");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().SampleMaxRun >=
                   CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
               "Run-aware adaptive must report the instanceable sample run");
-    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().RunBypasses == 0,
               "Run-aware adaptive must not count a bypass for high-repeat samples");
 
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
@@ -1235,13 +1373,13 @@ void OpaquePacketAdaptiveRunGateBypassesNoRunFrame()
               "Run-aware adaptive must flush a sampled frame with no instanceable run");
     TestCheck(context.Encoder.SubmitCount == CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT,
               "Run-aware adaptive bypass must replay sampled packets before bypassing");
-    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().RunBypasses == 1,
               "Run-aware adaptive bypass must be counted");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().SampleMaxRun == 1,
               "Player-like no-run sample must report max run one");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSubmitSavedEstimate() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().SubmitSavedEstimate == 0,
               "Player-like no-run sample must not estimate submit savings");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames ==
                   CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
               "Sample-time no-run bypass must start persistent cooldown");
 
@@ -1271,7 +1409,7 @@ void OpaquePacketAdaptiveSampleBypassCooldownReprobes()
 
     TestCheck(!ffp.HasOpaqueRenderPackets(),
               "No-run adaptive sample must bypass the current frame");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames ==
                   CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
               "No-run adaptive sample must start persistent cooldown");
 
@@ -1299,7 +1437,7 @@ void OpaquePacketAdaptiveSampleBypassCooldownReprobes()
     TestCheck(context.Encoder.SubmitCount ==
                   CKFF_RENDER_PACKET_ADAPTIVE_MIN_SAMPLE_COUNT + 9,
               "High-repeat reprobe must restore instanced replay after cooldown");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().SampleMaxRun >=
                   CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
               "Restored high-repeat frame must report an instanceable run");
 
@@ -1322,7 +1460,7 @@ void OpaquePacketAdaptivePacketOnlyIgnoresRunGate()
               "Packet-only adaptive must keep bind-saving samples even without instance runs");
     TestCheck(context.Encoder.SubmitCount == 0,
               "Packet-only adaptive must not flush the bind-saving sample early");
-    TestCheck(ffp.GetOpaquePacketAdaptiveRunBypasses() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().RunBypasses == 0,
               "Packet-only adaptive must not count run-gate bypasses");
 
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
@@ -1353,11 +1491,11 @@ void OpaquePacketAdaptiveFrameEndNoRunStartsCooldown()
 
     TestCheck(context.Encoder.SubmitCount == 29,
               "Frame-end no-run evaluation must replay the probe frame");
-    TestCheck(ffp.GetOpaquePacketAdaptiveFrameEndEvaluations() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().FrameEndEvaluations == 1,
               "Frame-end no-run evaluation must be counted");
-    TestCheck(ffp.GetOpaquePacketAdaptiveFrameEndRunBypasses() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().FrameEndRunBypasses == 1,
               "Frame-end no-run bypass must be counted");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames ==
                   CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
               "Frame-end no-run evaluation must start persistent cooldown");
 
@@ -1369,9 +1507,9 @@ void OpaquePacketAdaptiveFrameEndNoRunStartsCooldown()
               "Cooldown frame must bypass eligible opaque packets before capture");
     TestCheck(context.Encoder.SubmitCount == 58,
               "Cooldown frame must submit bypassed draws through the immediate path");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownBypasses() == 29,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownBypasses == 29,
               "Cooldown bypass counter must count immediate eligible draws");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSamples() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().Samples == 0,
               "Cooldown bypass must avoid packet sampling work");
 
     ffp.Shutdown();
@@ -1389,7 +1527,7 @@ void OpaquePacketAdaptiveCooldownReprobesAndRestoresInstancing()
     for (int i = 0; i < 29; ++i)
         DrawPacketUniqueMeshCandidate(&ffp, &context, i);
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() ==
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames ==
                   CKFF_RENDER_PACKET_ADAPTIVE_REPROBE_INTERVAL,
               "No-run probe must start cooldown before reprobe test");
 
@@ -1406,9 +1544,9 @@ void OpaquePacketAdaptiveCooldownReprobesAndRestoresInstancing()
 
     TestCheck(context.Encoder.SubmitCount == 30,
               "High-repeat reprobe after cooldown must restore instanced replay");
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames == 0,
               "High-repeat reprobe must clear persistent cooldown");
-    TestCheck(ffp.GetOpaquePacketAdaptiveSampleMaxRun() >=
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().SampleMaxRun >=
                   CKFF_RENDER_PACKET_MIN_INSTANCE_COUNT,
               "High-repeat reprobe must report an instanceable run");
 
@@ -1429,9 +1567,9 @@ void OpaquePacketAdaptiveFrameEndPacketOnlyDoesNotCooldown()
 
     ffp.FlushOpaqueRenderPackets(&context.Encoder);
 
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames == 0,
               "Packet-only mode must not use instancing cooldown");
-    TestCheck(ffp.GetOpaquePacketAdaptiveFrameEndEvaluations() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().FrameEndEvaluations == 0,
               "Packet-only mode must not run frame-end instancing evaluation");
 
     ffp.Shutdown();
@@ -1451,9 +1589,9 @@ void OpaquePacketAdaptiveForcedFlushDoesNotStartCooldown()
 
     ffp.FlushOpaqueRenderPackets(&context.Encoder, FALSE, FALSE);
 
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownFrames() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownFrames == 0,
               "Forced or barrier flush must not start persistent cooldown");
-    TestCheck(ffp.GetOpaquePacketAdaptiveFrameEndEvaluations() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().FrameEndEvaluations == 0,
               "Forced or barrier flush must skip frame-end learning");
 
     ffp.Shutdown();
@@ -1475,12 +1613,12 @@ void OpaquePacketCooldownCountsOnlyEligibleDraws()
     ffp.BeginDebugFrame();
     DrawPacketCandidate(&ffp, &context, CKRP_VIEW_TRANSPARENT, 100, 200);
 
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownBypasses() == 0,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownBypasses == 0,
               "Cooldown counter must not include non-opaque VB draws");
 
     DrawPacketUniqueMeshCandidate(&ffp, &context, 0);
 
-    TestCheck(ffp.GetOpaquePacketAdaptiveCooldownBypasses() == 1,
+    TestCheck(ffp.GetOpaquePacketAdaptiveStats().CooldownBypasses == 1,
               "Cooldown counter must include eligible opaque packet draws");
 
     ffp.Shutdown();
@@ -1587,7 +1725,7 @@ void OpaquePacketInstancingRejectsMismatchedSpecializedABI()
     TestCheck(normalBinding.Program != 0 && normalBinding.FullSpecialized,
               "Alpha-test normal shader fixture must hit a full-specialized module");
     TestCheck(instancedBinding.Program != 0 && !instancedBinding.FullSpecialized,
-              "Alpha-test instanced shader fixture must fallback to the uber-specialized ABI");
+              "Alpha-test instanced shader fixture must fallback to the runtime-specialized ABI");
 
     ffp.Shutdown();
 }
@@ -1770,6 +1908,10 @@ int main()
               &OpaquePacketVertexBlendFallsBackImmediate);
     tests.Run("Opaque packet TWEENING falls back immediate",
               &OpaquePacketTweeningFallsBackImmediate);
+    tests.Run("Opaque packet fallback reuses prepared program",
+              &OpaquePacketFallbackReusesPreparedProgram);
+    tests.Run("Prepared program cache tracks shader state",
+              &PreparedProgramCacheTracksShaderState);
     tests.Run("Opaque packet texture handle change keeps static payload",
               &OpaquePacketTextureHandleChangeKeepsStaticPayload);
     tests.Run("Opaque packet ignores unused texture bindings",
@@ -1788,8 +1930,10 @@ int main()
               &TexcoordDeclarationInvalidatesStaticUniformCache);
     tests.Run("Vertex buffer packet build result reports reject reasons",
               &VertexBufferPacketBuildResultReportsRejectReasons);
-    tests.Run("Shader binding cache remains bounded",
-              &ShaderBindingCacheRemainsBounded);
+    tests.Run("Vertex buffer hard reject ignores packet sorting",
+              &VertexBufferHardRejectDoesNotDependOnPacketSorting);
+    tests.Run("Shader binding cache evicts incrementally",
+              &ShaderBindingCacheEvictsIncrementally);
     tests.Run("Opaque packet adaptive keeps high-repeat queue",
               &OpaquePacketAdaptiveKeepsHighRepeatQueued);
     tests.Run("Opaque packet adaptive bypasses low-benefit frame",

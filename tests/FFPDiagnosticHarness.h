@@ -43,6 +43,8 @@ public:
     CKDWORD StateSetCount = 0;
     CKDWORD LastProgram = 0;
     CKDWORD SubmitCount = 0;
+    CKDWORD DiscardCount = 0;
+    CKDWORD LastDiscardFlags = 0;
     CKDWORD TouchCount = 0;
     CKRenderView LastTouchedView = 0;
     CKDWORD TextureBindCount = 0;
@@ -83,6 +85,12 @@ public:
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;
 
     CKERROR GetStatus() const override { return Status; }
+
+    void Discard(CKDWORD flags) override {
+        LastDiscardFlags = flags;
+        ++DiscardCount;
+        Status = CK_OK;
+    }
 
     void SetState(CKDrawState State) override {
         LastState = State;

@@ -190,9 +190,16 @@ void DrawVertexBufferPropagatesEncoderFailure() {
               "The failing backend submit must be attempted exactly once");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
               "A backend submit failure must report the encoder-error reason");
+    TestCheck(context.Encoder.DiscardCount == 1 &&
+                  context.Encoder.LastDiscardFlags == CKRST_DISCARD_ALL,
+              "A failed submit must discard all pending encoder state");
 
-    context.Encoder.Status = CK_OK;
     context.Encoder.SubmitError = CK_OK;
+    TestCheck(ffp.DrawVertexBuffer(
+                  &context.Encoder, 1, VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "A draw after recovered submit failure must still submit");
     ffp.Shutdown();
 }
 
@@ -376,9 +383,15 @@ void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
               "A state-binding failure must stop before backend submit");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
               "A state-binding failure must report the encoder-error reason");
+    TestCheck(context.Encoder.DiscardCount == 1,
+              "A failed state binding must discard pending encoder state");
 
-    context.Encoder.Status = CK_OK;
     context.Encoder.StateError = CK_OK;
+    TestCheck(ffp.DrawVertexBuffer(
+                  &context.Encoder, 1, VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "A draw after recovered state failure must still submit");
     ffp.Shutdown();
 }
 
@@ -402,9 +415,15 @@ void DrawVertexBufferStopsUniformUploadsAfterFailure() {
               "A uniform failure must stop before state binding and submit");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
               "A uniform failure must report the encoder-error reason");
+    TestCheck(context.Encoder.DiscardCount == 1,
+              "A failed uniform upload must discard pending encoder state");
 
-    context.Encoder.Status = CK_OK;
     context.Encoder.UniformError = CK_OK;
+    TestCheck(ffp.DrawVertexBuffer(
+                  &context.Encoder, 1, VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "A draw after recovered uniform failure must still submit");
     ffp.Shutdown();
 }
 
@@ -2579,6 +2598,29 @@ void VertexBlendWeightFlagsCreateWeightLayout() {
     ffp.Shutdown();
 }
 
+void VertexTweenRejectsMissingStreamsWithTweenReason() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    VxVector positions[3] = {};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    TestCheck(!ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                 NULL, 0, &data),
+              "Vertex tween without its second stream must be rejected");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_TWEEN,
+              "Vertex tween input failures must use the tween rejection category");
+
+    ffp.Shutdown();
+}
+
 void IndexedVertexBlendRequiresIndexLayout() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
@@ -2959,6 +3001,8 @@ int main() {
               &VertexBlendUploadsExplicitMatrixPaletteSlot);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
+    tests.Run("Vertex tween rejects missing streams with tween reason",
+              &VertexTweenRejectsMissingStreamsWithTweenReason);
     tests.Run("Indexed vertex blend requires index layout",
               &IndexedVertexBlendRequiresIndexLayout);
     tests.Run("Indexed vertex blend rejects palette overflow",

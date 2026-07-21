@@ -168,6 +168,7 @@ set(CKRE_SOURCES
         CKFFPipelineGuards.cpp
         CKFFDrawProbes.cpp
         CKFFDrawTypes.cpp
+        CKFFDrawPreparer.cpp
         CKFFStateStore.cpp
         CKFFStateResolver.cpp
         CKFFTextureBinder.cpp
