@@ -379,13 +379,18 @@ CKBOOL CKTransientGeometry::Prepare(
             return FALSE;
         const CKDWORD spriteIndexCount = pointCount * 6;
         const CKDWORD spriteVertexCount = pointCount * 4;
+        const CKBOOL index32 = spriteVertexCount > 0x10000u ? TRUE : FALSE;
+        if (m_Context->GetAvailTransientVertexBuffer(
+                spriteVertexCount, layoutHandle) < spriteVertexCount ||
+            m_Context->GetAvailTransientIndexBuffer(
+                spriteIndexCount, index32) < spriteIndexCount)
+            return FALSE;
         if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
             return FALSE;
         m_LastVertexBytes = tvb.Size;
 
         CKTransientIndexBuffer tib;
         memset(&tib, 0, sizeof(tib));
-        const CKBOOL index32 = spriteVertexCount > 0x10000u ? TRUE : FALSE;
         if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, index32))
             return FALSE;
         m_LastIndexBytes = tib.Size;
@@ -593,6 +598,10 @@ CKBOOL CKTransientGeometry::Prepare(
 
         CKTransientVertexBuffer tvb;
         memset(&tvb, 0, sizeof(tvb));
+        if (m_Context->GetAvailTransientVertexBuffer(
+                (CKDWORD)primitiveIndices.Size(), layoutHandle) <
+            (CKDWORD)primitiveIndices.Size())
+            return FALSE;
         if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)primitiveIndices.Size(), layoutHandle))
             return FALSE;
         m_LastVertexBytes = tvb.Size;
@@ -629,6 +638,26 @@ CKBOOL CKTransientGeometry::Prepare(
         return TRUE;
     }
 
+    CKDWORD transientIndexCount = 0;
+    if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
+        const int srcCount = (indices && indexCount > 0)
+            ? indexCount : (int)vertexCount;
+        const int maxTriListIndices = (srcCount - 2) * 3;
+        if (maxTriListIndices <= 0)
+            return FALSE;
+        transientIndexCount = (CKDWORD)maxTriListIndices;
+    } else if (indices && indexCount > 0) {
+        transientIndexCount = (CKDWORD)indexCount;
+    }
+
+    if (m_Context->GetAvailTransientVertexBuffer(vertexCount, layoutHandle) <
+        vertexCount)
+        return FALSE;
+    if (transientIndexCount != 0 &&
+        m_Context->GetAvailTransientIndexBuffer(
+            transientIndexCount, FALSE) < transientIndexCount)
+        return FALSE;
+
     // Allocate transient vertex buffer
     CKTransientVertexBuffer tvb;
     memset(&tvb, 0, sizeof(tvb));
@@ -646,10 +675,9 @@ CKBOOL CKTransientGeometry::Prepare(
     if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
         // Must convert to triangle list (bgfx doesn't support fan/strip natively)
         int srcCount = (indices && indexCount > 0) ? indexCount : (int)vertexCount;
-        int maxTriListIndices = (srcCount - 2) * 3;
-        if (maxTriListIndices <= 0) return FALSE;
 
-        if (!m_Context->AllocTransientIndexBuffer(&tib, maxTriListIndices, FALSE))
+        if (!m_Context->AllocTransientIndexBuffer(
+                &tib, transientIndexCount, FALSE))
             return FALSE;
         m_LastIndexBytes = tib.Size;
         hasIndexBuffer = TRUE;

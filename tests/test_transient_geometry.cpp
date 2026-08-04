@@ -202,6 +202,30 @@ static void IndexedTriangleFanUsesGenericPath()
 #endif
 }
 
+static void PairedTransientCapacityIsCheckedBeforeAllocation()
+{
+    TransientGeometryHarness harness;
+    VxDrawPrimitiveData data;
+    float positions[16];
+    float texcoords[8];
+    CKDWORD colors[4];
+
+    FillQuadInput(positions, texcoords, colors);
+    InitQuadData(&data, positions, texcoords, colors);
+    harness.Context.TransientVertexCapacity = 4;
+    harness.Context.TransientIndexCapacity = 5;
+
+    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
+                                       VX_TRIANGLEFAN,
+                                       NULL,
+                                       4,
+                                       &data) == FALSE,
+              "paired transient prepare must fail when the index budget is short");
+    TestCheck(harness.Context.TransientVertexAllocations == 0 &&
+                  harness.Context.TransientIndexAllocations == 0,
+              "paired transient capacity failure must not consume either budget");
+}
+
 static void ExtendedTexcoordDataUsesGenericPath()
 {
     TransientGeometryHarness harness;
@@ -790,6 +814,8 @@ int main()
     TestFramework tests;
     tests.Run("2D quad uses generic fan path", &QuadUsesGenericFanPath);
     tests.Run("indexed triangle fan uses generic path", &IndexedTriangleFanUsesGenericPath);
+    tests.Run("paired transient capacity is checked before allocation",
+              &PairedTransientCapacityIsCheckedBeforeAllocation);
     tests.Run("extended texcoord data uses generic path", &ExtendedTexcoordDataUsesGenericPath);
     tests.Run("four-component texcoord quad uses generic path", &FourComponentTexcoordQuadUsesGenericPath);
     tests.Run("multiple texture stages apply independent wrap modes",
