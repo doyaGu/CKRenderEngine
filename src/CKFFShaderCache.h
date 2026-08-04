@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #define CKFF_MAX_PROGRAM_BINDINGS 4096
+#define CKFF_MAX_PROGRAM_SAMPLER_BINDINGS (CKFF_MAX_TEXTURE_STAGES * 2)
 
 class CKRasterizerContext;
 
@@ -39,6 +40,20 @@ struct CKFFProgramContext {
 
     CKFFProgramContext()
         : ShaderKey(), Binding(), Program(0), FullSpecialized(FALSE), Specialization() {}
+};
+
+struct CKFFProgramSamplerBinding {
+    CKDWORD Stage;
+    CKDWORD Uniform;
+
+    CKFFProgramSamplerBinding() : Stage(0), Uniform(0) {}
+};
+
+struct CKFFProgramSamplerLayout {
+    CKDWORD BindingCount;
+    CKFFProgramSamplerBinding Bindings[CKFF_MAX_PROGRAM_SAMPLER_BINDINGS];
+
+    CKFFProgramSamplerLayout() : BindingCount(0), Bindings() {}
 };
 
 struct CKFFShaderCacheStats {
@@ -108,6 +123,12 @@ public:
     // Returns the program handle (0 if unavailable).
     CKFFProgramBinding GetProgram(const CKFFShaderKey &key);
     CKBOOL SupportsSamplerLayout(const CKFFShaderKey &key) const;
+    CKBOOL RequiresExplicitSamplerInitialization() const {
+        return m_Target.ShaderProfile == CKRST_SHADER_PROFILE_GLSL ||
+               m_Target.ShaderProfile == CKRST_SHADER_PROFILE_ESSL;
+    }
+    CKBOOL GetProgramSamplerLayout(
+        CKDWORD program, CKFFProgramSamplerLayout *layout) const;
 
     // Get uniform handles (created once at Init)
     const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
@@ -153,6 +174,7 @@ private:
     XArray<CKFFShaderKey> m_ProgramBindingClock;
     int m_ProgramBindingClockHand;
     CKFFProgramModuleCacheTable m_ModuleProgramCache;
+    XHashTable<CKFFProgramSamplerLayout, CKDWORD> m_ProgramSamplerLayouts;
     CKFFShaderCacheStats m_CacheStats;
 
     bool CreateUniforms();
@@ -160,6 +182,8 @@ private:
     void PrewarmPrograms();
     void CacheProgramBinding(const CKFFShaderKey &key,
                              const CKFFProgramBinding &binding);
+    void CacheProgramSamplerLayout(const CKFFShaderKey &key,
+                                   const CKFFProgramBinding &binding);
     CKFFProgramBinding CreateVariantProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateRuntimeSpecializedProgram(const CKFFShaderKey &key);
     CKFFProgramBinding CreateFullSpecializedProgram(const CKFFShaderKey &key);

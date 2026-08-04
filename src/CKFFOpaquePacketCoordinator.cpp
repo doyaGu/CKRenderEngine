@@ -530,6 +530,7 @@ void CKFFOpaquePacketCoordinator::InitRenderPacketReplayContext(
     context->Encoder = encoder;
     context->Context = pipeline.GetContext();
     context->Queue = &m_Queue;
+    context->TextureBinder = &pipeline.m_TextureBinder;
     context->InstanceLayout = m_InstanceLayout;
     CKFFInitRenderPacketReplayDiagnostics(&context->Diagnostics);
     CKFF_PROBE(pipeline.GetProbes(),

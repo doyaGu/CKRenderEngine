@@ -1,5 +1,6 @@
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFDebug.h"
+#include "CKFFTextureBinder.h"
 #include "CKRasterizer.h"
 
 #include <string.h>
@@ -82,6 +83,7 @@ void CKFFInitRenderPacketReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *di
 
 void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
                                      const CKRenderPacket &packet,
+                                     CKDWORD program,
                                      CKRenderPacketReplayCache *cache)
 {
     if (!context || !context->Encoder || !context->Queue || !cache)
@@ -89,6 +91,13 @@ void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
 
     CKRasterizerEncoder *encoder = context->Encoder;
     CKFFRenderPacketReplayDiagnostics *diagnostics = &context->Diagnostics;
+
+    if (context->TextureBinder) {
+        if (context->TextureBinder->InitializeProgramSamplers(encoder, program))
+            cache->HasTextures = FALSE;
+        if (encoder->GetStatus() != CK_OK)
+            return;
+    }
 
     if (!cache->HasState || !CKFFDrawStateEquals(cache->DrawState, packet.DrawState)) {
         encoder->SetState(packet.DrawState);
@@ -220,7 +229,7 @@ void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
         context->Encoder->GetStatus() != CK_OK)
         return;
 
-    CKFFBindRenderPacketSharedState(context, packet, cache);
+    CKFFBindRenderPacketSharedState(context, packet, packet.Program, cache);
     if (context->Encoder->GetStatus() != CK_OK)
         return;
     CKFFReplayUploadObjectUniforms(context, packet);
@@ -337,7 +346,8 @@ CKBOOL CKFFReplayVertexBufferPacketRunInstanced(CKFFRenderPacketReplayContext *c
                 memset(dst + sizeof(VxMatrix), 0, instanceBuffer.Stride - sizeof(VxMatrix));
         }
 
-        CKFFBindRenderPacketSharedState(context, first, cache);
+        CKFFBindRenderPacketSharedState(
+            context, first, first.InstancedProgram, cache);
         if (context->Encoder->GetStatus() != CK_OK)
             return TRUE;
         if (first.ObjectUniforms.MatrixUniform) {
