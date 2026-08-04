@@ -24,6 +24,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache),
 #endif
       m_OpaquePackets(), m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
+      m_FrameDrawRejected(FALSE),
       m_BorderPaletteCount(0), m_BorderPaletteFrameSerial((CKDWORD)-1) {
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
@@ -60,6 +61,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
         return false;
     m_Context = ctx;
     m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+    m_FrameDrawRejected = FALSE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     m_BorderPaletteCount = 0;
     m_BorderPaletteFrameSerial = (CKDWORD)-1;
@@ -284,6 +286,7 @@ static float CKFFResolveConstantPointSize(const CKDrawStateCache &drawState)
 CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 {
     m_LastDrawRejectReason = reason;
+    m_FrameDrawRejected = TRUE;
     if (reason > CKFF_DRAW_REJECT_NONE && reason < CKFF_DRAW_REJECT_COUNT) {
         CKDWORD &count = m_DrawRejectCounts[reason];
         ++count;
@@ -606,6 +609,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
+    m_FrameDrawRejected = FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_DebugState.BeginFrame();
     LogAndResetFrameStats();

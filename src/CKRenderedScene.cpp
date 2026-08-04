@@ -313,6 +313,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         sectionStart = CKRenderPerfNow();
 #endif
     CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
+    rc->BeginFrameErrorTracking();
     rc->m_FFPipeline.BeginDebugFrame();
     rc->m_FFPipeline.FlushOpaqueRenderPackets();
     const CKERROR beginFrameStatus =
@@ -353,7 +354,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             sectionStart = CKRenderPerfNow();
 #endif
         CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
-        ((RCK2dEntity *) rm->m_2DRootBack)->Render((CKRenderContext *) rc);
+        rc->RecordFrameRenderError(
+            ((RCK2dEntity *)rm->m_2DRootBack)->Render((CKRenderContext *)rc));
 #if CKRE_ENABLE_RENDER_STATS
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_BACKGROUND_2D, CKRenderPerfElapsedUs(sectionStart));
@@ -519,7 +521,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             sectionStart = CKRenderPerfNow();
 #endif
         CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
-        ((RCK2dEntity *) rm->m_2DRootFore)->Render(rc);
+        rc->RecordFrameRenderError(
+            ((RCK2dEntity *)rm->m_2DRootFore)->Render(rc));
 #if CKRE_ENABLE_RENDER_STATS
         if (renderStats)
             CKRenderPerfAddSection(CKRPS_FOREGROUND_2D, CKRenderPerfElapsedUs(sectionStart));

@@ -176,6 +176,9 @@ public:
     void ResetVertexBlendMatrices();
     void SetTexcoordComponentCount(CKDWORD Stage, CKDWORD Count);
     void ResetTexcoordComponentCounts();
+    void BeginFrameErrorTracking();
+    void RecordFrameRenderError(CKERROR Error);
+    CKRenderView ResolveDrawView(CKDWORD DrawFlags) const;
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 
@@ -366,6 +369,7 @@ public:
     VxPlane m_UserClipPlanes[6];
     CKRenderView m_Current2DView;
     CKRenderView m_Current3DView;
+    CKERROR m_FrameRenderError;
     CKDWORD m_RasterizerDebugFlags;
     CKDrawAnnotationState *m_DrawAnnotationState;
     CKRenderPipelineResourceIds m_RenderPipelineResources;

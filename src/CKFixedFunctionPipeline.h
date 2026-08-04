@@ -106,6 +106,7 @@ public:
     void SetTexcoordComponentCount(CKDWORD stage, CKDWORD count);
     void ResetTexcoordComponentCounts();
     void BeginDebugFrame();
+    CKBOOL HadRejectedDrawsThisFrame() const { return m_FrameDrawRejected; }
 
     // === Drawing ===
     // Draw using VxDrawPrimitiveData (software vertex path)
@@ -203,6 +204,7 @@ private:
     CKFFUniformEmitter m_UniformEmitter;
     CKFFOpaquePacketCoordinator m_OpaquePackets;
     CKFFDrawRejectReason m_LastDrawRejectReason;
+    CKBOOL m_FrameDrawRejected;
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
     CKDWORD m_BorderPaletteColors[16];
     CKDWORD m_BorderPaletteCount;
