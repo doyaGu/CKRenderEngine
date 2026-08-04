@@ -73,6 +73,54 @@ static CKBYTE *ConvertCopyImage(const VxImageDescEx &src, const VxImageDescEx &v
     return converted;
 }
 
+static const CKRenderView s_RenderTargetViews[CKRP_VIEW_COUNT] = {
+    CKRP_VIEW_CLEAR,
+    CKRP_VIEW_BACKGROUND2D,
+    CKRP_VIEW_RENDERFIRST3D,
+    CKRP_VIEW_OPAQUE3D,
+    CKRP_VIEW_STENCIL_CLEAR,
+    CKRP_VIEW_TRANSPARENT,
+    CKRP_VIEW_POSTPROCESS,
+    CKRP_VIEW_FOREGROUND2D,
+};
+
+static CKERROR SetRenderTargetViews(CKRasterizerContext *context,
+                                    CKDWORD frameBuffer,
+                                    CKDWORD rollbackFrameBuffer) {
+    if (!context)
+        return CKERR_INVALIDRENDERCONTEXT;
+    for (int i = 0; i < CKRP_VIEW_COUNT; ++i) {
+        const CKERROR status = context->SetViewFrameBuffer(
+            s_RenderTargetViews[i], frameBuffer);
+        if (status == CK_OK)
+            continue;
+        for (int rollback = i; rollback >= 0; --rollback) {
+            context->SetViewFrameBuffer(
+                s_RenderTargetViews[rollback], rollbackFrameBuffer);
+        }
+        return status;
+    }
+    return CK_OK;
+}
+
+static CKBOOL DeleteRenderTargetResources(CKRasterizerContext *context,
+                                          CKDWORD &frameBuffer,
+                                          CKDWORD &depthTexture) {
+    if (!context)
+        return FALSE;
+    if (frameBuffer != 0) {
+        if (context->DeleteObject(frameBuffer, CKRST_OBJ_FRAMEBUFFER) != CK_OK)
+            return FALSE;
+        frameBuffer = 0;
+    }
+    if (depthTexture != 0) {
+        if (context->DeleteObject(depthTexture, CKRST_OBJ_TEXTURE) != CK_OK)
+            return FALSE;
+        depthTexture = 0;
+    }
+    return TRUE;
+}
+
 enum CKScreenCapturePurpose {
     CK_SCREEN_CAPTURE_FILE = 0,
     CK_SCREEN_CAPTURE_TEXTURE,
@@ -3145,6 +3193,8 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         return FALSE;
     if (!m_RasterizerContext)
         return FALSE;
+    if (m_FFPipeline.GetRenderPipeline().IsInFrame())
+        return FALSE;
 
     if (texture) {
         if (CubeMapFace < CKRST_CUBEFACE_XPOS || CubeMapFace > CKRST_CUBEFACE_ZNEG)
@@ -3156,19 +3206,15 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
             return FALSE;
 
         RCKTexture *target = static_cast<RCKTexture *>(texture);
+        if (texture->GetWidth() <= 0 || texture->GetHeight() <= 0)
+            return FALSE;
+        if (!DeleteRenderTargetResources(
+                m_RasterizerContext,
+                m_TargetFrameBuffer,
+                m_TargetDepthTexture))
+            return FALSE;
         if (!target->EnsureRenderTarget(this, FALSE))
             return FALSE;
-
-        m_CubeMapFace = static_cast<CKRST_CUBEFACE>(CubeMapFace);
-
-        if (m_TargetFrameBuffer != 0) {
-            m_RasterizerContext->DeleteObject(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
-            m_TargetFrameBuffer = 0;
-        }
-        if (m_TargetDepthTexture != 0) {
-            m_RasterizerContext->DeleteObject(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
-            m_TargetDepthTexture = 0;
-        }
 
         CKDepthTextureDesc depthDesc = {};
         depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
@@ -3177,45 +3223,50 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         depthDesc.MipMapCount = 1;
         const CKBOOL needsStencil = m_Settings.m_StencilBpp > 0;
         depthDesc.DepthFormat = needsStencil ? CKRST_DEPTHFMT_D24S8 : CKRST_DEPTHFMT_D24;
+        CKDWORD newDepthTexture = 0;
         CKERROR depthErr = m_RasterizerContext->CreateDepthTexture(
-            &depthDesc, &m_TargetDepthTexture);
+            &depthDesc, &newDepthTexture);
         if (depthErr != CK_OK && !needsStencil) {
             depthDesc.DepthFormat = CKRST_DEPTHFMT_D16;
             if (m_RasterizerContext->CreateDepthTexture(
-                    &depthDesc, &m_TargetDepthTexture) != CK_OK)
+                    &depthDesc, &newDepthTexture) != CK_OK)
                 return FALSE;
         } else if (depthErr != CK_OK) {
             return FALSE;
         }
 
-        CKFrameBufferAttachmentDesc color;
+        CKFrameBufferAttachmentDesc color = {};
         color.Texture = target->GetRstTextureIndex();
         color.Mip = 0;
         color.Layer = (CKDWORD)CubeMapFace;
 
-        CKFrameBufferDesc desc;
+        CKFrameBufferDesc desc = {};
         desc.Color = &color;
         desc.ColorCount = 1;
-        desc.DepthStencil.Texture = m_TargetDepthTexture;
+        desc.DepthStencil.Texture = newDepthTexture;
         desc.DepthStencil.Mip = 0;
         desc.DepthStencil.Layer = 0;
 
+        CKDWORD newFrameBuffer = 0;
         if (m_RasterizerContext->CreateFrameBuffer(
-                &desc, &m_TargetFrameBuffer) != CK_OK) {
-            m_RasterizerContext->DeleteObject(m_TargetDepthTexture,
+                &desc, &newFrameBuffer) != CK_OK) {
+            m_RasterizerContext->DeleteObject(newDepthTexture,
                                               CKRST_OBJ_TEXTURE);
-            m_TargetDepthTexture = 0;
             return FALSE;
         }
 
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_POSTPROCESS, m_TargetFrameBuffer);
-        m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, m_TargetFrameBuffer);
+        if (SetRenderTargetViews(
+                m_RasterizerContext, newFrameBuffer, 0) != CK_OK) {
+            m_RasterizerContext->DeleteObject(
+                newFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+            m_RasterizerContext->DeleteObject(
+                newDepthTexture, CKRST_OBJ_TEXTURE);
+            return FALSE;
+        }
+
+        m_TargetFrameBuffer = newFrameBuffer;
+        m_TargetDepthTexture = newDepthTexture;
+        m_CubeMapFace = static_cast<CKRST_CUBEFACE>(CubeMapFace);
         m_FFPipeline.GetRenderPipeline().SetExternalRenderTarget(TRUE);
     }
 
@@ -3241,20 +3292,22 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         return TRUE;
     }
 
+    const CKDWORD oldFrameBuffer = m_TargetFrameBuffer;
+    if (SetRenderTargetViews(
+            m_RasterizerContext, 0, oldFrameBuffer) != CK_OK)
+        return FALSE;
+
     m_TargetTexture = nullptr;
     VxImageDescEx backbufferDesc;
     VxPixelFormat2ImageDesc(GetPixelFormat(), backbufferDesc);
     m_FFPipeline.SetAlphaTestPrecision(CKFFAlphaTestPrecisionForFormat(backbufferDesc));
     m_CubeMapFace = CKRST_CUBEFACE_XPOS;
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_CLEAR, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_BACKGROUND2D, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_RENDERFIRST3D, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_OPAQUE3D, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_STENCIL_CLEAR, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_TRANSPARENT, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_POSTPROCESS, 0);
-    m_RasterizerContext->SetViewFrameBuffer(CKRP_VIEW_FOREGROUND2D, 0);
     m_FFPipeline.GetRenderPipeline().SetExternalRenderTarget(FALSE);
+
+    const CKBOOL resourcesDeleted = DeleteRenderTargetResources(
+        m_RasterizerContext,
+        m_TargetFrameBuffer,
+        m_TargetDepthTexture);
 
     CKRenderContextSettings savedSettings;
     savedSettings.m_Rect.left = m_RasterizerContext->m_PosX;
@@ -3268,7 +3321,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
 
     SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
     UpdateProjection(TRUE);
-    return TRUE;
+    return resourcesDeleted;
 }
 
 void RCKRenderContext::AddRemoveSequence(CKBOOL Start) {
