@@ -365,6 +365,12 @@ CKDWORD CKFFOpaquePacketCoordinator::GetOpaqueVertexBufferPacketRejectReason(
         return CKFF_RENDER_PACKET_REJECT_Z_DISABLED;
     if (!pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
         return CKFF_RENDER_PACKET_REJECT_Z_WRITE_DISABLED;
+    {
+        const CKDWORD depthFunc = pipeline.GetDrawStateCache().GetRenderState(
+            VXRENDERSTATE_ZFUNC);
+        if (depthFunc != VXCMP_LESS && depthFunc != VXCMP_LESSEQUAL)
+            return CKFF_RENDER_PACKET_REJECT_DEPTH_FUNC;
+    }
     if (pipeline.GetDrawStateCache().GetRenderState(VXRENDERSTATE_STENCILENABLE))
         return CKFF_RENDER_PACKET_REJECT_STENCIL;
     {
