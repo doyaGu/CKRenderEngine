@@ -1083,6 +1083,16 @@ void VertexBufferPacketBuildResultReportsRejectReasons()
         TestCheck(missingVertexBuffer.RejectReason == CKFF_RENDER_PACKET_REJECT_MISSING_VERTEX_BUFFER,
                   "Missing vertex buffer packet build must report its reject reason");
 
+        ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+        const CKDWORD submitCount = context.Encoder.SubmitCount;
+        TestCheck(DrawPacketCandidate(
+                      &ffp, &context, CKRP_VIEW_OPAQUE3D, 100, 200),
+                  "Order-dependent depth draws must remain drawable");
+        TestCheck(!ffp.HasOpaqueRenderPackets() &&
+                      context.Encoder.SubmitCount == submitCount + 1,
+                  "Order-dependent depth functions must bypass packet sorting");
+        ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+
         ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
         CKFFVertexBufferPacketBuildResult vertexBlend;
         CKFFPipelineTestAccess::BuildVertexBufferPacket(
