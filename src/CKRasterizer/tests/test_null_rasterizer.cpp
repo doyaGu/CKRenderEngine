@@ -83,6 +83,7 @@ int main()
              CKRST_CAPS_BUFFER_UPDATE | CKRST_CAPS_TEXTURE_UPDATE) ||
         caps.MaxRenderViews != CKRST_MAX_RENDER_VIEWS ||
         caps.MaxShaders != 0 || caps.MaxPrograms != 0 ||
+        caps.MaxTextureBindings != caps.MaxTextureStages ||
         caps.MaxTransforms != CKRST_MAX_TRANSFORMS)
         return Fail();
 
