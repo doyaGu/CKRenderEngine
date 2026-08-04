@@ -64,15 +64,17 @@ static float ParseRenderScale(const char *value, float fallback)
     return parsed;
 }
 
-static CKDWORD ScaledDimension(CKDWORD value, float scale)
+static CKDWORD ScaledDimension(CKDWORD value, float scale, CKDWORD maximum)
 {
+    if (maximum == 0)
+        return 0;
     if (value == 0)
         value = 1;
     const float scaled = (float)value * scale;
     if (scaled <= 1.0f)
         return 1;
-    if (scaled >= 16384.0f)
-        return 16384;
+    if (scaled >= (float)maximum)
+        return maximum;
     return (CKDWORD)(scaled + 0.5f);
 }
 
@@ -472,10 +474,15 @@ CKBOOL CKRenderPipeline::EnsureSceneFrameBuffer(const CKRECT &viewport)
 {
     if (!m_Context || m_ExternalRenderTarget)
         return FALSE;
+    CKRasterizerCapsDesc caps;
+    if (m_Context->GetCaps(&caps) != CK_OK || caps.MaxTextureSize == 0)
+        return FALSE;
     const CKDWORD viewportWidth = (CKDWORD)((viewport.right > viewport.left) ? (viewport.right - viewport.left) : 1);
     const CKDWORD viewportHeight = (CKDWORD)((viewport.bottom > viewport.top) ? (viewport.bottom - viewport.top) : 1);
-    const CKDWORD width = ScaledDimension(viewportWidth, m_Config.RenderScale);
-    const CKDWORD height = ScaledDimension(viewportHeight, m_Config.RenderScale);
+    const CKDWORD width = ScaledDimension(
+        viewportWidth, m_Config.RenderScale, caps.MaxTextureSize);
+    const CKDWORD height = ScaledDimension(
+        viewportHeight, m_Config.RenderScale, caps.MaxTextureSize);
 
     if (m_SceneFrameBufferActive && m_SceneWidth == width && m_SceneHeight == height)
         return TRUE;
