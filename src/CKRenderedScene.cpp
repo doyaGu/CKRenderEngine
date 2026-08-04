@@ -192,6 +192,9 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         CK_LOG("RenderedScene", "Draw - no rootEntity!");
         return CKERR_INVALIDRENDERCONTEXT;
     }
+    if (rc->m_ViewportData.ViewWidth <= 0 ||
+        rc->m_ViewportData.ViewHeight <= 0)
+        return CK_OK;
 #if CKRE_ENABLE_RENDER_STATS
     const bool renderStats = CKRenderPerfStatsEnabled();
     CKRenderPerfBeginFrame((CKDWORD)m_3DEntities.Size(), (CKDWORD)m_2DEntities.Size(),
@@ -241,7 +244,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         }
 
         // Build view frustum
-        float aspectRatio = (float) rc->m_ViewportData.ViewWidth / (float) rc->m_ViewportData.ViewHeight;
+        const float aspectRatio = (float)rc->m_ViewportData.ViewWidth /
+                                  (float)rc->m_ViewportData.ViewHeight;
         VxVector *origin = (VxVector *) &rootEntity->m_WorldMatrix[3];
         VxVector *vright = (VxVector *) &rootEntity->m_WorldMatrix[0];
         VxVector *up = (VxVector *) &rootEntity->m_WorldMatrix[1];
