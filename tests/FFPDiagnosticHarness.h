@@ -228,6 +228,8 @@ public:
         FrameResult = CK_OK;
         DeviceStatus = CK_OK;
         FailBeginEncoder = FALSE;
+        TransientVertexCapacity = 0xFFFFFFFFu;
+        TransientIndexCapacity = 0xFFFFFFFFu;
     }
 
     CKERROR GetTargetDesc(CKRasterizerTargetDesc *target) const override {
@@ -250,6 +252,10 @@ public:
     CKERROR FrameResult = CK_OK;
     CKERROR DeviceStatus = CK_OK;
     CKBOOL FailBeginEncoder = FALSE;
+    CKDWORD TransientVertexCapacity = 0xFFFFFFFFu;
+    CKDWORD TransientIndexCapacity = 0xFFFFFFFFu;
+    CKDWORD TransientVertexAllocations = 0;
+    CKDWORD TransientIndexAllocations = 0;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     CKDWORD CreatedTextureCount = 0;
@@ -410,6 +416,7 @@ public:
     CKERROR TouchView(CKRenderView) override { return CK_OK; }
     CKDWORD AllocTransform(VxMatrix *, CKDWORD) override { return 1; }
     CKBOOL AllocTransientVertexBuffer(CKTransientVertexBuffer *buffer, CKDWORD vertexCount, CKDWORD layout) override {
+        ++TransientVertexAllocations;
         const CKDWORD stride = m_LayoutStride[layout];
         TestCheck(stride > 0, "FFP diagnostic context must know transient vertex stride");
         m_VertexStorage.assign(vertexCount * stride, 0);
@@ -422,6 +429,7 @@ public:
         return TRUE;
     }
     CKBOOL AllocTransientIndexBuffer(CKTransientIndexBuffer *buffer, CKDWORD indexCount, CKBOOL index32) override {
+        ++TransientIndexAllocations;
         m_IndexStorage.assign(indexCount * (index32 ? sizeof(CKDWORD) : sizeof(CKWORD)), 0);
         buffer->Data = m_IndexStorage.data();
         buffer->Size = (CKDWORD)m_IndexStorage.size();
@@ -444,8 +452,14 @@ public:
         buffer->Layout = layout;
         return TRUE;
     }
-    CKDWORD GetAvailTransientVertexBuffer(CKDWORD vertexCount, CKDWORD) override { return vertexCount; }
-    CKDWORD GetAvailTransientIndexBuffer(CKDWORD indexCount, CKBOOL) override { return indexCount; }
+    CKDWORD GetAvailTransientVertexBuffer(CKDWORD vertexCount, CKDWORD) override {
+        return vertexCount <= TransientVertexCapacity
+            ? vertexCount : TransientVertexCapacity;
+    }
+    CKDWORD GetAvailTransientIndexBuffer(CKDWORD indexCount, CKBOOL) override {
+        return indexCount <= TransientIndexCapacity
+            ? indexCount : TransientIndexCapacity;
+    }
     CKDWORD GetAvailTransientInstanceBuffer(CKDWORD instanceCount, CKDWORD layout) override {
         if (!AllowTransientInstanceBuffer || FailTransientInstanceBuffer)
             return 0;
