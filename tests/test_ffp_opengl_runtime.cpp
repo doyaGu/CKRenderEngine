@@ -924,15 +924,16 @@ void RunSpecializedCriticalPixelCases(CKBgfxRasterizerContext *context,
     ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX, 0);
     for (int stage = 0; stage < 2; ++stage) {
         ffp.SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
         ffp.SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
         ffp.SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
     }
     float bumpTexcoords[3][4] = {
-        {0.125f, 0.5f, 0.0f, 1.0f},
-        {0.125f, 0.5f, 0.0f, 1.0f},
-        {0.125f, 0.5f, 0.0f, 1.0f}
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f}
     };
     BeginPixelFrame(ffp, context, resources);
     TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
@@ -1225,6 +1226,7 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     ffp.SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX, 0);
     for (int stage = 0; stage < 2; ++stage) {
         ffp.SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
         ffp.SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
@@ -1232,9 +1234,9 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     }
     BeginPixelFrame(ffp, context, resources);
     float bumpTexcoords[3][4] = {
-        {0.125f, 0.5f, 0.0f, 1.0f},
-        {0.125f, 0.5f, 0.0f, 1.0f},
-        {0.125f, 0.5f, 0.0f, 1.0f}
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f},
+        {0.25f, 0.5f, 0.0f, 1.0f}
     };
     TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
                                    flatPositions, depthWhite, bumpTexcoords),
