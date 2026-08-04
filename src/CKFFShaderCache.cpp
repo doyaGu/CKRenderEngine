@@ -247,6 +247,7 @@ void CKFFShaderCache::Shutdown() {
         }
     }
     m_ModuleProgramCache.Clear();
+    m_ProgramSamplerLayouts.Clear();
     m_ProgramCache.Clear();
     m_ProgramBindingClock.Clear();
     m_ProgramBindingClockHand = 0;
@@ -753,19 +754,119 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     return hProgram;
 }
 
+static CKDWORD CKFFProgramSamplerUniform(const CKFFUniformHandles &uniforms,
+                                         CKDWORD logicalStage,
+                                         CKDWORD samplerType)
+{
+    if (logicalStage >= CKFF_MAX_TEXTURE_STAGES)
+        return 0;
+    if (samplerType == CKFF_SAMPLER_CUBE)
+        return uniforms.s_textureCube[logicalStage];
+    if (samplerType == CKFF_SAMPLER_VOLUME)
+        return uniforms.s_textureVolume[logicalStage];
+    return uniforms.s_texture[logicalStage];
+}
+
+static void CKFFAddProgramSamplerBinding(CKFFProgramSamplerLayout *layout,
+                                         CKDWORD stage,
+                                         CKDWORD uniform)
+{
+    if (!layout || uniform == 0 ||
+        layout->BindingCount >= CKFF_MAX_PROGRAM_SAMPLER_BINDINGS)
+        return;
+    CKFFProgramSamplerBinding &binding =
+        layout->Bindings[layout->BindingCount++];
+    binding.Stage = stage;
+    binding.Uniform = uniform;
+}
+
+void CKFFShaderCache::CacheProgramSamplerLayout(
+    const CKFFShaderKey &key, const CKFFProgramBinding &binding)
+{
+    if (binding.Program == 0 ||
+        m_ProgramSamplerLayouts.FindPtr(binding.Program) != NULL)
+        return;
+
+    CKFFProgramSamplerLayout layout;
+    const CKFFSamplerLayoutKey samplerLayout =
+        CKFFBuildSamplerLayoutKey(key.FS);
+    const CKBOOL needsCube =
+        CKFFSamplerLayoutNeedsCubeSampler(samplerLayout) ? TRUE : FALSE;
+    const CKBOOL needsVolume =
+        CKFFSamplerLayoutNeedsVolumeSampler(samplerLayout) ? TRUE : FALSE;
+
+    if (binding.FullSpecialized ||
+        (needsCube && needsVolume &&
+         !CKFFSamplerLayoutSupportsGenericMixed(samplerLayout))) {
+        for (CKDWORD logicalStage = 0;
+             logicalStage < CKFF_MAX_TEXTURE_STAGES; ++logicalStage) {
+            const CKDWORD samplerType =
+                CKFFSamplerLayoutStageType(samplerLayout, logicalStage);
+            CKFFAddProgramSamplerBinding(
+                &layout,
+                CKFFSamplerBindStage(logicalStage, samplerType),
+                CKFFProgramSamplerUniform(
+                    m_Uniforms, logicalStage, samplerType));
+        }
+    } else {
+        for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            CKFFAddProgramSamplerBinding(
+                &layout, stage, m_Uniforms.s_texture[stage]);
+        }
+
+        if (needsCube && needsVolume) {
+            for (CKDWORD stage = 0; stage < 4; ++stage) {
+                CKFFAddProgramSamplerBinding(
+                    &layout, CKFF_MAX_TEXTURE_STAGES + stage,
+                    m_Uniforms.s_textureCube[stage]);
+                CKFFAddProgramSamplerBinding(
+                    &layout, CKFF_MAX_TEXTURE_STAGES + 4 + stage,
+                    m_Uniforms.s_textureVolume[stage]);
+            }
+        } else {
+            const CKDWORD samplerType = needsVolume
+                ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_CUBE;
+            for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+                CKFFAddProgramSamplerBinding(
+                    &layout, CKFF_MAX_TEXTURE_STAGES + stage,
+                    CKFFProgramSamplerUniform(
+                        m_Uniforms, stage, samplerType));
+            }
+        }
+    }
+
+    m_ProgramSamplerLayouts.Insert(binding.Program, layout);
+}
+
+CKBOOL CKFFShaderCache::GetProgramSamplerLayout(
+    CKDWORD program, CKFFProgramSamplerLayout *layout) const
+{
+    if (!layout)
+        return FALSE;
+    const CKFFProgramSamplerLayout *cached =
+        m_ProgramSamplerLayouts.FindPtr(program);
+    if (!cached)
+        return FALSE;
+    *layout = *cached;
+    return TRUE;
+}
+
 CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     CKFFProgramBindingCacheEntry *cached = m_ProgramCache.FindPtr(key);
     if (cached) {
         cached->RecentlyUsed = true;
         ++m_CacheStats.BindingHits;
+        CacheProgramSamplerLayout(key, cached->Binding);
         return cached->Binding;
     }
 
     ++m_CacheStats.BindingMisses;
 
     const CKFFProgramBinding binding = CreateVariantProgram(key);
-    if (binding.Program)
+    if (binding.Program) {
         CacheProgramBinding(key, binding);
+        CacheProgramSamplerLayout(key, binding);
+    }
     return binding;
 }
 

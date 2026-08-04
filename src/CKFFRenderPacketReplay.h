@@ -6,6 +6,7 @@
 
 class CKRasterizerContext;
 class CKRasterizerEncoder;
+class CKFFTextureBinder;
 
 struct CKFFRenderPacketReplayDiagnostics {
     CKBOOL StatsEnabled;
@@ -43,6 +44,7 @@ struct CKFFRenderPacketReplayContext {
     CKRasterizerEncoder *Encoder;
     CKRasterizerContext *Context;
     CKFFRenderPacketQueue *Queue;
+    CKFFTextureBinder *TextureBinder;
     CKDWORD InstanceLayout;
     CKFFRenderPacketReplayDiagnostics Diagnostics;
 };
@@ -50,6 +52,7 @@ struct CKFFRenderPacketReplayContext {
 void CKFFInitRenderPacketReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *diagnostics);
 void CKFFBindRenderPacketSharedState(CKFFRenderPacketReplayContext *context,
                                      const CKRenderPacket &packet,
+                                     CKDWORD program,
                                      CKRenderPacketReplayCache *cache);
 void CKFFReplayVertexBufferPacket(CKFFRenderPacketReplayContext *context,
                                   const CKRenderPacket &packet,

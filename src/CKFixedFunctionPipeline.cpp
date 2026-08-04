@@ -75,6 +75,11 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
             (caps.Features & (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)) ==
                 (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)
             ? TRUE : FALSE;
+        if (shaderBackend &&
+            caps.MaxTextureBindings < CKFF_MAX_PROGRAM_SAMPLER_BINDINGS) {
+            Shutdown();
+            return false;
+        }
     }
     if (shaderBackend && !m_ShaderCache.Init(ctx)) {
         Shutdown();
@@ -82,6 +87,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     }
     m_DrawStateCache.Reset();
     m_VertexLayoutCache.Init(ctx);
+    m_TextureBinder.ResetProgramBindings();
     m_OpaquePackets.SetInstanceLayout(m_VertexLayoutCache.GetLayout(CKFF_VF_TEXCOORD0 |
                                                                     CKFF_VF_TEXCOORD1 |
                                                                     CKFF_VF_TEXCOORD2 |
@@ -102,6 +108,7 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
     m_OpaquePackets.ClearRenderPackets();
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
+    m_TextureBinder.ResetProgramBindings();
     m_OpaquePackets.SetInstanceLayout(0);
     m_ShaderCache.Shutdown();
     m_Context = nullptr;
@@ -918,7 +925,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
 
     {
         CKFF_SCOPE_TIME(m_Probes, TextureUs);
-        BindTextures(encoder, textures);
+        BindTextures(encoder, programContext->Program, textures);
     }
     if (encoder->GetStatus() != CK_OK)
         return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
@@ -1075,9 +1082,10 @@ CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUn
     return m_UniformEmitter.BuildObjectUniforms(uniforms, programContext);
 }
 
-void CKFixedFunctionPipeline::BindTextures(CKRasterizerEncoder *encoder,
-                                           const CKFFTextureBindingSet *bindingSet) {
-    m_TextureBinder.Bind(encoder, bindingSet);
+void CKFixedFunctionPipeline::BindTextures(
+    CKRasterizerEncoder *encoder, CKDWORD program,
+    const CKFFTextureBindingSet *bindingSet) {
+    m_TextureBinder.Bind(encoder, program, bindingSet);
 }
 
 CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {

@@ -106,9 +106,48 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
                                m_State.TextureHandles, m_State.TextureFlags, samplers);
 }
 
-void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *set) const
+void CKFFTextureBinder::ResetProgramBindings()
+{
+    m_InitializedPrograms.Clear();
+}
+
+CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
+    CKRasterizerEncoder *encoder, CKDWORD program)
+{
+    if (!encoder || program == 0 ||
+        !m_ShaderCache.RequiresExplicitSamplerInitialization())
+        return FALSE;
+
+    CKBOOL initialized = FALSE;
+    if (m_InitializedPrograms.LookUp(program, initialized))
+        return FALSE;
+
+    CKFFProgramSamplerLayout layout;
+    if (!m_ShaderCache.GetProgramSamplerLayout(program, &layout))
+        return FALSE;
+
+    // GLSL rejects draws when active sampler types retain the shared default unit.
+    for (CKDWORD i = 0; i < layout.BindingCount; ++i) {
+        const CKFFProgramSamplerBinding &binding = layout.Bindings[i];
+        encoder->SetTexture(binding.Stage, binding.Uniform, 0, NULL);
+        if (encoder->GetStatus() != CK_OK)
+            return FALSE;
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+        m_Probes.OnTextureBind();
+#endif
+    }
+    m_InitializedPrograms.Insert(program, TRUE);
+    return TRUE;
+}
+
+void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, CKDWORD program,
+                             const CKFFTextureBindingSet *set)
 {
     if (!encoder || !set)
+        return;
+
+    InitializeProgramSamplers(encoder, program);
+    if (encoder->GetStatus() != CK_OK)
         return;
 
     CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};

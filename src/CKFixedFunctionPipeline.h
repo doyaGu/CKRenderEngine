@@ -221,7 +221,8 @@ private:
     CKBOOL RejectPendingSubmission(CKRasterizerEncoder *encoder,
                                    CKFFDrawRejectReason reason);
     CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
-    void BindTextures(CKRasterizerEncoder *encoder, const CKFFTextureBindingSet *bindingSet);
+    void BindTextures(CKRasterizerEncoder *encoder, CKDWORD program,
+                      const CKFFTextureBindingSet *bindingSet);
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
 

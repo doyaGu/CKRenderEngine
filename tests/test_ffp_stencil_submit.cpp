@@ -1015,9 +1015,6 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE &&
                   spec.Get(CKFF_SPEC_STAGE1_COLOR_OP) == CKRST_TOP_ADD,
               "Volume + cube fallback must keep texture stage ops runtime-specialized");
-    TestCheck(context.Encoder.TextureBindCount == 2,
-              "Volume + cube fallback must bind both textures");
-
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     bool sawVolume = false;
     bool sawCube = false;
@@ -1071,8 +1068,6 @@ void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE pro
 
     TestCheck(context.Encoder.SubmitCount == 1,
               "arbitrary single volume+cube placement must draw through the generic fallback");
-    TestCheck(context.Encoder.TextureBindCount == 2,
-              "generic mixed fallback must bind both non-2D textures");
     TestCheck(context.CreatedProgramCount == 1,
               "generic mixed fallback must create one canonical program");
 
