@@ -172,7 +172,10 @@ void RCK2dEntity::SetRect(const VxRect &rect, CKBOOL KeepChildren) {
                     childRect.left = childRect.right - childWidth;
                 } else {
                     float centerX = (child->m_Rect.left + child->m_Rect.right) * 0.5f;
-                    float ratio = (centerX - m_Rect.left) / m_Rect.GetWidth();
+                    const float parentWidth = m_Rect.GetWidth();
+                    const float ratio = parentWidth != 0.0f
+                        ? (centerX - m_Rect.left) / parentWidth
+                        : 0.5f;
                     float newCenter = rect.GetWidth() * ratio + rect.left;
                     childRect.left = newCenter - childWidth * 0.5f;
                     childRect.right = childRect.left + childWidth;
@@ -190,7 +193,10 @@ void RCK2dEntity::SetRect(const VxRect &rect, CKBOOL KeepChildren) {
                     childRect.top = childRect.bottom - childHeight;
                 } else {
                     float centerY = (child->m_Rect.top + child->m_Rect.bottom) * 0.5f;
-                    float ratio = (centerY - m_Rect.top) / m_Rect.GetHeight();
+                    const float parentHeight = m_Rect.GetHeight();
+                    const float ratio = parentHeight != 0.0f
+                        ? (centerY - m_Rect.top) / parentHeight
+                        : 0.5f;
                     float newCenter = rect.GetHeight() * ratio + rect.top;
                     childRect.top = newCenter - childHeight * 0.5f;
                     childRect.bottom = childRect.top + childHeight;
@@ -376,21 +382,26 @@ CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
     // IDA line 33: Initialize UV
     Vx2DVector uv;
 
+    const float width = m_Rect.GetWidth();
+    const float height = m_Rect.GetHeight();
+    if (width == 0.0f || height == 0.0f)
+        return nullptr;
+
     // IDA line 34-58: Calculate normalized UV coordinates within the entity
     if ((m_Flags & CK_2DENTITY_RATIOOFFSET) != 0) {
         // IDA line 36-42: With ratio offset, subtract viewport position
         RCKRenderContext *rc = (RCKRenderContext *) m_Context->GetPlayerRenderContext();
         if (rc) {
-            uv.x = (pt.x - m_Rect.left - (float) rc->m_ViewportData.ViewX) / m_Rect.GetWidth();
-            uv.y = (pt.y - m_Rect.top - (float) rc->m_ViewportData.ViewY) / m_Rect.GetHeight();
+            uv.x = (pt.x - m_Rect.left - (float) rc->m_ViewportData.ViewX) / width;
+            uv.y = (pt.y - m_Rect.top - (float) rc->m_ViewportData.ViewY) / height;
         } else {
-            uv.x = (pt.x - m_Rect.left) / m_Rect.GetWidth();
-            uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
+            uv.x = (pt.x - m_Rect.left) / width;
+            uv.y = (pt.y - m_Rect.top) / height;
         }
     } else {
         // IDA line 54-57: Without ratio offset
-        uv.x = (pt.x - m_Rect.left) / m_Rect.GetWidth();
-        uv.y = (pt.y - m_Rect.top) / m_Rect.GetHeight();
+        uv.x = (pt.x - m_Rect.left) / width;
+        uv.y = (pt.y - m_Rect.top) / height;
     }
 
     // IDA line 59: Map UV to source rect coordinates (sub_10060070)

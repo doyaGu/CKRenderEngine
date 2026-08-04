@@ -216,7 +216,9 @@ Remarks:
 Implementation based on decompilation at 0x1000efbc.
 *************************************************/
 void RCKCamera::ComputeProjectionMatrix(VxMatrix &mat) {
-    float aspect = (float) m_Width / (float) m_Height;
+    const float aspect = m_Width > 0 && m_Height > 0
+        ? (float)m_Width / (float)m_Height
+        : 1.0f;
 
     if (m_ProjectionType & CK_PERSPECTIVEPROJECTION) {
         // Perspective projection

@@ -935,6 +935,8 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         return CKERR_RENDERCONTEXTINACTIVE;
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
+    if (m_ViewportData.ViewWidth <= 0 || m_ViewportData.ViewHeight <= 0)
+        return CK_OK;
 
     ProcessPendingScreenCaptures();
 
@@ -2130,6 +2132,9 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *i
 
     const float viewWidth = (float) m_ViewportData.ViewWidth;
     const float viewHeight = (float) m_ViewportData.ViewHeight;
+
+    if (viewWidth <= 0.0f || viewHeight <= 0.0f)
+        return nullptr;
 
     if (viewX + viewWidth < localPt.x || viewY + viewHeight < localPt.y)
         return nullptr;
