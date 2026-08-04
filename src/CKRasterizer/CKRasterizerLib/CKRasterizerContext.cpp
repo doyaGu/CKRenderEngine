@@ -821,6 +821,7 @@ CKERROR CKRasterizerContext::GetCaps(CKRasterizerCapsDesc *Caps) const
     Caps->MaxShaders = 0;
     Caps->MaxTextures = 64;
     Caps->MaxTextureStages = CKRST_MAX_TEXTURE_STAGES;
+    Caps->MaxTextureBindings = CKRST_MAX_TEXTURE_STAGES;
     Caps->MaxVertexLayouts = 64;
     Caps->MaxVertexStreams = CKRST_MAX_VERTEX_STREAMS;
     Caps->MaxIndexBuffers = 64;

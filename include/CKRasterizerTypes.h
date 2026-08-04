@@ -174,6 +174,7 @@ struct CKRasterizerCapsDesc {
     CKDWORD MaxShaders;
     CKDWORD MaxTextures;
     CKDWORD MaxTextureStages;
+    CKDWORD MaxTextureBindings;
     CKDWORD MaxComputeBindings;
     CKDWORD MaxVertexLayouts;
     CKDWORD MaxVertexStreams;
@@ -195,7 +196,8 @@ struct CKRasterizerCapsDesc {
           MaxDrawCalls(0), MaxBlits(0), MaxTextureSize(0),
           MaxTextureLayers(0), MaxRenderViews(0), MaxFrameBuffers(0),
           MaxColorAttachments(0), MaxPrograms(0), MaxShaders(0),
-          MaxTextures(0), MaxTextureStages(0), MaxComputeBindings(0),
+          MaxTextures(0), MaxTextureStages(0), MaxTextureBindings(0),
+          MaxComputeBindings(0),
           MaxVertexLayouts(0), MaxVertexStreams(0), MaxIndexBuffers(0),
           MaxVertexBuffers(0), MaxDynamicIndexBuffers(0),
           MaxDynamicVertexBuffers(0), MaxUniforms(0),

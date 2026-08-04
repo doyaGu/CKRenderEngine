@@ -1095,7 +1095,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     }
     CKBgfxUniformRecord *uniRec = m_Context->GetUniform(Uniform);
     CKBgfxTextureRecord *texRec = m_Context->GetTexture(Texture);
-    if (Stage >= m_Context->m_CapsDesc.MaxTextureStages || !uniRec ||
+    if (Stage >= m_Context->m_CapsDesc.MaxTextureBindings || !uniRec ||
         uniRec->Type != CKRST_UNIFORM_SAMPLER || (Texture != 0 && !texRec)) {
         SetError(CKERR_INVALIDPARAMETER, (CKSTRING)"SetTexture");
         return;
@@ -2196,6 +2196,7 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
         m_CapsDesc.MaxTextures = limits.maxTextures;
         m_CapsDesc.MaxTextureStages = XMin((CKDWORD)limits.maxTextureSamplers,
                                            (CKDWORD)CKRST_MAX_TEXTURE_STAGES);
+        m_CapsDesc.MaxTextureBindings = limits.maxTextureSamplers;
         m_CapsDesc.MaxComputeBindings = limits.maxComputeBindings;
         m_CapsDesc.MaxVertexLayouts = limits.maxVertexLayouts;
         m_CapsDesc.MaxVertexStreams = XMin((CKDWORD)limits.maxVertexStreams,
