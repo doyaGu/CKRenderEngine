@@ -924,6 +924,11 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
             return frameStatus;
     }
 
+    if (m_FrameRenderError != CK_OK)
+        return m_FrameRenderError;
+    if (m_FFPipeline.HadRejectedDrawsThisFrame())
+        return CKERR_INVALIDOPERATION;
+
     return CK_OK;
 }
 
@@ -1780,69 +1785,42 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
 #endif
-    if (!data)
+    if (!data) {
+        RecordFrameRenderError(CKERR_INVALIDPARAMETER);
         return FALSE;
-    if (data->VertexCount <= 0)
+    }
+    if (data->VertexCount <= 0) {
+        RecordFrameRenderError(CKERR_INVALIDSIZE);
         return FALSE;
+    }
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         ++CKRenderPerfCurrent().DrawPrimitiveCalls;
 #endif
 
+    VxDrawPrimitiveData drawData;
+    UserDrawPrimitiveDataClass::CopySubmissionData(drawData, data);
+    drawData.Flags &= ~CKRST_DP_VBUFFER;
+
     // Set lighting mode based on normals
-    if ((data->Flags & CKRST_DP_LIGHT) != 0 && data->NormalPtr) {
+    if ((drawData.Flags & CKRST_DP_LIGHT) != 0 && drawData.NormalPtr) {
         m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, 1);
     } else {
-        if (data->SpecularColorPtr)
-            data->Flags |= CKRST_DP_SPECULAR;
-        if (data->ColorPtr)
-            data->Flags |= CKRST_DP_DIFFUSE;
+        if (drawData.SpecularColorPtr)
+            drawData.Flags |= CKRST_DP_SPECULAR;
+        if (drawData.ColorPtr)
+            drawData.Flags |= CKRST_DP_DIFFUSE;
         m_FFPipeline.SetRenderState(VXRENDERSTATE_LIGHTING, 0);
     }
 
     if (!indices)
         indexcount = data->VertexCount;
 
-    // Update stats
-    switch (pType) {
-    case VX_POINTLIST:
-        m_Stats.NbPointsDrawn += data->VertexCount;
-        break;
-    case VX_LINELIST:
-        m_Stats.NbLinesDrawn += indexcount >> 1;
-        break;
-    case VX_LINESTRIP:
-        m_Stats.NbLinesDrawn += indexcount - 1;
-        break;
-    case VX_TRIANGLELIST:
-        m_Stats.NbTrianglesDrawn += indexcount / 3;
-        break;
-    case VX_TRIANGLESTRIP:
-    case VX_TRIANGLEFAN:
-        m_Stats.NbTrianglesDrawn += indexcount - 2;
-        break;
-    default:
-        break;
-    }
-    m_Stats.NbVerticesProcessed += data->VertexCount;
-
     CKRasterizerEncoder *encoder = m_FFPipeline.GetRenderPipeline().GetEncoder();
-    CKRenderView view;
-    if (data->Flags & CKRST_DP_TRANSFORM) {
-        view = m_Current3DView;
-        if (m_FFPipeline.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE) ||
-            !m_FFPipeline.GetRenderState(VXRENDERSTATE_ZWRITEENABLE)) {
-            view = CKRP_VIEW_TRANSPARENT;
-        }
-    } else {
-        view = m_Current2DView;
-    }
+    const CKRenderView view = ResolveDrawView(drawData.Flags);
     m_FFPipeline.SetViewport(m_ViewportData);
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE();
 
-    VxDrawPrimitiveData drawData;
-    UserDrawPrimitiveDataClass::CopySubmissionData(drawData, data);
-    drawData.Flags &= ~CKRST_DP_VBUFFER;
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE_SANITIZE();
     if (m_DrawAnnotationState) {
         ApplyDrawAnnotation(encoder, view, pType,
@@ -1851,11 +1829,58 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     }
     const CKBOOL submitted = m_FFPipeline.DrawPrimitive(
         encoder, view, pType, indices, indexcount, &drawData);
+    if (submitted) {
+        switch (pType) {
+        case VX_POINTLIST:
+            m_Stats.NbPointsDrawn += data->VertexCount;
+            break;
+        case VX_LINELIST:
+            m_Stats.NbLinesDrawn += indexcount >> 1;
+            break;
+        case VX_LINESTRIP:
+            m_Stats.NbLinesDrawn += indexcount - 1;
+            break;
+        case VX_TRIANGLELIST:
+            m_Stats.NbTrianglesDrawn += indexcount / 3;
+            break;
+        case VX_TRIANGLESTRIP:
+        case VX_TRIANGLEFAN:
+            m_Stats.NbTrianglesDrawn += indexcount - 2;
+            break;
+        default:
+            break;
+        }
+        m_Stats.NbVerticesProcessed += data->VertexCount;
+    } else {
+        RecordFrameRenderError(CKERR_INVALIDOPERATION);
+    }
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         CKRenderPerfCurrent().DrawPrimitiveWrapperUs += CKRenderPerfElapsedUs(perfStart);
 #endif
     return submitted;
+}
+
+void RCKRenderContext::BeginFrameErrorTracking() {
+    m_FrameRenderError = CK_OK;
+}
+
+void RCKRenderContext::RecordFrameRenderError(CKERROR Error) {
+    if (m_FrameRenderError == CK_OK && Error != CK_OK)
+        m_FrameRenderError = Error;
+}
+
+CKRenderView RCKRenderContext::ResolveDrawView(CKDWORD DrawFlags) const {
+    if ((DrawFlags & CKRST_DP_TRANSFORM) == 0)
+        return m_Current2DView;
+    if (m_Current3DView != CKRP_VIEW_OPAQUE3D)
+        return m_Current3DView;
+    if (m_FFPipeline.GetRenderState(VXRENDERSTATE_STENCILENABLE))
+        return m_Current3DView;
+    if (m_FFPipeline.GetRenderState(VXRENDERSTATE_ALPHABLENDENABLE) ||
+        !m_FFPipeline.GetRenderState(VXRENDERSTATE_ZWRITEENABLE))
+        return CKRP_VIEW_TRANSPARENT;
+    return m_Current3DView;
 }
 
 void RCKRenderContext::SetDrawAnnotation(const CKDrawAnnotation *annotation) {
@@ -3588,6 +3613,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     Vx3DMatrixIdentity(m_ViewMatrix);
     m_Current2DView = CKRP_VIEW_FOREGROUND2D;
     m_Current3DView = CKRP_VIEW_OPAQUE3D;
+    m_FrameRenderError = CK_OK;
     m_DrawAnnotationState = nullptr;
     m_PendingScreenCaptures = new CKPendingScreenCaptureState();
 }

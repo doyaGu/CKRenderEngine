@@ -60,6 +60,49 @@ void RenderPropagatesDrawFailure() {
     CKCloseContext(context);
 }
 
+void DrawViewRoutingPreservesExplicitPhases() {
+    CKContext *context = nullptr;
+    TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
+              "CKCreateContext failed");
+
+    RCKRenderManager *renderManager =
+        static_cast<RCKRenderManager *>(context->GetRenderManager());
+    if (!renderManager)
+        renderManager = new RCKRenderManager(context);
+    RCKRenderContext *renderContext = new RCKRenderContext(context);
+
+    renderContext->m_Current2DView = CKRP_VIEW_BACKGROUND2D;
+    TestCheck(renderContext->ResolveDrawView(0) == CKRP_VIEW_BACKGROUND2D,
+              "Untransformed draws must use the current 2D view");
+
+    renderContext->m_Current3DView = CKRP_VIEW_OPAQUE3D;
+    renderContext->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
+                  CKRP_VIEW_TRANSPARENT,
+              "Blended opaque-phase draws must use the transparent view");
+
+    renderContext->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    renderContext->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    renderContext->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_STENCILENABLE, TRUE);
+    TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
+                  CKRP_VIEW_OPAQUE3D,
+              "Stencil draws must stay in their explicit 3D phase");
+
+    renderContext->m_Current3DView = CKRP_VIEW_RENDERFIRST3D;
+    renderContext->m_FFPipeline.SetRenderState(
+        VXRENDERSTATE_STENCILENABLE, FALSE);
+    TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
+                  CKRP_VIEW_RENDERFIRST3D,
+              "Render-first draws must not be rerouted by inferred transparency");
+
+    delete renderContext;
+    CKCloseContext(context);
+}
+
 } // namespace
 
 int main() {
@@ -71,6 +114,8 @@ int main() {
 
     TestFramework tests;
     tests.Run("Render propagates Draw failure", &RenderPropagatesDrawFailure);
+    tests.Run("Draw view routing preserves explicit phases",
+              &DrawViewRoutingPreservesExplicitPhases);
 
     const int exitCode = tests.ExitCode();
     TestCheck(CKShutdown() == CK_OK, "CKShutdown failed");

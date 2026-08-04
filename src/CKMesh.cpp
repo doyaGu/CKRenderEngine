@@ -73,7 +73,7 @@ static void CKMeshSetDrawAnnotation(RCKRenderContext *rc,
     rc->SetDrawAnnotation(&annotation);
 }
 
-static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, RCKMaterial *mat) {
+static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent) {
     CKRenderPipeline &pipeline = dev->m_FFPipeline.GetRenderPipeline();
 
     // Render-first entities are a Virtools contract used by sky/background
@@ -81,10 +81,7 @@ static CKRenderView GetMeshRenderView(RCKRenderContext *dev, RCK3dEntity *ent, R
     // before the regular scene rather than in the transparent pass.
     if (ent && (ent->m_MoveableFlags & VX_MOVEABLE_RENDERFIRST) != 0)
         return pipeline.GetRenderFirst3DView();
-
-    return (mat && mat->IsAlphaTransparent())
-        ? pipeline.GetTransparentView()
-        : pipeline.GetOpaqueView();
+    return dev->ResolveDrawView(CKRST_DP_TRANSFORM);
 }
 
 void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
@@ -4243,8 +4240,9 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
 
             rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            const CKRenderView drawView = rc->ResolveDrawView(dpData.Flags);
             CKMeshSetDrawAnnotation(rc, (CKSTRING)"ZBUF",
-                                    rc->m_Current3DView,
+                                    drawView,
                                     ent, this, firstMat, -1, 0,
                                     VX_TRIANGLELIST,
                                     (CKDWORD)m_FaceVertexIndices.Size(),
@@ -4252,13 +4250,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             if (rc->m_DrawAnnotationState) {
                 rc->ApplyDrawAnnotation(
                     rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
-                    rc->m_Current3DView, VX_TRIANGLELIST,
+                    drawView, VX_TRIANGLELIST,
                     (CKDWORD)m_FaceVertexIndices.Size(),
                     (CKDWORD)dpData.VertexCount);
             }
             rc->m_FFPipeline.DrawPrimitive(
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
-                rc->m_Current3DView, VX_TRIANGLELIST,
+                drawView, VX_TRIANGLELIST,
                 m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
         } else if (stencilOnly) {
             // Stencil only rendering mode
@@ -4283,8 +4281,9 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
 
             rc->m_FFPipeline.SetViewport(rc->m_ViewportData);
+            const CKRenderView drawView = rc->ResolveDrawView(dpData.Flags);
             CKMeshSetDrawAnnotation(rc, (CKSTRING)"STENCIL",
-                                    rc->m_Current3DView,
+                                    drawView,
                                     ent, this, firstMat, -1, 0,
                                     VX_TRIANGLELIST,
                                     (CKDWORD)m_FaceVertexIndices.Size(),
@@ -4292,13 +4291,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             if (rc->m_DrawAnnotationState) {
                 rc->ApplyDrawAnnotation(
                     rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
-                    rc->m_Current3DView, VX_TRIANGLELIST,
+                    drawView, VX_TRIANGLELIST,
                     (CKDWORD)m_FaceVertexIndices.Size(),
                     (CKDWORD)dpData.VertexCount);
             }
             rc->m_FFPipeline.DrawPrimitive(
                 rc->m_FFPipeline.GetRenderPipeline().GetEncoder(),
-                rc->m_Current3DView, VX_TRIANGLELIST,
+                drawView, VX_TRIANGLELIST,
                 m_FaceVertexIndices.Begin(), m_FaceVertexIndices.Size(), &dpData);
 
             // Match original: stencil-only disables channel passes.
@@ -4653,7 +4652,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // Submit draw via fixed-function pipeline (software vertex path)
         CKRasterizerEncoder *encoder = dev->m_FFPipeline.GetRenderPipeline().GetEncoder();
         if (encoder) {
-            CKRenderView view = GetMeshRenderView(dev, ent, mat);
+            CKRenderView view = GetMeshRenderView(dev, ent);
 
             // Iterate through primitive entries and submit draws
             for (int p = 0; p < group->m_Primitives.Size(); p++) {
@@ -4728,7 +4727,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         // Submit draw via fixed-function pipeline (hardware VB path)
         CKRasterizerEncoder *encoder = dev->m_FFPipeline.GetRenderPipeline().GetEncoder();
         if (encoder) {
-            CKRenderView view = GetMeshRenderView(dev, ent, mat);
+            CKRenderView view = GetMeshRenderView(dev, ent);
 
             for (int p = 0; p < group->m_Primitives.Size(); p++) {
                 CKPrimitiveEntry *prim = &group->m_Primitives[p];
@@ -4943,8 +4942,9 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
             CKRenderPerfCurrent().TotalChannelIndices += (CKDWORD)indexCount;
         );
 
+        const CKRenderView drawView = dev->ResolveDrawView(data->Flags);
         CKMeshSetDrawAnnotation(dev, (CKSTRING)"CHANNEL",
-                                dev->m_Current3DView,
+                                drawView,
                                 ent, this, mat, c, 0,
                                 VX_TRIANGLELIST,
                                 (CKDWORD)indexCount,
