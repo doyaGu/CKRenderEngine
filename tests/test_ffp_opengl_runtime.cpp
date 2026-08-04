@@ -930,9 +930,9 @@ void RunSpecializedCriticalPixelCases(CKBgfxRasterizerContext *context,
         ffp.SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
     }
     float bumpTexcoords[3][4] = {
-        {0.25f, 0.5f, 0.0f, 1.0f},
-        {0.25f, 0.5f, 0.0f, 1.0f},
-        {0.25f, 0.5f, 0.0f, 1.0f}
+        {0.125f, 0.5f, 0.0f, 1.0f},
+        {0.125f, 0.5f, 0.0f, 1.0f},
+        {0.125f, 0.5f, 0.0f, 1.0f}
     };
     BeginPixelFrame(ffp, context, resources);
     TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
@@ -1232,9 +1232,9 @@ void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
     }
     BeginPixelFrame(ffp, context, resources);
     float bumpTexcoords[3][4] = {
-        {0.25f, 0.5f, 0.0f, 1.0f},
-        {0.25f, 0.5f, 0.0f, 1.0f},
-        {0.25f, 0.5f, 0.0f, 1.0f}
+        {0.125f, 0.5f, 0.0f, 1.0f},
+        {0.125f, 0.5f, 0.0f, 1.0f},
+        {0.125f, 0.5f, 0.0f, 1.0f}
     };
     TestCheck(DrawTexturedTriangle(ffp, ffp.GetRenderPipeline().GetEncoder(),
                                    flatPositions, depthWhite, bumpTexcoords),
@@ -1364,6 +1364,9 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
                   driver->m_3DCaps.MaxTextureWidth == caps.MaxTextureSize &&
                   driver->m_TextureFormats.Size() > 0,
               "Context creation must refresh legacy driver caps from bgfx");
+    TestCheck(caps.MaxTextureBindings >= CKFF_MAX_PROGRAM_SAMPLER_BINDINGS &&
+                  caps.MaxTextureStages <= CKFF_MAX_TEXTURE_STAGES,
+              "Backend caps must distinguish physical sampler bindings from FFP stages");
     if (target.ShaderProfile == CKRST_SHADER_PROFILE_GLSL ||
         target.ShaderProfile == CKRST_SHADER_PROFILE_ESSL) {
         TestCheck(target.HomogeneousDepth && target.OriginBottomLeft,
