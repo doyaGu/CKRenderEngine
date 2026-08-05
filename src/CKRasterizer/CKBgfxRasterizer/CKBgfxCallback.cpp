@@ -248,7 +248,8 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
         for (int i = 0; i < m_Context->m_PendingScreenShots.Size(); ++i) {
             if (_filePath &&
                 m_Context->m_PendingScreenShots[i].Path.Compare(_filePath) == 0) {
-                m_Context->m_PendingScreenShots.RemoveAt((unsigned int)i, request);
+                request = m_Context->m_PendingScreenShots[i];
+                m_Context->m_PendingScreenShots.RemoveAt(i);
                 foundRequest = true;
                 break;
             }
@@ -304,7 +305,7 @@ void CKBgfxCallback::captureFrame(const void *_data, uint32_t _size)
     if (!m_Context || !_data || _size == 0)
         return;
 
-    XArray<CKBgfxScreenShotRequest> completed;
+    XClassArray<CKBgfxScreenShotRequest> completed;
     CKDWORD width = 0;
     CKDWORD height = 0;
     CKDWORD pitch = 0;
@@ -321,8 +322,8 @@ void CKBgfxCallback::captureFrame(const void *_data, uint32_t _size)
             if (!m_Context->m_PendingScreenShots[i].UseCaptureFrame)
                 continue;
             CKBgfxScreenShotRequest request = {};
-            m_Context->m_PendingScreenShots.RemoveAt(
-                (unsigned int)i, request);
+            request = m_Context->m_PendingScreenShots[i];
+            m_Context->m_PendingScreenShots.RemoveAt(i);
             completed.PushBack(request);
         }
     }

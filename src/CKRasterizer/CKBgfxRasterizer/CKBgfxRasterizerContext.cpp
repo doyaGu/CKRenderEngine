@@ -2004,7 +2004,7 @@ void CKBgfxRasterizerContext::RecordViewColorWrite(CKRenderView View,
 
 CKBgfxRasterizerContext::~CKBgfxRasterizerContext()
 {
-    XArray<CKBgfxScreenShotRequest> cancelledScreenShots;
+    XClassArray<CKBgfxScreenShotRequest> cancelledScreenShots;
     {
         VxMutexLock lock(m_ScreenShotMutex);
         cancelledScreenShots.Swap(m_PendingScreenShots);
@@ -5475,7 +5475,7 @@ CKBOOL CKBgfxRasterizerContext::HasCaptureFrameScreenShots()
 
 CKERROR CKBgfxRasterizerContext::CancelScreenShots(void *UserData)
 {
-    XArray<CKBgfxScreenShotRequest> cancelled;
+    XClassArray<CKBgfxScreenShotRequest> cancelled;
     {
         VxMutexLock lock(m_ScreenShotMutex);
         for (int i = m_PendingScreenShots.Size() - 1; i >= 0; --i) {
@@ -5483,7 +5483,8 @@ CKERROR CKBgfxRasterizerContext::CancelScreenShots(void *UserData)
                 continue;
 
             CKBgfxScreenShotRequest request = {};
-            m_PendingScreenShots.RemoveAt((unsigned int)i, request);
+            request = m_PendingScreenShots[i];
+            m_PendingScreenShots.RemoveAt(i);
             cancelled.PushBack(request);
         }
     }
