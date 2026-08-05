@@ -80,7 +80,6 @@ void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner)
 
     m_TextureFormats.Clear();
     CKTextureDesc textureDesc;
-    memset(&textureDesc, 0, sizeof(textureDesc));
     textureDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     VxPixelFormat2ImageDesc(_32_ARGB8888, textureDesc.Format);
     m_TextureFormats.PushBack(textureDesc);
