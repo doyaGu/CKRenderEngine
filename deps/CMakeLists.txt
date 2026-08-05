@@ -23,6 +23,13 @@ if (NOT TARGET bgfx)
     add_subdirectory(bgfx)
 endif ()
 
+if (TARGET bimg_encode AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bimg_encode PRIVATE
+            -Wno-logical-not-parentheses
+            -Wno-nontrivial-memcall
+    )
+endif ()
+
 if (TARGET bgfx AND CKRE_BGFX_OPENGLES_VERSION)
     target_compile_definitions(bgfx PRIVATE
             BGFX_CONFIG_RENDERER_OPENGLES=${CKRE_BGFX_OPENGLES_VERSION}
