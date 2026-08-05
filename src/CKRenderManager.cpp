@@ -212,8 +212,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // Allocate driver description array
     if (m_DriverCount > 0) {
-        m_Drivers = new VxDriverDescEx[m_DriverCount];
-        memset(m_Drivers, 0, sizeof(VxDriverDescEx) * m_DriverCount);
+        m_Drivers = new VxDriverDescEx[m_DriverCount]();
     }
 
     CKDWORD driverId = 0;
