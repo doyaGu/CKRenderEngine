@@ -124,7 +124,7 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
 endforeach ()
 
 # Tests
-if (CKRE_BUILD_TESTS OR BUILD_TESTING)
+if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_executable(test_null_rasterizer tests/test_null_rasterizer.cpp)
     target_include_directories(test_null_rasterizer PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
