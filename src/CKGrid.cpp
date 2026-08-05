@@ -406,7 +406,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
 
     // Create the mesh
     char buffer[256];
-    sprintf(buffer, "%s mesh", GetName());
+    snprintf(buffer, sizeof(buffer), "%s mesh", GetName());
     m_Mesh = (RCKMesh *) m_Context->CreateObject(CKCID_MESH, buffer, CK_OBJECTCREATION_NONAMECHECK);
     if (!m_Mesh)
         return;
@@ -485,7 +485,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     m_Mesh->SetLitMode(VX_PRELITMESH);
 
     // Create main material (with alpha blend for transparency)
-    sprintf(buffer, "%s material", GetName());
+    snprintf(buffer, sizeof(buffer), "%s material", GetName());
     CKMaterial *material = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
     m_Mesh->SetFaceMaterial(0, material);
     m_Mesh->SetFaceMaterial(1, material);
@@ -501,7 +501,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     material->SetTextureBlendMode(VXTEXTUREBLEND_MODULATEALPHA);
 
     // Create wireframe material for border
-    sprintf(buffer, "%s material2", GetName());
+    snprintf(buffer, sizeof(buffer), "%s material2", GetName());
     CKMaterial *material2 = (CKMaterial *) m_Context->CreateObject(CKCID_MATERIAL, buffer, CK_OBJECTCREATION_NONAMECHECK);
     for (int i = 2; i < 10; ++i)
         m_Mesh->SetFaceMaterial(i, material2);
@@ -512,7 +512,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     material2->SetDiffuse(white);
 
     // Create texture for grid visualization
-    sprintf(buffer, "%s texture", GetName());
+    snprintf(buffer, sizeof(buffer), "%s texture", GetName());
     CKTexture *texture = (CKTexture *) m_Context->CreateObject(CKCID_TEXTURE, buffer, CK_OBJECTCREATION_NONAMECHECK);
 
     // Calculate texture size based on grid dimensions (power of 2, max 256)
