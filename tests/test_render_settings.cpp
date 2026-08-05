@@ -37,7 +37,7 @@ static void OverridesReadEveryLegacyRootOption() {
 
     for (int i = 0; i < (int)(sizeof(numericCases) / sizeof(numericCases[0])); ++i) {
         char value[16];
-        sprintf(value, "%lu", (unsigned long)numericCases[i].value);
+        snprintf(value, sizeof(value), "%lu", (unsigned long)numericCases[i].value);
         CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, numericCases[i].name, value);
         TestCheck(CKRenderSettingsGetDword(CKRenderSettingsSection::Root, numericCases[i].name, 999) == numericCases[i].value,
                   "numeric CK2_3D root option should round-trip through settings");
