@@ -982,6 +982,16 @@ void RunSpecializedCriticalPixelCases(CKBgfxRasterizerContext *context,
 
 void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
 {
+    CKRasterizerCapsDesc caps;
+    TestCheck(context && context->GetCaps(&caps) == CK_OK,
+              "Backend pixel gate must query runtime capabilities");
+    const CKRST_CAPS requiredReadbackCaps =
+        CKRST_CAPS_BLIT | CKRST_CAPS_TEXTURE_READBACK;
+    if ((caps.Features & requiredReadbackCaps) != requiredReadbackCaps) {
+        printf("  coverage: backendPixelCases=0 reason=texture-readback-unavailable\n");
+        return;
+    }
+
     CKRenderSettingsClearOverridesForTests();
     CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
                                         "ShaderMode", "runtime-specialized");
