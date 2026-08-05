@@ -826,7 +826,7 @@ void NvStripifier::CreateStrips(
 
     outIndices.Resize(0);
     outStripCount = 0;
-    XArray<XArray<CKWORD> > sequences;
+    XClassArray<XArray<CKWORD> > sequences;
     sequences.Reserve(strips.Size());
     bool requiresJoinedFallback = false;
 

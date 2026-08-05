@@ -177,7 +177,7 @@ class CKNullRasterizerEncoder;
 struct CKNullContextState {
     XUINTPTR ApiThread;
     VxMutex ResourceMutex;
-    XArray<CKNullResourceRecord> Resources;
+    XClassArray<CKNullResourceRecord> Resources;
     CKDWORD NextResourceHandle;
     VxMutex TransformMutex;
     XArray<VxMatrix> Transforms;
