@@ -2234,9 +2234,18 @@ int RCKPatchMesh::GetPatchCount() {
  */
 void RCKPatchMesh::SetPatch(int index, CKPatch *p) {
     if (index >= 0 && index < m_Patches.Size() && p) {
-        // Copy 56 bytes (all fields except auxs)
-        memcpy(&m_Patches[index], p, 56);
-        m_Patches[index].auxs = nullptr; // Clear runtime auxs pointer
+        CKPatch &patch = m_Patches[index];
+        CKDeletePointer(patch.auxs);
+        patch.type = p->type;
+        patch.SmoothingGroup = p->SmoothingGroup;
+        for (int i = 0; i < 4; ++i) {
+            patch.v[i] = p->v[i];
+            patch.interior[i] = p->interior[i];
+            patch.edge[i] = p->edge[i];
+        }
+        for (int i = 0; i < 8; ++i)
+            patch.vec[i] = p->vec[i];
+        patch.Material = p->Material;
         m_PatchChanged = TRUE;
     }
 }
@@ -2247,8 +2256,18 @@ void RCKPatchMesh::SetPatch(int index, CKPatch *p) {
  */
 void RCKPatchMesh::GetPatch(int index, CKPatch *p) {
     if (index >= 0 && index < m_Patches.Size() && p) {
-        memcpy(p, &m_Patches[index], 56);
-        p->auxs = nullptr; // Clear runtime auxs pointer
+        CKPatch &patch = m_Patches[index];
+        CKDeletePointer(p->auxs);
+        p->type = patch.type;
+        p->SmoothingGroup = patch.SmoothingGroup;
+        for (int i = 0; i < 4; ++i) {
+            p->v[i] = patch.v[i];
+            p->interior[i] = patch.interior[i];
+            p->edge[i] = patch.edge[i];
+        }
+        for (int i = 0; i < 8; ++i)
+            p->vec[i] = patch.vec[i];
+        p->Material = patch.Material;
     }
 }
 
