@@ -556,7 +556,7 @@ private:
     std::atomic<CKBOOL> m_ShuttingDown;
 
     VxMutex m_ScreenShotMutex;
-    XArray<CKBgfxScreenShotRequest> m_PendingScreenShots;
+    XClassArray<CKBgfxScreenShotRequest> m_PendingScreenShots;
     uint64_t m_NextScreenShotToken;
     CKDWORD m_CaptureWidth;
     CKDWORD m_CaptureHeight;
