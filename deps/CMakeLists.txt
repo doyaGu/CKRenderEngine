@@ -24,10 +24,14 @@ if (NOT TARGET bgfx)
 endif ()
 
 if (TARGET bimg_encode AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(bimg_encode PRIVATE
-            -Wno-logical-not-parentheses
-            -Wno-nontrivial-memcall
-    )
+    set_property(SOURCE
+            "${BIMG_DIR}/3rdparty/etcpak/ProcessRGB.cpp"
+            TARGET_DIRECTORY bimg_encode APPEND PROPERTY
+            COMPILE_OPTIONS "-Wno-logical-not-parentheses")
+    set_property(SOURCE
+            "${BIMG_DIR}/3rdparty/nvtt/nvmath/fitting.cpp"
+            TARGET_DIRECTORY bimg_encode APPEND PROPERTY
+            COMPILE_OPTIONS "-Wno-nontrivial-memcall")
 endif ()
 
 if (TARGET bgfx AND CKRE_BGFX_OPENGLES_VERSION)
