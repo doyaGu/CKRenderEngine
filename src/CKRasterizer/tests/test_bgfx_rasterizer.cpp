@@ -659,6 +659,8 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(driver->m_DisplayModes.Size() > 0,
                 "bgfx driver exposes real modes or a minimal fallback list");
     TEST_ASSERT(DisplayModesAreSorted(driver), "bgfx display modes are sorted for screen-mode grouping");
+    TEST_ASSERT(HasDisplayMode(driver, 640, 480, 32, 60),
+                "bgfx driver exposes the legacy 640x480 windowed mode");
     TEST_ASSERT(!HasDisplayMode(driver, 800, 600, 16, 60),
                 "bgfx driver does not fabricate legacy 16-bit display modes");
     TEST_ASSERT(driver->m_CapsUpToDate == FALSE,

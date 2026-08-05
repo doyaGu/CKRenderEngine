@@ -78,14 +78,15 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
         {1280, 720},
         {1920, 1080},
     };
-    if (m_DisplayModes.Size() == 0) {
-        for (int i = 0;
-             i < (int)(sizeof(fallbackResolutions) / sizeof(fallbackResolutions[0]));
-             ++i) {
-            AddCompatibleDisplayMode(m_DisplayModes,
-                                     fallbackResolutions[i][0],
-                                     fallbackResolutions[i][1]);
-        }
+    // Windowed contexts are not limited to the display's exclusive fullscreen
+    // modes. Keep the legacy resolutions selectable even on Retina displays,
+    // which commonly omit 640x480 and 800x600 from the SDL mode list.
+    for (int i = 0;
+         i < (int)(sizeof(fallbackResolutions) / sizeof(fallbackResolutions[0]));
+         ++i) {
+        AddCompatibleDisplayMode(m_DisplayModes,
+                                 fallbackResolutions[i][0],
+                                 fallbackResolutions[i][1]);
     }
 
     m_DisplayModes.Sort(CompareDisplayModes);
