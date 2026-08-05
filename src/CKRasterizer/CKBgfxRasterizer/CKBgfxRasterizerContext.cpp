@@ -9,7 +9,7 @@
 #include <stdarg.h>
 #include <string.h>
 
-static_assert(BGFX_API_VERSION == 147, "Review CKBgfxRasterizer mappings before updating bgfx");
+static_assert(BGFX_API_VERSION == 153, "Review CKBgfxRasterizer mappings before updating bgfx");
 static_assert(CKRST_DISCARD_BINDINGS == BGFX_DISCARD_BINDINGS, "discard ABI mismatch");
 static_assert(CKRST_DISCARD_INDEX_BUFFER == BGFX_DISCARD_INDEX_BUFFER, "discard ABI mismatch");
 static_assert(CKRST_DISCARD_INSTANCE_DATA == BGFX_DISCARD_INSTANCE_DATA, "discard ABI mismatch");
