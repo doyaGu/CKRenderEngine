@@ -23,6 +23,12 @@ if (NOT TARGET bgfx)
     add_subdirectory(bgfx)
 endif ()
 
+if (TARGET bgfx AND CKRE_BGFX_OPENGLES_VERSION)
+    target_compile_definitions(bgfx PRIVATE
+            BGFX_CONFIG_RENDERER_OPENGLES=${CKRE_BGFX_OPENGLES_VERSION}
+    )
+endif ()
+
 if (TARGET bgfx AND CKRE_BUILD_SHARED AND BGFX_LIBRARY_TYPE STREQUAL "STATIC")
     target_compile_definitions(bgfx PRIVATE BGFX_SHARED_LIB_BUILD=1)
 endif ()
