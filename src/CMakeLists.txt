@@ -258,6 +258,8 @@ endif ()
 
 # Function to configure common target settings
 function(ckre_configure_target TARGET_NAME)
+    target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
+
     target_include_directories(${TARGET_NAME}
             PUBLIC
             $<BUILD_INTERFACE:${CKRE_GENERATED_INCLUDE_DIR}>

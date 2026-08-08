@@ -13,6 +13,7 @@ set(CKRASTERIZER_LIB_HEADERS
 )
 
 add_library(CKRasterizerLib STATIC ${CKRASTERIZER_LIB_SOURCES} ${CKRASTERIZER_LIB_HEADERS})
+target_compile_features(CKRasterizerLib PRIVATE cxx_std_20)
 
 target_include_directories(CKRasterizerLib
         PUBLIC
