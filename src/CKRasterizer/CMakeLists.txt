@@ -100,6 +100,8 @@ if (CKRE_BUILD_STATIC)
 endif ()
 
 foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
+    target_compile_features(${_ckre_bgfx_target} PRIVATE cxx_std_20)
+
     target_include_directories(${_ckre_bgfx_target}
             PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
