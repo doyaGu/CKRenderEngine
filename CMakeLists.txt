@@ -228,7 +228,7 @@ if (NOT TARGET VxMath OR NOT TARGET CK2)
             FetchContent_Declare(
                     virtools_sdk
                     GIT_REPOSITORY https://github.com/doyaGu/Virtools-SDK-2.1.git
-                    GIT_TAG main
+                    GIT_TAG 175bcb12d829c687359b90615be53524cdba0132
             )
             FetchContent_MakeAvailable(virtools_sdk)
             set(VIRTOOLS_SDK_PATH "${virtools_sdk_SOURCE_DIR}" CACHE PATH "Path to the Virtools SDK" FORCE)
