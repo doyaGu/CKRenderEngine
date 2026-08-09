@@ -544,12 +544,6 @@ CKERROR RCKMaterial::Load(CKStateChunk *chunk, CKFile *file) {
         m_Textures[i] = nullptr;
     }
 
-    if (m_EffectParameter && m_Context) {
-        m_Context->DestroyObject(m_EffectParameter, CK_DESTROY_TEMPOBJECT, nullptr);
-    }
-    m_EffectParameter = nullptr;
-    m_Flags &= ~0x3F00;
-
     // Read main material data
     if (chunk->SeekIdentifier(CK_STATESAVE_MATDATA)) {
         int dataVersion = chunk->GetDataVersion();

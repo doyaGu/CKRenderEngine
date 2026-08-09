@@ -215,15 +215,16 @@ void AdditionalTexturesSaveWithoutEffect() {
               "additional material textures must survive save/load even without an effect");
 }
 
-void LoadClearsStaleEffectState() {
+void LoadPreservesUnspecifiedEffectState() {
     MaterialTestWorld world;
     RCKMaterial source(world.context, "NoEffectSource");
     RCKMaterial loaded(world.context, "EffectLoaded");
 
     loaded.SetEffect(VXEFFECT_TEXGEN);
+    CKParameter *effectParameter = loaded.GetEffectParameter();
     TestCheck(loaded.GetEffect() == VXEFFECT_TEXGEN,
               "test setup should assign a material effect");
-    TestCheck(loaded.GetEffectParameter() != nullptr,
+    TestCheck(effectParameter != nullptr,
               "test setup should create an effect parameter");
 
     CKStateChunk *chunk = source.Save(nullptr, CK_STATESAVE_MATERIALONLY);
@@ -232,10 +233,29 @@ void LoadClearsStaleEffectState() {
     TestCheck(loaded.Load(chunk, nullptr) == CK_OK, "material Load failed");
     DeleteCKStateChunk(chunk);
 
-    TestCheck(loaded.GetEffect() == VXEFFECT_NONE,
-              "loading a material without effect data must clear stale effect bits");
-    TestCheck(loaded.GetEffectParameter() == nullptr,
-              "loading a material without effect data must clear stale effect parameters");
+    TestCheck(loaded.GetEffect() == VXEFFECT_TEXGEN,
+              "loading partial material state must preserve unspecified effect bits");
+    TestCheck(loaded.GetEffectParameter() == effectParameter,
+              "loading partial material state must preserve an unspecified effect parameter");
+}
+
+void LoadPreservesReferencedEffectParameter() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "EffectMaterial");
+
+    material.SetEffect(VXEFFECT_TEXGEN);
+    CKParameter *effectParameter = material.GetEffectParameter();
+    TestCheck(effectParameter != nullptr,
+              "test setup should create an effect parameter");
+
+    CKStateChunk *chunk = material.Save(nullptr, CK_STATESAVE_MATERIALONLY);
+    TestCheck(chunk != nullptr, "material Save failed");
+    chunk->StartRead();
+    TestCheck(material.Load(chunk, nullptr) == CK_OK, "material Load failed");
+    DeleteCKStateChunk(chunk);
+
+    TestCheck(material.GetEffectParameter() == effectParameter,
+              "loading material state must not destroy its referenced effect parameter");
 }
 
 void SetEffectInitializesAndReleasesParameters() {
@@ -336,8 +356,10 @@ int main() {
               &MultiTextureEffectPropagatesSecondaryUploadFailure);
     tests.Run("Additional textures save without effect",
               &AdditionalTexturesSaveWithoutEffect);
-    tests.Run("Load clears stale effect state",
-              &LoadClearsStaleEffectState);
+    tests.Run("Load preserves unspecified effect state",
+              &LoadPreservesUnspecifiedEffectState);
+    tests.Run("Load preserves a referenced effect parameter",
+              &LoadPreservesReferencedEffectParameter);
     tests.Run("SetEffect initializes and releases parameters",
               &SetEffectInitializesAndReleasesParameters);
     tests.Run("Custom effect callback runs when material is current",
