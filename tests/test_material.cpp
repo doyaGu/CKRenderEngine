@@ -4,6 +4,7 @@
 #include "CKContext.h"
 #include "CKDependencies.h"
 #include "CKGlobals.h"
+#include "CKParameter.h"
 #include "CKRenderManager.h"
 #include "CKStateChunk.h"
 #include "RCKRenderContext.h"
@@ -247,6 +248,7 @@ void LoadPreservesReferencedEffectParameter() {
     CKParameter *effectParameter = material.GetEffectParameter();
     TestCheck(effectParameter != nullptr,
               "test setup should create an effect parameter");
+    CK_ID effectParameterId = effectParameter->GetID();
 
     CKStateChunk *chunk = material.Save(nullptr, CK_STATESAVE_MATERIALONLY);
     TestCheck(chunk != nullptr, "material Save failed");
@@ -254,7 +256,7 @@ void LoadPreservesReferencedEffectParameter() {
     TestCheck(material.Load(chunk, nullptr) == CK_OK, "material Load failed");
     DeleteCKStateChunk(chunk);
 
-    TestCheck(material.GetEffectParameter() == effectParameter,
+    TestCheck(world.context->GetObject(effectParameterId) == effectParameter,
               "loading material state must not destroy its referenced effect parameter");
 }
 
