@@ -1505,12 +1505,26 @@ WIN_HANDLE RCKRenderContext::GetWindowHandle() {
 
 void RCKRenderContext::ScreenToClient(Vx2DVector *ioPoint) {
     // IDA: 0x1006c075
-    VxScreenToClient(m_WinHandle, (CKPOINT *) ioPoint);
+    if (!ioPoint)
+        return;
+
+    CKPOINT point = {static_cast<int>(ioPoint->x), static_cast<int>(ioPoint->y)};
+    if (VxScreenToClient(m_WinHandle, &point)) {
+        ioPoint->x = static_cast<float>(point.x);
+        ioPoint->y = static_cast<float>(point.y);
+    }
 }
 
 void RCKRenderContext::ClientToScreen(Vx2DVector *ioPoint) {
     // IDA: 0x1006c096
-    VxClientToScreen(m_WinHandle, (CKPOINT *) ioPoint);
+    if (!ioPoint)
+        return;
+
+    CKPOINT point = {static_cast<int>(ioPoint->x), static_cast<int>(ioPoint->y)};
+    if (VxClientToScreen(m_WinHandle, &point)) {
+        ioPoint->x = static_cast<float>(point.x);
+        ioPoint->y = static_cast<float>(point.y);
+    }
 }
 
 CKERROR RCKRenderContext::SetWindowRect(VxRect &rect, CKDWORD Flags) {
