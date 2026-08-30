@@ -34,6 +34,14 @@ if (TARGET bimg_encode AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             COMPILE_OPTIONS "-Wno-nontrivial-memcall")
 endif ()
 
+if (TARGET bimg_encode AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # The selector is constrained to [0, 15] by etcpak, but GCC cannot prove it.
+    set_property(SOURCE
+            "${BIMG_DIR}/3rdparty/etcpak/ProcessRGB.cpp"
+            TARGET_DIRECTORY bimg_encode APPEND PROPERTY
+            COMPILE_OPTIONS "-Wno-return-type")
+endif ()
+
 if (TARGET bgfx AND CKRE_BGFX_OPENGLES_VERSION)
     target_compile_definitions(bgfx PRIVATE
             BGFX_CONFIG_RENDERER_OPENGLES=${CKRE_BGFX_OPENGLES_VERSION}
