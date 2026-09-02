@@ -271,8 +271,8 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
                   CKFFSamplerBindStage(2, CKFF_SAMPLER_VOLUME) == 10,
               "Cube and volume samplers must bind to texture slots 8..15");
 
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
-    const std::string vs = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
+    const std::string vs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
     TestCheck(fs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos &&
                   vs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos,
               "Shader sources must declare u_ffDrawParams with the ABI count");
@@ -330,10 +330,10 @@ void StageParamsPackThroughABIIndices() {
 }
 
 void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
-    const std::string varying = ReadTextFile("Source/RenderEngine/src/shaders/varying.def.sc");
-    const std::string compiler = ReadTextFile("Source/RenderEngine/src/shaders/compile_shaders.py");
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
-    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_positiont.sc");
+    const std::string varying = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/varying.def.sc");
+    const std::string compiler = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_positiont.sc");
 
     TestCheck(varying.find("flat vec4 v_flatColor0") != std::string::npos &&
                   varying.find("flat vec4 v_flatColor1") != std::string::npos,
@@ -474,7 +474,7 @@ void LastActiveTextureStageSpecializationRoundTrips() {
 }
 
 void FullSpecializedRejectsRuntimeOnlyTextureStagesBeforeLookup() {
-    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKFFShaderCache.cpp");
+    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKFFShaderCache.cpp");
     TestCheck(!shaderCache.empty(),
               "Shader cache source must be readable");
 
@@ -493,10 +493,10 @@ void FullSpecializedRejectsRuntimeOnlyTextureStagesBeforeLookup() {
 }
 
 void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
-    const std::string common = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_common.sc");
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
-    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_positiont.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_common.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_positiont.sc");
 
     TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
@@ -516,7 +516,7 @@ void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
 }
 
 void TextureCombinerOpFormulasStayDxvkCompatible() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
 
     TestCheck(!fs.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -610,7 +610,7 @@ void TextureCombinerPreservesTempDestination() {
               "a final TEMP write must leave CURRENT unchanged");
 
     const std::string fs = ReadTextFile(
-        "Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+        "Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
     TestCheck(fs.find("vec4 stageResult = resultArg == 5 ? temp : current") !=
                   std::string::npos &&
                   fs.find("if (op == 1) return dst") != std::string::npos &&
@@ -694,7 +694,7 @@ void AlphaTestPrecisionFollowsRenderTargetAlphaMask() {
 }
 
 void TextureCombinerTempInitializesAlphaToZero() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -705,7 +705,7 @@ void TextureCombinerTempInitializesAlphaToZero() {
 }
 
 void DepthTextureCompareUsesSamplerCompareOrdering() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -725,13 +725,13 @@ void DepthTextureCompareUsesSamplerCompareOrdering() {
 
 void Runtime3DVertexShaderKeepsAdditionalTexcoordsActive() {
     RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
-        "Source/RenderEngine/src/shaders/vs_ff_3d.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc",
         "FFP 3D vertex shader source must be readable from the test working directory");
 }
 
 void RuntimePositionTVertexShaderKeepsAdditionalTexcoordsActive() {
     RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
-        "Source/RenderEngine/src/shaders/vs_ff_positiont.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_positiont.sc",
         "FFP POSITIONT vertex shader source must be readable from the test working directory");
 }
 
@@ -804,9 +804,9 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
 }
 
 void TweeningInputsAndShaderAreWired() {
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/shaders/vs_ff_3d.sc");
-    const std::string layout = ReadTextFile("Source/RenderEngine/src/CKVertexLayoutCache.cpp");
-    const std::string transient = ReadTextFile("Source/RenderEngine/src/CKTransientGeometry.cpp");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
+    const std::string layout = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKVertexLayoutCache.cpp");
+    const std::string transient = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKTransientGeometry.cpp");
     const std::string vertexBuffer = ReadTextFile("Source/RenderEngine/src/CKVertexBuffer.cpp");
 
     TestCheck(!vs3d.empty() && !layout.empty() && !transient.empty() &&
@@ -993,7 +993,7 @@ void SamplerLayoutMissDiagnosticsAreActionable() {
                           "{\"backends\":[\"dx11\"],\"stageTypes\":[3,0,1,0,0,0,0,0]}") == 0,
               "Sampler layout diagnostics must emit a copyable manifest entry");
 
-    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKFFShaderCache.cpp");
+    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKFFShaderCache.cpp");
     TestCheck(shaderCache.find("FFP static sampler layout miss") != std::string::npos,
               "Static sampler layout miss must be logged");
     TestCheck(shaderCache.find("profile=0x%08X") != std::string::npos &&
@@ -1007,7 +1007,7 @@ void SamplerLayoutMissDiagnosticsAreActionable() {
 }
 
 void FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
 
@@ -1029,7 +1029,7 @@ void FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization() {
 }
 
 void CMakeShaderSourcesIncludeSamplerLayoutManifest() {
-    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CMakeLists.txt");
+    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CMakeLists.txt");
     TestCheck(!cmake.empty(),
               "RenderEngine CMakeLists must be readable from the test working directory");
     TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json") != std::string::npos,
@@ -1041,9 +1041,9 @@ void CMakeShaderSourcesIncludeSamplerLayoutManifest() {
 }
 
 void SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration() {
-    const std::string manifest = ReadTextFile("Source/RenderEngine/src/shaders/ffp_sampler_layouts.json");
-    const std::string script = ReadTextFile("Source/RenderEngine/src/shaders/compile_shaders.py");
-    const std::string generated = ReadTextFile("Source/RenderEngine/src/shaders/generated/CKFFSpecializedModuleTable.generated.h");
+    const std::string manifest = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/ffp_sampler_layouts.json");
+    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
+    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/generated/CKFFSpecializedModuleTable.generated.h");
 
     TestCheck(!manifest.empty(),
               "FFP sampler layout manifest must be present");
@@ -1103,7 +1103,7 @@ void SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration() {
                 "/sampler_layout/" + identifier + "_fs_ff_stage.bin.h";
             TestCheck(generated.find(headerPath) != std::string::npos,
                       "Generated table must include every manifest sampler layout header");
-            TestCheck(!ReadTextFile((std::string("Source/RenderEngine/src/") + headerPath).c_str()).empty(),
+            TestCheck(!ReadTextFile((std::string("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/") + headerPath).c_str()).empty(),
                       "Every generated sampler layout table include must point at an existing binary header");
 
             const std::string moduleName = std::string("CKFFSamplerLayoutModule_") + backend + "_" + identifier;

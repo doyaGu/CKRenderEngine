@@ -1,7 +1,7 @@
 #include "CKRenderPipeline.h"
 #include "CKRasterizer.h"
 #include "CKDebugLogger.h"
-#include "CKRenderPerfStats.h"
+#include "CKRenderPerfClock.h"
 #include "CKRenderSettings.h"
 
 #include "shaders/generated/dx11/vs_postprocess.bin.h"

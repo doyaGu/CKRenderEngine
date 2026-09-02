@@ -6,7 +6,7 @@
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKRenderConfig.h"
-#include "CKRenderPerfStats.h"
+#include "CKRenderPerfClock.h"
 
 class CKDrawStateCache;
 class CKFFRenderPacketQueue;

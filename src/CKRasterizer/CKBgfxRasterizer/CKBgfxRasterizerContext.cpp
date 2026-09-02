@@ -3,7 +3,7 @@
 #include "CKBgfxDrawMapTrace.h"
 #include "CKRasterizerValidation.h"
 #include "CKRasterizerCapsBaseline.h"
-#include "../../CKDrawAnnotation.h"
+#include "CKDrawAnnotation.h"
 
 #include <SDL3/SDL.h>
 #include <stdint.h>

@@ -89,7 +89,7 @@ def find_shaderc(explicit: str | None) -> Path:
         candidates.append(Path(path_shaderc))
 
     script_dir = Path(__file__).resolve().parent
-    renderengine_root = script_dir.parent.parent
+    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
     workspace_root = renderengine_root.parent.parent
     for build_root in (workspace_root / "build", workspace_root / "out"):
         if build_root.exists():
@@ -106,7 +106,7 @@ def find_shaderc(explicit: str | None) -> Path:
 
 
 def include_dirs(script_dir: Path) -> list[Path]:
-    renderengine_root = script_dir.parent.parent
+    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
     bgfx_root = renderengine_root / "deps" / "bgfx" / "bgfx"
     return [
         script_dir,
@@ -508,7 +508,7 @@ def shaderc_runtime_dirs(script_dir: Path, shaderc: Path) -> list[Path]:
                 dirs.append(candidate.parent)
                 break
 
-    renderengine_root = script_dir.parent.parent
+    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
     dirs.append(renderengine_root / "deps" / "bgfx" / "bgfx" / "tools" / "bin" / "windows")
     return dirs
 

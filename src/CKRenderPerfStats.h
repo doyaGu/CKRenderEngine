@@ -2,6 +2,7 @@
 #define CK_RENDER_PERF_STATS_H
 
 #include "CKRenderConfig.h"
+#include "CKRenderPerfClock.h"
 #include "CKTypes.h"
 
 enum CKRenderPerfSection {
@@ -54,10 +55,6 @@ struct CKRenderPerfStats {
 
 #if CKRE_ENABLE_RENDER_STATS
 bool CKRenderPerfStatsEnabled();
-double CKRenderPerfNow();
-double CKRenderPerfElapsedUs(double start);
-void CKRenderPerfResetNowCallCountForTests();
-CKDWORD CKRenderPerfNowCallCountForTests();
 void CKRenderPerfBeginFrame(CKDWORD entities3D, CKDWORD entities2D, CKDWORD cameras, CKDWORD lights);
 void CKRenderPerfAddSection(CKRenderPerfSection section, double us);
 void CKRenderPerfLogAndReset();
@@ -77,10 +74,6 @@ CKRenderPerfStats &CKRenderPerfCurrent();
 
 #else
 inline bool CKRenderPerfStatsEnabled() { return false; }
-inline double CKRenderPerfNow() { return 0.0; }
-inline double CKRenderPerfElapsedUs(double) { return 0.0; }
-inline void CKRenderPerfResetNowCallCountForTests() {}
-inline CKDWORD CKRenderPerfNowCallCountForTests() { return 0; }
 inline void CKRenderPerfBeginFrame(CKDWORD, CKDWORD, CKDWORD, CKDWORD) {}
 inline void CKRenderPerfAddSection(CKRenderPerfSection, double) {}
 inline void CKRenderPerfLogAndReset() {}

@@ -4,7 +4,6 @@ add_subdirectory(CKRasterizerLib)
 add_subdirectory(v3/CKRasterizerLib3)
 
 set(CKBGFX_RASTERIZER_SOURCES
-        ../CKDrawAnnotationParser.cpp
         CKBgfxRasterizer/CKBgfxCallback.cpp
         CKBgfxRasterizer/CKBgfxConfig.cpp
         CKBgfxRasterizer/CKBgfxDrawMapTrace.cpp

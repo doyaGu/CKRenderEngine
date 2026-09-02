@@ -1,9 +1,42 @@
-# CKRasterizerLib - v2 rasterizer base and null fallback
+# CKRasterizerLib - translation core shared by the rasterizer plugins:
+#   * v2 rasterizer base classes and the NULL fallback
+#   * fixed-function pipeline translation (CKFF*, CKFixedFunctionPipeline,
+#     draw-state / vertex-layout caches, transient geometry, render pipeline)
+#   * render settings / debug logger / frame-cost stats it depends on
+#   * bgfx fixed-function shaders (shaders/, generated headers checked in)
 set(CKRASTERIZER_LIB_SOURCES
         CKRasterizer.cpp
         CKRasterizerDriver.cpp
         CKRasterizerContext.cpp
         CKRasterizerCapsBaseline.cpp
+
+        CKFixedFunctionPipeline.cpp
+        CKFFPipelineState.cpp
+        CKFFPipelineGuards.cpp
+        CKFFDrawProbes.cpp
+        CKFFDrawTypes.cpp
+        CKFFDrawPreparer.cpp
+        CKFFStateStore.cpp
+        CKFFStateResolver.cpp
+        CKFFTextureBinder.cpp
+        CKFFUniformEmitter.cpp
+        CKFFOpaquePacketCoordinator.cpp
+        CKFFRenderPacket.cpp
+        CKFFRenderPacketQueue.cpp
+        CKFFRenderPacketReplay.cpp
+        CKFFStageState.cpp
+        CKFFUniformState.cpp
+        CKFFShaderKey.cpp
+        CKFFSpecializationInfo.cpp
+        CKFFSpecializedModuleTable.cpp
+        CKFFShaderCache.cpp
+        CKDrawAnnotation.cpp
+        CKDrawAnnotationParser.cpp
+        CKDrawStateCache.cpp
+        CKVertexLayoutCache.cpp
+        CKTransientGeometry.cpp
+        CKRenderPipeline.cpp
+        CKRenderSettings.cpp
 )
 
 set(CKRASTERIZER_LIB_HEADERS
@@ -13,7 +46,57 @@ set(CKRASTERIZER_LIB_HEADERS
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
+
+        CKFixedFunctionPipeline.h
+        CKRenderConfig.h
+        CKDebugLogger.h
+        CKFFDebug.h
+        CKFFDrawProbes.h
+        CKFFStageState.h
+        CKFFShaderABI.h
+        CKFFUniformState.h
+        CKFFShaderKey.h
+        CKFFSamplerLayout.h
+        CKFFSpecializationInfo.h
+        CKFFSpecializedModuleTable.h
+        CKFFStateDesc.h
+        CKFFRenderPacket.h
+        CKFFRenderPacketQueue.h
+        CKFFRenderPacketReplay.h
+        CKFFShaderCache.h
+        CKFFConstants.h
+        CKFFDrawTypes.h
+        CKFFDrawPreparer.h
+        CKFFStateStore.h
+        CKFFStateResolver.h
+        CKFFTextureBinder.h
+        CKFFUniformEmitter.h
+        CKFFOpaquePacketCoordinator.h
+        CKDrawAnnotation.h
+        CKDrawStateCache.h
+        CKVertexLayoutCache.h
+        CKTransientGeometry.h
+        CKRenderPipeline.h
+        CKRenderSettings.h
+        CKRenderPerfClock.h
+        CKRenderFrameCostStats.h
 )
+
+if (CKRE_ENABLE_DEBUG_LOGGER)
+    list(APPEND CKRASTERIZER_LIB_SOURCES CKDebugLogger.cpp)
+endif ()
+
+if (CKRE_ENABLE_RENDER_STATS)
+    list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderPerfClock.cpp)
+endif ()
+
+if (CKRE_ENABLE_FRAME_COST_STATS)
+    list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderFrameCostStats.cpp)
+endif ()
+
+if (CKRE_ENABLE_FFP_DIAGNOSTICS)
+    list(APPEND CKRASTERIZER_LIB_SOURCES CKFFDebug.cpp)
+endif ()
 
 add_library(CKRasterizerLib STATIC ${CKRASTERIZER_LIB_SOURCES} ${CKRASTERIZER_LIB_HEADERS})
 target_compile_features(CKRasterizerLib PRIVATE cxx_std_20)
@@ -48,6 +131,49 @@ set_target_properties(CKRasterizerLib PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         FOLDER "Rasterizer"
 )
+
+
+# -----------------------------------------------------------------------------
+# bgfx fixed-function shaders. The generated headers are checked in; the
+# CK2_3D_shaders target regenerates them when CKRE_GENERATE_SHADERS is ON.
+# -----------------------------------------------------------------------------
+find_package(Python3 COMPONENTS Interpreter)
+set(CKRE_SHADER_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_3d.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_postprocess.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_postprocess.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_fog_common.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_specialized_variants.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+)
+
+if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)
+    set(CKRE_SHADER_STAMP "${CMAKE_CURRENT_BINARY_DIR}/CK2_3D_shaders.stamp")
+    add_custom_command(OUTPUT "${CKRE_SHADER_STAMP}"
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+                    --shaderc "${CKRE_SHADERC_COMMAND}"
+            COMMAND "${CMAKE_COMMAND}" -E touch "${CKRE_SHADER_STAMP}"
+            DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
+            COMMENT "Generating CK2_3D bgfx fixed-function shaders"
+            VERBATIM
+    )
+    add_custom_target(CK2_3D_shaders
+            DEPENDS "${CKRE_SHADER_STAMP}"
+            SOURCES ${CKRE_SHADER_SOURCES}
+    )
+    add_dependencies(CKRasterizerLib CK2_3D_shaders)
+elseif (CKRE_GENERATE_SHADERS)
+    message(WARNING "CK2_3D_shaders target disabled: Python3 or bgfx shaderc target not available")
+else ()
+    message(STATUS "CK2_3D_shaders target disabled: using checked-in generated shader headers")
+endif ()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CKRE_BUILD_SHARED)
     set_target_properties(CKRasterizerLib PROPERTIES POSITION_INDEPENDENT_CODE ON)

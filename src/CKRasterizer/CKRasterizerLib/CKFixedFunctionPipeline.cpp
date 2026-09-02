@@ -5,7 +5,7 @@
 #include "CKFFSamplerLayout.h"
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
-#include "CKRenderPerfStats.h"
+#include "CKRenderPerfClock.h"
 #include "CKRenderFrameCostStats.h"
 
 #include <math.h>

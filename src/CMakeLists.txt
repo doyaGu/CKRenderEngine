@@ -75,38 +75,8 @@ set(CKRE_PUBLIC_HEADERS
 )
 
 set(CKRE_PRIVATE_HEADERS
-        CKFixedFunctionPipeline.h
-        CKRenderConfig.h
-        CKDebugLogger.h
         CKException.h
-        CKFFDebug.h
-        CKFFDrawProbes.h
-        CKFFStageState.h
-        CKFFShaderABI.h
-        CKFFUniformState.h
-        CKFFShaderKey.h
-        CKFFSamplerLayout.h
-        CKFFSpecializationInfo.h
-        CKFFSpecializedModuleTable.h
-        CKFFStateDesc.h
-        CKFFRenderPacketQueue.h
-        CKFFRenderPacketReplay.h
-        CKFFShaderCache.h
-        CKFFConstants.h
-        CKFFDrawTypes.h
-        CKFFStateStore.h
-        CKFFStateResolver.h
-        CKFFTextureBinder.h
-        CKFFUniformEmitter.h
-        CKFFOpaquePacketCoordinator.h
-        CKDrawAnnotation.h
-        CKDrawStateCache.h
-        CKVertexLayoutCache.h
-        CKTransientGeometry.h
-        CKRenderPipeline.h
-        CKRenderSettings.h
         CKRenderPerfStats.h
-        CKRenderFrameCostStats.h
 )
 
 set(CKRE_CONFIG_FILES
@@ -161,34 +131,6 @@ set(CKRE_SOURCES
         CKRenderedScene.cpp
         CKSceneGraph.cpp
         CKVertexBuffer.cpp
-
-        CKFixedFunctionPipeline.cpp
-        CKFFPipelineState.cpp
-        CKFFPipelineGuards.cpp
-        CKFFDrawProbes.cpp
-        CKFFDrawTypes.cpp
-        CKFFDrawPreparer.cpp
-        CKFFStateStore.cpp
-        CKFFStateResolver.cpp
-        CKFFTextureBinder.cpp
-        CKFFUniformEmitter.cpp
-        CKFFOpaquePacketCoordinator.cpp
-        CKFFRenderPacket.cpp
-        CKFFRenderPacketQueue.cpp
-        CKFFRenderPacketReplay.cpp
-        CKFFStageState.cpp
-        CKFFUniformState.cpp
-        CKFFShaderKey.cpp
-        CKFFSpecializationInfo.cpp
-        CKFFSpecializedModuleTable.cpp
-        CKFFShaderCache.cpp
-        CKDrawAnnotation.cpp
-        CKDrawAnnotationParser.cpp
-        CKDrawStateCache.cpp
-        CKVertexLayoutCache.cpp
-        CKTransientGeometry.cpp
-        CKRenderPipeline.cpp
-        CKRenderSettings.cpp
 )
 
 if (WIN32)
@@ -196,19 +138,11 @@ if (WIN32)
 endif ()
 
 if (CKRE_ENABLE_DEBUG_LOGGER)
-    list(APPEND CKRE_SOURCES CKDebugLogger.cpp CKException.cpp)
+    list(APPEND CKRE_SOURCES CKException.cpp)
 endif ()
 
 if (CKRE_ENABLE_RENDER_STATS)
     list(APPEND CKRE_SOURCES CKRenderPerfStats.cpp)
-endif ()
-
-if (CKRE_ENABLE_FRAME_COST_STATS)
-    list(APPEND CKRE_SOURCES CKRenderFrameCostStats.cpp)
-endif ()
-
-if (CKRE_ENABLE_FFP_DIAGNOSTICS)
-    list(APPEND CKRE_SOURCES CKFFDebug.cpp)
 endif ()
 
 # Add the bgfx rasterizer plugin targets when requested.
@@ -216,42 +150,6 @@ if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
     add_subdirectory(CKRasterizer)
 elseif (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
     add_subdirectory(CKRasterizer/CKRasterizerLib)
-endif ()
-
-find_package(Python3 COMPONENTS Interpreter)
-set(CKRE_SHADER_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_3d.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_ff_positiont.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_stage.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vs_postprocess.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_postprocess.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_specialized_variants.json
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
-)
-
-if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)
-    set(CKRE_SHADER_STAMP "${CMAKE_CURRENT_BINARY_DIR}/CK2_3D_shaders.stamp")
-    add_custom_command(OUTPUT "${CKRE_SHADER_STAMP}"
-            COMMAND ${Python3_EXECUTABLE}
-                    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
-                    --shaderc "${CKRE_SHADERC_COMMAND}"
-            COMMAND "${CMAKE_COMMAND}" -E touch "${CKRE_SHADER_STAMP}"
-            DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
-            COMMENT "Generating CK2_3D bgfx fixed-function shaders"
-            VERBATIM
-    )
-    add_custom_target(CK2_3D_shaders
-            DEPENDS "${CKRE_SHADER_STAMP}"
-            SOURCES ${CKRE_SHADER_SOURCES}
-    )
-elseif (CKRE_GENERATE_SHADERS)
-    message(WARNING "CK2_3D_shaders target disabled: Python3 or bgfx shaderc target not available")
-else ()
-    message(STATUS "CK2_3D_shaders target disabled: using checked-in generated shader headers")
 endif ()
 
 # Function to configure common target settings
@@ -315,10 +213,6 @@ if (CKRE_BUILD_SHARED)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     )
 
-    # CK2_3D consumer code not yet rewritten for v2 API
-    if (TARGET CK2_3D_shaders)
-        add_dependencies(CK2_3D CK2_3D_shaders)
-    endif ()
 
     add_custom_command(TARGET CK2_3D POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -336,10 +230,6 @@ if (CKRE_BUILD_STATIC)
 
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
     ckre_configure_target(CK2_3DStatic)
-    # CK2_3DStatic consumer code not yet rewritten for v2 API
-    if (TARGET CK2_3D_shaders)
-        add_dependencies(CK2_3DStatic CK2_3D_shaders)
-    endif ()
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES
