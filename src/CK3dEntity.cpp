@@ -2589,10 +2589,10 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // Handle indirect matrix (mirrored objects)
     const CKBOOL hasIndirectMatrix = (m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0;
-    CKFFRenderStateGuard inverseWindingGuard(dev->m_FFPipeline, VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
+    CKFFRenderStateGuard inverseWindingGuard(*dev->m_FFP, VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
     if (hasIndirectMatrix) {
-        const CKDWORD inverseWinding = dev->m_FFPipeline.GetRenderState(VXRENDERSTATE_INVERSEWINDING);
-        dev->m_FFPipeline.SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);
+        const CKDWORD inverseWinding = dev->m_FFP->GetRenderState(VXRENDERSTATE_INVERSEWINDING);
+        dev->m_FFP->SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);
     }
 
     // Handle skin update for non-PM meshes
@@ -3205,7 +3205,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
         return FALSE;
 
     RCKRenderContext *dev = (RCKRenderContext *) rc;
-    if (!dev->m_RasterizerContext)
+    if (!dev->m_RasterizerDevice)
         return TRUE;
 
     const CKBOOL updateExtents = (CKBYTE) flags != 0;
@@ -3302,7 +3302,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
         return FALSE;
 
     RCKRenderContext *dev = (RCKRenderContext *) rc;
-    if (!dev->m_RasterizerContext || !m_SceneGraphNode)
+    if (!dev->m_RasterizerDevice || !m_SceneGraphNode)
         return TRUE;
 
     m_SceneGraphNode->SetAsPotentiallyVisible();

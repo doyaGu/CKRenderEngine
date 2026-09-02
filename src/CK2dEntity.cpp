@@ -865,7 +865,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             dev->SetFullViewport(&dev->m_ViewportData, (int) width, (int) height);
         }
 
-        CKFFStateGuard ffpState(dev->m_FFPipeline);
+        CKFFStateGuard ffpState(*dev->m_FFP);
 
         // Set material
         if (!m_Material->SetAsCurrent(dev, TRUE, FALSE)) {
@@ -966,7 +966,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         if (m_Context->IsPlaying())
             return CK_OK;
 
-        CKFFStateGuard ffpState(dev->m_FFPipeline);
+        CKFFStateGuard ffpState(*dev->m_FFP);
 
         // Set blend states for transparent black fill
         dev->SetState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);

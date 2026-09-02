@@ -191,6 +191,11 @@ void TestDefaultsReachThePipeline()
 {
     Fixture f;
     CKDWORD value = 0;
+    // Create() resets only the contract-visible mirror; the explicit call
+    // pushes the v1 defaults into the pipeline.
+    TestCheck(f.FFP->GetRenderState(VXRENDERSTATE_CULLMODE) == VXCULL_CCW, "pipeline keeps its own defaults after Create");
+    f.Context->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);
+    f.Context->InitDefaultRenderStatesValue();
     TestCheck(f.Context->GetRenderState(VXRENDERSTATE_CULLMODE, &value) && value == VXCULL_CCW, "CULLMODE default");
     TestCheck(f.Context->GetRenderState(VXRENDERSTATE_ZENABLE, &value) && value == 1, "ZENABLE default");
     TestCheck(f.Context->GetRenderState(VXRENDERSTATE_COLORWRITEENABLE, &value) && value == CKRST_COLORWRITE_ALL,
@@ -200,7 +205,7 @@ void TestDefaultsReachThePipeline()
     TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == CKRST_TOP_MODULATE, "stage 0 OP");
     TestCheck(f.Context->GetTextureStageState(1, CKRST_TSS_OP, &value) && value == CKRST_TOP_DISABLE, "stage 1 OP");
     TestCheck(f.Context->GetTextureStageState(3, CKRST_TSS_TEXCOORDINDEX, &value) && value == 3, "TEXCOORDINDEX");
-    TestCheck(f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == CKRST_TOP_MODULATE, "FFP received stage 0 OP");
+    TestCheck(f.FFP->GetTexture(0) == 0, "InitDefaultRenderStatesValue unbinds textures in the pipeline");
 }
 
 void TestStateRoundTrip()

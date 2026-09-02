@@ -57,7 +57,7 @@ protected:
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_VideoFormat;
     VxImageDescEx m_VideoFormatDesc;   // Cached video format (Phase 1 stub for CKSpriteDesc)
-    CKRasterizerDevice *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerDevice;
     CKDWORD m_ObjectIndex;
     CKBOOL m_InVideoMemory;
 };

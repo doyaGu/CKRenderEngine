@@ -76,24 +76,24 @@ void DrawViewRoutingPreservesExplicitPhases() {
               "Untransformed draws must use the current 2D view");
 
     renderContext->m_Current3DView = CKRP_VIEW_OPAQUE3D;
-    renderContext->m_FFPipeline.SetRenderState(
+    renderContext->m_FFP->SetRenderState(
         VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
     TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
                   CKRP_VIEW_TRANSPARENT,
               "Blended opaque-phase draws must use the transparent view");
 
-    renderContext->m_FFPipeline.SetRenderState(
+    renderContext->m_FFP->SetRenderState(
         VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    renderContext->m_FFPipeline.SetRenderState(
+    renderContext->m_FFP->SetRenderState(
         VXRENDERSTATE_ZWRITEENABLE, FALSE);
-    renderContext->m_FFPipeline.SetRenderState(
+    renderContext->m_FFP->SetRenderState(
         VXRENDERSTATE_STENCILENABLE, TRUE);
     TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
                   CKRP_VIEW_OPAQUE3D,
               "Stencil draws must stay in their explicit 3D phase");
 
     renderContext->m_Current3DView = CKRP_VIEW_RENDERFIRST3D;
-    renderContext->m_FFPipeline.SetRenderState(
+    renderContext->m_FFP->SetRenderState(
         VXRENDERSTATE_STENCILENABLE, FALSE);
     TestCheck(renderContext->ResolveDrawView(CKRST_DP_TRANSFORM) ==
                   CKRP_VIEW_RENDERFIRST3D,

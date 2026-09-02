@@ -105,7 +105,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_NextView = 0;
     m_LastFrameViewCount = 0;
 
-    InitDefaultRenderStatesValue();
+    ResetStateMirror();
 
     m_Viewport.ViewX = 0;
     m_Viewport.ViewY = 0;
@@ -432,30 +432,41 @@ CKBOOL CKTranslatedContext::GetUserClipPlane(CKDWORD Index, VxPlane &Plane)
     return TRUE;
 }
 
+void CKTranslatedContext::ResetStateMirror()
+{
+    // Contract-visible defaults (spec 4.6). Create() only resets the mirror:
+    // the fixed-function pipeline keeps its own richer defaults (they are what
+    // the engine renders with today), and the engine sets everything it
+    // depends on every frame anyway.
+    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
+        m_RenderStates[state] = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+        for (CKDWORD tss = 0; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss)
+            m_StageStates[stage][tss] = CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)tss);
+    }
+}
+
 void CKTranslatedContext::InitDefaultRenderStatesValue()
 {
-    // The contract-visible defaults go into the mirror. The pipeline only
-    // receives the non-zero ones: for the states the v1 table leaves at 0 the
-    // pipeline keeps its own (draw-valid) defaults, exactly as the engine
-    // behaves today when it never touches them.
+    ResetStateMirror();
+    // Render states with a non-zero v1 default reach the pipeline; the ones
+    // the v1 table leaves at 0 keep the pipeline's own draw-valid defaults.
     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state) {
-        const CKDWORD value = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
-        m_RenderStates[state] = value;
-        if (value != 0 || state == (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
-            SetRenderState((VXRENDERSTATETYPE)state, value);
+        const CKDWORD value = m_RenderStates[state];
+        if (value == 0 && state != (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
+            continue;
+        if (state == (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
+            m_FFP.SetColorWriteMask(value & CKRST_COLORWRITE_ALL);
+        else
+            m_FFP.SetRenderState((VXRENDERSTATETYPE)state, value);
     }
+    // Texture stages go back to the pipeline's own stage defaults. Pushing the
+    // D3D8 defaults one state at a time would mark states such as COLORARG0 or
+    // STAGEBLEND as explicitly set and make the pipeline reject draws.
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
-        for (CKDWORD tss = (CKDWORD)CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
-            const CKDWORD value = CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)tss);
-            if (tss == (CKDWORD)CKRST_TSS_TEXTUREMAPBLEND || tss == (CKDWORD)CKRST_TSS_STAGEBLEND) {
-                // The legacy combined states mean "not in use" at 0. Handing 0 to
-                // the pipeline would mark them as set and either clear the explicit
-                // combine state or make every draw fail; the mirror alone keeps them.
-                m_StageStates[stage][tss] = value;
-                continue;
-            }
-            SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, value);
-        }
+        m_FFP.ResetTextureStage(stage);
+        m_FFP.SetTexture(stage, 0, 0);
+        m_Textures[stage] = 0;
     }
 }
 

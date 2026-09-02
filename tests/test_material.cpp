@@ -11,6 +11,7 @@
 #include "RCKRenderManager.h"
 #include "RCKMaterial.h"
 #include "RCKTexture.h"
+#include "CKTranslatedRasterizer.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -30,7 +31,8 @@ struct MaterialTestWorld {
         : context(nullptr),
           renderManager(nullptr),
           renderContext(nullptr),
-          rasterizer(&driver) {
+          rasterizer(&driver),
+          translatedDriver(nullptr, &driver, 0) {
         TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
                   "CKCreateContext failed");
 
@@ -43,13 +45,14 @@ struct MaterialTestWorld {
         AddDriverTextureFormat(driver, _16_RGB565);
 
         renderContext = new RCKRenderContext(context);
-        renderContext->m_RasterizerContext = &rasterizer;
-        renderContext->m_RasterizerDriver = &driver;
+        translatedDriver.SyncCapsFromDevice();
+        renderContext->m_RasterizerDevice = &rasterizer;
+        renderContext->m_RasterizerDriver = &translatedDriver;
     }
 
     ~MaterialTestWorld() {
         if (renderContext) {
-            renderContext->m_RasterizerContext = nullptr;
+            renderContext->m_RasterizerDevice = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -65,6 +68,7 @@ struct MaterialTestWorld {
     RCKRenderContext *renderContext;
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext rasterizer;
+    CKTranslatedDriver translatedDriver;
 };
 
 void FillTextureSlot(RCKTexture &texture, int slot, CKDWORD seed) {
@@ -91,7 +95,7 @@ VX_EFFECTCALLBACK_RETVAL TextureMatrixEffectCallback(CKRenderContext *context,
     matrix.Identity();
     matrix[3][0] = 3.25f;
     renderContext->SetTextureMatrix(matrix, stage);
-    renderContext->m_FFPipeline.SetTextureStageState(
+    renderContext->m_FFP->SetTextureStageState(
         stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
     return VXEFFECTRETVAL_SKIPTEXMAT;
 }
@@ -147,7 +151,7 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent must fail when its texture upload fails");
-    TestCheck(world.renderContext->m_FFPipeline.GetTexture(0) == 0,
+    TestCheck(world.renderContext->m_FFP->GetTexture(0) == 0,
               "failed material texture upload must not leave a texture bound");
 }
 
@@ -169,7 +173,7 @@ void ChannelTextureBindingPreservesTextureFlags() {
               "BindTextureSlotToStage should bind cubemap texture");
 
     CKFFTextureStageSnapshot stage;
-    world.renderContext->m_FFPipeline.SaveTextureStage(1, stage);
+    world.renderContext->m_FFP->SaveTextureStage(1, stage);
     TestCheck((stage.TextureFlags & CKRST_TEXTURE_CUBEMAP) != 0,
               "channel texture binding must preserve cubemap texture flags");
 }
@@ -194,7 +198,7 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "multi-texture material setup must fail when a secondary texture upload fails");
-    TestCheck(world.renderContext->m_FFPipeline.GetTexture(1) == 0,
+    TestCheck(world.renderContext->m_FFP->GetTexture(1) == 0,
               "failed secondary texture upload must not leave the stage bound");
 }
 
@@ -312,10 +316,10 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
     TestCheck(material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent should preserve callback-owned texture matrices");
     CKFFTextureStageSnapshot stage;
-    world.renderContext->m_FFPipeline.SaveTextureStage(0, stage);
+    world.renderContext->m_FFP->SaveTextureStage(0, stage);
     TestCheck(stage.TextureMatrix[3][0] == 3.25f,
               "SKIPTEXMAT callback matrix must survive material texture setup");
-    TestCheck(world.renderContext->m_FFPipeline.GetTextureStageState(
+    TestCheck(world.renderContext->m_FFP->GetTextureStageState(
                   0, CKRST_TSS_TEXTURETRANSFORMFLAGS) == CKRST_TTF_COUNT2,
               "SKIPTEXMAT callback transform flags must survive material texture setup");
 }

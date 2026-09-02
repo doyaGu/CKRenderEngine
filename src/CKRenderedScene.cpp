@@ -255,7 +255,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
                           rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
         rc->m_Frustum = frustum;
 
-        rc->m_FFPipeline.SetTransform(VXMATRIX_WORLD, VxMatrix::Identity());
+        rc->m_FFP->SetTransform(VXMATRIX_WORLD, VxMatrix::Identity());
         rc->SetViewTransformationMatrix(rootEntity->GetInverseWorldMatrix());
 
         static int s_camLogCount = 0;
@@ -303,8 +303,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     // Obtain current view and projection matrices after camera setup so bgfx
     // receives the same transforms used by draw submission in this frame.
-    const VxMatrix &viewMat = rc->m_FFPipeline.GetViewMatrix();
-    const VxMatrix &projMat = rc->m_FFPipeline.GetProjectionMatrix();
+    const VxMatrix &viewMat = rc->m_FFP->GetViewMatrix();
+    const VxMatrix &projMat = rc->m_FFP->GetProjectionMatrix();
 
     if (frameLog)
         CK_LOG("RenderedScene", "Draw - calling BeginFrame");
@@ -314,10 +314,10 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 #endif
     CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
     rc->BeginFrameErrorTracking();
-    rc->m_FFPipeline.BeginDebugFrame();
-    rc->m_FFPipeline.FlushOpaqueRenderPackets();
+    rc->m_FFP->BeginDebugFrame();
+    rc->m_FFP->FlushOpaqueRenderPackets();
     const CKERROR beginFrameStatus =
-        rc->m_FFPipeline.GetRenderPipeline().BeginFrame(
+        rc->m_FFP->GetRenderPipeline().BeginFrame(
             viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
     if (beginFrameStatus != CK_OK)
         return beginFrameStatus;
@@ -429,7 +429,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 #endif
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_OPAQUE_TRAVERSAL, frameCostSectionStart);
 
-        rc->m_FFPipeline.FlushOpaqueRenderPackets();
+        rc->m_FFP->FlushOpaqueRenderPackets();
 
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
 
@@ -503,9 +503,9 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     rc->m_SpriteTimeProfiler.Reset();
 
     const CKERROR compositeStatus =
-        rc->m_FFPipeline.GetRenderPipeline().CompositeScene();
+        rc->m_FFP->GetRenderPipeline().CompositeScene();
     if (compositeStatus != CK_OK) {
-        rc->m_FFPipeline.GetRenderPipeline().EndFrame(
+        rc->m_FFP->GetRenderPipeline().EndFrame(
             CKRST_FRAME_SYNC_PRESERVE_PRESENT);
         return compositeStatus;
     }
@@ -578,7 +578,7 @@ void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
 
     for (CKDWORD i = 0; i < m_LightCount; ++i) {
-        rc->m_FFPipeline.EnableLight(i, FALSE);
+        rc->m_FFP->EnableLight(i, FALSE);
     }
     m_LightCount = 0;
 
@@ -593,12 +593,12 @@ void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
             continue;
         if (m_LightCount >= CKFF_MAX_LIGHTS)
             break;
-        if (light->Setup(&rc->m_FFPipeline, static_cast<int>(m_LightCount))) {
+        if (light->Setup(rc->m_FFP, static_cast<int>(m_LightCount))) {
             ++m_LightCount;
         }
     }
 
-    rc->m_FFPipeline.SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
+    rc->m_FFP->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
 }
 
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
@@ -617,7 +617,7 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerDevice * /*rst*/) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
-    CKFixedFunctionPipeline &ffp = rc->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *rc->m_FFP;
 
     CKDWORD fogMode = m_FogMode;
     if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {

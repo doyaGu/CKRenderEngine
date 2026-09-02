@@ -240,7 +240,7 @@ protected:
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;
     CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
-    CKRasterizerDevice *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerDevice;
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKDWORD m_IndexBufferIndexCount;

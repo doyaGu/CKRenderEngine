@@ -225,6 +225,7 @@ private:
     CKBOOL CompositeScene();
     void FinishFrame();
     void ApplyOptions();
+    void ResetStateMirror();
     void ReleaseFrameScratch();
     void ReleaseTarget();
     void UpdateAlphaTestPrecision();

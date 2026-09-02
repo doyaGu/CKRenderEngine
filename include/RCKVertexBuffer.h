@@ -33,7 +33,7 @@ protected:
     VxDrawPrimitiveData m_LockedData;
     CKDWORD m_FormatFlags;
     CKDWORD m_VertexLayout;
-    CKRasterizerDevice *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerDevice;
     CKBOOL m_HardwareValid;
     CKDWORD m_LockedStart;
     CKDWORD m_LockedCount;

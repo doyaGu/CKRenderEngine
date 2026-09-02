@@ -749,7 +749,7 @@ void RCKRenderManager::DetachAllObjects() {
 
 void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
     RCKRenderContext *rctx = (RCKRenderContext *) ctx;
-    CKRasterizerDevice *rstCtx = rctx->m_RasterizerContext;
+    CKRasterizerDevice *rstCtx = rctx->m_RasterizerDevice;
 
     for (int i = 0; i < CKGetClassCount(); ++i) {
         if (CKIsChildClassOf(i, CKCID_TEXTURE)) {
@@ -757,8 +757,8 @@ void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCKTexture *tex = (RCKTexture *) m_Context->GetObject(ids[j]);
-                if (tex && tex->m_RasterizerContext == rstCtx) {
-                    tex->m_RasterizerContext = nullptr;
+                if (tex && tex->m_RasterizerDevice == rstCtx) {
+                    tex->m_RasterizerDevice = nullptr;
                     tex->m_InVideoMemory = FALSE;
                 }
             }
@@ -767,8 +767,8 @@ void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
             CK_ID *ids = m_Context->GetObjectsListByClassID(i);
             for (int j = 0; j < count; ++j) {
                 RCKSprite *sprite = (RCKSprite *) m_Context->GetObject(ids[j]);
-                if (sprite && sprite->m_RasterizerContext == rstCtx) {
-                    sprite->m_RasterizerContext = nullptr;
+                if (sprite && sprite->m_RasterizerDevice == rstCtx) {
+                    sprite->m_RasterizerDevice = nullptr;
                     sprite->m_InVideoMemory = FALSE;
                 }
             }

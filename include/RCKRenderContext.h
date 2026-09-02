@@ -6,6 +6,7 @@
 #include "CKRenderedScene.h"
 #include "CKRasterizerDeviceEnums.h"
 #include "CKFixedFunctionPipeline.h"
+#include "CKTranslatedRasterizer.h"
 
 // Forward declarations
 class RCKMaterial;
@@ -110,6 +111,8 @@ public:
     // CK2 public API: returns the v3 CKRasterizerContext. The engine still
     // drives the internal device directly (step 1.3); wired in step 1.5.
     CKRasterizerContext *GetRasterizerContext() override;
+    void AttachTranslatedContext();
+    void DetachTranslatedContext();
     void ApplyRenderOptions();
     void SetClearBackground(CKBOOL ClearBack = TRUE) override;
     CKBOOL GetClearBackground() override;
@@ -283,8 +286,12 @@ public:
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
     CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
-    CKRasterizerDevice *m_RasterizerContext; // 0xA8 (4 bytes)
-    CKRasterizerDeviceDriver *m_RasterizerDriver; // 0xAC (4 bytes)
+    // v3 contract objects (phase 1 step 1.5). The engine still drives the
+    // device and the fixed-function pipeline behind the translated context
+    // directly until step 1.6 rewrites its files to the contract calls.
+    CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
+    CKRasterizerDriver *m_RasterizerDriver;   // 0xAC (4 bytes)
+    CKRasterizerDevice *m_RasterizerDevice;   // migration: device behind m_RasterizerContext
     int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
     CKDWORD m_Shading;                      // 0xB4 (4 bytes)
     CKBOOL m_TextureEnabled;                // 0xB8 (4 bytes)
@@ -364,8 +371,11 @@ public:
     void SetDrawCallbackObject(const CKDrawAnnotationObjectRef *object);
     CKBOOL GetDrawCallbackObject(CKDrawAnnotationObjectRef *object);
 
-    // Fixed-function pipeline (v2 rendering)
-    CKFixedFunctionPipeline m_FFPipeline;
+    // Fixed-function pipeline of the translated context (migration accessor).
+    // Without a device it points at m_DetachedFFP so state-only calls keep
+    // working exactly as with the former by-value member.
+    CKFixedFunctionPipeline *m_FFP;
+    CKFixedFunctionPipeline m_DetachedFFP;
     VxMatrix m_WorldMatrix;
     VxMatrix m_ViewMatrix;
     VxPlane m_UserClipPlanes[6];

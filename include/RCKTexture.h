@@ -59,7 +59,7 @@ protected:
                             int CubeMapFace);
 
     VX_PIXELFORMAT m_DesiredVideoFormat;
-    CKRasterizerDevice *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerDevice;
     CKDWORD m_MipMapLevel;
     CKDWORD m_ObjectIndex;
     XClassArray<VxImageDescEx> *m_MipMaps;

@@ -1430,7 +1430,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         }
     }
 
-    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
     VX_EFFECT effect = GetEffect();
     const VxEffectDescription *effectDesc = nullptr;
     CKRenderManager *renderManager = m_Context ? m_Context->GetRenderManager() : nullptr;
@@ -1572,7 +1572,7 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
     }
 
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
-    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
     ffp.ResetTextureStage(TextureStage);
 
     CKTexture *tex = m_Textures[TextureSlot];
@@ -1674,7 +1674,7 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
         break;
     }
 
-    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
     if (texGen == VXEFFECT_TGREFLECT || texGen == VXEFFECT_TGCHROME) {
         ffp.SetTransform((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), texMatrix);
     }
@@ -1703,7 +1703,7 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
     CKMaterialBumpEnvParams params;
     ReadBumpEnvParameter(m_EffectParameter, params);
 
-    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
 
     const CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
     if (!m_Textures[0]->SetAsCurrent((CKRenderContext *)dev, clamped, 0)) {
@@ -1802,7 +1802,7 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
     if (!dev || stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || !m_Textures[stage])
         return 0;
 
-    CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
     ffp.SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);
     ffp.SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR);
@@ -1855,7 +1855,7 @@ CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
         const CKDWORD texGen = (i == 0) ? params.TexGen1 : params.TexGen2;
         const CK_ID refId = (i == 0) ? params.Referential1 : params.Referential2;
 
-        CKFixedFunctionPipeline &ffp = dev->m_FFPipeline;
+        CKFixedFunctionPipeline &ffp = *dev->m_FFP;
         if (!m_Textures[currentStage]->SetAsCurrent((CKRenderContext *)dev, FALSE, currentStage)) {
             ffp.ResetTextureStage(currentStage);
             return CKRE_MATERIAL_EFFECT_FAILED;

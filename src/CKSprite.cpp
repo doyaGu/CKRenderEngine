@@ -48,7 +48,7 @@ static VX_PIXELFORMAT ResolveObjectVideoFormat(VX_PIXELFORMAT requested, VX_PIXE
     return _32_ARGB8888;
 }
 
-static void FindNearestFormatWithAlpha(CKRasterizerDeviceDriver *driver, VxImageDescEx *desc) {
+static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx *desc) {
     VxImageDescEx *best = nullptr;
     int minDiff = 64;
     for (auto it = driver->m_TextureFormats.Begin(); it != driver->m_TextureFormats.End(); ++it) {
@@ -161,7 +161,7 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
 
     RCKRenderManager *rm = (RCKRenderManager *) Context->GetRenderManager();
     m_VideoFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
-    m_RasterizerContext = nullptr;
+    m_RasterizerDevice = nullptr;
     m_ObjectIndex = 0;
     m_InVideoMemory = FALSE;
 }
@@ -262,15 +262,15 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         return CKERR_INVALIDPARAMETER;
 
     RCKRenderContext *rctx = (RCKRenderContext *) dev;
-    if (!rctx || !rctx->m_RasterizerContext)
+    if (!rctx || !rctx->m_RasterizerDevice)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CKRasterizerDevice *rstCtx = rctx->m_RasterizerContext;
-    if (m_RasterizerContext != rstCtx) {
+    CKRasterizerDevice *rstCtx = rctx->m_RasterizerDevice;
+    if (m_RasterizerDevice != rstCtx) {
         FreeVideoMemory();
         m_ObjectIndex = 0;
     }
-    m_RasterizerContext = rstCtx;
+    m_RasterizerDevice = rstCtx;
 
     CKBOOL reload = FALSE;
 
@@ -288,14 +288,14 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     if (reload) {
         SystemToVideoMemory(dev, FALSE);
     } else {
-        m_RasterizerContext = rstCtx;
+        m_RasterizerDevice = rstCtx;
     }
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) {
         Restore(FALSE);
     }
 
-    CKFixedFunctionPipeline &ffp = rctx->m_FFPipeline;
+    CKFixedFunctionPipeline &ffp = *rctx->m_FFP;
     CKFFStateGuard ffpState(ffp);
 
     // Set render states for 2D sprite rendering
@@ -386,9 +386,9 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
     RCKRenderContext *rctx = (RCKRenderContext *) dev;
-    if (!rctx->m_RasterizerContext) return FALSE;
+    if (!rctx->m_RasterizerDevice) return FALSE;
 
-    m_RasterizerContext = rctx->m_RasterizerContext;
+    m_RasterizerDevice = rctx->m_RasterizerDevice;
 
     CKTextureDesc spriteDesc;
     spriteDesc.Format.Width = m_BitmapData.m_Width;
@@ -407,7 +407,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
         FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
     }
 
-    if (m_RasterizerContext->CreateTexture(&spriteDesc, nullptr, &m_ObjectIndex) == CK_OK) {
+    if (m_RasterizerDevice->CreateTexture(&spriteDesc, nullptr, &m_ObjectIndex) == CK_OK) {
         m_InVideoMemory = TRUE;
         m_VideoFormatDesc = spriteDesc.Format;
         return Restore(Clamping);
@@ -416,7 +416,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
 }
 
 CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
-    if (!m_RasterizerContext) return FALSE;
+    if (!m_RasterizerDevice) return FALSE;
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
     m_BitmapData.m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
@@ -439,7 +439,7 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
                 return FALSE;
         }
 
-        const CKBOOL result = (m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc) == CK_OK);
+        const CKBOOL result = (m_RasterizerDevice->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc) == CK_OK);
         delete[] converted;
         return result;
     }
@@ -451,26 +451,26 @@ CKBOOL RCKSprite::FreeVideoMemory() {
         m_InVideoMemory = FALSE;
         return TRUE;
     }
-    if (!m_RasterizerContext)
+    if (!m_RasterizerDevice)
         return FALSE;
     const CKBOOL result =
-        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
+        m_RasterizerDevice->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
     m_InVideoMemory = FALSE;
     m_ObjectIndex = 0;
     return result;
 }
 
 CKBOOL RCKSprite::IsInVideoMemory() {
-    return m_RasterizerContext && m_InVideoMemory;
+    return m_RasterizerDevice && m_InVideoMemory;
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    if (!ctx || !m_RasterizerContext || !m_InVideoMemory)
+    if (!ctx || !m_RasterizerDevice || !m_InVideoMemory)
         return FALSE;
 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
-    if (!rctx->m_RasterizerContext ||
-        rctx->m_RasterizerContext != m_RasterizerContext)
+    if (!rctx->m_RasterizerDevice ||
+        rctx->m_RasterizerDevice != m_RasterizerDevice)
         return FALSE;
 
     return rctx->QueueSpriteCopy(this, Src, Dest);
@@ -479,8 +479,8 @@ CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
 CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
                                    const VxImageDescEx &source,
                                    const VxRect *destination) {
-    if (!context || !context->m_RasterizerContext ||
-        context->m_RasterizerContext != m_RasterizerContext ||
+    if (!context || !context->m_RasterizerDevice ||
+        context->m_RasterizerDevice != m_RasterizerDevice ||
         !m_InVideoMemory)
         return FALSE;
 
@@ -503,19 +503,19 @@ CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
     }
 
     const CKBOOL result =
-        (m_RasterizerContext->UpdateTexture(m_ObjectIndex, 0, 0, regionPtr, &uploadDesc) == CK_OK);
+        (m_RasterizerDevice->UpdateTexture(m_ObjectIndex, 0, 0, regionPtr, &uploadDesc) == CK_OK);
     delete[] converted;
     return result;
 }
 
 CKBOOL RCKSprite::GetVideoTextureDesc(VxImageDescEx &desc) {
-    if (!m_RasterizerContext || !m_InVideoMemory) return FALSE;
+    if (!m_RasterizerDevice || !m_InVideoMemory) return FALSE;
     desc = m_VideoFormatDesc;
     return TRUE;
 }
 
 VX_PIXELFORMAT RCKSprite::GetVideoPixelFormat() {
-    if (!m_RasterizerContext || !m_InVideoMemory) return UNKNOWN_PF;
+    if (!m_RasterizerDevice || !m_InVideoMemory) return UNKNOWN_PF;
     return VxImageDesc2PixelFormat(m_VideoFormatDesc);
 }
 

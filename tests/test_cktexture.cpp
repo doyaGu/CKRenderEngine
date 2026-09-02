@@ -9,6 +9,7 @@
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKTexture.h"
+#include "CKTranslatedRasterizer.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -27,7 +28,8 @@ struct TextureTestWorld {
         : context(nullptr),
           renderManager(nullptr),
           renderContext(nullptr),
-          rasterizer(&driver) {
+          rasterizer(&driver),
+          translatedDriver(nullptr, &driver, 0) {
         TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
                   "CKCreateContext failed");
 
@@ -41,13 +43,14 @@ struct TextureTestWorld {
         AddDriverTextureFormat(driver, _16_ARGB4444);
 
         renderContext = new RCKRenderContext(context);
-        renderContext->m_RasterizerContext = &rasterizer;
-        renderContext->m_RasterizerDriver = &driver;
+        translatedDriver.SyncCapsFromDevice();
+        renderContext->m_RasterizerDevice = &rasterizer;
+        renderContext->m_RasterizerDriver = &translatedDriver;
     }
 
     ~TextureTestWorld() {
         if (renderContext) {
-            renderContext->m_RasterizerContext = nullptr;
+            renderContext->m_RasterizerDevice = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -63,6 +66,7 @@ struct TextureTestWorld {
     RCKRenderContext *renderContext;
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext rasterizer;
+    CKTranslatedDriver translatedDriver;
 };
 
 void FillTexture(RCKTexture &texture, CKDWORD seed) {
@@ -110,7 +114,7 @@ void SetAsCurrentFailureDoesNotBindOrClearRestoreFlag() {
               "failed upload must not leave the texture marked in video memory");
     TestCheck(texture.ToRestore(),
               "failed upload must keep the restore flag set");
-    TestCheck(world.renderContext->m_FFPipeline.GetTexture(0) == 0,
+    TestCheck(world.renderContext->m_FFP->GetTexture(0) == 0,
               "failed upload must not bind the texture stage");
 }
 
