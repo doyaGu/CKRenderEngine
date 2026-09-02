@@ -88,7 +88,7 @@ public:
     // the v3 driver caps after the device reported its real limits.
     CKRasterizerDeviceDriver *GetDeviceDriver(int DriverIndex);
     void RefreshDriverCaps(int DriverIndex);
-    CKRasterizerDevice *GetFullscreenContext();
+    CKRasterizerContext *GetFullscreenContext();
     int GetPreferredSoftwareDriver();
 
     XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;  // 0x28

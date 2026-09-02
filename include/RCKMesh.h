@@ -247,9 +247,7 @@ protected:
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKDWORD m_IndexBufferIndexCount;
-    CKDWORD m_VertexLayout;     // HW vertex layout handle for DrawVertexBuffer
     CKDWORD m_VertexBufferDpFlags;
-    CKDWORD m_VertexBufferFormatFlags; // pipeline layout flags (migration: draws still go through the pipeline)
     CKDWORD m_VertexBufferVertexFormat; // contract vertex format of m_VertexBuffer
     CKDWORD m_VertexBufferStride;
     CKDWORD m_VertexBufferVertexCount;

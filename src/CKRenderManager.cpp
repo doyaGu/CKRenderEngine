@@ -1109,13 +1109,13 @@ CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
 
-CKRasterizerDevice *RCKRenderManager::GetFullscreenContext() {
-    // A fullscreen device context is one created with Fullscreen=TRUE.
+CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
+    // A fullscreen context is one created with Fullscreen=TRUE.
     for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDeviceDriver *driver = GetDeviceDriver(i);
+        CKRasterizerDriver *driver = GetDriver(i);
         if (!driver) continue;
         for (int c = 0; c < driver->m_Contexts.Size(); ++c) {
-            CKRasterizerDevice *ctx = driver->m_Contexts[c];
+            CKRasterizerContext *ctx = driver->m_Contexts[c];
             if (ctx && ctx->m_Fullscreen)
                 return ctx;
         }

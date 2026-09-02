@@ -94,6 +94,9 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
         m_Device->BeginShutdown();
         return FALSE;
     }
+    // Draw order is the call order (spec 4.3): the pipeline must not reorder
+    // opaque draws into packets behind the engine's back.
+    m_FFP.SetOpaqueRenderPacketsAllowed(FALSE);
     m_Postprocess.Init(m_Device);
     if (m_TranslatedDriver)
         m_TranslatedDriver->SyncCapsFromDevice();
@@ -392,8 +395,12 @@ CKBOOL CKTranslatedContext::EnableLight(CKDWORD Index, CKBOOL Enable)
 CKBOOL CKTranslatedContext::SetMaterial(const CKMaterialData *Data)
 {
     if (!Data) {
-        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
-        return FALSE;
+        // No material: white diffuse / ambient, everything else zero.
+        memset(&m_Material, 0, sizeof(m_Material));
+        m_Material.Diffuse = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+        m_Material.Ambient = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+        m_FFP.ResetMaterial();
+        return TRUE;
     }
     m_Material = *Data;
     m_FFP.SetMaterial(Data);
@@ -488,19 +495,6 @@ const CKTranslatedContext::Resource *CKTranslatedContext::FindResource(CKDWORD T
         return NULL;
     std::unordered_map<uint64_t, Resource>::const_iterator it = m_Resources.find(ResourceKey(Type, Handle));
     return it == m_Resources.end() ? NULL : &it->second;
-}
-
-CKBOOL CKTranslatedContext::GetVertexBufferDrawInfoForMigration(CKDWORD VB, CKDWORD *FormatFlags,
-                                                                CKDWORD *DeviceLayout) const
-{
-    const Resource *resource = FindResource(CKRST_OBJ_VERTEXBUFFER, VB);
-    if (!resource)
-        return FALSE;
-    if (FormatFlags)
-        *FormatFlags = resource->FormatFlags;
-    if (DeviceLayout)
-        *DeviceLayout = resource->DeviceLayout;
-    return TRUE;
 }
 
 void CKTranslatedContext::SyncStageMirrorFromPipeline(int Stage)

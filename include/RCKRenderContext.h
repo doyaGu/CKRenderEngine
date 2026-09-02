@@ -4,8 +4,9 @@
 #include "CKRenderEngineTypes.h"
 #include "CKRenderContext.h"
 #include "CKRenderedScene.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKFixedFunctionPipeline.h"
+#include "CKRasterizer.h"
+// Migration (phase 1): stage resets and state guards still go through the
+// translated context's pipeline until step 1.7.
 #include "CKTranslatedRasterizer.h"
 
 // Forward declarations
@@ -17,7 +18,7 @@ class RCKTexture;
 struct CKDrawAnnotation;
 struct CKDrawAnnotationObjectRef;
 struct CKDrawAnnotationState;
-struct CKPendingScreenCaptureState;
+struct CKRenderContextReadback;
 
 struct UserDrawPrimitiveDataClass : public VxDrawPrimitiveData {
     UserDrawPrimitiveDataClass();
@@ -108,13 +109,10 @@ public:
     CKDWORD GetState(VXRENDERSTATETYPE State) override;
     CKBOOL SetTexture(CKTexture *tex, CKBOOL Clamped = 0, int Stage = 0) override;
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
-    // CK2 public API: returns the v3 CKRasterizerContext. The engine still
-    // drives the internal device directly (step 1.3); wired in step 1.5.
+    // CK2 public API: returns the v3 CKRasterizerContext.
     CKRasterizerContext *GetRasterizerContext() override;
-    void AttachTranslatedContext();
-    void DetachTranslatedContext();
-    // Migration (phase 1): the translated context behind the contract pointer
-    // and a by-value render state read through the contract.
+    // Migration (phase 1, removed in step 1.7): the translated context behind
+    // the contract pointer, for the pipeline-side stage resets and guards.
     CKTranslatedContext *TranslatedContext() const { return static_cast<CKTranslatedContext *>(m_RasterizerContext); }
     CKDWORD GetRasterizerRenderState(VXRENDERSTATETYPE State) const {
         CKDWORD value = 0;
@@ -186,13 +184,8 @@ public:
     VxDrawPrimitiveData *LockCurrentVB(CKDWORD VertexCount) override;
     CKBOOL ReleaseCurrentVB() override;
     void SetTextureMatrix(const VxMatrix &M, int Stage = 0) override;
-    void SetVertexBlendMatrix(CKDWORD Index, const VxMatrix &M);
-    void ResetVertexBlendMatrices();
-    void SetTexcoordComponentCount(CKDWORD Stage, CKDWORD Count);
-    void ResetTexcoordComponentCounts();
     void BeginFrameErrorTracking();
     void RecordFrameRenderError(CKERROR Error);
-    CKRenderView ResolveDrawView(CKDWORD DrawFlags) const;
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
     void GetStereoParameters(float &EyeSeparation, float &FocalLength) override;
 
@@ -251,19 +244,15 @@ private:
     void ExecutePreRenderCallbacks();
     void ExecutePostRenderCallbacks(CKBOOL beforeTransparent);
     void ExecutePostSpriteCallbacks();
-    void AllocateRenderPipelineResources();
-    void ReleaseRenderPipelineResources();
     CKBOOL QueueTextureCopy(RCKTexture *Texture, const VxRect *Source,
                             const VxRect *Destination, int CubeMapFace);
     CKBOOL QueueSpriteCopy(RCKSprite *Sprite, const VxRect *Source,
                            const VxRect *Destination);
-    void ProcessPendingScreenCaptures();
-    void CancelPendingScreenCaptures();
-    static void ScreenCaptureCallback(void *UserData, CKDWORD FrameBuffer,
-                                      CKDWORD Width, CKDWORD Height,
-                                      CKDWORD Pitch, VX_PIXELFORMAT Format,
-                                      const void *Data, CKDWORD Size,
-                                      CKBOOL YFlip);
+    // Delivered by the rasterizer at a frame boundary on the render thread.
+    static void ReadbackCallback(void *User, const CKRECT *Rect, VXBUFFER_TYPE Buffer,
+                                 const VxImageDescEx *Image, CKBOOL Success);
+    // Draws the rasterizer rejected since the last BeginFrameErrorTracking().
+    CKDWORD RejectedDrawCount();
     void LoadPVInformationTexture();
     void DrawPVInformationWatermark();
     void AppendStateOnOffLine(CKBOOL on);
@@ -295,12 +284,10 @@ public:
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
     CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
-    // v3 contract objects (phase 1 step 1.5). The engine still drives the
-    // device and the fixed-function pipeline behind the translated context
-    // directly until step 1.6 rewrites its files to the contract calls.
+    // v3 contract objects: the engine talks to the rasterizer only through
+    // these two (spec section 4).
     CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
     CKRasterizerDriver *m_RasterizerDriver;   // 0xAC (4 bytes)
-    CKRasterizerDevice *m_RasterizerDevice;   // migration: device behind m_RasterizerContext
     int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
     CKDWORD m_Shading;                      // 0xB4 (4 bytes)
     CKBOOL m_TextureEnabled;                // 0xB8 (4 bytes)
@@ -332,11 +319,6 @@ public:
     RCK3dEntity *m_Current3dEntity;         // 0x310 (4 bytes)
     RCKTexture *m_TargetTexture;            // 0x314 (4 bytes)
     CKRST_CUBEFACE m_CubeMapFace;           // 0x318 (4 bytes) - changed type to match IDA
-    CKDWORD m_TargetFrameBuffer;
-    CKDWORD m_TargetDepthTexture;
-    CKDWORD m_CopyToVideoTexture;
-    int m_CopyToVideoWidth;
-    int m_CopyToVideoHeight;
     float m_FocalLength;                    // 0x31C (4 bytes)
     float m_EyeSeparation;                  // 0x320 (4 bytes)
     CKDWORD m_Flags;                        // 0x324 (4 bytes)
@@ -367,36 +349,24 @@ public:
     void OnClearAll();
     void SetDrawAnnotation(const CKDrawAnnotation *annotation);
     void ApplyDrawAnnotationDebugFlags(CKDWORD DebugFlags);
-    void ApplyDrawAnnotation(CKRasterizerEncoder *encoder,
-                             CKRenderView view,
-                             VXPRIMITIVETYPE primitiveType,
+    void ApplyDrawAnnotation(VXPRIMITIVETYPE primitiveType,
                              CKDWORD indexCount,
                              CKDWORD vertexCount);
     CKBOOL ConsumeDrawAnnotation(CKDrawAnnotation *annotation,
-                                 CKRenderView view,
                                  VXPRIMITIVETYPE primitiveType,
                                  CKDWORD indexCount,
                                  CKDWORD vertexCount);
     void SetDrawCallbackObject(const CKDrawAnnotationObjectRef *object);
     CKBOOL GetDrawCallbackObject(CKDrawAnnotationObjectRef *object);
 
-    // Fixed-function pipeline of the translated context (migration accessor).
-    // Without a device it points at m_DetachedFFP so state-only calls keep
-    // working exactly as with the former by-value member.
-    CKFixedFunctionPipeline *m_FFP;
-    CKFixedFunctionPipeline m_DetachedFFP;
     VxMatrix m_WorldMatrix;
     VxMatrix m_ViewMatrix;
     VxPlane m_UserClipPlanes[6];
-    CKRenderView m_Current2DView;
-    CKRenderView m_Current3DView;
     CKERROR m_FrameRenderError;
     CKDWORD m_RasterizerDebugFlags;
     CKDrawAnnotationState *m_DrawAnnotationState;
-    CKRenderPipelineResourceIds m_RenderPipelineResources;
-
-private:
-    CKPendingScreenCaptureState *m_PendingScreenCaptures;
+    // CKRST_DIAG_REJECT_UNSUPPORTED_STATE counter at BeginFrameErrorTracking().
+    CKDWORD m_FrameRejectBaseline;
 };
 
 #endif // RCKRENDERCONTEXT_H

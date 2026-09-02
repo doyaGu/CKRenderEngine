@@ -4,8 +4,7 @@
 #include "CKContext.h"
 #include "VxRect.h"
 
-// Internal device interface (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice.h).
-class CKRasterizerDevice;
+class CKRasterizerContext;
 
 class RCKRenderContext;
 class RCKMaterial;
@@ -20,9 +19,9 @@ public:
     CKRenderedScene(CKRenderContext *rc);
     ~CKRenderedScene();
     CKERROR Draw(CK_RENDER_FLAGS Flags);
-    void SetDefaultRenderStates(CKRasterizerDevice *rst);
+    void SetDefaultRenderStates(CKRasterizerContext *rst);
     void PrepareCameras(CK_RENDER_FLAGS Flags = CK_RENDER_USECURRENTSETTINGS);
-    void SetupLights(CKRasterizerDevice *rst);
+    void SetupLights(CKRasterizerContext *rst);
     void ResizeViewport(const VxRect &rect);
     void UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags);
     void ForceCameraSettingsUpdate();

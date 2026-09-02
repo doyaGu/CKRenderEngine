@@ -4,7 +4,6 @@
 #include "CKVertexPacking.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
-#include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 
 namespace {
@@ -22,9 +21,9 @@ int GetActiveTexcoordCount(CKRST_DPFLAGS flags) {
     return count;
 }
 
-CKBOOL HasTextureCoordinateWrap(const CKFixedFunctionPipeline &pipeline) {
+CKBOOL HasTextureCoordinateWrap(RCKRenderContext *rctx) {
     for (int stage = 0; stage < CKRST_MAX_STAGES; ++stage) {
-        if ((pipeline.GetRenderState(
+        if ((rctx->GetRasterizerRenderState(
                  (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0) {
             return TRUE;
         }
@@ -168,8 +167,6 @@ RCKVertexBuffer::RCKVertexBuffer(CKContext *context) : CKVertexBuffer(), m_Desc(
     memset(&m_LockedData, 0, sizeof(m_LockedData));
     m_Valid = FALSE;
     m_FormatFlags = 0;
-    m_FFPFormatFlags = 0;
-    m_VertexLayout = 0;
     m_HardwareValid = FALSE;
     m_LockedStart = 0;
     m_LockedCount = 0;
@@ -198,9 +195,7 @@ void RCKVertexBuffer::InvalidateHardwareBuffer() {
     m_RasterizerContext = nullptr;
     m_ObjectIndex = 0;
     m_HardwareValid = FALSE;
-    m_VertexLayout = 0;
     m_FormatFlags = 0;
-    m_FFPFormatFlags = 0;
 }
 
 CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) {
@@ -232,7 +227,6 @@ CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, 
     m_Valid = TRUE;
     m_HardwareValid = FALSE;
     m_FormatFlags = 0;
-    m_VertexLayout = 0;
     m_DirtyStart = 0;
     m_DirtyCount = 0;
     return CK_VB_LOST;
@@ -299,9 +293,7 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
         desc.m_VertexFormat = vertexFormat;
         desc.m_VertexSize = stride;
         desc.m_CurrentVCount = m_Desc.m_CurrentVCount;
-        CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(rst);
-        if (rst->CreateVertexBuffer(&desc, nullptr, &m_ObjectIndex) &&
-            translated->GetVertexBufferDrawInfoForMigration(m_ObjectIndex, &m_FFPFormatFlags, &m_VertexLayout)) {
+        if (rst->CreateVertexBuffer(&desc, nullptr, &m_ObjectIndex)) {
             m_HardwareValid = TRUE;
             m_FormatFlags = vertexFormat;
         } else {
@@ -345,25 +337,11 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(Ctx);
     if (m_HardwareValid && !Indices &&
         rctx && rctx->m_RasterizerContext &&
-        !HasTextureCoordinateWrap(*rctx->m_FFP) &&
-        !rctx->m_FFP->GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
+        !HasTextureCoordinateWrap(rctx) &&
+        !rctx->GetRasterizerRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
         pType != VX_POINTLIST) {
-        CKRenderView view = (m_DpData.Flags & CKRST_DP_TRANSFORM)
-            ? rctx->m_Current3DView
-            : rctx->m_Current2DView;
-        return rctx->m_FFP->DrawVertexBuffer(
-            rctx->m_FFP->GetRenderPipeline().GetEncoder(),
-            view,
-            pType,
-            m_ObjectIndex,
-            0,
-            StartVertex,
-            VertexCount,
-            0,
-            VertexCount,
-            m_DpData.Flags,
-            m_FFPFormatFlags,
-            m_VertexLayout);
+        return rctx->m_RasterizerContext->DrawPrimitiveVB(pType, m_ObjectIndex, StartVertex, VertexCount,
+                                                          nullptr, 0);
     }
 
     VxDrawPrimitiveData drawData = m_DpData;

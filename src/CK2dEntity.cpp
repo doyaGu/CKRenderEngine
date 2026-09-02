@@ -32,7 +32,6 @@ static void CK2dSetDrawAnnotation(RCKRenderContext *dev,
 
     CKDrawAnnotation annotation;
     CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_2D_ENTITY);
-    annotation.View = dev->m_Current2DView;
     annotation.PrimitiveType = primitiveType;
     annotation.IndexCount = indexCount;
     annotation.VertexCount = vertexCount;

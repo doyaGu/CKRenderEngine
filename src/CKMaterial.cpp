@@ -1432,7 +1432,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
     CKTranslatedContext *rst = dev->TranslatedContext();
 
-    CKFixedFunctionPipeline &ffp = *dev->m_FFP;
+    CKFixedFunctionPipeline &ffp = *rst->GetFFPipelineForMigration();
     VX_EFFECT effect = GetEffect();
     const VxEffectDescription *effectDesc = nullptr;
     CKRenderManager *renderManager = m_Context ? m_Context->GetRenderManager() : nullptr;

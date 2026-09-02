@@ -3205,7 +3205,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrum(CKRenderContext *rc, CKDWORD flags) {
         return FALSE;
 
     RCKRenderContext *dev = (RCKRenderContext *) rc;
-    if (!dev->m_RasterizerDevice)
+    if (!dev->m_RasterizerContext)
         return TRUE;
 
     const CKBOOL updateExtents = (CKBYTE) flags != 0;
@@ -3302,7 +3302,7 @@ CKBOOL RCK3dEntity::IsInViewFrustrumHierarchic(CKRenderContext *rc) {
         return FALSE;
 
     RCKRenderContext *dev = (RCKRenderContext *) rc;
-    if (!dev->m_RasterizerDevice || !m_SceneGraphNode)
+    if (!dev->m_RasterizerContext || !m_SceneGraphNode)
         return TRUE;
 
     m_SceneGraphNode->SetAsPotentiallyVisible();

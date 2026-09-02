@@ -7,7 +7,7 @@
 
 #include "VxMatrix.h"
 #include "CKRenderContext.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizer.h"
 #include "CK3dEntity.h"
 #include "CKMaterial.h"
 #include "CKLight.h"
@@ -206,31 +206,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostSectionStart, frameCostCollecting);
 
-    // --- Phase 1: begin the frame via the FF pipeline ---
-    // Build a clear color from the background material diffuse.
-    CKDWORD clearColor = 0xFF000000;
-    if (m_BackgroundMaterial) {
-        VxColor diff = m_BackgroundMaterial->GetDiffuse();
-        CKDWORD r = (CKDWORD)(diff.r * 255.0f) & 0xFF;
-        CKDWORD g = (CKDWORD)(diff.g * 255.0f) & 0xFF;
-        CKDWORD b = (CKDWORD)(diff.b * 255.0f) & 0xFF;
-        clearColor = 0xFF000000 | (r << 16) | (g << 8) | b;
-    }
-    CKDWORD clearFlags = 0;
-    if (Flags & CK_RENDER_CLEARBACK)
-        clearFlags |= CKRST_CTXCLEAR_COLOR;
-    if (Flags & CK_RENDER_CLEARZ)
-        clearFlags |= CKRST_CTXCLEAR_DEPTH;
-    if (Flags & CK_RENDER_CLEARSTENCIL)
-        clearFlags |= CKRST_CTXCLEAR_STENCIL;
-
-    // Build a viewport CKRECT from current settings.
-    CKRECT viewport;
-    viewport.left   = 0;
-    viewport.top    = 0;
-    viewport.right  = rc->m_Settings.m_Rect.right;
-    viewport.bottom = rc->m_Settings.m_Rect.bottom;
-
+    // --- Phase 1: camera setup ---
     RCKCamera *camera = nullptr;
     if (!(Flags & CK_RENDER_SKIP3D)) {
         camera = rc->m_Camera;
@@ -301,26 +277,20 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 #endif
     CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_FRAME_SETUP, frameCostSectionStart);
 
-    // Obtain current view and projection matrices after camera setup so bgfx
-    // receives the same transforms used by draw submission in this frame.
-    const VxMatrix &viewMat = rc->m_ViewMatrix;
-    const VxMatrix &projMat = rc->m_ProjectionMatrix;
-
     if (frameLog)
-        CK_LOG("RenderedScene", "Draw - calling BeginFrame");
+        CK_LOG("RenderedScene", "Draw - calling BeginScene");
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         sectionStart = CKRenderPerfNow();
 #endif
     CK_FRAME_COST_RESTART_SECTION(frameCostSectionStart, frameCostCollecting);
     rc->BeginFrameErrorTracking();
-    rc->m_FFP->BeginDebugFrame();
-    rc->m_FFP->FlushOpaqueRenderPackets();
-    const CKERROR beginFrameStatus =
-        rc->m_FFP->GetRenderPipeline().BeginFrame(
-            viewport, clearFlags, clearColor, 1.0f, viewMat, projMat);
-    if (beginFrameStatus != CK_OK)
-        return beginFrameStatus;
+    // The clear (RCKRenderContext::Clear) already opened the frame; the scene
+    // pass starts here and ends before the overlay phase below (spec 4.3).
+    if (!rc->m_RasterizerContext->BeginScene()) {
+        const CKERROR deviceStatus = rc->m_RasterizerContext->GetDeviceStatus();
+        return deviceStatus != CK_OK ? deviceStatus : CKERR_INVALIDOPERATION;
+    }
 #if CKRE_ENABLE_RENDER_STATS
     if (renderStats)
         CKRenderPerfAddSection(CKRPS_BEGIN_FRAME, CKRenderPerfElapsedUs(sectionStart));
@@ -348,7 +318,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         VxRect viewRect;
         rc->GetViewRect(viewRect);
 
-        rc->m_Current2DView = CKRP_VIEW_BACKGROUND2D;
 #if CKRE_ENABLE_RENDER_STATS
         if (renderStats)
             sectionStart = CKRenderPerfNow();
@@ -361,7 +330,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             CKRenderPerfAddSection(CKRPS_BACKGROUND_2D, CKRenderPerfElapsedUs(sectionStart));
 #endif
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_BACKGROUND_2D, frameCostSectionStart);
-        rc->m_Current2DView = CKRP_VIEW_FOREGROUND2D;
 
         ResizeViewport(viewRect);
     }
@@ -416,7 +384,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_Stats.SceneTraversalTime = 0.0f;
         rc->m_SceneTraversalTimeProfiler.Reset();
 
-        rc->m_Current3DView = CKRP_VIEW_OPAQUE3D;
 #if CKRE_ENABLE_RENDER_STATS
         if (renderStats)
             sectionStart = CKRenderPerfNow();
@@ -428,8 +395,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
             CKRenderPerfAddSection(CKRPS_OPAQUE_TRAVERSAL, CKRenderPerfElapsedUs(sectionStart));
 #endif
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_OPAQUE_TRAVERSAL, frameCostSectionStart);
-
-        rc->m_FFP->FlushOpaqueRenderPackets();
 
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
 
@@ -468,7 +433,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         // Sort and render transparent objects
         rc->m_SortTransparentObjects = TRUE;
-        rc->m_Current3DView = CKRP_VIEW_TRANSPARENT;
 #if CKRE_ENABLE_RENDER_STATS
         if (renderStats)
             sectionStart = CKRenderPerfNow();
@@ -482,7 +446,6 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 #endif
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_TRANSPARENT_SORT_RENDER, frameCostSectionStart);
         rc->m_SortTransparentObjects = FALSE;
-        rc->m_Current3DView = CKRP_VIEW_OPAQUE3D;
 
         rc->m_Stats.ObjectsRenderTime = rc->m_ObjectsRenderTimeProfiler.Current();
 
@@ -502,13 +465,11 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     rc->m_SpriteTimeProfiler.Reset();
 
-    const CKERROR compositeStatus =
-        rc->m_FFP->GetRenderPipeline().CompositeScene();
-    if (compositeStatus != CK_OK) {
-        rc->m_FFP->GetRenderPipeline().EndFrame(
-            CKRST_FRAME_SYNC_PRESERVE_PRESENT);
-        return compositeStatus;
-    }
+    // Scene done: foreground sprites draw over the presented scene image at
+    // native resolution. A texture target has no overlay phase (spec 4.3).
+    rc->m_RasterizerContext->EndScene();
+    if (!rc->m_TargetTexture)
+        rc->m_RasterizerContext->BeginOverlayPhase();
 
     // Render foreground 2D sprites
     if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 &&
@@ -572,7 +533,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     return CK_OK;
 }
 
-void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
+void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
     // IDA: 0x1006fea0
     // Phase 1: disable all lights that were active during the previous frame.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
@@ -613,7 +574,7 @@ void CKRenderedScene::ResizeViewport(const VxRect &rect) {
     rc->m_ViewportData.ViewHeight = (int) rect.GetHeight();
 }
 
-void CKRenderedScene::SetDefaultRenderStates(CKRasterizerDevice * /*rst*/) {
+void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;

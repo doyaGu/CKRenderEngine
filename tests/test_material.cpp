@@ -49,12 +49,11 @@ struct MaterialTestWorld {
         renderContext = new RCKRenderContext(context);
         renderContext->m_RasterizerContext = translated.Context;
         renderContext->m_RasterizerDriver = translated.Driver;
-        renderContext->AttachTranslatedContext();
     }
 
     ~MaterialTestWorld() {
         if (renderContext) {
-            renderContext->DetachTranslatedContext();
+            renderContext->m_RasterizerContext = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -96,7 +95,7 @@ VX_EFFECTCALLBACK_RETVAL TextureMatrixEffectCallback(CKRenderContext *context,
     matrix.Identity();
     matrix[3][0] = 3.25f;
     renderContext->SetTextureMatrix(matrix, stage);
-    renderContext->m_FFP->SetTextureStageState(
+    renderContext->m_RasterizerContext->SetTextureStageState(
         stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
     return VXEFFECTRETVAL_SKIPTEXMAT;
 }
@@ -152,7 +151,7 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent must fail when its texture upload fails");
-    TestCheck(world.renderContext->m_FFP->GetTexture(0) == 0,
+    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(0) == 0,
               "failed material texture upload must not leave a texture bound");
 }
 
@@ -174,7 +173,7 @@ void ChannelTextureBindingPreservesTextureFlags() {
               "BindTextureSlotToStage should bind cubemap texture");
 
     CKFFTextureStageSnapshot stage;
-    world.renderContext->m_FFP->SaveTextureStage(1, stage);
+    world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->SaveTextureStage(1, stage);
     TestCheck((stage.TextureFlags & CKRST_TEXTURE_CUBEMAP) != 0,
               "channel texture binding must preserve cubemap texture flags");
 }
@@ -199,7 +198,7 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "multi-texture material setup must fail when a secondary texture upload fails");
-    TestCheck(world.renderContext->m_FFP->GetTexture(1) == 0,
+    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(1) == 0,
               "failed secondary texture upload must not leave the stage bound");
 }
 
@@ -317,10 +316,10 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
     TestCheck(material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent should preserve callback-owned texture matrices");
     CKFFTextureStageSnapshot stage;
-    world.renderContext->m_FFP->SaveTextureStage(0, stage);
+    world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->SaveTextureStage(0, stage);
     TestCheck(stage.TextureMatrix[3][0] == 3.25f,
               "SKIPTEXMAT callback matrix must survive material texture setup");
-    TestCheck(world.renderContext->m_FFP->GetTextureStageState(
+    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTextureStageState(
                   0, CKRST_TSS_TEXTURETRANSFORMFLAGS) == CKRST_TTF_COUNT2,
               "SKIPTEXMAT callback transform flags must survive material texture setup");
 }

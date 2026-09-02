@@ -212,7 +212,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
 
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0) {
-        dev->m_FFP->ResetTextureStage(TextureStage);
+        dev->TranslatedContext()->ResetTextureStageForMigration(TextureStage);
         return FALSE;
     }
 
@@ -253,7 +253,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
 
     if (needsCreate) {
         if (!SystemToVideoMemory(Dev, Clamping)) {
-            dev->m_FFP->ResetTextureStage(TextureStage);
+            dev->TranslatedContext()->ResetTextureStageForMigration(TextureStage);
             return FALSE;
         }
         isRenderTarget = (m_TextureFlags & CKRST_TEXTURE_RENDERTARGET) != 0;
@@ -266,7 +266,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     }
 
     if (needsRestore && !Restore(Clamping)) {
-        dev->m_FFP->ResetTextureStage(TextureStage);
+        dev->TranslatedContext()->ResetTextureStageForMigration(TextureStage);
         return FALSE;
     }
 

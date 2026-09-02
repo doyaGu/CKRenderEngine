@@ -47,12 +47,11 @@ struct TextureTestWorld {
         renderContext = new RCKRenderContext(context);
         renderContext->m_RasterizerContext = translated.Context;
         renderContext->m_RasterizerDriver = translated.Driver;
-        renderContext->AttachTranslatedContext();
     }
 
     ~TextureTestWorld() {
         if (renderContext) {
-            renderContext->DetachTranslatedContext();
+            renderContext->m_RasterizerContext = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -115,7 +114,7 @@ void SetAsCurrentFailureDoesNotBindOrClearRestoreFlag() {
               "failed upload must not leave the texture marked in video memory");
     TestCheck(texture.ToRestore(),
               "failed upload must keep the restore flag set");
-    TestCheck(world.renderContext->m_FFP->GetTexture(0) == 0,
+    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(0) == 0,
               "failed upload must not bind the texture stage");
 }
 
