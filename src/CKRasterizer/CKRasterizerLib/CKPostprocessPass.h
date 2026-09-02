@@ -9,7 +9,7 @@ class CKRasterizerDevice;
 class CKRasterizerEncoder;
 
 // Device handles of the postprocess (scene framebuffer + composite) pass.
-struct CKRenderPipelineResourceIds {
+struct CKPostprocessResourceIds {
     CKDWORD SceneColorTexture;
     CKDWORD SceneDepthTexture;
     CKDWORD SceneFrameBuffer;
@@ -20,16 +20,16 @@ struct CKRenderPipelineResourceIds {
     CKDWORD PostParamsUniform;
     CKDWORD PostVertexLayout;
 
-    CKRenderPipelineResourceIds()
+    CKPostprocessResourceIds()
         : SceneColorTexture(0), SceneDepthTexture(0), SceneFrameBuffer(0),
           PostVertexShader(0), PostPixelShader(0), PostProgram(0),
           PostSamplerUniform(0), PostParamsUniform(0), PostVertexLayout(0) {}
 };
 
 // Offscreen scene target plus the fullscreen composite that resolves it to
-// the presented backbuffer (RenderScale / FXAA / Sharpness). Shared by the
-// legacy CKRenderPipeline frame flow and the v3 translated context; it does
-// not own any view, the caller decides which view the composite goes to.
+// the presented backbuffer (RenderScale / FXAA / Sharpness). Driven by the
+// translated context's frame flow; it does not own any view, the caller
+// decides which view the composite goes to.
 class CKPostprocessPass {
 public:
     CKPostprocessPass();
@@ -52,7 +52,7 @@ public:
     CKDWORD GetSceneColorTexture() const { return m_ResourceIds.SceneColorTexture; }
     CKDWORD GetSceneWidth() const { return m_SceneWidth; }
     CKDWORD GetSceneHeight() const { return m_SceneHeight; }
-    const CKRenderPipelineResourceIds &GetResourceIds() const { return m_ResourceIds; }
+    const CKPostprocessResourceIds &GetResourceIds() const { return m_ResourceIds; }
 
     // Draws the scene color texture as a fullscreen triangle into `view`.
     CKERROR Submit(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa, float sharpness);
@@ -63,7 +63,7 @@ public:
 
 private:
     CKRasterizerDevice *m_Device;
-    CKRenderPipelineResourceIds m_ResourceIds;
+    CKPostprocessResourceIds m_ResourceIds;
     CKBOOL m_SceneFrameBufferActive;
     CKDWORD m_SceneWidth;
     CKDWORD m_SceneHeight;

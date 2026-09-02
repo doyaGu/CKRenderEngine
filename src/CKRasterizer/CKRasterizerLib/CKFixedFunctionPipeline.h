@@ -21,7 +21,6 @@
 #include "CKDrawStateCache.h"
 #include "CKVertexLayoutCache.h"
 #include "CKTransientGeometry.h"
-#include "CKRenderPipeline.h"
 
 #ifndef CKRE_ENABLE_TEST_ACCESS
 #define CKRE_ENABLE_TEST_ACCESS 0
@@ -113,6 +112,10 @@ public:
     void ResetTexcoordComponentCounts();
     void BeginDebugFrame();
     CKBOOL HadRejectedDrawsThisFrame() const { return m_FrameDrawRejected; }
+    // Frame counter published by the frame flow (the translated context);
+    // per-frame state such as the border colour palette resets on it.
+    void SetFrameNumber(CKDWORD frameNumber) { m_FrameNumber = frameNumber; }
+    CKDWORD GetFrameNumber() const { return m_FrameNumber; }
 
     // === Drawing ===
     // Draw using VxDrawPrimitiveData (software vertex path)
@@ -137,7 +140,6 @@ public:
     // === Subsystem access ===
     CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
     CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
-    CKRenderPipeline &GetRenderPipeline() { return m_RenderPipeline; }
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes &GetProbes() { return m_Probes; }
 #endif
@@ -184,7 +186,7 @@ private:
     CKDrawStateCache m_DrawStateCache;
     CKVertexLayoutCache m_VertexLayoutCache;
     CKTransientGeometry m_TransientGeometry;
-    CKRenderPipeline m_RenderPipeline;
+    CKDWORD m_FrameNumber;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
 #endif

@@ -172,7 +172,7 @@ void CKTranslatedContext::FinishFrame()
     m_Composited = FALSE;
     m_FrameTargetDecided = FALSE;
     ++m_FrameNumber;
-    m_FFP.GetRenderPipeline().SetFrameNumber(m_FrameNumber);
+    m_FFP.SetFrameNumber(m_FrameNumber);
     if (m_AppliedMSAA != m_Options.MSAASamples)
         ApplyOptions();
 

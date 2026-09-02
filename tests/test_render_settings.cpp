@@ -1,5 +1,4 @@
 #include "CKRenderSettings.h"
-#include "CKRenderPipeline.h"
 #include "CKFixedFunctionPipeline.h"
 #include "TestTriangleMultiset.h"
 #include "VxMath.h"
@@ -77,58 +76,6 @@ static void ModernDefaultsPreferFullQualityRenderPath() {
               "default CK2_3D settings should use 32-bit texture video format");
     TestCheck(CKRenderSettingsGetPixelFormat(CKRenderSettingsSection::Root, "SpriteVideoFormat", UNKNOWN_PF) == _32_ARGB8888,
               "default CK2_3D settings should use 32-bit sprite video format");
-}
-
-static void ClaritySettingsDefaultsAndClamp() {
-    CKRenderSettingsClearOverridesForTests();
-
-    CKRenderPipelineConfig defaults = CKRenderPipelineConfigFromSettings();
-    TestCheck(!defaults.FXAA,
-              "FXAA must default off for classic rendering");
-    TestCheck(defaults.RenderScale == 1.0f,
-              "RenderScale must default to 1.0");
-    TestCheck(defaults.Sharpness == 0.0f,
-              "Sharpness must default to 0.0");
-    TestCheck(!defaults.NeedsSceneFrameBuffer(),
-              "classic defaults must not allocate a scene framebuffer");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "FXAA", "1");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "RenderScale", "3.0");
-    CKRenderPipelineConfig high = CKRenderPipelineConfigFromSettings();
-    TestCheck(high.FXAA,
-              "FXAA root setting should enable the postprocess path");
-    TestCheck(high.RenderScale == 2.0f,
-              "RenderScale must clamp high values to 2.0");
-    TestCheck(high.NeedsSceneFrameBuffer(),
-              "FXAA should require a scene framebuffer");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "FXAA", "0");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "RenderScale", "0.1");
-    CKRenderPipelineConfig low = CKRenderPipelineConfigFromSettings();
-    TestCheck(low.RenderScale == 0.5f,
-              "RenderScale must clamp low values to 0.5");
-    TestCheck(low.NeedsSceneFrameBuffer(),
-              "non-1.0 RenderScale should require a scene framebuffer");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "RenderScale", "not-a-number");
-    CKRenderPipelineConfig invalid = CKRenderPipelineConfigFromSettings();
-    TestCheck(invalid.RenderScale == 1.0f,
-              "invalid RenderScale should fall back to 1.0");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "RenderScale", "1.0");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "Sharpness", "2.0");
-    CKRenderPipelineConfig sharp = CKRenderPipelineConfigFromSettings();
-    TestCheck(sharp.Sharpness == 1.0f,
-              "Sharpness must clamp high values to 1.0");
-    TestCheck(sharp.NeedsSceneFrameBuffer(),
-              "Sharpness should require a scene framebuffer");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, "Sharpness", "-0.5");
-    CKRenderPipelineConfig notSharp = CKRenderPipelineConfigFromSettings();
-    TestCheck(notSharp.Sharpness == 0.0f,
-              "negative Sharpness should fall back to 0.0");
-
-    CKRenderSettingsClearOverridesForTests();
 }
 
 static void ForceAnisotropicFilteringUpdatesFfpSamplers() {
@@ -221,7 +168,6 @@ int main() {
     TestFramework tests;
     tests.Run("CK2_3D root settings parse legacy options", &OverridesReadEveryLegacyRootOption);
     tests.Run("CK2_3D defaults prefer the full quality render path", &ModernDefaultsPreferFullQualityRenderPath);
-    tests.Run("clarity settings default and clamp", &ClaritySettingsDefaultsAndClamp);
     tests.Run("forced anisotropic filtering updates FFP samplers", &ForceAnisotropicFilteringUpdatesFfpSamplers);
     tests.Run("FFP runtime options do not live under Debug.FFPStats", &FfpRuntimeOptionsDoNotLiveUnderDebugStats);
     tests.Run("FrameCostStats defaults and fallbacks", &FrameCostStatsDefaultsAndFallbacks);

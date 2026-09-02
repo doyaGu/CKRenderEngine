@@ -9,7 +9,7 @@
 #include "CKFFConstants.h"
 #include "CKFFStateDesc.h"
 #include "CKDrawStateCache.h"
-#include "CKRenderPipeline.h"
+#include "CKRasterizerDeviceEnums.h"
 
 struct VxDrawPrimitiveData;
 

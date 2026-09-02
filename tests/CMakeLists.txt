@@ -85,7 +85,7 @@ ckre_add_rasterizer3_test(rasterizer3_translated_tests
 
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
 # shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
-# environment gates as ffp_opengl_runtime_tests. Skips when no golden frames
+# environment gates as rasterizer3_pixel_tests. Skips when no golden frames
 # exist for the current runner / backend.
 if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
     add_test(NAME scene_capture_golden
@@ -156,13 +156,14 @@ ckre_add_test(ffp_sampler_layout_exhaustive_tests
     test_ffp_sampler_layout_exhaustive.cpp
 )
 
-ckre_add_test(ffp_opengl_runtime_tests
-    test_ffp_opengl_runtime.cpp
-)
-if (TARGET SDL3::SDL3)
-    target_link_libraries(ffp_opengl_runtime_tests PRIVATE SDL3::SDL3)
+# Real-backend pixel gate: the fixed-function semantics driven through the v3
+# contract on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
+if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
+    ckre_add_rasterizer3_test(rasterizer3_pixel_tests
+        test_rasterizer3_pixels.cpp
+    )
+    target_link_libraries(rasterizer3_pixel_tests PRIVATE CKBgfxRasterizerStatic SDL3::SDL3)
 endif ()
-target_link_libraries(ffp_opengl_runtime_tests PRIVATE bgfx bimg bx)
 
 ckre_add_test(ff_state_store_tests
     test_ff_state_store.cpp

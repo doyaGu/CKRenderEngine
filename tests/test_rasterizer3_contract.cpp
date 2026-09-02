@@ -942,10 +942,14 @@ void TestPresentRequiresEndScene()
     TestCheck(f.Context->SetOptions(&options), "SetOptions at frame boundary");
     TestCheck(f.Context->GetOptionsForTests().RenderScale == 2.0f && f.Context->GetOptionsForTests().Sharpness == 0.0f,
               "options clamped");
+    options.RenderScale = 0.1f;
+    TestCheck(f.Context->SetOptions(&options), "SetOptions low render scale");
+    TestCheck(f.Context->GetOptionsForTests().RenderScale == 0.5f, "render scale clamped up to 0.5");
+    options.RenderScale = 2.0f;
     options.Size = 4;
     TestCheck(!f.Context->SetOptions(&options), "wrong Size rejected");
     TestCheck(!f.Context->SetOptions(NULL), "NULL options rejected");
-    TestCheck(f.Context->GetOptionsForTests().RenderScale == 2.0f, "rejected options leave the current ones");
+    TestCheck(f.Context->GetOptionsForTests().RenderScale == 0.5f, "rejected options leave the current ones");
 
     f.Context->BeginScene();
     f.Context->EndScene();

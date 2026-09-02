@@ -2,7 +2,7 @@
 #   * internal device interface (CKRasterizerDevice*.h, formerly v2)
 #     with its NULL fallback
 #   * fixed-function pipeline translation (CKFF*, CKFixedFunctionPipeline,
-#     draw-state / vertex-layout caches, transient geometry, render pipeline)
+#     draw-state / vertex-layout caches, transient geometry, postprocess pass)
 #   * render settings / debug logger / frame-cost stats it depends on
 #   * bgfx fixed-function shaders (shaders/, generated headers checked in)
 set(CKRASTERIZER_LIB_SOURCES
@@ -32,7 +32,6 @@ set(CKRASTERIZER_LIB_SOURCES
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
         CKTransientGeometry.cpp
-        CKRenderPipeline.cpp
         CKPostprocessPass.cpp
         CKRenderSettings.cpp
 
@@ -77,7 +76,6 @@ set(CKRASTERIZER_LIB_HEADERS
         CKDrawStateCache.h
         CKVertexLayoutCache.h
         CKTransientGeometry.h
-        CKRenderPipeline.h
         CKPostprocessPass.h
         CKRenderSettings.h
         CKTranslatedRasterizer.h

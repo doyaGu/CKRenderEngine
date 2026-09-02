@@ -23,7 +23,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_TextureBinder(m_State, m_ShaderCache),
       m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache),
 #endif
-      m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
+      m_FrameNumber(0), m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_FrameDrawRejected(FALSE),
       m_BorderPaletteCount(0), m_BorderPaletteFrameSerial((CKDWORD)-1) {
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
@@ -84,14 +84,14 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
     m_VertexLayoutCache.Init(ctx);
     m_TextureBinder.ResetProgramBindings();
     m_TransientGeometry.Init(ctx, &m_VertexLayoutCache);
-    m_RenderPipeline.Init(ctx);
+    m_FrameNumber = 0;
     m_State.MarkViewProjectionDirty();
     MarkPreparedProgramDirty();
     return true;
 }
 
 CKERROR CKFixedFunctionPipeline::Shutdown() {
-    const CKERROR status = m_RenderPipeline.Shutdown();
+    const CKERROR status = PrepareShutdown();
     if (status != CK_OK)
         return status;
     m_TransientGeometry.Shutdown();
@@ -103,7 +103,8 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
 }
 
 CKERROR CKFixedFunctionPipeline::PrepareShutdown() {
-    return m_RenderPipeline.PrepareShutdown();
+    // The frame flow (translated context) must have closed its encoder.
+    return m_Context && !m_Context->IsIdle() ? CKERR_INVALIDOPERATION : CK_OK;
 }
 
 static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
@@ -523,7 +524,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
 {
     if (!bindingSet || !m_Context)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    const CKDWORD frameSerial = m_RenderPipeline.GetFrameNumber();
+    const CKDWORD frameSerial = m_FrameNumber;
     if (m_BorderPaletteFrameSerial != frameSerial) {
         m_BorderPaletteFrameSerial = frameSerial;
         m_BorderPaletteCount = 0;

@@ -50,11 +50,10 @@ bool CKFFDebugState::AnyLoggingEnabled() const {
 }
 
 int CKFFDebugState::NextDrawSerial(CKRenderView view) {
-    if (view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D)
-        return m_Opaque3DDrawSerial++;
-    if (view == CKRP_VIEW_TRANSPARENT)
-        return m_Transparent3DDrawSerial++;
-    return -1;
+    // Views are allocated per pass by the frame flow; the log numbers every
+    // draw of the frame in submission order.
+    (void)view;
+    return m_Opaque3DDrawSerial++;
 }
 
 void CKFFDebugState::LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info) {
@@ -260,7 +259,8 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
 }
 
 bool CKFFDebugState::Is3DView(CKRenderView view) const {
-    return view == CKRP_VIEW_RENDERFIRST3D || view == CKRP_VIEW_OPAQUE3D || view == CKRP_VIEW_TRANSPARENT;
+    (void)view;
+    return true;
 }
 
 const char *CKFFDebugState::VertexBlendName(CKDWORD vertexBlend) const {

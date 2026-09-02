@@ -107,7 +107,7 @@ void CKPostprocessPass::Shutdown()
     DestroySceneFrameBuffer();
     DestroyResources();
     m_Device = nullptr;
-    m_ResourceIds = CKRenderPipelineResourceIds();
+    m_ResourceIds = CKPostprocessResourceIds();
 }
 
 CKBOOL CKPostprocessPass::EnsureSceneFrameBuffer(CKDWORD width, CKDWORD height)
