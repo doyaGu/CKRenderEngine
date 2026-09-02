@@ -169,7 +169,7 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
         }
 
         if (clipRectSet) {
-            rc->m_FFP->SetViewport(rc->m_ViewportData);
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
             rc->SetProjectionTransformationMatrix(rc->m_ProjectionMatrix);
         }
 
@@ -615,7 +615,7 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
     }
 
     if (clipRectSet) {
-        dev->m_FFP->SetViewport(dev->m_ViewportData);
+        dev->m_RasterizerContext->SetViewport(&dev->m_ViewportData);
         dev->SetProjectionTransformationMatrix(dev->m_ProjectionMatrix);
     }
 }
@@ -636,7 +636,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
 
         // Phase 1: compute viewProj from FF pipeline (v2 has no UpdateMatrices/m_ViewProjMatrix)
         VxMatrix viewProj;
-        Vx3DMultiplyMatrix4(viewProj, dev->m_FFP->GetProjectionMatrix(), dev->m_FFP->GetViewMatrix());
+        Vx3DMultiplyMatrix4(viewProj, dev->m_ProjectionMatrix, dev->m_ViewMatrix);
 
         CKTransparentObject *it = m_TransparentObjects.Begin();
         while (it != m_TransparentObjects.End()) {

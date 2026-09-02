@@ -113,6 +113,15 @@ public:
     CKRasterizerContext *GetRasterizerContext() override;
     void AttachTranslatedContext();
     void DetachTranslatedContext();
+    // Migration (phase 1): the translated context behind the contract pointer
+    // and a by-value render state read through the contract.
+    CKTranslatedContext *TranslatedContext() const { return static_cast<CKTranslatedContext *>(m_RasterizerContext); }
+    CKDWORD GetRasterizerRenderState(VXRENDERSTATETYPE State) const {
+        CKDWORD value = 0;
+        if (m_RasterizerContext)
+            m_RasterizerContext->GetRenderState(State, &value);
+        return value;
+    }
     void ApplyRenderOptions();
     void SetClearBackground(CKBOOL ClearBack = TRUE) override;
     CKBOOL GetClearBackground() override;

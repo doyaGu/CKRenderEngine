@@ -34,7 +34,7 @@ public:
     static CKLight *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
 
-    CKBOOL Setup(CKFixedFunctionPipeline *ffPipeline, int lightIndex);
+    CKBOOL Setup(CKRasterizerContext *rst, int lightIndex);
 
 protected:
     CKLightData m_LightData;

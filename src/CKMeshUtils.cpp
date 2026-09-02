@@ -371,7 +371,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                             Vx3DMultiplyMatrix(combined, invWorldMat, worldMatrix);
 
                             VxMatrix projCombined;
-                            Vx3DMultiplyMatrix4(projCombined, dev->m_FFP->GetProjectionMatrix(), combined);
+                            Vx3DMultiplyMatrix4(projCombined, dev->m_ProjectionMatrix, combined);
 
                             // Transform points to clip space
                             VxVector4 clipIntersect, clipV0, clipV1, clipV2;

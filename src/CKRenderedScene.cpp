@@ -255,7 +255,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
                           rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
         rc->m_Frustum = frustum;
 
-        rc->m_FFP->SetTransform(VXMATRIX_WORLD, VxMatrix::Identity());
+        rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());
         rc->SetViewTransformationMatrix(rootEntity->GetInverseWorldMatrix());
 
         static int s_camLogCount = 0;
@@ -303,8 +303,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     // Obtain current view and projection matrices after camera setup so bgfx
     // receives the same transforms used by draw submission in this frame.
-    const VxMatrix &viewMat = rc->m_FFP->GetViewMatrix();
-    const VxMatrix &projMat = rc->m_FFP->GetProjectionMatrix();
+    const VxMatrix &viewMat = rc->m_ViewMatrix;
+    const VxMatrix &projMat = rc->m_ProjectionMatrix;
 
     if (frameLog)
         CK_LOG("RenderedScene", "Draw - calling BeginFrame");
@@ -578,7 +578,7 @@ void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
 
     for (CKDWORD i = 0; i < m_LightCount; ++i) {
-        rc->m_FFP->EnableLight(i, FALSE);
+        rc->m_RasterizerContext->EnableLight(i, FALSE);
     }
     m_LightCount = 0;
 
@@ -593,12 +593,12 @@ void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
             continue;
         if (m_LightCount >= CKFF_MAX_LIGHTS)
             break;
-        if (light->Setup(rc->m_FFP, static_cast<int>(m_LightCount))) {
+        if (light->Setup(rc->m_RasterizerContext, static_cast<int>(m_LightCount))) {
             ++m_LightCount;
         }
     }
 
-    rc->m_FFP->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
+    rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
 }
 
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
@@ -617,24 +617,24 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerDevice * /*rst*/) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
-    CKFixedFunctionPipeline &ffp = *rc->m_FFP;
+    CKTranslatedContext *rst = rc->TranslatedContext();
 
     CKDWORD fogMode = m_FogMode;
     if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {
         fogMode = VXFOG_LINEAR;
     }
 
-    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
+    rst->SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
 
     if (fogMode != VXFOG_NONE) {
         if ((rc->m_RasterizerDriver->m_3DCaps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) == (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
+            rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
         } else {
             fogMode = VXFOG_LINEAR;
-            ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, fogMode);
+            rst->SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, fogMode);
         }
 
-        const VxMatrix &projMat = ffp.GetProjectionMatrix();
+        const VxMatrix &projMat = rc->m_ProjectionMatrix;
 
         float endZ = projMat[2][2] * m_FogEnd + projMat[3][2];
         float endW = projMat[2][3] * m_FogEnd + projMat[3][3];
@@ -647,43 +647,43 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerDevice * /*rst*/) {
         float recipStartW = 1.0f / startW;
 
         if (g_FogProjectionMode == 0) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(m_FogEnd));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(m_FogStart));
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(m_FogEnd));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(m_FogStart));
         } else if (g_FogProjectionMode == 1) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogEnd));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(projFogStart));
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogEnd));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(projFogStart));
         } else if (g_FogProjectionMode == 2) {
-            ffp.SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogStart));
-            ffp.SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(recipStartW));
+            rst->SetRenderState(VXRENDERSTATE_FOGEND, FloatRenderState(projFogStart));
+            rst->SetRenderState(VXRENDERSTATE_FOGSTART, FloatRenderState(recipStartW));
         }
 
-        ffp.SetRenderState(VXRENDERSTATE_FOGDENSITY, FloatRenderState(m_FogDensity));
-        ffp.SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
+        rst->SetRenderState(VXRENDERSTATE_FOGDENSITY, FloatRenderState(m_FogDensity));
+        rst->SetRenderState(VXRENDERSTATE_FOGCOLOR, m_FogColor);
     }
 
     if (rm->m_DisableSpecular.Value != 0) {
-        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
+        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, FALSE);
     } else {
-        ffp.SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
+        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE, TRUE);
     }
 
-    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
-    ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
+    rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+    rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
     // m_PresentInterval / m_CurrentPresentInterval were v1 fields on
     // CKRasterizerDevice; filter/mipmap modes are now managed by the
     // sampler descriptors built inside CKFixedFunctionPipeline.
 
-    ffp.SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
-    ffp.SetRenderState(VXRENDERSTATE_ZENABLE,   TRUE);
-    ffp.SetRenderState(VXRENDERSTATE_CULLMODE,  VXCULL_CCW);
-    ffp.SetRenderState(VXRENDERSTATE_ZFUNC,     VXCMP_LESSEQUAL);
+    rst->SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
+    rst->SetRenderState(VXRENDERSTATE_ZENABLE,   TRUE);
+    rst->SetRenderState(VXRENDERSTATE_CULLMODE,  VXCULL_CCW);
+    rst->SetRenderState(VXRENDERSTATE_ZFUNC,     VXCMP_LESSEQUAL);
 
     if (rc->m_Shading < 2) {
         if (rc->m_Shading) {
-            ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
+            rst->SetRenderState(VXRENDERSTATE_SHADEMODE, rc->m_Shading);
         } else {
-            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+            rst->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
         }
     }
     // Shading == 2 (Gouraud solid) is the pipeline default; no override needed.

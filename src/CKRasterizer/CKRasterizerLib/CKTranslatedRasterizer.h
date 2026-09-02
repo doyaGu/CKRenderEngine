@@ -156,6 +156,17 @@ public:
     // Pipeline-side layout of a contract vertex buffer, for the engine's
     // remaining CKFixedFunctionPipeline::DrawVertexBuffer calls.
     CKBOOL GetVertexBufferDrawInfoForMigration(CKDWORD VB, CKDWORD *FormatFlags, CKDWORD *DeviceLayout) const;
+    // Pipeline-side stage operations the contract has no equivalent for yet
+    // (they clear the pipeline's "explicitly set" masks); the mirror follows.
+    void ResetTextureStageForMigration(int Stage);
+    void DisableTextureStagesFromForMigration(int FirstStage);
+    void RestoreTextureStageForMigration(int Stage, const CKFFTextureStageSnapshot &Snapshot);
+    CKDWORD GetBoundTextureForMigration(int Stage) const;
+    // Re-reads the pipeline state into the contract mirror after a pipeline-side
+    // guard restored it.
+    void SyncMirrorFromPipeline();
+    void SyncRenderStateMirrorFromPipeline(VXRENDERSTATETYPE State);
+    void SyncStageMirrorFromPipeline(int Stage);
 
     // --- Test access ---
     CKDWORD GetTargetForTests() const { return m_Target; }
@@ -311,6 +322,69 @@ private:
     CKDWORD m_FrameTextureUploads;
     CKDWORD m_FrameBufferUploads;
     CKBOOL m_LayoutMismatchLogged;
+};
+
+// ===========================================================================
+// Migration guards (phase 1, removed in step 1.7)
+// ===========================================================================
+// The engine still saves / restores state through the pipeline guards, which
+// keep the pipeline's "explicitly set" semantics intact. These wrappers
+// resynchronise the contract mirror after the restore.
+
+class CKTranslatedStateGuard {
+public:
+    explicit CKTranslatedStateGuard(CKTranslatedContext *Context)
+        : m_Context(Context), m_Guard(*Context->GetFFPipelineForMigration()) {}
+    ~CKTranslatedStateGuard() { Restore(); }
+    CKTranslatedStateGuard(const CKTranslatedStateGuard &) = delete;
+    CKTranslatedStateGuard &operator=(const CKTranslatedStateGuard &) = delete;
+
+    void Restore()
+    {
+        if (!m_Context)
+            return;
+        m_Guard.Restore();
+        m_Context->SyncMirrorFromPipeline();
+        m_Context = NULL;
+    }
+    void Dismiss()
+    {
+        m_Guard.Dismiss();
+        m_Context = NULL;
+    }
+
+private:
+    CKTranslatedContext *m_Context;
+    CKFFStateGuard m_Guard;
+};
+
+class CKTranslatedRenderStateGuard {
+public:
+    CKTranslatedRenderStateGuard(CKTranslatedContext *Context, VXRENDERSTATETYPE State, CKBOOL Active = TRUE)
+        : m_Context(Active ? Context : NULL), m_State(State),
+          m_Guard(*Context->GetFFPipelineForMigration(), State, Active) {}
+    ~CKTranslatedRenderStateGuard() { Restore(); }
+    CKTranslatedRenderStateGuard(const CKTranslatedRenderStateGuard &) = delete;
+    CKTranslatedRenderStateGuard &operator=(const CKTranslatedRenderStateGuard &) = delete;
+
+    void Restore()
+    {
+        if (!m_Context)
+            return;
+        m_Guard.Restore();
+        m_Context->SyncRenderStateMirrorFromPipeline(m_State);
+        m_Context = NULL;
+    }
+    void Dismiss()
+    {
+        m_Guard.Dismiss();
+        m_Context = NULL;
+    }
+
+private:
+    CKTranslatedContext *m_Context;
+    VXRENDERSTATETYPE m_State;
+    CKFFRenderStateGuard m_Guard;
 };
 
 // ===========================================================================

@@ -3,7 +3,7 @@
 #include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizer.h"
 #include "RCK3dEntity.h"
 #include "CKFixedFunctionPipeline.h"
 
@@ -591,7 +591,7 @@ Remarks:
 
 Implementation based on decompilation at 0x1001b0c2.
 *************************************************/
-CKBOOL RCKLight::Setup(CKFixedFunctionPipeline *ffPipeline, int lightIndex) {
+CKBOOL RCKLight::Setup(CKRasterizerContext *rst, int lightIndex) {
     // Check visibility
     if (!IsVisible())
         return FALSE;
@@ -644,13 +644,13 @@ CKBOOL RCKLight::Setup(CKFixedFunctionPipeline *ffPipeline, int lightIndex) {
         m_LightData.Diffuse.b *= m_LightPower;
         m_LightData.Diffuse.a *= m_LightPower;
 
-        ffPipeline->SetLight(lightIndex, &m_LightData);
-        ffPipeline->EnableLight(lightIndex, TRUE);
+        rst->SetLight((CKDWORD)lightIndex, &m_LightData);
+        rst->EnableLight((CKDWORD)lightIndex, TRUE);
 
         m_LightData.Diffuse = originalDiffuse;
     } else {
-        ffPipeline->SetLight(lightIndex, &m_LightData);
-        ffPipeline->EnableLight(lightIndex, TRUE);
+        rst->SetLight((CKDWORD)lightIndex, &m_LightData);
+        rst->EnableLight((CKDWORD)lightIndex, TRUE);
     }
 
     return TRUE;

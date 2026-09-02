@@ -39,7 +39,7 @@ static void RestoreSceneSpecularState(RCKRenderContext *rc) {
     if (!rc || !rc->m_RenderManager)
         return;
 
-    rc->m_FFP->SetRenderState(
+    rc->m_RasterizerContext->SetRenderState(
         VXRENDERSTATE_SPECULARENABLE,
         rc->m_RenderManager->m_DisableSpecular.Value != 0 ? FALSE : TRUE);
 }
@@ -114,14 +114,14 @@ void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
             continue;
 
         channelMat->BindTextureSlotToStage(static_cast<CKRenderContext *>(dev), 0, stage);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_OP, colorOp);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_ARG1, colorArg1);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_ARG2, colorArg2);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_AOP, alphaOp);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_AARG1, alphaArg1);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_AARG2, alphaArg2);
-        dev->m_FFP->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_OP, colorOp);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_ARG1, colorArg1);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_ARG2, colorArg2);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AOP, alphaOp);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AARG1, alphaArg1);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AARG2, alphaArg2);
+        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
                                               CKFFPackTexcoordIndex((CKDWORD)stage, CKFF_TEXGEN_NONE));
     }
 }
@@ -4204,7 +4204,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     if (faceCount) {
         // Wrap mode (matches IDA)
         const CKDWORD wrapMode = TextureWrapModeFromMeshFlags(m_Flags);
-        rc->m_FFP->SetRenderState(VXRENDERSTATE_WRAP0, wrapMode);
+        rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, wrapMode);
 
         // Ensure optimized render groups exist (VXMESH_OPTIMIZED)
         if (!(m_Flags & VXMESH_OPTIMIZED))
@@ -4230,19 +4230,20 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         // Z-buffer only rendering mode
         if (zbufOnly) {
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
+            CKTranslatedContext *rst = rc->TranslatedContext();
             CKFixedFunctionPipeline &ffp = *rc->m_FFP;
-            CKFFStateGuard ffpState(ffp);
+            CKTranslatedStateGuard ffpState(rst);
 
-            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
-            ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+            rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+            rst->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+            rst->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0);
 
-            rc->m_FFP->SetViewport(rc->m_ViewportData);
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
             const CKRenderView drawView = rc->ResolveDrawView(dpData.Flags);
             CKMeshSetDrawAnnotation(rc, (CKSTRING)"ZBUF",
                                     drawView,
@@ -4264,26 +4265,26 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         } else if (stencilOnly) {
             // Stencil only rendering mode
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            CKFixedFunctionPipeline &ffp = *rc->m_FFP;
-            CKFFStateGuard ffpState(ffp);
+            CKTranslatedContext *rst = rc->TranslatedContext();
+            CKTranslatedStateGuard ffpState(rst);
 
-            ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
-            ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILREF, 1);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xFF);
-            ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
-            ffp.SetColorWriteMask(FALSE, FALSE, FALSE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+            rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+            rst->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+            rst->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+            rst->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+            rst->SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+            rst->SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+            rst->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+            rst->SetRenderState(VXRENDERSTATE_STENCILREF, 1);
+            rst->SetRenderState(VXRENDERSTATE_STENCILMASK, 0xFF);
+            rst->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+            rst->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0);
 
-            rc->m_FFP->SetViewport(rc->m_ViewportData);
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
             const CKRenderView drawView = rc->ResolveDrawView(dpData.Flags);
             CKMeshSetDrawAnnotation(rc, (CKSTRING)"STENCIL",
                                     drawView,
@@ -4398,9 +4399,9 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
-                rc->m_FFP->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
-                rc->m_FFP->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_DISABLE);
-                rc->m_FFP->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
+                rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
+                rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+                rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
             }
 
             // Setup draw flags
@@ -4409,10 +4410,10 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             // Vertex color (prelit) vs lighting
             if ((m_Flags & VXMESH_PRELITMODE) != 0) {
                 dpData.Flags |= CKRST_DP_DIFFUSE | CKRST_DP_SPECULAR;
-                rc->m_FFP->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+                rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             } else {
                 dpData.Flags |= CKRST_DP_LIGHT;
-                rc->m_FFP->SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+                rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
             }
 
             // Check HW vertex buffer
@@ -4473,16 +4474,16 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
             // Wireframe overlay
             if (rc->m_DisplayWireframe) {
-                CKFFStateGuard ffpState(*rc->m_FFP);
+                CKTranslatedStateGuard ffpState(rc->TranslatedContext());
                 VxMatrix projMat;
                 memcpy(&projMat, rc->GetProjectionTransformationMatrix(), sizeof(VxMatrix));
                 float origZ = projMat[3][2];
                 projMat[3][2] = origZ * 1.003f;
                 rc->SetProjectionTransformationMatrix(projMat);
 
-                rc->m_FFP->DisableTextureStagesFrom(0);
-                rc->m_FFP->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-                rc->m_FFP->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+                rc->TranslatedContext()->DisableTextureStagesFromForMigration(0);
+                rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+                rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
 
                 VxDrawPrimitiveData wfDp = dpData;
                 wfDp.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
@@ -4497,15 +4498,15 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
         // Render material channels if needed
         if (renderChannels) {
-            CKDWORD fogEnable = rc->m_FFP->GetRenderState(VXRENDERSTATE_FOGENABLE);
+            CKDWORD fogEnable = rc->GetRasterizerRenderState(VXRENDERSTATE_FOGENABLE);
             RenderChannels(rc, ent, &dpData, fogEnable);
-            rc->m_FFP->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
+            rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         }
     }
 
     // Render lines
     if (lineCount) {
-        CKFFStateGuard ffpState(*rc->m_FFP);
+        CKTranslatedStateGuard ffpState(rc->TranslatedContext());
         VxDrawPrimitiveData lineDp;
         memset(&lineDp, 0, sizeof(lineDp));
 
@@ -4517,18 +4518,18 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         lineDp.ColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Color : nullptr;
         lineDp.SpecularColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Specular : nullptr;
 
-        rc->m_FFP->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-        rc->m_FFP->DisableTextureStagesFrom(0);
+        rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+        rc->TranslatedContext()->DisableTextureStagesFromForMigration(0);
         lineDp.Flags = (m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
         rc->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
 
         rc->m_Stats.NbLinesDrawn += lineCount;
     }
 
-    rc->m_FFP->SetRenderState(VXRENDERSTATE_WRAP0, 0);
+    rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
 
     if (m_ActiveTextureChannels.Size() > 0)
-        rc->m_FFP->DisableTextureStagesFrom(1);
+        rc->TranslatedContext()->DisableTextureStagesFromForMigration(1);
 
     CK_RENDER_PERF_ADD(renderStats, MeshDefaultUs, CKRenderPerfElapsedUs(perfStart));
     return 1;
@@ -4587,10 +4588,10 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
         if (!mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
         }
     } else {
         // No material - use default
@@ -4598,22 +4599,22 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
         if (m_ActiveTextureChannels.Size() > 0) {
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-            dev->m_FFP->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
         }
     }
 
     BindMonoPassTextureChannels(dev);
 
-    dev->m_FFP->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
+    dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
 
     if (ent) {
         if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERTEST) != 0)
-            dev->m_FFP->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
         if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERWRITE) != 0)
-            dev->m_FFP->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
     }
 
     // Render primitives
@@ -4835,7 +4836,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
     (void)rstContext;
-    CKFFStateGuard ffpState(*dev->m_FFP);
+    CKTranslatedStateGuard ffpState(dev->TranslatedContext());
 
     // Setup flags for channel rendering
     data->Flags = m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;
@@ -4876,12 +4877,12 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         mat->PatchForChannelRender(channel.m_SourceBlend, channel.m_DestBlend, savedSourceBlend, savedDestBlend, savedFlags);
 
         if (channel.m_SourceBlend == VXBLEND_SRCALPHA && channel.m_DestBlend == VXBLEND_INVSRCALPHA) {
-            dev->m_FFP->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         } else {
-            dev->m_FFP->SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
         }
 
-        dev->m_FFP->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
+        dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 0);
 
         // Check for additive blending (mark as unlit)
         if ((channel.m_SourceBlend == VXBLEND_ZERO && channel.m_DestBlend == VXBLEND_SRCCOLOR) ||
@@ -4893,7 +4894,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         CKBOOL useLighting = (m_Flags & VXMESH_PRELITMODE) == 0 && (channelFlags & VXCHANNEL_NOTLIT) == 0;
 
         mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
-        dev->m_FFP->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
+        dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
 
         // Handle unlit channel - clear color pointers
         if ((channelFlags & VXCHANNEL_NOTLIT) != 0) {

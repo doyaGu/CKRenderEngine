@@ -2589,10 +2589,10 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // Handle indirect matrix (mirrored objects)
     const CKBOOL hasIndirectMatrix = (m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0;
-    CKFFRenderStateGuard inverseWindingGuard(*dev->m_FFP, VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
+    CKTranslatedRenderStateGuard inverseWindingGuard(dev->TranslatedContext(), VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
     if (hasIndirectMatrix) {
-        const CKDWORD inverseWinding = dev->m_FFP->GetRenderState(VXRENDERSTATE_INVERSEWINDING);
-        dev->m_FFP->SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);
+        const CKDWORD inverseWinding = dev->GetRasterizerRenderState(VXRENDERSTATE_INVERSEWINDING);
+        dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);
     }
 
     // Handle skin update for non-PM meshes
