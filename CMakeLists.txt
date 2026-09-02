@@ -48,6 +48,7 @@ set_property(CACHE CKRE_BGFX_OPENGLES_VERSION PROPERTY STRINGS "" 20 30 31 32)
 option(CKRE_GENERATE_SHADERS "Regenerate CK2_3D bgfx fixed-function shader headers at build time" ${_ckre_generate_shaders_default})
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
+option(CKRE_BUILD_TOOLS "Build ckre_scene_capture (needs CKRE_BUILD_SHARED)" ${CKRE_BUILD_TESTS})
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
 option(CKRE_ENABLE_DIAGNOSTICS "Enable optional CK2_3D diagnostic code unless a category overrides it" OFF)
 option(CKRE_ENABLE_DEBUG_LOGGER "Enable CK2_3D internal diagnostic logger support" ${CKRE_ENABLE_DIAGNOSTICS})
@@ -283,6 +284,17 @@ if (CKRE_BUILD_TESTS)
     enable_testing()
 endif ()
 add_subdirectory(src)
+
+# =============================================================================
+# Tools (before tests: scene_capture_golden refers to the tool target)
+# =============================================================================
+if (CKRE_BUILD_TOOLS)
+    if (CKRE_BUILD_SHARED AND TARGET CK2 AND TARGET SDL3::SDL3)
+        add_subdirectory(tools/scene_capture)
+    else ()
+        message(STATUS "[CKRenderEngine] ckre_scene_capture skipped: it needs CKRE_BUILD_SHARED (dynamic render engine loading)")
+    endif ()
+endif ()
 
 # =============================================================================
 # Tests

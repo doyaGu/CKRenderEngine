@@ -54,6 +54,49 @@ function(ckre_add_benchmark TARGET_NAME)
     ckre_configure_test_target(${TARGET_NAME})
 endfunction()
 
+# Tests of the CKRasterizer v3 contract link only CKRasterizerLib3: they must
+# not see the v2 headers in include/ nor the engine.
+function(ckre_add_rasterizer3_test TARGET_NAME)
+    add_executable(${TARGET_NAME} ${ARGN})
+    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
+    )
+    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib3)
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+        FOLDER "Tests"
+    )
+    ckre_copy_runtime_dependencies(${TARGET_NAME})
+    add_test(NAME ${TARGET_NAME} COMMAND $<TARGET_FILE:${TARGET_NAME}>)
+    set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
+endfunction()
+
+ckre_add_rasterizer3_test(rasterizer3_contract_tests
+    test_rasterizer3_contract.cpp
+)
+
+# Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
+# shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
+# environment gates as ffp_opengl_runtime_tests. Skips when no golden frames
+# exist for the current runner / backend.
+if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
+    add_test(NAME scene_capture_golden
+        COMMAND "${CMAKE_COMMAND}"
+            -DTOOL=$<TARGET_FILE:ckre_scene_capture>
+            -DENGINE_DIR=$<TARGET_FILE_DIR:CK2_3D>
+            -DGOLDEN_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/reference/frames/golden
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture
+            # stencil_write_mask: the v2 pipeline rejects partial stencil write masks (KNOWN_DIFFERENCES.md)
+            -DSKIP=stencil_write_mask
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_golden.cmake
+    )
+    set_tests_properties(scene_capture_golden PROPERTIES
+        TIMEOUT 900
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
+    )
+endif ()
+
 ckre_add_test(nvstripifier_tests
     test_nvstripifier.cpp
 )

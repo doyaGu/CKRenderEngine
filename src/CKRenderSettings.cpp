@@ -134,6 +134,12 @@ static bool CKRenderSettingsLoadFile(VxConfiguration &config, const char *path) 
 }
 
 static void CKRenderSettingsLoad(VxConfiguration &config) {
+    // Test tooling (ckre_scene_capture present_* scenes) points the engine at a
+    // specific ini through the environment; it replaces the module sibling file.
+    const char *overridePath = getenv("CKRE_SETTINGS_FILE");
+    if (overridePath && overridePath[0] != 0 && CKRenderSettingsLoadFile(config, overridePath))
+        return;
+
     XString path = CKRenderSettingsModuleSiblingFile((const void *)&CKRenderSettingsLoad, kRenderSettingsFile);
     if (path.Length() > 0 && CKRenderSettingsLoadFile(config, path.CStr()))
         return;

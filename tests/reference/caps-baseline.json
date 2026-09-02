@@ -1,0 +1,41 @@
+{
+  "source": "CKDX8Rasterizer.dll (Ballance retail, RenderEngines/CK2_3D.dll 2002-10-30) | NVIDIA GeForce RTX 4090 (T&L DX8) | Windows 11 x64, 32-bit process | captured 2026-09-02 by ckre_scene_capture --caps-json",
+  "notes": [
+    "Bit fields (RasterCaps, TextureCaps, ...) are the contract baseline (spec 4.9.2). Drivers may only lower numeric fields.",
+    "RenderBpps / ZBufferBpps / StencilBpps / MaxVideoMemory / AvailableVideoMemory were reported as 0 by the original driver.",
+    "The original driver reported an empty TextureFormats list through VxDriverDesc; the format list is not part of the baseline."
+  ],
+  "caps3D": {
+    "DevCaps": "0x001BBEF0",
+    "RenderBpps": "0x00000000",
+    "ZBufferBpps": "0x00000000",
+    "StencilBpps": "0x00000000",
+    "StencilCaps": "0x000000FF",
+    "MinTextureWidth": "0x00000001",
+    "MinTextureHeight": "0x00000001",
+    "MaxTextureWidth": "0x00004000",
+    "MaxTextureHeight": "0x00004000",
+    "MaxClipPlanes": "0x00000008",
+    "VertexCaps": "0x0000003B",
+    "MaxActiveLights": "0x00000008",
+    "MaxNumberBlendStage": "0x00000008",
+    "MaxNumberTextureStage": "0x00000008",
+    "MaxTextureRatio": "0x00004000",
+    "TextureFilterCaps": "0x0303073F",
+    "TextureAddressCaps": "0x0000003F",
+    "TextureCaps": "0x0001ECC5",
+    "MiscCaps": "0x00000EF2",
+    "AlphaCmpCaps": "0x000000FF",
+    "ZCmpCaps": "0x000000FF",
+    "RasterCaps": "0x00F37191",
+    "SrcBlendCaps": "0x00001FFF",
+    "DestBlendCaps": "0x00001FFF",
+    "CKRasterizerSpecificCaps": "0x000104CD"
+  },
+  "caps2D": {
+    "Family": 0,
+    "MaxVideoMemory": "0x00000000",
+    "AvailableVideoMemory": "0x00000000",
+    "Caps": "0x00000007"
+  }
+}

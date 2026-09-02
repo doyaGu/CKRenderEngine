@@ -11,3 +11,8 @@ CTestTestfile.cmake
 _deps
 build/
 install/
+
+# Phase-0 reference material that must stay local
+oracle/
+tests/reference/frames/local/
+tools/scene_capture/build*/
