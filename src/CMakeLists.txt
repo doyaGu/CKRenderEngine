@@ -104,7 +104,6 @@ set(CKRE_PRIVATE_HEADERS
         CKVertexLayoutCache.h
         CKTransientGeometry.h
         CKRenderPipeline.h
-        CKFrustumCuller.h
         CKRenderSettings.h
         CKRenderPerfStats.h
         CKRenderFrameCostStats.h
@@ -189,7 +188,6 @@ set(CKRE_SOURCES
         CKVertexLayoutCache.cpp
         CKTransientGeometry.cpp
         CKRenderPipeline.cpp
-        CKFrustumCuller.cpp
         CKRenderSettings.cpp
 )
 
@@ -288,7 +286,8 @@ function(ckre_configure_target TARGET_NAME)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
 
-    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
+    # PUBLIC: tests and tools that link CK2_3DStatic include translation-core headers.
+    target_link_libraries(${TARGET_NAME} PUBLIC CKRasterizerLib)
 
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
     target_link_libraries(${TARGET_NAME} PRIVATE SDL3::SDL3)

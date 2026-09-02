@@ -24,7 +24,6 @@
 #include "CKVertexLayoutCache.h"
 #include "CKTransientGeometry.h"
 #include "CKRenderPipeline.h"
-#include "CKFrustumCuller.h"
 
 #ifndef CKRE_ENABLE_TEST_ACCESS
 #define CKRE_ENABLE_TEST_ACCESS 0
@@ -190,7 +189,6 @@ private:
     CKVertexLayoutCache m_VertexLayoutCache;
     CKTransientGeometry m_TransientGeometry;
     CKRenderPipeline m_RenderPipeline;
-    CKFrustumCuller m_FrustumCuller;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
 #endif

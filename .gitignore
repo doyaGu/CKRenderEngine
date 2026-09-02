@@ -16,3 +16,4 @@ install/
 oracle/
 tests/reference/frames/local/
 tools/scene_capture/build*/
+tests/reference/frames/golden/local-*/
