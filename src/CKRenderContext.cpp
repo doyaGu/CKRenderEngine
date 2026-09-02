@@ -1358,7 +1358,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     } else {
         // Check if forced to software
         if (m_RenderManager->m_ForceSoftware.Value != 0) {
-            CKRasterizerDeviceDriver *drv = m_RenderManager->GetDriver(NewDriver);
+            CKRasterizerDeviceDriver *drv = m_RenderManager->GetDeviceDriver(NewDriver);
             if (!drv || drv->m_Hardware) {
                 NewDriver = m_RenderManager->GetPreferredSoftwareDriver();
             }
@@ -1366,7 +1366,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     }
 
     // Get the new driver
-    CKRasterizerDeviceDriver *newDriver = m_RenderManager->GetDriver(NewDriver);
+    CKRasterizerDeviceDriver *newDriver = m_RenderManager->GetDeviceDriver(NewDriver);
     CKRasterizerDeviceDriver *oldDriver = m_RasterizerDriver;
 
     if (!newDriver)
@@ -1464,6 +1464,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     CKERROR created = createDevice(newDriver, m_Settings);
 
     if (created == CK_OK) {
+        m_RenderManager->RefreshDriverCaps(NewDriver);
         // Success - update driver index and settings
         m_DriverIndex = NewDriver;
         m_Settings.m_Rect.left = m_RasterizerContext->m_PosX;
@@ -3444,14 +3445,14 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Check if forcing software driver
     if (m_RenderManager->m_ForceSoftware.Value != 0) {
-        CKRasterizerDeviceDriver *driverToCheck = m_RenderManager->GetDriver(Driver);
+        CKRasterizerDeviceDriver *driverToCheck = m_RenderManager->GetDeviceDriver(Driver);
         if (!driverToCheck || driverToCheck->m_Hardware) {
             Driver = m_RenderManager->GetPreferredSoftwareDriver();
         }
     }
 
     // Get the rasterizer driver
-    m_RasterizerDriver = m_RenderManager->GetDriver(Driver);
+    m_RasterizerDriver = m_RenderManager->GetDeviceDriver(Driver);
     if (!m_RasterizerDriver)
         return CKERR_INVALIDRENDERCONTEXT;
 
@@ -3537,6 +3538,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
         m_DeviceDestroying = FALSE;
         return CKERR_CANCREATERENDERCONTEXT;
     }
+    m_RenderManager->RefreshDriverCaps(Driver);
 
     m_DriverIndex = Driver;
 

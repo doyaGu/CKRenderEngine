@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKTranslatedRasterizer.h"
 
 #include <new>
 
@@ -38,7 +39,8 @@ void CKBgfxRasterizer::Close()
     m_Drivers.Clear();
 }
 
-static CKRasterizerDeviceLibrary *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
+// The bgfx device library, wrapped by the translation core below.
+static CKRasterizerDeviceLibrary *CKBgfxDeviceStart(WIN_HANDLE AppWnd)
 {
     auto *rasterizer = new (std::nothrow) CKBgfxRasterizer();
     if (!rasterizer)
@@ -52,7 +54,7 @@ static CKRasterizerDeviceLibrary *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
     return rasterizer;
 }
 
-static void CKBgfxRasterizerClose(CKRasterizerDeviceLibrary *rst)
+static void CKBgfxDeviceClose(CKRasterizerDeviceLibrary *rst)
 {
     if (!rst)
         return;
@@ -61,10 +63,24 @@ static void CKBgfxRasterizerClose(CKRasterizerDeviceLibrary *rst)
     delete rst;
 }
 
+// Plugin entry points: the engine sees the v3 contract.
+static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
+{
+    CKRasterizerDeviceLibrary *device = CKBgfxDeviceStart(AppWnd);
+    if (!device)
+        return NULL;
+    return CKTranslatedRasterizerStart(device, CKBgfxDeviceClose);
+}
+
+static void CKBgfxRasterizerClose(CKRasterizer *rst)
+{
+    CKTranslatedRasterizerClose(rst);
+}
+
 #ifdef CK_LIB
-void CKBgfxRasterizerGetInfo(CKRasterizerDeviceInfo *info)
+void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info)
 #else
-extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerDeviceInfo *info)
+extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *info)
 #endif
 {
     if (!info)
@@ -73,5 +89,5 @@ extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerDevice
     info->Desc = "bgfx Rasterizer";
     info->StartFct = CKBgfxRasterizerStart;
     info->CloseFct = CKBgfxRasterizerClose;
-    info->InterfaceRevision = CKRST_DEVICE_INTERFACE_REVISION;
+    info->InterfaceRevision = CKRST_INTERFACE_REVISION;
 }

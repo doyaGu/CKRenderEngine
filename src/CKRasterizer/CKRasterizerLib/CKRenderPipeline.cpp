@@ -4,54 +4,8 @@
 #include "CKRenderPerfClock.h"
 #include "CKRenderSettings.h"
 
-#include "shaders/generated/dx11/vs_postprocess.bin.h"
-#include "shaders/generated/dx11/fs_postprocess.bin.h"
-#include "shaders/generated/dx12/vs_postprocess.bin.h"
-#include "shaders/generated/dx12/fs_postprocess.bin.h"
-#include "shaders/generated/spirv/vs_postprocess.bin.h"
-#include "shaders/generated/spirv/fs_postprocess.bin.h"
-#include "shaders/generated/glsl/vs_postprocess.bin.h"
-#include "shaders/generated/glsl/fs_postprocess.bin.h"
-#include "shaders/generated/essl/vs_postprocess.bin.h"
-#include "shaders/generated/essl/fs_postprocess.bin.h"
-#include "shaders/generated/metal/vs_postprocess.bin.h"
-#include "shaders/generated/metal/fs_postprocess.bin.h"
-
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-struct CKPostprocessShaderBlobSet {
-    CK_SHADER_PROFILE Profile;
-    const unsigned char *VS;
-    unsigned int VSSize;
-    const unsigned char *FS;
-    unsigned int FSSize;
-};
-
-const CKPostprocessShaderBlobSet g_PostprocessShaderBlobSets[] = {
-    {CKRST_SHADER_PROFILE_DX11, s_dx11_vs_postprocess, sizeof(s_dx11_vs_postprocess),
-     s_dx11_fs_postprocess, sizeof(s_dx11_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_DX12, s_dx12_vs_postprocess, sizeof(s_dx12_vs_postprocess),
-     s_dx12_fs_postprocess, sizeof(s_dx12_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_SPIRV, s_spirv_vs_postprocess, sizeof(s_spirv_vs_postprocess),
-     s_spirv_fs_postprocess, sizeof(s_spirv_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_GLSL, s_glsl_vs_postprocess, sizeof(s_glsl_vs_postprocess),
-     s_glsl_fs_postprocess, sizeof(s_glsl_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_ESSL, s_essl_vs_postprocess, sizeof(s_essl_vs_postprocess),
-     s_essl_fs_postprocess, sizeof(s_essl_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_MSL, s_metal_vs_postprocess, sizeof(s_metal_vs_postprocess),
-     s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
-};
-
-static const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE profile)
-{
-    for (const CKPostprocessShaderBlobSet &set : g_PostprocessShaderBlobSets) {
-        if (set.Profile == profile)
-            return &set;
-    }
-    return nullptr;
-}
 
 static float ParseRenderScale(const char *value, float fallback)
 {
@@ -64,38 +18,14 @@ static float ParseRenderScale(const char *value, float fallback)
     return parsed;
 }
 
-static CKDWORD ScaledDimension(CKDWORD value, float scale, CKDWORD maximum)
-{
-    if (maximum == 0)
-        return 0;
-    if (value == 0)
-        value = 1;
-    const float scaled = (float)value * scale;
-    if (scaled <= 1.0f)
-        return 1;
-    if (scaled >= (float)maximum)
-        return maximum;
-    return (CKDWORD)(scaled + 0.5f);
-}
-
 float CKRenderPipelineClampRenderScale(float scale)
 {
-    if (!(scale > 0.0f) || !isfinite(scale))
-        return 1.0f;
-    if (scale < 0.5f)
-        return 0.5f;
-    if (scale > 2.0f)
-        return 2.0f;
-    return scale;
+    return CKPostprocessPass::ClampRenderScale(scale);
 }
 
 float CKRenderPipelineClampSharpness(float sharpness)
 {
-    if (!(sharpness > 0.0f) || !isfinite(sharpness))
-        return 0.0f;
-    if (sharpness > 1.0f)
-        return 1.0f;
-    return sharpness;
+    return CKPostprocessPass::ClampSharpness(sharpness);
 }
 
 CKRenderPipelineConfig CKRenderPipelineConfigFromSettings()
@@ -119,10 +49,7 @@ CKRenderPipelineConfig CKRenderPipelineConfigFromSettings()
 
 CKRenderPipeline::CKRenderPipeline()
     : m_Context(nullptr), m_Encoder(nullptr), m_ExternalRenderTarget(FALSE),
-      m_SceneFrameBufferActive(FALSE), m_PostprocessSubmitted(FALSE),
-      m_SceneWidth(0), m_SceneHeight(0),
-      m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN),
-      m_FrameNumber(0) {
+      m_PostprocessSubmitted(FALSE), m_FrameNumber(0) {
     Vx3DMatrixIdentity(m_OrthoProj);
 }
 
@@ -134,6 +61,7 @@ void CKRenderPipeline::Init(CKRasterizerDevice *ctx) {
     m_Context = ctx;
     m_Encoder = nullptr;
     m_FrameNumber = 0;
+    m_Postprocess.Init(ctx);
     if (m_Context) {
         m_Context->SetViewName(CKRP_VIEW_CLEAR, (CKSTRING)"clear");
         m_Context->SetViewName(CKRP_VIEW_BACKGROUND2D, (CKSTRING)"background2d");
@@ -173,29 +101,26 @@ CKERROR CKRenderPipeline::Shutdown() {
     const CKERROR status = PrepareShutdown();
     if (status != CK_OK)
         return status;
-    DestroySceneFrameBuffer();
-    DestroyPostprocessResources();
+    m_Postprocess.Shutdown();
     m_Encoder = nullptr;
     m_Context = nullptr;
-    m_ResourceIds = CKRenderPipelineResourceIds();
     m_ExternalRenderTarget = FALSE;
-    m_SceneFrameBufferActive = FALSE;
     m_PostprocessSubmitted = FALSE;
-    m_SceneWidth = 0;
-    m_SceneHeight = 0;
-    m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
     m_FrameNumber = 0;
     return CK_OK;
 }
 
 void CKRenderPipeline::SetResourceIds(const CKRenderPipelineResourceIds &ids) {
-    m_ResourceIds = ids;
+    // The engine only ever hands over an empty set to reset the pass.
+    (void)ids;
+    m_Postprocess.DestroySceneFrameBuffer();
+    m_Postprocess.DestroyResources();
 }
 
 void CKRenderPipeline::SetExternalRenderTarget(CKBOOL enabled) {
     m_ExternalRenderTarget = enabled;
     if (enabled) {
-        m_SceneFrameBufferActive = FALSE;
+        m_Postprocess.DestroySceneFrameBuffer();
         m_PostprocessSubmitted = FALSE;
     }
 }
@@ -233,17 +158,17 @@ CKERROR CKRenderPipeline::BeginFrame(
     CKBOOL useSceneFrameBuffer = FALSE;
     if (wantsSceneFrameBuffer) {
         useSceneFrameBuffer =
-            EnsureSceneFrameBuffer(viewport) && EnsurePostprocessResources();
+            EnsureSceneFrameBuffer(viewport) && m_Postprocess.EnsureResources();
         if (!useSceneFrameBuffer) {
-            DestroySceneFrameBuffer();
+            m_Postprocess.DestroySceneFrameBuffer();
             return CKERR_NOTIMPLEMENTED;
         }
-    } else if (m_SceneFrameBufferActive) {
-        DestroySceneFrameBuffer();
+    } else if (m_Postprocess.IsSceneFrameBufferActive()) {
+        m_Postprocess.DestroySceneFrameBuffer();
     }
 
     if (!m_ExternalRenderTarget) {
-        const CKDWORD sceneFb = useSceneFrameBuffer ? m_ResourceIds.SceneFrameBuffer : 0;
+        const CKDWORD sceneFb = useSceneFrameBuffer ? m_Postprocess.GetSceneFrameBuffer() : 0;
         CKERROR status = BindFrameBuffer(CKRP_VIEW_CLEAR, sceneFb);
         if (status != CK_OK) return status;
         status = BindFrameBuffer(CKRP_VIEW_BACKGROUND2D, sceneFb);
@@ -266,8 +191,8 @@ CKERROR CKRenderPipeline::BeginFrame(
     if (useSceneFrameBuffer) {
         sceneRect.left = 0;
         sceneRect.top = 0;
-        sceneRect.right = (int)m_SceneWidth;
-        sceneRect.bottom = (int)m_SceneHeight;
+        sceneRect.right = (int)m_Postprocess.GetSceneWidth();
+        sceneRect.bottom = (int)m_Postprocess.GetSceneHeight();
     }
 
     // View 0: Clear only
@@ -348,7 +273,7 @@ CKERROR CKRenderPipeline::BeginFrame(
     status = ConfigurePostprocessView(viewport);
     if (status != CK_OK) return status;
 
-    // View 6: Foreground 2D
+    // View 7: Foreground 2D
     status = m_Context->SetViewRect(CKRP_VIEW_FOREGROUND2D, viewport);
     if (status != CK_OK) return status;
     status = m_Context->SetViewTransform(
@@ -377,10 +302,11 @@ CKERROR CKRenderPipeline::CompositeScene()
         return CKERR_INVALIDRENDERCONTEXT;
     if (!m_Encoder)
         return CKERR_INVALIDOPERATION;
-    if (!m_SceneFrameBufferActive || m_PostprocessSubmitted)
+    if (!m_Postprocess.IsSceneFrameBufferActive() || m_PostprocessSubmitted)
         return CK_OK;
 
-    const CKERROR status = SubmitPostprocess();
+    const CKERROR status = m_Postprocess.Submit(
+        m_Encoder, CKRP_VIEW_POSTPROCESS, m_Config.FXAA, m_Config.Sharpness);
     if (status == CK_OK)
         m_PostprocessSubmitted = TRUE;
     return status;
@@ -479,286 +405,9 @@ CKBOOL CKRenderPipeline::EnsureSceneFrameBuffer(const CKRECT &viewport)
         return FALSE;
     const CKDWORD viewportWidth = (CKDWORD)((viewport.right > viewport.left) ? (viewport.right - viewport.left) : 1);
     const CKDWORD viewportHeight = (CKDWORD)((viewport.bottom > viewport.top) ? (viewport.bottom - viewport.top) : 1);
-    const CKDWORD width = ScaledDimension(
+    const CKDWORD width = CKPostprocessPass::ScaledDimension(
         viewportWidth, m_Config.RenderScale, caps.MaxTextureSize);
-    const CKDWORD height = ScaledDimension(
+    const CKDWORD height = CKPostprocessPass::ScaledDimension(
         viewportHeight, m_Config.RenderScale, caps.MaxTextureSize);
-
-    if (m_SceneFrameBufferActive && m_SceneWidth == width && m_SceneHeight == height)
-        return TRUE;
-
-    DestroySceneFrameBuffer();
-
-    CKTextureDesc colorDesc;
-    VxPixelFormat2ImageDesc(_32_ARGB8888, colorDesc.Format);
-    colorDesc.Format.Width = (int)width;
-    colorDesc.Format.Height = (int)height;
-    colorDesc.MipMapCount = 1;
-    colorDesc.Depth = 1;
-    colorDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
-                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
-    if (m_Context->CreateTexture(&colorDesc, nullptr,
-                                 &m_ResourceIds.SceneColorTexture) != CK_OK)
-        return FALSE;
-
-    CKDepthTextureDesc depthDesc = {};
-    depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
-    depthDesc.Width = width;
-    depthDesc.Height = height;
-    depthDesc.MipMapCount = 1;
-    depthDesc.DepthFormat = CKRST_DEPTHFMT_D24S8;
-    CKERROR depthErr = m_Context->CreateDepthTexture(
-        &depthDesc, &m_ResourceIds.SceneDepthTexture);
-    if (depthErr != CK_OK) {
-        depthDesc.DepthFormat = CKRST_DEPTHFMT_D24;
-        depthErr = m_Context->CreateDepthTexture(
-            &depthDesc, &m_ResourceIds.SceneDepthTexture);
-    }
-    if (depthErr != CK_OK) {
-        depthDesc.DepthFormat = CKRST_DEPTHFMT_D16;
-        depthErr = m_Context->CreateDepthTexture(
-            &depthDesc, &m_ResourceIds.SceneDepthTexture);
-    }
-    if (depthErr != CK_OK) {
-        m_Context->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
-        m_ResourceIds.SceneColorTexture = 0;
-        return FALSE;
-    }
-
-    CKFrameBufferAttachmentDesc colorAttachment;
-    colorAttachment.Texture = m_ResourceIds.SceneColorTexture;
-    colorAttachment.Mip = 0;
-    colorAttachment.Layer = 0;
-
-    CKFrameBufferDesc fbDesc;
-    fbDesc.Color = &colorAttachment;
-    fbDesc.ColorCount = 1;
-    fbDesc.DepthStencil.Texture = m_ResourceIds.SceneDepthTexture;
-    fbDesc.DepthStencil.Mip = 0;
-    fbDesc.DepthStencil.Layer = 0;
-
-    if (m_Context->CreateFrameBuffer(&fbDesc,
-                                     &m_ResourceIds.SceneFrameBuffer) != CK_OK) {
-        m_Context->DeleteObject(m_ResourceIds.SceneDepthTexture, CKRST_OBJ_TEXTURE);
-        m_Context->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
-        m_ResourceIds.SceneDepthTexture = 0;
-        m_ResourceIds.SceneColorTexture = 0;
-        return FALSE;
-    }
-
-    m_SceneWidth = width;
-    m_SceneHeight = height;
-    m_SceneFrameBufferActive = TRUE;
-    return TRUE;
-}
-
-void CKRenderPipeline::DestroySceneFrameBuffer()
-{
-    if (!m_Context)
-        return;
-    if (m_ResourceIds.SceneFrameBuffer)
-        m_Context->DeleteObject(m_ResourceIds.SceneFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
-    if (m_ResourceIds.SceneDepthTexture)
-        m_Context->DeleteObject(m_ResourceIds.SceneDepthTexture, CKRST_OBJ_TEXTURE);
-    if (m_ResourceIds.SceneColorTexture)
-        m_Context->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
-    m_ResourceIds.SceneFrameBuffer = 0;
-    m_ResourceIds.SceneDepthTexture = 0;
-    m_ResourceIds.SceneColorTexture = 0;
-    m_SceneFrameBufferActive = FALSE;
-    m_PostprocessSubmitted = FALSE;
-    m_SceneWidth = 0;
-    m_SceneHeight = 0;
-}
-
-CKBOOL CKRenderPipeline::EnsurePostprocessResources()
-{
-    if (!m_Context || !m_Context->m_Driver)
-        return FALSE;
-    CKRasterizerTargetDesc target;
-    if (m_Context->GetTargetDesc(&target) != CK_OK)
-        return FALSE;
-
-    if (target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
-        return FALSE;
-    if (m_PostVertexShaderProfile == target.ShaderProfile &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostProgram, CKRST_OBJ_PROGRAM) &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostVertexShader, CKRST_OBJ_SHADER) &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostPixelShader, CKRST_OBJ_SHADER) &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostSamplerUniform, CKRST_OBJ_UNIFORM) &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostParamsUniform, CKRST_OBJ_UNIFORM) &&
-        m_Context->IsObjectAlive(m_ResourceIds.PostVertexLayout, CKRST_OBJ_VERTEXLAYOUT))
-        return TRUE;
-
-    DestroyPostprocessResources();
-
-    const CKPostprocessShaderBlobSet *blobs = FindPostprocessShaderBlobSet(target.ShaderProfile);
-    if (!blobs)
-        return FALSE;
-
-    CKUniformDesc uniformDesc;
-    uniformDesc.Name = (CKSTRING)"s_sceneColor";
-    uniformDesc.Type = CKRST_UNIFORM_SAMPLER;
-    uniformDesc.Count = 1;
-    if (m_Context->CreateUniform(&uniformDesc,
-                                 &m_ResourceIds.PostSamplerUniform) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    uniformDesc.Name = (CKSTRING)"u_postParams";
-    uniformDesc.Type = CKRST_UNIFORM_VEC4;
-    uniformDesc.Count = 1;
-    if (m_Context->CreateUniform(&uniformDesc,
-                                 &m_ResourceIds.PostParamsUniform) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    CKShaderDesc shaderDesc;
-    shaderDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    shaderDesc.Profile = target.ShaderProfile;
-
-    shaderDesc.Stage = CKRST_SHADER_VERTEX;
-    shaderDesc.Code = blobs->VS;
-    shaderDesc.CodeSize = blobs->VSSize;
-    if (m_Context->CreateShader(&shaderDesc,
-                                &m_ResourceIds.PostVertexShader) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    shaderDesc.Stage = CKRST_SHADER_PIXEL;
-    shaderDesc.Code = blobs->FS;
-    shaderDesc.CodeSize = blobs->FSSize;
-    if (m_Context->CreateShader(&shaderDesc,
-                                &m_ResourceIds.PostPixelShader) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    CKProgramDesc programDesc;
-    programDesc.VertexShader = m_ResourceIds.PostVertexShader;
-    programDesc.PixelShader = m_ResourceIds.PostPixelShader;
-    programDesc.ConsumeShaders = FALSE;
-    if (m_Context->CreateProgram(&programDesc,
-                                 &m_ResourceIds.PostProgram) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    CKVertexElementDesc elements[2];
-    memset(elements, 0, sizeof(elements));
-    elements[0].Attrib = CKRST_ATTRIB_POSITION;
-    elements[0].Type = CKRST_ATTRIBTYPE_FLOAT;
-    elements[0].Count = 3;
-    elements[0].Normalized = FALSE;
-    elements[0].AsInt = FALSE;
-    elements[0].Offset = 0;
-    elements[1].Attrib = CKRST_ATTRIB_TEXCOORD0;
-    elements[1].Type = CKRST_ATTRIBTYPE_FLOAT;
-    elements[1].Count = 2;
-    elements[1].Normalized = FALSE;
-    elements[1].AsInt = FALSE;
-    elements[1].Offset = 12;
-
-    CKVertexLayoutDesc layoutDesc;
-    layoutDesc.Elements = elements;
-    layoutDesc.ElementCount = 2;
-    layoutDesc.Stride = 20;
-    if (m_Context->CreateVertexLayout(&layoutDesc,
-                                      &m_ResourceIds.PostVertexLayout) != CK_OK) {
-        DestroyPostprocessResources();
-        return FALSE;
-    }
-
-    m_PostVertexShaderProfile = target.ShaderProfile;
-    return TRUE;
-}
-
-void CKRenderPipeline::DestroyPostprocessResources()
-{
-    if (!m_Context)
-        return;
-    if (m_ResourceIds.PostProgram)
-        m_Context->DeleteObject(m_ResourceIds.PostProgram, CKRST_OBJ_PROGRAM);
-    if (m_ResourceIds.PostVertexShader)
-        m_Context->DeleteObject(m_ResourceIds.PostVertexShader, CKRST_OBJ_SHADER);
-    if (m_ResourceIds.PostPixelShader)
-        m_Context->DeleteObject(m_ResourceIds.PostPixelShader, CKRST_OBJ_SHADER);
-    if (m_ResourceIds.PostSamplerUniform)
-        m_Context->DeleteObject(m_ResourceIds.PostSamplerUniform, CKRST_OBJ_UNIFORM);
-    if (m_ResourceIds.PostParamsUniform)
-        m_Context->DeleteObject(m_ResourceIds.PostParamsUniform, CKRST_OBJ_UNIFORM);
-    if (m_ResourceIds.PostVertexLayout)
-        m_Context->DeleteObject(m_ResourceIds.PostVertexLayout, CKRST_OBJ_VERTEXLAYOUT);
-    m_ResourceIds.PostProgram = 0;
-    m_ResourceIds.PostVertexShader = 0;
-    m_ResourceIds.PostPixelShader = 0;
-    m_ResourceIds.PostSamplerUniform = 0;
-    m_ResourceIds.PostParamsUniform = 0;
-    m_ResourceIds.PostVertexLayout = 0;
-    m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
-}
-
-CKERROR CKRenderPipeline::SubmitPostprocess()
-{
-    if (!m_Context || !m_Encoder || !m_SceneFrameBufferActive ||
-        !EnsurePostprocessResources())
-        return CKERR_NOTIMPLEMENTED;
-
-    struct PostVertex {
-        float X, Y, Z;
-        float U, V;
-    };
-
-    CKTransientVertexBuffer tvb;
-    memset(&tvb, 0, sizeof(tvb));
-    if (!m_Context->AllocTransientVertexBuffer(&tvb, 3, m_ResourceIds.PostVertexLayout))
-        return CKERR_OUTOFMEMORY;
-
-    PostVertex *vertices = (PostVertex *)tvb.Data;
-    CKRasterizerTargetDesc target;
-    const CKBOOL originBottomLeft =
-        m_Context->GetTargetDesc(&target) == CK_OK &&
-        target.OriginBottomLeft;
-    const float bottomV = originBottomLeft ? 0.0f : 1.0f;
-    const float extendedTopV = originBottomLeft ? 2.0f : -1.0f;
-    vertices[0] = {-1.0f, -1.0f, 0.0f, 0.0f, bottomV};
-    vertices[1] = { 3.0f, -1.0f, 0.0f, 2.0f, bottomV};
-    vertices[2] = {-1.0f,  3.0f, 0.0f, 0.0f, extendedTopV};
-
-    CKSamplerDesc sampler;
-    memset(&sampler, 0, sizeof(sampler));
-    sampler.MinFilter = CKRST_FILTER_LINEAR;
-    sampler.MagFilter = CKRST_FILTER_LINEAR;
-    sampler.MipFilter = CKRST_FILTER_NONE;
-    sampler.AddressU = CKRST_ADDRESS_CLAMP;
-    sampler.AddressV = CKRST_ADDRESS_CLAMP;
-    sampler.AddressW = CKRST_ADDRESS_CLAMP;
-    sampler.CompareFunc = CKRST_COMPARE_NONE;
-
-    const float params[4] = {
-        m_SceneWidth > 0 ? 1.0f / (float)m_SceneWidth : 1.0f,
-        m_SceneHeight > 0 ? 1.0f / (float)m_SceneHeight : 1.0f,
-        m_Config.FXAA ? 1.0f : 0.0f,
-        m_Config.Sharpness
-    };
-
-    CKDrawState state = CKDrawStateBuilder()
-        .Depth(FALSE, FALSE, VXCMP_ALWAYS)
-        .Cull(VXCULL_NONE)
-        .Build();
-
-    m_Encoder->SetState(state);
-    m_Encoder->SetStencilRef(0);
-    m_Encoder->SetStencilMask(0xFF, 0xFF);
-    m_Encoder->SetScissor(nullptr);
-    m_Encoder->SetPointSize(1.0f);
-    m_Encoder->SetTransientVertexBuffer(0, &tvb);
-    m_Encoder->SetTexture(0, m_ResourceIds.PostSamplerUniform,
-                          m_ResourceIds.SceneColorTexture, &sampler);
-    m_Encoder->SetUniform(m_ResourceIds.PostParamsUniform, params, 1);
-    m_Encoder->Submit(CKRP_VIEW_POSTPROCESS, m_ResourceIds.PostProgram, 0, CKRST_DISCARD_ALL);
-    return m_Encoder->GetStatus();
+    return m_Postprocess.EnsureSceneFrameBuffer(width, height);
 }

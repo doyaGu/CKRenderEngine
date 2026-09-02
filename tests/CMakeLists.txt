@@ -76,6 +76,19 @@ ckre_add_rasterizer3_test(rasterizer3_contract_tests
     test_rasterizer3_contract.cpp
 )
 
+# Translation core (CKRasterizerLib) driven through the v3 contract on the
+# recording device of FFPDiagnosticHarness.h.
+add_executable(rasterizer3_translated_tests test_rasterizer3_translated.cpp)
+target_include_directories(rasterizer3_translated_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rasterizer3_translated_tests PRIVATE CKRasterizerLib)
+set_target_properties(rasterizer3_translated_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    FOLDER "Tests"
+)
+ckre_copy_runtime_dependencies(rasterizer3_translated_tests)
+add_test(NAME rasterizer3_translated_tests COMMAND $<TARGET_FILE:rasterizer3_translated_tests>)
+set_tests_properties(rasterizer3_translated_tests PROPERTIES TIMEOUT 60)
+
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
 # shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
 # environment gates as ffp_opengl_runtime_tests. Skips when no golden frames

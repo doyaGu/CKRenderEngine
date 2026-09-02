@@ -267,6 +267,8 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_REJECT_INVALID_PARAMETER,
     CKRST_DIAG_REJECT_DEVICE_LOST,
     CKRST_DIAG_REJECT_SCENE_STATE,      // operation not allowed in the current scene state
+    CKRST_DIAG_REJECT_UNSUPPORTED_STATE, // phase 1 only: the translation core cannot approximate the
+                                         // current state yet (phase 2 turns these into APPROX_* counters)
 
     // State call rejected (returned FALSE, state unchanged)
     CKRST_DIAG_INVALID_RENDER_STATE,

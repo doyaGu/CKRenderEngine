@@ -537,8 +537,8 @@ struct VxDriverDescEx {
     XSArray<VxImageDescEx> TextureFormats;
     Vx2DCapsDesc Caps2D;
     Vx3DCapsDesc Caps3D;
-    CKRasterizerDeviceLibrary *Rasterizer;
-    CKRasterizerDeviceDriver *RasterizerDriver;
+    CKRasterizer *Rasterizer;
+    CKRasterizerDriver *RasterizerDriver;
 };
 
 struct VxColors {

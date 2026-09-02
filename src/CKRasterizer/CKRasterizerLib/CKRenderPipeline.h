@@ -4,6 +4,7 @@
 #include "VxMath.h"
 #include "CKTypes.h"
 #include "CKRasterizerDeviceEnums.h"
+#include "CKPostprocessPass.h"
 
 class CKRasterizerDevice;
 class CKRasterizerEncoder;
@@ -18,23 +19,6 @@ class CKRasterizerEncoder;
 #define CKRP_VIEW_POSTPROCESS  6
 #define CKRP_VIEW_FOREGROUND2D 7
 #define CKRP_VIEW_COUNT        8
-
-struct CKRenderPipelineResourceIds {
-    CKDWORD SceneColorTexture;
-    CKDWORD SceneDepthTexture;
-    CKDWORD SceneFrameBuffer;
-    CKDWORD PostVertexShader;
-    CKDWORD PostPixelShader;
-    CKDWORD PostProgram;
-    CKDWORD PostSamplerUniform;
-    CKDWORD PostParamsUniform;
-    CKDWORD PostVertexLayout;
-
-    CKRenderPipelineResourceIds()
-        : SceneColorTexture(0), SceneDepthTexture(0), SceneFrameBuffer(0),
-          PostVertexShader(0), PostPixelShader(0), PostProgram(0),
-          PostSamplerUniform(0), PostParamsUniform(0), PostVertexLayout(0) {}
-};
 
 struct CKRenderPipelineConfig {
     CKBOOL FXAA;
@@ -51,6 +35,9 @@ float CKRenderPipelineClampRenderScale(float scale);
 float CKRenderPipelineClampSharpness(float sharpness);
 CKRenderPipelineConfig CKRenderPipelineConfigFromSettings();
 
+// Legacy fixed-view frame flow used by the engine until phase 1 step 1.6
+// switches it to the v3 contract. The scene framebuffer and the composite
+// live in CKPostprocessPass so the translated context can share them.
 class CKRenderPipeline {
 public:
     CKRenderPipeline();
@@ -93,29 +80,24 @@ public:
 
     // Check if we're inside a frame
     CKBOOL IsInFrame() const { return m_Encoder != nullptr; }
-    CKBOOL IsSceneFrameBufferEnabled() const { return m_SceneFrameBufferActive; }
+    CKBOOL IsSceneFrameBufferEnabled() const { return m_Postprocess.IsSceneFrameBufferActive(); }
     CKDWORD GetFrameNumber() const { return m_FrameNumber; }
+    // The v3 translated context drives its own frame flow; it publishes its
+    // frame number here so per-frame state inside the FFP keeps resetting.
+    void SetFrameNumber(CKDWORD frameNumber) { m_FrameNumber = frameNumber; }
 
 private:
-    CKBOOL EnsurePostprocessResources();
     CKBOOL EnsureSceneFrameBuffer(const CKRECT &viewport);
-    void DestroySceneFrameBuffer();
-    void DestroyPostprocessResources();
     CKERROR BindFrameBuffer(CKRenderView view, CKDWORD frameBuffer);
     CKERROR ConfigurePostprocessView(const CKRECT &viewport);
-    CKERROR SubmitPostprocess();
 
     CKRasterizerDevice *m_Context;
     CKRasterizerEncoder *m_Encoder;
     VxMatrix m_OrthoProj;
-    CKRenderPipelineResourceIds m_ResourceIds;
+    CKPostprocessPass m_Postprocess;
     CKRenderPipelineConfig m_Config;
     CKBOOL m_ExternalRenderTarget;
-    CKBOOL m_SceneFrameBufferActive;
     CKBOOL m_PostprocessSubmitted;
-    CKDWORD m_SceneWidth;
-    CKDWORD m_SceneHeight;
-    CKDWORD m_PostVertexShaderProfile;
     CKDWORD m_FrameNumber;
 };
 
