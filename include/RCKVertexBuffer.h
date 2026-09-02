@@ -33,7 +33,8 @@ protected:
     VxDrawPrimitiveData m_LockedData;
     CKDWORD m_FormatFlags;
     CKDWORD m_VertexLayout;
-    CKRasterizerDevice *m_RasterizerDevice;
+    CKRasterizerContext *m_RasterizerContext; // v3 context owning m_ObjectIndex
+    CKDWORD m_FFPFormatFlags; // pipeline layout flags (migration: Draw still uses the pipeline)
     CKBOOL m_HardwareValid;
     CKDWORD m_LockedStart;
     CKDWORD m_LockedCount;

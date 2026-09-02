@@ -173,9 +173,12 @@ public:
     static CKDWORD TextureWrapModeFromMeshFlags(CKDWORD meshFlags);
     static CKBOOL RequiresWrapAwareHardwareVertexBuffer(CKDWORD meshFlags);
     CKBOOL CheckHWVertexBuffer(RCKRenderContext *renderContext,
-                               CKRasterizerDevice *rst,
+                               CKRasterizerContext *rst,
                                VxDrawPrimitiveData *data);
-    CKBOOL CheckHWIndexBuffer(CKRasterizerDevice *rst);
+    CKBOOL CheckHWIndexBuffer(CKRasterizerContext *rst);
+    CKBOOL CreateHardwareVertexBuffer(CKRasterizerContext *rst, CKDWORD vertexFormat,
+                                      CKDWORD stride, CKDWORD vertexCount);
+    void ResetHardwareVertexBufferState();
 
     // Progressive mesh rendering (IDA: 0x100257b1)
     void BuildRenderMesh();
@@ -240,13 +243,14 @@ protected:
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;
     CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
-    CKRasterizerDevice *m_RasterizerDevice;
+    CKRasterizerContext *m_RasterizerContext; // v3 context owning the hardware buffers
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKDWORD m_IndexBufferIndexCount;
     CKDWORD m_VertexLayout;     // HW vertex layout handle for DrawVertexBuffer
     CKDWORD m_VertexBufferDpFlags;
-    CKDWORD m_VertexBufferFormatFlags;
+    CKDWORD m_VertexBufferFormatFlags; // pipeline layout flags (migration: draws still go through the pipeline)
+    CKDWORD m_VertexBufferVertexFormat; // contract vertex format of m_VertexBuffer
     CKDWORD m_VertexBufferStride;
     CKDWORD m_VertexBufferVertexCount;
     CKBOOL m_VertexBufferWrapAware;

@@ -490,6 +490,19 @@ const CKTranslatedContext::Resource *CKTranslatedContext::FindResource(CKDWORD T
     return it == m_Resources.end() ? NULL : &it->second;
 }
 
+CKBOOL CKTranslatedContext::GetVertexBufferDrawInfoForMigration(CKDWORD VB, CKDWORD *FormatFlags,
+                                                                CKDWORD *DeviceLayout) const
+{
+    const Resource *resource = FindResource(CKRST_OBJ_VERTEXBUFFER, VB);
+    if (!resource)
+        return FALSE;
+    if (FormatFlags)
+        *FormatFlags = resource->FormatFlags;
+    if (DeviceLayout)
+        *DeviceLayout = resource->DeviceLayout;
+    return TRUE;
+}
+
 int CKTranslatedContext::GetLiveResourceCountForTests(CKDWORD TypeMask) const
 {
     int count = 0;

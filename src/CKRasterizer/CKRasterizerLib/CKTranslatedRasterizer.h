@@ -153,6 +153,9 @@ public:
     CKRasterizerDevice *GetDeviceForMigration() const { return m_Device; }
     CKRasterizerEncoder *GetEncoderForMigration() const { return m_Encoder; }
     CKRenderView GetCurrentViewForMigration() const { return m_CurrentView; }
+    // Pipeline-side layout of a contract vertex buffer, for the engine's
+    // remaining CKFixedFunctionPipeline::DrawVertexBuffer calls.
+    CKBOOL GetVertexBufferDrawInfoForMigration(CKDWORD VB, CKDWORD *FormatFlags, CKDWORD *DeviceLayout) const;
 
     // --- Test access ---
     CKDWORD GetTargetForTests() const { return m_Target; }
