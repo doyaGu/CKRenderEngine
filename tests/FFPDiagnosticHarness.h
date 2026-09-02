@@ -23,6 +23,33 @@ struct FFPViewClearRecord {
     CKDWORD Color;
     float Z;
     CKDWORD Stencil;
+    CKRECT Rect;          // view rect at the time of the call
+};
+
+// One Submit() on the encoder (a draw or the postprocess composite).
+struct FFPSubmitRecord {
+    CKRenderView View;
+    CKDWORD Program;
+    CKDWORD Flags;
+    XString Marker;       // last SetMarker() before the submit, consumed
+    CKDWORD Target;       // color texture of the view's frame buffer (0 = backbuffer)
+    CKRECT Rect;          // view rect at the time of the submit
+};
+
+class FFPDiagnosticContext;
+
+// Per-view configuration recorded from the SetView* calls.
+struct FFPViewState {
+    CKRECT Rect;
+    CKDWORD FrameBuffer;
+    CK_VIEW_MODE Mode;
+    FFPViewState() : FrameBuffer(0), Mode(CKRST_VIEWMODE_DEFAULT) { memset(&Rect, 0, sizeof(Rect)); }
+};
+
+struct FFPScreenShotRequest {
+    CKDWORD FrameBuffer;
+    CKScreenShotCallback Callback;
+    void *UserData;
 };
 
 class FFPDiagnosticDriver : public CKRasterizerDeviceDriver {
@@ -40,6 +67,7 @@ public:
 
 class FFPDiagnosticEncoder : public CKRasterizerEncoder {
 public:
+    FFPDiagnosticContext *Owner = nullptr;   // set by FFPDiagnosticContext
     CKDrawState LastState = {};
     CKDWORD StateSetCount = 0;
     CKDWORD LastProgram = 0;
@@ -66,6 +94,9 @@ public:
     CKDWORD IndexBufferSetCount = 0;
     CKDWORD SubmitFlags[32] = {};
     CKRenderView SubmitViews[32] = {};
+    std::vector<FFPSubmitRecord> Submits;
+    std::vector<CKRenderView> Touches;
+    XString LastMarker;
     CKDWORD VertexBufferOrder[32] = {};
     CKDWORD IndexBufferOrder[32] = {};
     CKDWORD TransientInstanceSetCount = 0;
@@ -188,17 +219,8 @@ public:
     void SetComputeBuffer(CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetComputeImage(CKDWORD, CKDWORD, CKDWORD, CK_ACCESS_MODE) override {}
     void SetCondition(CKDWORD, CKBOOL) override {}
-    void SetMarker(CKSTRING) override {}
-    void Submit(CKRenderView view, CKDWORD program, CKDWORD, CKDWORD flags) override {
-        if (SubmitCount < 32) {
-            SubmitViews[SubmitCount] = view;
-            SubmitFlags[SubmitCount] = flags;
-        }
-        LastProgram = program;
-        ++SubmitCount;
-        if (SubmitError != CK_OK)
-            Status = SubmitError;
-    }
+    void SetMarker(CKSTRING name) override { LastMarker = name ? name : ""; }
+    void Submit(CKRenderView view, CKDWORD program, CKDWORD, CKDWORD flags) override; // after FFPDiagnosticContext
     void SubmitOcclusionQuery(CKRenderView, CKDWORD program, CKDWORD, CKDWORD, CKDWORD) override {
         LastProgram = program;
         ++SubmitCount;
@@ -211,6 +233,7 @@ public:
     void DispatchIndirect(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD) override {}
     void Touch(CKRenderView view) override {
         LastTouchedView = view;
+        Touches.push_back(view);
         ++TouchCount;
     }
     void Blit(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, const CKRECT *) override {}
@@ -219,6 +242,7 @@ public:
 class FFPDiagnosticContext : public CKRasterizerDevice {
 public:
     explicit FFPDiagnosticContext(CKRasterizerDeviceDriver *driver) {
+        Encoder.Owner = this;
         m_Driver = driver;
         m_Width = 64;
         m_Height = 64;
@@ -281,6 +305,20 @@ public:
     CKDWORD LastPixelShaderCodeSize = 0;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
     std::vector<FFPViewClearRecord> ViewClears;
+    std::unordered_map<CKRenderView, FFPViewState> Views;
+    std::unordered_map<CKDWORD, CKDWORD> FrameBufferColorTexture;   // frame buffer -> color attachment
+    std::vector<CKRST_FRAME_SYNC_MODE> Frames;
+    std::vector<FFPScreenShotRequest> ScreenShots;
+    CKBOOL FailScreenShot = FALSE;
+
+    // Target texture (0 = backbuffer) a view draws into.
+    CKDWORD ViewTarget(CKRenderView view) const {
+        std::unordered_map<CKRenderView, FFPViewState>::const_iterator it = Views.find(view);
+        if (it == Views.end() || it->second.FrameBuffer == 0)
+            return 0;
+        std::unordered_map<CKDWORD, CKDWORD>::const_iterator fb = FrameBufferColorTexture.find(it->second.FrameBuffer);
+        return fb == FrameBufferColorTexture.end() ? 0 : fb->second;
+    }
 
     CKERROR AllocateHandle(CKDWORD *out) {
         if (!out)
@@ -342,8 +380,11 @@ public:
             m_LayoutStride[*out] = stride;
         return result;
     }
-    CKERROR CreateFrameBuffer(const CKFrameBufferDesc *, CKDWORD *out) override {
-        return AllocateHandle(out);
+    CKERROR CreateFrameBuffer(const CKFrameBufferDesc *desc, CKDWORD *out) override {
+        CKERROR result = AllocateHandle(out);
+        if (result == CK_OK && desc && desc->ColorCount > 0 && desc->Color)
+            FrameBufferColorTexture[*out] = desc->Color[0].Texture;
+        return result;
     }
     CKERROR CreateDepthTexture(const CKDepthTextureDesc *, CKDWORD *out) override {
         return AllocateHandle(out);
@@ -398,22 +439,67 @@ public:
     CKBOOL IsTextureValid(CKDWORD, CKBOOL, CKWORD, CKDWORD, CKDWORD) override { return TRUE; }
     CKBOOL IsFrameBufferValid(CKDWORD, const CKFrameBufferAttachmentDesc *, const CKFrameBufferAttachmentDesc *) override { return TRUE; }
     void CalcTextureSize(CKTextureInfo *, CKWORD, CKWORD, CKWORD, CKBOOL, CKBOOL, CKWORD, CKDWORD) override {}
-    CKERROR RequestScreenShot(CKDWORD, CKScreenShotCallback, void *) override {
-        return CKERR_NOTIMPLEMENTED;
+    // Screenshots are delivered by the next Frame() as a zero-filled image of
+    // the device size (the recording device draws nothing).
+    CKERROR RequestScreenShot(CKDWORD frameBuffer, CKScreenShotCallback callback, void *user) override {
+        if (!callback)
+            return CKERR_INVALIDPARAMETER;
+        if (FailScreenShot)
+            return CKERR_NOTIMPLEMENTED;
+        FFPScreenShotRequest request = { frameBuffer, callback, user };
+        ScreenShots.push_back(request);
+        return CK_OK;
+    }
+    CKERROR CancelScreenShots(void *user) override {
+        CKERROR result = CKERR_NOTFOUND;
+        for (size_t i = 0; i < ScreenShots.size();) {
+            if (ScreenShots[i].UserData == user) {
+                FFPScreenShotRequest request = ScreenShots[i];
+                ScreenShots.erase(ScreenShots.begin() + (ptrdiff_t)i);
+                request.Callback(request.UserData, request.FrameBuffer, 0, 0, 0, UNKNOWN_PF, NULL, 0, FALSE);
+                result = CK_OK;
+            } else {
+                ++i;
+            }
+        }
+        return result;
+    }
+    void DeliverScreenShots() {
+        std::vector<FFPScreenShotRequest> pending;
+        pending.swap(ScreenShots);
+        if (pending.empty())
+            return;
+        const CKDWORD pitch = m_Width * 4;
+        std::vector<CKBYTE> zeros((size_t)pitch * m_Height, 0);
+        for (size_t i = 0; i < pending.size(); ++i)
+            pending[i].Callback(pending[i].UserData, pending[i].FrameBuffer, m_Width, m_Height, pitch,
+                                _32_ARGB8888, zeros.data(), (CKDWORD)zeros.size(), FALSE);
     }
     CKERROR SetViewName(CKRenderView, CKSTRING) override { return CK_OK; }
-    CKERROR SetViewRect(CKRenderView, const CKRECT &) override { return CK_OK; }
+    CKERROR SetViewRect(CKRenderView view, const CKRECT &rect) override {
+        Views[view].Rect = rect;
+        return CK_OK;
+    }
     CKERROR SetViewScissor(CKRenderView, const CKRECT *) override { return CK_OK; }
     CKERROR SetViewClear(CKRenderView view, CKDWORD flags, CKDWORD color, float z, CKDWORD stencil) override {
-        FFPViewClearRecord record = { view, flags, color, z, stencil };
+        FFPViewClearRecord record = { view, flags, color, z, stencil, Views[view].Rect };
         ViewClears.push_back(record);
         return CK_OK;
     }
     CKERROR SetViewTransform(CKRenderView, const VxMatrix *, const VxMatrix *) override { return CK_OK; }
-    CKERROR SetViewFrameBuffer(CKRenderView, CKDWORD) override { return CK_OK; }
-    CKERROR SetViewMode(CKRenderView, CK_VIEW_MODE) override { return CK_OK; }
+    CKERROR SetViewFrameBuffer(CKRenderView view, CKDWORD frameBuffer) override {
+        Views[view].FrameBuffer = frameBuffer;
+        return CK_OK;
+    }
+    CKERROR SetViewMode(CKRenderView view, CK_VIEW_MODE mode) override {
+        Views[view].Mode = mode;
+        return CK_OK;
+    }
     CKERROR SetViewOrder(CKRenderView, CKWORD, const CKRenderView *) override { return CK_OK; }
-    CKERROR ResetView(CKRenderView) override { return CK_OK; }
+    CKERROR ResetView(CKRenderView view) override {
+        Views.erase(view);
+        return CK_OK;
+    }
     CKERROR TouchView(CKRenderView) override { return CK_OK; }
     CKDWORD AllocTransform(VxMatrix *, CKDWORD) override { return 1; }
     CKBOOL AllocTransientVertexBuffer(CKTransientVertexBuffer *buffer, CKDWORD vertexCount, CKDWORD layout) override {
@@ -474,11 +560,13 @@ public:
             return CKERR_INVALIDPARAMETER;
         return EndEncoderResult != CK_OK ? EndEncoderResult : encoder->GetStatus();
     }
-    CKERROR Frame(CKRST_FRAME_SYNC_MODE, CKDWORD = CKRST_FRAME_NONE,
+    CKERROR Frame(CKRST_FRAME_SYNC_MODE mode, CKDWORD = CKRST_FRAME_NONE,
                   CKDWORD *frameNumber = nullptr) override {
         ++FrameSerial;
+        Frames.push_back(mode);
         if (frameNumber)
             *frameNumber = FrameSerial;
+        DeliverScreenShots();
         return FrameResult;
     }
 
@@ -490,6 +578,31 @@ private:
     std::vector<CKBYTE> m_IndexStorage;
     std::vector<CKBYTE> m_InstanceStorage;
 };
+
+inline void FFPDiagnosticEncoder::Submit(CKRenderView view, CKDWORD program, CKDWORD, CKDWORD flags) {
+    if (SubmitCount < 32) {
+        SubmitViews[SubmitCount] = view;
+        SubmitFlags[SubmitCount] = flags;
+    }
+    FFPSubmitRecord record;
+    record.View = view;
+    record.Program = program;
+    record.Flags = flags;
+    record.Marker = LastMarker;
+    record.Target = Owner ? Owner->ViewTarget(view) : 0;
+    memset(&record.Rect, 0, sizeof(record.Rect));
+    if (Owner) {
+        std::unordered_map<CKRenderView, FFPViewState>::const_iterator it = Owner->Views.find(view);
+        if (it != Owner->Views.end())
+            record.Rect = it->second.Rect;
+    }
+    LastMarker = "";
+    Submits.push_back(record);
+    LastProgram = program;
+    ++SubmitCount;
+    if (SubmitError != CK_OK)
+        Status = SubmitError;
+}
 
 // ===========================================================================
 // Recording device behind the v3 translation core

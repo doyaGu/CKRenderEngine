@@ -156,18 +156,25 @@ public:
     void ResetTextureStageForMigration(int Stage);
     void DisableTextureStagesFromForMigration(int FirstStage);
     void RestoreTextureStageForMigration(int Stage, const CKFFTextureStageSnapshot &Snapshot);
-    CKDWORD GetBoundTextureForMigration(int Stage) const;
     // Re-reads the pipeline state into the contract mirror after a pipeline-side
     // guard restored it.
     void SyncMirrorFromPipeline();
     void SyncRenderStateMirrorFromPipeline(VXRENDERSTATETYPE State);
     void SyncStageMirrorFromPipeline(int Stage);
 
-    // --- Test access ---
+    // --- Test access (contract tests read the mirror back) ---
     CKDWORD GetTargetForTests() const { return m_Target; }
     CKBOOL IsInSceneForTests() const { return m_InScene; }
     CKDWORD GetPassCountForTests() const { return m_FramePasses; }
     int GetLiveResourceCountForTests(CKDWORD TypeMask) const;
+    const VxMatrix &GetMatrixForTests(VXMATRIX_TYPE Type) const;
+    const CKLightData &GetLightForTests(CKDWORD Index) const { return m_Lights[Index]; }
+    CKBOOL IsLightEnabledForTests(CKDWORD Index) const { return m_LightEnabled[Index]; }
+    const CKMaterialData &GetMaterialForTests() const { return m_Material; }
+    const CKViewportData &GetViewportForTests() const { return m_Viewport; }
+    const CKRasterizerOptions &GetOptionsForTests() const { return m_Options; }
+    CKDWORD GetBoundTextureForTests(int Stage) const;
+    CKBOOL GetVertexBufferDescForTests(CKDWORD VB, CKVertexBufferDesc *Desc) const;
 
 private:
     struct Resource {
@@ -396,5 +403,6 @@ void CKTranslatedRasterizerClose(CKRasterizer *Rasterizer);
 // when no rasterizer plugin loads, and the device the contract tests run on.
 CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd);
 void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer);
+void CKTranslatedNullRasterizerGetInfo(CKRasterizerInfo *Info);
 
 #endif // CKTRANSLATEDRASTERIZER_H

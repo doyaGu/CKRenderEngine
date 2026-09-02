@@ -1,4 +1,5 @@
 #include "CKRasterizerDevice.h"
+#include "CKRasterizerCapsBaseline.h"
 
 #include <string.h>
 
@@ -84,7 +85,19 @@ void CKRasterizerDeviceDriver::InitNULLRasterizerCaps(CKRasterizerDeviceLibrary 
     VxPixelFormat2ImageDesc(_32_ARGB8888, textureDesc.Format);
     m_TextureFormats.PushBack(textureDesc);
 
+    // Capability baseline (spec 4.9.2). The NULL device neither transforms
+    // nor rasterizes in hardware, so only the hardware / software bits differ.
     memset(&m_3DCaps, 0, sizeof(m_3DCaps));
     memset(&m_2DCaps, 0, sizeof(m_2DCaps));
-    m_2DCaps.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D | CKRST_2DCAPS_GDI;
+    if (!CKRSTGetCapsBaseline(&m_3DCaps, &m_2DCaps)) {
+        m_3DCaps.MinTextureWidth = m_3DCaps.MinTextureHeight = 1;
+        m_3DCaps.MaxTextureWidth = m_3DCaps.MaxTextureHeight = 4096;
+        m_3DCaps.MaxClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
+        m_3DCaps.MaxActiveLights = CKRST_MAX_LIGHTS;
+        m_3DCaps.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
+        m_3DCaps.MaxNumberTextureStage = CKRST_MAX_TEXTURE_STAGES;
+        m_2DCaps.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D | CKRST_2DCAPS_GDI;
+    }
+    m_3DCaps.CKRasterizerSpecificCaps &= ~(CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL);
+    m_3DCaps.CKRasterizerSpecificCaps |= CKRST_SPECIFICCAPS_SOFTWARE;
 }

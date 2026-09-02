@@ -54,15 +54,16 @@ function(ckre_add_benchmark TARGET_NAME)
     ckre_configure_test_target(${TARGET_NAME})
 endfunction()
 
-# Tests of the CKRasterizer v3 contract link only CKRasterizerLib3: they must
-# not see the internal device interface nor the engine.
+# Tests of the CKRasterizer v3 contract: the translation core (CKRasterizerLib)
+# driven through the public contract only, over the recording device of
+# FFPDiagnosticHarness.h. They do not link the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
     )
-    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib3)
+    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
         FOLDER "Tests"
@@ -76,18 +77,11 @@ ckre_add_rasterizer3_test(rasterizer3_contract_tests
     test_rasterizer3_contract.cpp
 )
 
-# Translation core (CKRasterizerLib) driven through the v3 contract on the
-# recording device of FFPDiagnosticHarness.h.
-add_executable(rasterizer3_translated_tests test_rasterizer3_translated.cpp)
-target_include_directories(rasterizer3_translated_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(rasterizer3_translated_tests PRIVATE CKRasterizerLib)
-set_target_properties(rasterizer3_translated_tests PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    FOLDER "Tests"
+# Translation core internals (state forwarding into the fixed-function
+# pipeline, device calls) on the same recording device.
+ckre_add_rasterizer3_test(rasterizer3_translated_tests
+    test_rasterizer3_translated.cpp
 )
-ckre_copy_runtime_dependencies(rasterizer3_translated_tests)
-add_test(NAME rasterizer3_translated_tests COMMAND $<TARGET_FILE:rasterizer3_translated_tests>)
-set_tests_properties(rasterizer3_translated_tests PROPERTIES TIMEOUT 60)
 
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
 # shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same

@@ -1,70 +1,99 @@
-// CKRasterizer v3 contract conformance tests (spec 7.2), run against the NULL
-// rasterizer in CKRasterizerLib3. Phase 1 points the same tests at the
-// translation core + NULL device without changing them.
+// CKRasterizer v3 contract conformance tests (spec 7.2).
+//
+// The translation core (CKTranslatedRasterizer / Driver / Context in
+// CKRasterizerLib) is driven exclusively through the public contract in
+// include/CKRasterizer.h. The device below it is the recording device of
+// FFPDiagnosticHarness.h: its log is what the tests inspect (draw order, pass
+// splitting, clear rectangles, targets, presents, screenshots). The built-in
+// NULL device is checked separately for the capability baseline.
 
 #include <stdio.h>
 #include <string.h>
 
-#include "CKNullRasterizer.h"
+#include "CKTranslatedRasterizer.h"
 #include "CKRasterizerCapsBaseline.h"
+#include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
 
 struct Fixture {
     CKRasterizer *Rasterizer;
-    CKNullRasterizerDriver *Driver;
-    CKNullRasterizerContext *Context;
+    CKTranslatedDriver *Driver;
+    CKTranslatedContext *Context;
+    FFPRecordingContext *Device;
 
-    Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL)
+    Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL)
     {
-        Rasterizer = CKNullRasterizerStart(NULL);
-        TestCheck(Rasterizer != NULL, "CKNullRasterizerStart failed");
-        TestCheck(Rasterizer->GetDriverCount() == 1, "NULL rasterizer exposes one driver");
-        Driver = static_cast<CKNullRasterizerDriver *>(Rasterizer->GetDriver(0));
-        TestCheck(Driver != NULL, "driver 0 missing");
-        Context = static_cast<CKNullRasterizerContext *>(Driver->CreateContext());
-        TestCheck(Context != NULL, "CreateContext failed");
-        TestCheck(Context->Create(NULL, 0, 0, 640, 480, 32, FALSE, 60, 24, 8), "Create failed");
-        Context->ClearEvents();
+        TestCheck(World.CreateContext(640, 480), "translated context over the recording device");
+        Rasterizer = World.Rasterizer;
+        Driver = World.Driver;
+        Context = World.Context;
+        Device = World.Device;
+        TestCheck(Context != NULL && Device != NULL, "fixture objects");
     }
 
-    ~Fixture()
-    {
-        if (Rasterizer)
-            CKNullRasterizerClose(Rasterizer);
-    }
+    FFPTranslatedWorld World;
 };
 
-CKDWORD Diag(CKNullRasterizerContext *ctx, CKRST_DIAGNOSTIC kind)
+CKDWORD Diag(CKTranslatedContext *ctx, CKRST_DIAGNOSTIC kind)
 {
     return ctx->GetStats()->Diagnostics[kind];
 }
 
-int CountEvents(const CKNullRasterizerContext *ctx, CKNullEventKind kind)
+// --- Device log views -------------------------------------------------------
+
+// Draws are the encoder submits (the recording device receives one submit per
+// contract draw; the postprocess composite would be one too, but the default
+// options never composite).
+int CountDraws(const Fixture &f)
+{
+    return (int)f.Device->Encoder.Submits.size();
+}
+
+const FFPSubmitRecord *FindDraw(const Fixture &f, int ordinal)
+{
+    const std::vector<FFPSubmitRecord> &submits = f.Device->Encoder.Submits;
+    return ordinal >= 0 && (size_t)ordinal < submits.size() ? &submits[ordinal] : NULL;
+}
+
+// Clears are the view clears with non-zero flags (every pass configures its
+// view clear; draw passes use flags 0).
+int CountClears(const Fixture &f)
 {
     int count = 0;
-    const XClassArray<CKNullEvent> &events = ctx->GetEvents();
-    for (int i = 0; i < events.Size(); ++i)
-        if (events[i].Kind == kind)
+    for (size_t i = 0; i < f.Device->ViewClears.size(); ++i)
+        if (f.Device->ViewClears[i].Flags != 0)
             ++count;
     return count;
 }
 
-const CKNullEvent *FindEvent(const CKNullRasterizerContext *ctx, CKNullEventKind kind, int ordinal)
+const FFPViewClearRecord *FindClear(const Fixture &f, int ordinal)
 {
-    const XClassArray<CKNullEvent> &events = ctx->GetEvents();
-    for (int i = 0; i < events.Size(); ++i) {
-        if (events[i].Kind != kind)
+    for (size_t i = 0; i < f.Device->ViewClears.size(); ++i) {
+        if (f.Device->ViewClears[i].Flags == 0)
             continue;
         if (ordinal == 0)
-            return &events[i];
+            return &f.Device->ViewClears[i];
         --ordinal;
     }
     return NULL;
 }
 
-CKDWORD CreateTexture2D(CKNullRasterizerContext *ctx, int w, int h, CKDWORD flags, CKDWORD mips)
+// Every pass touches its view once.
+int CountPasses(const Fixture &f)
+{
+    return (int)f.Device->Encoder.Touches.size();
+}
+
+int CountPresents(const Fixture &f)
+{
+    return (int)f.Device->Frames.size();
+}
+
+// --- Resource helpers -------------------------------------------------------
+
+CKDWORD CreateTexture2D(CKRasterizerContext *ctx, int w, int h, CKDWORD flags, CKDWORD mips)
 {
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
@@ -79,7 +108,7 @@ CKDWORD CreateTexture2D(CKNullRasterizerContext *ctx, int w, int h, CKDWORD flag
     return handle;
 }
 
-CKDWORD CreateVB(CKNullRasterizerContext *ctx, CKDWORD format, CKDWORD count)
+CKDWORD CreateVB(CKRasterizerContext *ctx, CKDWORD format, CKDWORD count)
 {
     CKVertexBufferDesc desc;
     desc.m_VertexFormat = format;
@@ -90,7 +119,7 @@ CKDWORD CreateVB(CKNullRasterizerContext *ctx, CKDWORD format, CKDWORD count)
     return handle;
 }
 
-CKDWORD CreateIB(CKNullRasterizerContext *ctx, CKDWORD count)
+CKDWORD CreateIB(CKRasterizerContext *ctx, CKDWORD count)
 {
     CKIndexBufferDesc desc;
     desc.m_MaxIndexCount = count;
@@ -100,7 +129,7 @@ CKDWORD CreateIB(CKNullRasterizerContext *ctx, CKDWORD count)
     return handle;
 }
 
-void DrawTriangle(CKNullRasterizerContext *ctx)
+void DrawTriangle(CKRasterizerContext *ctx)
 {
     static VxVector positions[3] = {VxVector(0, 0, 0), VxVector(1, 0, 0), VxVector(0, 1, 0)};
     VxDrawPrimitiveData data;
@@ -125,6 +154,7 @@ void TestLifecycle()
     TestCheck(f.Context->GetDeviceStatus() == CK_OK, "device status");
     TestCheck(f.Context->IsIdle(), "idle after create");
     TestCheck(!f.Context->Create(NULL, 0, 0, 10, 10, 32, FALSE, 0, 24, 8), "second Create must fail");
+    TestCheck(f.Driver->m_Contexts.Size() == 1, "driver tracks its context");
 
     TestCheck(f.Context->Resize(5, 6, 800, 600, 0), "Resize failed");
     TestCheck(f.Context->m_PosX == 5 && f.Context->m_PosY == 6 && f.Context->m_Width == 800 &&
@@ -133,39 +163,56 @@ void TestLifecycle()
     CKRasterizerCapsDesc caps;
     TestCheck(f.Context->GetCaps(&caps), "GetCaps failed");
     TestCheck(caps.Size == sizeof(CKRasterizerCapsDesc), "caps size");
-    TestCheck(caps.MaxTextureStages == CKRST_MAX_TEXTURE_STAGES, "caps stages");
+    TestCheck(caps.MaxTextureStages >= 1 && caps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES, "caps stages");
+    TestCheck(caps.MaxLights == CKRST_MAX_LIGHTS && caps.MaxUserClipPlanes == CKRST_MAX_USER_CLIP_PLANES, "fixed caps");
     TestCheck(!f.Context->GetCaps(NULL), "GetCaps(NULL) must fail");
-
-    CKRasterizerInfo info;
-    CKNullRasterizerGetInfo(&info);
-    TestCheck(info.InterfaceRevision == CKRST_INTERFACE_REVISION, "interface revision");
     TestCheck(CKRST_INTERFACE_REVISION == 0x00030000u, "v3 revision value");
-    TestCheck(info.StartFct != NULL && info.CloseFct != NULL, "entry points");
 
-    // A second context on the same driver is allowed for the NULL rasterizer.
+    // A second context on the same driver is allowed for the recording device.
     CKRasterizerContext *second = f.Driver->CreateContext();
     TestCheck(second != NULL, "second context");
     TestCheck(f.Driver->DestroyContext(second), "DestroyContext");
     TestCheck(!f.Driver->DestroyContext(second), "DestroyContext twice must fail");
+    TestCheck(f.Driver->m_Contexts.Size() == 1, "second context removed from the driver");
 }
 
-void TestDriverCaps()
+// The built-in NULL device (engine fallback when no plugin loads) must report
+// the capability baseline like any driver.
+void TestNullDeviceDriverCaps()
 {
-    Fixture f;
-    const Vx3DCapsDesc &caps = f.Driver->m_3DCaps;
+    CKRasterizerInfo info;
+    CKTranslatedNullRasterizerGetInfo(&info);
+    TestCheck(info.InterfaceRevision == CKRST_INTERFACE_REVISION, "interface revision");
+    TestCheck(info.StartFct != NULL && info.CloseFct != NULL, "entry points");
+
+    CKRasterizer *rasterizer = info.StartFct(NULL);
+    TestCheck(rasterizer != NULL, "NULL rasterizer start");
+    if (!rasterizer)
+        return;
+    TestCheck(rasterizer->GetDriverCount() == 1, "NULL rasterizer exposes one driver");
+    CKRasterizerDriver *driver = rasterizer->GetDriver(0);
+    TestCheck(driver != NULL, "driver 0 missing");
+    if (!driver) {
+        info.CloseFct(rasterizer);
+        return;
+    }
+
+    const Vx3DCapsDesc &caps = driver->m_3DCaps;
     TestCheck(caps.MaxNumberTextureStage >= 1, "MaxNumberTextureStage");
     TestCheck(caps.MaxTextureWidth >= 256 && caps.MaxTextureHeight >= 256, "max texture size");
-    TestCheck((f.Driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) != 0, "2D WINDOWED cap");
+    TestCheck((driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) != 0, "2D WINDOWED cap");
     TestCheck((caps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_SOFTWARE) != 0, "NULL reports software");
-    TestCheck(f.Driver->m_TextureFormats.Size() >= 1, "texture formats");
-    TestCheck(f.Driver->m_DisplayModes.Size() >= 1, "display modes");
+    TestCheck((caps.CKRasterizerSpecificCaps & (CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL)) == 0,
+              "NULL reports no hardware");
+    TestCheck(driver->m_TextureFormats.Size() >= 1, "texture formats");
+    TestCheck(driver->m_DisplayModes.Size() >= 1, "display modes");
 
     Vx3DCapsDesc baseline3D;
     Vx2DCapsDesc baseline2D;
     if (CKRSTGetCapsBaseline(&baseline3D, &baseline2D)) {
         TestCheck(CKRSTGetCapsBaselineSource() != NULL, "baseline source string");
         // Bit fields must match the baseline exactly (spec 4.9.2); the NULL
-        // rasterizer only rewrites the hardware / software specific bits.
+        // device only rewrites the hardware / software specific bits.
         TestCheck(caps.RasterCaps == baseline3D.RasterCaps, "RasterCaps == baseline");
         TestCheck(caps.TextureCaps == baseline3D.TextureCaps, "TextureCaps == baseline");
         TestCheck(caps.TextureFilterCaps == baseline3D.TextureFilterCaps, "TextureFilterCaps == baseline");
@@ -185,12 +232,24 @@ void TestDriverCaps()
         TestCheck(caps.MaxClipPlanes <= baseline3D.MaxClipPlanes, "MaxClipPlanes <= baseline");
         TestCheck(caps.MaxActiveLights <= baseline3D.MaxActiveLights, "MaxActiveLights <= baseline");
         TestCheck(caps.MaxNumberTextureStage <= baseline3D.MaxNumberTextureStage, "MaxNumberTextureStage <= baseline");
-        TestCheck(f.Driver->m_2DCaps.Family == baseline2D.Family, "2D Family == baseline");
-        TestCheck((f.Driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) == (baseline2D.Caps & CKRST_2DCAPS_WINDOWED),
+        TestCheck(driver->m_2DCaps.Family == baseline2D.Family, "2D Family == baseline");
+        TestCheck((driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) == (baseline2D.Caps & CKRST_2DCAPS_WINDOWED),
                   "2D WINDOWED == baseline");
     } else {
         printf("(no caps baseline compiled in) ");
     }
+
+    // The fallback must run an empty frame.
+    CKRasterizerContext *context = driver->CreateContext();
+    TestCheck(context != NULL, "NULL device context");
+    if (context) {
+        TestCheck(context->Create(NULL, 0, 0, 320, 240, 32, FALSE, 60, 24, 8), "NULL device Create");
+        TestCheck(context->Clear(CKRST_CTXCLEAR_ALL, 0, 1.0f, 0, 0, NULL), "NULL device Clear");
+        TestCheck(context->BeginScene() && context->EndScene(), "NULL device scene");
+        TestCheck(context->BackToFront(FALSE), "NULL device present");
+        TestCheck(driver->DestroyContext(context), "NULL device DestroyContext");
+    }
+    info.CloseFct(rasterizer);
 }
 
 void TestLowerCapsHelper()
@@ -323,6 +382,17 @@ void TestTextureStageRoundTrip()
     f.Context->GetTextureStageState(2, CKRST_TSS_ADDRESSU, &u);
     f.Context->GetTextureStageState(2, CKRST_TSS_ADDRESSV, &v);
     TestCheck(u == VXTEXTURE_ADDRESSCLAMP && v == VXTEXTURE_ADDRESSMIRROR, "ADDRESSV independent");
+
+    // InitDefaultRenderStatesValue restores the stage defaults too.
+    f.Context->InitDefaultRenderStatesValue();
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+        for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
+            CKDWORD got = 0;
+            f.Context->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &got);
+            TestCheck(got == CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)tss),
+                      "stage defaults restored");
+        }
+    }
 }
 
 void TestInvalidStateTypesLeaveStateUnchanged()
@@ -362,7 +432,7 @@ void TestInvalidStateTypesLeaveStateUnchanged()
     f.Context->BeginScene();
     DrawTriangle(f.Context);
     f.Context->EndScene();
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_DRAW) == 1, "draw submitted after invalid state calls");
+    TestCheck(CountDraws(f) == 1, "draw submitted after invalid state calls");
 }
 
 void TestMatricesLightsClipPlanes()
@@ -372,18 +442,22 @@ void TestMatricesLightsClipPlanes()
     Vx3DMatrixIdentity(m);
     m[3][0] = 5.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLD, m), "set WORLD");
-    TestCheck(f.Context->GetMatrix(VXMATRIX_WORLDMATRIX(0))[3][0] == 5.0f, "WORLD aliases WORLDMATRIX(0)");
+    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLDMATRIX(0))[3][0] == 5.0f, "WORLD aliases WORLDMATRIX(0)");
     m[3][0] = 7.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLDMATRIX(0), m), "set WORLDMATRIX(0)");
-    TestCheck(f.Context->GetMatrix(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(0) aliases WORLD");
+    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(0) aliases WORLD");
     m[3][0] = 9.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLDMATRIX(3), m), "set WORLDMATRIX(3)");
-    TestCheck(f.Context->GetMatrix(VXMATRIX_WORLDMATRIX(3))[3][0] == 9.0f, "WORLDMATRIX(3) stored");
-    TestCheck(f.Context->GetMatrix(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(3) does not alias WORLD");
+    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLDMATRIX(3))[3][0] == 9.0f, "WORLDMATRIX(3) stored");
+    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(3) does not alias WORLD");
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_VIEW, m), "set VIEW");
+    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_VIEW)[3][0] == 9.0f, "VIEW stored");
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_PROJECTION, m), "set PROJECTION");
-    for (int i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i)
+    for (int i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i) {
+        m[3][0] = 10.0f + (float)i;
         TestCheck(f.Context->SetTransformMatrix(VXMATRIX_TEXTURE(i), m), "set TEXTURE(i)");
+        TestCheck(f.Context->GetMatrixForTests(VXMATRIX_TEXTURE(i))[3][0] == 10.0f + (float)i, "TEXTURE(i) stored");
+    }
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)0, m), "matrix type 0 rejected");
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)4, m), "matrix type 4 rejected");
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)24, m), "matrix type 24 rejected");
@@ -399,8 +473,9 @@ void TestMatricesLightsClipPlanes()
     for (CKDWORD i = 0; i < CKRST_MAX_LIGHTS; ++i) {
         TestCheck(f.Context->SetLight(i, &light), "SetLight in range");
         TestCheck(f.Context->EnableLight(i, TRUE), "EnableLight in range");
-        TestCheck(f.Context->IsLightEnabled(i) && f.Context->GetLight(i).Range == 12.0f, "light stored");
+        TestCheck(f.Context->IsLightEnabledForTests(i) && f.Context->GetLightForTests(i).Range == 12.0f, "light stored");
     }
+    TestCheck(f.Context->EnableLight(3, FALSE) && !f.Context->IsLightEnabledForTests(3), "light disabled");
     TestCheck(!f.Context->SetLight(CKRST_MAX_LIGHTS, &light), "SetLight out of range");
     TestCheck(!f.Context->EnableLight(CKRST_MAX_LIGHTS, TRUE), "EnableLight out of range");
     TestCheck(!f.Context->SetLight(0, NULL), "SetLight NULL");
@@ -410,13 +485,19 @@ void TestMatricesLightsClipPlanes()
     memset(&material, 0, sizeof(material));
     material.SpecularPower = 3.0f;
     TestCheck(f.Context->SetMaterial(&material), "SetMaterial");
-    TestCheck(f.Context->GetMaterial().SpecularPower == 3.0f, "material stored");
-    TestCheck(!f.Context->SetMaterial(NULL), "SetMaterial NULL");
+    TestCheck(f.Context->GetMaterialForTests().SpecularPower == 3.0f, "material stored");
+    // NULL selects the default material (white diffuse / ambient), like the
+    // engine's SetCurrentMaterial(NULL).
+    TestCheck(f.Context->SetMaterial(NULL), "SetMaterial NULL");
+    TestCheck(f.Context->GetMaterialForTests().SpecularPower == 0.0f &&
+              f.Context->GetMaterialForTests().Diffuse.r == 1.0f, "default material");
 
     CKViewportData viewport;
     viewport.ViewX = 1; viewport.ViewY = 2; viewport.ViewWidth = 3; viewport.ViewHeight = 4;
+    viewport.ViewZMin = 0.0f; viewport.ViewZMax = 1.0f;
     TestCheck(f.Context->SetViewport(&viewport), "SetViewport");
-    TestCheck(f.Context->GetViewport().ViewWidth == 3, "viewport stored");
+    TestCheck(f.Context->GetViewportForTests().ViewWidth == 3, "viewport stored");
+    TestCheck(!f.Context->SetViewport(NULL), "SetViewport NULL rejected");
 
     VxPlane plane(VxVector(0, 1, 0), 2.0f);
     for (CKDWORD i = 0; i < CKRST_MAX_USER_CLIP_PLANES; ++i) {
@@ -507,12 +588,12 @@ void TestTextures()
     CKTextureDesc desc;
     TestCheck(f.Context->GetTextureDesc(tex, &desc), "GetTextureDesc");
     TestCheck(desc.Format.Width == 64 && desc.Format.Height == 32, "texture size");
-    TestCheck(desc.MipMapCount == 1, "MipMapCount 0 normalizes to 1");
+    TestCheck(desc.MipMapCount == 1, "MipMapCount 0 means one level");
     TestCheck((desc.Flags & CKRST_TEXTURE_VALID) != 0, "VALID flag set");
 
     const CKDWORD mipTex = CreateTexture2D(f.Context, 64, 32, 0, CKRST_MIPMAP_GENERATE);
     TestCheck(f.Context->GetTextureDesc(mipTex, &desc), "GetTextureDesc mip");
-    TestCheck(desc.MipMapCount == 7, "generated mip chain count for 64x32");
+    TestCheck(desc.MipMapCount == CKRST_MIPMAP_GENERATE, "generated mip chain request kept in the descriptor");
 
     // Cube maps must be square.
     CKTextureDesc cube;
@@ -535,11 +616,15 @@ void TestTextures()
     image.Height = 32;
     image.BytesPerLine = 64 * 4;
     image.Image = pixels.Begin();
+    const CKDWORD uploadsBefore = f.Device->UpdatedTextureCount;
     TestCheck(f.Context->LoadTexture(tex, image, 0, CKRST_CUBEFACE_XPOS, NULL), "LoadTexture level 0");
+    TestCheck(f.Device->UpdatedTextureCount == uploadsBefore + 1 && f.Device->LastUpdatedTexture == tex,
+              "upload reached the device");
     TestCheck(!f.Context->LoadTexture(tex, image, 1, CKRST_CUBEFACE_XPOS, NULL), "level 1 of a 1-level texture rejected");
     TestCheck(!f.Context->LoadTexture(tex, image, 0, CKRST_CUBEFACE_YNEG, NULL), "cube face on 2D texture rejected");
     CKRECT region = {8, 8, 16, 16};
     TestCheck(f.Context->LoadTexture(tex, image, 0, CKRST_CUBEFACE_XPOS, &region), "region upload");
+    TestCheck(f.Device->LastTextureUpdateHadRegion && f.Device->LastTextureUpdateRegion.right == 16, "region forwarded");
     CKRECT bad = {60, 0, 70, 8};
     TestCheck(!f.Context->LoadTexture(tex, image, 0, CKRST_CUBEFACE_XPOS, &bad), "out-of-bounds region rejected");
     TestCheck(!f.Context->LoadTexture(0, image, 0, CKRST_CUBEFACE_XPOS, NULL), "handle 0 rejected");
@@ -554,21 +639,22 @@ void TestTextures()
 
     // Binding and deletion.
     TestCheck(f.Context->SetTexture(tex, 0), "SetTexture");
-    TestCheck(f.Context->GetBoundTexture(0) == tex, "bound");
+    TestCheck(f.Context->GetBoundTextureForTests(0) == tex, "bound");
     TestCheck(!f.Context->SetTexture(0xBAD, 1), "unknown handle rejected");
+    TestCheck(!f.Context->SetTexture(tex, CKRST_MAX_TEXTURE_STAGES), "stage 8 rejected");
     TestCheck(f.Context->SetTexture(0, 1), "unbind with 0");
     TestCheck(!f.Context->DeleteObject(tex, CKRST_OBJ_VERTEXBUFFER), "wrong type rejected");
     TestCheck(f.Context->DeleteObject(tex, CKRST_OBJ_TEXTURE), "DeleteObject");
-    TestCheck(f.Context->GetBoundTexture(0) == 0, "deleted texture unbound");
+    TestCheck(f.Context->GetBoundTextureForTests(0) == 0, "deleted texture unbound");
     TestCheck(!f.Context->DeleteObject(tex, CKRST_OBJ_TEXTURE), "double delete rejected");
     TestCheck(!f.Context->GetTextureDesc(tex, &desc), "stale handle rejected");
-    TestCheck(f.Context->GetLiveResourceCount(CKRST_OBJ_TEXTURE) == 2, "two textures left");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_TEXTURE) == 2, "two textures left");
     TestCheck(f.Context->FlushObjects(CKRST_OBJ_TEXTURE), "FlushObjects");
-    TestCheck(f.Context->GetLiveResourceCount(CKRST_OBJ_ALL) == 0, "all textures flushed");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0, "all textures flushed");
 
-    // A slot can be reused, but the old handle stays invalid.
+    // A deleted handle stays invalid even after new allocations.
     const CKDWORD again = CreateTexture2D(f.Context, 8, 8, 0, 0);
-    TestCheck(again != tex, "reused slot gets a new handle");
+    TestCheck(again != tex, "new texture gets a new handle");
     TestCheck(!f.Context->GetTextureDesc(tex, &desc), "old handle still invalid after reuse");
 }
 
@@ -576,9 +662,10 @@ void TestBuffers()
 {
     Fixture f;
     const CKDWORD vb = CreateVB(f.Context, CKRST_DP_TR_CL_VNT, 16);
-    const CKNullResource *res = f.Context->GetResource(vb);
-    TestCheck(res && res->VertexBuffer.m_VertexSize == 32, "vertex size filled from layout");
-    TestCheck((res->VertexBuffer.m_Flags & CKRST_VB_VALID) != 0, "VB VALID flag");
+    CKVertexBufferDesc vbDesc;
+    TestCheck(f.Context->GetVertexBufferDescForTests(vb, &vbDesc), "vertex buffer descriptor");
+    TestCheck(vbDesc.m_VertexSize == 32, "vertex size filled from the canonical layout");
+    TestCheck(vbDesc.m_MaxVertexCount == 16, "vertex count kept");
 
     CKVertexBufferDesc mismatch;
     mismatch.m_VertexFormat = CKRST_DP_TR_CL_VNT;
@@ -626,13 +713,13 @@ void TestBuffers()
     TestCheck(!f.Context->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 6, NULL, 0), "draw from locked VB rejected");
     f.Context->UnlockVertexBuffer(vb);
     f.Context->EndScene();
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_DRAW) == 2, "two draws recorded");
+    TestCheck(CountDraws(f) == 2, "two draws recorded");
     TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_HANDLE) == 3, "invalid handle rejections counted");
-    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 9, "invalid parameter rejections counted");
+    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 12, "invalid parameter rejections counted");
 
     TestCheck(f.Context->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete IB");
     TestCheck(f.Context->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB");
-    TestCheck(f.Context->GetLiveResourceCount(CKRST_OBJ_ALL) == 0, "buffers released");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0, "buffers released");
 }
 
 void TestDrawPrimitiveValidation()
@@ -655,12 +742,16 @@ void TestDrawPrimitiveValidation()
     TestCheck(f.Context->DrawPrimitive(VX_POINTLIST, NULL, 0, &data), "point list accepted");
     CKWORD indices[6] = {0, 1, 2, 0, 2, 3};
     TestCheck(f.Context->DrawPrimitive(VX_TRIANGLELIST, indices, 6, &data), "indexed list accepted");
-    TestCheck(!f.Context->DrawPrimitive(VX_TRIANGLELIST, NULL, 6, &data), "index count without indices rejected");
+    TestCheck(!f.Context->DrawPrimitive(VX_TRIANGLELIST, indices, 2, &data), "two indices make no triangle");
+    TestCheck(!f.Context->DrawPrimitive((VXPRIMITIVETYPE)7, NULL, 0, &data), "unknown topology rejected");
     f.Context->EndScene();
-    const CKNullEvent *fan = FindEvent(f.Context, CKNULL_EVENT_DRAW, 0);
-    const CKNullEvent *indexed = FindEvent(f.Context, CKNULL_EVENT_DRAW, 5);
-    TestCheck(fan && fan->A == VX_TRIANGLEFAN && fan->B == 2, "fan primitive count");
-    TestCheck(indexed && indexed->B == 2, "indexed primitive count");
+    TestCheck(CountDraws(f) == 6, "six draws submitted");
+    f.Context->BackToFront(FALSE);
+    const CKRenderStats *stats = f.Context->GetStats();
+    TestCheck(stats->DrawCalls == 6, "stats draw calls");
+    // fan 2 + strip 2 + line list 2 + line strip 3 + points 4 + indexed list 2
+    TestCheck(stats->Primitives == 15, "stats primitive count per topology");
+    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 4, "invalid parameter rejections counted");
 }
 
 // ---------------------------------------------------------------------------
@@ -673,6 +764,7 @@ void TestDrawOrderAndMarkers()
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_ALL, 0, 1.0f, 0, 0, NULL), "Clear");
     TestCheck(f.Context->BeginScene(), "BeginScene");
     TestCheck(!f.Context->BeginScene(), "nested BeginScene rejected");
+    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_SCENE_STATE) == 1, "nested BeginScene counted");
     for (int i = 0; i < 5; ++i) {
         char name[16];
         sprintf(name, "draw%d", i);
@@ -685,28 +777,25 @@ void TestDrawOrderAndMarkers()
     DrawTriangle(f.Context);
     TestCheck(f.Context->BackToFront(FALSE), "BackToFront");
 
-    int seen = 0;
-    CKDWORD pass = 0;
-    const XClassArray<CKNullEvent> &events = f.Context->GetEvents();
-    for (int i = 0; i < events.Size(); ++i) {
-        if (events[i].Kind != CKNULL_EVENT_DRAW)
-            continue;
-        if (seen < 5) {
-            char expected[16];
-            sprintf(expected, "draw%d", seen);
-            TestCheck(events[i].Name == expected, "draw order matches call order");
-            if (seen == 0)
-                pass = events[i].Pass;
-            TestCheck(events[i].Pass == pass, "all draws in one pass");
-        }
-        ++seen;
+    const std::vector<FFPSubmitRecord> &draws = f.Device->Encoder.Submits;
+    TestCheck(draws.size() == 6, "six draws recorded");
+    for (size_t i = 0; i < draws.size() && i < 5; ++i) {
+        char expected[16];
+        sprintf(expected, "draw%d", (int)i);
+        TestCheck(draws[i].Marker == expected, "draw order matches call order");
+        TestCheck(draws[i].View == draws[0].View, "all scene draws in one pass");
     }
-    TestCheck(seen == 6, "six draws recorded");
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_PASS_BEGIN) == 1, "single pass frame");
+    if (draws.size() == 6) {
+        TestCheck(draws[5].Marker.Length() == 0, "marker consumed by one draw");
+        TestCheck(draws[5].View == draws[0].View, "post-EndScene draw stays in the scene pass");
+    }
+    TestCheck(CountPasses(f) == 2, "clear pass + scene pass");
+    TestCheck(CountPresents(f) == 1, "one present");
     TestCheck(f.Context->GetStats()->FrameNumber == 1, "frame counted");
     TestCheck(f.Context->GetStats()->DrawCalls == 6, "stats draw calls");
     TestCheck(f.Context->GetStats()->Primitives == 6, "stats primitives");
     TestCheck(f.Context->GetStats()->Clears == 1, "stats clears");
+    TestCheck(f.Context->GetStats()->Passes == 2, "stats passes");
     TestCheck(f.Context->IsIdle(), "idle after present");
 }
 
@@ -715,17 +804,28 @@ void TestClearRectSemantics()
     Fixture f;
     CKViewportData viewport;
     viewport.ViewX = 10; viewport.ViewY = 20; viewport.ViewWidth = 100; viewport.ViewHeight = 50;
+    viewport.ViewZMin = 0.0f; viewport.ViewZMax = 1.0f;
     f.Context->SetViewport(&viewport);
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_COLOR, 0xFF00FF00, 1.0f, 0, 0, NULL), "viewport clear");
-    const CKNullEvent *clear = FindEvent(f.Context, CKNULL_EVENT_CLEAR, 0);
+    const FFPViewClearRecord *clear = FindClear(f, 0);
     TestCheck(clear != NULL, "clear recorded");
-    TestCheck(clear->Rect.left == 10 && clear->Rect.top == 20 && clear->Rect.right == 110 && clear->Rect.bottom == 70,
-              "RectCount 0 clears the current viewport");
-    TestCheck(clear->B == 0xFF00FF00 && clear->A == CKRST_CTXCLEAR_COLOR, "clear parameters");
+    if (clear) {
+        TestCheck(clear->Rect.left == 10 && clear->Rect.top == 20 && clear->Rect.right == 110 && clear->Rect.bottom == 70,
+                  "RectCount 0 clears the current viewport");
+        TestCheck(clear->Color == 0xFF00FF00 && clear->Flags == CKRST_CTXCLEAR_COLOR, "clear parameters");
+    }
     CKRECT rects[2] = {{0, 0, 8, 8}, {16, 16, 32, 32}};
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_DEPTH, 0, 0.5f, 0, 2, rects), "two rect clear");
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_CLEAR) == 3, "one event per rectangle");
+    TestCheck(CountClears(f) == 3, "one clear per rectangle");
+    const FFPViewClearRecord *second = FindClear(f, 2);
+    TestCheck(second && second->Rect.left == 16 && second->Rect.bottom == 32 && second->Z == 0.5f &&
+              second->Flags == CKRST_CTXCLEAR_DEPTH, "second rectangle recorded");
     TestCheck(!f.Context->Clear(CKRST_CTXCLEAR_DEPTH, 0, 0.5f, 0, 2, NULL), "rect count without rects rejected");
+    // Clearing nothing is a no-op.
+    TestCheck(f.Context->Clear(0, 0, 1.0f, 0, 0, NULL), "empty flags accepted");
+    TestCheck(CountClears(f) == 3, "empty flags clear nothing");
+    f.Context->BackToFront(FALSE);
+    TestCheck(f.Context->GetStats()->Clears == 3, "stats clears");
 }
 
 void TestMidSceneStencilClearSplitsPass()
@@ -735,46 +835,54 @@ void TestMidSceneStencilClearSplitsPass()
     f.Context->BeginScene();
     f.Context->SetDebugMarker("before");
     DrawTriangle(f.Context);
-    TestCheck(f.Context->Clear(CKRST_CTXCLEAR_STENCIL, 0, 1.0f, 0, 0, NULL), "mid-scene stencil clear");
+    TestCheck(f.Context->Clear(CKRST_CTXCLEAR_STENCIL, 0, 1.0f, 0x7, 0, NULL), "mid-scene stencil clear");
     f.Context->SetDebugMarker("after");
     DrawTriangle(f.Context);
     f.Context->EndScene();
     f.Context->BackToFront(FALSE);
 
-    const CKNullEvent *before = FindEvent(f.Context, CKNULL_EVENT_DRAW, 0);
-    const CKNullEvent *after = FindEvent(f.Context, CKNULL_EVENT_DRAW, 1);
-    const CKNullEvent *stencilClear = FindEvent(f.Context, CKNULL_EVENT_CLEAR, 1);
+    const FFPSubmitRecord *before = FindDraw(f, 0);
+    const FFPSubmitRecord *after = FindDraw(f, 1);
+    const FFPViewClearRecord *stencilClear = FindClear(f, 1);
     TestCheck(before && after && stencilClear, "events present");
-    TestCheck(before->Name == "before" && after->Name == "after", "draw markers");
-    TestCheck(before->Pass < stencilClear->Pass, "clear pass after first draw pass");
-    TestCheck(stencilClear->Pass < after->Pass, "second draw pass after clear pass");
-    TestCheck(stencilClear->A == CKRST_CTXCLEAR_STENCIL, "stencil-only clear recorded");
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_PASS_BEGIN) == 3, "three passes: scene, clear, scene");
-    TestCheck(f.Context->GetStats()->Passes == 3, "stats passes");
-    TestCheck(f.Context->IsInScene() == FALSE, "scene closed");
+    if (before && after && stencilClear) {
+        TestCheck(before->Marker == "before" && after->Marker == "after", "draw markers");
+        TestCheck(before->View < stencilClear->View, "clear pass after first draw pass");
+        TestCheck(stencilClear->View < after->View, "second draw pass after clear pass");
+        TestCheck(stencilClear->Flags == CKRST_CTXCLEAR_STENCIL && stencilClear->Stencil == 0x7,
+                  "stencil-only clear recorded with its value");
+    }
+    TestCheck(CountPasses(f) == 4, "four passes: clear, scene, stencil clear, scene");
+    TestCheck(f.Context->GetStats()->Passes == 4, "stats passes");
+    TestCheck(f.Context->GetStats()->Clears == 2, "stats clears");
+    TestCheck(f.Context->IsInSceneForTests() == FALSE, "scene closed");
 }
 
 void TestOverlayPhase()
 {
     Fixture f;
     f.Context->BeginScene();
+    TestCheck(!f.Context->BeginOverlayPhase(), "overlay phase inside the scene rejected");
     DrawTriangle(f.Context);
+    f.Context->EndScene();
     TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
     TestCheck(!f.Context->BeginOverlayPhase(), "second overlay phase in a frame rejected");
     DrawTriangle(f.Context);
-    f.Context->EndScene();
     f.Context->BackToFront(FALSE);
-    const CKNullEvent *scene = FindEvent(f.Context, CKNULL_EVENT_DRAW, 0);
-    const CKNullEvent *overlay = FindEvent(f.Context, CKNULL_EVENT_DRAW, 1);
-    const CKNullEvent *begin = FindEvent(f.Context, CKNULL_EVENT_BEGIN_OVERLAY, 0);
-    TestCheck(scene && overlay && begin, "overlay events");
-    TestCheck(scene->Pass < begin->Pass && begin->Pass < overlay->Pass, "overlay draws in a later pass");
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_PASS_BEGIN) == 3, "scene, present, overlay passes");
+    const FFPSubmitRecord *scene = FindDraw(f, 0);
+    const FFPSubmitRecord *overlay = FindDraw(f, 1);
+    TestCheck(scene && overlay, "overlay events");
+    if (scene && overlay) {
+        TestCheck(scene->View < overlay->View, "overlay draws in a later pass");
+        TestCheck(scene->Target == 0 && overlay->Target == 0, "both passes draw to the backbuffer");
+    }
+    TestCheck(CountPasses(f) == 2, "scene and overlay passes (default options composite nothing)");
     // Overlay phase resets with the frame.
     f.Context->BeginScene();
-    TestCheck(f.Context->BeginOverlayPhase(), "overlay allowed again next frame");
     f.Context->EndScene();
+    TestCheck(f.Context->BeginOverlayPhase(), "overlay allowed again next frame");
     f.Context->BackToFront(FALSE);
+    TestCheck(CountPresents(f) == 2, "two presents");
 }
 
 void TestPresentRequiresEndScene()
@@ -783,22 +891,32 @@ void TestPresentRequiresEndScene()
     f.Context->BeginScene();
     TestCheck(!f.Context->BackToFront(FALSE), "BackToFront inside scene rejected");
     TestCheck(!f.Context->Resize(0, 0, 320, 240, 0), "Resize inside scene rejected");
-    CKRasterizerOptions options;
-    TestCheck(!f.Context->SetOptions(&options), "SetOptions inside scene rejected");
-    TestCheck(!f.Context->BeginShutdown(), "BeginShutdown inside scene rejected");
     TestCheck(!f.Context->IsIdle(), "not idle inside scene");
+    // Options may change inside the scene (render callbacks do that); they
+    // are stored immediately and clamped.
+    CKRasterizerOptions options;
+    options.DisableTextureFiltering = TRUE;
+    TestCheck(f.Context->SetOptions(&options), "SetOptions inside scene accepted");
+    TestCheck(f.Context->GetOptionsForTests().DisableTextureFiltering == TRUE, "options stored inside scene");
     f.Context->EndScene();
     TestCheck(f.Context->BackToFront(TRUE), "BackToFront after EndScene");
-    const CKNullEvent *present = FindEvent(f.Context, CKNULL_EVENT_PRESENT, 0);
-    TestCheck(present && present->A == 1, "vsync flag recorded");
+    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] == CKRST_FRAME_SYNC_VSYNC, "vsync flag recorded");
+    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] != CKRST_FRAME_SYNC_IMMEDIATE, "vsync is not immediate");
 
     options.RenderScale = 9.0f;
     options.Sharpness = -1.0f;
     TestCheck(f.Context->SetOptions(&options), "SetOptions at frame boundary");
-    TestCheck(f.Context->GetOptions().RenderScale == 2.0f && f.Context->GetOptions().Sharpness == 0.0f,
+    TestCheck(f.Context->GetOptionsForTests().RenderScale == 2.0f && f.Context->GetOptionsForTests().Sharpness == 0.0f,
               "options clamped");
     options.Size = 4;
     TestCheck(!f.Context->SetOptions(&options), "wrong Size rejected");
+    TestCheck(!f.Context->SetOptions(NULL), "NULL options rejected");
+    TestCheck(f.Context->GetOptionsForTests().RenderScale == 2.0f, "rejected options leave the current ones");
+
+    f.Context->BeginScene();
+    f.Context->EndScene();
+    TestCheck(f.Context->BackToFront(FALSE), "immediate present");
+    TestCheck(CountPresents(f) == 2 && f.Device->Frames[1] == CKRST_FRAME_SYNC_IMMEDIATE, "immediate flag recorded");
 }
 
 void TestRenderTargets()
@@ -817,17 +935,21 @@ void TestRenderTargets()
     TestCheck(!f.Context->SetTargetTexture(rt, 0, 0, CKRST_CUBEFACE_XPOS), "SetTargetTexture inside scene rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_INVALID_TARGET) == 1, "in-scene target change counted");
     f.Context->EndScene();
+    f.Context->BackToFront(FALSE);
+    f.Device->Encoder.Submits.clear();
+    f.Device->Encoder.Touches.clear();
 
     TestCheck(!f.Context->SetTargetTexture(plain, 0, 0, CKRST_CUBEFACE_XPOS), "texture without RENDERTARGET rejected");
     TestCheck(!f.Context->SetTargetTexture(rt, 0, 0, CKRST_CUBEFACE_YPOS), "cube face on 2D target rejected");
-    TestCheck(!f.Context->SetTargetTexture(rt, 256, 64, CKRST_CUBEFACE_XPOS), "size larger than texture rejected");
+    TestCheck(!f.Context->SetTargetTexture(rt, 256, 64, CKRST_CUBEFACE_XPOS), "size other than the texture size rejected");
     TestCheck(!f.Context->SetTargetTexture(cubeRt, 0, 0, (CKRST_CUBEFACE)6), "face 6 rejected");
     TestCheck(!f.Context->SetTargetTexture(0xBEEF, 0, 0, CKRST_CUBEFACE_XPOS), "unknown handle rejected");
+    TestCheck(Diag(f.Context, CKRST_DIAG_INVALID_TARGET) == 5, "invalid targets counted");
+    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_HANDLE) == 1, "unknown target handle counted");
+    TestCheck(f.Context->GetTargetForTests() == 0, "target unchanged after rejections");
 
     TestCheck(f.Context->SetTargetTexture(rt, 0, 0, CKRST_CUBEFACE_XPOS), "2D render target");
-    const CKNullEvent *target = FindEvent(f.Context, CKNULL_EVENT_SET_TARGET, 0);
-    TestCheck(target && target->B == 128 && target->C == 64, "size 0 means texture size");
-    TestCheck(f.Context->GetTarget() == rt, "target set");
+    TestCheck(f.Context->GetTargetForTests() == rt, "target set");
     TestCheck(!f.Context->BeginOverlayPhase(), "overlay phase rejected while a texture is the target");
     TestCheck(Diag(f.Context, CKRST_DIAG_OVERLAY_ON_TARGET) == 1, "overlay on target counted");
 
@@ -835,27 +957,34 @@ void TestRenderTargets()
     f.Context->BeginScene();
     DrawTriangle(f.Context);
     f.Context->EndScene();
-    TestCheck(f.Context->SetTargetTexture(cubeRt, 16, 16, CKRST_CUBEFACE_ZNEG), "cube face target with sub-size");
+    TestCheck(f.Context->SetTargetTexture(cubeRt, 32, 32, CKRST_CUBEFACE_ZNEG), "cube face target with explicit size");
     f.Context->BeginScene();
     DrawTriangle(f.Context);
     f.Context->EndScene();
     TestCheck(f.Context->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "back to backbuffer");
+    TestCheck(f.Context->GetTargetForTests() == 0, "target cleared");
     f.Context->BeginScene();
     DrawTriangle(f.Context);
     f.Context->EndScene();
     f.Context->BackToFront(FALSE);
 
-    const CKNullEvent *d0 = FindEvent(f.Context, CKNULL_EVENT_DRAW, 0);
-    const CKNullEvent *d1 = FindEvent(f.Context, CKNULL_EVENT_DRAW, 1);
-    const CKNullEvent *d2 = FindEvent(f.Context, CKNULL_EVENT_DRAW, 2);
+    const FFPSubmitRecord *d0 = FindDraw(f, 0);
+    const FFPSubmitRecord *d1 = FindDraw(f, 1);
+    const FFPSubmitRecord *d2 = FindDraw(f, 2);
     TestCheck(d0 && d1 && d2, "three draws");
-    TestCheck(d0->Target == rt && d1->Target == cubeRt && d2->Target == 0, "draw targets recorded");
-    TestCheck(d0->Pass < d1->Pass && d1->Pass < d2->Pass, "target change starts a new pass");
+    if (d0 && d1 && d2) {
+        TestCheck(d0->Target == rt && d1->Target == cubeRt && d2->Target == 0, "draw targets recorded");
+        TestCheck(d0->View < d1->View && d1->View < d2->View, "target change starts a new pass");
+        TestCheck(d0->Rect.right == 128 && d0->Rect.bottom == 64, "size 0 means texture size");
+        TestCheck(d1->Rect.right == 32 && d1->Rect.bottom == 32, "cube face pass uses the face size");
+        TestCheck(d2->Rect.right == 640 && d2->Rect.bottom == 480, "backbuffer pass uses the window size");
+    }
+    TestCheck(CountPasses(f) == 4, "clear + three scene passes");
 
     // Deleting the current target falls back to the backbuffer.
     TestCheck(f.Context->SetTargetTexture(rt, 0, 0, CKRST_CUBEFACE_XPOS), "target again");
     TestCheck(f.Context->DeleteObject(rt, CKRST_OBJ_TEXTURE), "delete current target");
-    TestCheck(f.Context->GetTarget() == 0, "target reset after delete");
+    TestCheck(f.Context->GetTargetForTests() == 0, "target reset after delete");
 }
 
 void TestReadbackAndCopies()
@@ -866,17 +995,20 @@ void TestReadbackAndCopies()
     const int required = f.Context->CopyToMemoryBuffer(NULL, VXBUFFER_BACKBUFFER, image);
     TestCheck(required == 640 * 480 * 4, "required size for whole backbuffer");
     TestCheck(image.Width == 640 && image.Height == 480 && image.BitsPerPixel == 32, "descriptor filled");
+    TestCheck(image.Image == NULL, "size query copies nothing");
     XArray<CKBYTE> pixels;
-    pixels.Resize(required);
-    memset(pixels.Begin(), 0xFF, required);
+    pixels.Resize(required > 0 ? required : 1);
+    memset(pixels.Begin(), 0xFF, pixels.Size());
     image.Image = pixels.Begin();
     TestCheck(f.Context->CopyToMemoryBuffer(NULL, VXBUFFER_BACKBUFFER, image) == required, "copy whole backbuffer");
-    TestCheck(pixels[0] == 0 && pixels[required - 1] == 0, "NULL rasterizer returns a black image");
+    TestCheck(required > 0 && pixels[0] == 0 && pixels[required - 1] == 0, "recording device returns a black image");
+    TestCheck(f.Context->IsIdle(), "synchronous readback leaves the context idle");
 
     CKRECT rect = {10, 10, 20, 30};
     VxImageDescEx sub;
     memset(&sub, 0, sizeof(sub));
-    TestCheck(f.Context->CopyToMemoryBuffer(&rect, VXBUFFER_ZBUFFER, sub) == 10 * 20 * 4, "sub rect size");
+    TestCheck(f.Context->CopyToMemoryBuffer(&rect, VXBUFFER_BACKBUFFER, sub) == 10 * 20 * 4, "sub rect size");
+    TestCheck(sub.Width == 10 && sub.Height == 20, "sub rect descriptor");
     CKRECT badRect = {600, 0, 700, 10};
     TestCheck(f.Context->CopyToMemoryBuffer(&badRect, VXBUFFER_BACKBUFFER, sub) == 0, "rect outside target rejected");
     TestCheck(f.Context->CopyToMemoryBuffer(NULL, (VXBUFFER_TYPE)8, sub) == 0, "unknown buffer rejected");
@@ -885,16 +1017,34 @@ void TestReadbackAndCopies()
     TestCheck(f.Context->CopyToMemoryBuffer(NULL, VXBUFFER_BACKBUFFER, image) == 0, "readback inside scene rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_SCENE_STATE) == 1, "scene state rejection counted");
     f.Context->EndScene();
+    f.Context->BackToFront(FALSE);
 
-    TestCheck(f.Context->CopyFromMemoryBuffer(&rect, VXBUFFER_BACKBUFFER, image) == 10 * 20 * 4, "CopyFromMemoryBuffer");
-    TestCheck(f.Context->CopyFromMemoryBuffer(&rect, VXBUFFER_ZBUFFER, image) == 0, "depth upload rejected");
-    TestCheck(CountEvents(f.Context, CKNULL_EVENT_COPY_FROM_MEMORY) == 1, "copy from memory recorded");
-
+    // CopyToTexture reads the target back and uploads it into the texture.
     const CKDWORD tex = CreateTexture2D(f.Context, 64, 64, 0, 0);
     VxRect src(0, 0, 64, 64);
+    const CKDWORD uploads = f.Device->UpdatedTextureCount;
     TestCheck(f.Context->CopyToTexture(tex, &src, NULL, CKRST_CUBEFACE_XPOS), "CopyToTexture");
+    TestCheck(f.Device->UpdatedTextureCount == uploads + 1 && f.Device->LastUpdatedTexture == tex,
+              "CopyToTexture uploads into the texture");
     TestCheck(!f.Context->CopyToTexture(tex, &src, NULL, CKRST_CUBEFACE_XNEG), "cube face on 2D texture rejected");
     TestCheck(!f.Context->CopyToTexture(0, &src, NULL, CKRST_CUBEFACE_XPOS), "handle 0 rejected");
+
+    // CopyFromMemoryBuffer draws the image into the target rectangle.
+    XArray<CKBYTE> small;
+    small.Resize(10 * 20 * 4);
+    VxImageDescEx upload;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, upload);
+    upload.Width = 10;
+    upload.Height = 20;
+    upload.BytesPerLine = 10 * 4;
+    upload.Image = small.Begin();
+    const int drawsBefore = CountDraws(f);
+    TestCheck(f.Context->CopyFromMemoryBuffer(&rect, VXBUFFER_BACKBUFFER, upload) == 10 * 20 * 4, "CopyFromMemoryBuffer");
+    TestCheck(CountDraws(f) == drawsBefore + 1, "copy from memory is one draw");
+    TestCheck(f.Context->CopyFromMemoryBuffer(&rect, VXBUFFER_ZBUFFER, upload) == 0, "depth upload rejected");
+    TestCheck(f.Context->CopyFromMemoryBuffer(&badRect, VXBUFFER_BACKBUFFER, upload) == 0, "rect outside target rejected");
+    upload.Width = 64;
+    TestCheck(f.Context->CopyFromMemoryBuffer(&rect, VXBUFFER_BACKBUFFER, upload) == 0, "image size must match the rect");
 
     struct Capture {
         static void Callback(void *user, const CKRECT *r, VXBUFFER_TYPE buffer, const VxImageDescEx *img, CKBOOL ok)
@@ -908,9 +1058,12 @@ void TestReadbackAndCopies()
     };
     int calls = 0;
     TestCheck(f.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, Capture::Callback, &calls), "RequestReadback");
+    TestCheck(calls == 0, "readback not delivered before the present");
     f.Context->BackToFront(FALSE);
     TestCheck(calls == 1, "readback callback delivered by the next present");
     TestCheck(!f.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, NULL, NULL), "NULL callback rejected");
+    TestCheck(!f.Context->RequestReadback(&badRect, VXBUFFER_BACKBUFFER, Capture::Callback, &calls), "rect outside target rejected");
+    TestCheck(!f.Context->RequestReadback(NULL, VXBUFFER_ZBUFFER, Capture::Callback, &calls), "depth readback rejected");
 }
 
 void TestShutdown()
@@ -918,12 +1071,16 @@ void TestShutdown()
     Fixture f;
     CreateTexture2D(f.Context, 8, 8, 0, 0);
     CreateVB(f.Context, CKRST_DP_TR_CL_V, 3);
+    f.Context->BeginScene();
+    // Orderly shutdown protocol (spec 4.2): BeginShutdown ends an open scene.
     TestCheck(f.Context->BeginShutdown(), "BeginShutdown");
     TestCheck(f.Context->IsIdle(), "idle after shutdown");
-    TestCheck(f.Context->GetLiveResourceCount(CKRST_OBJ_ALL) == 0, "resources flushed on shutdown");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0, "resources flushed on shutdown");
     TestCheck(!f.Context->BeginScene(), "BeginScene after shutdown rejected");
+    TestCheck(f.Context->BeginShutdown(), "BeginShutdown twice is harmless");
     TestCheck(f.Driver->DestroyContext(f.Context), "DestroyContext after shutdown");
     f.Context = NULL;
+    TestCheck(f.Driver->m_Contexts.Size() == 0, "context removed from the driver");
 }
 
 } // namespace
@@ -932,7 +1089,7 @@ int main()
 {
     TestFramework framework;
     framework.Run("lifecycle", TestLifecycle);
-    framework.Run("driver caps", TestDriverCaps);
+    framework.Run("NULL device driver caps", TestNullDeviceDriverCaps);
     framework.Run("caps lowering helper", TestLowerCapsHelper);
     framework.Run("render state defaults", TestRenderStateDefaults);
     framework.Run("texture stage defaults", TestTextureStageDefaults);

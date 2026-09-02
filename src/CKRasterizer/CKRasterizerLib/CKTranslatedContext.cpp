@@ -149,8 +149,12 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
 
 CKBOOL CKTranslatedContext::SetOptions(const CKRasterizerOptions *Options)
 {
-    if (!Options)
+    if (!Options || Options->Size != sizeof(CKRasterizerOptions)) {
+        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
+    }
+    // Accepted at any time (render callbacks may change the options inside
+    // the scene); the MSAA change waits for the frame boundary (FinishFrame).
     m_Options = *Options;
     m_Options.Size = sizeof(CKRasterizerOptions);
     m_Options.RenderScale = CKPostprocessPass::ClampRenderScale(m_Options.RenderScale);
@@ -557,9 +561,29 @@ void CKTranslatedContext::RestoreTextureStageForMigration(int Stage, const CKFFT
     SyncStageMirrorFromPipeline(Stage);
 }
 
-CKDWORD CKTranslatedContext::GetBoundTextureForMigration(int Stage) const
+CKDWORD CKTranslatedContext::GetBoundTextureForTests(int Stage) const
 {
     return Stage >= 0 && Stage < CKRST_MAX_TEXTURE_STAGES ? m_Textures[Stage] : 0;
+}
+
+const VxMatrix &CKTranslatedContext::GetMatrixForTests(VXMATRIX_TYPE Type) const
+{
+    static VxMatrix identity;
+    const int slot = CKRSTMatrixSlot(Type);
+    if (slot < 0) {
+        Vx3DMatrixIdentity(identity);
+        return identity;
+    }
+    return m_Matrices[slot];
+}
+
+CKBOOL CKTranslatedContext::GetVertexBufferDescForTests(CKDWORD VB, CKVertexBufferDesc *Desc) const
+{
+    const Resource *resource = FindResource(CKRST_OBJ_VERTEXBUFFER, VB);
+    if (!resource || !Desc)
+        return FALSE;
+    *Desc = resource->VertexBuffer;
+    return TRUE;
 }
 
 int CKTranslatedContext::GetLiveResourceCountForTests(CKDWORD TypeMask) const
@@ -578,16 +602,20 @@ CKBOOL CKTranslatedContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *Ou
         *OutHandle = 0;
     if (!m_Created || m_ShuttingDown || !Desc || !OutHandle)
         return FALSE;
-    if (Desc->Format.Width <= 0 || Desc->Format.Height <= 0) {
+    if (Desc->Format.Width <= 0 || Desc->Format.Height <= 0 ||
+        ((Desc->Flags & CKRST_TEXTURE_CUBEMAP) && Desc->Format.Width != Desc->Format.Height)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
     // CKRST_MIPMAP_GENERATE ((CKDWORD)-1) is passed through: the device treats
-    // it as an auto-mip request and builds the chain from level 0.
+    // it as an auto-mip request and builds the chain from level 0. 0 and 1
+    // both mean "no mip levels" (spec 4.5).
     CKTextureDesc deviceDesc = *Desc;
     deviceDesc.Flags |= CKRST_TEXTURE_VALID;
     if (deviceDesc.Depth == 0)
         deviceDesc.Depth = 1;
+    if (deviceDesc.MipMapCount == 0)
+        deviceDesc.MipMapCount = 1;
 
     CKDWORD handle = 0;
     if (m_Device->CreateTexture(&deviceDesc, NULL, &handle) != CK_OK || handle == 0) {
@@ -598,10 +626,7 @@ CKBOOL CKTranslatedContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *Ou
     resource = Resource();
     resource.Type = CKRST_OBJ_TEXTURE;
     resource.Handle = handle;
-    resource.Texture = *Desc;
-    resource.Texture.Flags |= CKRST_TEXTURE_VALID;
-    if (resource.Texture.Depth == 0)
-        resource.Texture.Depth = 1;
+    resource.Texture = deviceDesc;
     *OutHandle = handle;
     return TRUE;
 }
@@ -627,6 +652,14 @@ CKBOOL CKTranslatedContext::LoadTexture(CKDWORD Texture, const VxImageDescEx &Im
     if ((CKDWORD)MipLevel >= levels) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
+    }
+    if (Region) {
+        const CKDWORD levelWidth = XMax((CKDWORD)1, (CKDWORD)resource->Texture.Format.Width >> MipLevel);
+        const CKDWORD levelHeight = XMax((CKDWORD)1, (CKDWORD)resource->Texture.Format.Height >> MipLevel);
+        if (!ValidateRect(Region, levelWidth, levelHeight)) {
+            Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
+            return FALSE;
+        }
     }
     if (m_Device->UpdateTexture(Texture, (CKDWORD)MipLevel, (CKDWORD)Face, Region, &Image) != CK_OK)
         return FALSE;
@@ -660,7 +693,9 @@ CKBOOL CKTranslatedContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, c
     resource.Type = CKRST_OBJ_VERTEXBUFFER;
     resource.VertexBuffer = *Desc;
     const CKDWORD canonicalStride = CKRSTGetVertexLayout(Desc->m_VertexFormat, Desc->m_TexcoordDims, &resource.Layout);
-    if (canonicalStride == 0) {
+    if (canonicalStride == 0 || (Desc->m_VertexSize != 0 && Desc->m_VertexSize != canonicalStride)) {
+        // The engine writes Lock memory in the canonical layout (spec 4.5); a
+        // different explicit vertex size cannot be honoured.
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }

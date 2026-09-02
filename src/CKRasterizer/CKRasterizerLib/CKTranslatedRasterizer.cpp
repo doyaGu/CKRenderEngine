@@ -170,3 +170,15 @@ void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer)
 {
     CKTranslatedRasterizerClose(Rasterizer);
 }
+
+void CKTranslatedNullRasterizerGetInfo(CKRasterizerInfo *Info)
+{
+    if (!Info)
+        return;
+    Info->DllName = "CK2_3D";
+    Info->Desc = "NULL Rasterizer (translation core)";
+    Info->DllInstance = NULL;
+    Info->StartFct = CKTranslatedNullRasterizerStart;
+    Info->CloseFct = CKTranslatedNullRasterizerClose;
+    Info->InterfaceRevision = CKRST_INTERFACE_REVISION;
+}

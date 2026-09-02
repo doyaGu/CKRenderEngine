@@ -173,6 +173,8 @@ void CKTranslatedContext::FinishFrame()
     m_FrameTargetDecided = FALSE;
     ++m_FrameNumber;
     m_FFP.GetRenderPipeline().SetFrameNumber(m_FrameNumber);
+    if (m_AppliedMSAA != m_Options.MSAASamples)
+        ApplyOptions();
 
     m_Stats.DrawCalls = m_FrameDrawCalls;
     m_Stats.Primitives = m_FramePrimitives;
@@ -195,30 +197,37 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
     Flags &= CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL;
     if (Flags == 0)
         return TRUE;
+    if (RectCount > 0 && !Rects) {
+        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
+        return FALSE;
+    }
     PrepareFrameTarget();
 
+    // RectCount == 0 clears the current viewport (D3D7 semantics); otherwise
+    // every rectangle gets a clear pass of its own.
     const CKRECT target = CurrentTargetRect();
-    CKRECT rect;
-    if (RectCount > 0 && Rects) {
-        rect = Rects[0];
-    } else {
-        rect.left = (int)m_Viewport.ViewX;
-        rect.top = (int)m_Viewport.ViewY;
-        rect.right = (int)(m_Viewport.ViewX + m_Viewport.ViewWidth);
-        rect.bottom = (int)(m_Viewport.ViewY + m_Viewport.ViewHeight);
-    }
-    if (rect.left < 0) rect.left = 0;
-    if (rect.top < 0) rect.top = 0;
-    if (rect.right > target.right) rect.right = target.right;
-    if (rect.bottom > target.bottom) rect.bottom = target.bottom;
-    if (rect.right <= rect.left || rect.bottom <= rect.top)
-        return TRUE;
-
+    CKRECT viewportRect;
+    viewportRect.left = (int)m_Viewport.ViewX;
+    viewportRect.top = (int)m_Viewport.ViewY;
+    viewportRect.right = (int)(m_Viewport.ViewX + m_Viewport.ViewWidth);
+    viewportRect.bottom = (int)(m_Viewport.ViewY + m_Viewport.ViewHeight);
+    const int count = RectCount > 0 ? RectCount : 1;
     const CKDWORD frameBuffer = CurrentSceneFrameBuffer();
-    if (!OpenPass(frameBuffer, rect, Flags, Color, Z, Stencil, "clear"))
-        return FALSE;
-    ++m_FrameClears;
-    if (m_InScene) {
+    CKBOOL cleared = FALSE;
+    for (int i = 0; i < count; ++i) {
+        CKRECT rect = RectCount > 0 ? Rects[i] : viewportRect;
+        if (rect.left < 0) rect.left = 0;
+        if (rect.top < 0) rect.top = 0;
+        if (rect.right > target.right) rect.right = target.right;
+        if (rect.bottom > target.bottom) rect.bottom = target.bottom;
+        if (rect.right <= rect.left || rect.bottom <= rect.top)
+            continue;
+        if (!OpenPass(frameBuffer, rect, Flags, Color, Z, Stencil, "clear"))
+            return FALSE;
+        ++m_FrameClears;
+        cleared = TRUE;
+    }
+    if (cleared && m_InScene) {
         // Mid-scene clear: the following draws need a pass of their own so
         // the clear stays at the call position.
         if (!OpenPass(frameBuffer, target, 0, 0, 1.0f, 0, "scene"))
@@ -270,7 +279,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
         Diag(CKRST_DIAG_OVERLAY_ON_TARGET);
         return FALSE;
     }
-    if (m_InScene) {
+    if (m_InScene || m_OverlayPhase) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
