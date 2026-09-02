@@ -9,9 +9,7 @@
 #include "CKPlace.h"
 #include "CKScene.h"
 #include "CKDependencies.h"
-#include "CKRasterizerDevice.h"
 #include "CKDrawAnnotation.h"
-#include "CKFixedFunctionPipeline.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKMesh.h"
@@ -2589,7 +2587,7 @@ CKBOOL RCK3dEntity::Render(CKRenderContext *Dev, CKDWORD Flags) {
 
     // Handle indirect matrix (mirrored objects)
     const CKBOOL hasIndirectMatrix = (m_MoveableFlags & VX_MOVEABLE_INDIRECTMATRIX) != 0;
-    CKTranslatedRenderStateGuard inverseWindingGuard(dev->TranslatedContext(), VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
+    CKRenderStateGuard inverseWindingGuard(dev->m_RasterizerContext, VXRENDERSTATE_INVERSEWINDING, hasIndirectMatrix);
     if (hasIndirectMatrix) {
         const CKDWORD inverseWinding = dev->GetRasterizerRenderState(VXRENDERSTATE_INVERSEWINDING);
         dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverseWinding == 0 ? TRUE : FALSE);

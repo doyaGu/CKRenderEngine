@@ -5,9 +5,6 @@
 #include "CKRenderContext.h"
 #include "CKRenderedScene.h"
 #include "CKRasterizer.h"
-// Migration (phase 1): stage resets and state guards still go through the
-// translated context's pipeline until step 1.7.
-#include "CKTranslatedRasterizer.h"
 
 // Forward declarations
 class RCKMaterial;
@@ -111,9 +108,11 @@ public:
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
     // CK2 public API: returns the v3 CKRasterizerContext.
     CKRasterizerContext *GetRasterizerContext() override;
-    // Migration (phase 1, removed in step 1.7): the translated context behind
-    // the contract pointer, for the pipeline-side stage resets and guards.
-    CKTranslatedContext *TranslatedContext() const { return static_cast<CKTranslatedContext *>(m_RasterizerContext); }
+    // Texture stage back to "not set" (spec 4.6): no texture, every stage
+    // state 0 (TEXCOORDINDEX = stage), identity texture matrix. The
+    // rasterizer then disables the stage until a texture is bound.
+    void ResetTextureStage(int Stage);
+    void DisableTextureStagesFrom(int FirstStage);
     CKDWORD GetRasterizerRenderState(VXRENDERSTATETYPE State) const {
         CKDWORD value = 0;
         if (m_RasterizerContext)
@@ -367,6 +366,47 @@ public:
     CKDrawAnnotationState *m_DrawAnnotationState;
     // CKRST_DIAG_REJECT_UNSUPPORTED_STATE counter at BeginFrameErrorTracking().
     CKDWORD m_FrameRejectBaseline;
+};
+
+// Saves the fixed-function state the engine changes around a special draw
+// (render states, texture stages with their textures, world / view /
+// projection and texture matrices) and restores it through the contract.
+class CKRenderContextStateGuard {
+public:
+    explicit CKRenderContextStateGuard(CKRasterizerContext *Rst);
+    ~CKRenderContextStateGuard() { Restore(); }
+    CKRenderContextStateGuard(const CKRenderContextStateGuard &) = delete;
+    CKRenderContextStateGuard &operator=(const CKRenderContextStateGuard &) = delete;
+
+    void Restore();
+    void Dismiss() { m_Rst = NULL; }
+
+private:
+    CKRasterizerContext *m_Rst;
+    CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
+    CKDWORD m_StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
+    CKDWORD m_Textures[CKRST_MAX_TEXTURE_STAGES];
+    VxMatrix m_TextureMatrices[CKRST_MAX_TEXTURE_STAGES];
+    VxMatrix m_World;
+    VxMatrix m_View;
+    VxMatrix m_Projection;
+};
+
+// Saves one render state and restores it on destruction.
+class CKRenderStateGuard {
+public:
+    CKRenderStateGuard(CKRasterizerContext *Rst, VXRENDERSTATETYPE State, CKBOOL Active = TRUE);
+    ~CKRenderStateGuard() { Restore(); }
+    CKRenderStateGuard(const CKRenderStateGuard &) = delete;
+    CKRenderStateGuard &operator=(const CKRenderStateGuard &) = delete;
+
+    void Restore();
+    void Dismiss() { m_Rst = NULL; }
+
+private:
+    CKRasterizerContext *m_Rst;
+    VXRENDERSTATETYPE m_State;
+    CKDWORD m_Value;
 };
 
 #endif // RCKRENDERCONTEXT_H

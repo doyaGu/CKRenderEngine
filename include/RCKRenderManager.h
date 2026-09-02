@@ -86,7 +86,6 @@ public:
     // Phase 1 migration: the engine still creates the device context itself
     // from the device driver behind the translated v3 driver, and refreshes
     // the v3 driver caps after the device reported its real limits.
-    CKRasterizerDeviceDriver *GetDeviceDriver(int DriverIndex);
     void RefreshDriverCaps(int DriverIndex);
     CKRasterizerContext *GetFullscreenContext();
     int GetPreferredSoftwareDriver();

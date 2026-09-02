@@ -195,6 +195,13 @@ typedef enum VXMATRIX_TYPE {
 #define CKRST_TCI_SPHEREMAP                   0x00040000u
 #define CKRST_TCI_MASK                        0xFFFF0000u
 
+// Generation numbers (CKRST_TCI_* >> 16) for CKRSTPackTexcoordIndex.
+#define CKRST_TEXGEN_PASSTHRU                    0u
+#define CKRST_TEXGEN_CAMERASPACENORMAL           1u
+#define CKRST_TEXGEN_CAMERASPACEPOSITION         2u
+#define CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR 3u
+#define CKRST_TEXGEN_SPHEREMAP                   4u
+
 inline CKDWORD CKRSTPackTexcoordIndex(CKDWORD Index, CKDWORD Generation)
 {
     return (Index & 0xFFFFu) | ((Generation << 16) & CKRST_TCI_MASK);

@@ -6,8 +6,6 @@
 #include "RCK3dEntity.h"
 #include "CKLight.h"
 
-class CKFixedFunctionPipeline;
-
 class RCKLight : public RCK3dEntity {
 public:
 

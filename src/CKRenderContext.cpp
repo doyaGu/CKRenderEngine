@@ -1349,8 +1349,101 @@ CKBOOL RCKRenderContext::SetTexture(CKTexture *tex, CKBOOL Clamped, int Stage) {
         return FALSE;
     if (tex)
         return tex->SetAsCurrent(this, Clamped, Stage);
-    TranslatedContext()->ResetTextureStageForMigration(Stage);
+    ResetTextureStage(Stage);
     return TRUE;
+}
+
+void RCKRenderContext::ResetTextureStage(int Stage) {
+    if (!m_RasterizerContext || Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
+        return;
+    m_RasterizerContext->SetTexture(0, Stage);
+    for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
+        m_RasterizerContext->SetTextureStageState(Stage, (CKRST_TEXTURESTAGESTATETYPE)tss,
+                                                  tss == (CKDWORD)CKRST_TSS_TEXCOORDINDEX ? (CKDWORD)Stage : 0);
+    }
+    VxMatrix identity;
+    Vx3DMatrixIdentity(identity);
+    m_RasterizerContext->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + Stage), identity);
+}
+
+void RCKRenderContext::DisableTextureStagesFrom(int FirstStage) {
+    if (FirstStage < 0)
+        FirstStage = 0;
+    for (int stage = FirstStage; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+        ResetTextureStage(stage);
+}
+
+// ---------------------------------------------------------------------------
+// State guards
+// ---------------------------------------------------------------------------
+
+CKRenderContextStateGuard::CKRenderContextStateGuard(CKRasterizerContext *Rst) : m_Rst(Rst) {
+    if (!m_Rst)
+        return;
+    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
+        m_Rst->GetRenderState((VXRENDERSTATETYPE)state, &m_RenderStates[state]);
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+        m_Textures[stage] = 0;
+        m_Rst->GetTexture(stage, &m_Textures[stage]);
+        m_StageStates[stage][0] = 0;
+        for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss)
+            m_Rst->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &m_StageStates[stage][tss]);
+        m_Rst->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]);
+    }
+    m_Rst->GetTransformMatrix(VXMATRIX_WORLD, m_World);
+    m_Rst->GetTransformMatrix(VXMATRIX_VIEW, m_View);
+    m_Rst->GetTransformMatrix(VXMATRIX_PROJECTION, m_Projection);
+}
+
+void CKRenderContextStateGuard::Restore() {
+    if (!m_Rst)
+        return;
+    CKRasterizerContext *rst = m_Rst;
+    m_Rst = NULL;
+
+    rst->SetTransformMatrix(VXMATRIX_WORLD, m_World);
+    rst->SetTransformMatrix(VXMATRIX_VIEW, m_View);
+    rst->SetTransformMatrix(VXMATRIX_PROJECTION, m_Projection);
+    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state) {
+        CKDWORD current = 0;
+        if (rst->GetRenderState((VXRENDERSTATETYPE)state, &current) && current != m_RenderStates[state])
+            rst->SetRenderState((VXRENDERSTATETYPE)state, m_RenderStates[state]);
+    }
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+        CKDWORD texture = 0;
+        if (rst->GetTexture(stage, &texture) && texture != m_Textures[stage])
+            rst->SetTexture(m_Textures[stage], stage);
+        // TEXTUREMAPBLEND first: it resets the combine states, which are
+        // replayed afterwards (spec 4.6).
+        CKDWORD current = 0;
+        if (rst->GetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND, &current) &&
+            current != m_StageStates[stage][CKRST_TSS_TEXTUREMAPBLEND])
+            rst->SetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND, m_StageStates[stage][CKRST_TSS_TEXTUREMAPBLEND]);
+        for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
+            if (tss == (CKDWORD)CKRST_TSS_TEXTUREMAPBLEND || tss == (CKDWORD)CKRST_TSS_ADDRESS)
+                continue;
+            if (rst->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &current) &&
+                current != m_StageStates[stage][tss])
+                rst->SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, m_StageStates[stage][tss]);
+        }
+        rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]);
+    }
+}
+
+CKRenderStateGuard::CKRenderStateGuard(CKRasterizerContext *Rst, VXRENDERSTATETYPE State, CKBOOL Active)
+    : m_Rst(Active ? Rst : NULL), m_State(State), m_Value(0) {
+    if (m_Rst)
+        m_Rst->GetRenderState(m_State, &m_Value);
+}
+
+void CKRenderStateGuard::Restore() {
+    if (!m_Rst)
+        return;
+    CKRasterizerContext *rst = m_Rst;
+    m_Rst = NULL;
+    CKDWORD current = 0;
+    if (rst->GetRenderState(m_State, &current) && current != m_Value)
+        rst->SetRenderState(m_State, m_Value);
 }
 
 CKBOOL RCKRenderContext::SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage) {
@@ -2425,7 +2518,7 @@ void RCKRenderContext::SetCurrentMaterial(CKMaterial *mat, CKBOOL Lit) {
         mat->SetAsCurrent(this, Lit, 0);
     } else if (m_RasterizerContext) {
         m_RasterizerContext->SetMaterial(nullptr);
-        TranslatedContext()->DisableTextureStagesFromForMigration(0);
+        DisableTextureStagesFrom(0);
     }
 }
 
@@ -3216,7 +3309,7 @@ void RCKRenderContext::CallSprite3DBatches() {
     }
 
     // Use original literals (do not define new constants)
-    CKTranslatedStateGuard ffpState(TranslatedContext());
+    CKRenderContextStateGuard ffpState(m_RasterizerContext);
 
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);

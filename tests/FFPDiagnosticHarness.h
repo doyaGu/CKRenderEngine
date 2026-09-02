@@ -710,7 +710,7 @@ struct FFPTranslatedWorld {
             return FALSE;
         if (!Context->Create(NULL, 0, 0, width, height, 32, FALSE, 60, 24, 8))
             return FALSE;
-        Device = static_cast<FFPRecordingContext *>(Context->GetDeviceForMigration());
+        Device = static_cast<FFPRecordingContext *>(Context->GetDevice());
         return Device != NULL;
     }
 };

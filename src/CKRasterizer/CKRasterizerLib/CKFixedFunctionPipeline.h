@@ -85,6 +85,9 @@ public:
     void SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const;
     void RestoreTextureStage(int stage, const CKFFTextureStageSnapshot &snapshot);
     void SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value);
+    // Back to "not set": value 0 and the explicit bit cleared, so the state
+    // is derived from TEXTUREMAPBLEND / the bound texture at draw time.
+    void ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type);
     CKDWORD GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
     // TRUE when the state was set explicitly since the last stage reset.
     CKBOOL IsTextureStageStateSet(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {

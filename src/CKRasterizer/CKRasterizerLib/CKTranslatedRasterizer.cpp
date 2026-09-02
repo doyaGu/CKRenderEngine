@@ -120,7 +120,7 @@ CKBOOL CKTranslatedDriver::DestroyContext(CKRasterizerContext *Context)
             continue;
         CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(Context);
         translated->BeginShutdown();
-        if (m_Device && !m_Device->DestroyContext(translated->GetDeviceForMigration()))
+        if (m_Device && !m_Device->DestroyContext(translated->GetDevice()))
             return FALSE;
         m_Contexts.RemoveAt(i);
         delete translated;

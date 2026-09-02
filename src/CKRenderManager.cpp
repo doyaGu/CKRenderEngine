@@ -1123,11 +1123,6 @@ CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
     return nullptr;
 }
 
-CKRasterizerDeviceDriver *RCKRenderManager::GetDeviceDriver(int DriverIndex) {
-    CKTranslatedDriver *driver = static_cast<CKTranslatedDriver *>(GetDriver(DriverIndex));
-    return driver ? driver->GetDeviceDriver() : nullptr;
-}
-
 void RCKRenderManager::RefreshDriverCaps(int DriverIndex) {
     if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
         return;

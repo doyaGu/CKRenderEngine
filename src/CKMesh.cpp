@@ -72,11 +72,20 @@ static void CKMeshSetDrawAnnotation(RCKRenderContext *rc,
     rc->SetDrawAnnotation(&annotation);
 }
 
+// Mono-pass texture channels: the rasterizer folds a channel into one texture
+// stage only for the two modulate blends (STAGEBLEND semantics, spec 4.6).
+static CKBOOL CKMeshMonoPassStageBlend(CKDWORD stageBlend) {
+    const CKDWORD src = (stageBlend >> 4) & 0xF;
+    const CKDWORD dst = stageBlend & 0xF;
+    return (src == VXBLEND_ZERO && dst == VXBLEND_SRCCOLOR) ||
+           (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO);
+}
+
 void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
     if (!dev)
         return;
 
-    const int maxAdditionalStages = CKFF_MAX_TEXTURE_STAGES - 1;
+    const int maxAdditionalStages = CKRST_MAX_TEXTURE_STAGES - 1;
     for (int i = 0; i < m_ActiveTextureChannels.Size() && i < maxAdditionalStages; ++i) {
         const int channelIndex = m_ActiveTextureChannels[i];
         if (channelIndex < 0 || channelIndex >= m_MaterialChannels.Size())
@@ -88,28 +97,16 @@ void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
             continue;
 
         const int stage = i + 1;
-        CKDWORD colorOp = 0;
-        CKDWORD colorArg1 = 0;
-        CKDWORD colorArg2 = 0;
-        CKDWORD alphaOp = 0;
-        CKDWORD alphaArg1 = 0;
-        CKDWORD alphaArg2 = 0;
         const CKDWORD stageBlend = STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend);
-        if (!CKFFStageBlendToTextureOps(stageBlend,
-                                        colorOp, colorArg1, colorArg2,
-                                        alphaOp, alphaArg1, alphaArg2))
+        if (!CKMeshMonoPassStageBlend(stageBlend))
             continue;
 
         channelMat->BindTextureSlotToStage(static_cast<CKRenderContext *>(dev), 0, stage);
+        // The rasterizer derives the stage's colour / alpha operations from
+        // the blend (spec 4.6).
         dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_OP, colorOp);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_ARG1, colorArg1);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_ARG2, colorArg2);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AOP, alphaOp);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AARG1, alphaArg1);
-        dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_AARG2, alphaArg2);
         dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
-                                              CKFFPackTexcoordIndex((CKDWORD)stage, CKFF_TEXGEN_NONE));
+                                              CKRSTPackTexcoordIndex((CKDWORD)stage, CKRST_TEXGEN_PASSTHRU));
     }
 }
 
@@ -4209,8 +4206,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         // Z-buffer only rendering mode
         if (zbufOnly) {
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            CKTranslatedContext *rst = rc->TranslatedContext();
-            CKTranslatedStateGuard ffpState(rst);
+            CKRasterizerContext *rst = rc->m_RasterizerContext;
+            CKRenderContextStateGuard ffpState(rst);
 
             rst->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
@@ -4237,8 +4234,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         } else if (stencilOnly) {
             // Stencil only rendering mode
             dpData.Flags = m_DrawFlags | CKRST_DP_TRANSFORM;
-            CKTranslatedContext *rst = rc->TranslatedContext();
-            CKTranslatedStateGuard ffpState(rst);
+            CKRasterizerContext *rst = rc->m_RasterizerContext;
+            CKRenderContextStateGuard ffpState(rst);
 
             rst->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
             rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
@@ -4287,8 +4284,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                     ? (int)rc->m_RasterizerDriver->m_3DCaps.MaxNumberTextureStage
                     : 1;
                 int maxAdditionalStages = textureStages - 1;
-                if (maxAdditionalStages > CKFF_MAX_TEXTURE_STAGES - 1)
-                    maxAdditionalStages = CKFF_MAX_TEXTURE_STAGES - 1;
+                if (maxAdditionalStages > CKRST_MAX_TEXTURE_STAGES - 1)
+                    maxAdditionalStages = CKRST_MAX_TEXTURE_STAGES - 1;
                 if (maxAdditionalStages < 0)
                     maxAdditionalStages = 0;
 
@@ -4328,16 +4325,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         continue;
                     }
 
-                    CKDWORD colorOp = 0;
-                    CKDWORD colorArg1 = 0;
-                    CKDWORD colorArg2 = 0;
-                    CKDWORD alphaOp = 0;
-                    CKDWORD alphaArg1 = 0;
-                    CKDWORD alphaArg2 = 0;
                     const CKDWORD stageBlend = STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend);
-                    if (!CKFFStageBlendToTextureOps(stageBlend,
-                                                    colorOp, colorArg1, colorArg2,
-                                                    alphaOp, alphaArg1, alphaArg2)) {
+                    if (!CKMeshMonoPassStageBlend(stageBlend)) {
                         needsMultiPass = TRUE;
                         lastMultiPass = &channel;
                         usedStages = maxAdditionalStages;
@@ -4365,7 +4354,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
-                rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, 0);
+                rc->DisableTextureStagesFrom(1);
                 rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_DISABLE);
                 rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
             }
@@ -4440,14 +4429,14 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
             // Wireframe overlay
             if (rc->m_DisplayWireframe) {
-                CKTranslatedStateGuard ffpState(rc->TranslatedContext());
+                CKRenderContextStateGuard ffpState(rc->m_RasterizerContext);
                 VxMatrix projMat;
                 memcpy(&projMat, rc->GetProjectionTransformationMatrix(), sizeof(VxMatrix));
                 float origZ = projMat[3][2];
                 projMat[3][2] = origZ * 1.003f;
                 rc->SetProjectionTransformationMatrix(projMat);
 
-                rc->TranslatedContext()->DisableTextureStagesFromForMigration(0);
+                rc->DisableTextureStagesFrom(0);
                 rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
                 rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
 
@@ -4472,7 +4461,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
     // Render lines
     if (lineCount) {
-        CKTranslatedStateGuard ffpState(rc->TranslatedContext());
+        CKRenderContextStateGuard ffpState(rc->m_RasterizerContext);
         VxDrawPrimitiveData lineDp;
         memset(&lineDp, 0, sizeof(lineDp));
 
@@ -4485,7 +4474,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         lineDp.SpecularColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Specular : nullptr;
 
         rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-        rc->TranslatedContext()->DisableTextureStagesFromForMigration(0);
+        rc->DisableTextureStagesFrom(0);
         lineDp.Flags = (m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
         rc->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
 
@@ -4495,7 +4484,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
 
     if (m_ActiveTextureChannels.Size() > 0)
-        rc->TranslatedContext()->DisableTextureStagesFromForMigration(1);
+        rc->DisableTextureStagesFrom(1);
 
     CK_RENDER_PERF_ADD(renderStats, MeshDefaultUs, CKRenderPerfElapsedUs(perfStart));
     return 1;
@@ -4797,7 +4786,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
     (void)rstContext;
-    CKTranslatedStateGuard ffpState(dev->TranslatedContext());
+    CKRenderContextStateGuard ffpState(dev->m_RasterizerContext);
 
     // Setup flags for channel rendering
     data->Flags = m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;

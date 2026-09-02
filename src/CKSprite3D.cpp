@@ -3,8 +3,6 @@
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKSceneGraph.h"
-#include "CKRasterizerDevice.h"
-#include "CKRasterizerDeviceTypes.h"
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"
 #include "RCKRenderContext.h"

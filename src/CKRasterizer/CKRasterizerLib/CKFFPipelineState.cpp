@@ -243,6 +243,18 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
+void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) {
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
+    if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
+    const uint64_t stateBit = 1ull << (CKDWORD)type;
+    if (m_State.StageStates[stage][(int)type] == 0 &&
+        (m_State.StageStateSetMasks[stage] & stateBit) == 0)
+        return;
+    m_State.StageStates[stage][(int)type] = 0;
+    m_State.StageStateSetMasks[stage] &= ~stateBit;
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+}
+
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return 0;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return 0;

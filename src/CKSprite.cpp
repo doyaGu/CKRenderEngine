@@ -294,9 +294,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         Restore(FALSE);
     }
 
-    // Migration (phase 1): the state guard and the stage reset still come
-    // from the pipeline; the states themselves go through the v3 contract.
-    CKTranslatedStateGuard ffpState(rctx->TranslatedContext());
+    CKRenderContextStateGuard ffpState(rctx->m_RasterizerContext);
 
     // Set render states for 2D sprite rendering
     rstCtx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
@@ -318,7 +316,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     }
 
     // Bind sprite texture
-    rctx->TranslatedContext()->DisableTextureStagesFromForMigration(0);
+    rctx->DisableTextureStagesFrom(0);
     rstCtx->SetTexture(m_ObjectIndex, 0);
     rstCtx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
     rstCtx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);

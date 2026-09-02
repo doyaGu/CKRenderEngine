@@ -27,8 +27,8 @@ struct Fixture {
         Driver = World.Driver;
         Context = World.Context;
         Device = World.Device;
-        FFP = Context ? Context->GetFFPipelineForMigration() : NULL;
-        TestCheck(Device != NULL && FFP != NULL, "migration accessors");
+        FFP = Context ? Context->GetFFPipelineForTests() : NULL;
+        TestCheck(Device != NULL && FFP != NULL, "test accessors");
     }
 
     FFPTranslatedWorld World;

@@ -5,7 +5,6 @@
 #include "CKFile.h"
 #include "CKRasterizer.h"
 #include "RCK3dEntity.h"
-#include "CKFixedFunctionPipeline.h"
 
 // Static class ID definition
 CK_CLASSID RCKLight::m_ClassID = CKCID_LIGHT;
@@ -578,7 +577,7 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
 
 /*************************************************
 Summary: Sets up the light in the fixed-function pipeline.
-Purpose: Configures the light at the specified index via CKFixedFunctionPipeline.
+Purpose: Configures the light at the specified index through the rasterizer contract.
 Remarks:
 - Checks visibility first
 - For non-directional lights, checks if attenuation sum is sufficient
@@ -587,7 +586,7 @@ Remarks:
 - Extracts world-space direction from world matrix row 2
 - Handles specular flag (0x200) - scales diffuse by light power for specular
 - Applies light power scaling to diffuse color if != 1.0
-- The FFPipeline transforms position/direction to view space internally
+- The rasterizer transforms position/direction to view space internally
 
 Implementation based on decompilation at 0x1001b0c2.
 *************************************************/

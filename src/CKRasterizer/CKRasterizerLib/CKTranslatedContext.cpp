@@ -295,16 +295,69 @@ CKBOOL CKTranslatedContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAGEST
         return FALSE;
     }
     m_StageStates[Stage][(CKDWORD)Tss] = Value;
-    if (Tss == CKRST_TSS_ADDRESS) {
+    switch ((CKDWORD)Tss) {
+    case CKRST_TSS_ADDRESS:
         m_StageStates[Stage][CKRST_TSS_ADDRESSU] = Value;
         m_StageStates[Stage][CKRST_TSS_ADDRESSV] = Value;
         m_StageStates[Stage][CKRST_TSS_ADDRESW] = Value;
         m_FFP.SetTextureStageState(Stage, CKRST_TSS_ADDRESSU, Value);
         m_FFP.SetTextureStageState(Stage, CKRST_TSS_ADDRESSV, Value);
         m_FFP.SetTextureStageState(Stage, CKRST_TSS_ADDRESW, Value);
+        m_FFP.SetTextureStageState(Stage, Tss, Value);
+        return TRUE;
+    case CKRST_TSS_OP:
+    case CKRST_TSS_ARG1:
+    case CKRST_TSS_ARG2:
+    case CKRST_TSS_AOP:
+    case CKRST_TSS_AARG1:
+    case CKRST_TSS_AARG2:
+    case CKRST_TSS_COLORARG0:
+    case CKRST_TSS_ALPHAARG0:
+    case CKRST_TSS_RESULTARG0:
+        // 0 = not set (spec 4.6): the pipeline derives the state from
+        // TEXTUREMAPBLEND and the bound texture at draw time.
+        if (Value == 0)
+            m_FFP.ClearTextureStageState(Stage, Tss);
+        else
+            m_FFP.SetTextureStageState(Stage, Tss, Value);
+        return TRUE;
+    case CKRST_TSS_STAGEBLEND: {
+        if (Value == 0) {
+            m_FFP.ClearTextureStageState(Stage, Tss);
+            return TRUE;
+        }
+        m_FFP.SetTextureStageState(Stage, Tss, Value);
+        // The pipeline derives the combine states from the blend; the mirror
+        // shows the same values so a save / restore replays them.
+        CKDWORD colorOp = 0, colorArg1 = 0, colorArg2 = 0, alphaOp = 0, alphaArg1 = 0, alphaArg2 = 0;
+        if (CKFFStageBlendToTextureOps(Value, colorOp, colorArg1, colorArg2, alphaOp, alphaArg1, alphaArg2)) {
+            m_StageStates[Stage][CKRST_TSS_OP] = colorOp;
+            m_StageStates[Stage][CKRST_TSS_ARG1] = colorArg1;
+            m_StageStates[Stage][CKRST_TSS_ARG2] = colorArg2;
+            m_StageStates[Stage][CKRST_TSS_AOP] = alphaOp;
+            m_StageStates[Stage][CKRST_TSS_AARG1] = alphaArg1;
+            m_StageStates[Stage][CKRST_TSS_AARG2] = alphaArg2;
+        }
+        return TRUE;
     }
-    m_FFP.SetTextureStageState(Stage, Tss, Value);
-    return TRUE;
+    case CKRST_TSS_TEXTUREMAPBLEND:
+        // The legacy blend replaces any explicit combine state (the pipeline
+        // clears them too); they read back as "not set".
+        m_FFP.SetTextureStageState(Stage, Tss, Value);
+        m_StageStates[Stage][CKRST_TSS_OP] = 0;
+        m_StageStates[Stage][CKRST_TSS_ARG1] = 0;
+        m_StageStates[Stage][CKRST_TSS_ARG2] = 0;
+        m_StageStates[Stage][CKRST_TSS_AOP] = 0;
+        m_StageStates[Stage][CKRST_TSS_AARG1] = 0;
+        m_StageStates[Stage][CKRST_TSS_AARG2] = 0;
+        m_StageStates[Stage][CKRST_TSS_COLORARG0] = 0;
+        m_StageStates[Stage][CKRST_TSS_ALPHAARG0] = 0;
+        m_StageStates[Stage][CKRST_TSS_RESULTARG0] = 0;
+        return TRUE;
+    default:
+        m_FFP.SetTextureStageState(Stage, Tss, Value);
+        return TRUE;
+    }
 }
 
 CKBOOL CKTranslatedContext::GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value)
@@ -340,6 +393,29 @@ CKBOOL CKTranslatedContext::SetTexture(CKDWORD Texture, int Stage)
     }
     m_Textures[Stage] = Texture;
     m_FFP.SetTexture(Stage, Texture, flags);
+    return TRUE;
+}
+
+CKBOOL CKTranslatedContext::GetTexture(int Stage, CKDWORD *Texture)
+{
+    if (!Texture)
+        return FALSE;
+    if (Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES) {
+        Diag(CKRST_DIAG_INVALID_STAGE_INDEX);
+        return FALSE;
+    }
+    *Texture = m_Textures[Stage];
+    return TRUE;
+}
+
+CKBOOL CKTranslatedContext::GetTransformMatrix(VXMATRIX_TYPE Type, VxMatrix &Mat)
+{
+    const int slot = CKRSTMatrixSlot(Type);
+    if (slot < 0) {
+        Diag(CKRST_DIAG_INVALID_MATRIX_TYPE);
+        return FALSE;
+    }
+    Mat = m_Matrices[slot];
     return TRUE;
 }
 
@@ -495,82 +571,6 @@ const CKTranslatedContext::Resource *CKTranslatedContext::FindResource(CKDWORD T
         return NULL;
     std::unordered_map<uint64_t, Resource>::const_iterator it = m_Resources.find(ResourceKey(Type, Handle));
     return it == m_Resources.end() ? NULL : &it->second;
-}
-
-void CKTranslatedContext::SyncStageMirrorFromPipeline(int Stage)
-{
-    if (Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
-        return;
-    for (CKDWORD tss = (CKDWORD)CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
-        const CKRST_TEXTURESTAGESTATETYPE type = (CKRST_TEXTURESTAGESTATETYPE)tss;
-        m_StageStates[Stage][tss] = m_FFP.IsTextureStageStateSet(Stage, type)
-                                        ? m_FFP.GetTextureStageState(Stage, type)
-                                        : CKRSTDefaultTextureStageStateValue(Stage, type);
-    }
-    m_Textures[Stage] = m_FFP.GetTexture(Stage);
-}
-
-void CKTranslatedContext::SyncRenderStateMirrorFromPipeline(VXRENDERSTATETYPE State)
-{
-    const CKDWORD state = (CKDWORD)State;
-    if (!CKRSTIsValidRenderStateType(state))
-        return;
-    if (state == (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
-        m_RenderStates[state] = m_FFP.GetColorWriteMask();
-    else if (state < CKFF_RS_COUNT)
-        m_RenderStates[state] = m_FFP.GetRenderState(State);
-}
-
-void CKTranslatedContext::SyncMirrorFromPipeline()
-{
-    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
-        SyncRenderStateMirrorFromPipeline((VXRENDERSTATETYPE)state);
-    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
-        SyncStageMirrorFromPipeline(stage);
-    m_Matrices[CKRSTMatrixSlot(VXMATRIX_WORLD)] = m_FFP.GetWorldMatrix();
-    m_Matrices[CKRSTMatrixSlot(VXMATRIX_VIEW)] = m_FFP.GetViewMatrix();
-    m_Matrices[CKRSTMatrixSlot(VXMATRIX_PROJECTION)] = m_FFP.GetProjectionMatrix();
-}
-
-void CKTranslatedContext::ResetTextureStageForMigration(int Stage)
-{
-    if (Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
-        return;
-    m_FFP.ResetTextureStage(Stage);
-    SyncStageMirrorFromPipeline(Stage);
-}
-
-void CKTranslatedContext::DisableTextureStagesFromForMigration(int FirstStage)
-{
-    if (FirstStage < 0)
-        FirstStage = 0;
-    m_FFP.DisableTextureStagesFrom(FirstStage);
-    for (int stage = FirstStage; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
-        SyncStageMirrorFromPipeline(stage);
-}
-
-void CKTranslatedContext::RestoreTextureStageForMigration(int Stage, const CKFFTextureStageSnapshot &Snapshot)
-{
-    if (Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
-        return;
-    m_FFP.RestoreTextureStage(Stage, Snapshot);
-    SyncStageMirrorFromPipeline(Stage);
-}
-
-CKDWORD CKTranslatedContext::GetBoundTextureForTests(int Stage) const
-{
-    return Stage >= 0 && Stage < CKRST_MAX_TEXTURE_STAGES ? m_Textures[Stage] : 0;
-}
-
-const VxMatrix &CKTranslatedContext::GetMatrixForTests(VXMATRIX_TYPE Type) const
-{
-    static VxMatrix identity;
-    const int slot = CKRSTMatrixSlot(Type);
-    if (slot < 0) {
-        Vx3DMatrixIdentity(identity);
-        return identity;
-    }
-    return m_Matrices[slot];
 }
 
 CKBOOL CKTranslatedContext::GetVertexBufferDescForTests(CKDWORD VB, CKVertexBufferDesc *Desc) const

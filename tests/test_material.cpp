@@ -151,7 +151,8 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent must fail when its texture upload fails");
-    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(0) == 0,
+    CKDWORD bound = 0xFFFFFFFFu;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTexture(0, &bound) && bound == 0,
               "failed material texture upload must not leave a texture bound");
 }
 
@@ -172,9 +173,11 @@ void ChannelTextureBindingPreservesTextureFlags() {
     TestCheck(material.BindTextureSlotToStage(world.renderContext, 0, 1),
               "BindTextureSlotToStage should bind cubemap texture");
 
-    CKFFTextureStageSnapshot stage;
-    world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->SaveTextureStage(1, stage);
-    TestCheck((stage.TextureFlags & CKRST_TEXTURE_CUBEMAP) != 0,
+    CKDWORD bound = 0;
+    CKTextureDesc desc;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTexture(1, &bound) && bound != 0 &&
+              world.renderContext->m_RasterizerContext->GetTextureDesc(bound, &desc) &&
+              (desc.Flags & CKRST_TEXTURE_CUBEMAP) != 0,
               "channel texture binding must preserve cubemap texture flags");
 }
 
@@ -198,7 +201,8 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "multi-texture material setup must fail when a secondary texture upload fails");
-    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(1) == 0,
+    CKDWORD bound = 0xFFFFFFFFu;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTexture(1, &bound) && bound == 0,
               "failed secondary texture upload must not leave the stage bound");
 }
 
@@ -315,12 +319,14 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
     material.SetEffect(static_cast<VX_EFFECT>(effectIndex));
     TestCheck(material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent should preserve callback-owned texture matrices");
-    CKFFTextureStageSnapshot stage;
-    world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->SaveTextureStage(0, stage);
-    TestCheck(stage.TextureMatrix[3][0] == 3.25f,
+    VxMatrix textureMatrix;
+    Vx3DMatrixIdentity(textureMatrix);
+    CKDWORD transformFlags = 0;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTransformMatrix(VXMATRIX_TEXTURE0, textureMatrix) &&
+                  textureMatrix[3][0] == 3.25f,
               "SKIPTEXMAT callback matrix must survive material texture setup");
-    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTextureStageState(
-                  0, CKRST_TSS_TEXTURETRANSFORMFLAGS) == CKRST_TTF_COUNT2,
+    TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
+                  0, CKRST_TSS_TEXTURETRANSFORMFLAGS, &transformFlags) && transformFlags == CKRST_TTF_COUNT2,
               "SKIPTEXMAT callback transform flags must survive material texture setup");
 }
 

@@ -2,10 +2,8 @@
 
 #include "RCK2dEntity.h"
 #include "RCKRenderContext.h"
-#include "CKRasterizerDevice.h"
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
-#include "CKFixedFunctionPipeline.h"
 #include "CKDrawAnnotation.h"
 #include "CKRenderFrameCostStats.h"
 
@@ -864,7 +862,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
             dev->SetFullViewport(&dev->m_ViewportData, (int) width, (int) height);
         }
 
-        CKTranslatedStateGuard ffpState(dev->TranslatedContext());
+        CKRenderContextStateGuard ffpState(dev->m_RasterizerContext);
 
         // Set material
         if (!m_Material->SetAsCurrent(dev, TRUE, FALSE)) {
@@ -965,7 +963,7 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
         if (m_Context->IsPlaying())
             return CK_OK;
 
-        CKTranslatedStateGuard ffpState(dev->TranslatedContext());
+        CKRenderContextStateGuard ffpState(dev->m_RasterizerContext);
 
         // Set blend states for transparent black fill
         dev->SetState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);

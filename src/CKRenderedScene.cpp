@@ -552,7 +552,7 @@ void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
         RCKLight *light = static_cast<RCKLight *>(*it);
         if (!light)
             continue;
-        if (m_LightCount >= CKFF_MAX_LIGHTS)
+        if (m_LightCount >= CKRST_MAX_LIGHTS)
             break;
         if (light->Setup(rc->m_RasterizerContext, static_cast<int>(m_LightCount))) {
             ++m_LightCount;
@@ -578,7 +578,7 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
-    CKTranslatedContext *rst = rc->TranslatedContext();
+    CKRasterizerContext *rst = rc->m_RasterizerContext;
 
     CKDWORD fogMode = m_FogMode;
     if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {
@@ -631,9 +631,8 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
     rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
-    // m_PresentInterval / m_CurrentPresentInterval were v1 fields on
-    // CKRasterizerDevice; filter/mipmap modes are now managed by the
-    // sampler descriptors built inside CKFixedFunctionPipeline.
+    // m_PresentInterval / m_CurrentPresentInterval were v1 rasterizer fields;
+    // filter / mipmap modes are texture stage states of the contract.
 
     rst->SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
     rst->SetRenderState(VXRENDERSTATE_ZENABLE,   TRUE);

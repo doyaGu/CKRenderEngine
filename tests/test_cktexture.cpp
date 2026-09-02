@@ -114,7 +114,8 @@ void SetAsCurrentFailureDoesNotBindOrClearRestoreFlag() {
               "failed upload must not leave the texture marked in video memory");
     TestCheck(texture.ToRestore(),
               "failed upload must keep the restore flag set");
-    TestCheck(world.renderContext->TranslatedContext()->GetFFPipelineForMigration()->GetTexture(0) == 0,
+    CKDWORD bound = 0xFFFFFFFFu;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTexture(0, &bound) && bound == 0,
               "failed upload must not bind the texture stage");
 }
 

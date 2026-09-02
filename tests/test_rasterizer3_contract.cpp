@@ -41,6 +41,21 @@ CKDWORD Diag(CKTranslatedContext *ctx, CKRST_DIAGNOSTIC kind)
     return ctx->GetStats()->Diagnostics[kind];
 }
 
+CKDWORD BoundTexture(CKRasterizerContext *ctx, int stage)
+{
+    CKDWORD texture = 0xFFFFFFFFu;
+    TestCheck(ctx->GetTexture(stage, &texture), "GetTexture");
+    return texture;
+}
+
+VxMatrix Matrix(CKRasterizerContext *ctx, VXMATRIX_TYPE type)
+{
+    VxMatrix m;
+    Vx3DMatrixIdentity(m);
+    TestCheck(ctx->GetTransformMatrix(type, m), "GetTransformMatrix");
+    return m;
+}
+
 // --- Device log views -------------------------------------------------------
 
 // Draws are the encoder submits (the recording device receives one submit per
@@ -383,6 +398,19 @@ void TestTextureStageRoundTrip()
     f.Context->GetTextureStageState(2, CKRST_TSS_ADDRESSV, &v);
     TestCheck(u == VXTEXTURE_ADDRESSCLAMP && v == VXTEXTURE_ADDRESSMIRROR, "ADDRESSV independent");
 
+    // TEXTUREMAPBLEND replaces the explicit combine states: they read 0.
+    TestCheck(f.Context->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD), "explicit OP");
+    TestCheck(f.Context->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATE), "TEXTUREMAPBLEND");
+    CKDWORD op = 0xCDCDCDCD;
+    f.Context->GetTextureStageState(0, CKRST_TSS_OP, &op);
+    TestCheck(op == 0, "combine states read 0 after TEXTUREMAPBLEND");
+    // A non-zero STAGEBLEND stores the derived combine states.
+    TestCheck(f.Context->SetTextureStageState(1, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_ZERO, VXBLEND_SRCCOLOR)), "STAGEBLEND");
+    CKDWORD aop = 0;
+    f.Context->GetTextureStageState(1, CKRST_TSS_OP, &op);
+    f.Context->GetTextureStageState(1, CKRST_TSS_AOP, &aop);
+    TestCheck(op == CKRST_TOP_MODULATE && aop == CKRST_TOP_SELECTARG2, "STAGEBLEND derives the combine states");
+
     // InitDefaultRenderStatesValue restores the stage defaults too.
     f.Context->InitDefaultRenderStatesValue();
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
@@ -442,27 +470,29 @@ void TestMatricesLightsClipPlanes()
     Vx3DMatrixIdentity(m);
     m[3][0] = 5.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLD, m), "set WORLD");
-    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLDMATRIX(0))[3][0] == 5.0f, "WORLD aliases WORLDMATRIX(0)");
+    TestCheck(Matrix(f.Context, VXMATRIX_WORLDMATRIX(0))[3][0] == 5.0f, "WORLD aliases WORLDMATRIX(0)");
     m[3][0] = 7.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLDMATRIX(0), m), "set WORLDMATRIX(0)");
-    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(0) aliases WORLD");
+    TestCheck(Matrix(f.Context, VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(0) aliases WORLD");
     m[3][0] = 9.0f;
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_WORLDMATRIX(3), m), "set WORLDMATRIX(3)");
-    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLDMATRIX(3))[3][0] == 9.0f, "WORLDMATRIX(3) stored");
-    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(3) does not alias WORLD");
+    TestCheck(Matrix(f.Context, VXMATRIX_WORLDMATRIX(3))[3][0] == 9.0f, "WORLDMATRIX(3) stored");
+    TestCheck(Matrix(f.Context, VXMATRIX_WORLD)[3][0] == 7.0f, "WORLDMATRIX(3) does not alias WORLD");
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_VIEW, m), "set VIEW");
-    TestCheck(f.Context->GetMatrixForTests(VXMATRIX_VIEW)[3][0] == 9.0f, "VIEW stored");
+    TestCheck(Matrix(f.Context, VXMATRIX_VIEW)[3][0] == 9.0f, "VIEW stored");
     TestCheck(f.Context->SetTransformMatrix(VXMATRIX_PROJECTION, m), "set PROJECTION");
     for (int i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i) {
         m[3][0] = 10.0f + (float)i;
         TestCheck(f.Context->SetTransformMatrix(VXMATRIX_TEXTURE(i), m), "set TEXTURE(i)");
-        TestCheck(f.Context->GetMatrixForTests(VXMATRIX_TEXTURE(i))[3][0] == 10.0f + (float)i, "TEXTURE(i) stored");
+        TestCheck(Matrix(f.Context, VXMATRIX_TEXTURE(i))[3][0] == 10.0f + (float)i, "TEXTURE(i) stored");
     }
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)0, m), "matrix type 0 rejected");
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)4, m), "matrix type 4 rejected");
     TestCheck(!f.Context->SetTransformMatrix((VXMATRIX_TYPE)24, m), "matrix type 24 rejected");
     TestCheck(!f.Context->SetTransformMatrix(VXMATRIX_WORLDMATRIX(CKRST_MAX_WORLD_MATRICES), m), "WORLDMATRIX(4) rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_INVALID_MATRIX_TYPE) == 4, "invalid matrix types counted");
+    TestCheck(!f.Context->GetTransformMatrix((VXMATRIX_TYPE)4, m), "GetTransformMatrix rejects type 4");
+    TestCheck(Diag(f.Context, CKRST_DIAG_INVALID_MATRIX_TYPE) == 5, "invalid getter matrix type counted");
     TestCheck((CKDWORD)VXMATRIX_WORLD == 1 && (CKDWORD)VXMATRIX_TEXTURE0 == 16 && (CKDWORD)VXMATRIX_WMAT == 256,
               "v1 matrix enumeration values");
 
@@ -639,13 +669,17 @@ void TestTextures()
 
     // Binding and deletion.
     TestCheck(f.Context->SetTexture(tex, 0), "SetTexture");
-    TestCheck(f.Context->GetBoundTextureForTests(0) == tex, "bound");
+    TestCheck(BoundTexture(f.Context, 0) == tex, "bound");
     TestCheck(!f.Context->SetTexture(0xBAD, 1), "unknown handle rejected");
     TestCheck(!f.Context->SetTexture(tex, CKRST_MAX_TEXTURE_STAGES), "stage 8 rejected");
     TestCheck(f.Context->SetTexture(0, 1), "unbind with 0");
+    TestCheck(BoundTexture(f.Context, 1) == 0, "stage 1 unbound");
+    CKDWORD dummy = 0;
+    TestCheck(!f.Context->GetTexture(CKRST_MAX_TEXTURE_STAGES, &dummy), "GetTexture stage 8 rejected");
+    TestCheck(!f.Context->GetTexture(0, NULL), "GetTexture NULL rejected");
     TestCheck(!f.Context->DeleteObject(tex, CKRST_OBJ_VERTEXBUFFER), "wrong type rejected");
     TestCheck(f.Context->DeleteObject(tex, CKRST_OBJ_TEXTURE), "DeleteObject");
-    TestCheck(f.Context->GetBoundTextureForTests(0) == 0, "deleted texture unbound");
+    TestCheck(BoundTexture(f.Context, 0) == 0, "deleted texture unbound");
     TestCheck(!f.Context->DeleteObject(tex, CKRST_OBJ_TEXTURE), "double delete rejected");
     TestCheck(!f.Context->GetTextureDesc(tex, &desc), "stale handle rejected");
     TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_TEXTURE) == 2, "two textures left");

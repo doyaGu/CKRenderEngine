@@ -143,13 +143,23 @@ public:
     virtual CKBOOL BackToFront(CKBOOL VSync) = 0;
 
     // --- Fixed-function state (spec 4.6) ---
+    // Every setter has a getter (D3D7 shape) so the engine can save and
+    // restore state around its special draws without rasterizer internals.
     virtual CKBOOL SetRenderState(VXRENDERSTATETYPE State, CKDWORD Value) = 0;
     virtual CKBOOL GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value) = 0;
-    // CKRST_TSS_ADDRESS sets ADDRESSU, ADDRESSV and ADDRESW together.
+    // CKRST_TSS_ADDRESS sets ADDRESSU, ADDRESSV and ADDRESW together. For the
+    // nine combine states (OP, ARG1, ARG2, AOP, AARG1, AARG2, COLORARG0,
+    // ALPHAARG0, RESULTARG0) and STAGEBLEND the value 0 means "not set": the
+    // stage is then derived at draw time from TEXTUREMAPBLEND and the bound
+    // texture, and a stage without texture is disabled. Setting
+    // TEXTUREMAPBLEND resets the nine combine states to 0; setting a non-zero
+    // STAGEBLEND stores the derived combine states.
     virtual CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) = 0;
     virtual CKBOOL GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value) = 0;
     virtual CKBOOL SetTexture(CKDWORD Texture, int Stage) = 0;
+    virtual CKBOOL GetTexture(int Stage, CKDWORD *Texture) = 0;
     virtual CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) = 0;
+    virtual CKBOOL GetTransformMatrix(VXMATRIX_TYPE Type, VxMatrix &Mat) = 0;
     virtual CKBOOL SetLight(CKDWORD Index, const CKLightData *Data) = 0;
     virtual CKBOOL EnableLight(CKDWORD Index, CKBOOL Enable) = 0;
     virtual CKBOOL SetMaterial(const CKMaterialData *Data) = 0;
