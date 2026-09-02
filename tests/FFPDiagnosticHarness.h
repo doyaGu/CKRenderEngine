@@ -2,6 +2,7 @@
 #define CKRE_FFP_DIAGNOSTIC_HARNESS_H
 
 #include "CKRasterizerDevice.h"
+#include "CKTranslatedRasterizer.h"
 #include "TestTriangleMultiset.h"
 
 #include <string.h>
@@ -488,6 +489,117 @@ private:
     std::vector<CKBYTE> m_VertexStorage;
     std::vector<CKBYTE> m_IndexStorage;
     std::vector<CKBYTE> m_InstanceStorage;
+};
+
+// ===========================================================================
+// Recording device behind the v3 translation core
+// ===========================================================================
+
+// Reports a shader-capable backend once created, like the bgfx device does;
+// the fixed-function pipeline builds programs only then.
+class FFPRecordingContext : public FFPDiagnosticContext {
+public:
+    explicit FFPRecordingContext(CKRasterizerDeviceDriver *driver) : FFPDiagnosticContext(driver) {}
+
+    CKERROR GetCaps(CKRasterizerDeviceCapsDesc *caps) const override {
+        const CKERROR status = CKRasterizerDevice::GetCaps(caps);
+        if (status != CK_OK)
+            return status;
+        caps->Features |= CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER |
+                          CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_TEXTURE_READBACK;
+        caps->MaxTextureBindings = 16;
+        return CK_OK;
+    }
+};
+
+class FFPRecordingDriver : public FFPDiagnosticDriver {
+public:
+    FFPRecordingDriver() : FFPDiagnosticDriver(CKRST_SHADER_PROFILE_DX11) {
+        m_Hardware = FALSE;
+        m_CapsUpToDate = TRUE;
+        m_Desc = "Recording device";
+        m_3DCaps.MaxNumberTextureStage = 8;
+        m_3DCaps.MaxTextureWidth = 4096;
+        m_3DCaps.MaxTextureHeight = 4096;
+    }
+
+    CKRasterizerDevice *CreateContext() override {
+        FFPRecordingContext *context = new FFPRecordingContext(this);
+        m_Contexts.PushBack(context);
+        return context;
+    }
+
+    CKBOOL DestroyContext(CKRasterizerDevice *context) override {
+        for (int i = 0; i < m_Contexts.Size(); ++i) {
+            if (m_Contexts[i] == context) {
+                m_Contexts.RemoveAt(i);
+                delete static_cast<FFPRecordingContext *>(context);
+                return TRUE;
+            }
+        }
+        return FALSE;
+    }
+};
+
+class FFPRecordingDeviceLibrary : public CKRasterizerDeviceLibrary {
+public:
+    ~FFPRecordingDeviceLibrary() override { Close(); }
+
+    CKBOOL Start(WIN_HANDLE window) override {
+        m_MainWindow = window;
+        if (m_Drivers.Size() == 0) {
+            FFPRecordingDriver *driver = new FFPRecordingDriver();
+            driver->m_Owner = this;
+            driver->m_DriverIndex = 0;
+            m_Drivers.PushBack(driver);
+        }
+        return TRUE;
+    }
+
+    void Close() override {
+        for (int i = 0; i < m_Drivers.Size(); ++i)
+            delete m_Drivers[i];
+        m_Drivers.Clear();
+    }
+};
+
+// A started translated rasterizer over the recording device. Add texture
+// formats to DeviceDriver() before CreateContext(); the translated driver
+// syncs them when the context is created.
+struct FFPTranslatedWorld {
+    CKRasterizer *Rasterizer;
+    CKTranslatedDriver *Driver;
+    CKTranslatedContext *Context;
+    FFPRecordingContext *Device;
+
+    FFPTranslatedWorld() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL) {
+        FFPRecordingDeviceLibrary *library = new FFPRecordingDeviceLibrary();
+        library->Start(NULL);
+        Rasterizer = CKTranslatedRasterizerStart(library, NULL);
+        TestCheck(Rasterizer != NULL && Rasterizer->GetDriverCount() == 1, "translated rasterizer over the recording device");
+        Driver = Rasterizer ? static_cast<CKTranslatedDriver *>(Rasterizer->GetDriver(0)) : NULL;
+    }
+
+    ~FFPTranslatedWorld() {
+        if (Rasterizer)
+            CKTranslatedRasterizerClose(Rasterizer);
+    }
+
+    FFPRecordingDriver *DeviceDriver() const {
+        return Driver ? static_cast<FFPRecordingDriver *>(Driver->GetDeviceDriver()) : NULL;
+    }
+
+    CKBOOL CreateContext(int width, int height) {
+        if (!Driver)
+            return FALSE;
+        Context = static_cast<CKTranslatedContext *>(Driver->CreateContext());
+        if (!Context)
+            return FALSE;
+        if (!Context->Create(NULL, 0, 0, width, height, 32, FALSE, 60, 24, 8))
+            return FALSE;
+        Device = static_cast<FFPRecordingContext *>(Context->GetDeviceForMigration());
+        return Device != NULL;
+    }
 };
 
 #endif // CKRE_FFP_DIAGNOSTIC_HARNESS_H

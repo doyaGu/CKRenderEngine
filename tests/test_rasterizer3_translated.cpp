@@ -12,75 +12,8 @@
 
 namespace {
 
-// The recording device reports a shader-capable backend once created, like
-// the bgfx device does; the fixed-function pipeline builds programs only then.
-class RecordingContext : public FFPDiagnosticContext {
-public:
-    explicit RecordingContext(CKRasterizerDeviceDriver *driver) : FFPDiagnosticContext(driver) {}
-
-    CKERROR GetCaps(CKRasterizerDeviceCapsDesc *caps) const override {
-        const CKERROR status = CKRasterizerDevice::GetCaps(caps);
-        if (status != CK_OK)
-            return status;
-        caps->Features |= CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER |
-                          CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_TEXTURE_READBACK;
-        caps->MaxTextureBindings = 16;
-        return CK_OK;
-    }
-};
-
-class RecordingDriver : public FFPDiagnosticDriver {
-public:
-    RecordingDriver() : FFPDiagnosticDriver(CKRST_SHADER_PROFILE_DX11) {
-        m_Hardware = FALSE;
-        m_CapsUpToDate = TRUE;
-        m_Desc = "Recording device";
-        m_3DCaps.MaxNumberTextureStage = 8;
-        m_3DCaps.MaxTextureWidth = 4096;
-        m_3DCaps.MaxTextureHeight = 4096;
-    }
-
-    CKRasterizerDevice *CreateContext() override {
-        RecordingContext *context = new RecordingContext(this);
-        m_Contexts.PushBack(context);
-        return context;
-    }
-
-    CKBOOL DestroyContext(CKRasterizerDevice *context) override {
-        for (int i = 0; i < m_Contexts.Size(); ++i) {
-            if (m_Contexts[i] == context) {
-                m_Contexts.RemoveAt(i);
-                delete static_cast<FFPDiagnosticContext *>(context);
-                return TRUE;
-            }
-        }
-        return FALSE;
-    }
-};
-
-class RecordingDeviceLibrary : public CKRasterizerDeviceLibrary {
-public:
-    ~RecordingDeviceLibrary() override { Close(); }
-
-    CKBOOL Start(WIN_HANDLE window) override {
-        m_MainWindow = window;
-        if (m_Drivers.Size() == 0) {
-            RecordingDriver *driver = new RecordingDriver();
-            driver->m_Owner = this;
-            driver->m_DriverIndex = 0;
-            m_Drivers.PushBack(driver);
-        }
-        return TRUE;
-    }
-
-    void Close() override {
-        for (int i = 0; i < m_Drivers.Size(); ++i)
-            delete m_Drivers[i];
-        m_Drivers.Clear();
-    }
-};
-
 struct Fixture {
+    // World is declared last so the members above are plain aliases into it.
     CKRasterizer *Rasterizer;
     CKTranslatedDriver *Driver;
     CKTranslatedContext *Context;
@@ -89,26 +22,16 @@ struct Fixture {
 
     Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL), FFP(NULL)
     {
-        RecordingDeviceLibrary *library = new RecordingDeviceLibrary();
-        library->Start(NULL);
-        Rasterizer = CKTranslatedRasterizerStart(library, NULL);
-        TestCheck(Rasterizer != NULL, "CKTranslatedRasterizerStart failed");
-        TestCheck(Rasterizer->GetDriverCount() == 1, "one translated driver");
-        Driver = static_cast<CKTranslatedDriver *>(Rasterizer->GetDriver(0));
-        TestCheck(Driver != NULL, "driver 0 missing");
-        Context = static_cast<CKTranslatedContext *>(Driver->CreateContext());
-        TestCheck(Context != NULL, "CreateContext failed");
-        TestCheck(Context->Create(NULL, 0, 0, 64, 64, 32, FALSE, 60, 24, 8), "Create failed");
-        Device = static_cast<FFPDiagnosticContext *>(Context->GetDeviceForMigration());
-        FFP = Context->GetFFPipelineForMigration();
+        TestCheck(World.CreateContext(64, 64), "translated context over the recording device");
+        Rasterizer = World.Rasterizer;
+        Driver = World.Driver;
+        Context = World.Context;
+        Device = World.Device;
+        FFP = Context ? Context->GetFFPipelineForMigration() : NULL;
         TestCheck(Device != NULL && FFP != NULL, "migration accessors");
     }
 
-    ~Fixture()
-    {
-        if (Rasterizer)
-            CKTranslatedRasterizerClose(Rasterizer);
-    }
+    FFPTranslatedWorld World;
 };
 
 CKDWORD Diag(CKTranslatedContext *ctx, CKRST_DIAGNOSTIC kind)

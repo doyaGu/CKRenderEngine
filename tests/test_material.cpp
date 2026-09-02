@@ -31,8 +31,7 @@ struct MaterialTestWorld {
         : context(nullptr),
           renderManager(nullptr),
           renderContext(nullptr),
-          rasterizer(&driver),
-          translatedDriver(nullptr, &driver, 0) {
+          rasterizer(nullptr) {
         TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
                   "CKCreateContext failed");
 
@@ -41,18 +40,21 @@ struct MaterialTestWorld {
             renderManager = new RCKRenderManager(context);
         TestCheck(renderManager != nullptr, "RCKRenderManager creation failed");
 
-        AddDriverTextureFormat(driver, _32_ARGB8888);
-        AddDriverTextureFormat(driver, _16_RGB565);
+        AddDriverTextureFormat(*translated.DeviceDriver(), _32_ARGB8888);
+        AddDriverTextureFormat(*translated.DeviceDriver(), _16_RGB565);
+
+        TestCheck(translated.CreateContext(64, 64), "translated context creation failed");
+        rasterizer = translated.Device;
 
         renderContext = new RCKRenderContext(context);
-        translatedDriver.SyncCapsFromDevice();
-        renderContext->m_RasterizerDevice = &rasterizer;
-        renderContext->m_RasterizerDriver = &translatedDriver;
+        renderContext->m_RasterizerContext = translated.Context;
+        renderContext->m_RasterizerDriver = translated.Driver;
+        renderContext->AttachTranslatedContext();
     }
 
     ~MaterialTestWorld() {
         if (renderContext) {
-            renderContext->m_RasterizerDevice = nullptr;
+            renderContext->DetachTranslatedContext();
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -66,9 +68,8 @@ struct MaterialTestWorld {
     CKContext *context;
     RCKRenderManager *renderManager;
     RCKRenderContext *renderContext;
-    FFPDiagnosticDriver driver;
-    FFPDiagnosticContext rasterizer;
-    CKTranslatedDriver translatedDriver;
+    FFPTranslatedWorld translated;
+    FFPRecordingContext *rasterizer;
 };
 
 void FillTextureSlot(RCKTexture &texture, int slot, CKDWORD seed) {
@@ -147,7 +148,7 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
     FillTextureSlot(texture, 0, 0xFF112233u);
     material.SetTexture(0, &texture);
-    world.rasterizer.FailUpdateTexture = TRUE;
+    world.rasterizer->FailUpdateTexture = TRUE;
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "SetAsCurrent must fail when its texture upload fails");
@@ -194,7 +195,7 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
     material.SetTexture(0, &baseTexture);
     material.SetTexture(1, &detailTexture);
     material.SetEffect(VXEFFECT_2TEXTURES);
-    world.rasterizer.FailUpdateTexture = TRUE;
+    world.rasterizer->FailUpdateTexture = TRUE;
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
               "multi-texture material setup must fail when a secondary texture upload fails");

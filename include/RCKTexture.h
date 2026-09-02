@@ -3,8 +3,7 @@
 
 #include "CKTexture.h"
 
-// Internal device interface (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice.h).
-class CKRasterizerDevice;
+class CKRasterizerContext;
 
 class RCKRenderContext;
 
@@ -59,7 +58,7 @@ protected:
                             int CubeMapFace);
 
     VX_PIXELFORMAT m_DesiredVideoFormat;
-    CKRasterizerDevice *m_RasterizerDevice;
+    CKRasterizerContext *m_RasterizerContext; // v3 context the video texture belongs to
     CKDWORD m_MipMapLevel;
     CKDWORD m_ObjectIndex;
     XClassArray<VxImageDescEx> *m_MipMaps;

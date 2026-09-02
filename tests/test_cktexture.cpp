@@ -28,8 +28,7 @@ struct TextureTestWorld {
         : context(nullptr),
           renderManager(nullptr),
           renderContext(nullptr),
-          rasterizer(&driver),
-          translatedDriver(nullptr, &driver, 0) {
+          rasterizer(nullptr) {
         TestCheck(CKCreateContext(&context, nullptr, 0, 0) == CK_OK && context,
                   "CKCreateContext failed");
 
@@ -38,19 +37,22 @@ struct TextureTestWorld {
             renderManager = new RCKRenderManager(context);
         TestCheck(renderManager != nullptr, "RCKRenderManager creation failed");
 
-        AddDriverTextureFormat(driver, _32_ARGB8888);
-        AddDriverTextureFormat(driver, _16_RGB565);
-        AddDriverTextureFormat(driver, _16_ARGB4444);
+        AddDriverTextureFormat(*translated.DeviceDriver(), _32_ARGB8888);
+        AddDriverTextureFormat(*translated.DeviceDriver(), _16_RGB565);
+        AddDriverTextureFormat(*translated.DeviceDriver(), _16_ARGB4444);
+
+        TestCheck(translated.CreateContext(64, 64), "translated context creation failed");
+        rasterizer = translated.Device;
 
         renderContext = new RCKRenderContext(context);
-        translatedDriver.SyncCapsFromDevice();
-        renderContext->m_RasterizerDevice = &rasterizer;
-        renderContext->m_RasterizerDriver = &translatedDriver;
+        renderContext->m_RasterizerContext = translated.Context;
+        renderContext->m_RasterizerDriver = translated.Driver;
+        renderContext->AttachTranslatedContext();
     }
 
     ~TextureTestWorld() {
         if (renderContext) {
-            renderContext->m_RasterizerDevice = nullptr;
+            renderContext->DetachTranslatedContext();
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
             renderContext = nullptr;
@@ -64,9 +66,8 @@ struct TextureTestWorld {
     CKContext *context;
     RCKRenderManager *renderManager;
     RCKRenderContext *renderContext;
-    FFPDiagnosticDriver driver;
-    FFPDiagnosticContext rasterizer;
-    CKTranslatedDriver translatedDriver;
+    FFPTranslatedWorld translated;
+    FFPRecordingContext *rasterizer;
 };
 
 void FillTexture(RCKTexture &texture, CKDWORD seed) {
@@ -88,13 +89,13 @@ void StandardTextureUploadPreservesSourceFormat() {
 
     TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE),
               "SystemToVideoMemory should succeed");
-    TestCheck(world.rasterizer.CreatedTextureCount == 1,
+    TestCheck(world.rasterizer->CreatedTextureCount == 1,
               "texture should be created once");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer.LastTextureDesc.Format) == _32_ARGB8888,
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureDesc.Format) == _32_ARGB8888,
               "regular textures should be created with the source image format");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer.LastTextureUpdateDesc) == _32_ARGB8888,
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _32_ARGB8888,
               "Restore upload should preserve the source image format");
-    TestCheck(world.rasterizer.LastTextureUpdateDesc.BytesPerLine == 4 * 4,
+    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 4 * 4,
               "source-format texture upload pitch should remain one row");
     TestCheck(texture.GetVideoPixelFormat() == _32_ARGB8888,
               "reported video format should match the created source format");
@@ -106,7 +107,7 @@ void SetAsCurrentFailureDoesNotBindOrClearRestoreFlag() {
 
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
     FillTexture(texture, 0xFF405060u);
-    world.rasterizer.FailUpdateTexture = TRUE;
+    world.rasterizer->FailUpdateTexture = TRUE;
 
     TestCheck(!texture.SetAsCurrent(world.renderContext, FALSE, 0),
               "SetAsCurrent should fail when upload fails");
@@ -129,7 +130,7 @@ void RestoreFailureKeepsDirtyFlag() {
     TestCheck(!texture.ToRestore(), "successful upload should clear restore flag");
 
     FillTexture(texture, 0xFF708090u);
-    world.rasterizer.FailUpdateTexture = TRUE;
+    world.rasterizer->FailUpdateTexture = TRUE;
     TestCheck(!texture.Restore(FALSE), "Restore should report update failure");
     TestCheck(texture.ToRestore(), "failed Restore must keep restore flag set");
 }
@@ -140,12 +141,14 @@ void SystemToVideoMemoryRejectsMissingRasterizerDriver() {
 
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
     FillTexture(texture, 0xFF112233u);
-    world.rasterizer.m_Driver = nullptr;
+    CKRasterizerDriver *driver = world.translated.Context->m_Driver;
+    world.translated.Context->m_Driver = nullptr;
 
     TestCheck(!texture.SystemToVideoMemory(world.renderContext, FALSE),
               "SystemToVideoMemory should reject a rasterizer context without a driver");
     TestCheck(!texture.IsInVideoMemory(),
               "failed upload must not mark the texture as resident");
+    world.translated.Context->m_Driver = driver;
 }
 
 void MipmapRequestsKeepLegacyBoolAndExplicitCounts() {
@@ -172,7 +175,7 @@ void GeneratedAndUserMipmapsUseInitializedCreationModes() {
     TestCheck(generated.UseMipmap(3), "generated UseMipmap failed");
     TestCheck(generated.SystemToVideoMemory(world.renderContext, FALSE),
               "generated mip texture upload failed");
-    TestCheck(world.rasterizer.LastTextureDesc.MipMapCount == (CKDWORD)-1,
+    TestCheck(world.rasterizer->LastTextureDesc.MipMapCount == (CKDWORD)-1,
               "base-only system data must request generated mipmaps");
 
     RCKTexture user(world.context, "UserMips");
@@ -181,7 +184,7 @@ void GeneratedAndUserMipmapsUseInitializedCreationModes() {
     TestCheck(user.SetUserMipMapMode(TRUE), "user mipmap mode failed");
     TestCheck(user.SystemToVideoMemory(world.renderContext, FALSE),
               "user mip texture upload failed");
-    TestCheck(world.rasterizer.LastTextureDesc.MipMapCount == 3,
+    TestCheck(world.rasterizer->LastTextureDesc.MipMapCount == 3,
               "complete user mip data must request the explicit full chain");
 }
 
@@ -305,16 +308,16 @@ void UserMipmapsUploadUsingCreatedTextureFormat() {
 
     TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE),
               "SystemToVideoMemory should upload user mipmaps");
-    TestCheck(world.rasterizer.UpdatedTextureCount == 3,
+    TestCheck(world.rasterizer->UpdatedTextureCount == 3,
               "base level and two user mip levels should be uploaded");
-    TestCheck(world.rasterizer.LastUpdateMip == 2,
+    TestCheck(world.rasterizer->LastUpdateMip == 2,
               "last upload should be the final user mip level");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer.LastTextureUpdateDesc) == _32_ARGB8888,
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _32_ARGB8888,
               "user mipmap levels should use the created texture format");
-    TestCheck(world.rasterizer.LastTextureUpdateDesc.BytesPerLine == 1 * 4,
+    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 1 * 4,
               "user mipmap upload pitch should remain one row");
-    TestCheck(world.rasterizer.LastTextureUpdateDesc.Width == 1 &&
-                  world.rasterizer.LastTextureUpdateDesc.Height == 1,
+    TestCheck(world.rasterizer->LastTextureUpdateDesc.Width == 1 &&
+                  world.rasterizer->LastTextureUpdateDesc.Height == 1,
               "final user mip dimensions should be preserved during conversion");
 }
 
@@ -334,12 +337,12 @@ void CopyPreservesUserMipmapsAndInvalidatesDestinationVideoMemory() {
     FillTexture(dest, 0xFF020000u);
     TestCheck(dest.SystemToVideoMemory(world.renderContext, FALSE),
               "dest initial upload should succeed");
-    const CKDWORD deletesBeforeCopy = world.rasterizer.DeletedObjectCount;
+    const CKDWORD deletesBeforeCopy = world.rasterizer->DeletedObjectCount;
 
     CKDependenciesContext dependencies(world.context);
     TestCheck(dest.Copy(source, dependencies) == CK_OK, "texture Copy failed");
 
-    TestCheck(world.rasterizer.DeletedObjectCount > deletesBeforeCopy,
+    TestCheck(world.rasterizer->DeletedObjectCount > deletesBeforeCopy,
               "copy should free stale destination video memory");
     TestCheck(!dest.IsInVideoMemory(), "copied texture should not keep stale video memory");
     TestCheck(dest.GetWidth() == 4 && dest.GetHeight() == 4,
@@ -366,13 +369,13 @@ void EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat() {
               "EnsureRenderTarget should create a render target texture");
     TestCheck(texture.GetMipmapCount() == 3,
               "render target creation must not overwrite the requested mipmap count");
-    TestCheck((world.rasterizer.LastTextureDesc.Flags & CKRST_TEXTURE_RENDERTARGET) != 0,
+    TestCheck((world.rasterizer->LastTextureDesc.Flags & CKRST_TEXTURE_RENDERTARGET) != 0,
               "render target flag should be passed to CreateTexture");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer.LastTextureDesc.Format) == _16_RGB565,
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureDesc.Format) == _16_RGB565,
               "render target should use the desired video format");
     TestCheck(texture.GetVideoPixelFormat() == _16_RGB565,
               "reported render target video format should match the created format");
-    TestCheck(world.rasterizer.UpdatedTextureCount == 0,
+    TestCheck(world.rasterizer->UpdatedTextureCount == 0,
               "render target creation should not upload system-memory pixels");
 }
 

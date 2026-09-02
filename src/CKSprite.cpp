@@ -6,7 +6,7 @@
 #include "CKBitmapData.h"
 #include "CKBitmapReader.h"
 #include "CKGlobals.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizer.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "CKDebugLogger.h"
@@ -161,7 +161,7 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
 
     RCKRenderManager *rm = (RCKRenderManager *) Context->GetRenderManager();
     m_VideoFormat = (VX_PIXELFORMAT) rm->m_SpriteVideoFormat.Value;
-    m_RasterizerDevice = nullptr;
+    m_RasterizerContext = nullptr;
     m_ObjectIndex = 0;
     m_InVideoMemory = FALSE;
 }
@@ -262,15 +262,15 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         return CKERR_INVALIDPARAMETER;
 
     RCKRenderContext *rctx = (RCKRenderContext *) dev;
-    if (!rctx || !rctx->m_RasterizerDevice)
+    if (!rctx || !rctx->m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CKRasterizerDevice *rstCtx = rctx->m_RasterizerDevice;
-    if (m_RasterizerDevice != rstCtx) {
+    CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+    if (m_RasterizerContext != rstCtx) {
         FreeVideoMemory();
         m_ObjectIndex = 0;
     }
-    m_RasterizerDevice = rstCtx;
+    m_RasterizerContext = rstCtx;
 
     CKBOOL reload = FALSE;
 
@@ -288,41 +288,42 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     if (reload) {
         SystemToVideoMemory(dev, FALSE);
     } else {
-        m_RasterizerDevice = rstCtx;
+        m_RasterizerContext = rstCtx;
     }
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) {
         Restore(FALSE);
     }
 
-    CKFixedFunctionPipeline &ffp = *rctx->m_FFP;
-    CKFFStateGuard ffpState(ffp);
+    // Migration (phase 1): the state guard and the stage reset still come
+    // from the pipeline; the states themselves go through the v3 contract.
+    CKFFStateGuard ffpState(*rctx->m_FFP);
 
     // Set render states for 2D sprite rendering
-    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
-    ffp.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
-    ffp.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
+    rstCtx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    rstCtx->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    rstCtx->SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
+    rstCtx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    rstCtx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
-        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-        ffp.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
-        ffp.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
-        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
-        ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
-        ffp.SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+        rstCtx->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
+        rstCtx->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHAREF, 0);
     } else {
-        ffp.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-        ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+        rstCtx->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
     }
 
     // Bind sprite texture
-    ffp.DisableTextureStagesFrom(0);
-    ffp.SetTexture(0, m_ObjectIndex);
-    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
-    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
-    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    rctx->m_FFP->DisableTextureStagesFrom(0);
+    rstCtx->SetTexture(m_ObjectIndex, 0);
+    rstCtx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    rstCtx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    rstCtx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
 
     // Build quad vertices
     VxDrawPrimitiveData *data = rctx->GetDrawPrimitiveStructure(CKRST_DP_CL_VCT, 4);
@@ -386,9 +387,9 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
     RCKRenderContext *rctx = (RCKRenderContext *) dev;
-    if (!rctx->m_RasterizerDevice) return FALSE;
+    if (!rctx->m_RasterizerContext) return FALSE;
 
-    m_RasterizerDevice = rctx->m_RasterizerDevice;
+    m_RasterizerContext = rctx->m_RasterizerContext;
 
     CKTextureDesc spriteDesc;
     spriteDesc.Format.Width = m_BitmapData.m_Width;
@@ -407,7 +408,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
         FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
     }
 
-    if (m_RasterizerDevice->CreateTexture(&spriteDesc, nullptr, &m_ObjectIndex) == CK_OK) {
+    if (m_RasterizerContext->CreateTexture(&spriteDesc, &m_ObjectIndex)) {
         m_InVideoMemory = TRUE;
         m_VideoFormatDesc = spriteDesc.Format;
         return Restore(Clamping);
@@ -416,7 +417,7 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
 }
 
 CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
-    if (!m_RasterizerDevice) return FALSE;
+    if (!m_RasterizerContext) return FALSE;
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
     m_BitmapData.m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
@@ -439,7 +440,7 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
                 return FALSE;
         }
 
-        const CKBOOL result = (m_RasterizerDevice->UpdateTexture(m_ObjectIndex, 0, 0, nullptr, &uploadDesc) == CK_OK);
+        const CKBOOL result = m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, nullptr);
         delete[] converted;
         return result;
     }
@@ -451,26 +452,25 @@ CKBOOL RCKSprite::FreeVideoMemory() {
         m_InVideoMemory = FALSE;
         return TRUE;
     }
-    if (!m_RasterizerDevice)
+    if (!m_RasterizerContext)
         return FALSE;
-    const CKBOOL result =
-        m_RasterizerDevice->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE) == CK_OK;
+    const CKBOOL result = m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
     m_InVideoMemory = FALSE;
     m_ObjectIndex = 0;
     return result;
 }
 
 CKBOOL RCKSprite::IsInVideoMemory() {
-    return m_RasterizerDevice && m_InVideoMemory;
+    return m_RasterizerContext && m_InVideoMemory;
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    if (!ctx || !m_RasterizerDevice || !m_InVideoMemory)
+    if (!ctx || !m_RasterizerContext || !m_InVideoMemory)
         return FALSE;
 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
-    if (!rctx->m_RasterizerDevice ||
-        rctx->m_RasterizerDevice != m_RasterizerDevice)
+    if (!rctx->m_RasterizerContext ||
+        rctx->m_RasterizerContext != m_RasterizerContext)
         return FALSE;
 
     return rctx->QueueSpriteCopy(this, Src, Dest);
@@ -479,8 +479,8 @@ CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
 CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
                                    const VxImageDescEx &source,
                                    const VxRect *destination) {
-    if (!context || !context->m_RasterizerDevice ||
-        context->m_RasterizerDevice != m_RasterizerDevice ||
+    if (!context || !context->m_RasterizerContext ||
+        context->m_RasterizerContext != m_RasterizerContext ||
         !m_InVideoMemory)
         return FALSE;
 
@@ -503,19 +503,19 @@ CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
     }
 
     const CKBOOL result =
-        (m_RasterizerDevice->UpdateTexture(m_ObjectIndex, 0, 0, regionPtr, &uploadDesc) == CK_OK);
+        m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, regionPtr);
     delete[] converted;
     return result;
 }
 
 CKBOOL RCKSprite::GetVideoTextureDesc(VxImageDescEx &desc) {
-    if (!m_RasterizerDevice || !m_InVideoMemory) return FALSE;
+    if (!m_RasterizerContext || !m_InVideoMemory) return FALSE;
     desc = m_VideoFormatDesc;
     return TRUE;
 }
 
 VX_PIXELFORMAT RCKSprite::GetVideoPixelFormat() {
-    if (!m_RasterizerDevice || !m_InVideoMemory) return UNKNOWN_PF;
+    if (!m_RasterizerContext || !m_InVideoMemory) return UNKNOWN_PF;
     return VxImageDesc2PixelFormat(m_VideoFormatDesc);
 }
 

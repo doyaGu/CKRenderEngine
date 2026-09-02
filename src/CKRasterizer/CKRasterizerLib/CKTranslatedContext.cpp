@@ -510,10 +510,10 @@ CKBOOL CKTranslatedContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *Ou
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
+    // CKRST_MIPMAP_GENERATE ((CKDWORD)-1) is passed through: the device treats
+    // it as an auto-mip request and builds the chain from level 0.
     CKTextureDesc deviceDesc = *Desc;
     deviceDesc.Flags |= CKRST_TEXTURE_VALID;
-    if (deviceDesc.MipMapCount == CKRST_MIPMAP_GENERATE)
-        deviceDesc.MipMapCount = 1; // the device builds no chain yet; level 0 is uploaded
     if (deviceDesc.Depth == 0)
         deviceDesc.Depth = 1;
 
