@@ -2,11 +2,11 @@
 #define CKVERTEXLAYOUTCACHE_H
 
 #include "VxDefines.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "XHashTable.h"
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 
 // Vertex layout flags (used as cache key)
 #define CKFF_VF_POSITION   0x0001
@@ -34,7 +34,7 @@ public:
     CKVertexLayoutCache();
     ~CKVertexLayoutCache();
 
-    void Init(CKRasterizerContext *ctx);
+    void Init(CKRasterizerDevice *ctx);
     void Shutdown();
 
     // Get or create a layout handle for the given vertex format flags.
@@ -53,7 +53,7 @@ public:
     static CKDWORD ComputeStride(CKDWORD formatFlags);
 
 private:
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     XHashTable<CKDWORD, CKDWORD> m_Cache; // formatFlags -> layout handle
 };
 

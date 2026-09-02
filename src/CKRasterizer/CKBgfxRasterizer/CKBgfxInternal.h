@@ -1,7 +1,7 @@
 #ifndef CK_BGFX_INTERNAL_H
 #define CK_BGFX_INTERNAL_H
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <bgfx/bgfx.h>
 

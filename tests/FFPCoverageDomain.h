@@ -2,7 +2,7 @@
 #define CKRE_FFP_COVERAGE_DOMAIN_H
 
 #include "CKFFShaderKey.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 
 #include <stddef.h>
 

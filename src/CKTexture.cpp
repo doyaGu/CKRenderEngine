@@ -3,7 +3,7 @@
 #include "CKBitmapReader.h"
 #include "CKPathManager.h"
 #include "CKStateChunk.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 
@@ -31,7 +31,7 @@ static CKBOOL IsPowerOfTwo(CKDWORD x) {
     return x && !(x & (x - 1));
 }
 
-static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx &desc) {
+static void FindNearestFormatWithAlpha(CKRasterizerDeviceDriver *driver, VxImageDescEx &desc) {
     VxImageDescEx *bestFormat = nullptr;
     int bestDiff = 64;
 
@@ -209,7 +209,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     if (!dev || !dev->m_RasterizerContext || !dev->m_RasterizerDriver)
         return FALSE;
 
-    CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
+    CKRasterizerDevice *rstCtx = dev->m_RasterizerContext;
     if (!rstCtx->m_Driver)
         return FALSE;
 

@@ -1,6 +1,6 @@
 #include "RCKVertexBuffer.h"
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "CKTransientGeometry.h"

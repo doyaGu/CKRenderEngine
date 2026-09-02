@@ -3,7 +3,7 @@
 
 #include "CKFFShaderKey.h"
 #include "CKFFSamplerLayout.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceTypes.h"
 
 #include <stddef.h>
 

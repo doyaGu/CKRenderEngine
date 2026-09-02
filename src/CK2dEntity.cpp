@@ -2,7 +2,7 @@
 
 #include "RCK2dEntity.h"
 #include "RCKRenderContext.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
 #include "CKFixedFunctionPipeline.h"

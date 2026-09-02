@@ -33,7 +33,7 @@ static int g_FailCount = 0;
 
 #define TEST_SECTION(name) printf("\n[%s]\n", name)
 
-static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+static bool HasDisplayMode(CKRasterizerDeviceDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &mode = driver->m_DisplayModes[i];
@@ -48,7 +48,7 @@ static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, in
     return false;
 }
 
-static int CountDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+static int CountDisplayMode(CKRasterizerDeviceDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     int count = 0;
     for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
@@ -63,7 +63,7 @@ static int CountDisplayMode(CKRasterizerDriver *driver, int width, int height, i
     return count;
 }
 
-static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
+static bool DisplayModesAreSorted(CKRasterizerDeviceDriver *driver)
 {
     for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &prev = driver->m_DisplayModes[i - 1];
@@ -652,7 +652,7 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "repeated start is idempotent");
     TEST_ASSERT(rasterizer.GetDriverCount() == 1, "repeated start does not add another driver");
 
-    CKRasterizerDriver *driver = rasterizer.GetDriver(0);
+    CKRasterizerDeviceDriver *driver = rasterizer.GetDriver(0);
     TEST_ASSERT(driver != NULL, "driver exists after start");
     TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");

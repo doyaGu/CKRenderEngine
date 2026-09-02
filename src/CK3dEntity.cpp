@@ -9,7 +9,7 @@
 #include "CKPlace.h"
 #include "CKScene.h"
 #include "CKDependencies.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKDrawAnnotation.h"
 #include "CKFixedFunctionPipeline.h"
 #include "RCKRenderContext.h"

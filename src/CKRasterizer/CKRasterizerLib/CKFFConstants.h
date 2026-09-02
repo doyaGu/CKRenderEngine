@@ -3,7 +3,7 @@
 
 #include "VxMath.h"
 #include "CKTypes.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 
 #define CKFF_MAX_LIGHTS         8
 #define CKFF_MAX_TEXTURE_STAGES 8

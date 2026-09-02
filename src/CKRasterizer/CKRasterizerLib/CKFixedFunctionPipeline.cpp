@@ -1,5 +1,5 @@
 #include "CKFixedFunctionPipeline.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKFFUniformState.h"
 #include "CKFFShaderABI.h"
 #include "CKFFSamplerLayout.h"
@@ -56,7 +56,7 @@ CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
 }
 
-bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
+bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
     if (Shutdown() != CK_OK)
         return false;
     m_Context = ctx;
@@ -69,11 +69,11 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerContext *ctx) {
     if (!ctx)
         return false;
     CKBOOL shaderBackend = TRUE;
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     if (ctx->GetCaps(&caps) == CK_OK) {
         shaderBackend =
-            (caps.Features & (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)) ==
-                (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)
+            (caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) ==
+                (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)
             ? TRUE : FALSE;
         if (shaderBackend &&
             caps.MaxTextureBindings < CKFF_MAX_PROGRAM_SAMPLER_BINDINGS) {

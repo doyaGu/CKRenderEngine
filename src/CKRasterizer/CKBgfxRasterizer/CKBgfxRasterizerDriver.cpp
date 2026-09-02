@@ -178,7 +178,7 @@ CKBgfxRasterizerDriver::~CKBgfxRasterizerDriver()
     m_Contexts.Clear();
 }
 
-CKRasterizerContext *CKBgfxRasterizerDriver::CreateContext()
+CKRasterizerDevice *CKBgfxRasterizerDriver::CreateContext()
 {
     if (m_Contexts.Size() != 0) {
         CKBgfxLogf("Init", "multiple bgfx rasterizer contexts are unsupported");
@@ -192,7 +192,7 @@ CKRasterizerContext *CKBgfxRasterizerDriver::CreateContext()
     return ctx;
 }
 
-CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
+CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerDevice *Context)
 {
     if (!Context)
         return FALSE;

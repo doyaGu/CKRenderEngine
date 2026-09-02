@@ -3,7 +3,7 @@
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFUniformState.h"
 #include "CKRenderFrameCostStats.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <string.h>
 

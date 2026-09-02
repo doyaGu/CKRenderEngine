@@ -2,7 +2,7 @@
 #define CKFFSTATESTORE_H
 
 #include "VxMath.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
 

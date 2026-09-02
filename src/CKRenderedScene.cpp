@@ -7,7 +7,7 @@
 
 #include "VxMatrix.h"
 #include "CKRenderContext.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CK3dEntity.h"
 #include "CKMaterial.h"
 #include "CKLight.h"
@@ -572,7 +572,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     return CK_OK;
 }
 
-void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
+void CKRenderedScene::SetupLights(CKRasterizerDevice * /*rst*/) {
     // IDA: 0x1006fea0
     // Phase 1: disable all lights that were active during the previous frame.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
@@ -613,7 +613,7 @@ void CKRenderedScene::ResizeViewport(const VxRect &rect) {
     rc->m_ViewportData.ViewHeight = (int) rect.GetHeight();
 }
 
-void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
+void CKRenderedScene::SetDefaultRenderStates(CKRasterizerDevice * /*rst*/) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
@@ -671,7 +671,7 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
     // m_PresentInterval / m_CurrentPresentInterval were v1 fields on
-    // CKRasterizerContext; filter/mipmap modes are now managed by the
+    // CKRasterizerDevice; filter/mipmap modes are now managed by the
     // sampler descriptors built inside CKFixedFunctionPipeline.
 
     ffp.SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);

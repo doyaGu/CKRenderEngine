@@ -5,6 +5,9 @@
 #include "RCK2dEntity.h"
 #include "CKSprite.h"
 
+// Internal device interface (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice.h).
+class CKRasterizerDevice;
+
 class RCKRenderContext;
 
 class RCKSprite : public RCK2dEntity {
@@ -54,7 +57,7 @@ protected:
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_VideoFormat;
     VxImageDescEx m_VideoFormatDesc;   // Cached video format (Phase 1 stub for CKSpriteDesc)
-    CKRasterizerContext *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerContext;
     CKDWORD m_ObjectIndex;
     CKBOOL m_InVideoMemory;
 };

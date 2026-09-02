@@ -55,7 +55,7 @@ function(ckre_add_benchmark TARGET_NAME)
 endfunction()
 
 # Tests of the CKRasterizer v3 contract link only CKRasterizerLib3: they must
-# not see the v2 headers in include/ nor the engine.
+# not see the internal device interface nor the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

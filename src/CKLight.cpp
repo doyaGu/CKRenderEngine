@@ -3,7 +3,7 @@
 #include "VxMath.h"
 #include "CKStateChunk.h"
 #include "CKFile.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCK3dEntity.h"
 #include "CKFixedFunctionPipeline.h"
 

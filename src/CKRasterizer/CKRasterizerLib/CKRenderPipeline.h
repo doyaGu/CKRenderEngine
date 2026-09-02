@@ -3,9 +3,9 @@
 
 #include "VxMath.h"
 #include "CKTypes.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 class CKRasterizerEncoder;
 
 // Render view IDs
@@ -56,7 +56,7 @@ public:
     CKRenderPipeline();
     ~CKRenderPipeline();
 
-    void Init(CKRasterizerContext *ctx);
+    void Init(CKRasterizerDevice *ctx);
     CKERROR PrepareShutdown();
     CKERROR Shutdown();
     void SetResourceIds(const CKRenderPipelineResourceIds &ids);
@@ -105,7 +105,7 @@ private:
     CKERROR ConfigurePostprocessView(const CKRECT &viewport);
     CKERROR SubmitPostprocess();
 
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     CKRasterizerEncoder *m_Encoder;
     VxMatrix m_OrthoProj;
     CKRenderPipelineResourceIds m_ResourceIds;

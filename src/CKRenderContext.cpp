@@ -26,8 +26,8 @@
 #include "CK3dEntity.h"
 #include "CKCamera.h"
 #include "CKSceneGraph.h"
-#include "CKRasterizer.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDevice.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
@@ -84,7 +84,7 @@ static const CKRenderView s_RenderTargetViews[CKRP_VIEW_COUNT] = {
     CKRP_VIEW_FOREGROUND2D,
 };
 
-static CKERROR SetRenderTargetViews(CKRasterizerContext *context,
+static CKERROR SetRenderTargetViews(CKRasterizerDevice *context,
                                     CKDWORD frameBuffer,
                                     CKDWORD rollbackFrameBuffer) {
     if (!context)
@@ -103,7 +103,7 @@ static CKERROR SetRenderTargetViews(CKRasterizerContext *context,
     return CK_OK;
 }
 
-static CKBOOL DeleteRenderTargetResources(CKRasterizerContext *context,
+static CKBOOL DeleteRenderTargetResources(CKRasterizerDevice *context,
                                           CKDWORD &frameBuffer,
                                           CKDWORD &depthTexture) {
     if (!context)
@@ -1358,7 +1358,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     } else {
         // Check if forced to software
         if (m_RenderManager->m_ForceSoftware.Value != 0) {
-            CKRasterizerDriver *drv = m_RenderManager->GetDriver(NewDriver);
+            CKRasterizerDeviceDriver *drv = m_RenderManager->GetDriver(NewDriver);
             if (!drv || drv->m_Hardware) {
                 NewDriver = m_RenderManager->GetPreferredSoftwareDriver();
             }
@@ -1366,8 +1366,8 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     }
 
     // Get the new driver
-    CKRasterizerDriver *newDriver = m_RenderManager->GetDriver(NewDriver);
-    CKRasterizerDriver *oldDriver = m_RasterizerDriver;
+    CKRasterizerDeviceDriver *newDriver = m_RenderManager->GetDriver(NewDriver);
+    CKRasterizerDeviceDriver *oldDriver = m_RasterizerDriver;
 
     if (!newDriver)
         return FALSE;
@@ -1426,7 +1426,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     m_RasterizerDriver = nullptr;
     m_ProjectionUpdated = FALSE;
 
-    const auto createDevice = [this](CKRasterizerDriver *driver,
+    const auto createDevice = [this](CKRasterizerDeviceDriver *driver,
                                      const CKRenderContextSettings &settings) -> CKERROR {
         m_RasterizerDriver = driver;
         m_RasterizerContext = driver ? driver->CreateContext() : nullptr;
@@ -1669,7 +1669,9 @@ CKBOOL RCKRenderContext::SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State,
 }
 
 CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
-    return m_RasterizerContext;
+    // No v3 context exists yet: the engine owns a CKRasterizerDevice until
+    // step 1.5 switches it to the translated v3 context.
+    return NULL;
 }
 
 void RCKRenderContext::ApplyRenderOptions() {
@@ -3442,7 +3444,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Check if forcing software driver
     if (m_RenderManager->m_ForceSoftware.Value != 0) {
-        CKRasterizerDriver *driverToCheck = m_RenderManager->GetDriver(Driver);
+        CKRasterizerDeviceDriver *driverToCheck = m_RenderManager->GetDriver(Driver);
         if (!driverToCheck || driverToCheck->m_Hardware) {
             Driver = m_RenderManager->GetPreferredSoftwareDriver();
         }
@@ -3504,7 +3506,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     const auto createRasterizerContext = [this, &localRect, width, height,
                                           Bpp, Fullscreen, RefreshRate,
                                           Zbpp, StencilBpp]
-        (CKRasterizerDriver *driver) -> CKERROR {
+        (CKRasterizerDeviceDriver *driver) -> CKERROR {
         m_RasterizerDriver = driver;
         m_RasterizerContext = driver ? driver->CreateContext() : nullptr;
         if (!m_RasterizerContext)

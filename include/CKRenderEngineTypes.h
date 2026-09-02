@@ -9,48 +9,15 @@
 #include "XArray.h"
 #include "XClassArray.h"
 #include "CKTypes.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKRenderEngineEnums.h"
 
 typedef CKDWORD CKRST_OBJECTTYPE;
 
-struct CKViewportData {
-    CKDWORD ViewX;
-    CKDWORD ViewY;
-    CKDWORD ViewWidth;
-    CKDWORD ViewHeight;
-    float ViewZMin;
-    float ViewZMax;
-
-    CKViewportData() : ViewX(0), ViewY(0), ViewWidth(0), ViewHeight(0),
-                       ViewZMin(0.0f), ViewZMax(1.0f) {}
-};
-
 class CKRenderContext;
 
-struct CKMaterialData {
-    VxColor Diffuse;
-    VxColor Ambient;
-    VxColor Specular;
-    VxColor Emissive;
-    float SpecularPower;
-};
-
-struct CKLightData {
-    VXLIGHT_TYPE Type;
-    VxColor Diffuse;
-    VxColor Specular;
-    VxColor Ambient;
-    VxVector Position;
-    VxVector Direction;
-    float Range;
-    float Falloff;
-    float Attenuation0;
-    float Attenuation1;
-    float Attenuation2;
-    float InnerSpotCone;
-    float OuterSpotCone;
-};
+// CKViewportData, CKMaterialData and CKLightData are the v3 contract types
+// (CKRasterizerTypes.h).
 
 class RCKRenderManager;
 class RCKRenderContext;
@@ -570,8 +537,8 @@ struct VxDriverDescEx {
     XSArray<VxImageDescEx> TextureFormats;
     Vx2DCapsDesc Caps2D;
     Vx3DCapsDesc Caps3D;
-    CKRasterizer *Rasterizer;
-    CKRasterizerDriver *RasterizerDriver;
+    CKRasterizerDeviceLibrary *Rasterizer;
+    CKRasterizerDeviceDriver *RasterizerDriver;
 };
 
 struct VxColors {

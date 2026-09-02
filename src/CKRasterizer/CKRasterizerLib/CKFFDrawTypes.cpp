@@ -1,7 +1,7 @@
 #include "CKFFDrawTypes.h"
 #include "CKDrawStateCache.h"
 #include "CKFFStateStore.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 
 #include <string.h>
 

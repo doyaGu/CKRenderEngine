@@ -1,7 +1,7 @@
 #include "CKFFShaderKey.h"
 
 #include "CKFFStageState.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 
 #include <string.h>
 

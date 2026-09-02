@@ -1,6 +1,6 @@
 # CKRasterizer - rasterizer core and bgfx implementation
 add_subdirectory(CKRasterizerLib)
-# v3 contract headers + NULL rasterizer (phase 0, coexists with v2)
+# NULL implementation of the v3 contract (phase 0 stub, replaced in step 1.4)
 add_subdirectory(v3/CKRasterizerLib3)
 
 set(CKBGFX_RASTERIZER_SOURCES

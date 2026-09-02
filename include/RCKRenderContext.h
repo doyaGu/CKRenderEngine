@@ -4,7 +4,7 @@
 #include "CKRenderEngineTypes.h"
 #include "CKRenderContext.h"
 #include "CKRenderedScene.h"
-#include "CKRasterizerEnums.h"
+#include "CKRasterizerDeviceEnums.h"
 #include "CKFixedFunctionPipeline.h"
 
 // Forward declarations
@@ -107,6 +107,8 @@ public:
     CKDWORD GetState(VXRENDERSTATETYPE State) override;
     CKBOOL SetTexture(CKTexture *tex, CKBOOL Clamped = 0, int Stage = 0) override;
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
+    // CK2 public API: returns the v3 CKRasterizerContext. The engine still
+    // drives the internal device directly (step 1.3); wired in step 1.5.
     CKRasterizerContext *GetRasterizerContext() override;
     void ApplyRenderOptions();
     void SetClearBackground(CKBOOL ClearBack = TRUE) override;
@@ -281,8 +283,8 @@ public:
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
     CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
-    CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
-    CKRasterizerDriver *m_RasterizerDriver; // 0xAC (4 bytes)
+    CKRasterizerDevice *m_RasterizerContext; // 0xA8 (4 bytes)
+    CKRasterizerDeviceDriver *m_RasterizerDriver; // 0xAC (4 bytes)
     int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
     CKDWORD m_Shading;                      // 0xB4 (4 bytes)
     CKBOOL m_TextureEnabled;                // 0xB8 (4 bytes)

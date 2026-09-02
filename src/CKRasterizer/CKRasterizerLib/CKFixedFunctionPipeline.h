@@ -4,8 +4,8 @@
 #include "VxMath.h"
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
@@ -29,7 +29,7 @@
 #define CKRE_ENABLE_TEST_ACCESS 0
 #endif
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 class CKRasterizerEncoder;
 
 struct CKLightData;
@@ -70,7 +70,7 @@ public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 
-    bool Init(CKRasterizerContext *ctx);
+    bool Init(CKRasterizerDevice *ctx);
     CKERROR PrepareShutdown();
     CKERROR Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
@@ -182,7 +182,7 @@ private:
         CKFFSubmitSource Source;
     };
 
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     // Subsystems
     CKFFShaderCache m_ShaderCache;
     CKDrawStateCache m_DrawStateCache;
@@ -229,7 +229,7 @@ private:
     CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
     const CKDrawStateCache &GetDrawStateCache() const { return m_DrawStateCache; }
     const CKFFStateStore &GetStateStore() const { return m_State; }
-    CKRasterizerContext *GetContext() const { return m_Context; }
+    CKRasterizerDevice *GetContext() const { return m_Context; }
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);

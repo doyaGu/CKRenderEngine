@@ -25,7 +25,7 @@
 #include "CKTexture.h"
 #include "RCKRenderContext.h"
 #include "CKRenderedScene.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKParameterManager.h"
 #include "RCK3dEntity.h"
 #include "RCKLight.h"

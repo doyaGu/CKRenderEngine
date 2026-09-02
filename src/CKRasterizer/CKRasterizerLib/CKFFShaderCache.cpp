@@ -2,7 +2,7 @@
 #include "CKFFSpecializedModuleTable.h"
 #include "CKFFSamplerLayout.h"
 #include "CKFFShaderABI.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 
@@ -217,7 +217,7 @@ CKFFShaderCache::~CKFFShaderCache() {
     Shutdown();
 }
 
-bool CKFFShaderCache::Init(CKRasterizerContext *ctx) {
+bool CKFFShaderCache::Init(CKRasterizerDevice *ctx) {
     Shutdown();
     m_Context = ctx;
     m_ShaderMode = CKFFResolveShaderMode();

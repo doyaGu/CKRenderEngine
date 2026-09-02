@@ -1,7 +1,7 @@
 #ifndef CKRASTERIZERVALIDATION_H
 #define CKRASTERIZERVALIDATION_H
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 inline CKERROR CKRasterizerValidateDiscard(CKDWORD Flags)
 {

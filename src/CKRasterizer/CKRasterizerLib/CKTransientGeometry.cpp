@@ -1,7 +1,7 @@
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 #include "CKFFConstants.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKRenderFrameCostStats.h"
 
 #include <math.h>
@@ -310,7 +310,7 @@ CKTransientGeometry::~CKTransientGeometry() {
     Shutdown();
 }
 
-void CKTransientGeometry::Init(CKRasterizerContext *ctx, CKVertexLayoutCache *layoutCache) {
+void CKTransientGeometry::Init(CKRasterizerDevice *ctx, CKVertexLayoutCache *layoutCache) {
     m_Context = ctx;
     m_LayoutCache = layoutCache;
 }

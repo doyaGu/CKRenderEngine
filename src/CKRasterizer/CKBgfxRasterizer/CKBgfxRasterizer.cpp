@@ -38,7 +38,7 @@ void CKBgfxRasterizer::Close()
     m_Drivers.Clear();
 }
 
-static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
+static CKRasterizerDeviceLibrary *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
 {
     auto *rasterizer = new (std::nothrow) CKBgfxRasterizer();
     if (!rasterizer)
@@ -52,7 +52,7 @@ static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
     return rasterizer;
 }
 
-static void CKBgfxRasterizerClose(CKRasterizer *rst)
+static void CKBgfxRasterizerClose(CKRasterizerDeviceLibrary *rst)
 {
     if (!rst)
         return;
@@ -62,9 +62,9 @@ static void CKBgfxRasterizerClose(CKRasterizer *rst)
 }
 
 #ifdef CK_LIB
-void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info)
+void CKBgfxRasterizerGetInfo(CKRasterizerDeviceInfo *info)
 #else
-extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *info)
+extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerDeviceInfo *info)
 #endif
 {
     if (!info)
@@ -73,5 +73,5 @@ extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *
     info->Desc = "bgfx Rasterizer";
     info->StartFct = CKBgfxRasterizerStart;
     info->CloseFct = CKBgfxRasterizerClose;
-    info->InterfaceRevision = CKRST_INTERFACE_REVISION;
+    info->InterfaceRevision = CKRST_DEVICE_INTERFACE_REVISION;
 }

@@ -4,7 +4,7 @@
 #include "CKFFRenderPacketQueue.h"
 #include "CKFFShaderCache.h"
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 class CKRasterizerEncoder;
 class CKFFTextureBinder;
 
@@ -42,7 +42,7 @@ struct CKFFRenderPacketReplayDiagnostics {
 
 struct CKFFRenderPacketReplayContext {
     CKRasterizerEncoder *Encoder;
-    CKRasterizerContext *Context;
+    CKRasterizerDevice *Context;
     CKFFRenderPacketQueue *Queue;
     CKFFTextureBinder *TextureBinder;
     CKDWORD InstanceLayout;

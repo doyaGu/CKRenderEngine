@@ -82,14 +82,14 @@ public:
     void ReleaseRenderContextMaskFree(CKDWORD mask) { m_RenderContextMaskFree |= mask; }
 
     // Driver management
-    CKRasterizerDriver *GetDriver(int DriverIndex);
-    CKRasterizerContext *GetFullscreenContext();
+    CKRasterizerDeviceDriver *GetDriver(int DriverIndex);
+    CKRasterizerDevice *GetFullscreenContext();
     int GetPreferredSoftwareDriver();
 
     XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;  // 0x28
     XClassArray<VxCallBack> m_TemporaryPostRenderCallbacks; // 0x34
     XSObjectArray m_RenderContexts;                          // 0x40
-    XArray<CKRasterizer *> m_Rasterizers;                    // 0x48
+    XArray<CKRasterizerDeviceLibrary *> m_Rasterizers;                    // 0x48
     VxDriverDescEx *m_Drivers;                               // 0x54
     int m_DriverCount;                                       // 0x58
     CKMaterial *m_DefaultMat;                                // 0x5C

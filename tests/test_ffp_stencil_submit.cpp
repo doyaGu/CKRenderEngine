@@ -11,19 +11,19 @@
 #include <math.h>
 #include <string.h>
 
-extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizer *Rasterizer);
+extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *Rasterizer);
 
 namespace {
 
 void NullRasterizerSupportsHeadlessFFP()
 {
-    CKRasterizer *rasterizer = CKNULLRasterizerStart(NULL);
+    CKRasterizerDeviceLibrary *rasterizer = CKNULLRasterizerStart(NULL);
     TestCheck(rasterizer != NULL && rasterizer->GetDriverCount() == 1,
               "Null rasterizer must expose its headless driver");
-    CKRasterizerDriver *driver = rasterizer->GetDriver(0);
-    CKRasterizerContext *first = driver->CreateContext();
-    CKRasterizerContext *second = driver->CreateContext();
+    CKRasterizerDeviceDriver *driver = rasterizer->GetDriver(0);
+    CKRasterizerDevice *first = driver->CreateContext();
+    CKRasterizerDevice *second = driver->CreateContext();
     TestCheck(first != NULL && second != NULL &&
                   first->Create(NULL, 0, 0, 64, 64, 32, FALSE, 0, 24, 8) == CK_OK &&
                   second->Create(NULL, 0, 0, 32, 32, 32, FALSE, 0, 16, 0) == CK_OK,

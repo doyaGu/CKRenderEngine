@@ -3,11 +3,11 @@
 
 #include "VxDefines.h"
 #include "VxMatrix.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "XArray.h"
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 class CKRasterizerEncoder;
 class CKVertexLayoutCache;
 
@@ -31,7 +31,7 @@ public:
     CKTransientGeometry();
     ~CKTransientGeometry();
 
-    void Init(CKRasterizerContext *ctx, CKVertexLayoutCache *layoutCache);
+    void Init(CKRasterizerDevice *ctx, CKVertexLayoutCache *layoutCache);
     void Shutdown();
 
     // Pack VxDrawPrimitiveData (scattered attribute pointers with varying strides)
@@ -84,7 +84,7 @@ public:
                                  const float *texcoordOverrides = nullptr);
 
 private:
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     CKVertexLayoutCache *m_LayoutCache;
     CKDWORD m_LastLayout;
     CKDWORD m_LastVertexBytes;

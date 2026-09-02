@@ -1,7 +1,7 @@
 #include "RCKRenderManager.h"
 
 #include "CKLevel.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKMaterial.h"
 #include "CKParameterManager.h"
 #include "CKRenderSettings.h"
@@ -15,13 +15,13 @@
 #include "RCKVertexBuffer.h"
 
 // External reference to rasterizer info array from CK2_3D.cpp
-extern XClassArray<CKRasterizerInfo> g_RasterizersInfo;
-extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizer *Rasterizer);
+extern XClassArray<CKRasterizerDeviceInfo> g_RasterizersInfo;
+extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *Rasterizer);
 
 // Helper function to update driver description from rasterizer driver
 static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
-    CKRasterizerDriver *rstDriver = drvDesc->RasterizerDriver;
+    CKRasterizerDeviceDriver *rstDriver = drvDesc->RasterizerDriver;
 
     if (!rstDriver) {
         // NULL rasterizer case
@@ -152,8 +152,8 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     // Start rasterizers and count available drivers
     int rstInfoCount = g_RasterizersInfo.Size();
 
-    for (CKRasterizerInfo *rstInfo = g_RasterizersInfo.Begin(); rstInfo != g_RasterizersInfo.End();) {
-        CKRasterizer *rasterizer = nullptr;
+    for (CKRasterizerDeviceInfo *rstInfo = g_RasterizersInfo.Begin(); rstInfo != g_RasterizersInfo.End();) {
+        CKRasterizerDeviceLibrary *rasterizer = nullptr;
 
         if (rstInfo->StartFct) {
             rasterizer = rstInfo->StartFct(mainWindow);
@@ -179,10 +179,10 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     CKBOOL hasSoftwareDriver = FALSE;
     for (int i = 0; i < m_Rasterizers.Size() && !hasSoftwareDriver; ++i) {
-        CKRasterizer *rasterizer = m_Rasterizers[i];
+        CKRasterizerDeviceLibrary *rasterizer = m_Rasterizers[i];
         for (int driverIndex = 0; rasterizer &&
              driverIndex < rasterizer->GetDriverCount(); ++driverIndex) {
-            CKRasterizerDriver *driver = rasterizer->GetDriver(driverIndex);
+            CKRasterizerDeviceDriver *driver = rasterizer->GetDriver(driverIndex);
             if (driver && !driver->m_Hardware) {
                 hasSoftwareDriver = TRUE;
                 break;
@@ -191,15 +191,15 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     }
 
     if (!hasSoftwareDriver) {
-        CKRasterizer *fallback = CKNULLRasterizerStart(mainWindow);
+        CKRasterizerDeviceLibrary *fallback = CKNULLRasterizerStart(mainWindow);
         if (fallback && fallback->GetDriverCount() > 0) {
-            CKRasterizerInfo info;
+            CKRasterizerDeviceInfo info;
             info.StartFct = CKNULLRasterizerStart;
             info.CloseFct = CKNULLRasterizerClose;
             info.DllInstance = nullptr;
             info.DllName = "";
             info.Desc = "NULL Rasterizer";
-            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
+            info.InterfaceRevision = CKRST_DEVICE_INTERFACE_REVISION;
             g_RasterizersInfo.PushBack(info);
             m_Rasterizers.PushBack(fallback);
             m_DriverCount += fallback->GetDriverCount();
@@ -219,11 +219,11 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // First pass: enumerate hardware drivers
     for (int i = 0; i < rasterizerCount; ++i) {
-        CKRasterizer *rasterizer = m_Rasterizers[i];
+        CKRasterizerDeviceLibrary *rasterizer = m_Rasterizers[i];
         int drvCount = rasterizer->GetDriverCount();
 
         for (int k = 0; k < drvCount; ++k) {
-            CKRasterizerDriver *rstDriver = rasterizer->GetDriver(k);
+            CKRasterizerDeviceDriver *rstDriver = rasterizer->GetDriver(k);
             if (rstDriver && rstDriver->m_Hardware) {
                 VxDriverDescEx *drvDesc = &m_Drivers[driverId];
                 drvDesc->Rasterizer = rasterizer;
@@ -237,11 +237,11 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
     // Second pass: enumerate software drivers
     for (int i = 0; i < rasterizerCount; ++i) {
-        CKRasterizer *rasterizer = m_Rasterizers[i];
+        CKRasterizerDeviceLibrary *rasterizer = m_Rasterizers[i];
         int drvCount = rasterizer->GetDriverCount();
 
         for (int m = 0; m < drvCount; ++m) {
-            CKRasterizerDriver *rstDriver = rasterizer->GetDriver(m);
+            CKRasterizerDeviceDriver *rstDriver = rasterizer->GetDriver(m);
             if (!rstDriver || !rstDriver->m_Hardware) {
                 VxDriverDescEx *drvDesc = &m_Drivers[driverId];
                 drvDesc->Rasterizer = rasterizer;
@@ -291,7 +291,7 @@ RCKRenderManager::~RCKRenderManager() {
     // Close rasterizers
     int rstInfoCount = g_RasterizersInfo.Size();
     for (int i = 0; i < rstInfoCount; ++i) {
-        CKRasterizerInfo &info = g_RasterizersInfo[i];
+        CKRasterizerDeviceInfo &info = g_RasterizersInfo[i];
         if (info.CloseFct && m_Rasterizers[i]) {
             info.CloseFct(m_Rasterizers[i]);
         }
@@ -750,7 +750,7 @@ void RCKRenderManager::DetachAllObjects() {
 
 void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
     RCKRenderContext *rctx = (RCKRenderContext *) ctx;
-    CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+    CKRasterizerDevice *rstCtx = rctx->m_RasterizerContext;
 
     for (int i = 0; i < CKGetClassCount(); ++i) {
         if (CKIsChildClassOf(i, CKCID_TEXTURE)) {
@@ -1103,24 +1103,24 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
 // Driver Management
 // =====================================================
 
-CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
+CKRasterizerDeviceDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     // IDA: 0x1006f7f0
     if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
         return nullptr;
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
 
-CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
+CKRasterizerDevice *RCKRenderManager::GetFullscreenContext() {
     // v2 API: fullscreen is just a context created with Fullscreen=TRUE
     // Return the first fullscreen context found
     for (int i = 0; i < m_Rasterizers.Size(); ++i) {
-        CKRasterizer *rasterizer = m_Rasterizers[i];
+        CKRasterizerDeviceLibrary *rasterizer = m_Rasterizers[i];
         if (!rasterizer) continue;
         for (int d = 0; d < rasterizer->GetDriverCount(); ++d) {
-            CKRasterizerDriver *driver = rasterizer->GetDriver(d);
+            CKRasterizerDeviceDriver *driver = rasterizer->GetDriver(d);
             if (!driver) continue;
             for (int c = 0; c < driver->m_Contexts.Size(); ++c) {
-                CKRasterizerContext *ctx = driver->m_Contexts[c];
+                CKRasterizerDevice *ctx = driver->m_Contexts[c];
                 if (ctx && ctx->m_Fullscreen)
                     return ctx;
             }
@@ -1133,7 +1133,7 @@ int RCKRenderManager::GetPreferredSoftwareDriver() {
     // IDA: 0x100733f0
     // First pass: prefer OpenGL software driver
     for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDriver *driver = GetDriver(i);
+        CKRasterizerDeviceDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware && driver->m_2DCaps.Family == CKRST_OPENGL) {
             return i;
         }
@@ -1141,7 +1141,7 @@ int RCKRenderManager::GetPreferredSoftwareDriver() {
 
     // Second pass: any software driver
     for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDriver *driver = GetDriver(i);
+        CKRasterizerDeviceDriver *driver = GetDriver(i);
         if (driver && !driver->m_Hardware) {
             return i;
         }

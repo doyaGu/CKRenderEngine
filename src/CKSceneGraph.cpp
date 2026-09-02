@@ -2,7 +2,7 @@
 
 #include "VxVector.h"
 #include "CKRenderedScene.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCK3dEntity.h"

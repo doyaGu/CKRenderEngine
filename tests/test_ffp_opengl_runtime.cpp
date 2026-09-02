@@ -205,7 +205,7 @@ void RunShaderProgramCase(CKBgfxRasterizerContext *context,
     CKRenderSettingsClearOverridesForTests();
 }
 
-void ValidateEncoderFrameBoundary(CKRasterizerDriver *driver,
+void ValidateEncoderFrameBoundary(CKRasterizerDeviceDriver *driver,
                                   CKBgfxRasterizerContext *context)
 {
     CKUniformDesc desc;
@@ -982,11 +982,11 @@ void RunSpecializedCriticalPixelCases(CKBgfxRasterizerContext *context,
 
 void BackendRuntimeMatchesFFPPixelSemantics(CKBgfxRasterizerContext *context)
 {
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     TestCheck(context && context->GetCaps(&caps) == CK_OK,
               "Backend pixel gate must query runtime capabilities");
-    const CKRST_CAPS requiredReadbackCaps =
-        CKRST_CAPS_BLIT | CKRST_CAPS_TEXTURE_READBACK;
+    const CKRST_DEVCAPS requiredReadbackCaps =
+        CKRST_DEVCAPS_BLIT | CKRST_DEVCAPS_TEXTURE_READBACK;
     if ((caps.Features & requiredReadbackCaps) != requiredReadbackCaps) {
         printf("  coverage: backendPixelCases=0 reason=texture-readback-unavailable\n");
         return;
@@ -1352,11 +1352,11 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     TestCheck(rasterizer.GetDriverCount() > 0,
               "CKBgfxRasterizer must expose a driver");
 
-    CKRasterizerDriver *driver = rasterizer.GetDriver(0);
+    CKRasterizerDeviceDriver *driver = rasterizer.GetDriver(0);
     TestCheck(driver != NULL,
               "CKBgfxRasterizer driver must exist");
 
-    CKRasterizerContext *baseContext = driver->CreateContext();
+    CKRasterizerDevice *baseContext = driver->CreateContext();
     TestCheck(baseContext != NULL,
               "CKBgfxRasterizer driver must create a context");
     TestCheck(driver->CreateContext() == NULL,
@@ -1370,7 +1370,7 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     CKRasterizerTargetDesc target;
     TestCheck(context->GetTargetDesc(&target) == CK_OK,
               "backend runtime context must expose a target descriptor");
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     TestCheck(context->GetCaps(&caps) == CK_OK &&
                   driver->m_CapsUpToDate &&
                   driver->m_3DCaps.MaxTextureWidth > 0 &&

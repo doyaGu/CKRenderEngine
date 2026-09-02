@@ -1,7 +1,7 @@
 #ifndef CKDRAWANNOTATION_H
 #define CKDRAWANNOTATION_H
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #define CKDRAW_ANNOTATION_NAME_SIZE 96
 #define CKDRAW_ANNOTATION_PATH_SIZE 32

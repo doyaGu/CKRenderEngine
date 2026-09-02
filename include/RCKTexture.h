@@ -3,6 +3,9 @@
 
 #include "CKTexture.h"
 
+// Internal device interface (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice.h).
+class CKRasterizerDevice;
+
 class RCKRenderContext;
 
 class RCKTexture : public CKTexture {
@@ -56,7 +59,7 @@ protected:
                             int CubeMapFace);
 
     VX_PIXELFORMAT m_DesiredVideoFormat;
-    CKRasterizerContext *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerContext;
     CKDWORD m_MipMapLevel;
     CKDWORD m_ObjectIndex;
     XClassArray<VxImageDescEx> *m_MipMaps;

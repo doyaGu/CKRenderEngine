@@ -3,8 +3,8 @@
 
 #include "CKFFShaderKey.h"
 #include "CKFFConstants.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "XArray.h"
 #include "XHashTable.h"
 #include <stdint.h>
@@ -12,7 +12,7 @@
 #define CKFF_MAX_PROGRAM_BINDINGS 4096
 #define CKFF_MAX_PROGRAM_SAMPLER_BINDINGS (CKFF_MAX_TEXTURE_STAGES * 2)
 
-class CKRasterizerContext;
+class CKRasterizerDevice;
 
 enum CKFFShaderMode {
     CKFF_SHADER_MODE_RUNTIME_SPECIALIZED = 0,
@@ -116,7 +116,7 @@ public:
     CKFFShaderCache();
     ~CKFFShaderCache();
 
-    bool Init(CKRasterizerContext *ctx);
+    bool Init(CKRasterizerDevice *ctx);
     void Shutdown();
 
     // Select the fixed-function program for the given FFP shader key.
@@ -164,7 +164,7 @@ private:
     typedef XHashTable<CKFFProgramBindingCacheEntry, CKFFShaderKey, CKFFShaderKeyXHash>
         CKFFProgramCacheTable;
 
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     CKFFUniformHandles m_Uniforms;
     CKRasterizerTargetDesc m_Target;
     const void *m_BlobSet;

@@ -1,6 +1,6 @@
 #include "RCKMesh.h"
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCKMaterial.h"

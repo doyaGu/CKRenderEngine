@@ -10,7 +10,7 @@
 #include "CKSkin.h"
 #include "CKObjectAnimation.h"
 #include "CKKeyframeData.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
@@ -4138,7 +4138,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CK_FRAME_COST_ADD_MESH_DEFAULT();
     CK_RENDER_PERF_INC(renderStats, MeshDefaultCalls);
-    CKRasterizerContext *rstContext = rc->m_RasterizerContext;
+    CKRasterizerDevice *rstContext = rc->m_RasterizerContext;
 
     const int vertexCount = m_Vertices.Size();
     if (vertexCount <= 0)
@@ -4313,7 +4313,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             CKBOOL needsMultiPass = FALSE;
 
             if (renderChannels && rstContext) {
-                CKRasterizerCapsDesc caps;
+                CKRasterizerDeviceCapsDesc caps;
                 const int textureStages = rstContext->GetCaps(&caps) == CK_OK
                     ? (int)caps.MaxTextureStages
                     : 1;
@@ -4416,7 +4416,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             // Check HW vertex buffer
             VxDrawPrimitiveData *dp = &dpData;
             m_Valid++;
-            CKRasterizerCapsDesc caps;
+            CKRasterizerDeviceCapsDesc caps;
             const CKBOOL canUseVertexBuffers =
                 rstContext->GetCaps(&caps) == CK_OK &&
                 caps.MaxDynamicVertexBuffers > 0;
@@ -4834,7 +4834,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
 int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimitiveData *data, int fogEnable) {
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
-    CKRasterizerContext *rstContext = dev->m_RasterizerContext;
+    CKRasterizerDevice *rstContext = dev->m_RasterizerContext;
     CKFFStateGuard ffpState(dev->m_FFPipeline);
 
     // Setup flags for channel rendering
@@ -5357,7 +5357,7 @@ CKBOOL RCKMesh::RequiresWrapAwareHardwareVertexBuffer(CKDWORD meshFlags) {
 }
 
 CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
-                                    CKRasterizerContext *rst,
+                                    CKRasterizerDevice *rst,
                                     VxDrawPrimitiveData *data) {
     if (!renderContext || renderContext->m_RasterizerContext != rst ||
         !rst || !data)
@@ -5730,11 +5730,11 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
 // CheckHWIndexBuffer - Check and setup hardware index buffer
 // Returns TRUE if hardware IB was created/updated successfully
 //--------------------------------------------
-CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
+CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerDevice *rst) {
     if (!rst)
         return FALSE;
 
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     if (rst->GetCaps(&caps) != CK_OK || caps.MaxDynamicIndexBuffers == 0)
         return FALSE;
 

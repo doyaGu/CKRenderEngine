@@ -1,9 +1,9 @@
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <stdlib.h>
 
-extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizer *rst);
+extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *rst);
 
 static int Fail()
 {
@@ -16,7 +16,7 @@ static void ScreenShotCallback(void *, CKDWORD, CKDWORD, CKDWORD,
 {
 }
 
-static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
+static bool HasDisplayMode(CKRasterizerDeviceDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &mode = driver->m_DisplayModes[i];
@@ -33,14 +33,14 @@ static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, in
 
 int main()
 {
-    CKRasterizer *rasterizer = CKNULLRasterizerStart(NULL);
+    CKRasterizerDeviceLibrary *rasterizer = CKNULLRasterizerStart(NULL);
     if (!rasterizer)
         return Fail();
 
     if (rasterizer->GetDriverCount() != 1)
         return Fail();
 
-    CKRasterizerDriver *driver = rasterizer->GetDriver(0);
+    CKRasterizerDeviceDriver *driver = rasterizer->GetDriver(0);
     if (!driver || driver->m_Owner != rasterizer || driver->m_DriverIndex != 0)
         return Fail();
 
@@ -60,12 +60,12 @@ int main()
         (driver->m_2DCaps.Caps & CKRST_2DCAPS_3D) == 0)
         return Fail();
 
-    CKRasterizerContext *context = driver->CreateContext();
+    CKRasterizerDevice *context = driver->CreateContext();
     if (!context || context->m_Driver != driver)
         return Fail();
 
     CKRasterizerTargetDesc target;
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     if (context->GetTargetDesc(&target) != CKERR_INVALIDOPERATION ||
         context->GetCaps(&caps) != CKERR_INVALIDOPERATION)
         return Fail();
@@ -76,11 +76,11 @@ int main()
     if (context->GetTargetDesc(&target) != CK_OK ||
         target.ShaderProfile != CKRST_SHADER_PROFILE_UNKNOWN ||
         context->GetCaps(&caps) != CK_OK ||
-        (caps.Features & (CKRST_CAPS_VERTEX_SHADER | CKRST_CAPS_PIXEL_SHADER)) != 0 ||
-        (caps.Features & (CKRST_CAPS_RENDER_VIEWS | CKRST_CAPS_FRAMEBUFFER |
-                          CKRST_CAPS_BUFFER_UPDATE | CKRST_CAPS_TEXTURE_UPDATE)) !=
-            (CKRST_CAPS_RENDER_VIEWS | CKRST_CAPS_FRAMEBUFFER |
-             CKRST_CAPS_BUFFER_UPDATE | CKRST_CAPS_TEXTURE_UPDATE) ||
+        (caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) != 0 ||
+        (caps.Features & (CKRST_DEVCAPS_RENDER_VIEWS | CKRST_DEVCAPS_FRAMEBUFFER |
+                          CKRST_DEVCAPS_BUFFER_UPDATE | CKRST_DEVCAPS_TEXTURE_UPDATE)) !=
+            (CKRST_DEVCAPS_RENDER_VIEWS | CKRST_DEVCAPS_FRAMEBUFFER |
+             CKRST_DEVCAPS_BUFFER_UPDATE | CKRST_DEVCAPS_TEXTURE_UPDATE) ||
         caps.MaxRenderViews != CKRST_MAX_RENDER_VIEWS ||
         caps.MaxShaders != 0 || caps.MaxPrograms != 0 ||
         caps.MaxTextureBindings != caps.MaxTextureStages ||
@@ -115,7 +115,7 @@ int main()
         context->m_Width != 320 || context->m_Height != 240)
         return Fail();
 
-    CKRasterizerContext *secondContext = driver->CreateContext();
+    CKRasterizerDevice *secondContext = driver->CreateContext();
     if (!secondContext ||
         secondContext->Create(NULL, 0, 0, 320, 240, 32, FALSE, 60, 24, 8) !=
             CK_OK)

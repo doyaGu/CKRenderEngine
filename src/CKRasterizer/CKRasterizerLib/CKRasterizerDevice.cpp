@@ -1,4 +1,4 @@
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKRasterizerValidation.h"
 
 #include <atomic>
@@ -196,17 +196,17 @@ struct CKNullContextState {
     ~CKNullContextState();
 };
 
-static CKNullContextState *CKNullState(CKRasterizerContext *Context)
+static CKNullContextState *CKNullState(CKRasterizerDevice *Context)
 {
     return Context ? static_cast<CKNullContextState *>(Context->m_NullBackendState) : NULL;
 }
 
-static const CKNullContextState *CKNullState(const CKRasterizerContext *Context)
+static const CKNullContextState *CKNullState(const CKRasterizerDevice *Context)
 {
     return Context ? static_cast<const CKNullContextState *>(Context->m_NullBackendState) : NULL;
 }
 
-static CKBOOL CKNullIsApiThread(const CKRasterizerContext *Context)
+static CKBOOL CKNullIsApiThread(const CKRasterizerDevice *Context)
 {
     const CKNullContextState *state = CKNullState(Context);
     return state && state->ApiThread == VxThread::GetCurrentVxThreadId() ? TRUE : FALSE;
@@ -270,7 +270,7 @@ public:
     CKERROR GetStatus() const override { return m_Status.load(std::memory_order_acquire); }
     CKERROR GetFrameStatus() const { return m_FrameStatus.load(std::memory_order_acquire); }
 
-    void Reset(CKRasterizerContext *Context, CKNullContextState *State)
+    void Reset(CKRasterizerDevice *Context, CKNullContextState *State)
     {
         m_Context = Context;
         m_State = State;
@@ -635,7 +635,7 @@ private:
         }
     }
 
-    CKRasterizerContext *m_Context;
+    CKRasterizerDevice *m_Context;
     CKNullContextState *m_State;
     std::atomic<CKERROR> m_Status;
     std::atomic<CKERROR> m_FrameStatus;
@@ -664,7 +664,7 @@ CKNullContextState::~CKNullContextState()
 
 } // namespace
 
-CKRasterizerContext::CKRasterizerContext()
+CKRasterizerDevice::CKRasterizerDevice()
     : m_Driver(NULL),
       m_PosX(0),
       m_PosY(0),
@@ -682,13 +682,13 @@ CKRasterizerContext::CKRasterizerContext()
 {
 }
 
-CKRasterizerContext::~CKRasterizerContext()
+CKRasterizerDevice::~CKRasterizerDevice()
 {
     delete CKNullState(this);
     m_NullBackendState = NULL;
 }
 
-CKERROR CKRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
+CKERROR CKRasterizerDevice::Create(WIN_HANDLE Window, int PosX, int PosY,
                                     int Width, int Height, int Bpp,
                                     CKBOOL Fullscreen, int RefreshRate,
                                     int Zbpp, int StencilBpp)
@@ -714,7 +714,7 @@ CKERROR CKRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::Resize(int PosX, int PosY, int Width, int Height,
+CKERROR CKRasterizerDevice::Resize(int PosX, int PosY, int Width, int Height,
                                     CKDWORD Flags)
 {
     if (!m_Created || !CKNullIsApiThread(this))
@@ -734,7 +734,7 @@ CKERROR CKRasterizerContext::Resize(int PosX, int PosY, int Width, int Height,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetAntialias(CKDWORD Samples)
+CKERROR CKRasterizerDevice::SetAntialias(CKDWORD Samples)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -749,7 +749,7 @@ CKERROR CKRasterizerContext::SetAntialias(CKDWORD Samples)
         ? CKERR_INVALIDOPERATION : CK_OK;
 }
 
-CKBOOL CKRasterizerContext::IsIdle() const
+CKBOOL CKRasterizerDevice::IsIdle() const
 {
     const CKNullContextState *constState = CKNullState(this);
     if (!constState)
@@ -762,7 +762,7 @@ CKBOOL CKRasterizerContext::IsIdle() const
         ? TRUE : FALSE;
 }
 
-CKERROR CKRasterizerContext::GetDeviceStatus() const
+CKERROR CKRasterizerDevice::GetDeviceStatus() const
 {
     if (!m_Created)
         return CKERR_INVALIDRENDERCONTEXT;
@@ -773,7 +773,7 @@ CKERROR CKRasterizerContext::GetDeviceStatus() const
     return state->ShuttingDown ? CKERR_INVALIDOPERATION : CK_OK;
 }
 
-CKERROR CKRasterizerContext::BeginShutdown()
+CKERROR CKRasterizerDevice::BeginShutdown()
 {
     CKNullContextState *state = CKNullState(this);
     if (!m_Created || !state)
@@ -787,7 +787,7 @@ CKERROR CKRasterizerContext::BeginShutdown()
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::GetTargetDesc(CKRasterizerTargetDesc *Target) const
+CKERROR CKRasterizerDevice::GetTargetDesc(CKRasterizerTargetDesc *Target) const
 {
     if (!Target || Target->Size < sizeof(CKRasterizerTargetDesc))
         return CKERR_INVALIDPARAMETER;
@@ -797,20 +797,20 @@ CKERROR CKRasterizerContext::GetTargetDesc(CKRasterizerTargetDesc *Target) const
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::GetCaps(CKRasterizerCapsDesc *Caps) const
+CKERROR CKRasterizerDevice::GetCaps(CKRasterizerDeviceCapsDesc *Caps) const
 {
-    if (!Caps || Caps->Size < sizeof(CKRasterizerCapsDesc))
+    if (!Caps || Caps->Size < sizeof(CKRasterizerDeviceCapsDesc))
         return CKERR_INVALIDPARAMETER;
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
-    *Caps = CKRasterizerCapsDesc();
-    Caps->Features = CKRST_CAPS_RENDER_VIEWS |
-                     CKRST_CAPS_FRAMEBUFFER |
-                     CKRST_CAPS_SCISSOR |
-                     CKRST_CAPS_BUFFER_UPDATE |
-                     CKRST_CAPS_TEXTURE_UPDATE |
-                     CKRST_CAPS_DEPTH_TEXTURE |
-                     CKRST_CAPS_TRANSFORM_CACHE;
+    *Caps = CKRasterizerDeviceCapsDesc();
+    Caps->Features = CKRST_DEVCAPS_RENDER_VIEWS |
+                     CKRST_DEVCAPS_FRAMEBUFFER |
+                     CKRST_DEVCAPS_SCISSOR |
+                     CKRST_DEVCAPS_BUFFER_UPDATE |
+                     CKRST_DEVCAPS_TEXTURE_UPDATE |
+                     CKRST_DEVCAPS_DEPTH_TEXTURE |
+                     CKRST_DEVCAPS_TRANSFORM_CACHE;
     Caps->MaxDrawCalls = 1024;
     Caps->MaxTextureSize = 4096;
     Caps->MaxTextureLayers = 1;
@@ -834,7 +834,7 @@ CKERROR CKRasterizerContext::GetCaps(CKRasterizerCapsDesc *Caps) const
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
+CKERROR CKRasterizerDevice::GetTextureFormatCaps(VX_PIXELFORMAT Format,
                                                    CKTextureFormatCaps *Caps) const
 {
     if (!Caps || Caps->Size < sizeof(CKTextureFormatCaps))
@@ -849,7 +849,7 @@ CKERROR CKRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
+CKERROR CKRasterizerDevice::GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
                                                  CKDepthFormatCaps *Caps) const
 {
     if (!Caps || Caps->Size < sizeof(CKDepthFormatCaps))
@@ -873,7 +873,7 @@ CKERROR CKRasterizerContext::GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
     return CK_OK;
 }
 
-static CKERROR CKNullCreateObject(CKRasterizerContext *Context, CKDWORD Type,
+static CKERROR CKNullCreateObject(CKRasterizerDevice *Context, CKDWORD Type,
                                   CKDWORD *OutObject, CKDWORD Capacity = 0,
                                   CKDWORD Count = 0, CKDWORD Kind = 0,
                                   CKDWORD Attachment = 0,
@@ -926,7 +926,7 @@ static CKERROR CKNullCreateObject(CKRasterizerContext *Context, CKDWORD Type,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc,
+CKERROR CKRasterizerDevice::CreateVertexBuffer(const CKVertexBufferDesc *Desc,
                                                  const void *, CKDWORD *OutBuffer)
 {
     if (!OutBuffer)
@@ -945,7 +945,7 @@ CKERROR CKRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc,
                               Desc->m_MaxVertexCount);
 }
 
-CKERROR CKRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc,
+CKERROR CKRasterizerDevice::CreateIndexBuffer(const CKIndexBufferDesc *Desc,
                                                 CKBOOL Index32, const void *, CKDWORD *OutBuffer)
 {
     if (!OutBuffer)
@@ -964,7 +964,7 @@ CKERROR CKRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc,
                               Desc->m_MaxIndexCount);
 }
 
-CKERROR CKRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
+CKERROR CKRasterizerDevice::CreateTexture(const CKTextureDesc *Desc,
                                             const VxImageDescEx *, CKDWORD *OutTexture)
 {
     if (!OutTexture)
@@ -998,7 +998,7 @@ CKERROR CKRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
                               Desc->Flags);
 }
 
-CKERROR CKRasterizerContext::CreateShader(const CKShaderDesc *Desc, CKDWORD *OutShader)
+CKERROR CKRasterizerDevice::CreateShader(const CKShaderDesc *Desc, CKDWORD *OutShader)
 {
     if (!OutShader)
         return CKERR_INVALIDPARAMETER;
@@ -1011,7 +1011,7 @@ CKERROR CKRasterizerContext::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out
     return CKERR_NOTIMPLEMENTED;
 }
 
-CKERROR CKRasterizerContext::CreateProgram(const CKProgramDesc *Desc, CKDWORD *OutProgram)
+CKERROR CKRasterizerDevice::CreateProgram(const CKProgramDesc *Desc, CKDWORD *OutProgram)
 {
     if (!OutProgram)
         return CKERR_INVALIDPARAMETER;
@@ -1023,7 +1023,7 @@ CKERROR CKRasterizerContext::CreateProgram(const CKProgramDesc *Desc, CKDWORD *O
     return CKERR_NOTIMPLEMENTED;
 }
 
-CKERROR CKRasterizerContext::CreateUniform(const CKUniformDesc *Desc, CKDWORD *OutUniform)
+CKERROR CKRasterizerDevice::CreateUniform(const CKUniformDesc *Desc, CKDWORD *OutUniform)
 {
     if (!OutUniform)
         return CKERR_INVALIDPARAMETER;
@@ -1038,7 +1038,7 @@ CKERROR CKRasterizerContext::CreateUniform(const CKUniformDesc *Desc, CKDWORD *O
                               Desc->Count, Desc->Type, 0, Desc->Name);
 }
 
-CKERROR CKRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
+CKERROR CKRasterizerDevice::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
                                                  CKDWORD *OutLayout)
 {
     if (!OutLayout)
@@ -1052,7 +1052,7 @@ CKERROR CKRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
                               Desc->Stride, Desc->ElementCount);
 }
 
-CKERROR CKRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc,
+CKERROR CKRasterizerDevice::CreateFrameBuffer(const CKFrameBufferDesc *Desc,
                                                 CKDWORD *OutFrameBuffer)
 {
     if (!OutFrameBuffer)
@@ -1093,7 +1093,7 @@ CKERROR CKRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc,
                               Desc->ColorCount ? Desc->Color[0].Texture : 0);
 }
 
-CKERROR CKRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *Desc,
+CKERROR CKRasterizerDevice::CreateDepthTexture(const CKDepthTextureDesc *Desc,
                                                  CKDWORD *OutTexture)
 {
     if (!OutTexture)
@@ -1114,7 +1114,7 @@ CKERROR CKRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *Desc,
                               CKRST_TEXTURE_DEPTHSTENCIL);
 }
 
-CKERROR CKRasterizerContext::CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
+CKERROR CKRasterizerDevice::CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
                                                    CKDWORD *OutQuery)
 {
     if (!OutQuery)
@@ -1125,7 +1125,7 @@ CKERROR CKRasterizerContext::CreateOcclusionQuery(const CKOcclusionQueryDesc *De
     return Desc ? CKERR_NOTIMPLEMENTED : CKERR_INVALIDPARAMETER;
 }
 
-CKERROR CKRasterizerContext::CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
+CKERROR CKRasterizerDevice::CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
                                                    CKDWORD *OutBuffer)
 {
     if (!OutBuffer)
@@ -1136,7 +1136,7 @@ CKERROR CKRasterizerContext::CreateIndirectBuffer(const CKIndirectBufferDesc *De
     return Desc ? CKERR_NOTIMPLEMENTED : CKERR_INVALIDPARAMETER;
 }
 
-CKBOOL CKRasterizerContext::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
+CKBOOL CKRasterizerDevice::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return FALSE;
@@ -1144,7 +1144,7 @@ CKBOOL CKRasterizerContext::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
                               Object, Type);
 }
 
-CKERROR CKRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
+CKERROR CKRasterizerDevice::DeleteObject(CKDWORD Object, CKDWORD Type)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1164,7 +1164,7 @@ CKERROR CKRasterizerContext::DeleteObject(CKDWORD Object, CKDWORD Type)
     return CKERR_INVALIDPARAMETER;
 }
 
-CKERROR CKRasterizerContext::FlushObjects(CKDWORD TypeMask)
+CKERROR CKRasterizerDevice::FlushObjects(CKDWORD TypeMask)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1184,7 +1184,7 @@ CKERROR CKRasterizerContext::FlushObjects(CKDWORD TypeMask)
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
+CKERROR CKRasterizerDevice::UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
                                                  CKDWORD Size, const void *Data)
 {
     if (!m_Created || !CKNullIsApiThread(this))
@@ -1196,7 +1196,7 @@ CKERROR CKRasterizerContext::UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
         ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
-CKERROR CKRasterizerContext::UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
+CKERROR CKRasterizerDevice::UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
                                                 CKDWORD Size, const void *Data)
 {
     if (!m_Created || !CKNullIsApiThread(this))
@@ -1208,7 +1208,7 @@ CKERROR CKRasterizerContext::UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
         ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
-CKERROR CKRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
+CKERROR CKRasterizerDevice::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                             CKDWORD Face, const CKRECT *Region,
                                             const VxImageDescEx *Data)
 {
@@ -1235,7 +1235,7 @@ CKERROR CKRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
-CKERROR CKRasterizerContext::ReadTexture(CKDWORD Texture, CKDWORD Mip,
+CKERROR CKRasterizerDevice::ReadTexture(CKDWORD Texture, CKDWORD Mip,
                                          CKReadbackDesc *Readback,
                                          CKDWORD *AvailableFrame)
 {
@@ -1251,41 +1251,41 @@ CKERROR CKRasterizerContext::ReadTexture(CKDWORD Texture, CKDWORD Mip,
     return CKERR_NOTIMPLEMENTED;
 }
 
-CK_OCCLUSION_RESULT CKRasterizerContext::GetOcclusionResult(CKDWORD, CKDWORD *)
+CK_OCCLUSION_RESULT CKRasterizerDevice::GetOcclusionResult(CKDWORD, CKDWORD *)
 {
     return CKRST_OCCLUSION_NORESULT;
 }
 
-CKERROR CKRasterizerContext::SetPaletteColor(CKDWORD Index, CKDWORD)
+CKERROR CKRasterizerDevice::SetPaletteColor(CKDWORD Index, CKDWORD)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
     return Index < 16 ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
-void CKRasterizerContext::DbgTextClear(CKDWORD, CKBOOL)
+void CKRasterizerDevice::DbgTextClear(CKDWORD, CKBOOL)
 {
 }
 
-void CKRasterizerContext::DbgTextPrintf(CKWORD, CKWORD, CKDWORD, CKSTRING, ...)
+void CKRasterizerDevice::DbgTextPrintf(CKWORD, CKWORD, CKDWORD, CKSTRING, ...)
 {
 }
 
-void CKRasterizerContext::DbgTextImage(CKWORD, CKWORD, CKWORD, CKWORD, const void *, CKWORD)
+void CKRasterizerDevice::DbgTextImage(CKWORD, CKWORD, CKWORD, CKWORD, const void *, CKWORD)
 {
 }
 
-void CKRasterizerContext::SetDebug(CKDWORD)
+void CKRasterizerDevice::SetDebug(CKDWORD)
 {
 }
 
-const CKRenderStats *CKRasterizerContext::GetStats()
+const CKRasterizerDeviceStats *CKRasterizerDevice::GetStats()
 {
-    static CKRenderStats stats = {};
+    static CKRasterizerDeviceStats stats = {};
     return &stats;
 }
 
-void CKRasterizerContext::SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name)
+void CKRasterizerDevice::SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name)
 {
     if (!m_Created || !CKNullIsApiThread(this) || !Name)
         return;
@@ -1299,12 +1299,12 @@ void CKRasterizerContext::SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING
     }
 }
 
-CKDWORD CKRasterizerContext::GetShaderUniforms(CKDWORD, CKDWORD *, CKDWORD)
+CKDWORD CKRasterizerDevice::GetShaderUniforms(CKDWORD, CKDWORD *, CKDWORD)
 {
     return 0;
 }
 
-void CKRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info)
+void CKRasterizerDevice::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info)
 {
     if (!Info)
         return;
@@ -1322,7 +1322,7 @@ void CKRasterizerContext::GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info)
     Info->Count = uniform.Count;
 }
 
-CKDWORD CKRasterizerContext::GetFrameBufferTexture(CKDWORD FrameBuffer,
+CKDWORD CKRasterizerDevice::GetFrameBufferTexture(CKDWORD FrameBuffer,
                                                     CKDWORD Attachment)
 {
     if (!m_Created || !CKNullIsApiThread(this) || Attachment != 0)
@@ -1333,7 +1333,7 @@ CKDWORD CKRasterizerContext::GetFrameBufferTexture(CKDWORD FrameBuffer,
         ? frameBuffer.Attachment : 0;
 }
 
-CKBOOL CKRasterizerContext::IsTextureValid(CKDWORD Depth, CKBOOL CubeMap,
+CKBOOL CKRasterizerDevice::IsTextureValid(CKDWORD Depth, CKBOOL CubeMap,
                                             CKWORD NumLayers, CKDWORD Format,
                                             CKDWORD Flags)
 {
@@ -1345,7 +1345,7 @@ CKBOOL CKRasterizerContext::IsTextureValid(CKDWORD Depth, CKBOOL CubeMap,
                      CKRST_TEXTURE_READBACK | CKRST_TEXTURE_DEPTHSTENCIL)) == 0;
 }
 
-CKBOOL CKRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
+CKBOOL CKRasterizerDevice::IsFrameBufferValid(CKDWORD ColorCount,
                                                const CKFrameBufferAttachmentDesc *Color,
                                                const CKFrameBufferAttachmentDesc *DepthStencil)
 {
@@ -1381,7 +1381,7 @@ CKBOOL CKRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
     return ColorCount != 0 || (DepthStencil && DepthStencil->Texture != 0);
 }
 
-void CKRasterizerContext::CalcTextureSize(CKTextureInfo *Info, CKWORD Width,
+void CKRasterizerDevice::CalcTextureSize(CKTextureInfo *Info, CKWORD Width,
                                           CKWORD Height, CKWORD Depth,
                                           CKBOOL CubeMap, CKBOOL HasMips,
                                           CKWORD NumLayers, CKDWORD Format)
@@ -1421,7 +1421,7 @@ void CKRasterizerContext::CalcTextureSize(CKTextureInfo *Info, CKWORD Width,
     Info->CubeMap = CubeMap;
 }
 
-CKERROR CKRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
+CKERROR CKRasterizerDevice::RequestScreenShot(CKDWORD FrameBuffer,
                                                 CKScreenShotCallback Callback,
                                                 void *UserData)
 {
@@ -1437,7 +1437,7 @@ CKERROR CKRasterizerContext::RequestScreenShot(CKDWORD FrameBuffer,
     return CKERR_NOTIMPLEMENTED;
 }
 
-CKERROR CKRasterizerContext::CancelScreenShots(void *UserData)
+CKERROR CKRasterizerDevice::CancelScreenShots(void *UserData)
 {
     (void)UserData;
     if (!m_Created || !CKNullIsApiThread(this))
@@ -1445,7 +1445,7 @@ CKERROR CKRasterizerContext::CancelScreenShots(void *UserData)
     return CKERR_NOTFOUND;
 }
 
-CKERROR CKRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
+CKERROR CKRasterizerDevice::SetViewName(CKRenderView View, CKSTRING Name)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1455,7 +1455,7 @@ CKERROR CKRasterizerContext::SetViewName(CKRenderView View, CKSTRING Name)
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewRect(CKRenderView View, const CKRECT &Rect)
+CKERROR CKRasterizerDevice::SetViewRect(CKRenderView View, const CKRECT &Rect)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1467,7 +1467,7 @@ CKERROR CKRasterizerContext::SetViewRect(CKRenderView View, const CKRECT &Rect)
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewScissor(CKRenderView View, const CKRECT *Rect)
+CKERROR CKRasterizerDevice::SetViewScissor(CKRenderView View, const CKRECT *Rect)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1484,7 +1484,7 @@ CKERROR CKRasterizerContext::SetViewScissor(CKRenderView View, const CKRECT *Rec
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewClear(CKRenderView View, CKDWORD Flags,
+CKERROR CKRasterizerDevice::SetViewClear(CKRenderView View, CKDWORD Flags,
                                            CKDWORD Color, float Z, CKDWORD Stencil)
 {
     if (!m_Created || !CKNullIsApiThread(this))
@@ -1501,7 +1501,7 @@ CKERROR CKRasterizerContext::SetViewClear(CKRenderView View, CKDWORD Flags,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewTransform(CKRenderView View,
+CKERROR CKRasterizerDevice::SetViewTransform(CKRenderView View,
                                                const VxMatrix *ViewMatrix,
                                                const VxMatrix *ProjMatrix)
 {
@@ -1519,7 +1519,7 @@ CKERROR CKRasterizerContext::SetViewTransform(CKRenderView View,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewFrameBuffer(CKRenderView View, CKDWORD FrameBuffer)
+CKERROR CKRasterizerDevice::SetViewFrameBuffer(CKRenderView View, CKDWORD FrameBuffer)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1531,7 +1531,7 @@ CKERROR CKRasterizerContext::SetViewFrameBuffer(CKRenderView View, CKDWORD Frame
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewMode(CKRenderView View, CK_VIEW_MODE Mode)
+CKERROR CKRasterizerDevice::SetViewMode(CKRenderView View, CK_VIEW_MODE Mode)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1542,7 +1542,7 @@ CKERROR CKRasterizerContext::SetViewMode(CKRenderView View, CK_VIEW_MODE Mode)
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::SetViewOrder(CKRenderView Start, CKWORD Count,
+CKERROR CKRasterizerDevice::SetViewOrder(CKRenderView Start, CKWORD Count,
                                            const CKRenderView *Order)
 {
     if (!m_Created || !CKNullIsApiThread(this))
@@ -1562,7 +1562,7 @@ CKERROR CKRasterizerContext::SetViewOrder(CKRenderView Start, CKWORD Count,
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::ResetView(CKRenderView View)
+CKERROR CKRasterizerDevice::ResetView(CKRenderView View)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
@@ -1572,14 +1572,14 @@ CKERROR CKRasterizerContext::ResetView(CKRenderView View)
     return CK_OK;
 }
 
-CKERROR CKRasterizerContext::TouchView(CKRenderView View)
+CKERROR CKRasterizerDevice::TouchView(CKRenderView View)
 {
     if (!m_Created || !CKNullIsApiThread(this))
         return CKERR_INVALIDOPERATION;
     return View < CKRST_MAX_RENDER_VIEWS ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
-CKDWORD CKRasterizerContext::AllocTransform(VxMatrix *Transform, CKDWORD Count)
+CKDWORD CKRasterizerDevice::AllocTransform(VxMatrix *Transform, CKDWORD Count)
 {
     if (!m_Created || !Transform || Count == 0 || Count > CKRST_MAX_TRANSFORMS)
         return CKRST_INVALID_TRANSFORM;
@@ -1593,37 +1593,37 @@ CKDWORD CKRasterizerContext::AllocTransform(VxMatrix *Transform, CKDWORD Count)
     return first;
 }
 
-CKBOOL CKRasterizerContext::AllocTransientVertexBuffer(CKTransientVertexBuffer *, CKDWORD, CKDWORD)
+CKBOOL CKRasterizerDevice::AllocTransientVertexBuffer(CKTransientVertexBuffer *, CKDWORD, CKDWORD)
 {
     return FALSE;
 }
 
-CKBOOL CKRasterizerContext::AllocTransientIndexBuffer(CKTransientIndexBuffer *, CKDWORD, CKBOOL)
+CKBOOL CKRasterizerDevice::AllocTransientIndexBuffer(CKTransientIndexBuffer *, CKDWORD, CKBOOL)
 {
     return FALSE;
 }
 
-CKBOOL CKRasterizerContext::AllocTransientInstanceBuffer(CKTransientInstanceBuffer *, CKDWORD, CKDWORD)
+CKBOOL CKRasterizerDevice::AllocTransientInstanceBuffer(CKTransientInstanceBuffer *, CKDWORD, CKDWORD)
 {
     return FALSE;
 }
 
-CKDWORD CKRasterizerContext::GetAvailTransientVertexBuffer(CKDWORD, CKDWORD)
+CKDWORD CKRasterizerDevice::GetAvailTransientVertexBuffer(CKDWORD, CKDWORD)
 {
     return 0;
 }
 
-CKDWORD CKRasterizerContext::GetAvailTransientIndexBuffer(CKDWORD, CKBOOL)
+CKDWORD CKRasterizerDevice::GetAvailTransientIndexBuffer(CKDWORD, CKBOOL)
 {
     return 0;
 }
 
-CKDWORD CKRasterizerContext::GetAvailTransientInstanceBuffer(CKDWORD, CKDWORD)
+CKDWORD CKRasterizerDevice::GetAvailTransientInstanceBuffer(CKDWORD, CKDWORD)
 {
     return 0;
 }
 
-CKRasterizerEncoder *CKRasterizerContext::BeginEncoder(CKBOOL ForceNewEncoder)
+CKRasterizerEncoder *CKRasterizerDevice::BeginEncoder(CKBOOL ForceNewEncoder)
 {
     if (!m_Created)
         return NULL;
@@ -1642,7 +1642,7 @@ CKRasterizerEncoder *CKRasterizerContext::BeginEncoder(CKBOOL ForceNewEncoder)
     return encoder;
 }
 
-CKERROR CKRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
+CKERROR CKRasterizerDevice::EndEncoder(CKRasterizerEncoder *Encoder)
 {
     if (!Encoder)
         return CKERR_INVALIDPARAMETER;
@@ -1664,7 +1664,7 @@ CKERROR CKRasterizerContext::EndEncoder(CKRasterizerEncoder *Encoder)
     return status;
 }
 
-CKERROR CKRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
+CKERROR CKRasterizerDevice::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
                                    CKDWORD Flags, CKDWORD *FrameNumber)
 {
     if (!m_Created || !CKNullIsApiThread(this))

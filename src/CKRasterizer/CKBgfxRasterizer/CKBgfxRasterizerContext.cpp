@@ -929,7 +929,7 @@ void CKBgfxEncoder::SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
 {
     if (!CanSubmit())
         return;
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0) {
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_INSTANCING) == 0) {
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
@@ -1113,7 +1113,7 @@ void CKBgfxEncoder::SetTexture(CKDWORD Stage, CKDWORD Uniform,
     if (Sampler) {
         if (Sampler->CompareFunc != CKRST_COMPARE_NONE) {
             if (!texRec ||
-                (m_Context->m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) == 0 ||
+                (m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_COMPARISON) == 0 ||
                 (CKBgfxMapFormatCaps(m_Context->m_NativeFormatCaps[texRec->Format],
                                      FALSE, TRUE) &
                  CKRST_FORMAT_CAPS_TEXTURE_COMPARE) == 0) {
@@ -1492,7 +1492,7 @@ void CKBgfxEncoder::Blit(CKRenderView View,
         SetError(CKERR_INVALIDPARAMETER);
         return;
     }
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_BLIT) == 0 ||
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_BLIT) == 0 ||
         (dst->Flags & CKRST_TEXTURE_BLIT_DST) == 0 ||
         dst->Format != src->Format) {
         SetError(CKERR_NOTIMPLEMENTED);
@@ -1559,7 +1559,7 @@ void CKBgfxEncoder::SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
         SetError(CKERR_INVALIDPARAMETER);
         return;
     }
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0) {
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0) {
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
@@ -1609,8 +1609,8 @@ void CKBgfxEncoder::SetComputeImage(CKDWORD Stage, CKDWORD Texture,
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0 ||
-        (m_Context->m_CapsDesc.Features & CKRST_CAPS_IMAGE_RW) == 0) {
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0 ||
+        (m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_IMAGE_RW) == 0) {
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
@@ -1797,7 +1797,7 @@ void CKBgfxEncoder::Dispatch(CKRenderView View, CKDWORD Program,
     m_DebugSpecializationValid = FALSE;
     if (!CanSubmit())
         return;
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0) {
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0) {
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
@@ -1830,8 +1830,8 @@ void CKBgfxEncoder::DispatchIndirect(CKRenderView View, CKDWORD Program,
 {
     if (!CanSubmit())
         return;
-    if ((m_Context->m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0 ||
-        (m_Context->m_CapsDesc.Features & CKRST_CAPS_DRAW_INDIRECT) == 0) {
+    if ((m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0 ||
+        (m_Context->m_CapsDesc.Features & CKRST_DEVCAPS_DRAW_INDIRECT) == 0) {
         SetError(CKERR_NOTIMPLEMENTED);
         return;
     }
@@ -2174,7 +2174,7 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_TargetDesc.ShaderProfile = CKBgfxShaderProfile(actualRenderer);
     m_TargetDesc.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
     m_TargetDesc.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
-    m_CapsDesc = CKRasterizerCapsDesc();
+    m_CapsDesc = CKRasterizerDeviceCapsDesc();
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
     if (caps) {
         m_NativeSupported = caps->supported;
@@ -2220,41 +2220,41 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
         m_CapsDesc.MinUniformBufferSize = limits.minUniformBufferSize;
         m_CapsDesc.MaxTransforms = CKRST_MAX_TRANSFORMS;
 
-        m_CapsDesc.Features = CKRST_CAPS_VERTEX_SHADER |
-                              CKRST_CAPS_PIXEL_SHADER |
-                              CKRST_CAPS_RENDER_VIEWS |
-                              CKRST_CAPS_FRAMEBUFFER |
-                              CKRST_CAPS_TRANSIENT_BUFFERS |
-                              CKRST_CAPS_SCISSOR |
-                              CKRST_CAPS_BUFFER_UPDATE |
-                              CKRST_CAPS_TEXTURE_UPDATE |
-                              CKRST_CAPS_BLEND_EQUATION |
-                              CKRST_CAPS_TRANSFORM_CACHE |
-                              CKRST_CAPS_TEXTURE_CUBE;
+        m_CapsDesc.Features = CKRST_DEVCAPS_VERTEX_SHADER |
+                              CKRST_DEVCAPS_PIXEL_SHADER |
+                              CKRST_DEVCAPS_RENDER_VIEWS |
+                              CKRST_DEVCAPS_FRAMEBUFFER |
+                              CKRST_DEVCAPS_TRANSIENT_BUFFERS |
+                              CKRST_DEVCAPS_SCISSOR |
+                              CKRST_DEVCAPS_BUFFER_UPDATE |
+                              CKRST_DEVCAPS_TEXTURE_UPDATE |
+                              CKRST_DEVCAPS_BLEND_EQUATION |
+                              CKRST_DEVCAPS_TRANSFORM_CACHE |
+                              CKRST_DEVCAPS_TEXTURE_CUBE;
         if (caps->supported & BGFX_CAPS_INSTANCING)
-            m_CapsDesc.Features |= CKRST_CAPS_INSTANCING;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_INSTANCING;
         if (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK)
-            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_READBACK;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_TEXTURE_READBACK;
         if (caps->supported & BGFX_CAPS_TEXTURE_BLIT)
-            m_CapsDesc.Features |= CKRST_CAPS_BLIT;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_BLIT;
         if (caps->supported & BGFX_CAPS_INDEX32)
-            m_CapsDesc.Features |= CKRST_CAPS_INDEX32;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_INDEX32;
         if (caps->supported & BGFX_CAPS_TEXTURE_COMPARE_ALL)
-            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_COMPARISON;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_TEXTURE_COMPARISON;
         if (caps->supported & BGFX_CAPS_COMPUTE)
-            m_CapsDesc.Features |= CKRST_CAPS_COMPUTE;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_COMPUTE;
         if (caps->supported & BGFX_CAPS_OCCLUSION_QUERY)
-            m_CapsDesc.Features |= CKRST_CAPS_OCCLUSION_QUERY;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_OCCLUSION_QUERY;
         if (caps->supported & BGFX_CAPS_DRAW_INDIRECT)
-            m_CapsDesc.Features |= CKRST_CAPS_DRAW_INDIRECT;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_DRAW_INDIRECT;
         if (caps->supported & BGFX_CAPS_TEXTURE_3D)
-            m_CapsDesc.Features |= CKRST_CAPS_TEXTURE_3D;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_TEXTURE_3D;
         if (caps->supported & BGFX_CAPS_IMAGE_RW)
-            m_CapsDesc.Features |= CKRST_CAPS_IMAGE_RW;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_IMAGE_RW;
         if (caps->supported & BGFX_CAPS_VERTEX_ATTRIB_HALF)
-            m_CapsDesc.Features |= CKRST_CAPS_VERTEX_ATTRIB_HALF;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_VERTEX_ATTRIB_HALF;
         if (caps->supported & BGFX_CAPS_VERTEX_ATTRIB_UINT10)
-            m_CapsDesc.Features |= CKRST_CAPS_VERTEX_ATTRIB_UINT10;
+            m_CapsDesc.Features |= CKRST_DEVCAPS_VERTEX_ATTRIB_UINT10;
 
         const bgfx::TextureFormat::Enum depthFormats[] = {
             bgfx::TextureFormat::D16,
@@ -2267,7 +2267,7 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
             BGFX_CAPS_FORMAT_TEXTURE_2D;
         for (CKDWORD i = 0; i < sizeof(depthFormats) / sizeof(depthFormats[0]); ++i) {
             if ((m_NativeFormatCaps[depthFormats[i]] & depthTextureCaps) == depthTextureCaps) {
-                m_CapsDesc.Features |= CKRST_CAPS_DEPTH_TEXTURE;
+                m_CapsDesc.Features |= CKRST_DEVCAPS_DEPTH_TEXTURE;
                 break;
             }
         }
@@ -2525,9 +2525,9 @@ static CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
     return result;
 }
 
-CKERROR CKBgfxRasterizerContext::GetCaps(CKRasterizerCapsDesc *Caps) const
+CKERROR CKBgfxRasterizerContext::GetCaps(CKRasterizerDeviceCapsDesc *Caps) const
 {
-    if (!Caps || Caps->Size < sizeof(CKRasterizerCapsDesc))
+    if (!Caps || Caps->Size < sizeof(CKRasterizerDeviceCapsDesc))
         return CKERR_INVALIDPARAMETER;
     if (!m_BgfxInitialized || !m_Created || !IsApiThread())
         return CKERR_INVALIDOPERATION;
@@ -2548,7 +2548,7 @@ CKERROR CKBgfxRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
     *Caps = CKTextureFormatCaps();
     Caps->Format = Format;
     const CKBOOL allowReadback =
-        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) != 0 &&
+        (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_READBACK) != 0 &&
         CKBgfxCanExposeReadback(Format, nativeFormat)
             ? TRUE : FALSE;
     Caps->Caps = CKBgfxMapFormatCaps(
@@ -2572,7 +2572,7 @@ CKERROR CKBgfxRasterizerContext::GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
     Caps->Format = Format;
     Caps->Caps = CKBgfxMapFormatCaps(
         m_NativeFormatCaps[nativeFormat], FALSE,
-        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) != 0 ? TRUE : FALSE);
+        (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_COMPARISON) != 0 ? TRUE : FALSE);
     return CK_OK;
 }
 
@@ -2782,7 +2782,7 @@ CKERROR CKBgfxRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *De
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
     if ((Desc->m_Flags & (CKRST_VB_COMPUTE_READ | CKRST_VB_COMPUTE_WRITE)) &&
-        (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0)
         return CKERR_NOTIMPLEMENTED;
     if ((Desc->m_Flags & CKRST_VB_COMPUTE_WRITE) && Data)
         return CKERR_INVALIDPARAMETER;
@@ -2870,7 +2870,7 @@ CKERROR CKBgfxRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc
         return CKERR_INVALIDPARAMETER;
     if (Desc->m_MaxIndexCount == 0)
         return CKERR_INVALIDPARAMETER;
-    if (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0)
+    if (Index32 && (m_CapsDesc.Features & CKRST_DEVCAPS_INDEX32) == 0)
         return CKERR_NOTIMPLEMENTED;
 
     CKDWORD indexSize = Index32 ? 4 : 2;
@@ -2965,7 +2965,7 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
         return CKERR_NOTIMPLEMENTED;
     }
     const CKBOOL allowReadback =
-        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) != 0 &&
+        (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_READBACK) != 0 &&
         CKBgfxCanExposeReadback(pf, fmt)
             ? TRUE : FALSE;
     const CKDWORD formatCaps = CKBgfxMapFormatCaps(
@@ -2979,24 +2979,24 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
                                                : CKRST_FORMAT_CAPS_TEXTURE_2D);
     if ((formatCaps & requiredFormatCaps) == 0)
         return CKERR_NOTIMPLEMENTED;
-    if (cube && (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_CUBE) == 0)
+    if (cube && (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_CUBE) == 0)
         return CKERR_NOTIMPLEMENTED;
-    if (volume && (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_3D) == 0)
+    if (volume && (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_3D) == 0)
         return CKERR_NOTIMPLEMENTED;
     if ((Desc->Flags & CKRST_TEXTURE_RENDERTARGET) &&
         (formatCaps & CKRST_FORMAT_CAPS_FRAMEBUFFER) == 0)
         return CKERR_NOTIMPLEMENTED;
     if (Desc->Flags & CKRST_TEXTURE_READBACK) {
         if (cube || volume ||
-            (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_READBACK) == 0 ||
+            (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_READBACK) == 0 ||
             (formatCaps & CKRST_FORMAT_CAPS_READBACK) == 0)
             return CKERR_NOTIMPLEMENTED;
     }
     if ((Desc->Flags & CKRST_TEXTURE_BLIT_DST) &&
-        (m_CapsDesc.Features & CKRST_CAPS_BLIT) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_BLIT) == 0)
         return CKERR_NOTIMPLEMENTED;
     if (Desc->Flags & CKRST_TEXTURE_COMPUTE_WRITE) {
-        if ((m_CapsDesc.Features & CKRST_CAPS_IMAGE_RW) == 0 ||
+        if ((m_CapsDesc.Features & CKRST_DEVCAPS_IMAGE_RW) == 0 ||
             (formatCaps & CKRST_FORMAT_CAPS_IMAGE_WRITE) == 0)
             return CKERR_NOTIMPLEMENTED;
     }
@@ -3232,7 +3232,7 @@ CKERROR CKBgfxRasterizerContext::CreateShader(const CKShaderDesc *Desc,
         Desc->Stage != CKRST_SHADER_COMPUTE)
         return CKERR_INVALIDPARAMETER;
     if (Desc->Stage == CKRST_SHADER_COMPUTE &&
-        (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0)
         return CKERR_NOTIMPLEMENTED;
     if (!Desc->Code || Desc->CodeSize == 0) {
         CKBgfxLogf("CreateShader",
@@ -3315,7 +3315,7 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKProgramDesc *Desc,
     if (vs && vs->Stage == CKRST_SHADER_COMPUTE)
     {
         if (Desc->PixelShader != 0 ||
-            (m_CapsDesc.Features & CKRST_CAPS_COMPUTE) == 0)
+            (m_CapsDesc.Features & CKRST_DEVCAPS_COMPUTE) == 0)
             return CKERR_INVALIDPARAMETER;
         handle = bgfx::createProgram(vs->Handle, false);
         if (!bgfx::isValid(handle))
@@ -3450,10 +3450,10 @@ CKERROR CKBgfxRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *De
             !CKBgfxTryAttribType(elem.Type, nativeTypes[i]))
             return CKERR_INVALIDPARAMETER;
         if (elem.Type == CKRST_ATTRIBTYPE_HALF &&
-            (m_CapsDesc.Features & CKRST_CAPS_VERTEX_ATTRIB_HALF) == 0)
+            (m_CapsDesc.Features & CKRST_DEVCAPS_VERTEX_ATTRIB_HALF) == 0)
             return CKERR_NOTIMPLEMENTED;
         if (elem.Type == CKRST_ATTRIBTYPE_UINT10 &&
-            (m_CapsDesc.Features & CKRST_CAPS_VERTEX_ATTRIB_UINT10) == 0)
+            (m_CapsDesc.Features & CKRST_DEVCAPS_VERTEX_ATTRIB_UINT10) == 0)
             return CKERR_NOTIMPLEMENTED;
         usedAttribs[elem.Attrib] = TRUE;
         order[i] = i;
@@ -3620,7 +3620,7 @@ CKERROR CKBgfxRasterizerContext::CreateFrameBuffer(const CKFrameBufferDesc *Desc
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    if ((m_CapsDesc.Features & CKRST_CAPS_FRAMEBUFFER) == 0)
+    if ((m_CapsDesc.Features & CKRST_DEVCAPS_FRAMEBUFFER) == 0)
         return CKERR_NOTIMPLEMENTED;
 
     bgfx::Attachment attachments[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];
@@ -3675,7 +3675,7 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *De
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    if ((m_CapsDesc.Features & CKRST_CAPS_DEPTH_TEXTURE) == 0)
+    if ((m_CapsDesc.Features & CKRST_DEVCAPS_DEPTH_TEXTURE) == 0)
         return CKERR_NOTIMPLEMENTED;
     if (Desc->Width == 0 || Desc->Height == 0 ||
         Desc->Width > m_CapsDesc.MaxTextureSize ||
@@ -3689,7 +3689,7 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *De
         return CKERR_INVALIDPARAMETER;
     const CKDWORD formatCaps = CKBgfxMapFormatCaps(
         m_NativeFormatCaps[fmt], FALSE,
-        (m_CapsDesc.Features & CKRST_CAPS_TEXTURE_COMPARISON) != 0);
+        (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_COMPARISON) != 0);
     const CKDWORD requiredCaps =
         CKRST_FORMAT_CAPS_FRAMEBUFFER | CKRST_FORMAT_CAPS_TEXTURE_2D;
     if ((formatCaps & requiredCaps) != requiredCaps)
@@ -4577,7 +4577,7 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer(
     CKTransientIndexBuffer *Buffer, CKDWORD IndexCount, CKBOOL Index32)
 {
     if (!m_BgfxInitialized || !m_Created || !Buffer || IndexCount == 0 ||
-        (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0))
+        (Index32 && (m_CapsDesc.Features & CKRST_DEVCAPS_INDEX32) == 0))
         return FALSE;
 
     VxMutexLock poolLock(m_TransientPoolMutex);
@@ -4618,7 +4618,7 @@ CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer(
     CKTransientInstanceBuffer *Buffer, CKDWORD InstanceCount, CKDWORD Layout)
 {
     if (!m_BgfxInitialized || !m_Created || !Buffer || InstanceCount == 0 ||
-        (m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_INSTANCING) == 0)
         return FALSE;
 
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
@@ -4679,7 +4679,7 @@ CKDWORD CKBgfxRasterizerContext::GetAvailTransientIndexBuffer(
     CKDWORD IndexCount, CKBOOL Index32)
 {
     if (!m_BgfxInitialized || !m_Created || IndexCount == 0 ||
-        (Index32 && (m_CapsDesc.Features & CKRST_CAPS_INDEX32) == 0))
+        (Index32 && (m_CapsDesc.Features & CKRST_DEVCAPS_INDEX32) == 0))
         return 0;
     return bgfx::getAvailTransientIndexBuffer(IndexCount, Index32 ? true : false);
 }
@@ -4688,7 +4688,7 @@ CKDWORD CKBgfxRasterizerContext::GetAvailTransientInstanceBuffer(
     CKDWORD InstanceCount, CKDWORD Layout)
 {
     if (!m_BgfxInitialized || !m_Created || InstanceCount == 0 ||
-        (m_CapsDesc.Features & CKRST_CAPS_INSTANCING) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_INSTANCING) == 0)
         return 0;
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
@@ -5006,7 +5006,7 @@ CKERROR CKBgfxRasterizerContext::CreateOcclusionQuery(const CKOcclusionQueryDesc
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    if ((m_CapsDesc.Features & CKRST_CAPS_OCCLUSION_QUERY) == 0)
+    if ((m_CapsDesc.Features & CKRST_DEVCAPS_OCCLUSION_QUERY) == 0)
         return CKERR_NOTIMPLEMENTED;
 
     bgfx::OcclusionQueryHandle handle = bgfx::createOcclusionQuery();
@@ -5042,7 +5042,7 @@ CKERROR CKBgfxRasterizerContext::CreateIndirectBuffer(const CKIndirectBufferDesc
         return CKERR_INVALIDOPERATION;
     if (!Desc || Desc->MaxCommands == 0)
         return CKERR_INVALIDPARAMETER;
-    if ((m_CapsDesc.Features & CKRST_CAPS_DRAW_INDIRECT) == 0)
+    if ((m_CapsDesc.Features & CKRST_DEVCAPS_DRAW_INDIRECT) == 0)
         return CKERR_NOTIMPLEMENTED;
 
     bgfx::IndirectBufferHandle handle = bgfx::createIndirectBuffer(Desc->MaxCommands);
@@ -5168,7 +5168,7 @@ void CKBgfxRasterizerContext::SetDebug(CKDWORD Flags)
 // Statistics
 // ===========================================================================
 
-const CKRenderStats *CKBgfxRasterizerContext::GetStats()
+const CKRasterizerDeviceStats *CKBgfxRasterizerContext::GetStats()
 {
     if (!m_BgfxInitialized || !IsApiThread())
         return &m_Stats;
@@ -5367,7 +5367,7 @@ CKBOOL CKBgfxRasterizerContext::IsFrameBufferValid(CKDWORD ColorCount,
                                                     const CKFrameBufferAttachmentDesc *DepthStencil)
 {
     if (!m_BgfxInitialized || !IsApiThread() ||
-        (m_CapsDesc.Features & CKRST_CAPS_FRAMEBUFFER) == 0)
+        (m_CapsDesc.Features & CKRST_DEVCAPS_FRAMEBUFFER) == 0)
         return FALSE;
 
     bgfx::Attachment attachments[CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS];

@@ -2,7 +2,7 @@
 
 #include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
 {

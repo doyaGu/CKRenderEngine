@@ -3,8 +3,8 @@
 
 #include "CKFFConstants.h"
 #include "CKFFShaderCache.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKRenderConfig.h"
 #include "CKRenderPerfClock.h"
 

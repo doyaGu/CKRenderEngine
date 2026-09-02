@@ -4,7 +4,7 @@
 #include "VxMath.h"
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKFFConstants.h"
 
 #define CKFF_RENDER_PACKET_MAX_UNIFORMS 16

@@ -1,8 +1,8 @@
-# CKRasterizerLib3 - CKRasterizer v3 contract headers, NULL rasterizer and
-# capability baseline (phase 0). Coexists with the v2 CKRasterizerLib; phase 1
-# moves the headers over include/ and merges this target into CKRasterizerLib.
+# CKRasterizerLib3 - NULL implementation of the CKRasterizer v3 contract
+# (include/CKRasterizer*.h) plus the capability baseline. Phase 1 step 1.4
+# replaces it with the translation core in CKRasterizerLib.
 
-set(CKRASTERIZER_LIB3_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+set(CKRASTERIZER_LIB3_INCLUDE_DIR "${CKRE_INCLUDE_DIR}")
 # The capability baseline lives in the v2 CKRasterizerLib directory because the
 # bgfx plugin (still v2 in phase 0) consumes it too. This library compiles the
 # same source; no executable links both libraries before phase 1 merges them.
@@ -26,8 +26,8 @@ set(CKRASTERIZER_LIB3_HEADERS
 add_library(CKRasterizerLib3 STATIC ${CKRASTERIZER_LIB3_SOURCES} ${CKRASTERIZER_LIB3_HEADERS})
 target_compile_features(CKRasterizerLib3 PRIVATE cxx_std_20)
 
-# The v3 include directory must shadow the v2 include/ directory for every
-# consumer of this target, so it is PUBLIC and listed first.
+# Consumers of this target see only the public v3 headers, the NULL
+# rasterizer and the capability baseline.
 target_include_directories(CKRasterizerLib3
         PUBLIC
         $<BUILD_INTERFACE:${CKRASTERIZER_LIB3_INCLUDE_DIR}>

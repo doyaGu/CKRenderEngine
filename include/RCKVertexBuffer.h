@@ -3,7 +3,7 @@
 
 #include "VxMemoryPool.h"
 #include "CKVertexBuffer.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceTypes.h"
 
 struct RCKVertexBuffer : public CKVertexBuffer {
 public:
@@ -33,7 +33,7 @@ protected:
     VxDrawPrimitiveData m_LockedData;
     CKDWORD m_FormatFlags;
     CKDWORD m_VertexLayout;
-    CKRasterizerContext *m_RasterizerContext;
+    CKRasterizerDevice *m_RasterizerContext;
     CKBOOL m_HardwareValid;
     CKDWORD m_LockedStart;
     CKDWORD m_LockedCount;

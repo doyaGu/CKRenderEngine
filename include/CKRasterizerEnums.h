@@ -1,49 +1,68 @@
 #ifndef CKRASTERIZERENUMS_H
 #define CKRASTERIZERENUMS_H
 
+// CKRasterizer v3 contract: enumerations and constants.
+//
+// The v3 contract is D3D7 shaped: the engine sets fixed-function state
+// (render states, texture stage states, transforms, lights, material,
+// viewport, clip planes) and issues draws; all translation to a modern GPU
+// API happens below this boundary (spec: docs/spec/2026-09-01-render-engine-
+// redesign-v3.md, section 4).
+//
+// The internal device interface of the translation core
+// (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice*.h) includes this header for the
+// enumerations both layers share.
+
 #include <stdint.h>
 
 #include "VxDefines.h"
+#include "CKTypes.h"  // CKDWORD
 
 // ===========================================================================
-// Shared Enums (from v1, still used by v2 API)
+// Contract revision (spec 4.1)
 // ===========================================================================
 
-/******************************************************************************
-// CKRasterizerContext::Clear Flags
-*******************************************************************************/
-typedef enum CKRST_CTXCLEAR_FLAGS
-{
-    CKRST_CTXCLEAR_DEPTH	= 0x00000010,
-    CKRST_CTXCLEAR_COLOR	= 0x00000020,
-    CKRST_CTXCLEAR_STENCIL	= 0x00000040,
-    CKRST_CTXCLEAR_VIEWPORT	= 0x00000100,
-    CKRST_CTXCLEAR_ALL		= 0xFFFFFFFF,
+#define CKRST_INTERFACE_REVISION 0x00030000u
+
+// ===========================================================================
+// Limits
+// ===========================================================================
+
+#define CKRST_MAX_TEXTURE_STAGES        8
+#define CKRST_MAX_LIGHTS                8
+#define CKRST_MAX_USER_CLIP_PLANES      6
+#define CKRST_MAX_WORLD_MATRICES        4   // VXMATRIX_WORLDMATRIX(0..3)
+#define CKRST_MAX_TEXCOORD_DIMS         4
+
+// ===========================================================================
+// Object kinds (spec 4.5)
+// ===========================================================================
+// Only three kinds of handles cross the contract. Framebuffers, depth
+// buffers, shaders, programs, uniforms, vertex layouts and samplers are
+// rasterizer-internal objects.
+
+#define CKRST_OBJ_TEXTURE         0x00000001u
+#define CKRST_OBJ_VERTEXBUFFER    0x00000004u
+#define CKRST_OBJ_INDEXBUFFER     0x00000008u
+#define CKRST_OBJ_ALL             0xFFFFFFFFu
+
+// ===========================================================================
+// Clear flags (spec 4.3, v1 section 15)
+// ===========================================================================
+
+typedef enum CKRST_CTXCLEAR_FLAGS {
+    CKRST_CTXCLEAR_DEPTH    = 0x00000010,
+    CKRST_CTXCLEAR_COLOR    = 0x00000020,
+    CKRST_CTXCLEAR_STENCIL  = 0x00000040,
+    CKRST_CTXCLEAR_VIEWPORT = 0x00000100,
+    CKRST_CTXCLEAR_ALL      = 0xFFFFFFFF,
 } CKRST_CTXCLEAR_FLAGS;
 
-/******************************************************************************
-// CKRasterizerContext::Frame sync handling
-*******************************************************************************/
-typedef enum CKRST_FRAME_SYNC_MODE
-{
-    CKRST_FRAME_SYNC_IMMEDIATE        = 0,
-    CKRST_FRAME_SYNC_VSYNC            = 1,
-    CKRST_FRAME_SYNC_PRESERVE_PRESENT = 2,
-} CKRST_FRAME_SYNC_MODE;
+// ===========================================================================
+// Cube map faces
+// ===========================================================================
 
-typedef enum CKRST_FRAME_FLAGS
-{
-    CKRST_FRAME_NONE    = 0x00,
-    CKRST_FRAME_CAPTURE = 0x01,
-    CKRST_FRAME_DISCARD = 0x02,
-    CKRST_FRAME_FLUSH   = 0x04,
-} CKRST_FRAME_FLAGS;
-
-/****************************************************************
-// Cube Map Face Index
-*****************************************************************/
-typedef enum CKRST_CUBEFACE
-{
+typedef enum CKRST_CUBEFACE {
     CKRST_CUBEFACE_XPOS = 0,
     CKRST_CUBEFACE_XNEG = 1,
     CKRST_CUBEFACE_YPOS = 2,
@@ -52,431 +71,241 @@ typedef enum CKRST_CUBEFACE
     CKRST_CUBEFACE_ZNEG = 5
 } CKRST_CUBEFACE;
 
-/*************************************************************************************
-// Texture Flags
-*************************************************************************************/
-typedef enum CKRST_TEXTUREFLAGS
-{
-    CKRST_TEXTURE_VALID				 = 0x00000001,
-    CKRST_TEXTURE_COMPRESSION		 = 0x00000004,
-    CKRST_TEXTURE_MANAGED			 = 0x00000080,
-    CKRST_TEXTURE_HINTPROCEDURAL	 = 0x00000100,
-    CKRST_TEXTURE_HINTSTATIC		 = 0x00000200,
-    CKRST_TEXTURE_SPRITE			 = 0x00000400,
+#define CKRST_CUBEFACE_COUNT 6
 
-    CKRST_TEXTURE_RGB				 = 0x00000800,
-    CKRST_TEXTURE_ALPHA				 = 0x00001000,
+// ===========================================================================
+// Texture flags (CKTextureDesc::Flags)
+// ===========================================================================
 
-    CKRST_TEXTURE_CUBEMAP			 = 0x00002000,
-    CKRST_TEXTURE_BUMPDUDV			 = 0x00004000,
-    CKRST_TEXTURE_FORCEPOW2			 = 0x00008000,
-    CKRST_TEXTURE_HINTCOLORKEY		 = 0x00010000,
-    CKRST_TEXTURE_HINTALPHAONE		 = 0x00020000,
-    CKRST_TEXTURE_RLESPRITE			 = 0x00040000,
-    CKRST_TEXTURE_SURFATTACHED		 = 0x00080000,
+typedef enum CKRST_TEXTUREFLAGS {
+    CKRST_TEXTURE_VALID              = 0x00000001,
+    CKRST_TEXTURE_COMPRESSION        = 0x00000004,
+    CKRST_TEXTURE_MANAGED            = 0x00000080,
+    CKRST_TEXTURE_HINTPROCEDURAL     = 0x00000100,
+    CKRST_TEXTURE_HINTSTATIC         = 0x00000200,
+    CKRST_TEXTURE_SPRITE             = 0x00000400,
 
-    CKRST_TEXTURE_VOLUMEMAP			 = 0x00100000,
+    CKRST_TEXTURE_RGB                = 0x00000800,
+    CKRST_TEXTURE_ALPHA              = 0x00001000,
+
+    CKRST_TEXTURE_CUBEMAP            = 0x00002000,
+    CKRST_TEXTURE_BUMPDUDV           = 0x00004000,
+    CKRST_TEXTURE_FORCEPOW2          = 0x00008000,
+    CKRST_TEXTURE_HINTCOLORKEY       = 0x00010000,
+    CKRST_TEXTURE_HINTALPHAONE       = 0x00020000,
+    CKRST_TEXTURE_RLESPRITE          = 0x00040000,
+    CKRST_TEXTURE_SURFATTACHED       = 0x00080000,
+
+    CKRST_TEXTURE_VOLUMEMAP          = 0x00100000,
     CKRST_TEXTURE_CONDITIONALNONPOW2 = 0x00200000,
-    CKRST_TEXTURE_BUMPLUMINANCE		 = 0x00400000,
+    CKRST_TEXTURE_BUMPLUMINANCE      = 0x00400000,
 
-    CKRST_TEXTURE_RENDERTARGET		 = 0x10000000
+    CKRST_TEXTURE_RENDERTARGET       = 0x10000000
 } CKRST_TEXTUREFLAGS;
 
-/******************************************************************
-// Vertex or Index Buffer flags
-*******************************************************************/
-typedef enum CKRST_VBFLAGS
-{
-    CKRST_VB_VALID	    = 0x00000001,
-    CKRST_VB_WRITEONLY  = 0x00000004,
-    CKRST_VB_DYNAMIC    = 0x00000008,
-    CKRST_VB_SHARED	    = 0x00000010,
+// MipMapCount convention (spec 4.5): 0 or 1 = no mips; N = the engine
+// uploads N levels itself; CKRST_MIPMAP_GENERATE = upload level 0 only and
+// let the rasterizer build the full chain with a CPU box filter.
+#define CKRST_MIPMAP_GENERATE ((CKDWORD)-1)
+
+// ===========================================================================
+// Vertex / index buffer flags
+// ===========================================================================
+
+typedef enum CKRST_VBFLAGS {
+    CKRST_VB_VALID     = 0x00000001,
+    CKRST_VB_WRITEONLY = 0x00000004,
+    CKRST_VB_DYNAMIC   = 0x00000008,
+    CKRST_VB_SHARED    = 0x00000010,
 } CKRST_VBFLAGS;
 
-/*****************************************************************
-// Lock flags
-******************************************************************/
-typedef enum CKRST_LOCKFLAGS
-{
-    CKRST_LOCK_DEFAULT		= 0x00000000,
-    CKRST_LOCK_NOOVERWRITE	= 0x00000001,
-    CKRST_LOCK_DISCARD		= 0x00000002,
+typedef enum CKRST_LOCKFLAGS {
+    CKRST_LOCK_DEFAULT     = 0x00000000,
+    CKRST_LOCK_NOOVERWRITE = 0x00000001,
+    CKRST_LOCK_DISCARD     = 0x00000002,
 } CKRST_LOCKFLAGS;
 
 // ===========================================================================
-// Constants
+// Vertex format (spec 4.5)
 // ===========================================================================
+// The vertex format of a vertex buffer is the vertex-data subset of
+// CKRST_DPFLAGS. CKRST_DP_TRANSFORM missing means pre-transformed vertices
+// (x, y, z, rhw). CKRST_DP_LIGHT set means a normal is present. The
+// interleaved memory layout is fixed by CKRSTGetVertexLayout() in
+// CKRasterizer.h (D3D FVF order).
 
-#define CKRST_MAX_VERTEX_STREAMS   4
-#define CKRST_MAX_TEXTURE_STAGES   8
-#define CKRST_MAX_RENDER_VIEWS     256
-#define CKRST_MAX_ENCODERS         8
-#define CKRST_MAX_TRANSFORMS       1024
-#define CKRST_MAX_COMPUTE_BINDINGS 8
-#define CKRST_INVALID_TRANSFORM    0xFFFFFFFF
-
-#define CKRST_INTERFACE_REVISION 0x00020100u
+#define CKRST_VF_MASK (CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_DIFFUSE | \
+                       CKRST_DP_SPECULAR | CKRST_DP_STAGESMASK | CKRST_DP_WEIGHTMASK | \
+                       CKRST_DP_MATRIXPAL | CKRST_DP_PSIZE | CKRST_DP_TWEEN)
 
 // ===========================================================================
-// Object Kinds
+// Render state extensions (spec 4.6)
 // ===========================================================================
+// VXRENDERSTATE_COLORWRITEENABLE = 168 has the D3D8 value and is free in the
+// VxDefines.h enumeration. Phase 1 adds it to the VXRENDERSTATETYPE enum in
+// VxMath and deletes this macro.
 
-#define CKRST_OBJ_TEXTURE         0x00000001
-#define CKRST_OBJ_VERTEXBUFFER    0x00000004
-#define CKRST_OBJ_INDEXBUFFER     0x00000008
-#define CKRST_OBJ_SHADER          0x00000010
-#define CKRST_OBJ_PROGRAM         0x00000020
-#define CKRST_OBJ_UNIFORM         0x00000040
-#define CKRST_OBJ_FRAMEBUFFER     0x00000080
-#define CKRST_OBJ_VERTEXLAYOUT    0x00000100
-#define CKRST_OBJ_OCCLUSIONQUERY  0x00000200
-#define CKRST_OBJ_INDIRECTBUFFER  0x00000400
-#define CKRST_OBJ_ALL             0xFFFFFFFF
+#define VXRENDERSTATE_COLORWRITEENABLE ((VXRENDERSTATETYPE)168)
 
-// ---------------------------------------------------------------------------
-// Shader Stage and Format
-// ---------------------------------------------------------------------------
+#define CKRST_COLORWRITE_RED   0x00000001u
+#define CKRST_COLORWRITE_GREEN 0x00000002u
+#define CKRST_COLORWRITE_BLUE  0x00000004u
+#define CKRST_COLORWRITE_ALPHA 0x00000008u
+#define CKRST_COLORWRITE_ALL   0x0000000Fu
 
-#define CKRST_MAKEFOURCC(a, b, c, d) \
-    ((uint32_t)(uint8_t)(a) | ((uint32_t)(uint8_t)(b) << 8) | \
-     ((uint32_t)(uint8_t)(c) << 16) | ((uint32_t)(uint8_t)(d) << 24))
+// ===========================================================================
+// Transform matrices (spec 4.6): v1 / D3D values
+// ===========================================================================
+// VXMATRIX_WORLD is an alias of VXMATRIX_WORLDMATRIX(0): setting either
+// updates the same matrix. This is the only definition of VXMATRIX_TYPE; the
+// engine and the translation core both use it.
 
-typedef enum CK_SHADER_STAGE {
-    CKRST_SHADER_VERTEX  = 0,
-    CKRST_SHADER_PIXEL   = 1,
-    CKRST_SHADER_COMPUTE = 2,
-} CK_SHADER_STAGE;
+typedef enum VXMATRIX_TYPE {
+    VXMATRIX_WORLD      = 1,
+    VXMATRIX_VIEW       = 2,
+    VXMATRIX_PROJECTION = 3,
+    VXMATRIX_TEXTURE0   = 16,
+    VXMATRIX_TEXTURE1   = 17,
+    VXMATRIX_TEXTURE2   = 18,
+    VXMATRIX_TEXTURE3   = 19,
+    VXMATRIX_TEXTURE4   = 20,
+    VXMATRIX_TEXTURE5   = 21,
+    VXMATRIX_TEXTURE6   = 22,
+    VXMATRIX_TEXTURE7   = 23,
+    VXMATRIX_WMAT       = 256,
+} VXMATRIX_TYPE;
 
-typedef uint32_t CK_SHADER_FORMAT;
-typedef uint32_t CK_SHADER_PROFILE;
+#define VXMATRIX_TEXTURE(stage)     ((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + (stage)))
+#define VXMATRIX_WORLDMATRIX(index) ((VXMATRIX_TYPE)(VXMATRIX_WMAT + (index)))
 
-#define CKRST_SHADER_FORMAT_UNKNOWN 0u
-#define CKRST_SHADER_FORMAT_NATIVE  1u
+// Number of distinct matrix slots a context stores: view, projection,
+// 8 texture matrices, CKRST_MAX_WORLD_MATRICES world matrices.
+#define CKRST_MATRIX_SLOT_COUNT (2 + CKRST_MAX_TEXTURE_STAGES + CKRST_MAX_WORLD_MATRICES)
 
-#define CKRST_SHADER_PROFILE_UNKNOWN 0u
-#define CKRST_SHADER_PROFILE_DX11    CKRST_MAKEFOURCC('D', 'X', '1', '1')
-#define CKRST_SHADER_PROFILE_DX12    CKRST_MAKEFOURCC('D', 'X', '1', '2')
-#define CKRST_SHADER_PROFILE_SPIRV   CKRST_MAKEFOURCC('S', 'P', 'V', ' ')
-#define CKRST_SHADER_PROFILE_GLSL    CKRST_MAKEFOURCC('G', 'L', 'S', 'L')
-#define CKRST_SHADER_PROFILE_ESSL    CKRST_MAKEFOURCC('E', 'S', 'S', 'L')
-#define CKRST_SHADER_PROFILE_MSL     CKRST_MAKEFOURCC('M', 'S', 'L', ' ')
+// ===========================================================================
+// Texture coordinate index generation (CKRST_TSS_TEXCOORDINDEX high bits)
+// ===========================================================================
+// Same encoding as D3D8 D3DTSS_TCI_*: the low 16 bits select the texture
+// coordinate set, the high 16 bits select the generation mode.
 
-#define CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE 0x00000001u
-#define CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT    0x00000002u
+#define CKRST_TCI_PASSTHRU                    0x00000000u
+#define CKRST_TCI_CAMERASPACENORMAL           0x00010000u
+#define CKRST_TCI_CAMERASPACEPOSITION         0x00020000u
+#define CKRST_TCI_CAMERASPACEREFLECTIONVECTOR 0x00030000u
+#define CKRST_TCI_SPHEREMAP                   0x00040000u
+#define CKRST_TCI_MASK                        0xFFFF0000u
 
-// ---------------------------------------------------------------------------
-// Uniform Type
-// ---------------------------------------------------------------------------
+inline CKDWORD CKRSTPackTexcoordIndex(CKDWORD Index, CKDWORD Generation)
+{
+    return (Index & 0xFFFFu) | ((Generation << 16) & CKRST_TCI_MASK);
+}
 
-typedef enum CK_UNIFORM_TYPE {
-    CKRST_UNIFORM_SAMPLER = 0,
-    CKRST_UNIFORM_VEC4    = 1,
-    CKRST_UNIFORM_MAT3    = 2,
-    CKRST_UNIFORM_MAT4    = 3,
-} CK_UNIFORM_TYPE;
+inline CKDWORD CKRSTTexcoordIndex(CKDWORD Packed)
+{
+    return Packed & 0xFFFFu;
+}
 
-// ---------------------------------------------------------------------------
-// Vertex Attributes
-// ---------------------------------------------------------------------------
+// Returns CKRST_TCI_* >> 16, i.e. 0 = pass through, 1 = camera-space normal,
+// 2 = camera-space position, 3 = camera-space reflection, 4 = sphere map.
+inline CKDWORD CKRSTTexcoordGeneration(CKDWORD Packed)
+{
+    return (Packed & CKRST_TCI_MASK) >> 16;
+}
 
-typedef enum CK_VERTEX_ATTRIB {
-    CKRST_ATTRIB_POSITION  = 0,
-    CKRST_ATTRIB_NORMAL    = 1,
-    CKRST_ATTRIB_TANGENT   = 2,
-    CKRST_ATTRIB_BITANGENT = 3,
-    CKRST_ATTRIB_COLOR0    = 4,
-    CKRST_ATTRIB_COLOR1    = 5,
-    CKRST_ATTRIB_COLOR2    = 6,
-    CKRST_ATTRIB_COLOR3    = 7,
-    CKRST_ATTRIB_INDICES   = 8,
-    CKRST_ATTRIB_WEIGHT    = 9,
-    CKRST_ATTRIB_TEXCOORD0 = 10,
-    CKRST_ATTRIB_TEXCOORD1 = 11,
-    CKRST_ATTRIB_TEXCOORD2 = 12,
-    CKRST_ATTRIB_TEXCOORD3 = 13,
-    CKRST_ATTRIB_TEXCOORD4 = 14,
-    CKRST_ATTRIB_TEXCOORD5 = 15,
-    CKRST_ATTRIB_TEXCOORD6 = 16,
-    CKRST_ATTRIB_TEXCOORD7 = 17,
-    CKRST_ATTRIB_COUNT     = 18,
-} CK_VERTEX_ATTRIB;
+// ===========================================================================
+// Backend capability bits (spec 4.9.1) - tests and diagnostics only
+// ===========================================================================
+// CKRasterizerCapsDesc::Features describes what the backend below the
+// translation core can do natively. The engine MUST NOT read it; the
+// translation core approximates whatever is missing (appendix C / D).
 
-typedef enum CK_VERTEX_ATTRIB_TYPE {
-    CKRST_ATTRIBTYPE_INT8   = 0,
-    CKRST_ATTRIBTYPE_UINT8  = 1,
-    CKRST_ATTRIBTYPE_UINT10 = 2,
-    CKRST_ATTRIBTYPE_INT16  = 3,
-    CKRST_ATTRIBTYPE_UINT16 = 4,
-    CKRST_ATTRIBTYPE_HALF   = 5,
-    CKRST_ATTRIBTYPE_FLOAT  = 6,
-} CK_VERTEX_ATTRIB_TYPE;
-
-// ---------------------------------------------------------------------------
-// Render View
-// ---------------------------------------------------------------------------
-
-typedef uint16_t CKRenderView;
-
-typedef enum CK_VIEW_MODE {
-    CKRST_VIEWMODE_DEFAULT    = 0,
-    CKRST_VIEWMODE_SEQUENTIAL = 1,
-    CKRST_VIEWMODE_DEPTH_ASC  = 2,
-    CKRST_VIEWMODE_DEPTH_DESC = 3,
-} CK_VIEW_MODE;
-
-// ---------------------------------------------------------------------------
-// Depth Format (for depth/stencil textures)
-// ---------------------------------------------------------------------------
-
-typedef enum CK_DEPTH_FORMAT {
-    CKRST_DEPTHFMT_D16    = 0,
-    CKRST_DEPTHFMT_D24    = 1,
-    CKRST_DEPTHFMT_D24S8  = 2,
-    CKRST_DEPTHFMT_D32F   = 3,
-} CK_DEPTH_FORMAT;
-
-// ---------------------------------------------------------------------------
-// Sampler Enums
-// ---------------------------------------------------------------------------
-
-typedef enum CK_FILTER_MODE {
-    CKRST_FILTER_NONE             = 0,
-    CKRST_FILTER_NEAREST          = 1,
-    CKRST_FILTER_LINEAR           = 2,
-    CKRST_FILTER_MIPNEAREST       = 3,
-    CKRST_FILTER_MIPLINEAR        = 4,
-    CKRST_FILTER_LINEARMIPNEAREST = 5,
-    CKRST_FILTER_LINEARMIPLINEAR  = 6,
-    CKRST_FILTER_ANISOTROPIC      = 7,
-} CK_FILTER_MODE;
-
-typedef enum CK_ADDRESS_MODE {
-    CKRST_ADDRESS_WRAP       = 1,
-    CKRST_ADDRESS_MIRROR     = 2,
-    CKRST_ADDRESS_CLAMP      = 3,
-    CKRST_ADDRESS_BORDER     = 4,
-} CK_ADDRESS_MODE;
-
-typedef enum CK_COMPARE_MODE {
-    CKRST_COMPARE_NONE     = 0,
-    CKRST_COMPARE_LESS     = 1,
-    CKRST_COMPARE_LEQUAL   = 2,
-    CKRST_COMPARE_EQUAL    = 3,
-    CKRST_COMPARE_GEQUAL   = 4,
-    CKRST_COMPARE_GREATER  = 5,
-    CKRST_COMPARE_NOTEQUAL = 6,
-    CKRST_COMPARE_NEVER    = 7,
-    CKRST_COMPARE_ALWAYS   = 8,
-} CK_COMPARE_MODE;
-
-// ---------------------------------------------------------------------------
-// Discard Flags (encoder Submit)
-// ---------------------------------------------------------------------------
-
-typedef enum CK_DISCARD_FLAGS {
-    CKRST_DISCARD_NONE           = 0x00,
-    CKRST_DISCARD_BINDINGS       = 0x01,
-    CKRST_DISCARD_INDEX_BUFFER   = 0x02,
-    CKRST_DISCARD_INSTANCE_DATA  = 0x04,
-    CKRST_DISCARD_STATE          = 0x08,
-    CKRST_DISCARD_TRANSFORM      = 0x10,
-    CKRST_DISCARD_VERTEX_STREAMS = 0x20,
-    CKRST_DISCARD_ALL            = 0xFF,
-} CK_DISCARD_FLAGS;
-
-// ---------------------------------------------------------------------------
-// Texture Flags (v2 extensions to CKRST_TEXTUREFLAGS)
-// ---------------------------------------------------------------------------
-
-#define CKRST_TEXTURE_BLIT_DST        0x02000000
-#define CKRST_TEXTURE_COMPUTE_WRITE   0x04000000
-#define CKRST_TEXTURE_DEPTHSTENCIL    0x20000000
-#define CKRST_TEXTURE_READBACK        0x40000000
-
-// ---------------------------------------------------------------------------
-// Vertex Buffer Compute Flags (extensions to CKRST_VBFLAGS)
-// ---------------------------------------------------------------------------
-
-#define CKRST_VB_COMPUTE_READ       0x0100
-#define CKRST_VB_COMPUTE_WRITE      0x0200
-#define CKRST_VB_COMPUTE_READ_WRITE (CKRST_VB_COMPUTE_READ | CKRST_VB_COMPUTE_WRITE)
-
-// Runtime context capabilities. These values are owned by CKRasterizer and
-// must not alias or expose a native backend capability mask.
 typedef uint64_t CKRST_CAPS;
 
-#define CKRST_CAPS_VERTEX_SHADER       UINT64_C(0x0000000000000001)
-#define CKRST_CAPS_PIXEL_SHADER        UINT64_C(0x0000000000000002)
-#define CKRST_CAPS_RENDER_VIEWS        UINT64_C(0x0000000000000004)
-#define CKRST_CAPS_FRAMEBUFFER         UINT64_C(0x0000000000000008)
-#define CKRST_CAPS_TRANSIENT_BUFFERS   UINT64_C(0x0000000000000010)
-#define CKRST_CAPS_SCISSOR             UINT64_C(0x0000000000000020)
-#define CKRST_CAPS_INSTANCING          UINT64_C(0x0000000000000040)
-#define CKRST_CAPS_TEXTURE_READBACK    UINT64_C(0x0000000000000080)
-#define CKRST_CAPS_BUFFER_UPDATE       UINT64_C(0x0000000000000100)
-#define CKRST_CAPS_TEXTURE_UPDATE      UINT64_C(0x0000000000000200)
-#define CKRST_CAPS_DEPTH_TEXTURE       UINT64_C(0x0000000000000400)
-#define CKRST_CAPS_BLEND_EQUATION      UINT64_C(0x0000000000000800)
-#define CKRST_CAPS_BLIT                UINT64_C(0x0000000000001000)
-#define CKRST_CAPS_TRANSFORM_CACHE     UINT64_C(0x0000000000002000)
-#define CKRST_CAPS_INDEX32             UINT64_C(0x0000000000004000)
-#define CKRST_CAPS_TEXTURE_COMPARISON  UINT64_C(0x0000000000008000)
-#define CKRST_CAPS_COMPUTE             UINT64_C(0x0000000000010000)
-#define CKRST_CAPS_OCCLUSION_QUERY     UINT64_C(0x0000000000020000)
-#define CKRST_CAPS_DRAW_INDIRECT       UINT64_C(0x0000000000040000)
-#define CKRST_CAPS_TEXTURE_CUBE        UINT64_C(0x0000000000080000)
-#define CKRST_CAPS_TEXTURE_3D          UINT64_C(0x0000000000100000)
-#define CKRST_CAPS_IMAGE_RW            UINT64_C(0x0000000000200000)
-#define CKRST_CAPS_VERTEX_ATTRIB_HALF  UINT64_C(0x0000000000400000)
-#define CKRST_CAPS_VERTEX_ATTRIB_UINT10 UINT64_C(0x0000000000800000)
+#define CKRST_CAPS_SYNC_READBACK        UINT64_C(0x0000000000000001)
+#define CKRST_CAPS_MIDFRAME_READBACK    UINT64_C(0x0000000000000002)
+#define CKRST_CAPS_POINT_SIZE           UINT64_C(0x0000000000000004)
+#define CKRST_CAPS_DEPTH_BIAS           UINT64_C(0x0000000000000008)
+#define CKRST_CAPS_STENCIL_WRITE_MASK   UINT64_C(0x0000000000000010)
+#define CKRST_CAPS_SAMPLER_LOD_CONTROL  UINT64_C(0x0000000000000020)
+#define CKRST_CAPS_ANISOTROPY_LEVEL     UINT64_C(0x0000000000000040)
+#define CKRST_CAPS_MSAA                 UINT64_C(0x0000000000000080)
+#define CKRST_CAPS_TEXTURE_CUBE         UINT64_C(0x0000000000000100)
+#define CKRST_CAPS_TEXTURE_VOLUME       UINT64_C(0x0000000000000200)
+#define CKRST_CAPS_BORDER_COLOR         UINT64_C(0x0000000000000400)
+#define CKRST_CAPS_SEPARATE_ALPHA_BLEND UINT64_C(0x0000000000000800)
+#define CKRST_CAPS_MIRROR_ONCE          UINT64_C(0x0000000000001000)
+#define CKRST_CAPS_TEXTURE_DXT          UINT64_C(0x0000000000002000)
 
-typedef enum CKRST_FORMAT_CAPS {
-    CKRST_FORMAT_CAPS_NONE             = 0x00000000,
-    CKRST_FORMAT_CAPS_TEXTURE_2D       = 0x00000001,
-    CKRST_FORMAT_CAPS_TEXTURE_3D       = 0x00000002,
-    CKRST_FORMAT_CAPS_TEXTURE_CUBE     = 0x00000004,
-    CKRST_FORMAT_CAPS_FRAMEBUFFER      = 0x00000008,
-    CKRST_FORMAT_CAPS_FRAMEBUFFER_MSAA = 0x00000010,
-    CKRST_FORMAT_CAPS_READBACK         = 0x00000020,
-    CKRST_FORMAT_CAPS_IMAGE_READ       = 0x00000040,
-    CKRST_FORMAT_CAPS_IMAGE_WRITE      = 0x00000080,
-    CKRST_FORMAT_CAPS_MIP_AUTOGEN      = 0x00000100,
-    CKRST_FORMAT_CAPS_SRGB             = 0x00000200,
-    CKRST_FORMAT_CAPS_TEXTURE_COMPARE  = 0x00000400,
-} CKRST_FORMAT_CAPS;
+// ===========================================================================
+// Debug flags (CKRasterizerOptions::DebugFlags)
+// ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Draw State
-// ---------------------------------------------------------------------------
+#define CKRST_DEBUG_NONE              0x00000000u
+#define CKRST_DEBUG_WIREFRAME         0x00000001u
+#define CKRST_DEBUG_IFH               0x00000002u  // skip all draws ("infinitely fast hardware")
+#define CKRST_DEBUG_STATS             0x00000004u
+#define CKRST_DEBUG_DRAWMAP           0x00000020u
+#define CKRST_DEBUG_DRAWMAP_SUBMITS   0x00000040u
+#define CKRST_DEBUG_DRAWMAP_RESOURCES 0x00000080u
+#define CKRST_DEBUG_DRAWMAP_PASSES    0x00000100u
+#define CKRST_DEBUG_DRAWMAP_MARKERS   0x00000200u
+#define CKRST_DEBUG_DRAWMAP_FRAME     0x00000400u
+#define CKRST_DEBUG_DRAWMAP_SUMMARY   0x00000800u
 
-struct CKDrawState {
-    uint32_t Lo;
-    uint32_t Mid;
-    uint32_t Hi;
-};
+// ===========================================================================
+// Diagnostics (spec 4.10, appendix C / D)
+// ===========================================================================
+// Every counter is cumulative since context creation and exposed through
+// CKRenderStats::Diagnostics[]. REJECT_* counters are the only cases where a
+// draw returns FALSE. INVALID_* counters are Set* calls that returned FALSE
+// and left state unchanged. APPROX_* / IGNORE_* counters are draws that were
+// submitted with an approximated or ignored state.
 
-// ---------------------------------------------------------------------------
-// Draw State Helper Macros - Lo word
-// ---------------------------------------------------------------------------
+typedef enum CKRST_DIAGNOSTIC {
+    // Draw rejected (returned FALSE)
+    CKRST_DIAG_REJECT_INVALID_HANDLE = 0,
+    CKRST_DIAG_REJECT_INVALID_PARAMETER,
+    CKRST_DIAG_REJECT_DEVICE_LOST,
+    CKRST_DIAG_REJECT_SCENE_STATE,      // operation not allowed in the current scene state
 
-#define CKRST_STATE_WRITE_R        0x00000001UL
-#define CKRST_STATE_WRITE_G        0x00000002UL
-#define CKRST_STATE_WRITE_B        0x00000004UL
-#define CKRST_STATE_WRITE_A        0x00000008UL
-#define CKRST_STATE_WRITE_RGB      (CKRST_STATE_WRITE_R | CKRST_STATE_WRITE_G | CKRST_STATE_WRITE_B)
-#define CKRST_STATE_WRITE_RGBA     (CKRST_STATE_WRITE_RGB | CKRST_STATE_WRITE_A)
-#define CKRST_STATE_DEPTH_TEST     0x00000010UL
-#define CKRST_STATE_DEPTH_WRITE    0x00000020UL
-#define CKRST_STATE_MSAA           0x00004000UL
-#define CKRST_STATE_ALPHA_COVERAGE 0x00008000UL
+    // State call rejected (returned FALSE, state unchanged)
+    CKRST_DIAG_INVALID_RENDER_STATE,
+    CKRST_DIAG_INVALID_STAGE_STATE,
+    CKRST_DIAG_INVALID_STAGE_INDEX,
+    CKRST_DIAG_INVALID_LIGHT_INDEX,
+    CKRST_DIAG_INVALID_CLIP_PLANE_INDEX,
+    CKRST_DIAG_INVALID_MATRIX_TYPE,
+    CKRST_DIAG_INVALID_TARGET,          // SetTargetTexture inside a scene / bad face / bad size
+    CKRST_DIAG_OVERLAY_ON_TARGET,       // BeginOverlayPhase while target != 0
 
-#define CKRST_STATE_DEPTH_FUNC(f)      (((uint32_t)(f) & 0xF) << 6)
-#define CKRST_STATE_CULL(c)            (((uint32_t)(c) & 0x3) << 10)
-#define CKRST_STATE_FILLMODE(m)        (((uint32_t)(m) & 0x3) << 12)
-#define CKRST_STATE_BLEND_SRC(b)       (((uint32_t)(b) & 0xF) << 16)
-#define CKRST_STATE_BLEND_DST(b)       (((uint32_t)(b) & 0xF) << 20)
-#define CKRST_STATE_BLEND_SRC_ALPHA(b) (((uint32_t)(b) & 0xF) << 24)
-#define CKRST_STATE_BLEND_DST_ALPHA(b) (((uint32_t)(b) & 0xF) << 28)
+    // Render state approximations (appendix C)
+    CKRST_DIAG_APPROX_FILLMODE_POINT,
+    CKRST_DIAG_APPROX_STENCIL_WRITE_MASK,
+    CKRST_DIAG_IGNORE_WRAP,
+    CKRST_DIAG_IGNORE_CLIPPING_OFF,
+    CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE,
+    CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS,
+    CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN,
+    CKRST_DIAG_APPROX_POINT_SIZE,
+    CKRST_DIAG_APPROX_ZBIAS,
+    CKRST_DIAG_IGNORE_ANTIALIAS,
+    CKRST_DIAG_IGNORE_DITHER,
+    CKRST_DIAG_IGNORE_LINEPATTERN,
+    CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF,
+    CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING,
 
-#define CKRST_STATE_BLEND(src, dst) \
-    (CKRST_STATE_BLEND_SRC(src) | CKRST_STATE_BLEND_DST(dst))
+    // Texture stage approximations (appendix D)
+    CKRST_DIAG_APPROX_TEXTURE_OP,
+    CKRST_DIAG_APPROX_ALPHA_BUMP_OP,
+    CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS,
+    CKRST_DIAG_APPROX_MIRROR_ONCE,
+    CKRST_DIAG_APPROX_BORDER_COLOR,
+    CKRST_DIAG_IGNORE_SAMPLER_LOD,
+    CKRST_DIAG_APPROX_ANISOTROPY,
+    CKRST_DIAG_IGNORE_COMPAREFUNC,
+    CKRST_DIAG_APPROX_STAGEBLEND,
 
-#define CKRST_STATE_BLEND_SEPARATE(src_c, dst_c, src_a, dst_a) \
-    (CKRST_STATE_BLEND_SRC(src_c) | CKRST_STATE_BLEND_DST(dst_c) | \
-     CKRST_STATE_BLEND_SRC_ALPHA(src_a) | CKRST_STATE_BLEND_DST_ALPHA(dst_a))
-
-// ---------------------------------------------------------------------------
-// Draw State Helper Macros - Mid word
-// ---------------------------------------------------------------------------
-
-#define CKRST_STATE_BLEND_EQ(op)       (((uint32_t)(op) & 0x7) << 0)
-#define CKRST_STATE_BLEND_EQ_ALPHA(op) (((uint32_t)(op) & 0x7) << 3)
-#define CKRST_STATE_BLEND_EQ_SEPARATE(c, a) \
-    (CKRST_STATE_BLEND_EQ(c) | CKRST_STATE_BLEND_EQ_ALPHA(a))
-#define CKRST_STATE_PT(pt)             (((uint32_t)(pt) & 0x7) << 6)
-
-#define CKRST_STENCIL_ENABLE           (1UL << 9)
-#define CKRST_STENCIL_FUNC(f)         (((uint32_t)(f) & 0xF) << 10)
-#define CKRST_STENCIL_FAIL(o)         (((uint32_t)(o) & 0xF) << 14)
-#define CKRST_STENCIL_ZFAIL(o)        (((uint32_t)(o) & 0xF) << 18)
-#define CKRST_STENCIL_PASS(o)         (((uint32_t)(o) & 0xF) << 22)
-
-#define CKRST_STENCIL_OPS(func, fail, zfail, pass) \
-    (CKRST_STENCIL_ENABLE | CKRST_STENCIL_FUNC(func) | \
-     CKRST_STENCIL_FAIL(fail) | CKRST_STENCIL_ZFAIL(zfail) | CKRST_STENCIL_PASS(pass))
-
-// ---------------------------------------------------------------------------
-// Draw State Helper Macros - Hi word
-// ---------------------------------------------------------------------------
-
-#define CKRST_STENCIL_BACK_FUNC(f)    (((uint32_t)(f) & 0xF) << 0)
-#define CKRST_STENCIL_BACK_FAIL(o)    (((uint32_t)(o) & 0xF) << 4)
-#define CKRST_STENCIL_BACK_ZFAIL(o)   (((uint32_t)(o) & 0xF) << 8)
-#define CKRST_STENCIL_BACK_PASS(o)    (((uint32_t)(o) & 0xF) << 12)
-
-#define CKRST_STENCIL_BACK_OPS(func, fail, zfail, pass) \
-    (CKRST_STENCIL_BACK_FUNC(func) | CKRST_STENCIL_BACK_FAIL(fail) | \
-     CKRST_STENCIL_BACK_ZFAIL(zfail) | CKRST_STENCIL_BACK_PASS(pass))
-
-#define CKRST_STATE_FRONT_CCW          (1UL << 16)
-
-// ---------------------------------------------------------------------------
-// Common State Presets
-// ---------------------------------------------------------------------------
-
-#define CKRST_STATE_DEFAULT_LO \
-    (CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | CKRST_STATE_DEPTH_WRITE | \
-     CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL) | CKRST_STATE_CULL(2))
-
-#define CKRST_STATE_DEFAULT_MID \
-    (CKRST_STATE_PT(VX_TRIANGLELIST))
-
-#define CKRST_STATE_BLEND_ALPHA_LO \
-    (CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | \
-     CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL) | CKRST_STATE_CULL(2) | \
-     CKRST_STATE_BLEND(VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA))
-
-#define CKRST_STATE_BLEND_ADD_LO \
-    (CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | \
-     CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL) | \
-     CKRST_STATE_BLEND(VXBLEND_ONE, VXBLEND_ONE))
-
-// ---------------------------------------------------------------------------
-// Compute Access Mode
-// ---------------------------------------------------------------------------
-
-typedef enum CK_ACCESS_MODE {
-    CKRST_ACCESS_READ      = 0,
-    CKRST_ACCESS_WRITE     = 1,
-    CKRST_ACCESS_READWRITE = 2,
-} CK_ACCESS_MODE;
-
-// ---------------------------------------------------------------------------
-// Occlusion Query Result
-// ---------------------------------------------------------------------------
-
-typedef enum CK_OCCLUSION_RESULT {
-    CKRST_OCCLUSION_INVISIBLE = 0,
-    CKRST_OCCLUSION_VISIBLE   = 1,
-    CKRST_OCCLUSION_NORESULT  = 2,
-} CK_OCCLUSION_RESULT;
-
-// ---------------------------------------------------------------------------
-// Debug Flags
-// ---------------------------------------------------------------------------
-
-#define CKRST_DEBUG_NONE       0x00000000
-#define CKRST_DEBUG_WIREFRAME  0x00000001
-#define CKRST_DEBUG_IFH        0x00000002
-#define CKRST_DEBUG_STATS      0x00000004
-#define CKRST_DEBUG_TEXT       0x00000008
-#define CKRST_DEBUG_PROFILER   0x00000010
-#define CKRST_DEBUG_DRAWMAP           0x00000020
-#define CKRST_DEBUG_DRAWMAP_SUBMITS   0x00000040
-#define CKRST_DEBUG_DRAWMAP_RESOURCES 0x00000080
-#define CKRST_DEBUG_DRAWMAP_VIEWS     0x00000100
-#define CKRST_DEBUG_DRAWMAP_MARKERS   0x00000200
-#define CKRST_DEBUG_DRAWMAP_FRAME     0x00000400
-#define CKRST_DEBUG_DRAWMAP_SUMMARY   0x00000800
+    CKRST_DIAG_COUNT
+} CKRST_DIAGNOSTIC;
 
 #endif // CKRASTERIZERENUMS_H

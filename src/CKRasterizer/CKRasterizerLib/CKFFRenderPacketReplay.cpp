@@ -1,7 +1,7 @@
 #include "CKFFRenderPacketReplay.h"
 #include "CKFFDebug.h"
 #include "CKFFTextureBinder.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <string.h>
 

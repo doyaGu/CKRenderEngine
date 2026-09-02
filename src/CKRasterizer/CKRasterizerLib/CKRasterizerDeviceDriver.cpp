@@ -1,8 +1,8 @@
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <string.h>
 
-CKRasterizerDriver::CKRasterizerDriver()
+CKRasterizerDeviceDriver::CKRasterizerDeviceDriver()
     : m_Hardware(FALSE),
       m_CapsUpToDate(FALSE),
       m_Owner(NULL),
@@ -12,22 +12,22 @@ CKRasterizerDriver::CKRasterizerDriver()
     memset(&m_2DCaps, 0, sizeof(m_2DCaps));
 }
 
-CKRasterizerDriver::~CKRasterizerDriver()
+CKRasterizerDeviceDriver::~CKRasterizerDeviceDriver()
 {
     for (auto it = m_Contexts.Begin(); it != m_Contexts.End(); ++it)
         delete *it;
     m_Contexts.Clear();
 }
 
-CKRasterizerContext *CKRasterizerDriver::CreateContext()
+CKRasterizerDevice *CKRasterizerDeviceDriver::CreateContext()
 {
-    CKRasterizerContext *context = new CKRasterizerContext();
+    CKRasterizerDevice *context = new CKRasterizerDevice();
     context->m_Driver = this;
     m_Contexts.PushBack(context);
     return context;
 }
 
-CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
+CKBOOL CKRasterizerDeviceDriver::DestroyContext(CKRasterizerDevice *Context)
 {
     if (!Context)
         return FALSE;
@@ -45,7 +45,7 @@ CKBOOL CKRasterizerDriver::DestroyContext(CKRasterizerContext *Context)
     return FALSE;
 }
 
-void CKRasterizerDriver::InitNULLRasterizerCaps(CKRasterizer *Owner)
+void CKRasterizerDeviceDriver::InitNULLRasterizerCaps(CKRasterizerDeviceLibrary *Owner)
 {
     m_Owner = Owner;
     m_Desc = "NULL Rasterizer";

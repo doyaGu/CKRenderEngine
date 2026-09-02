@@ -1,7 +1,7 @@
 #ifndef CKBGFXRASTERIZER_H
 #define CKBGFXRASTERIZER_H
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #define CKBGFX_DRAWMAP_SOURCE_COUNT 6
 
@@ -183,7 +183,7 @@ struct CKBgfxResourceSlot {
 // CKBgfxRasterizer
 // ===========================================================================
 
-class CKBgfxRasterizer : public CKRasterizer {
+class CKBgfxRasterizer : public CKRasterizerDeviceLibrary {
 public:
     CKBgfxRasterizer();
     ~CKBgfxRasterizer() override;
@@ -196,13 +196,13 @@ public:
 // CKBgfxRasterizerDriver
 // ===========================================================================
 
-class CKBgfxRasterizerDriver : public CKRasterizerDriver {
+class CKBgfxRasterizerDriver : public CKRasterizerDeviceDriver {
 public:
     explicit CKBgfxRasterizerDriver(CKBgfxRasterizer *owner);
     ~CKBgfxRasterizerDriver() override;
 
-    CKRasterizerContext *CreateContext() override;
-    CKBOOL DestroyContext(CKRasterizerContext *Context) override;
+    CKRasterizerDevice *CreateContext() override;
+    CKBOOL DestroyContext(CKRasterizerDevice *Context) override;
 };
 
 struct CKBgfxScreenShotRequest {
@@ -328,7 +328,7 @@ public:
 // CKBgfxRasterizerContext
 // ===========================================================================
 
-class CKBgfxRasterizerContext : public CKRasterizerContext {
+class CKBgfxRasterizerContext : public CKRasterizerDevice {
     friend class CKBgfxEncoder;
     friend class CKBgfxCallback;
     friend class CKBgfxRasterizerDriver;
@@ -346,7 +346,7 @@ public:
     CKBOOL IsIdle() const override;
     CKERROR BeginShutdown() override;
     CKERROR GetDeviceStatus() const override;
-    CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const override;
+    CKERROR GetCaps(CKRasterizerDeviceCapsDesc *Caps) const override;
     CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
                                  CKTextureFormatCaps *Caps) const override;
     CKERROR GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
@@ -409,7 +409,7 @@ public:
     void SetDebug(CKDWORD Flags) override;
 
     // Statistics
-    const CKRenderStats *GetStats() override;
+    const CKRasterizerDeviceStats *GetStats() override;
 #ifdef CKRE_ENABLE_TEST_ACCESS
     CKDWORD GetFatalCountForTests() const { return m_DebugFatalCount.load(std::memory_order_relaxed); }
     void InjectFatalForTests() { LatchFatalError(CKERR_INVALIDRENDERCONTEXT); }
@@ -540,7 +540,7 @@ private:
     const char *m_RendererName;
     bgfx::RendererType::Enum m_RendererType;
     CKRasterizerTargetDesc m_TargetDesc;
-    CKRasterizerCapsDesc m_CapsDesc;
+    CKRasterizerDeviceCapsDesc m_CapsDesc;
     uint64_t m_NativeSupported;
     uint32_t m_NativeFormatCaps[bgfx::TextureFormat::Count];
     bgfx::TextureHandle m_DefaultWhiteTexture;
@@ -632,7 +632,7 @@ private:
     CKDWORD m_ViewClearFlags[CKRST_MAX_RENDER_VIEWS];
     CKBOOL m_ViewClearRecorded[CKRST_MAX_RENDER_VIEWS];
 
-    CKRenderStats m_Stats{};
+    CKRasterizerDeviceStats m_Stats{};
     XArray<CKRenderViewStats> m_ViewStatsCache;
 
     VxMatrix m_TransformCache[CKRST_MAX_TRANSFORMS];

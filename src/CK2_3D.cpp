@@ -13,7 +13,7 @@
 
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKException.h"
 #include "VxWindowFunctions.h"
 
@@ -54,15 +54,15 @@
 #define VIRTOOLS_RENDERENGIEN_GUID CKGUID(0xAABCF63, 0)
 
 extern void SetProcessorSpecific_FunctionsPtr();
-extern CKRasterizer *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizer *rst);
+extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
+extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *rst);
 
 INSTANCE_HANDLE g_DllHandle = nullptr;
 CKBOOL g_EnumerationDone = FALSE;
 CKPluginInfo g_PluginInfo;
 
 // Exported for use by RCKRenderManager
-XClassArray<CKRasterizerInfo> g_RasterizersInfo;
+XClassArray<CKRasterizerDeviceInfo> g_RasterizersInfo;
 
 void ReleaseRasterizers();
 
@@ -105,22 +105,22 @@ void RegisterRasterizer(const char *dll) {
     if (!instance)
         return;
 
-    for (CKRasterizerInfo *it = g_RasterizersInfo.Begin(); it != g_RasterizersInfo.End(); ++it) {
+    for (CKRasterizerDeviceInfo *it = g_RasterizersInfo.Begin(); it != g_RasterizersInfo.End(); ++it) {
         if (it->DllInstance == instance) {
             sl.ReleaseLibrary();
             return;
         }
     }
 
-    CKRST_GETINFO getInfoFunc = (CKRST_GETINFO) sl.GetFunctionPtr("CKRasterizerGetInfo");
+    CKRST_DEVICE_GETINFO getInfoFunc = (CKRST_DEVICE_GETINFO) sl.GetFunctionPtr("CKRasterizerGetInfo");
     if (!getInfoFunc) {
         sl.ReleaseLibrary();
         return;
     }
 
-    CKRasterizerInfo info;
+    CKRasterizerDeviceInfo info;
     getInfoFunc(&info);
-    if (info.InterfaceRevision != CKRST_INTERFACE_REVISION ||
+    if (info.InterfaceRevision != CKRST_DEVICE_INTERFACE_REVISION ||
         !info.StartFct || !info.CloseFct) {
         sl.ReleaseLibrary();
         return;
@@ -133,10 +133,10 @@ void RegisterRasterizer(const char *dll) {
 void EnumerateRasterizers() {
     if (!g_EnumerationDone) {
 #ifdef CK_LIB
-        extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
-        CKRasterizerInfo info;
+        extern void CKBgfxRasterizerGetInfo(CKRasterizerDeviceInfo *info);
+        CKRasterizerDeviceInfo info;
         CKBgfxRasterizerGetInfo(&info);
-        if (info.InterfaceRevision == CKRST_INTERFACE_REVISION &&
+        if (info.InterfaceRevision == CKRST_DEVICE_INTERFACE_REVISION &&
             info.StartFct && info.CloseFct) {
             info.DllInstance = nullptr;
             info.DllName = "CKBgfxRasterizer";
@@ -182,13 +182,13 @@ void EnumerateRasterizers() {
         }
 
         if (g_RasterizersInfo.Size() == 0) {
-            CKRasterizerInfo info;
+            CKRasterizerDeviceInfo info;
             info.StartFct = CKNULLRasterizerStart;
             info.CloseFct = CKNULLRasterizerClose;
             info.DllInstance = nullptr;
             info.DllName = "";
             info.Desc = "NULL Rasterizer";
-            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
+            info.InterfaceRevision = CKRST_DEVICE_INTERFACE_REVISION;
             g_RasterizersInfo.PushBack(info);
         }
 #endif
@@ -273,7 +273,7 @@ PLUGIN_EXPORT void CK2_3D_FrameCostStatsAddPlayerTiming(double updateUs,
 void ReleaseRasterizers() {
     const int count = g_RasterizersInfo.Size();
     for (int i = 0; i < count; ++i) {
-        CKRasterizerInfo &info = g_RasterizersInfo[i];
+        CKRasterizerDeviceInfo &info = g_RasterizersInfo[i];
         if (!info.DllInstance)
             continue;
 

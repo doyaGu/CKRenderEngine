@@ -1,7 +1,7 @@
 #ifndef CKRE_FFP_DIAGNOSTIC_HARNESS_H
 #define CKRE_FFP_DIAGNOSTIC_HARNESS_H
 
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "TestTriangleMultiset.h"
 
 #include <string.h>
@@ -24,7 +24,7 @@ struct FFPViewClearRecord {
     CKDWORD Stencil;
 };
 
-class FFPDiagnosticDriver : public CKRasterizerDriver {
+class FFPDiagnosticDriver : public CKRasterizerDeviceDriver {
 public:
     explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
                                   CKDWORD flags = 0)
@@ -215,9 +215,9 @@ public:
     void Blit(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, const CKRECT *) override {}
 };
 
-class FFPDiagnosticContext : public CKRasterizerContext {
+class FFPDiagnosticContext : public CKRasterizerDevice {
 public:
-    explicit FFPDiagnosticContext(CKRasterizerDriver *driver) {
+    explicit FFPDiagnosticContext(CKRasterizerDeviceDriver *driver) {
         m_Driver = driver;
         m_Width = 64;
         m_Height = 64;
@@ -389,7 +389,7 @@ public:
     void DbgTextPrintf(CKWORD, CKWORD, CKDWORD, CKSTRING, ...) override {}
     void DbgTextImage(CKWORD, CKWORD, CKWORD, CKWORD, const void *, CKWORD) override {}
     void SetDebug(CKDWORD) override {}
-    const CKRenderStats *GetStats() override { return &m_Stats; }
+    const CKRasterizerDeviceStats *GetStats() override { return &m_Stats; }
     void SetResourceName(CKDWORD, CKDWORD, CKSTRING) override {}
     CKDWORD GetShaderUniforms(CKDWORD, CKDWORD *, CKDWORD) override { return 0; }
     void GetUniformInfo(CKDWORD, CKUniformInfo *) override {}
@@ -482,7 +482,7 @@ public:
     }
 
 private:
-    CKRenderStats m_Stats = {};
+    CKRasterizerDeviceStats m_Stats = {};
     CKDWORD NextResourceHandle = 1;
     std::unordered_map<CKDWORD, CKDWORD> m_LayoutStride;
     std::vector<CKBYTE> m_VertexStorage;

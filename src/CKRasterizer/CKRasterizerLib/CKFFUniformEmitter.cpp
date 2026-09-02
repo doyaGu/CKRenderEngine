@@ -5,7 +5,7 @@
 #include "CKFFStageState.h"
 #include "CKFFStateResolver.h"
 #include "CKFFUniformState.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 
 #include <string.h>
 

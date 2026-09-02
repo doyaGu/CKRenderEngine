@@ -1,6 +1,12 @@
 #ifndef CKRASTERIZER_H
 #define CKRASTERIZER_H
 
+// CKRasterizer v3 contract (spec: docs/spec/2026-09-01-render-engine-
+// redesign-v3.md, section 4). The engine talks to a rasterizer plugin
+// exclusively through the three classes declared here. Everything that is
+// not a fixed-function state, a draw, a resource handle or a target / readback
+// operation is an implementation detail of the plugin.
+
 #include "VxDefines.h"
 #include "VxMath.h"
 #include "CKError.h"
@@ -10,11 +16,13 @@
 class CKRasterizerDriver;
 class CKRasterizerContext;
 class CKRasterizer;
-class CKRasterizerEncoder;
 
-// ---------------------------------------------------------------------------
-// CKRasterizerInfo
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Plugin entry point (unchanged since v1)
+// ===========================================================================
+// A rasterizer DLL exports one function, "CKRasterizerGetInfo", that fills
+// this structure. The render engine rejects plugins whose InterfaceRevision
+// differs from CKRST_INTERFACE_REVISION.
 
 struct CKRasterizerInfo {
     XString DllName;
@@ -25,30 +33,29 @@ struct CKRasterizerInfo {
     CKDWORD InterfaceRevision;
 
     CKRasterizerInfo()
-    {
-        DllInstance = NULL;
-        StartFct = NULL;
-        CloseFct = NULL;
-        InterfaceRevision = 0;
-    }
+        : DllInstance(NULL), StartFct(NULL), CloseFct(NULL), InterfaceRevision(0) {}
 };
 
 typedef void (*CKRST_GETINFO)(CKRasterizerInfo *);
 
 // ===========================================================================
-// CKRasterizer
+// CKRasterizer: one instance per plugin, owns the drivers (spec 4.2)
 // ===========================================================================
 
 class CKRasterizer {
 public:
-    CKRasterizer();
-    virtual ~CKRasterizer();
+    CKRasterizer() : m_MainWindow(NULL) {}
+    virtual ~CKRasterizer() {}
 
-    virtual CKBOOL Start(WIN_HANDLE AppWnd);
-    virtual void Close();
+    // Enumerates drivers. Returns FALSE when no usable driver exists.
+    virtual CKBOOL Start(WIN_HANDLE AppWnd) = 0;
+    virtual void Close() = 0;
 
-    virtual int GetDriverCount();
-    virtual CKRasterizerDriver *GetDriver(CKDWORD Index);
+    virtual int GetDriverCount() { return m_Drivers.Size(); }
+    virtual CKRasterizerDriver *GetDriver(CKDWORD Index)
+    {
+        return Index < (CKDWORD)m_Drivers.Size() ? m_Drivers[Index] : NULL;
+    }
 
 public:
     WIN_HANDLE m_MainWindow;
@@ -56,19 +63,26 @@ public:
 };
 
 // ===========================================================================
-// CKRasterizerDriver
+// CKRasterizerDriver: one per adapter / implementation (spec 4.2, 4.9.2)
 // ===========================================================================
+// m_3DCaps / m_2DCaps MUST follow the caps baseline (spec 4.9.2); only numeric
+// fields may be lowered to the real backend limits. m_TextureFormats lists
+// the storage formats the driver accepts; any Virtools pixel format is still
+// accepted as upload input (spec 4.5).
 
 class CKRasterizerDriver {
 public:
-    CKRasterizerDriver();
+    CKRasterizerDriver()
+        : m_Hardware(FALSE), m_CapsUpToDate(FALSE), m_Owner(NULL), m_DriverIndex(0)
+    {
+        memset(&m_3DCaps, 0, sizeof(m_3DCaps));
+        memset(&m_2DCaps, 0, sizeof(m_2DCaps));
+    }
+    virtual ~CKRasterizerDriver() {}
 
-    virtual ~CKRasterizerDriver();
-
-    virtual CKRasterizerContext *CreateContext();
-    virtual CKBOOL DestroyContext(CKRasterizerContext *Context);
-
-    virtual void InitNULLRasterizerCaps(CKRasterizer *Owner);
+    // A driver MAY support a single context; the second call returns NULL.
+    virtual CKRasterizerContext *CreateContext() = 0;
+    virtual CKBOOL DestroyContext(CKRasterizerContext *Context) = 0;
 
 public:
     CKBOOL m_Hardware;
@@ -84,428 +98,332 @@ public:
 };
 
 // ===========================================================================
-// CKRasterizerEncoder
+// CKRasterizerContext: the D3D7-shaped device (spec 4.2 - 4.13)
 // ===========================================================================
-
-class CKRasterizerEncoder {
-public:
-    virtual ~CKRasterizerEncoder() = default;
-    virtual CKERROR GetStatus() const;
-
-    // Draw state
-    virtual void SetState(CKDrawState State);
-    virtual void SetStencilRef(CKDWORD Ref);
-    virtual void SetStencilMask(CKDWORD ReadMask, CKDWORD WriteMask);
-    virtual void SetScissor(const CKRECT *Rect);
-    virtual void SetPointSize(float Size);
-
-    // Transform
-    virtual void SetTransform(CKDWORD TransformIndex, CKDWORD Count = 1);
-
-    // Geometry binding
-    virtual void SetVertexBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                 CKDWORD StartVertex, CKDWORD VertexCount,
-                                 CKDWORD Layout);
-    virtual void SetIndexBuffer(CKDWORD Buffer,
-                                CKDWORD StartIndex, CKDWORD IndexCount);
-    virtual void SetInstanceBuffer(CKDWORD Stream, CKDWORD Buffer,
-                                   CKDWORD StartInstance, CKDWORD InstanceCount);
-    virtual void SetTransientVertexBuffer(CKDWORD Stream,
-                                          CKTransientVertexBuffer *Buffer);
-    virtual void SetTransientIndexBuffer(CKTransientIndexBuffer *Buffer);
-    virtual void SetTransientInstanceBuffer(CKDWORD Stream,
-                                            CKTransientInstanceBuffer *Buffer);
-
-    // Resource binding
-    virtual void SetTexture(CKDWORD Stage, CKDWORD Uniform,
-                            CKDWORD Texture, CKSamplerDesc *Sampler = NULL);
-    virtual void SetUniform(CKDWORD Uniform, const void *Data,
-                            CKDWORD Count = 1);
-
-    // Clear pending encoder state and recover from a rejected draw.
-    virtual void Discard(CKDWORD Flags = CKRST_DISCARD_ALL) = 0;
-    // Compute binding
-    virtual void SetComputeBuffer(CKDWORD Stage, CKDWORD Buffer,
-                                  CK_ACCESS_MODE Access);
-    virtual void SetComputeImage(CKDWORD Stage, CKDWORD Texture,
-                                 CKDWORD Mip, CK_ACCESS_MODE Access);
-
-    // Occlusion queries
-    virtual void SetCondition(CKDWORD Query, CKBOOL Visible);
-
-    // Debug markers
-    virtual void SetMarker(CKSTRING Name);
-    virtual CKBOOL ConsumeMarker(char *Buffer, CKDWORD BufferSize);
-
-    // Submission -- graphics
-    virtual void Submit(CKRenderView View, CKDWORD Program,
-                        CKDWORD Depth = 0,
-                        CKDWORD Flags = CKRST_DISCARD_ALL);
-    virtual void SubmitOcclusionQuery(CKRenderView View, CKDWORD Program,
-                                      CKDWORD Query, CKDWORD Depth = 0,
-                                      CKDWORD Flags = CKRST_DISCARD_ALL);
-    virtual void SubmitIndirect(CKRenderView View, CKDWORD Program,
-                                CKDWORD IndirectBuffer,
-                                CKDWORD Start = 0, CKDWORD Count = 1,
-                                CKDWORD Depth = 0,
-                                CKDWORD Flags = CKRST_DISCARD_ALL);
-
-    // Submission -- compute
-    virtual void Dispatch(CKRenderView View, CKDWORD Program,
-                          CKDWORD NumX = 1, CKDWORD NumY = 1, CKDWORD NumZ = 1,
-                          CKDWORD Flags = CKRST_DISCARD_ALL);
-    virtual void DispatchIndirect(CKRenderView View, CKDWORD Program,
-                                  CKDWORD IndirectBuffer,
-                                  CKDWORD Start = 0, CKDWORD Count = 1,
-                                  CKDWORD Flags = CKRST_DISCARD_ALL);
-
-    // Utility
-    virtual void Touch(CKRenderView View);
-    virtual void Blit(CKRenderView View,
-                      CKDWORD DstTexture, CKDWORD DstMip,
-                      CKDWORD DstX, CKDWORD DstY,
-                      CKDWORD SrcTexture, CKDWORD SrcMip,
-                      const CKRECT *SrcRect);
-};
-
-// ===========================================================================
-// CKRasterizerContext
-// ===========================================================================
+// Error model (spec 4.10): every state setter returns CKBOOL. Any value of a
+// valid state type is stored verbatim and returned by the matching getter;
+// unsupported values are approximated at draw time and counted in
+// CKRenderStats::Diagnostics. Only out-of-range state types, stage indices,
+// light indices, clip plane indices and matrix types fail, without changing
+// state. Draws fail only for invalid handles, invalid parameters or a lost
+// device. All methods are called from the render thread (spec 4.11).
 
 class CKRasterizerContext {
 public:
-    CKRasterizerContext();
-    virtual ~CKRasterizerContext();
+    CKRasterizerContext()
+        : m_Driver(NULL), m_PosX(0), m_PosY(0), m_Width(0), m_Height(0), m_Bpp(0), m_ZBpp(0),
+          m_StencilBpp(0), m_Fullscreen(FALSE), m_RefreshRate(0), m_Window(NULL) {}
+    virtual ~CKRasterizerContext() {}
 
-    // --- Context lifecycle ---
-    virtual CKERROR Create(WIN_HANDLE Window, int PosX = 0, int PosY = 0,
-                           int Width = 0, int Height = 0, int Bpp = -1,
-                           CKBOOL Fullscreen = FALSE, int RefreshRate = 0,
-                           int Zbpp = -1, int StencilBpp = -1);
-    virtual CKERROR Resize(int PosX = 0, int PosY = 0,
-                           int Width = 0, int Height = 0,
-                           CKDWORD Flags = 0);
-    virtual CKERROR SetAntialias(CKDWORD Samples);
-    virtual CKBOOL IsIdle() const;
-    virtual CKERROR BeginShutdown();
-    virtual CKERROR GetDeviceStatus() const;
-    virtual CKERROR GetTargetDesc(CKRasterizerTargetDesc *Target) const;
-    virtual CKERROR GetCaps(CKRasterizerCapsDesc *Caps) const;
-    virtual CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format,
-                                         CKTextureFormatCaps *Caps) const;
-    virtual CKERROR GetDepthFormatCaps(CK_DEPTH_FORMAT Format,
-                                       CKDepthFormatCaps *Caps) const;
+    // --- Lifecycle (spec 4.2) ---
+    // Window is the SDL_Window* the engine received as WIN_HANDLE; native
+    // handle extraction is the backend's business.
+    virtual CKBOOL Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height,
+                          int Bpp, CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp) = 0;
+    virtual CKBOOL Resize(int PosX, int PosY, int Width, int Height, CKDWORD Flags) = 0;
+    virtual CKBOOL SetOptions(const CKRasterizerOptions *Options) = 0;
+    // Backend capabilities below the translation core: tests and diagnostics
+    // only, the engine MUST NOT read them (spec 4.9.1).
+    virtual CKBOOL GetCaps(CKRasterizerCapsDesc *Caps) const = 0;
+    virtual CKERROR GetDeviceStatus() const = 0;
+    virtual CKBOOL BeginShutdown() = 0;
+    virtual CKBOOL IsIdle() const = 0;
 
-    // --- Resource creation ---
-    virtual CKERROR CreateVertexBuffer(const CKVertexBufferDesc *Desc,
-                                       const void *Data, CKDWORD *OutBuffer);
-    virtual CKERROR CreateIndexBuffer(const CKIndexBufferDesc *Desc,
-                                      CKBOOL Index32, const void *Data,
-                                      CKDWORD *OutBuffer);
-    virtual CKERROR CreateTexture(const CKTextureDesc *Desc,
-                                  const VxImageDescEx *Data,
-                                  CKDWORD *OutTexture);
-    virtual CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *OutShader);
-    virtual CKERROR CreateProgram(const CKProgramDesc *Desc, CKDWORD *OutProgram);
-    virtual CKERROR CreateUniform(const CKUniformDesc *Desc, CKDWORD *OutUniform);
-    virtual CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc,
-                                       CKDWORD *OutLayout);
-    virtual CKERROR CreateFrameBuffer(const CKFrameBufferDesc *Desc,
-                                      CKDWORD *OutFrameBuffer);
-    virtual CKERROR CreateDepthTexture(const CKDepthTextureDesc *Desc,
-                                       CKDWORD *OutTexture);
-    virtual CKERROR CreateOcclusionQuery(const CKOcclusionQueryDesc *Desc,
-                                         CKDWORD *OutQuery);
-    virtual CKERROR CreateIndirectBuffer(const CKIndirectBufferDesc *Desc,
-                                         CKDWORD *OutBuffer);
-    virtual CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const;
-    virtual CKERROR DeleteObject(CKDWORD Object, CKDWORD Type);
-    virtual CKERROR FlushObjects(CKDWORD TypeMask = CKRST_OBJ_ALL);
+    // --- Frame (spec 4.3) ---
+    // Order: Clear* -> BeginScene -> draws -> EndScene -> BackToFront.
+    // Clear MAY also be called inside the scene (immediate clear of the current
+    // target; RectCount == 0 clears the current viewport). BeginOverlayPhase
+    // marks the start of native-resolution drawing over the presented scene
+    // image; it returns FALSE while a texture is the target.
+    virtual CKBOOL Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD Stencil,
+                         int RectCount, CKRECT *Rects) = 0;
+    virtual CKBOOL BeginScene() = 0;
+    virtual CKBOOL EndScene() = 0;
+    virtual CKBOOL BeginOverlayPhase() = 0;
+    virtual CKBOOL BackToFront(CKBOOL VSync) = 0;
 
-    // --- Resource update ---
-    virtual CKERROR UpdateVertexBuffer(CKDWORD Buffer, CKDWORD Offset,
-                                       CKDWORD Size, const void *Data);
-    virtual CKERROR UpdateIndexBuffer(CKDWORD Buffer, CKDWORD Offset,
-                                      CKDWORD Size, const void *Data);
-    virtual CKERROR UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face,
-                                  const CKRECT *Region,
-                                  const VxImageDescEx *Data);
+    // --- Fixed-function state (spec 4.6) ---
+    virtual CKBOOL SetRenderState(VXRENDERSTATETYPE State, CKDWORD Value) = 0;
+    virtual CKBOOL GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value) = 0;
+    // CKRST_TSS_ADDRESS sets ADDRESSU, ADDRESSV and ADDRESW together.
+    virtual CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) = 0;
+    virtual CKBOOL GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value) = 0;
+    virtual CKBOOL SetTexture(CKDWORD Texture, int Stage) = 0;
+    virtual CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) = 0;
+    virtual CKBOOL SetLight(CKDWORD Index, const CKLightData *Data) = 0;
+    virtual CKBOOL EnableLight(CKDWORD Index, CKBOOL Enable) = 0;
+    virtual CKBOOL SetMaterial(const CKMaterialData *Data) = 0;
+    virtual CKBOOL SetViewport(const CKViewportData *Data) = 0;
+    virtual CKBOOL SetUserClipPlane(CKDWORD Index, const VxPlane &Plane) = 0;
+    virtual CKBOOL GetUserClipPlane(CKDWORD Index, VxPlane &Plane) = 0;
+    // Resets every render state and texture stage state to the v1 defaults
+    // (CKRSTDefaultRenderStateValue / CKRSTDefaultTextureStageStateValue).
+    virtual void InitDefaultRenderStatesValue() = 0;
 
-    // --- Readback ---
-    virtual CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip,
-                                CKReadbackDesc *Readback,
-                                CKDWORD *AvailableFrame);
+    // --- Draw (spec 4.7) ---
+    // Indices are 16-bit. All six VXPRIMITIVETYPE topologies are accepted.
+    virtual CKBOOL DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices, int IndexCount,
+                                 VxDrawPrimitiveData *Data) = 0;
+    virtual CKBOOL DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB, CKDWORD StartVertex,
+                                   CKDWORD VertexCount, CKWORD *Indices, int IndexCount) = 0;
+    virtual CKBOOL DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD VB, CKDWORD IB,
+                                     CKDWORD MinVertexIndex, CKDWORD VertexCount,
+                                     CKDWORD StartIndex, int IndexCount) = 0;
 
-    // --- Occlusion query results ---
-    virtual CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD Query,
-                                                   CKDWORD *PixelCount = NULL);
+    // --- Resources (spec 4.5) ---
+    // Handles are allocated by the rasterizer; 0 is never a valid handle and a
+    // deleted handle MAY be reused.
+    virtual CKBOOL CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle) = 0;
+    virtual CKBOOL LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
+                               CKRST_CUBEFACE Face, const CKRECT *Region) = 0;
+    virtual CKBOOL GetTextureDesc(CKDWORD Texture, CKTextureDesc *Desc) const = 0;
+    virtual CKBOOL CreateVertexBuffer(const CKVertexBufferDesc *Desc, const void *Data, CKDWORD *OutHandle) = 0;
+    virtual CKBOOL CreateIndexBuffer(const CKIndexBufferDesc *Desc, const void *Data, CKDWORD *OutHandle) = 0;
+    virtual void *LockVertexBuffer(CKDWORD VB, CKDWORD StartVertex, CKDWORD VertexCount, CKRST_LOCKFLAGS Flags) = 0;
+    virtual CKBOOL UnlockVertexBuffer(CKDWORD VB) = 0;
+    virtual void *LockIndexBuffer(CKDWORD IB, CKDWORD StartIndex, CKDWORD IndexCount, CKRST_LOCKFLAGS Flags) = 0;
+    virtual CKBOOL UnlockIndexBuffer(CKDWORD IB) = 0;
+    virtual CKBOOL DeleteObject(CKDWORD Handle, CKDWORD Type) = 0;
+    virtual CKBOOL FlushObjects(CKDWORD TypeMask) = 0;
+    virtual void SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name) = 0;
 
-    // --- Palette ---
-    virtual CKERROR SetPaletteColor(CKDWORD Index, CKDWORD RGBA);
+    // --- Targets, readback, copies (spec 4.8) ---
+    // Texture == 0 selects the virtual backbuffer. Only outside a scene.
+    virtual CKBOOL SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face) = 0;
+    virtual CKBOOL CopyToTexture(CKDWORD Texture, const VxRect *Src, const VxRect *Dst, CKRST_CUBEFACE Face) = 0;
+    // Synchronous, outside a scene; returns the number of bytes written and
+    // 0 on failure. The image is at native (window) resolution (spec 4.4).
+    // Two-call protocol: when Image.Image is NULL the descriptor is filled
+    // (size, 32-bit ARGB format) and the required byte count is returned
+    // without copying anything.
+    virtual int CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, VxImageDescEx &Image) = 0;
+    virtual int CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, const VxImageDescEx &Image) = 0;
+    virtual CKBOOL RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer,
+                                   CKReadbackCallback Callback, void *User) = 0;
 
-    // --- Debug text overlay ---
-    virtual void DbgTextClear(CKDWORD Color = 0, CKBOOL Small = FALSE);
-    virtual void DbgTextPrintf(CKWORD X, CKWORD Y, CKDWORD Attr,
-                               CKSTRING Format, ...);
-    virtual void DbgTextImage(CKWORD X, CKWORD Y, CKWORD Width, CKWORD Height,
-                              const void *Data, CKWORD Pitch);
-
-    // --- Debug flags ---
-    virtual void SetDebug(CKDWORD Flags);
-
-    // --- Statistics ---
-    virtual const CKRenderStats *GetStats();
-
-    // --- Resource naming ---
-    virtual void SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name);
-
-    // --- Shader reflection ---
-    virtual CKDWORD GetShaderUniforms(CKDWORD Shader, CKDWORD *Uniforms = NULL,
-                                      CKDWORD MaxCount = 0);
-    virtual void GetUniformInfo(CKDWORD Uniform, CKUniformInfo *Info);
-
-    // --- Framebuffer queries ---
-    virtual CKDWORD GetFrameBufferTexture(CKDWORD FrameBuffer,
-                                          CKDWORD Attachment = 0);
-
-    // --- Resource validation ---
-    virtual CKBOOL IsTextureValid(CKDWORD Depth, CKBOOL CubeMap, CKWORD NumLayers,
-                                  CKDWORD Format, CKDWORD Flags);
-    virtual CKBOOL IsFrameBufferValid(CKDWORD ColorCount,
-                                      const CKFrameBufferAttachmentDesc *Color,
-                                      const CKFrameBufferAttachmentDesc *DepthStencil = NULL);
-
-    // --- Texture info ---
-    virtual void CalcTextureSize(CKTextureInfo *Info, CKWORD Width, CKWORD Height,
-                                 CKWORD Depth, CKBOOL CubeMap, CKBOOL HasMips,
-                                 CKWORD NumLayers, CKDWORD Format);
-
-    // --- Screenshot capture ---
-    virtual CKERROR RequestScreenShot(CKDWORD FrameBuffer,
-                                      CKScreenShotCallback Callback,
-                                      void *UserData = NULL);
-    virtual CKERROR CancelScreenShots(void *UserData);
-
-    // --- Render views ---
-    virtual CKERROR SetViewName(CKRenderView View, CKSTRING Name);
-    virtual CKERROR SetViewRect(CKRenderView View, const CKRECT &Rect);
-    virtual CKERROR SetViewScissor(CKRenderView View, const CKRECT *Rect);
-    virtual CKERROR SetViewClear(CKRenderView View, CKDWORD Flags,
-                                 CKDWORD Color, float Z, CKDWORD Stencil);
-    virtual CKERROR SetViewTransform(CKRenderView View,
-                                     const VxMatrix *ViewMatrix,
-                                     const VxMatrix *ProjMatrix);
-    virtual CKERROR SetViewFrameBuffer(CKRenderView View, CKDWORD FrameBuffer);
-    virtual CKERROR SetViewMode(CKRenderView View, CK_VIEW_MODE Mode);
-    virtual CKERROR SetViewOrder(CKRenderView Start, CKWORD Count,
-                                 const CKRenderView *Order);
-    virtual CKERROR ResetView(CKRenderView View);
-    virtual CKERROR TouchView(CKRenderView View);
-
-    // --- Transform cache ---
-    virtual CKDWORD AllocTransform(VxMatrix *Transform, CKDWORD Count);
-
-    // --- Transient buffers ---
-    virtual CKBOOL AllocTransientVertexBuffer(CKTransientVertexBuffer *Buffer,
-                                              CKDWORD VertexCount,
-                                              CKDWORD Layout);
-    virtual CKBOOL AllocTransientIndexBuffer(CKTransientIndexBuffer *Buffer,
-                                             CKDWORD IndexCount,
-                                             CKBOOL Index32 = FALSE);
-    virtual CKBOOL AllocTransientInstanceBuffer(CKTransientInstanceBuffer *Buffer,
-                                                CKDWORD InstanceCount,
-                                                CKDWORD Layout);
-    virtual CKDWORD GetAvailTransientVertexBuffer(CKDWORD VertexCount,
-                                                  CKDWORD Layout);
-    virtual CKDWORD GetAvailTransientIndexBuffer(CKDWORD IndexCount,
-                                                 CKBOOL Index32 = FALSE);
-    virtual CKDWORD GetAvailTransientInstanceBuffer(CKDWORD InstanceCount,
-                                                    CKDWORD Layout);
-
-    // --- Encoder and frame ---
-    virtual CKRasterizerEncoder *BeginEncoder(CKBOOL ForceNewEncoder = FALSE);
-    virtual CKERROR EndEncoder(CKRasterizerEncoder *Encoder);
-    virtual CKERROR Frame(CKRST_FRAME_SYNC_MODE SyncMode,
-                          CKDWORD Flags = CKRST_FRAME_NONE,
-                          CKDWORD *FrameNumber = NULL);
+    // --- Diagnostics ---
+    virtual void SetDebugMarker(CKSTRING Name) = 0;
+    virtual const CKRenderStats *GetStats() = 0;
 
 public:
     CKRasterizerDriver *m_Driver;
-
     CKDWORD m_PosX;
     CKDWORD m_PosY;
     CKDWORD m_Width;
     CKDWORD m_Height;
-
     CKDWORD m_Bpp;
     CKDWORD m_ZBpp;
     CKDWORD m_StencilBpp;
-
     CKDWORD m_Fullscreen;
     CKDWORD m_RefreshRate;
-
     WIN_HANDLE m_Window;
-    CKBOOL m_Created;
-    CKDWORD m_NullFrameNumber;
-    void *m_NullBackendState;
 };
 
 // ===========================================================================
-// CKDrawStateBuilder
+// Inline helpers shared by the engine and the rasterizer
 // ===========================================================================
 
-class CKDrawStateBuilder {
-public:
-    CKDrawStateBuilder()
-    {
-        m_State.Lo = CKRST_STATE_WRITE_RGBA
-                   | CKRST_STATE_DEPTH_TEST
-                   | CKRST_STATE_DEPTH_WRITE
-                   | CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL)
-                   | CKRST_STATE_CULL(VXCULL_CCW - 1);
-        m_State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
-        m_State.Hi = 0;
+// ---------------------------------------------------------------------------
+// State type validation
+// ---------------------------------------------------------------------------
+
+inline CKBOOL CKRSTIsValidRenderStateType(CKDWORD State)
+{
+    return State < (CKDWORD)VXRENDERSTATE_MAXSTATE ? TRUE : FALSE;
+}
+
+inline CKBOOL CKRSTIsValidTextureStageStateType(CKDWORD Tss)
+{
+    return Tss >= (CKDWORD)CKRST_TSS_OP && Tss < (CKDWORD)CKRST_TSS_MAXSTATE ? TRUE : FALSE;
+}
+
+// Maps a VXMATRIX_TYPE to a dense storage slot in 0..CKRST_MATRIX_SLOT_COUNT-1
+// (world matrices first so WORLD and WORLDMATRIX(0) share slot 0), or -1.
+inline int CKRSTMatrixSlot(VXMATRIX_TYPE Type)
+{
+    const CKDWORD t = (CKDWORD)Type;
+    if (t == (CKDWORD)VXMATRIX_WORLD)
+        return 0;
+    if (t >= (CKDWORD)VXMATRIX_WMAT && t < (CKDWORD)VXMATRIX_WMAT + CKRST_MAX_WORLD_MATRICES)
+        return (int)(t - (CKDWORD)VXMATRIX_WMAT);
+    if (t == (CKDWORD)VXMATRIX_VIEW)
+        return CKRST_MAX_WORLD_MATRICES;
+    if (t == (CKDWORD)VXMATRIX_PROJECTION)
+        return CKRST_MAX_WORLD_MATRICES + 1;
+    if (t >= (CKDWORD)VXMATRIX_TEXTURE0 && t < (CKDWORD)VXMATRIX_TEXTURE0 + CKRST_MAX_TEXTURE_STAGES)
+        return CKRST_MAX_WORLD_MATRICES + 2 + (int)(t - (CKDWORD)VXMATRIX_TEXTURE0);
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Default state values (spec 4.6): original CKRasterizerContext::
+// InitDefaultRenderStatesValue. States it does not list default to 0, except
+// the v3 addition COLORWRITEENABLE which defaults to all channels.
+// ---------------------------------------------------------------------------
+
+inline CKDWORD CKRSTDefaultRenderStateValue(VXRENDERSTATETYPE State)
+{
+    switch ((CKDWORD)State) {
+    case VXRENDERSTATE_SHADEMODE:        return VXSHADE_GOURAUD;    // 2
+    case VXRENDERSTATE_SRCBLEND:         return VXBLEND_ONE;        // 2
+    case VXRENDERSTATE_ALPHAFUNC:        return VXCMP_ALWAYS;       // 8
+    case VXRENDERSTATE_STENCILFUNC:      return VXCMP_ALWAYS;       // 8
+    case VXRENDERSTATE_STENCILMASK:      return 0xFFFFFFFFu;
+    case VXRENDERSTATE_STENCILWRITEMASK: return 0xFFFFFFFFu;
+    case VXRENDERSTATE_ZENABLE:          return 1;
+    case VXRENDERSTATE_FILLMODE:         return VXFILL_SOLID;       // 3
+    case VXRENDERSTATE_ZWRITEENABLE:     return 1;
+    case VXRENDERSTATE_DESTBLEND:        return VXBLEND_ZERO;       // 1
+    case VXRENDERSTATE_CULLMODE:         return VXCULL_CCW;         // 3
+    case VXRENDERSTATE_ZFUNC:            return VXCMP_LESSEQUAL;    // 4
+    case VXRENDERSTATE_STENCILFAIL:      return VXSTENCILOP_KEEP;   // 1
+    case VXRENDERSTATE_STENCILZFAIL:     return VXSTENCILOP_KEEP;   // 1
+    case VXRENDERSTATE_STENCILPASS:      return VXSTENCILOP_KEEP;   // 1
+    case VXRENDERSTATE_TEXTUREFACTOR:    return 0xFF000000u;        // A_MASK
+    case VXRENDERSTATE_CLIPPING:         return 1;
+    case VXRENDERSTATE_LIGHTING:         return 1;
+    case VXRENDERSTATE_LOCALVIEWER:      return 1;
+    case VXRENDERSTATE_NORMALIZENORMALS: return 1;
+    case 168 /* VXRENDERSTATE_COLORWRITEENABLE */: return CKRST_COLORWRITE_ALL;
+    default:                             return 0;
+    }
+}
+
+// D3D8 device defaults expressed with Virtools enumerations. Stage 0
+// modulates texture and diffuse; every other stage is disabled.
+inline CKDWORD CKRSTDefaultTextureStageStateValue(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss)
+{
+    switch ((CKDWORD)Tss) {
+    case CKRST_TSS_OP:            return Stage == 0 ? CKRST_TOP_MODULATE : CKRST_TOP_DISABLE;
+    case CKRST_TSS_ARG1:          return CKRST_TA_TEXTURE;
+    case CKRST_TSS_ARG2:          return CKRST_TA_CURRENT;
+    case CKRST_TSS_AOP:           return Stage == 0 ? CKRST_TOP_SELECTARG1 : CKRST_TOP_DISABLE;
+    case CKRST_TSS_AARG1:         return CKRST_TA_TEXTURE;
+    case CKRST_TSS_AARG2:         return CKRST_TA_CURRENT;
+    case CKRST_TSS_TEXCOORDINDEX: return (CKDWORD)Stage;
+    case CKRST_TSS_ADDRESS:       return VXTEXTURE_ADDRESSWRAP;
+    case CKRST_TSS_ADDRESSU:      return VXTEXTURE_ADDRESSWRAP;
+    case CKRST_TSS_ADDRESSV:      return VXTEXTURE_ADDRESSWRAP;
+    case CKRST_TSS_ADDRESW:       return VXTEXTURE_ADDRESSWRAP;
+    case CKRST_TSS_MAGFILTER:     return VXTEXTUREFILTER_NEAREST;
+    case CKRST_TSS_MINFILTER:     return VXTEXTUREFILTER_NEAREST;
+    case CKRST_TSS_MAXANISOTROPY: return 1;
+    case CKRST_TSS_COLORARG0:     return CKRST_TA_CURRENT;
+    case CKRST_TSS_ALPHAARG0:     return CKRST_TA_CURRENT;
+    case CKRST_TSS_RESULTARG0:    return CKRST_TA_CURRENT;
+    default:                      return 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Canonical interleaved vertex layout (spec 4.5)
+// ---------------------------------------------------------------------------
+// Component order follows the D3D FVF memory layout, with the tween set
+// inserted after the normal:
+//   position (xyz | xyzw)  weights  blend indices  normal  tween position
+//   tween normal  point size  diffuse  specular  texcoord0..n
+// Rules:
+//   - CKRST_DP_TRANSFORM missing => pre-transformed xyzw position; weights,
+//     blend indices, normal and tween data are not part of the layout.
+//   - Weight count = index of the highest CKRST_DP_WEIGHTS* bit + 1 (0..5).
+//   - CKRST_DP_MATRIXPAL adds one dword of four uint8 indices after weights.
+//   - CKRST_DP_LIGHT => normal present. CKRST_DP_TWEEN => tween position,
+//     plus tween normal when a normal is present.
+//   - Texcoord set count = index of the highest CKRST_DP_STAGES* bit + 1.
+//     Dimensions come from TexcoordDims (NULL or 0 entries => 2).
+// Returns the stride in bytes. Layout may be NULL.
+
+inline CKDWORD CKRSTGetVertexLayout(CKDWORD VertexFormat, const CKBYTE *TexcoordDims,
+                                    CKRSTVertexLayout *Layout)
+{
+    CKRSTVertexLayout local;
+    CKRSTVertexLayout &l = Layout ? *Layout : local;
+    l.PositionOffset = l.WeightOffset = l.BlendIndexOffset = l.NormalOffset = -1;
+    l.TweenPositionOffset = l.TweenNormalOffset = l.PointSizeOffset = -1;
+    l.DiffuseOffset = l.SpecularOffset = -1;
+    l.WeightCount = 0;
+    l.TexcoordCount = 0;
+    for (int i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i) {
+        l.TexcoordOffset[i] = -1;
+        l.TexcoordDims[i] = 0;
     }
 
-    CKDrawStateBuilder &WriteRGBA(CKBOOL R, CKBOOL G, CKBOOL B, CKBOOL A)
-    {
-        m_State.Lo &= ~0xFUL;
-        if (R) m_State.Lo |= CKRST_STATE_WRITE_R;
-        if (G) m_State.Lo |= CKRST_STATE_WRITE_G;
-        if (B) m_State.Lo |= CKRST_STATE_WRITE_B;
-        if (A) m_State.Lo |= CKRST_STATE_WRITE_A;
-        return *this;
-    }
+    const CKBOOL transformed = (VertexFormat & CKRST_DP_TRANSFORM) != 0;
+    CKDWORD offset = 0;
 
-    CKDrawStateBuilder &Depth(CKBOOL Test, CKBOOL Write, VXCMPFUNC Func)
-    {
-        m_State.Lo &= ~(CKRST_STATE_DEPTH_TEST | CKRST_STATE_DEPTH_WRITE | (0xFUL << 6));
-        if (Test)  m_State.Lo |= CKRST_STATE_DEPTH_TEST;
-        if (Write) m_State.Lo |= CKRST_STATE_DEPTH_WRITE;
-        m_State.Lo |= CKRST_STATE_DEPTH_FUNC(Func);
-        return *this;
-    }
+    l.PositionOffset = 0;
+    l.PositionComponents = transformed ? 3 : 4;
+    offset += (CKDWORD)l.PositionComponents * 4;
 
-    CKDrawStateBuilder &Cull(VXCULL Mode)
-    {
-        m_State.Lo &= ~(0x3UL << 10);
-        CKDWORD remapped = (Mode >= 1) ? (Mode - 1) : 0;
-        m_State.Lo |= CKRST_STATE_CULL(remapped);
-        return *this;
-    }
-
-    CKDrawStateBuilder &Fill(VXFILL_MODE Mode)
-    {
-        m_State.Lo &= ~(0x3UL << 12);
-        CKDWORD remapped;
-        switch (Mode) {
-        case VXFILL_SOLID:     remapped = 0; break;
-        case VXFILL_WIREFRAME: remapped = 1; break;
-        case VXFILL_POINT:     remapped = 2; break;
-        default:               remapped = 0; break;
+    if (transformed) {
+        CKDWORD weights = 0;
+        for (CKDWORD bit = VertexFormat & CKRST_DP_WEIGHTMASK; bit != 0; bit >>= 1)
+            ++weights;
+        // WEIGHTS1 is bit 20: shift the count back to 1..5.
+        if (weights > 20)
+            weights -= 20;
+        else
+            weights = 0;
+        if (weights > 5)
+            weights = 5;
+        if (weights > 0) {
+            l.WeightOffset = (int)offset;
+            l.WeightCount = (int)weights;
+            offset += weights * 4;
+            if (VertexFormat & CKRST_DP_MATRIXPAL) {
+                l.BlendIndexOffset = (int)offset;
+                offset += 4;
+            }
         }
-        m_State.Lo |= CKRST_STATE_FILLMODE(remapped);
-        return *this;
-    }
-
-    CKDrawStateBuilder &MSAA(CKBOOL Enable)
-    {
-        if (Enable) m_State.Lo |= CKRST_STATE_MSAA;
-        else        m_State.Lo &= ~CKRST_STATE_MSAA;
-        return *this;
-    }
-
-    CKDrawStateBuilder &AlphaCoverage(CKBOOL Enable)
-    {
-        if (Enable) m_State.Lo |= CKRST_STATE_ALPHA_COVERAGE;
-        else        m_State.Lo &= ~CKRST_STATE_ALPHA_COVERAGE;
-        return *this;
-    }
-
-    CKDrawStateBuilder &Blend(VXBLEND_MODE SrcColor, VXBLEND_MODE DstColor)
-    {
-        m_State.Lo &= ~(0xFFFFUL << 16);
-        FixupBlendPair(SrcColor, DstColor);
-        m_State.Lo |= CKRST_STATE_BLEND(SrcColor, DstColor);
-        return *this;
-    }
-
-    CKDrawStateBuilder &BlendSeparate(VXBLEND_MODE SrcColor, VXBLEND_MODE DstColor,
-                                       VXBLEND_MODE SrcAlpha, VXBLEND_MODE DstAlpha)
-    {
-        m_State.Lo &= ~(0xFFFFUL << 16);
-        FixupBlendPair(SrcColor, DstColor);
-        FixupBlendPair(SrcAlpha, DstAlpha);
-        m_State.Lo |= CKRST_STATE_BLEND_SEPARATE(SrcColor, DstColor, SrcAlpha, DstAlpha);
-        return *this;
-    }
-
-    CKDrawStateBuilder &NoBlend()
-    {
-        m_State.Lo &= ~(0xFFFFUL << 16);
-        return *this;
-    }
-
-    CKDrawStateBuilder &BlendEquation(VXBLENDOP Color)
-    {
-        m_State.Mid &= ~0x3FUL;
-        m_State.Mid |= CKRST_STATE_BLEND_EQ(Color);
-        return *this;
-    }
-
-    CKDrawStateBuilder &BlendEquationSeparate(VXBLENDOP Color, VXBLENDOP Alpha)
-    {
-        m_State.Mid &= ~0x3FUL;
-        m_State.Mid |= CKRST_STATE_BLEND_EQ_SEPARATE(Color, Alpha);
-        return *this;
-    }
-
-    CKDrawStateBuilder &Topology(VXPRIMITIVETYPE PT)
-    {
-        m_State.Mid &= ~(0x7UL << 6);
-        m_State.Mid |= CKRST_STATE_PT(PT);
-        return *this;
-    }
-
-    CKDrawStateBuilder &Stencil(CKBOOL Enable, VXCMPFUNC Func,
-                                 VXSTENCILOP Fail, VXSTENCILOP ZFail, VXSTENCILOP Pass)
-    {
-        m_State.Mid &= ~(0x7FFFFFUL << 9);
-        if (Enable)
-            m_State.Mid |= CKRST_STENCIL_OPS(Func, Fail, ZFail, Pass);
-        return *this;
-    }
-
-    CKDrawStateBuilder &StencilBack(VXCMPFUNC Func,
-                                     VXSTENCILOP Fail, VXSTENCILOP ZFail, VXSTENCILOP Pass)
-    {
-        m_State.Hi &= ~0xFFFFUL;
-        m_State.Hi |= CKRST_STENCIL_BACK_OPS(Func, Fail, ZFail, Pass);
-        return *this;
-    }
-
-    CKDrawStateBuilder &FrontFaceCCW(CKBOOL CCW)
-    {
-        if (CCW) m_State.Hi |= CKRST_STATE_FRONT_CCW;
-        else     m_State.Hi &= ~CKRST_STATE_FRONT_CCW;
-        return *this;
-    }
-
-    CKDrawState Build() const { return m_State; }
-
-private:
-    static void FixupBlendPair(VXBLEND_MODE &src, VXBLEND_MODE &dst)
-    {
-        if (src == VXBLEND_BOTHSRCALPHA) {
-            src = VXBLEND_SRCALPHA;
-            dst = VXBLEND_INVSRCALPHA;
-        } else if (src == VXBLEND_BOTHINVSRCALPHA) {
-            src = VXBLEND_INVSRCALPHA;
-            dst = VXBLEND_SRCALPHA;
+        if (VertexFormat & CKRST_DP_LIGHT) {
+            l.NormalOffset = (int)offset;
+            offset += 12;
+        }
+        if (VertexFormat & CKRST_DP_TWEEN) {
+            l.TweenPositionOffset = (int)offset;
+            offset += 12;
+            if (VertexFormat & CKRST_DP_LIGHT) {
+                l.TweenNormalOffset = (int)offset;
+                offset += 12;
+            }
         }
     }
 
-    CKDrawState m_State;
-};
+    if (VertexFormat & CKRST_DP_PSIZE) {
+        l.PointSizeOffset = (int)offset;
+        offset += 4;
+    }
+    if (VertexFormat & CKRST_DP_DIFFUSE) {
+        l.DiffuseOffset = (int)offset;
+        offset += 4;
+    }
+    if (VertexFormat & CKRST_DP_SPECULAR) {
+        l.SpecularOffset = (int)offset;
+        offset += 4;
+    }
+
+    int texcoordCount = 0;
+    for (CKDWORD bit = CKRST_DP_STAGEFLAGS(VertexFormat); bit != 0; bit >>= 1)
+        ++texcoordCount;
+    if (texcoordCount > CKRST_MAX_TEXTURE_STAGES)
+        texcoordCount = CKRST_MAX_TEXTURE_STAGES;
+    l.TexcoordCount = texcoordCount;
+    for (int i = 0; i < texcoordCount; ++i) {
+        int dims = TexcoordDims ? (int)TexcoordDims[i] : 0;
+        if (dims < 1 || dims > CKRST_MAX_TEXCOORD_DIMS)
+            dims = 2;
+        l.TexcoordOffset[i] = (int)offset;
+        l.TexcoordDims[i] = dims;
+        offset += (CKDWORD)dims * 4;
+    }
+
+    l.Stride = offset;
+    return offset;
+}
+
+inline CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat, const CKBYTE *TexcoordDims)
+{
+    return CKRSTGetVertexLayout(VertexFormat, TexcoordDims, NULL);
+}
 
 #endif // CKRASTERIZER_H

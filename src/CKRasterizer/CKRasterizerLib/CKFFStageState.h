@@ -3,8 +3,8 @@
 
 #include "VxMath.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerEnums.h"
-#include "CKRasterizerTypes.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 #include "CKFFConstants.h"
 
 struct CKFFTextureStageOps {

@@ -1,5 +1,5 @@
 #include "CKRenderPipeline.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKDebugLogger.h"
 #include "CKRenderPerfClock.h"
 #include "CKRenderSettings.h"
@@ -130,7 +130,7 @@ CKRenderPipeline::~CKRenderPipeline() {
     Shutdown();
 }
 
-void CKRenderPipeline::Init(CKRasterizerContext *ctx) {
+void CKRenderPipeline::Init(CKRasterizerDevice *ctx) {
     m_Context = ctx;
     m_Encoder = nullptr;
     m_FrameNumber = 0;
@@ -424,7 +424,7 @@ CKERROR CKRenderPipeline::EndFrame(CKRST_FRAME_SYNC_MODE syncMode) {
     const CKERROR frameStatus = m_Context->Frame(
         syncMode, CKRST_FRAME_NONE, &frameNumber);
     if (logPresentSync) {
-        const CKRenderStats *stats = m_Context->GetStats();
+        const CKRasterizerDeviceStats *stats = m_Context->GetStats();
         CK_LOG_FMT("PresentSync",
                    "frame=%u syncMode=%d frameUs=%.1f cpuFrame=%lld waitSubmit=%lld waitRender=%lld draws=%u maxGpuLatency=%u transientVB=%u transientIB=%u",
                    frameNumber, syncMode, CKRenderPerfElapsedUs(frameStart),
@@ -474,7 +474,7 @@ CKBOOL CKRenderPipeline::EnsureSceneFrameBuffer(const CKRECT &viewport)
 {
     if (!m_Context || m_ExternalRenderTarget)
         return FALSE;
-    CKRasterizerCapsDesc caps;
+    CKRasterizerDeviceCapsDesc caps;
     if (m_Context->GetCaps(&caps) != CK_OK || caps.MaxTextureSize == 0)
         return FALSE;
     const CKDWORD viewportWidth = (CKDWORD)((viewport.right > viewport.left) ? (viewport.right - viewport.left) : 1);

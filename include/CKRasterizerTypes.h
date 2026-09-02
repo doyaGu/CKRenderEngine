@@ -1,9 +1,12 @@
 #ifndef CKRASTERIZERTYPES_H
 #define CKRASTERIZERTYPES_H
 
+// CKRasterizer v3 contract: descriptor and data structures.
+
+#include <stdint.h>
+
 #include "VxDefines.h"
-#include "VxColor.h"
-#include "XArray.h"
+#include "VxMath.h"
 #include "CKTypes.h"
 #include "CKRasterizerEnums.h"
 
@@ -12,447 +15,203 @@ class CKRasterizerContext;
 class CKRasterizer;
 
 // ===========================================================================
-// Function typedefs for rasterizer DLL entry points
+// DLL entry points
 // ===========================================================================
 
 typedef CKRasterizer *(*CKRST_STARTFUNCTION)(WIN_HANDLE);
 typedef void (*CKRST_CLOSEFUNCTION)(CKRasterizer *);
 
 // ===========================================================================
-// Driver Problems
+// Texture descriptor (spec 4.5)
 // ===========================================================================
 
-typedef struct CKDriverProblems
-{
-    XString m_Vendor;
-    XString m_Renderer;
-    XString m_DeviceDesc;
-    XString m_Version;
-
-    CKBOOL m_VersionMustBeExact;
-    XArray<VX_OSINFO> m_ConcernedOS;
-    CKBOOL m_OnlyIn16;
-    CKBOOL m_OnlyIn32;
-
-    int m_RealMaxTextureWidth;
-    int m_RealMaxTextureHeight;
-    CKBOOL m_ClampToEdgeBug;
-    XArray<VX_PIXELFORMAT> m_TextureFormatsRGBABug;
-
-    CKDriverProblems()
-    {
-        m_ClampToEdgeBug = FALSE;
-        m_VersionMustBeExact = FALSE;
-        m_OnlyIn16 = FALSE;
-        m_OnlyIn32 = FALSE;
-        m_RealMaxTextureWidth = 0;
-        m_RealMaxTextureHeight = 0;
-    }
-} CKDriverProblems;
-
-// ===========================================================================
-// Resource Descriptor Base
-// ===========================================================================
-
-struct CKRasterizerObjectDesc
-{
-    virtual ~CKRasterizerObjectDesc() {}
-};
-
-// ===========================================================================
-// Texture Descriptor
-// ===========================================================================
-
-struct CKTextureDesc : public CKRasterizerObjectDesc
-{
-    CKDWORD Flags;
-    VxImageDescEx Format;
-    CKDWORD MipMapCount;
-    CKDWORD Depth;
+struct CKTextureDesc {
+    CKDWORD Flags;         // CKRST_TEXTUREFLAGS
+    VxImageDescEx Format;  // Width, Height, pixel format of level 0
+    CKDWORD MipMapCount;   // 0 / 1 = none, N = engine-provided levels, CKRST_MIPMAP_GENERATE
+    CKDWORD Depth;         // Volume depth (1 for 2D and cube)
 
     CKTextureDesc() : Flags(0), MipMapCount(0), Depth(1) {}
-    virtual ~CKTextureDesc() {}
 };
 
 // ===========================================================================
-// Vertex Buffer Descriptor
+// Vertex buffer descriptor (spec 4.5)
 // ===========================================================================
+// m_VertexFormat is the vertex-data subset of CKRST_DPFLAGS (CKRST_VF_MASK).
+// m_TexcoordDims[i] gives the component count (1..4) of texture coordinate
+// set i; 0 means the default of 2. m_VertexSize is filled by the rasterizer
+// from CKRSTGetVertexLayout() on creation.
 
-struct CKVertexBufferDesc : CKRasterizerObjectDesc
-{
-    CKDWORD m_Flags;
+struct CKVertexBufferDesc {
+    CKDWORD m_Flags;          // CKRST_VBFLAGS
     CKDWORD m_VertexFormat;
     CKDWORD m_MaxVertexCount;
     CKDWORD m_VertexSize;
     CKDWORD m_CurrentVCount;
+    CKBYTE m_TexcoordDims[CKRST_MAX_TEXTURE_STAGES];
 
     CKVertexBufferDesc()
+        : m_Flags(0), m_VertexFormat(0), m_MaxVertexCount(0), m_VertexSize(0), m_CurrentVCount(0)
     {
-        m_Flags = m_VertexFormat = m_MaxVertexCount = m_VertexSize = m_CurrentVCount = 0;
-    }
-    virtual ~CKVertexBufferDesc() {}
-
-    CKVertexBufferDesc &operator=(const CKVertexBufferDesc &b)
-    {
-        m_Flags = b.m_Flags;
-        m_VertexFormat = b.m_VertexFormat;
-        m_MaxVertexCount = b.m_MaxVertexCount;
-        m_VertexSize = b.m_VertexSize;
-        m_CurrentVCount = b.m_CurrentVCount;
-        return *this;
+        for (int i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i)
+            m_TexcoordDims[i] = 0;
     }
 };
 
 // ===========================================================================
-// Index Buffer Descriptor
+// Index buffer descriptor (spec 4.5): 16-bit indices
 // ===========================================================================
 
-struct CKIndexBufferDesc : CKRasterizerObjectDesc
-{
-    CKDWORD m_Flags;
+struct CKIndexBufferDesc {
+    CKDWORD m_Flags;          // CKRST_VBFLAGS
     CKDWORD m_MaxIndexCount;
     CKDWORD m_CurrentICount;
 
-    CKIndexBufferDesc()
-    {
-        m_Flags = m_MaxIndexCount = m_CurrentICount = 0;
-    }
-    virtual ~CKIndexBufferDesc() {}
-
-    CKIndexBufferDesc &operator=(const CKIndexBufferDesc &b)
-    {
-        m_Flags = b.m_Flags;
-        m_MaxIndexCount = b.m_MaxIndexCount;
-        m_CurrentICount = b.m_CurrentICount;
-        return *this;
-    }
+    CKIndexBufferDesc() : m_Flags(0), m_MaxIndexCount(0), m_CurrentICount(0) {}
 };
 
 // ===========================================================================
-// Render State Data (cache)
+// Canonical interleaved vertex layout (spec 4.5)
 // ===========================================================================
+// Byte offsets of each component inside one vertex, -1 when absent. Derived
+// from a vertex format by CKRSTGetVertexLayout() in CKRasterizer.h. Both the
+// engine (writing Lock memory) and the rasterizer (declaring the backend
+// vertex layout) use it.
 
-struct CKRenderStateData
-{
-    CKDWORD Value;
-    CKDWORD Valid;
-    CKDWORD Flags;
-    CKDWORD DefaultValue;
+struct CKRSTVertexLayout {
+    CKDWORD Stride;
+    int PositionOffset;      // 3 floats (x, y, z) or 4 floats (x, y, z, rhw)
+    int PositionComponents;  // 3 or 4
+    int WeightOffset;        // WeightCount floats
+    int WeightCount;         // 0..5
+    int BlendIndexOffset;    // 4 x uint8 matrix palette indices
+    int NormalOffset;        // 3 floats
+    int TweenPositionOffset; // 3 floats
+    int TweenNormalOffset;   // 3 floats
+    int PointSizeOffset;     // 1 float
+    int DiffuseOffset;       // ARGB dword
+    int SpecularOffset;      // ARGB dword
+    int TexcoordCount;       // 0..8
+    int TexcoordOffset[CKRST_MAX_TEXTURE_STAGES];
+    int TexcoordDims[CKRST_MAX_TEXTURE_STAGES];
 };
 
 // ===========================================================================
-// Shader Descriptor
+// Fixed-function data (spec 4.6)
 // ===========================================================================
 
-struct CKRasterizerTargetDesc {
+struct CKViewportData {
+    CKDWORD ViewX;
+    CKDWORD ViewY;
+    CKDWORD ViewWidth;
+    CKDWORD ViewHeight;
+    float ViewZMin;
+    float ViewZMax;
+
+    CKViewportData()
+        : ViewX(0), ViewY(0), ViewWidth(0), ViewHeight(0), ViewZMin(0.0f), ViewZMax(1.0f) {}
+};
+
+struct CKMaterialData {
+    VxColor Diffuse;
+    VxColor Ambient;
+    VxColor Specular;
+    VxColor Emissive;
+    float SpecularPower;
+};
+
+struct CKLightData {
+    VXLIGHT_TYPE Type;
+    VxColor Diffuse;
+    VxColor Specular;
+    VxColor Ambient;
+    VxVector Position;
+    VxVector Direction;
+    float Range;
+    float Falloff;
+    float Attenuation0;
+    float Attenuation1;
+    float Attenuation2;
+    float InnerSpotCone;
+    float OuterSpotCone;
+};
+
+// ===========================================================================
+// Rasterizer options (spec 4.2)
+// ===========================================================================
+// Merges the presentation and sampler options that CK2_3D.ini exposes.
+// SetOptions() may be called at any frame boundary.
+
+struct CKRasterizerOptions {
     CKDWORD Size;
-    CKDWORD Version;
-    CK_SHADER_PROFILE ShaderProfile;
-    CKBOOL HomogeneousDepth;
-    CKBOOL OriginBottomLeft;
+    CKDWORD MSAASamples;               // Antialias (0 / 1 = off)
+    float RenderScale;                 // RenderScale, clamped to 0.5..2.0
+    CKBOOL FXAA;                       // FXAA
+    float Sharpness;                   // Sharpness, clamped to 0..1
+    CKBOOL DisableTextureFiltering;    // DisableFilter
+    CKBOOL DisableMipmaps;             // DisableMipmap
+    CKBOOL ForceAnisotropicFiltering;  // ForceAnisotropicFiltering
+    CKDWORD DebugFlags;                // CKRST_DEBUG_*
 
-    CKRasterizerTargetDesc()
-        : Size(sizeof(CKRasterizerTargetDesc)),
-          Version(1),
-          ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN),
-          HomogeneousDepth(FALSE),
-          OriginBottomLeft(FALSE) {}
+    CKRasterizerOptions()
+        : Size(sizeof(CKRasterizerOptions)), MSAASamples(0), RenderScale(1.0f), FXAA(FALSE),
+          Sharpness(0.0f), DisableTextureFiltering(FALSE), DisableMipmaps(FALSE),
+          ForceAnisotropicFiltering(FALSE), DebugFlags(CKRST_DEBUG_NONE) {}
 };
+
+// ===========================================================================
+// Backend capabilities (spec 4.9.1) - tests and diagnostics only
+// ===========================================================================
 
 struct CKRasterizerCapsDesc {
     CKDWORD Size;
     CKDWORD Version;
     CKRST_CAPS Features;
-    CKDWORD MaxDrawCalls;
-    CKDWORD MaxBlits;
     CKDWORD MaxTextureSize;
-    CKDWORD MaxTextureLayers;
-    CKDWORD MaxRenderViews;
-    CKDWORD MaxFrameBuffers;
-    CKDWORD MaxColorAttachments;
-    CKDWORD MaxPrograms;
-    CKDWORD MaxShaders;
-    CKDWORD MaxTextures;
     CKDWORD MaxTextureStages;
-    CKDWORD MaxTextureBindings;
-    CKDWORD MaxComputeBindings;
-    CKDWORD MaxVertexLayouts;
-    CKDWORD MaxVertexStreams;
-    CKDWORD MaxIndexBuffers;
-    CKDWORD MaxVertexBuffers;
-    CKDWORD MaxDynamicIndexBuffers;
-    CKDWORD MaxDynamicVertexBuffers;
-    CKDWORD MaxUniforms;
-    CKDWORD MaxOcclusionQueries;
-    CKDWORD MaxEncoders;
-    CKDWORD MinResourceCommandBufferSize;
-    CKDWORD MaxTransientVertexBufferSize;
-    CKDWORD MaxTransientIndexBufferSize;
-    CKDWORD MinUniformBufferSize;
-    CKDWORD MaxTransforms;
+    CKDWORD MaxAnisotropy;
+    CKDWORD MaxUserClipPlanes;
+    CKDWORD MaxVertexBlendMatrices;
+    CKDWORD MaxMSAASamples;
+    float MaxPointSize;
+    CKDWORD MaxLights;
 
     CKRasterizerCapsDesc()
-        : Size(sizeof(CKRasterizerCapsDesc)), Version(1), Features(0),
-          MaxDrawCalls(0), MaxBlits(0), MaxTextureSize(0),
-          MaxTextureLayers(0), MaxRenderViews(0), MaxFrameBuffers(0),
-          MaxColorAttachments(0), MaxPrograms(0), MaxShaders(0),
-          MaxTextures(0), MaxTextureStages(0), MaxTextureBindings(0),
-          MaxComputeBindings(0),
-          MaxVertexLayouts(0), MaxVertexStreams(0), MaxIndexBuffers(0),
-          MaxVertexBuffers(0), MaxDynamicIndexBuffers(0),
-          MaxDynamicVertexBuffers(0), MaxUniforms(0),
-          MaxOcclusionQueries(0), MaxEncoders(0),
-          MinResourceCommandBufferSize(0), MaxTransientVertexBufferSize(0),
-          MaxTransientIndexBufferSize(0), MinUniformBufferSize(0),
-          MaxTransforms(0) {}
-};
-
-struct CKTextureFormatCaps {
-    CKDWORD Size;
-    VX_PIXELFORMAT Format;
-    CKDWORD Caps;
-
-    CKTextureFormatCaps()
-        : Size(sizeof(CKTextureFormatCaps)), Format(UNKNOWN_PF), Caps(0) {}
-};
-
-struct CKDepthFormatCaps {
-    CKDWORD Size;
-    CK_DEPTH_FORMAT Format;
-    CKDWORD Caps;
-
-    CKDepthFormatCaps()
-        : Size(sizeof(CKDepthFormatCaps)), Format(CKRST_DEPTHFMT_D24S8), Caps(0) {}
-};
-
-struct CKReadbackDesc {
-    CKDWORD Size;
-    void *Data;
-    CKDWORD Capacity;
-    CKDWORD RequiredSize;
-    CKDWORD RowPitch;
-    CKDWORD Width;
-    CKDWORD Height;
-    VX_PIXELFORMAT Format;
-    CKBOOL YFlip;
-
-    CKReadbackDesc()
-        : Size(sizeof(CKReadbackDesc)), Data(NULL), Capacity(0),
-          RequiredSize(0), RowPitch(0), Width(0), Height(0),
-          Format(UNKNOWN_PF), YFlip(FALSE) {}
-};
-
-struct CKShaderDesc {
-    CK_SHADER_STAGE Stage;
-    // Opaque precompiled shader blob for the selected rasterizer backend.
-    // Backend-specific payload selection happens above the rasterizer layer.
-    CK_SHADER_FORMAT Format;
-    CK_SHADER_PROFILE Profile;
-    const CKBYTE *Code;
-    CKDWORD CodeSize;
+        : Size(sizeof(CKRasterizerCapsDesc)), Version(1), Features(0), MaxTextureSize(0),
+          MaxTextureStages(0), MaxAnisotropy(0), MaxUserClipPlanes(0),
+          MaxVertexBlendMatrices(0), MaxMSAASamples(0), MaxPointSize(0.0f), MaxLights(0) {}
 };
 
 // ===========================================================================
-// Program Descriptor
+// Asynchronous readback (spec 4.8)
 // ===========================================================================
+// Image is valid only for the duration of the callback. Success is FALSE
+// when the readback could not be completed (device lost, shutdown).
 
-struct CKProgramDesc {
-    CKDWORD VertexShader;
-    CKDWORD PixelShader;
-    CKBOOL ConsumeShaders;
-};
-
-// ===========================================================================
-// Uniform Descriptor
-// ===========================================================================
-
-struct CKUniformDesc {
-    CKSTRING Name;
-    CK_UNIFORM_TYPE Type;
-    CKDWORD Count;
-};
+typedef void (*CKReadbackCallback)(void *User, const CKRECT *Rect, VXBUFFER_TYPE Buffer,
+                                   const VxImageDescEx *Image, CKBOOL Success);
 
 // ===========================================================================
-// Vertex Layout
+// Statistics (spec 4.13 GetStats)
 // ===========================================================================
-
-struct CKVertexElementDesc {
-    CK_VERTEX_ATTRIB Attrib;
-    CK_VERTEX_ATTRIB_TYPE Type;
-    CKBYTE Count;
-    CKBOOL Normalized;
-    CKBOOL AsInt;
-    CKWORD Offset;
-};
-
-struct CKVertexLayoutDesc {
-    CKVertexElementDesc *Elements;
-    CKDWORD ElementCount;
-    CKWORD Stride;
-};
-
-// ===========================================================================
-// Frame Buffer
-// ===========================================================================
-
-struct CKFrameBufferAttachmentDesc {
-    CKDWORD Texture;
-    CKDWORD Mip;
-    CKDWORD Layer;
-};
-
-struct CKFrameBufferDesc {
-    CKFrameBufferAttachmentDesc *Color;
-    CKDWORD ColorCount;
-    CKFrameBufferAttachmentDesc DepthStencil;
-};
-
-// ===========================================================================
-// Depth Texture
-// ===========================================================================
-
-struct CKDepthTextureDesc {
-    CKDWORD Flags;
-    CKDWORD Width;
-    CKDWORD Height;
-    CK_DEPTH_FORMAT DepthFormat;
-    CKDWORD MipMapCount;
-};
-
-// ===========================================================================
-// Occlusion Query
-// ===========================================================================
-
-struct CKOcclusionQueryDesc {
-};
-
-// ===========================================================================
-// Indirect Buffer
-// ===========================================================================
-
-struct CKIndirectBufferDesc {
-    CKDWORD MaxCommands;
-};
-
-// ===========================================================================
-// Sampler
-// ===========================================================================
-
-struct CKSamplerDesc {
-    CK_FILTER_MODE MinFilter;
-    CK_FILTER_MODE MagFilter;
-    CK_FILTER_MODE MipFilter;
-    CK_ADDRESS_MODE AddressU;
-    CK_ADDRESS_MODE AddressV;
-    CK_ADDRESS_MODE AddressW;
-    CKDWORD BorderColor;
-    CK_COMPARE_MODE CompareFunc;
-};
-
-// ===========================================================================
-// Transient Buffers
-// ===========================================================================
-
-struct CKTransientVertexBuffer {
-    void *Data;
-    CKDWORD Size;
-    CKDWORD StartVertex;
-    CKDWORD VertexCount;
-    CKDWORD Stride;
-    CKDWORD Layout;
-};
-
-struct CKTransientIndexBuffer {
-    void *Data;
-    CKDWORD Size;
-    CKDWORD StartIndex;
-    CKDWORD IndexCount;
-    CKBOOL Index32;
-};
-
-struct CKTransientInstanceBuffer {
-    void *Data;
-    CKDWORD Size;
-    CKDWORD StartInstance;
-    CKDWORD InstanceCount;
-    CKDWORD Stride;
-    CKDWORD Layout;
-};
-
-// ===========================================================================
-// Uniform Info (Shader Reflection)
-// ===========================================================================
-
-struct CKUniformInfo {
-    char Name[256];
-    CK_UNIFORM_TYPE Type;
-    CKDWORD Count;
-};
-
-// ===========================================================================
-// Render Statistics
-// ===========================================================================
-
-struct CKRenderViewStats {
-    CKSTRING Name;
-    CKRenderView View;
-    CKDWORD DrawCalls;
-    int64_t CpuTimeBegin;
-    int64_t CpuTimeEnd;
-    int64_t GpuTimeBegin;
-    int64_t GpuTimeEnd;
-};
 
 struct CKRenderStats {
-    int64_t CpuTimeFrame;
+    CKDWORD FrameNumber;       // Frames presented since creation
+    int64_t CpuTimeFrame;      // Last frame CPU time in CpuTimerFreq units
     int64_t CpuTimerFreq;
-    int64_t GpuTimeBegin;
-    int64_t GpuTimeEnd;
+    int64_t GpuTimeFrame;      // 0 when the backend has no GPU timer
     int64_t GpuTimerFreq;
-    int64_t WaitRender;
-    int64_t WaitSubmit;
-    CKDWORD DrawCalls;
-    CKDWORD BlitCalls;
-    CKDWORD ComputeCalls;
-    CKDWORD MaxGpuLatency;
-    CKDWORD NumUpdatedVertexBuffers;
-    CKDWORD NumUpdatedIndexBuffers;
-    CKDWORD NumTransientVertexBuffers;
-    CKDWORD NumTransientIndexBuffers;
-    CKDWORD NumTransientInstanceBuffers;
-    CKWORD NumViews;
-    CKRenderViewStats *ViewStats;
+    CKDWORD DrawCalls;         // Last frame
+    CKDWORD Primitives;        // Last frame
+    CKDWORD Passes;            // Last frame (scene passes incl. mid-frame clears, present)
+    CKDWORD Clears;            // Last frame
+    CKDWORD TextureUploads;    // Last frame
+    CKDWORD BufferUploads;     // Last frame
     CKDWORD GpuMemoryMax;
     CKDWORD GpuMemoryUsed;
-    CKDWORD Width;
+    CKDWORD Width;             // Virtual backbuffer size
     CKDWORD Height;
-    CKDWORD TextWidth;
-    CKDWORD TextHeight;
+    CKDWORD Diagnostics[CKRST_DIAG_COUNT]; // Cumulative, see CKRST_DIAGNOSTIC
 };
-
-// ===========================================================================
-// Texture Info (Size Calculation)
-// ===========================================================================
-
-struct CKTextureInfo {
-    CKDWORD Format;
-    CKDWORD StorageSize;
-    CKWORD Width;
-    CKWORD Height;
-    CKWORD Depth;
-    CKDWORD NumMips;
-    CKDWORD BitsPerPixel;
-    CKBOOL CubeMap;
-};
-
-// ===========================================================================
-// Screenshot Callback
-// ===========================================================================
-
-typedef void (*CKScreenShotCallback)(void *UserData, CKDWORD FrameBuffer,
-                                      CKDWORD Width, CKDWORD Height,
-                                      CKDWORD Pitch, VX_PIXELFORMAT Format,
-                                      const void *Data, CKDWORD Size,
-                                      CKBOOL YFlip);
 
 #endif // CKRASTERIZERTYPES_H

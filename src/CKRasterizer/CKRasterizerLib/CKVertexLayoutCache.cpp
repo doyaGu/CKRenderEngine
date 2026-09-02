@@ -1,5 +1,5 @@
 #include "CKVertexLayoutCache.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "CKFFConstants.h"
 
 static int ActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
@@ -23,7 +23,7 @@ CKVertexLayoutCache::~CKVertexLayoutCache() {
     Shutdown();
 }
 
-void CKVertexLayoutCache::Init(CKRasterizerContext *ctx) {
+void CKVertexLayoutCache::Init(CKRasterizerDevice *ctx) {
     m_Context = ctx;
     m_Cache.Clear();
 }

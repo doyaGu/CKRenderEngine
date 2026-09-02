@@ -6,7 +6,7 @@
 #include "CKBitmapData.h"
 #include "CKBitmapReader.h"
 #include "CKGlobals.h"
-#include "CKRasterizer.h"
+#include "CKRasterizerDevice.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "CKDebugLogger.h"
@@ -48,7 +48,7 @@ static VX_PIXELFORMAT ResolveObjectVideoFormat(VX_PIXELFORMAT requested, VX_PIXE
     return _32_ARGB8888;
 }
 
-static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx *desc) {
+static void FindNearestFormatWithAlpha(CKRasterizerDeviceDriver *driver, VxImageDescEx *desc) {
     VxImageDescEx *best = nullptr;
     int minDiff = 64;
     for (auto it = driver->m_TextureFormats.Begin(); it != driver->m_TextureFormats.End(); ++it) {
@@ -265,7 +265,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     if (!rctx || !rctx->m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+    CKRasterizerDevice *rstCtx = rctx->m_RasterizerContext;
     if (m_RasterizerContext != rstCtx) {
         FreeVideoMemory();
         m_ObjectIndex = 0;
