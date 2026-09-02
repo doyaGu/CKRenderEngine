@@ -1373,9 +1373,18 @@ void BackendRuntimeCreatesRepresentativeFFPPrograms()
     CKRasterizerCapsDesc caps;
     TestCheck(context->GetCaps(&caps) == CK_OK &&
                   driver->m_CapsUpToDate &&
-                  driver->m_3DCaps.MaxTextureWidth == caps.MaxTextureSize &&
+                  driver->m_3DCaps.MaxTextureWidth > 0 &&
+                  driver->m_3DCaps.MaxTextureWidth <= caps.MaxTextureSize &&
                   driver->m_TextureFormats.Size() > 0,
-              "Context creation must refresh legacy driver caps from bgfx");
+              "Context creation must lower legacy driver limits to the bgfx limits");
+    // Spec 4.9.2 / gate 15: the baseline bit fields survive context creation.
+    // CKRenderedScene forces linear vertex fog unless both fog bits are set.
+    TestCheck((driver->m_3DCaps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) ==
+                  (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL),
+              "Driver caps must keep the baseline FOGRANGE | FOGPIXEL bits");
+    TestCheck((driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_DX8) != 0 &&
+                  (driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_HARDWARETL) != 0,
+              "Driver caps must report the baseline DX8 hardware T&L level");
     TestCheck(caps.MaxTextureBindings >= CKFF_MAX_PROGRAM_SAMPLER_BINDINGS &&
                   caps.MaxTextureStages <= CKFF_MAX_TEXTURE_STAGES,
               "Backend caps must distinguish physical sampler bindings from FFP stages");

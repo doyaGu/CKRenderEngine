@@ -2,6 +2,7 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "CKRasterizerValidation.h"
+#include "CKRasterizerCapsBaseline.h"
 #include "../../CKDrawAnnotation.h"
 
 #include <SDL3/SDL.h>
@@ -2355,16 +2356,16 @@ CKERROR CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY,
     m_Created = TRUE;
 
     if (m_Driver) {
-        Vx3DCapsDesc &legacyCaps = m_Driver->m_3DCaps;
-        legacyCaps.MaxTextureWidth = m_CapsDesc.MaxTextureSize;
-        legacyCaps.MaxTextureHeight = m_CapsDesc.MaxTextureSize;
-        legacyCaps.MaxTextureRatio = m_CapsDesc.MaxTextureSize;
-        legacyCaps.MaxNumberTextureStage = m_CapsDesc.MaxTextureStages;
-        legacyCaps.MaxNumberBlendStage = m_CapsDesc.MaxTextureStages;
-        if (m_CapsDesc.Features & CKRST_CAPS_BLIT)
-            legacyCaps.CKRasterizerSpecificCaps |= CKRST_SPECIFICCAPS_COPYTEXTURE;
-        else
-            legacyCaps.CKRasterizerSpecificCaps &= ~CKRST_SPECIFICCAPS_COPYTEXTURE;
+        // Spec 4.9.2: the baseline bit fields stay as reported by the driver;
+        // only numeric limits may be lowered to the real backend limits.
+        Vx3DCapsDesc limits;
+        memset(&limits, 0, sizeof(limits));
+        limits.MaxTextureWidth = m_CapsDesc.MaxTextureSize;
+        limits.MaxTextureHeight = m_CapsDesc.MaxTextureSize;
+        limits.MaxTextureRatio = m_CapsDesc.MaxTextureSize;
+        limits.MaxNumberTextureStage = m_CapsDesc.MaxTextureStages;
+        limits.MaxNumberBlendStage = m_CapsDesc.MaxTextureStages;
+        CKRSTLowerCapsToLimits(&m_Driver->m_3DCaps, &limits);
 
         m_Driver->m_TextureFormats.Clear();
         for (int format = _32_ARGB8888; format <= _32_X8L8V8U8; ++format) {

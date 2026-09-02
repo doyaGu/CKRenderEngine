@@ -3,10 +3,13 @@ set(CKRASTERIZER_LIB_SOURCES
         CKRasterizer.cpp
         CKRasterizerDriver.cpp
         CKRasterizerContext.cpp
+        CKRasterizerCapsBaseline.cpp
 )
 
 set(CKRASTERIZER_LIB_HEADERS
         CKRasterizerValidation.h
+        CKRasterizerCapsBaseline.h
+        CKRasterizerCapsBaseline.generated.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
