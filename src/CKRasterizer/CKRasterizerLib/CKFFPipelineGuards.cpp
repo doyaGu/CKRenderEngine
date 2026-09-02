@@ -54,27 +54,3 @@ void CKFFRenderStateGuard::Restore() {
 void CKFFRenderStateGuard::Dismiss() {
     m_Pipeline = nullptr;
 }
-
-CKFFOpaquePacketGuard::CKFFOpaquePacketGuard(CKFixedFunctionPipeline &pipeline, CKBOOL active)
-    : m_Pipeline(active ? &pipeline : nullptr),
-      m_SavedAllowed(active ? pipeline.GetOpaqueRenderPacketsAllowed() : TRUE) {
-    if (m_Pipeline) {
-        m_Pipeline->FlushOpaqueRenderPackets(nullptr, FALSE, FALSE);
-        m_Pipeline->SetOpaqueRenderPacketsAllowed(FALSE);
-    }
-}
-
-CKFFOpaquePacketGuard::~CKFFOpaquePacketGuard() {
-    Restore();
-}
-
-void CKFFOpaquePacketGuard::Restore() {
-    if (!m_Pipeline)
-        return;
-    m_Pipeline->SetOpaqueRenderPacketsAllowed(m_SavedAllowed);
-    m_Pipeline = nullptr;
-}
-
-void CKFFOpaquePacketGuard::Dismiss() {
-    m_Pipeline = nullptr;
-}

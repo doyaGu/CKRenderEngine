@@ -3,8 +3,6 @@
 #include "CKDebugLogger.h"
 #include "CKDrawStateCache.h"
 #include "CKFFDebug.h"
-#include "CKFFRenderPacketQueue.h"
-#include "CKFFRenderPacketReplay.h"
 
 #include <string.h>
 
@@ -103,78 +101,6 @@ void CKFFDrawProbes::OnUniform(const CKFFUniformHandles &uniforms, CKDWORD unifo
     }
 }
 
-void CKFFDrawProbes::OnAdaptiveStats(const CKFFRenderPacketQueue &queue)
-{
-    if (!StatsEnabled())
-        return;
-    Stats.RenderPacketAdaptiveSamples = queue.GetAdaptiveSamples();
-    Stats.RenderPacketAdaptiveSavedBindEstimate = queue.GetAdaptiveSavedBindEstimate();
-    Stats.RenderPacketAdaptiveRunBypasses = queue.GetAdaptiveRunBypasses();
-    Stats.RenderPacketAdaptiveSampleRuns = queue.GetAdaptiveSampleRuns();
-    Stats.RenderPacketAdaptiveSampleMaxRun = queue.GetAdaptiveSampleMaxRun();
-    Stats.RenderPacketAdaptiveSubmitSavedEstimate = queue.GetAdaptiveSubmitSavedEstimate();
-    Stats.RenderPacketAdaptiveCooldownBypasses = queue.GetAdaptiveCooldownBypasses();
-    Stats.RenderPacketAdaptiveCooldownFrames = queue.GetAdaptiveCooldownFrames();
-    Stats.RenderPacketAdaptiveFrameEndEvaluations = queue.GetAdaptiveFrameEndEvaluations();
-    Stats.RenderPacketAdaptiveFrameEndRunBypasses = queue.GetAdaptiveFrameEndRunBypasses();
-}
-
-void CKFFDrawProbes::OnAdaptiveBypass(const CKFFRenderPacketQueue &queue)
-{
-    if (!StatsEnabled())
-        return;
-    ++Stats.RenderPacketAdaptiveBypasses;
-    Stats.RenderPacketAdaptiveRunBypasses = queue.GetAdaptiveRunBypasses();
-    Stats.RenderPacketAdaptiveSampleRuns = queue.GetAdaptiveSampleRuns();
-    Stats.RenderPacketAdaptiveSampleMaxRun = queue.GetAdaptiveSampleMaxRun();
-    Stats.RenderPacketAdaptiveSubmitSavedEstimate = queue.GetAdaptiveSubmitSavedEstimate();
-}
-
-void CKFFDrawProbes::OnRenderPacketRuns(CKDWORD runCount, CKDWORD maxRun)
-{
-    if (!TimingEnabled())
-        return;
-    Stats.RenderPacketRuns += runCount;
-    if (maxRun > Stats.RenderPacketMaxRunLength)
-        Stats.RenderPacketMaxRunLength = maxRun;
-}
-
-void CKFFDrawProbes::FillReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *diagnostics,
-                                           const CKFFUniformHandles &uniforms)
-{
-    if (!diagnostics)
-        return;
-    diagnostics->StatsEnabled = Config.StatsEnabled ? TRUE : FALSE;
-    diagnostics->UniformHistEnabled = Config.UniformHistEnabled ? TRUE : FALSE;
-    diagnostics->Uniforms = &uniforms;
-    diagnostics->UniformSets = &Stats.UniformSets;
-    diagnostics->UniformVec4s = &Stats.UniformVec4s;
-    diagnostics->UniformHandleSets = Stats.UniformHandleSets;
-    diagnostics->UniformHandleVec4s = Stats.UniformHandleVec4s;
-    diagnostics->TextureBinds = &Stats.TextureBinds;
-    diagnostics->VertexLayoutSets = &Stats.VertexLayoutSets;
-    diagnostics->VertexBufferSets = &Stats.VertexBufferSets;
-    diagnostics->IndexBufferSets = &Stats.IndexBufferSets;
-    diagnostics->TransformSets = &Stats.TransformSets;
-    diagnostics->SubmittedDraws = &Stats.SubmittedDraws;
-    diagnostics->ReplayedRenderPackets = &Stats.ReplayedRenderPackets;
-    diagnostics->RenderPacketSkippedStates = &Stats.RenderPacketSkippedStates;
-    diagnostics->RenderPacketSkippedTextures = &Stats.RenderPacketSkippedTextures;
-    diagnostics->RenderPacketSkippedUniforms = &Stats.RenderPacketSkippedUniforms;
-    diagnostics->RenderPacketStaticUniformUploads = &Stats.RenderPacketStaticUniformUploads;
-    diagnostics->RenderPacketStaticUniformSkips = &Stats.RenderPacketStaticUniformSkips;
-    diagnostics->RenderPacketObjectUniformUploads = &Stats.RenderPacketObjectUniformUploads;
-    diagnostics->RenderPacketSkippedVertexBuffers = &Stats.RenderPacketSkippedVertexBuffers;
-    diagnostics->RenderPacketSkippedIndexBuffers = &Stats.RenderPacketSkippedIndexBuffers;
-    diagnostics->RenderPacketInstancedRuns = &Stats.RenderPacketInstancedRuns;
-    diagnostics->RenderPacketInstancedPackets = &Stats.RenderPacketInstancedPackets;
-    diagnostics->RenderPacketInstancedSubmits = &Stats.RenderPacketInstancedSubmits;
-    diagnostics->RenderPacketInstanceBufferBytes = &Stats.RenderPacketInstanceBufferBytes;
-    diagnostics->RenderPacketInstanceAllocFailures = &Stats.RenderPacketInstanceAllocFailures;
-    diagnostics->RenderPacketSubmitSavedEstimate = &Stats.RenderPacketSubmitSavedEstimate;
-    diagnostics->RenderPacketInstancingFallbacks = &Stats.RenderPacketInstancingFallbacks;
-}
-
 static CKDWORD CKFFCacheCounterDelta(uint64_t current, uint64_t previous)
 {
     const uint64_t delta = current >= previous ? current - previous : current;
@@ -240,50 +166,8 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache,
                    Stats.DrawStateRebuilds,
                    Stats.TransientVertexBytes,
                    Stats.TransientIndexBytes);
-        CK_LOG_FMT("FFPStats.Packet",
-                   "frame=%u q=%u replay=%u fb=%u flush=%u overflow=%u runs=%u maxRun=%u skipState=%u skipTex=%u skipUniform=%u staticUp=%u staticSkip=%u objectUp=%u objectSkip=%u skipVB=%u skipIB=%u staticBuild=%u staticReuse=%u staticIntern=%u sortSkip=%u adaptiveSamples=%u adaptiveBypasses=%u adaptiveRunBypasses=%u adaptiveCooldownBypasses=%u adaptiveCooldownFrames=%u adaptiveFrameEndEvals=%u adaptiveFrameEndRunBypasses=%u adaptiveSaved=%u adaptiveSampleRuns=%u adaptiveSampleMaxRun=%u adaptiveSubmitSaved=%u viewProjRebuild=%u instRuns=%u instPackets=%u instSubmits=%u instBytes=%u instAllocFail=%u submitSaved=%u instFallbacks=%u",
-                   Stats.FrameIndex,
-                   Stats.QueuedRenderPackets,
-                   Stats.ReplayedRenderPackets,
-                   Stats.RenderPacketFallbacks,
-                   Stats.RenderPacketFlushes,
-                   Stats.RenderPacketUniformOverflows,
-                   Stats.RenderPacketRuns,
-                   Stats.RenderPacketMaxRunLength,
-                   Stats.RenderPacketSkippedStates,
-                   Stats.RenderPacketSkippedTextures,
-                   Stats.RenderPacketSkippedUniforms,
-                   Stats.RenderPacketStaticUniformUploads,
-                   Stats.RenderPacketStaticUniformSkips,
-                   Stats.RenderPacketObjectUniformUploads,
-                   Stats.RenderPacketObjectUniformSkips,
-                   Stats.RenderPacketSkippedVertexBuffers,
-                   Stats.RenderPacketSkippedIndexBuffers,
-                   Stats.RenderPacketStaticPayloadBuilds,
-                   Stats.RenderPacketStaticPayloadReuses,
-                   Stats.RenderPacketStaticPayloadInterns,
-                   Stats.RenderPacketSortSkips,
-                   Stats.RenderPacketAdaptiveSamples,
-                   Stats.RenderPacketAdaptiveBypasses,
-                   Stats.RenderPacketAdaptiveRunBypasses,
-                   Stats.RenderPacketAdaptiveCooldownBypasses,
-                   Stats.RenderPacketAdaptiveCooldownFrames,
-                   Stats.RenderPacketAdaptiveFrameEndEvaluations,
-                   Stats.RenderPacketAdaptiveFrameEndRunBypasses,
-                   Stats.RenderPacketAdaptiveSavedBindEstimate,
-                   Stats.RenderPacketAdaptiveSampleRuns,
-                   Stats.RenderPacketAdaptiveSampleMaxRun,
-                   Stats.RenderPacketAdaptiveSubmitSavedEstimate,
-                   Stats.RenderPacketViewProjectionRebuilds,
-                   Stats.RenderPacketInstancedRuns,
-                   Stats.RenderPacketInstancedPackets,
-                   Stats.RenderPacketInstancedSubmits,
-                   Stats.RenderPacketInstanceBufferBytes,
-                   Stats.RenderPacketInstanceAllocFailures,
-                   Stats.RenderPacketSubmitSavedEstimate,
-                   Stats.RenderPacketInstancingFallbacks);
         CK_LOG_FMT("FFPStats.Timing",
-                   "frame=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f packetBuildUs=%.1f packetSortUs=%.1f packetReplayUs=%.1f",
+                   "frame=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f",
                    Stats.FrameIndex,
                    Stats.PrepareUs,
                    Stats.StateUs,
@@ -296,10 +180,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache,
                    Stats.StencilUs,
                    Stats.LayoutUs,
                    Stats.BufferBindUs,
-                   Stats.SubmitUs,
-                   Stats.RenderPacketBuildUs,
-                   Stats.RenderPacketSortUs,
-                   Stats.RenderPacketReplayUs);
+                   Stats.SubmitUs);
         if (Config.UniformHistEnabled) {
             const CKFFUniformHandles &uniforms = shaderCache.GetUniforms();
             for (CKDWORD slot = 0; slot < 64; ++slot) {

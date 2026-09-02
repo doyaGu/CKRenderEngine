@@ -21,10 +21,6 @@ set(CKRASTERIZER_LIB_SOURCES
         CKFFStateResolver.cpp
         CKFFTextureBinder.cpp
         CKFFUniformEmitter.cpp
-        CKFFOpaquePacketCoordinator.cpp
-        CKFFRenderPacket.cpp
-        CKFFRenderPacketQueue.cpp
-        CKFFRenderPacketReplay.cpp
         CKFFStageState.cpp
         CKFFUniformState.cpp
         CKFFShaderKey.cpp
@@ -69,9 +65,6 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFSpecializationInfo.h
         CKFFSpecializedModuleTable.h
         CKFFStateDesc.h
-        CKFFRenderPacket.h
-        CKFFRenderPacketQueue.h
-        CKFFRenderPacketReplay.h
         CKFFShaderCache.h
         CKFFConstants.h
         CKFFDrawTypes.h
@@ -80,7 +73,6 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFStateResolver.h
         CKFFTextureBinder.h
         CKFFUniformEmitter.h
-        CKFFOpaquePacketCoordinator.h
         CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h

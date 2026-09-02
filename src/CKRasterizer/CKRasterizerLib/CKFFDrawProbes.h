@@ -9,8 +9,6 @@
 #include "CKRenderPerfClock.h"
 
 class CKDrawStateCache;
-class CKFFRenderPacketQueue;
-struct CKFFRenderPacketReplayDiagnostics;
 
 struct CKFFFrameStats {
     CKDWORD FrameIndex;
@@ -37,48 +35,6 @@ struct CKFFFrameStats {
     CKDWORD ConsecutiveVertexBufferRepeats;
     CKDWORD ConsecutiveIndexBufferRepeats;
     CKDWORD ConsecutiveWorldMatrixRepeats;
-    CKDWORD QueuedRenderPackets;
-    CKDWORD ReplayedRenderPackets;
-    CKDWORD RenderPacketFallbacks;
-    CKDWORD RenderPacketFlushes;
-    CKDWORD RenderPacketUniformOverflows;
-    CKDWORD RenderPacketSkippedStates;
-    CKDWORD RenderPacketSkippedTextures;
-    CKDWORD RenderPacketSkippedUniforms;
-    CKDWORD RenderPacketStaticUniformUploads;
-    CKDWORD RenderPacketStaticUniformSkips;
-    CKDWORD RenderPacketObjectUniformUploads;
-    CKDWORD RenderPacketObjectUniformSkips;
-    CKDWORD RenderPacketSkippedVertexBuffers;
-    CKDWORD RenderPacketSkippedIndexBuffers;
-    CKDWORD RenderPacketRuns;
-    CKDWORD RenderPacketMaxRunLength;
-    CKDWORD RenderPacketStaticPayloadBuilds;
-    CKDWORD RenderPacketStaticPayloadReuses;
-    CKDWORD RenderPacketStaticPayloadInterns;
-    CKDWORD RenderPacketSortSkips;
-    CKDWORD RenderPacketAdaptiveSamples;
-    CKDWORD RenderPacketAdaptiveBypasses;
-    CKDWORD RenderPacketAdaptiveSavedBindEstimate;
-    CKDWORD RenderPacketAdaptiveRunBypasses;
-    CKDWORD RenderPacketAdaptiveSampleRuns;
-    CKDWORD RenderPacketAdaptiveSampleMaxRun;
-    CKDWORD RenderPacketAdaptiveSubmitSavedEstimate;
-    CKDWORD RenderPacketAdaptiveCooldownBypasses;
-    CKDWORD RenderPacketAdaptiveCooldownFrames;
-    CKDWORD RenderPacketAdaptiveFrameEndEvaluations;
-    CKDWORD RenderPacketAdaptiveFrameEndRunBypasses;
-    CKDWORD RenderPacketViewProjectionRebuilds;
-    CKDWORD RenderPacketInstancedRuns;
-    CKDWORD RenderPacketInstancedPackets;
-    CKDWORD RenderPacketInstancedSubmits;
-    CKDWORD RenderPacketInstanceBufferBytes;
-    CKDWORD RenderPacketInstanceAllocFailures;
-    CKDWORD RenderPacketSubmitSavedEstimate;
-    CKDWORD RenderPacketInstancingFallbacks;
-    double RenderPacketBuildUs;
-    double RenderPacketSortUs;
-    double RenderPacketReplayUs;
     CKDWORD DrawStateCacheHits;
     CKDWORD DrawStateRebuilds;
     CKDWORD TransientVertexBytes;
@@ -142,20 +98,11 @@ public:
     void OnSubmittedDraw() { if (StatsEnabled()) ++Stats.SubmittedDraws; }
     void OnPrepareFailure() { if (StatsEnabled()) ++Stats.PrepareFailures; }
     void OnProgramMiss() { if (StatsEnabled()) ++Stats.ProgramMisses; }
-    void OnQueuedRenderPacket() { if (StatsEnabled()) ++Stats.QueuedRenderPackets; }
-    void OnRenderPacketFallback() { if (StatsEnabled()) ++Stats.RenderPacketFallbacks; }
     void OnTransformSet() { if (StatsEnabled()) ++Stats.TransformSets; }
     void OnVertexLayoutSet() { if (StatsEnabled()) ++Stats.VertexLayoutSets; }
     void OnVertexBufferSet() { if (StatsEnabled()) ++Stats.VertexBufferSets; }
     void OnIndexBufferSet() { if (StatsEnabled()) ++Stats.IndexBufferSets; }
     void OnTextureBind() { if (StatsEnabled()) ++Stats.TextureBinds; }
-    void OnRenderPacketFlush() { if (StatsEnabled()) ++Stats.RenderPacketFlushes; }
-    void OnRenderPacketUniformOverflow() { if (StatsEnabled()) ++Stats.RenderPacketUniformOverflows; }
-    void OnRenderPacketStaticPayloadBuild() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadBuilds; }
-    void OnRenderPacketStaticPayloadReuse() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadReuses; }
-    void OnRenderPacketStaticPayloadIntern() { if (StatsEnabled()) ++Stats.RenderPacketStaticPayloadInterns; }
-    void OnRenderPacketSortSkip() { if (StatsEnabled()) ++Stats.RenderPacketSortSkips; }
-    void OnViewProjectionRebuild() { if (StatsEnabled()) ++Stats.RenderPacketViewProjectionRebuilds; }
     void OnTransientGeometry(CKDWORD vertexBytes, CKDWORD indexBytes);
     void OnProgram(CKDWORD program);
     void OnWorldMatrix(const VxMatrix &world);
@@ -163,11 +110,6 @@ public:
     void OnTextureSet(CKDWORD activeTextureCount, const CKDWORD *textures);
     void OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout);
     void OnUniform(const CKFFUniformHandles &uniforms, CKDWORD uniform, CKDWORD count);
-    void OnAdaptiveStats(const CKFFRenderPacketQueue &queue);
-    void OnAdaptiveBypass(const CKFFRenderPacketQueue &queue);
-    void OnRenderPacketRuns(CKDWORD runCount, CKDWORD maxRun);
-    void FillReplayDiagnostics(CKFFRenderPacketReplayDiagnostics *diagnostics,
-                               const CKFFUniformHandles &uniforms);
     void LogAndReset(CKDrawStateCache &drawStateCache,
                      const CKFFShaderCache &shaderCache);
 

@@ -24,11 +24,6 @@ public:
     void UploadUniforms(CKRasterizerEncoder *encoder,
                         const CKFFProgramContext *programContext,
                         CKDWORD activeTextureCount);
-    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext,
-                                     CKDWORD activeTextureCount);
-    CKBOOL BuildObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                               const CKFFProgramContext *programContext);
 
 private:
     void UploadObjectUniforms(CKRasterizerEncoder *encoder,

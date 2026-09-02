@@ -17,8 +17,6 @@
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
-#include "CKFFOpaquePacketCoordinator.h"
-#include "CKFFRenderPacketReplay.h"
 #include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
 #include "CKVertexLayoutCache.h"
@@ -133,18 +131,6 @@ public:
             : 0;
     }
 
-    CKBOOL HasOpaqueRenderPackets() const { return m_OpaquePackets.HasPackets(); }
-    void FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder = nullptr,
-                                  CKBOOL forceDirectReplay = FALSE,
-                                  CKBOOL allowAdaptiveLearning = TRUE);
-    void SetOpaqueSortingEnabled(CKBOOL enabled);
-    void SetOpaqueInstancingEnabled(CKBOOL enabled) { m_OpaquePackets.SetInstancingEnabled(enabled); }
-    void SetOpaqueRenderPacketsAllowed(CKBOOL allowed) { m_OpaquePackets.SetPacketsAllowed(allowed); }
-    CKBOOL GetOpaqueRenderPacketsAllowed() const { return m_OpaquePackets.PacketsAllowed(); }
-    CKFFOpaquePacketAdaptiveStats GetOpaquePacketAdaptiveStats() const {
-        return m_OpaquePackets.GetAdaptiveStats();
-    }
-
     // === Subsystem access ===
     CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
     CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
@@ -165,11 +151,12 @@ public:
 #endif
 
 private:
-    friend class CKFFOpaquePacketCoordinator;
 #if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
 #endif
 
+    // Static uniforms are uploaded with every draw, so only program-affecting
+    // changes have to invalidate anything.
     enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
     enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
@@ -206,7 +193,6 @@ private:
     CKFFDrawPreparer m_DrawPreparer;
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
-    CKFFOpaquePacketCoordinator m_OpaquePackets;
     CKFFDrawRejectReason m_LastDrawRejectReason;
     CKBOOL m_FrameDrawRejected;
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
@@ -216,7 +202,6 @@ private:
 
     // Internal methods
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
-    void MarkStaticUniformsDirty();
     void MarkPreparedProgramDirty();
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
@@ -230,21 +215,9 @@ private:
     CKDWORD SubmitDiscardFlags() const;
     void LogAndResetFrameStats();
 
-    // Opaque-packet implementation support. These methods are intentionally
-    // private so packet capture does not expand the pipeline's caller interface.
-    CKDrawStateCache &GetDrawStateCache() { return m_DrawStateCache; }
-    const CKDrawStateCache &GetDrawStateCache() const { return m_DrawStateCache; }
-    const CKFFStateStore &GetStateStore() const { return m_State; }
-    CKRasterizerDevice *GetContext() const { return m_Context; }
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);
-    CKBOOL BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                     const CKFFProgramContext *programContext,
-                                     CKDWORD activeTextureCount);
-    CKBOOL BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                                     const CKFFProgramContext *programContext);
-    void UpdateViewProjectionCache();
     float ComputeDepthKey() const;
     CKBOOL SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder,
                                        const CKFFProgramPreparation &preparation,
@@ -298,22 +271,6 @@ private:
     CKFixedFunctionPipeline *m_Pipeline;
     VXRENDERSTATETYPE m_State;
     CKDWORD m_Value;
-};
-
-class CKFFOpaquePacketGuard {
-public:
-    CKFFOpaquePacketGuard(CKFixedFunctionPipeline &pipeline, CKBOOL active = TRUE);
-    ~CKFFOpaquePacketGuard();
-
-    CKFFOpaquePacketGuard(const CKFFOpaquePacketGuard &) = delete;
-    CKFFOpaquePacketGuard &operator=(const CKFFOpaquePacketGuard &) = delete;
-
-    void Restore();
-    void Dismiss();
-
-private:
-    CKFixedFunctionPipeline *m_Pipeline;
-    CKBOOL m_SavedAllowed;
 };
 
 #endif // CKFIXEDFUNCTIONPIPELINE_H

@@ -167,26 +167,23 @@ static void ForceAnisotropicFilteringUpdatesFfpSamplers() {
 static void FfpRuntimeOptionsDoNotLiveUnderDebugStats() {
     CKRenderSettingsClearOverridesForTests();
 
-    TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
-              "SortOpaqueObjects must default off until packet path is proven profitable");
-    TestCheck(CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", false),
-              "InstanceOpaqueObjects must default on for explicit opaque packet sorting");
+    // A key the shipped ini does not define reads back its default.
+    TestCheck(!CKRenderFFPSettings().GetBool("RuntimeOption", false),
+              "unset FFP option must return its default (false)");
+    TestCheck(CKRenderFFPSettings().GetBool("RuntimeOption", true),
+              "unset FFP option must return its default (true)");
 
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "SortOpaqueObjects", "0");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "InstanceOpaqueObjects", "0");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "RuntimeOption", "0");
     const CKRenderDiagnosticsConfig &diagnostics = CKRenderDiagnosticsSettings();
 
     TestCheck(!diagnostics.FFPStats.Any(),
               "Debug.FFPStats must remain pure diagnostics even if FFP runtime options are present");
-    TestCheck(CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true),
-              "Debug.FFPStats must not override FFP.InstanceOpaqueObjects");
+    TestCheck(CKRenderFFPSettings().GetBool("RuntimeOption", true),
+              "Debug.FFPStats must not override FFP.RuntimeOption");
 
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "SortOpaqueObjects", "0");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "InstanceOpaqueObjects", "0");
-    TestCheck(!CKRenderFFPSettings().GetBool("SortOpaqueObjects", true),
-              "SortOpaqueObjects must be read from the FFP runtime section");
-    TestCheck(!CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true),
-              "InstanceOpaqueObjects must be read from the FFP runtime section");
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "RuntimeOption", "0");
+    TestCheck(!CKRenderFFPSettings().GetBool("RuntimeOption", true),
+              "RuntimeOption must be read from the FFP runtime section");
 
     CKRenderSettingsClearOverridesForTests();
 }

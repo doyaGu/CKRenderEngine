@@ -61,7 +61,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
     }
-    set->Hash = CKFFHashRenderPacketTextureSet(set->ActiveTextureCount, set->Bindings);
+    set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
 }
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -160,7 +160,7 @@ void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, CKDWORD program,
     for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i) {
         if (encoder->GetStatus() != CK_OK)
             return;
-        const CKFFRenderPacketTextureBinding &binding = set->Bindings[i];
+        const CKFFTextureBinding &binding = set->Bindings[i];
         if (binding.Texture == 0)
             continue;
         CKSamplerDesc sampler = binding.Sampler;

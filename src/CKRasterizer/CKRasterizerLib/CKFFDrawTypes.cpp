@@ -29,3 +29,40 @@ CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCac
 
     return CKRST_DISCARD_ALL;
 }
+
+CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b)
+{
+    return a.Lo == b.Lo && a.Mid == b.Mid && a.Hi == b.Hi ? TRUE : FALSE;
+}
+
+CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash)
+{
+    const CKBYTE *bytes = (const CKBYTE *)data;
+    for (CKDWORD i = 0; i < size; ++i) {
+        hash ^= (CKDWORD)bytes[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+CKDWORD CKFFStaticTextureFlags(CKDWORD flags)
+{
+    return flags & (CKRST_TEXTURE_CUBEMAP |
+                    CKRST_TEXTURE_VOLUMEMAP |
+                    CKRST_TEXTURE_DEPTHSTENCIL);
+}
+
+CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureBinding *textures)
+{
+    CKDWORD hash = 2166136261u;
+    hash = CKFFHashBytes(&activeTextureCount, sizeof(activeTextureCount), hash);
+    for (CKDWORD i = 0; textures && i < activeTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
+        const CKFFTextureBinding &binding = textures[i];
+        hash = CKFFHashBytes(&binding.Stage, sizeof(binding.Stage), hash);
+        hash = CKFFHashBytes(&binding.Uniform, sizeof(binding.Uniform), hash);
+        hash = CKFFHashBytes(&binding.Texture, sizeof(binding.Texture), hash);
+        hash = CKFFHashBytes(&binding.TextureFlags, sizeof(binding.TextureFlags), hash);
+        hash = CKFFHashBytes(&binding.Sampler, sizeof(binding.Sampler), hash);
+    }
+    return hash;
+}

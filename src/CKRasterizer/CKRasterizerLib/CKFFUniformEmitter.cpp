@@ -130,8 +130,6 @@ static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
 
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
                                 CKRasterizerEncoder *encoder,
-                                CKFFRenderPacketUniformPayload *staticPayload,
-                                CKFFRenderPacketUniformPayload *objectPayload,
                                 CKBOOL emitStatic,
                                 CKBOOL emitObject)
 {
@@ -139,8 +137,6 @@ static void CKFFInitUniformSink(CKFFUniformSink *sink,
         return;
     memset(sink, 0, sizeof(CKFFUniformSink));
     sink->Encoder = encoder;
-    sink->StaticPayload = staticPayload;
-    sink->ObjectPayload = objectPayload;
     sink->EmitStatic = emitStatic;
     sink->EmitObject = emitObject;
 }
@@ -191,6 +187,7 @@ CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKDWORD uniform,
                                 const void *data, CKDWORD count,
                                 CKDWORD vec4Count, CKBOOL objectUniform)
 {
+    (void)vec4Count;
     if (!sink || !data || count == 0)
         return TRUE;
     if (sink->Failed)
@@ -209,11 +206,6 @@ CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKDWORD uniform,
             sink->Failed = TRUE;
             return FALSE;
         }
-    }
-    CKFFRenderPacketUniformPayload *payload = objectUniform ? sink->ObjectPayload : sink->StaticPayload;
-    if (payload && !CKFFRenderPacketAddUniform(payload, uniform, data, count, vec4Count)) {
-        sink->Failed = TRUE;
-        return FALSE;
     }
     return TRUE;
 }
@@ -374,9 +366,8 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 
     EmitTextureMatrixUniforms(&context);
 
-    // bgfx uniform bindings are draw state. Packet replay can retain static
-    // draw constants across sorted opaque packets, but immediate draws still
-    // upload all constants before each submit.
+    // bgfx uniform bindings are draw state: every draw uploads all of its
+    // constants before the submit.
     int packed = 0;
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
     if (context.LightingEnabled) {
@@ -417,7 +408,7 @@ void CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerEncoder *encoder,
     if (!encoder || !programContext)
         return;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, FALSE, TRUE);
+    CKFFInitUniformSink(&sink, encoder, FALSE, TRUE);
     EmitPayloads(&sink, programContext, activeTextureCount);
 }
 
@@ -428,65 +419,8 @@ void CKFFUniformEmitter::UploadStaticUniforms(CKRasterizerEncoder *encoder,
     if (!encoder || !programContext)
         return;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, encoder, nullptr, nullptr, TRUE, FALSE);
+    CKFFInitUniformSink(&sink, encoder, TRUE, FALSE);
     EmitPayloads(&sink, programContext, activeTextureCount);
-}
-
-CKBOOL CKFFUniformEmitter::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                                     const CKFFProgramContext *programContext,
-                                                     CKDWORD activeTextureCount)
-{
-    if (!payload)
-        return FALSE;
-    memset(payload, 0, sizeof(CKFFRenderPacketUniformPayload));
-
-    CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, nullptr, payload, nullptr, TRUE, FALSE);
-    EmitPayloads(&sink, programContext, activeTextureCount);
-    if (sink.Failed)
-        return FALSE;
-
-    payload->Hash = CKFFHashRenderPacketUniformPayload(*payload);
-    return TRUE;
-}
-
-CKBOOL CKFFUniformEmitter::BuildObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                                               const CKFFProgramContext *programContext)
-{
-    if (!uniforms)
-        return FALSE;
-    memset(uniforms, 0, sizeof(CKRenderPacketObjectUniforms));
-
-    if (!programContext)
-        return FALSE;
-
-    const CKFFShaderKey &shaderKey = programContext->ShaderKey;
-    if (shaderKey.VS.GetHasPositionT())
-        return TRUE;
-
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
-    const bool viewSpaceUniforms = CKFFProgramUsesViewSpaceUniforms(shaderKey,
-                                                                    programContext->FullSpecialized);
-
-    VxMatrix modelView;
-    VxMatrix normalMatrix;
-    VxMatrix modelViewProj;
-    if (viewSpaceUniforms) {
-        Vx3DMultiplyMatrix4(modelView, m_State.View, m_State.World);
-        Vx3DInverseMatrix(normalMatrix, modelView);
-        Vx3DTransposeMatrix(normalMatrix, normalMatrix);
-    }
-    Vx3DMultiplyMatrix4(modelViewProj, m_State.ViewProjection(), m_State.World);
-
-    uniforms->MatrixUniform = u.u_ffMatrices;
-    uniforms->MatrixCount = viewSpaceUniforms ? 4 : 2;
-    uniforms->Matrices[0] = modelViewProj;
-    uniforms->Matrices[1] = m_State.World;
-    if (viewSpaceUniforms) {
-        uniforms->Matrices[2] = modelView;
-        uniforms->Matrices[3] = normalMatrix;
-    }
-    return TRUE;
 }
 
 void CKFFUniformEmitter::UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform,

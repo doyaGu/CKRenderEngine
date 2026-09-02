@@ -251,7 +251,6 @@ CKBOOL CKTranslatedContext::BeginScene()
     DeliverReadbacks();
     PrepareFrameTarget();
     m_FFP.BeginDebugFrame();
-    m_FFP.FlushOpaqueRenderPackets();
     if (!OpenPass(CurrentSceneFrameBuffer(), CurrentTargetRect(), 0, 0, 1.0f, 0, "scene"))
         return FALSE;
     m_InScene = TRUE;
@@ -266,7 +265,6 @@ CKBOOL CKTranslatedContext::EndScene()
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
-    m_FFP.FlushOpaqueRenderPackets(m_Encoder);
     m_InScene = FALSE;
     return TRUE;
 }
@@ -301,7 +299,6 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         return FALSE;
     }
     if (m_Encoder) {
-        m_FFP.FlushOpaqueRenderPackets(m_Encoder);
         if (!m_Target)
             CompositeScene();
         m_Device->EndEncoder(m_Encoder);

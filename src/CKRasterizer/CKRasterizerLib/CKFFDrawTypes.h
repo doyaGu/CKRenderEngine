@@ -3,7 +3,6 @@
 
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
-#include "CKFFRenderPacket.h"
 #include "CKFFShaderCache.h"
 #include "CKRasterizerDeviceTypes.h"
 
@@ -13,11 +12,19 @@ struct CKFFStateStore;
 
 struct CKFFUniformSink {
     CKRasterizerEncoder *Encoder;
-    CKFFRenderPacketUniformPayload *StaticPayload;
-    CKFFRenderPacketUniformPayload *ObjectPayload;
     CKBOOL EmitStatic;
     CKBOOL EmitObject;
     CKBOOL Failed;
+};
+
+// One texture stage resolved for the encoder: which sampler uniform / bind
+// slot it lands on, the texture handle and its sampler state.
+struct CKFFTextureBinding {
+    CKDWORD Stage;
+    CKDWORD Uniform;
+    CKDWORD Texture;
+    CKDWORD TextureFlags;
+    CKSamplerDesc Sampler;
 };
 
 struct CKFFPreparedState {
@@ -45,7 +52,7 @@ struct CKFFTextureBindingSet {
     CKDWORD ActiveStageCount;
     CKDWORD ActiveTextureCount;
     CKDWORD Hash;
-    CKFFRenderPacketTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
+    CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
 
 struct CKFFUniformEmissionContext {
@@ -60,14 +67,6 @@ struct CKFFUniformEmissionContext {
     CKBOOL FogEnabled;
     CKDWORD VertexFogMode;
     CKDWORD PixelFogMode;
-};
-
-struct CKFFVertexBufferPacketBuildResult {
-    CKBOOL Success;
-    CKDWORD RejectReason;
-    CKFFProgramContext ProgramContext;
-    CKFFTextureBindingSet TextureBindingSet;
-    CKRenderPacket Packet;
 };
 
 inline void CKFFInitPreparedState(CKFFPreparedState *prepared)
@@ -104,6 +103,11 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
 float CKFFComputeDepthKey(const CKFFStateStore &state, const CKDrawStateCache &drawState);
 CKDWORD CKFFEncodeDepthKey(float depth);
 CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCache &drawState);
+CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b);
+CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash);
+// Texture flags that select the sampler type (and therefore the program).
+CKDWORD CKFFStaticTextureFlags(CKDWORD flags);
+CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureBinding *textures);
 
 inline CKFFShaderKey CKFFBuildShaderKeyFromPreparedState(const CKFFPreparedState *prepared)
 {

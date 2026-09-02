@@ -94,9 +94,6 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
         m_Device->BeginShutdown();
         return FALSE;
     }
-    // Draw order is the call order (spec 4.3): the pipeline must not reorder
-    // opaque draws into packets behind the engine's back.
-    m_FFP.SetOpaqueRenderPacketsAllowed(FALSE);
     m_Postprocess.Init(m_Device);
     if (m_TranslatedDriver)
         m_TranslatedDriver->SyncCapsFromDevice();
@@ -225,7 +222,6 @@ CKBOOL CKTranslatedContext::BeginShutdown()
     if (!m_Created || m_ShuttingDown)
         return TRUE;
     if (m_Encoder) {
-        m_FFP.FlushOpaqueRenderPackets(m_Encoder);
         m_Device->EndEncoder(m_Encoder);
         m_Encoder = NULL;
     }

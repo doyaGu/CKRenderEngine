@@ -193,15 +193,3 @@ endif ()
 ckre_add_test(render_transient_geometry_tests
     test_transient_geometry.cpp
 )
-
-ckre_add_test(render_packet_queue_tests
-    test_render_packet_queue.cpp
-)
-
-ckre_add_test(render_packet_core_tests
-    test_render_packet_core.cpp
-)
-
-ckre_add_benchmark(render_packet_submit_bench
-    render_packet_submit_bench.cpp
-)

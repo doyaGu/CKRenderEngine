@@ -23,7 +23,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_TextureBinder(m_State, m_ShaderCache),
       m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache),
 #endif
-      m_OpaquePackets(), m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
+      m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_FrameDrawRejected(FALSE),
       m_BorderPaletteCount(0), m_BorderPaletteFrameSerial((CKDWORD)-1) {
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
@@ -34,11 +34,6 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     m_Probes.Config.UniformHistEnabled = settings.UniformHistogram;
     m_Probes.Config.StatsInterval = settings.Interval;
 #endif
-    const bool batchOpaque = CKRenderFFPSettings().GetBool("BatchOpaqueObjects", false) ||
-                             CKRenderFFPSettings().GetBool("SortOpaqueObjects", false);
-    m_OpaquePackets.SetSortingEnabled(batchOpaque ? TRUE : FALSE);
-    m_OpaquePackets.SetInstancingEnabled(CKRenderFFPSettings().GetBool("InstanceOpaqueObjects", true) ? TRUE : FALSE);
-
     m_State.Reset();
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     memset(&m_Probes.Stats, 0, sizeof(m_Probes.Stats));
@@ -88,16 +83,10 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
     m_DrawStateCache.Reset();
     m_VertexLayoutCache.Init(ctx);
     m_TextureBinder.ResetProgramBindings();
-    m_OpaquePackets.SetInstanceLayout(m_VertexLayoutCache.GetLayout(CKFF_VF_TEXCOORD0 |
-                                                                    CKFF_VF_TEXCOORD1 |
-                                                                    CKFF_VF_TEXCOORD2 |
-                                                                    CKFF_VF_TEXCOORD3));
     m_TransientGeometry.Init(ctx, &m_VertexLayoutCache);
     m_RenderPipeline.Init(ctx);
     m_State.MarkViewProjectionDirty();
     MarkPreparedProgramDirty();
-    m_OpaquePackets.ClearRenderPackets();
-    m_OpaquePackets.ResetRenderPacketFrameState(*this);
     return true;
 }
 
@@ -105,11 +94,9 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
     const CKERROR status = m_RenderPipeline.Shutdown();
     if (status != CK_OK)
         return status;
-    m_OpaquePackets.ClearRenderPackets();
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
     m_TextureBinder.ResetProgramBindings();
-    m_OpaquePackets.SetInstanceLayout(0);
     m_ShaderCache.Shutdown();
     m_Context = nullptr;
     return CK_OK;
@@ -117,12 +104,6 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
 
 CKERROR CKFixedFunctionPipeline::PrepareShutdown() {
     return m_RenderPipeline.PrepareShutdown();
-}
-
-void CKFixedFunctionPipeline::SetOpaqueSortingEnabled(CKBOOL enabled)
-{
-    m_OpaquePackets.SetSortingEnabled(enabled);
-    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
@@ -525,11 +506,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
 // State tracking
 // ============================================================================
 
-void CKFixedFunctionPipeline::MarkStaticUniformsDirty()
-{
-    m_OpaquePackets.MarkStaticUniformsDirty();
-}
-
 void CKFixedFunctionPipeline::MarkPreparedProgramDirty()
 {
     m_DrawPreparer.InvalidateVertexBufferProgramCache();
@@ -539,8 +515,6 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 {
     if (changeMask & CKFF_CHANGE_PROGRAM)
         MarkPreparedProgramDirty();
-    if (changeMask & CKFF_CHANGE_STATIC_UNIFORM)
-        MarkStaticUniformsDirty();
 }
 
 CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
@@ -571,7 +545,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
         CKDWORD cubeIndex = 0;
         CKDWORD volumeIndex = 0;
         for (CKDWORD stage = 0; stage < bindingSet->ActiveTextureCount; ++stage) {
-            CKFFRenderPacketTextureBinding &binding = bindingSet->Bindings[stage];
+            CKFFTextureBinding &binding = bindingSet->Bindings[stage];
             if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME) {
                 binding.Stage = CKFF_MAX_TEXTURE_STAGES + 4 + volumeIndex;
                 binding.Uniform = uniforms.s_textureVolume[volumeIndex];
@@ -610,7 +584,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
         }
         sampler.BorderColor = slot;
     }
-    bindingSet->Hash = CKFFHashRenderPacketTextureSet(
+    bindingSet->Hash = CKFFHashTextureBindingSet(
         bindingSet->ActiveTextureCount, bindingSet->Bindings);
     return TRUE;
 }
@@ -621,7 +595,6 @@ void CKFixedFunctionPipeline::BeginDebugFrame() {
     m_DebugState.BeginFrame();
     LogAndResetFrameStats();
 #endif
-    m_OpaquePackets.ResetRenderPacketFrameState(*this);
 }
 
 // ============================================================================
@@ -635,8 +608,6 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
 {
     if (!encoder || !data || data->VertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    if (HasOpaqueRenderPackets())
-        FlushOpaqueRenderPackets(encoder, FALSE, FALSE);
     CKFF_PROBE(m_Probes, OnSoftwareDraw());
 
     const CKDWORD formatFlags =
@@ -834,13 +805,9 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
             CKFF_PROBE(m_Probes, OnProgramMiss());
         return RecordDrawReject(CKFFProgramPrepareRejectReason(prepareStatus));
     }
-    const CKBOOL drawn = m_OpaquePackets.DrawVertexBuffer(
-        *this, preparation, encoder, view, type, vb, ib,
-        baseVertex, vertexCount, startIndex, indexCount,
-        dpFlags, formatFlags, vertexLayout);
-    if (drawn)
-        m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
-    return drawn;
+    return SubmitVertexBufferImmediate(encoder, preparation, view, type, vb, ib,
+                                       baseVertex, vertexCount, startIndex, indexCount,
+                                       dpFlags, formatFlags, vertexLayout);
 }
 
 // ============================================================================
@@ -1061,27 +1028,6 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     return SubmitPrepared(encoder, submission);
 }
 
-CKBOOL CKFixedFunctionPipeline::BuildStaticUniformPayload(CKFFRenderPacketUniformPayload *payload,
-                                                          const CKFFProgramContext *programContext,
-                                                          CKDWORD activeTextureCount)
-{
-    return m_UniformEmitter.BuildStaticUniformPayload(payload, programContext, activeTextureCount);
-}
-
-void CKFixedFunctionPipeline::UpdateViewProjectionCache()
-{
-    if (!m_State.EnsureViewProjection())
-        return;
-    CKFF_PROBE(m_Probes, OnViewProjectionRebuild());
-}
-
-CKBOOL CKFixedFunctionPipeline::BuildPacketObjectUniforms(CKRenderPacketObjectUniforms *uniforms,
-                                                          const CKFFProgramContext *programContext)
-{
-    UpdateViewProjectionCache();
-    return m_UniformEmitter.BuildObjectUniforms(uniforms, programContext);
-}
-
 void CKFixedFunctionPipeline::BindTextures(
     CKRasterizerEncoder *encoder, CKDWORD program,
     const CKFFTextureBindingSet *bindingSet) {
@@ -1104,9 +1050,3 @@ float CKFixedFunctionPipeline::ComputeDepthKey() const {
     return CKFFComputeDepthKey(m_State, m_DrawStateCache);
 }
 
-void CKFixedFunctionPipeline::FlushOpaqueRenderPackets(CKRasterizerEncoder *encoder,
-                                                       CKBOOL forceDirectReplay,
-                                                       CKBOOL allowAdaptiveLearning)
-{
-    m_OpaquePackets.FlushRenderPackets(*this, encoder, forceDirectReplay, allowAdaptiveLearning);
-}
