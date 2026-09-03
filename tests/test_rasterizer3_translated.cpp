@@ -1,5 +1,5 @@
 // Translation core (CKTranslatedRasterizer / Driver / Context) on top of the
-// recording backend from FFPDiagnosticHarness.h: verbatim state mirror
+// recording backend from FFPRecordingHarness.h: verbatim state mirror
 // forwarded to the fixed-function pipeline, resources with Lock/Unlock
 // shadows, one backend pass per pass, targets and shutdown.
 
@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "CKTranslatedRasterizer.h"
-#include "FFPDiagnosticHarness.h"
+#include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
@@ -17,18 +17,18 @@ struct Fixture {
     CKRasterizer *Rasterizer;
     CKTranslatedDriver *Driver;
     CKTranslatedContext *Context;
-    FFPDiagnosticContext *Device;
+    FFPRecordingBackend *Backend;
     CKFixedFunctionPipeline *FFP;
 
-    Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL), FFP(NULL)
+    Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL), Backend(NULL), FFP(NULL)
     {
-        TestCheck(World.CreateContext(64, 64), "translated context over the recording device");
+        TestCheck(World.CreateContext(64, 64), "translated context over the recording backend");
         Rasterizer = World.Rasterizer;
         Driver = World.Driver;
         Context = World.Context;
-        Device = World.Device;
+        Backend = World.Backend;
         FFP = Context ? Context->GetFFPipelineForTests() : NULL;
-        TestCheck(Device != NULL && FFP != NULL, "test accessors");
+        TestCheck(Backend != NULL && FFP != NULL, "test accessors");
     }
 
     FFPTranslatedWorld World;
@@ -97,10 +97,10 @@ CKDWORD MakeIndexBuffer(Fixture &f, CKDWORD count)
 void TestLifecycle()
 {
     Fixture f;
-    TestCheck(f.Driver->m_Desc == "Recording device", "driver description synced from the device driver");
-    TestCheck(f.Driver->m_3DCaps.MaxNumberTextureStage == 8, "3D caps synced from the device driver");
+    TestCheck(f.Driver->m_Desc == "Recording backend", "driver description synced from the backend driver");
+    TestCheck(f.Driver->m_3DCaps.MaxNumberTextureStage == 8, "3D caps synced from the backend driver");
     TestCheck(f.Driver->GetBackendDriver() != NULL, "backend driver reachable");
-    TestCheck(f.Context->m_Width == 64 && f.Context->m_Height == 64, "context size from the device");
+    TestCheck(f.Context->m_Width == 64 && f.Context->m_Height == 64, "context size from the backend");
     TestCheck(f.Context->GetDeviceStatus() == CK_OK, "device status");
     TestCheck(f.Context->IsIdle(), "idle after Create");
     CKRasterizerCapsDesc caps;
@@ -210,9 +210,9 @@ void TestMatricesLightsClipPlanes()
 void TestTextures()
 {
     Fixture f;
-    const CKDWORD created = f.Device->CreatedTextureCount;
+    const CKDWORD created = f.Backend->CreatedTextureCount;
     const CKDWORD texture = MakeTexture(f, 32, 0);
-    TestCheck(f.Device->CreatedTextureCount == created + 1, "device texture created");
+    TestCheck(f.Backend->CreatedTextureCount == created + 1, "backend texture created");
     CKTextureDesc desc;
     TestCheck(f.Context->GetTextureDesc(texture, &desc) && desc.Format.Width == 32, "GetTextureDesc");
 
@@ -225,7 +225,7 @@ void TestTextures()
     memset(pixels, 0x80, sizeof(pixels));
     image.Image = pixels;
     TestCheck(f.Context->LoadTexture(texture, image, 0, CKRST_CUBEFACE_XPOS, NULL), "LoadTexture level 0");
-    TestCheck(f.Device->UpdatedTextureCount == 1, "device texture updated");
+    TestCheck(f.Backend->UpdatedTextureCount == 1, "backend texture updated");
     TestCheck(!f.Context->LoadTexture(texture, image, 1, CKRST_CUBEFACE_XPOS, NULL), "missing mip level rejected");
     TestCheck(!f.Context->LoadTexture(texture, image, 0, CKRST_CUBEFACE_YNEG, NULL), "face on a 2D texture rejected");
     TestCheck(!f.Context->LoadTexture(0xDEAD, image, 0, CKRST_CUBEFACE_XPOS, NULL), "unknown handle rejected");
@@ -270,15 +270,15 @@ void TestFrameFlowAndDraws()
     Fixture f;
     const CKDWORD vb = MakeVertexBuffer(f, 4);
     const CKDWORD ib = MakeIndexBuffer(f, 6);
-    f.Device->ViewClears.clear();
+    f.Backend->PassClears.clear();
 
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH, 0xFF204060, 1.0f, 0, 0, NULL), "Clear");
-    TestCheck(f.Device->ViewClears.size() == 1 && f.Device->ViewClears[0].Color == 0xFF204060, "device view clear recorded");
+    TestCheck(f.Backend->PassClears.size() == 1 && f.Backend->PassClears[0].Color == 0xFF204060, "backend clear recorded");
     TestCheck(f.Context->BeginScene(), "BeginScene");
     TestCheck(!f.Context->BeginScene(), "nested BeginScene rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_SCENE_STATE) == 1, "REJECT_SCENE_STATE counted");
 
-    const CKDWORD submitsBefore = f.Device->Encoder.SubmitCount;
+    const CKDWORD drawsBefore = f.Backend->Log.DrawCount;
     f.Context->SetDebugMarker((CKSTRING)"quad");
     const CKBOOL firstDraw = f.Context->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 4, 0, 6);
     if (!firstDraw)
@@ -287,28 +287,28 @@ void TestFrameFlowAndDraws()
                (unsigned)Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER),
                (unsigned)Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE));
     TestCheck(firstDraw, "DrawPrimitiveVBIB");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "one backend submit");
-    const CKDWORD firstView = f.Device->Encoder.SubmitViews[submitsBefore];
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 1, "one backend draw");
+    const CKDWORD firstPass = f.Backend->Log.DrawPasses[drawsBefore];
 
     const CKDWORD passesBefore = f.Context->GetPassCountForTests();
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_STENCIL, 0, 1.0f, 0x7, 0, NULL), "mid-scene stencil clear");
     TestCheck(f.Context->GetPassCountForTests() == passesBefore + 2, "stencil clear splits the scene pass");
-    // Every pass configures its view clear (scene passes with flags 0); the
+    // Every pass configures its clear (scene passes with flags 0); the
     // stencil clear must be there with its own flags and value.
     bool stencilClearRecorded = false;
-    for (size_t i = 0; i < f.Device->ViewClears.size(); ++i) {
-        if (f.Device->ViewClears[i].Flags == CKRST_CTXCLEAR_STENCIL && f.Device->ViewClears[i].Stencil == 0x7)
+    for (size_t i = 0; i < f.Backend->PassClears.size(); ++i) {
+        if (f.Backend->PassClears[i].Flags == CKRST_CTXCLEAR_STENCIL && f.Backend->PassClears[i].Stencil == 0x7)
             stencilClearRecorded = true;
     }
-    TestCheck(stencilClearRecorded, "stencil clear recorded on its own view");
+    TestCheck(stencilClearRecorded, "stencil clear recorded on its own pass");
 
     TestCheck(f.Context->DrawPrimitiveVB(VX_TRIANGLESTRIP, vb, 0, 4, NULL, 0), "DrawPrimitiveVB non-indexed");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 2, "second device submit");
-    TestCheck(f.Device->Encoder.SubmitViews[submitsBefore + 1] > firstView, "later draw lands on a later view");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 2, "second backend draw");
+    TestCheck(f.Backend->Log.DrawPasses[drawsBefore + 1] > firstPass, "later draw lands on a later pass");
 
     CKWORD cpuIndices[6] = {0, 1, 2, 2, 1, 3};
     TestCheck(f.Context->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 4, cpuIndices, 6), "DrawPrimitiveVB with indices");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 3, "third device submit");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 3, "third backend draw");
 
     float positions[3][3] = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}};
     CKDWORD colors[3] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
@@ -321,7 +321,7 @@ void TestFrameFlowAndDraws()
     dp.ColorPtr = colors;
     dp.ColorStride = sizeof(colors[0]);
     TestCheck(f.Context->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &dp), "DrawPrimitive (software path)");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 4, "fourth device submit");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 4, "fourth backend draw");
 
     TestCheck(!f.Context->DrawPrimitiveVBIB(VX_TRIANGLELIST, 0xDEAD, ib, 0, 4, 0, 6), "unknown VB rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_INVALID_HANDLE) == 1, "REJECT_INVALID_HANDLE counted");
@@ -332,9 +332,9 @@ void TestFrameFlowAndDraws()
     TestCheck(!f.Context->BackToFront(FALSE), "present inside the scene rejected");
     TestCheck(f.Context->EndScene(), "EndScene");
     TestCheck(!f.Context->EndScene(), "EndScene twice rejected");
-    const CKDWORD frames = f.Device->FrameSerial;
+    const CKDWORD frames = f.Backend->FrameSerial;
     TestCheck(f.Context->BackToFront(FALSE), "BackToFront");
-    TestCheck(f.Device->FrameSerial == frames + 1, "device Frame() called once");
+    TestCheck(f.Backend->FrameSerial == frames + 1, "backend Present() called once");
     const CKRenderStats *stats = f.Context->GetStats();
     TestCheck(stats->FrameNumber == 1, "frame counter");
     TestCheck(stats->DrawCalls == 4 && stats->Primitives == 2 + 2 + 2 + 1, "draw and primitive counters");
@@ -342,10 +342,10 @@ void TestFrameFlowAndDraws()
               "pass and clear counters (clear, scene, stencil clear, scene, resolve, present)");
     TestCheck(f.Context->IsIdle(), "idle after present");
 
-    // The next frame starts again at view 0 and does not leak scratch buffers.
+    // The next frame starts again at pass 0 and does not leak scratch buffers.
     TestCheck(f.Context->BeginScene() && f.Context->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 4, 0, 6),
               "second frame draw");
-    TestCheck(f.Device->Encoder.SubmitViews[f.Device->Encoder.SubmitCount - 1] <= firstView, "views restart per frame");
+    TestCheck(f.Backend->Log.DrawPasses[f.Backend->Log.DrawCount - 1] <= firstPass, "passes restart per frame");
     TestCheck(f.Context->EndScene() && f.Context->BackToFront(TRUE), "second frame presented");
 }
 
@@ -384,23 +384,23 @@ void TestOverlayPhase()
     TestCheck(!f.Context->BeginOverlayPhase(), "overlay inside the scene rejected");
     TestCheck(f.Context->EndScene(), "EndScene");
     const CKDWORD passes = f.Context->GetPassCountForTests();
-    const CKDWORD submitsBefore = f.Device->Encoder.SubmitCount;
+    const CKDWORD drawsBefore = f.Backend->Log.DrawCount;
     TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
     TestCheck(f.Context->GetPassCountForTests() == passes + 2, "overlay opens the resolve pass and the overlay pass");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "resolve submitted");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 2, "present blit submitted");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 2, "present blit submitted");
 
     CKRasterizerOptions options;
     options.RenderScale = 0.5f;
     TestCheck(f.Context->SetOptions(&options), "SetOptions(RenderScale 0.5)");
     TestCheck(f.Context->BeginScene() && f.Context->EndScene(), "scaled scene");
     const CKDWORD scaledPasses = f.Context->GetPassCountForTests();
-    const CKDWORD submits = f.Device->Encoder.SubmitCount;
+    const CKDWORD draws = f.Backend->Log.DrawCount;
     TestCheck(f.Context->BeginOverlayPhase(), "overlay after a scaled scene");
-    // resolve pass + overlay pass, and the resolve is a backend submit
+    // resolve pass + overlay pass, and the resolve is a backend draw
     TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 2, "resolve and overlay passes");
-    TestCheck(f.Device->Encoder.SubmitCount == submits + 1, "resolve submitted");
+    TestCheck(f.Backend->Log.DrawCount == draws + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present scaled frame");
 }
 
@@ -416,9 +416,9 @@ void TestRenderScaleCoordinates()
     // The fixture window is 64x64: the scene target is 32x32.
     CKRECT clearRect = {8, 8, 40, 24};
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_COLOR, 0, 1.0f, 0, 1, &clearRect), "clear rect");
-    TestCheck(!f.Device->ViewClears.empty(), "clear recorded");
-    if (!f.Device->ViewClears.empty()) {
-        const CKRECT &r = f.Device->ViewClears.back().Rect;
+    TestCheck(!f.Backend->PassClears.empty(), "clear recorded");
+    if (!f.Backend->PassClears.empty()) {
+        const CKRECT &r = f.Backend->PassClears.back().Rect;
         TestCheck(r.left == 4 && r.top == 4 && r.right == 20 && r.bottom == 12,
                   "clear rectangles are scaled to the scene target");
     }

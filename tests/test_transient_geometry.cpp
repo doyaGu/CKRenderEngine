@@ -4,22 +4,22 @@
 #include "CKRenderFrameCostStats.h"
 #include "CKRenderSettings.h"
 #include "RCKRenderContext.h"
-#include "FFPDiagnosticHarness.h"
+#include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
 #include <cstring>
 
 struct TransientGeometryHarness {
-    FFPDiagnosticDriver Driver;
-    FFPDiagnosticContext Context;
+    FFPRecordingDriver Driver;
+    FFPRecordingBackend Context;
     CKVertexLayoutCache LayoutCache;
     CKTransientGeometry Geometry;
 
     TransientGeometryHarness()
         : Driver(), Context(&Driver), LayoutCache(), Geometry()
     {
-        LayoutCache.Init(Context.FFPBackend());
-        Geometry.Init(Context.FFPBackend(), &LayoutCache);
+        LayoutCache.Init(Context.StartedBackend());
+        Geometry.Init(Context.StartedBackend(), &LayoutCache);
     }
 
     // Bytes of the last Prepare (empty when it produced no vertices / indices).

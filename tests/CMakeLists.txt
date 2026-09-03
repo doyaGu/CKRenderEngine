@@ -56,7 +56,7 @@ endfunction()
 
 # Tests of the CKRasterizer v3 contract: the translation core (CKRasterizerLib)
 # driven through the public contract only, over the recording device of
-# FFPDiagnosticHarness.h. They do not link the engine.
+# FFPRecordingHarness.h. They do not link the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -160,7 +160,7 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
 endif ()
 
 ckre_add_test(rasterizer_backend_tests
-        test_rasterizer_backend.cpp
+    test_rasterizer_backend.cpp
 )
 
 ckre_add_test(ff_state_store_tests
@@ -171,8 +171,8 @@ ckre_add_test(ff_state_resolver_tests
     test_ff_state_resolver.cpp
 )
 
-ckre_add_test(ffp_stencil_submit_tests
-    test_ffp_stencil_submit.cpp
+ckre_add_test(ffp_pipeline_tests
+    test_ffp_pipeline.cpp
 )
 
 ckre_add_test(draw_annotation_tests

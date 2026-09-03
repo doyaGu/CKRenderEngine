@@ -1,5 +1,5 @@
-#ifndef CKRE_FFP_DIAGNOSTIC_HARNESS_H
-#define CKRE_FFP_DIAGNOSTIC_HARNESS_H
+#ifndef CKRE_FFP_RECORDING_HARNESS_H
+#define CKRE_FFP_RECORDING_HARNESS_H
 
 // Recording backend for the fixed-function pipeline and translation core
 // tests: the NULL backend plus a log of everything the pipeline sends down
@@ -22,8 +22,8 @@ struct FFPTextureBinding {
     CKSamplerDesc Sampler;
 };
 
-struct FFPViewClearRecord {
-    CKDWORD View;    // pass index within the frame
+struct FFPPassClearRecord {
+    CKDWORD Pass;         // index into the frame's passes
     CKDWORD Flags;
     CKDWORD Color;
     float Z;
@@ -32,8 +32,8 @@ struct FFPViewClearRecord {
 };
 
 // One Draw() on the backend.
-struct FFPSubmitRecord {
-    CKDWORD View;    // pass index within the frame
+struct FFPDrawRecord {
+    CKDWORD Pass;         // index into the frame's passes
     CKDWORD Program;
     CKDWORD Flags;
     XString Marker;       // marker set before the draw, consumed
@@ -41,23 +41,23 @@ struct FFPSubmitRecord {
     CKRECT Rect;          // pass rect
 };
 
-struct FFPViewState {
+struct FFPPassState {
     CKRECT Rect;
     CKDWORD FrameBuffer;  // render target of the pass
-    FFPViewState() : FrameBuffer(0) { memset(&Rect, 0, sizeof(Rect)); }
+    FFPPassState() : FrameBuffer(0) { memset(&Rect, 0, sizeof(Rect)); }
 };
 
 // The draw-level log: one record per draw plus the running counters of
 // everything the pipeline pushed down with it.
-struct FFPEncoderRecord {
+struct FFPBackendLog {
     CKDrawState LastState = {};
     CKDWORD StateSetCount = 0;
     CKDWORD LastProgram = 0;
-    CKDWORD SubmitCount = 0;
+    CKDWORD DrawCount = 0;
     CKDWORD DiscardCount = 0;          // draws / uploads the backend refused
     CKDWORD LastDiscardFlags = 0;
-    CKDWORD TouchCount = 0;            // passes begun
-    CKDWORD LastTouchedView = 0;
+    CKDWORD PassCount = 0;             // passes begun
+    CKDWORD LastPass = 0;
     CKDWORD TextureBindCount = 0;
     CKDWORD UniformSetCount = 0;
     CKDWORD MatrixUniformSetCount = 0;
@@ -77,37 +77,36 @@ struct FFPEncoderRecord {
     CKDWORD ScissorSetCount = 0;
     CKDWORD VertexBufferSetCount = 0;
     CKDWORD IndexBufferSetCount = 0;
-    CKDWORD SubmitFlags[32] = {};
-    CKDWORD SubmitViews[32] = {};
-    std::vector<FFPSubmitRecord> Submits;
-    std::vector<CKDWORD> Touches;
+    CKDWORD DrawFlags[32] = {};
+    CKDWORD DrawPasses[32] = {};
+    std::vector<FFPDrawRecord> Draws;
+    std::vector<CKDWORD> PassOrder;
     XString LastMarker;
     CKDWORD VertexBufferOrder[32] = {};
     CKDWORD IndexBufferOrder[32] = {};
     // Failure knobs: the next Draw / PushConstants fails with this status.
     CKERROR StateError = CK_OK;
     CKERROR UniformError = CK_OK;
-    CKERROR SubmitError = CK_OK;
+    CKERROR DrawError = CK_OK;
     std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;   // transient geometry of the last draw
     std::vector<CKBYTE> LastIndexBytes;
-    std::unordered_set<CKDWORD> MatrixUniforms;   // unused since constants are pushed by block; kept for the tests
     std::unordered_map<CKDWORD, std::vector<float> > FloatUniforms;   // pseudo block uniform -> floats of the last push
     std::unordered_map<CKDWORD, CKDWORD> UniformCounts;               // pseudo block uniform -> element count
 };
 
-class FFPDiagnosticContext;
+class FFPRecordingBackend;
 
 // Backend driver of the recording backends: the shader profile and the
 // framebuffer conventions the backends report.
-class FFPDiagnosticDriver : public CKNullBackendDriver {
+class FFPRecordingDriver : public CKNullBackendDriver {
 public:
-    explicit FFPDiagnosticDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11, CKDWORD flags = 0)
+    explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11, CKDWORD flags = 0)
     {
         Profile = profile;
         HomogeneousDepth = (flags & CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE) ? TRUE : FALSE;
         OriginBottomLeft = (flags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) ? TRUE : FALSE;
-        m_Desc = "Recording device";
+        m_Desc = "Recording backend";
         m_3DCaps.MaxNumberTextureStage = 8;
         m_3DCaps.MaxTextureWidth = 4096;
         m_3DCaps.MaxTextureHeight = 4096;
@@ -117,9 +116,9 @@ protected:
     CKNullBackend *NewBackend() override;
 };
 
-class FFPDiagnosticContext : public CKNullBackend {
+class FFPRecordingBackend : public CKNullBackend {
 public:
-    explicit FFPDiagnosticContext(CKNullBackendDriver *driver) : CKNullBackend(driver) {}
+    explicit FFPRecordingBackend(CKNullBackendDriver *driver) : CKNullBackend(driver) {}
 
     // --- Knobs
     CKBOOL FailCreateProgram = FALSE;
@@ -129,11 +128,11 @@ public:
     CKERROR DeviceStatus = CK_OK;
     CKDWORD TransientVertexCapacity = 0xFFFFFFFFu;
     CKDWORD TransientIndexCapacity = 0xFFFFFFFFu;
-    CKDWORD Width = 64;      // size FFPBackend() initialises with
+    CKDWORD Width = 64;      // size StartedBackend() initialises with
     CKDWORD Height = 64;
 
     // --- Log
-    FFPEncoderRecord Encoder;
+    FFPBackendLog Log;
     CKDWORD TransientVertexAllocations = 0;   // successful allocations
     CKDWORD TransientIndexAllocations = 0;
     CKDWORD ReadTextureCount = 0;
@@ -160,16 +159,16 @@ public:
     const void *LastPixelShaderCode = nullptr;
     CKDWORD LastPixelShaderCodeSize = 0;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
-    std::vector<FFPViewClearRecord> ViewClears;
-    std::unordered_map<CKDWORD, FFPViewState> Views;   // pass index -> pass
+    std::vector<FFPPassClearRecord> PassClears;
+    std::unordered_map<CKDWORD, FFPPassState> PassStates;   // pass index -> its rect and target
     std::unordered_map<CKDWORD, CKDWORD> FrameBufferColorTexture;   // render target -> colour texture
     std::vector<CKBackendPresentMode> Frames;
     std::unordered_set<CKDWORD> LiveHandles;   // every allocated, not yet destroyed handle
 
     // Colour texture (0 = swap chain) a pass draws into.
-    CKDWORD ViewTarget(CKDWORD view) const {
-        std::unordered_map<CKDWORD, FFPViewState>::const_iterator it = Views.find(view);
-        if (it == Views.end() || it->second.FrameBuffer == 0)
+    CKDWORD PassTarget(CKDWORD pass) const {
+        std::unordered_map<CKDWORD, FFPPassState>::const_iterator it = PassStates.find(pass);
+        if (it == PassStates.end() || it->second.FrameBuffer == 0)
             return 0;
         std::unordered_map<CKDWORD, CKDWORD>::const_iterator fb = FrameBufferColorTexture.find(it->second.FrameBuffer);
         return fb == FrameBufferColorTexture.end() ? 0 : fb->second;
@@ -179,7 +178,7 @@ public:
     // initialised on first use with Width x Height and one open pass that
     // stays open for the whole test (IsIdle stays TRUE so the pipeline can
     // shut down at the end).
-    CKRasterizerBackend *FFPBackend() {
+    CKRasterizerBackend *StartedBackend() {
         if (!m_Initialized) {
             CKBackendInitDesc init;
             init.Width = (int)Width;
@@ -187,11 +186,11 @@ public:
             init.Bpp = 32;
             init.ZBpp = 24;
             init.StencilBpp = 8;
-            TestCheck(Init(&init) == CK_OK, "FFP diagnostic backend must initialise");
+            TestCheck(Init(&init) == CK_OK, "recording backend must initialise");
             CKBackendPassDesc pass;
             pass.Rect.right = (int)Width;
             pass.Rect.bottom = (int)Height;
-            TestCheck(BeginPass(&pass) == CK_OK, "FFP diagnostic backend must open its pass");
+            TestCheck(BeginPass(&pass) == CK_OK, "recording backend must open its pass");
         }
         return this;
     }
@@ -303,44 +302,44 @@ public:
         const CKERROR result = CKNullBackend::BeginPass(desc);
         if (result != CK_OK)
             return result;
-        const CKDWORD view = GetCurrentPass();
-        Views[view].Rect = desc->Rect;
-        Views[view].FrameBuffer = desc->RenderTarget;
-        FFPViewClearRecord record = { view, GetPasses().back().ClearFlags, desc->ClearColor, desc->ClearZ,
+        const CKDWORD pass = GetCurrentPass();
+        PassStates[pass].Rect = desc->Rect;
+        PassStates[pass].FrameBuffer = desc->RenderTarget;
+        FFPPassClearRecord record = { pass, GetPasses().back().ClearFlags, desc->ClearColor, desc->ClearZ,
                                       desc->ClearStencil, desc->Rect };
-        ViewClears.push_back(record);
-        Encoder.Touches.push_back(view);
-        Encoder.LastTouchedView = view;
-        ++Encoder.TouchCount;
+        PassClears.push_back(record);
+        Log.PassOrder.push_back(pass);
+        Log.LastPass = pass;
+        ++Log.PassCount;
         return CK_OK;
     }
     CKERROR PushConstants(CKBackendConstantBlock block, const void *data, CKDWORD vec4Count) override {
         if (!data || vec4Count == 0)
             return CKERR_INVALIDPARAMETER;
-        ++Encoder.UniformSetCount;
-        if (Encoder.UniformError != CK_OK) {
-            ++Encoder.DiscardCount;
-            Encoder.LastDiscardFlags = CKRST_DISCARD_ALL;
-            return Encoder.UniformError;
+        ++Log.UniformSetCount;
+        if (Log.UniformError != CK_OK) {
+            ++Log.DiscardCount;
+            Log.LastDiscardFlags = CKRST_DISCARD_ALL;
+            return Log.UniformError;
         }
         const CKERROR result = CKNullBackend::PushConstants(block, data, vec4Count);
         if (result != CK_OK) {
-            ++Encoder.DiscardCount;
-            Encoder.LastDiscardFlags = CKRST_DISCARD_ALL;
+            ++Log.DiscardCount;
+            Log.LastDiscardFlags = CKRST_DISCARD_ALL;
             return result;
         }
         const CKDWORD uniform = GetBlockUniformForTests(block);
         const CKBackendConstantBlockDesc &info = CKBackendConstantBlockInfo(block);
         if (info.Mat4)
-            ++Encoder.MatrixUniformSetCount;
+            ++Log.MatrixUniformSetCount;
         const float *values = static_cast<const float *>(data);
-        Encoder.FloatUniforms[uniform].assign(values, values + vec4Count * 4);
-        Encoder.UniformCounts[uniform] = info.Mat4 ? vec4Count / 4 : vec4Count;
+        Log.FloatUniforms[uniform].assign(values, values + vec4Count * 4);
+        Log.UniformCounts[uniform] = info.Mat4 ? vec4Count / 4 : vec4Count;
         return CK_OK;
     }
     void SetMarker(const char *name) override {
         CKNullBackend::SetMarker(name);
-        Encoder.LastMarker = name ? name : "";
+        Log.LastMarker = name ? name : "";
     }
     CKBOOL AllocTransientVertices(CKDWORD count, CKDWORD layout, CKBackendTransientVertices *out) override {
         if (count > TransientVertexCapacity)
@@ -381,39 +380,39 @@ public:
     }
 };
 
-inline CKNullBackend *FFPDiagnosticDriver::NewBackend()
+inline CKNullBackend *FFPRecordingDriver::NewBackend()
 {
-    return new FFPDiagnosticContext(this);
+    return new FFPRecordingBackend(this);
 }
 
 // Records the sticky state and the slot bindings the draw carries, then the
 // draw itself; the failure knobs refuse the draw before (StateError) or after
-// (SubmitError) recording it.
-inline CKERROR FFPDiagnosticContext::Draw(const CKBackendDraw *draw)
+// (DrawError) recording it.
+inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
 {
     if (!draw || !draw->Program)
         return CKERR_INVALIDPARAMETER;
     if (!IsPassOpen())
         return CKERR_INVALIDOPERATION;
-    if (Encoder.StateError != CK_OK) {
-        ++Encoder.DiscardCount;
-        Encoder.LastDiscardFlags = CKRST_DISCARD_ALL;
-        return Encoder.StateError;
+    if (Log.StateError != CK_OK) {
+        ++Log.DiscardCount;
+        Log.LastDiscardFlags = CKRST_DISCARD_ALL;
+        return Log.StateError;
     }
     const CKBackendPipelineState &state = GetPipelineState();
-    Encoder.LastState = state.State;
-    ++Encoder.StateSetCount;
-    Encoder.LastStencilRef = state.StencilRef & 0xFF;
-    Encoder.LastStencilReadMask = state.StencilReadMask & 0xFF;
-    Encoder.LastStencilWriteMask = state.StencilWriteMask & 0xFF;
-    ++Encoder.StencilRefSetCount;
-    ++Encoder.StencilMaskSetCount;
-    Encoder.ScissorEnabled = state.ScissorEnabled;
+    Log.LastState = state.State;
+    ++Log.StateSetCount;
+    Log.LastStencilRef = state.StencilRef & 0xFF;
+    Log.LastStencilReadMask = state.StencilReadMask & 0xFF;
+    Log.LastStencilWriteMask = state.StencilWriteMask & 0xFF;
+    ++Log.StencilRefSetCount;
+    ++Log.StencilMaskSetCount;
+    Log.ScissorEnabled = state.ScissorEnabled;
     if (state.ScissorEnabled)
-        Encoder.LastScissor = state.Scissor;
-    ++Encoder.ScissorSetCount;
-    Encoder.LastPointSize = state.PointSize;
-    ++Encoder.PointSizeSetCount;
+        Log.LastScissor = state.Scissor;
+    ++Log.ScissorSetCount;
+    Log.LastPointSize = state.PointSize;
+    ++Log.PointSizeSetCount;
     for (CKDWORD slot = 0; slot < CKRST_BACKEND_SLOT_COUNT; ++slot) {
         const CKDWORD texture = GetBoundTexture(slot);
         if (!texture)
@@ -423,63 +422,63 @@ inline CKERROR FFPDiagnosticContext::Draw(const CKBackendDraw *draw)
         binding.Uniform = GetSamplerUniformForTests(slot);
         binding.Texture = texture;
         binding.Sampler = m_Samplers[slot];
-        Encoder.TextureBindings.push_back(binding);
-        Encoder.LastTextureStage = slot;
-        Encoder.LastTextureUniform = binding.Uniform;
-        Encoder.LastTextureHandle = texture;
-        Encoder.LastTextureSampler = binding.Sampler;
-        ++Encoder.TextureBindCount;
+        Log.TextureBindings.push_back(binding);
+        Log.LastTextureStage = slot;
+        Log.LastTextureUniform = binding.Uniform;
+        Log.LastTextureHandle = texture;
+        Log.LastTextureSampler = binding.Sampler;
+        ++Log.TextureBindCount;
     }
     if (draw->VertexBuffer) {
-        if (Encoder.VertexBufferSetCount < 32)
-            Encoder.VertexBufferOrder[Encoder.VertexBufferSetCount] = draw->VertexBuffer;
-        ++Encoder.VertexBufferSetCount;
+        if (Log.VertexBufferSetCount < 32)
+            Log.VertexBufferOrder[Log.VertexBufferSetCount] = draw->VertexBuffer;
+        ++Log.VertexBufferSetCount;
     }
     if (draw->IndexBuffer) {
-        if (Encoder.IndexBufferSetCount < 32)
-            Encoder.IndexBufferOrder[Encoder.IndexBufferSetCount] = draw->IndexBuffer;
-        ++Encoder.IndexBufferSetCount;
+        if (Log.IndexBufferSetCount < 32)
+            Log.IndexBufferOrder[Log.IndexBufferSetCount] = draw->IndexBuffer;
+        ++Log.IndexBufferSetCount;
     }
 
-    const CKDWORD view = GetCurrentPass();
+    const CKDWORD pass = GetCurrentPass();
     const CKERROR result = CKNullBackend::Draw(draw);
     if (result != CK_OK) {
-        ++Encoder.DiscardCount;
-        Encoder.LastDiscardFlags = CKRST_DISCARD_ALL;
+        ++Log.DiscardCount;
+        Log.LastDiscardFlags = CKRST_DISCARD_ALL;
         return result;
     }
-    Encoder.LastVertexBytes.clear();
-    Encoder.LastIndexBytes.clear();
+    Log.LastVertexBytes.clear();
+    Log.LastIndexBytes.clear();
     if (draw->TransientVertices && draw->TransientVertices->Data) {
         const CKBYTE *begin = static_cast<const CKBYTE *>(draw->TransientVertices->Data);
-        Encoder.LastVertexBytes.assign(begin, begin + (size_t)draw->TransientVertices->Count * draw->TransientVertices->Stride);
+        Log.LastVertexBytes.assign(begin, begin + (size_t)draw->TransientVertices->Count * draw->TransientVertices->Stride);
     }
     if (draw->TransientIndices && draw->TransientIndices->Data) {
         const CKBYTE *begin = static_cast<const CKBYTE *>(draw->TransientIndices->Data);
-        Encoder.LastIndexBytes.assign(begin, begin + (size_t)draw->TransientIndices->Count * (draw->TransientIndices->Index32 ? 4 : 2));
+        Log.LastIndexBytes.assign(begin, begin + (size_t)draw->TransientIndices->Count * (draw->TransientIndices->Index32 ? 4 : 2));
     }
-    if (Encoder.SubmitCount < 32) {
-        Encoder.SubmitViews[Encoder.SubmitCount] = view;
-        Encoder.SubmitFlags[Encoder.SubmitCount] = CKRST_DISCARD_ALL;
+    if (Log.DrawCount < 32) {
+        Log.DrawPasses[Log.DrawCount] = pass;
+        Log.DrawFlags[Log.DrawCount] = CKRST_DISCARD_ALL;
     }
-    FFPSubmitRecord record;
-    record.View = view;
+    FFPDrawRecord record;
+    record.Pass = pass;
     record.Program = draw->Program;
     record.Flags = CKRST_DISCARD_ALL;
-    record.Marker = Encoder.LastMarker;
-    record.Target = ViewTarget(view);
+    record.Marker = Log.LastMarker;
+    record.Target = PassTarget(pass);
     memset(&record.Rect, 0, sizeof(record.Rect));
-    std::unordered_map<CKDWORD, FFPViewState>::const_iterator it = Views.find(view);
-    if (it != Views.end())
+    std::unordered_map<CKDWORD, FFPPassState>::const_iterator it = PassStates.find(pass);
+    if (it != PassStates.end())
         record.Rect = it->second.Rect;
-    Encoder.LastMarker = "";
-    Encoder.Submits.push_back(record);
-    Encoder.LastProgram = draw->Program;
-    ++Encoder.SubmitCount;
-    if (Encoder.SubmitError != CK_OK) {
-        ++Encoder.DiscardCount;
-        Encoder.LastDiscardFlags = CKRST_DISCARD_ALL;
-        return Encoder.SubmitError;
+    Log.LastMarker = "";
+    Log.Draws.push_back(record);
+    Log.LastProgram = draw->Program;
+    ++Log.DrawCount;
+    if (Log.DrawError != CK_OK) {
+        ++Log.DiscardCount;
+        Log.LastDiscardFlags = CKRST_DISCARD_ALL;
+        return Log.DrawError;
     }
     return CK_OK;
 }
@@ -488,24 +487,21 @@ inline CKERROR FFPDiagnosticContext::Draw(const CKBackendDraw *draw)
 // Recording backend behind the v3 translation core
 // ===========================================================================
 
-typedef FFPDiagnosticContext FFPRecordingContext;
-typedef FFPDiagnosticDriver FFPRecordingDriver;
-
 class FFPRecordingLibrary : public CKNullBackendLibrary {
 protected:
     CKNullBackendDriver *NewDriver() override { return new FFPRecordingDriver(); }
 };
 
 // A started translated rasterizer over the recording backend. Add texture
-// formats to DeviceDriver() before CreateContext(); the translated driver
+// formats to BackendDriver() before CreateContext(); the translated driver
 // syncs them when the context is created.
 struct FFPTranslatedWorld {
     CKRasterizer *Rasterizer;
     CKTranslatedDriver *Driver;
     CKTranslatedContext *Context;
-    FFPRecordingContext *Device;
+    FFPRecordingBackend *Backend;
 
-    FFPTranslatedWorld() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL) {
+    FFPTranslatedWorld() : Rasterizer(NULL), Driver(NULL), Context(NULL), Backend(NULL) {
         FFPRecordingLibrary *library = new FFPRecordingLibrary();
         library->Start(NULL);
         Rasterizer = CKTranslatedRasterizerStart(library, NULL);
@@ -518,7 +514,7 @@ struct FFPTranslatedWorld {
             CKTranslatedRasterizerClose(Rasterizer);
     }
 
-    FFPRecordingDriver *DeviceDriver() const {
+    FFPRecordingDriver *BackendDriver() const {
         return Driver ? static_cast<FFPRecordingDriver *>(Driver->GetBackendDriver()) : NULL;
     }
 
@@ -530,9 +526,9 @@ struct FFPTranslatedWorld {
             return FALSE;
         if (!Context->Create(NULL, 0, 0, width, height, 32, FALSE, 60, 24, 8))
             return FALSE;
-        Device = static_cast<FFPRecordingContext *>(Context->GetBackend());
-        return Device != NULL;
+        Backend = static_cast<FFPRecordingBackend *>(Context->GetBackend());
+        return Backend != NULL;
     }
 };
 
-#endif // CKRE_FFP_DIAGNOSTIC_HARNESS_H
+#endif // CKRE_FFP_RECORDING_HARNESS_H

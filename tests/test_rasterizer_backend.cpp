@@ -8,21 +8,19 @@
 #include <string.h>
 
 #include "CKFFShaderABI.h"
-#include "FFPDiagnosticHarness.h"
+#include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
 namespace {
 
 struct Fixture {
     FFPRecordingDriver Driver;
-    FFPRecordingContext *Device;   // the recording backend and its log
-    FFPRecordingContext *Backend;  // the same object through the interface under test
+    FFPRecordingBackend *Backend;  // the recording backend and its log
 
-    Fixture() : Device(NULL), Backend(NULL)
+    Fixture() : Backend(NULL)
     {
-        Device = static_cast<FFPRecordingContext *>(Driver.CreateBackend());
-        TestCheck(Device != NULL, "recording backend");
-        Backend = Device;
+        Backend = static_cast<FFPRecordingBackend *>(Driver.CreateBackend());
+        TestCheck(Backend != NULL, "recording backend");
         CKBackendInitDesc init;
         init.Width = 64;
         init.Height = 48;
@@ -33,8 +31,8 @@ struct Fixture {
     }
     ~Fixture()
     {
-        if (Device)
-            Driver.DestroyBackend(Device);
+        if (Backend)
+            Driver.DestroyBackend(Backend);
     }
 };
 
@@ -187,9 +185,9 @@ void TestFrame()
     pass.ClearColor = 0xFF102030;
     pass.Name = "scene";
     TestCheck(b->BeginPass(&pass) == CK_OK, "BeginPass");
-    TestCheck(!f.Device->ViewClears.empty() && f.Device->ViewClears.back().Color == 0xFF102030 &&
-                  f.Device->ViewClears.back().Rect.right == 64,
-              "the pass clear reaches the device view");
+    TestCheck(!f.Backend->PassClears.empty() && f.Backend->PassClears.back().Color == 0xFF102030 &&
+                  f.Backend->PassClears.back().Rect.right == 64,
+              "the pass clear reaches the backend");
 
     CKBackendPipelineState state;
     state.State.Lo = CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL);
@@ -218,32 +216,32 @@ void TestFrame()
     b->PushConstants(CKRST_BLOCK_SPEC, block, CKFF_SPEC_UNIFORM_VEC4_COUNT);
     b->SetMarker("first");
     TestCheck(b->Draw(&draw) == CK_OK, "Draw");
-    TestCheck(f.Device->Encoder.Submits.size() == 1 && f.Device->Encoder.Submits[0].Program == program &&
-                  f.Device->Encoder.Submits[0].Marker == "first",
-              "the draw reaches the device with its program and marker");
-    TestCheck(f.Device->Encoder.LastState.Lo == state.State.Lo, "the pipeline state reaches the device");
-    TestCheck(f.Device->Encoder.LastStencilRef == 0x07, "the stencil ref is clamped to 8 bits");
-    TestCheck(f.Device->Encoder.ScissorEnabled && f.Device->Encoder.LastScissor.right == 20, "the scissor reaches the device");
-    TestCheck(f.Device->Encoder.LastPointSize == 3.0f, "the point size reaches the device");
-    TestCheck(f.Device->Encoder.TextureBindCount == 1 && f.Device->Encoder.LastTextureStage == 2 &&
-                  f.Device->Encoder.LastTextureHandle == texture &&
-                  f.Device->Encoder.LastTextureUniform == f.Backend->GetSamplerUniformForTests(2),
+    TestCheck(f.Backend->Log.Draws.size() == 1 && f.Backend->Log.Draws[0].Program == program &&
+                  f.Backend->Log.Draws[0].Marker == "first",
+              "the draw reaches the backend with its program and marker");
+    TestCheck(f.Backend->Log.LastState.Lo == state.State.Lo, "the pipeline state reaches the backend");
+    TestCheck(f.Backend->Log.LastStencilRef == 0x07, "the stencil ref is clamped to 8 bits");
+    TestCheck(f.Backend->Log.ScissorEnabled && f.Backend->Log.LastScissor.right == 20, "the scissor reaches the backend");
+    TestCheck(f.Backend->Log.LastPointSize == 3.0f, "the point size reaches the backend");
+    TestCheck(f.Backend->Log.TextureBindCount == 1 && f.Backend->Log.LastTextureStage == 2 &&
+                  f.Backend->Log.LastTextureHandle == texture &&
+                  f.Backend->Log.LastTextureUniform == f.Backend->GetSamplerUniformForTests(2),
               "bound textures are set on their slot through the slot's sampler uniform");
     const CKDWORD specUniform = f.Backend->GetBlockUniformForTests(CKRST_BLOCK_SPEC);
-    TestCheck(f.Device->Encoder.FloatUniforms.count(specUniform) == 1 &&
-                  f.Device->Encoder.FloatUniforms[specUniform].size() == CKFF_SPEC_UNIFORM_VEC4_COUNT * 4,
+    TestCheck(f.Backend->Log.FloatUniforms.count(specUniform) == 1 &&
+                  f.Backend->Log.FloatUniforms[specUniform].size() == CKFF_SPEC_UNIFORM_VEC4_COUNT * 4,
               "PushConstants uploads the block through its uniform");
 
-    // Pass 2 follows pass 1 (sequential views); the state stays sticky.
+    // Pass 2 follows pass 1 (passes are sequential); the state stays sticky.
     pass.ClearFlags = 0;
     pass.Name = "overlay";
     TestCheck(b->BeginPass(&pass) == CK_OK, "second BeginPass");
     b->BindTexture(2, 0, NULL);
     TestCheck(b->Draw(&draw) == CK_OK, "second Draw");
-    TestCheck(f.Device->Encoder.Submits.size() == 2 && f.Device->Encoder.Submits[1].View > f.Device->Encoder.Submits[0].View,
-              "the second pass draws into a later view");
-    TestCheck(f.Device->Encoder.TextureBindCount == 1, "an unbound slot is not set again");
-    TestCheck(f.Device->Encoder.LastState.Lo == state.State.Lo, "the pipeline state is sticky across passes");
+    TestCheck(f.Backend->Log.Draws.size() == 2 && f.Backend->Log.Draws[1].Pass > f.Backend->Log.Draws[0].Pass,
+              "the second draw lands on a later pass");
+    TestCheck(f.Backend->Log.TextureBindCount == 1, "an unbound slot is not set again");
+    TestCheck(f.Backend->Log.LastState.Lo == state.State.Lo, "the pipeline state is sticky across passes");
 
     // Blit inside the pass; layers are cube faces / slices and are range-checked.
     CKTextureDesc dstDesc = tex;
@@ -256,11 +254,11 @@ void TestFrame()
     // Present closes the frame and fills the stats.
     CKDWORD frame = 0;
     TestCheck(b->Present(CKRST_BACKEND_PRESENT_IMMEDIATE, &frame) == CK_OK, "Present");
-    TestCheck(f.Device->Frames.size() == 1 && f.Device->Frames[0] == CKRST_BACKEND_PRESENT_IMMEDIATE, "Present(IMMEDIATE) recorded");
+    TestCheck(f.Backend->Frames.size() == 1 && f.Backend->Frames[0] == CKRST_BACKEND_PRESENT_IMMEDIATE, "Present(IMMEDIATE) recorded");
     const CKBackendStats &stats = b->GetStats();
     TestCheck(stats.Frames == 1 && stats.Passes == 2 && stats.Draws == 2 && stats.Blits == 1, "stats of the frame");
     TestCheck(b->IsIdle(), "idle after Present");
-    TestCheck(b->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK && f.Device->Frames.back() == CKRST_BACKEND_PRESENT_PRESERVE,
+    TestCheck(b->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK && f.Backend->Frames.back() == CKRST_BACKEND_PRESENT_PRESERVE,
               "Present(PRESERVE) recorded");
     TestCheck(b->GetStats().Passes == 0 && b->GetStats().Draws == 0, "an empty frame has no passes");
 

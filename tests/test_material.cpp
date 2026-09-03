@@ -12,7 +12,7 @@
 #include "RCKMaterial.h"
 #include "RCKTexture.h"
 #include "CKTranslatedRasterizer.h"
-#include "FFPDiagnosticHarness.h"
+#include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
 extern void SetProcessorSpecific_FunctionsPtr();
@@ -20,7 +20,7 @@ extern CKBOOL g_UpdateTransparency;
 
 namespace {
 
-void AddDriverTextureFormat(FFPDiagnosticDriver &driver, VX_PIXELFORMAT format) {
+void AddDriverTextureFormat(FFPRecordingDriver &driver, VX_PIXELFORMAT format) {
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(format, desc.Format);
     driver.m_TextureFormats.PushBack(desc);
@@ -40,11 +40,11 @@ struct MaterialTestWorld {
             renderManager = new RCKRenderManager(context);
         TestCheck(renderManager != nullptr, "RCKRenderManager creation failed");
 
-        AddDriverTextureFormat(*translated.DeviceDriver(), _32_ARGB8888);
-        AddDriverTextureFormat(*translated.DeviceDriver(), _16_RGB565);
+        AddDriverTextureFormat(*translated.BackendDriver(), _32_ARGB8888);
+        AddDriverTextureFormat(*translated.BackendDriver(), _16_RGB565);
 
         TestCheck(translated.CreateContext(64, 64), "translated context creation failed");
-        rasterizer = translated.Device;
+        rasterizer = translated.Backend;
 
         renderContext = new RCKRenderContext(context);
         renderContext->m_RasterizerContext = translated.Context;
@@ -68,7 +68,7 @@ struct MaterialTestWorld {
     RCKRenderManager *renderManager;
     RCKRenderContext *renderContext;
     FFPTranslatedWorld translated;
-    FFPRecordingContext *rasterizer;
+    FFPRecordingBackend *rasterizer;
 };
 
 void FillTextureSlot(RCKTexture &texture, int slot, CKDWORD seed) {
