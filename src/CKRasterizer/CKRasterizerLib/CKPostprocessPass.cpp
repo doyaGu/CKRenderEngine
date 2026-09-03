@@ -88,7 +88,7 @@ float CKPostprocessPass::ClampSharpness(float sharpness)
 }
 
 CKPostprocessPass::CKPostprocessPass()
-    : m_Device(nullptr), m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
+    : m_Device(nullptr), m_ReadbackTexture(0), m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
 CKPostprocessPass::~CKPostprocessPass()
 {
@@ -118,7 +118,7 @@ CKBOOL CKPostprocessPass::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWO
     if (m_Scene.IsActive() && m_Scene.Width == width && m_Scene.Height == height && m_Scene.Samples == samples)
         return TRUE;
     DestroyTarget(m_Scene);
-    return CreateTarget(m_Scene, width, height, samples, FALSE);
+    return CreateTarget(m_Scene, width, height, samples);
 }
 
 CKBOOL CKPostprocessPass::EnsureNativeTarget(CKDWORD width, CKDWORD height)
@@ -128,20 +128,48 @@ CKBOOL CKPostprocessPass::EnsureNativeTarget(CKDWORD width, CKDWORD height)
     if (m_Native.IsActive() && m_Native.Width == width && m_Native.Height == height)
         return TRUE;
     DestroyTarget(m_Native);
-    // Readable when the device can read textures back; plain otherwise (the
-    // swap chain screenshot path then stays the readback source).
-    return CreateTarget(m_Native, width, height, 0, TRUE) ||
-           CreateTarget(m_Native, width, height, 0, FALSE);
+    DestroyReadbackTexture();
+    if (!CreateTarget(m_Native, width, height, 0))
+        return FALSE;
+    EnsureReadbackTexture(width, height);
+    return TRUE;
 }
 
 void CKPostprocessPass::DestroyTargets()
 {
     DestroyTarget(m_Scene);
     DestroyTarget(m_Native);
+    DestroyReadbackTexture();
+}
+
+// Render targets cannot carry the readback flag; readbacks blit the native
+// color into this plain texture first. Missing when the device has no blit
+// or texture readback (the caller then falls back to the swap chain).
+void CKPostprocessPass::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
+{
+    if (m_ReadbackTexture || !m_Device)
+        return;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = (int)width;
+    desc.Format.Height = (int)height;
+    desc.MipMapCount = 1;
+    desc.Depth = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
+                 CKRST_TEXTURE_BLIT_DST | CKRST_TEXTURE_READBACK;
+    if (m_Device->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK)
+        m_ReadbackTexture = 0;
+}
+
+void CKPostprocessPass::DestroyReadbackTexture()
+{
+    if (m_Device && m_ReadbackTexture)
+        m_Device->DeleteObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
+    m_ReadbackTexture = 0;
 }
 
 CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height,
-                                       CKDWORD samples, CKBOOL readable)
+                                       CKDWORD samples)
 {
     target = CKPostprocessTarget();
     const CKDWORD msaaFlag = CKRSTTextureMSAAFlag(samples);
@@ -155,8 +183,7 @@ CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD widt
     colorDesc.MipMapCount = 1;
     colorDesc.Depth = 1;
     colorDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
-                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET | msaaFlag |
-                      (readable ? CKRST_TEXTURE_READBACK : 0);
+                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET | msaaFlag;
     if (m_Device->CreateTexture(&colorDesc, nullptr, &target.ColorTexture) != CK_OK)
         return FALSE;
 
@@ -199,7 +226,6 @@ CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD widt
     target.Width = width;
     target.Height = height;
     target.Samples = samples;
-    target.Readable = readable;
     return TRUE;
 }
 

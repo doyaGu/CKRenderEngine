@@ -113,10 +113,13 @@ void CKTranslatedContext::PrepareFrameTarget()
     }
     const CKDWORD nativeWidth = m_Width < caps.MaxTextureSize ? m_Width : caps.MaxTextureSize;
     const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
+    const CKDWORD nativeBefore = m_Postprocess.NativeTarget().ColorTexture;
     if (sceneReady && m_Postprocess.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Postprocess.EnsureResources())
         m_InternalTargets = TRUE;
     else
         m_Postprocess.DestroyTargets();
+    if (m_Postprocess.NativeTarget().ColorTexture != nativeBefore)
+        m_NativePresented = FALSE;
     m_FFP.SetMultisampledTarget(m_InternalTargets && m_Postprocess.SceneTarget().Samples > 0);
 }
 
@@ -331,17 +334,50 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         return FALSE;
     }
     if (m_Encoder) {
+        CKBOOL readbackBlitted = FALSE;
         if (!m_Target) {
             CompositeScene();
-            PresentInternalTarget();
+            if (PresentInternalTarget())
+                m_NativePresented = m_InternalTargets;
+            if (m_NativePresented && HasArmedTextureReadbacks())
+                readbackBlitted = BlitNativeTargetForReadback();
         }
         m_Device->EndEncoder(m_Encoder);
         m_Encoder = NULL;
+        if (readbackBlitted)
+            IssueArmedTextureReadbacks();
+    }
+    if (HasArmedTextureReadbacks()) {
+        // No frame carried the blit (target frame, or no scene at all):
+        // present the native target once more with the readback blit.
+        CKDWORD frame = 0;
+        if (m_NativePresented && !m_Target && PresentNativeTargetOnly(TRUE, &frame)) {
+            m_LastDeviceFrame = frame;
+            IssueArmedTextureReadbacks();
+        } else {
+            std::vector<PendingReadback *> armed;
+            {
+                VxMutexLock lock(m_ReadbackMutex);
+                for (size_t i = 0; i < m_Readbacks.size(); ++i)
+                    if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
+                        armed.push_back(m_Readbacks[i]);
+            }
+            for (size_t i = 0; i < armed.size(); ++i) {
+                armed[i]->ViaTexture = FALSE;
+                if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, armed[i]) != CK_OK) {
+                    VxMutexLock lock(m_ReadbackMutex);
+                    armed[i]->Done = TRUE;
+                    armed[i]->Success = FALSE;
+                }
+            }
+        }
     }
     const CKRST_FRAME_SYNC_MODE mode = m_Target ? CKRST_FRAME_SYNC_PRESERVE_PRESENT
                                        : (VSync ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE);
     CKDWORD frameNumber = 0;
     const CKERROR status = m_Device->Frame(mode, CKRST_FRAME_NONE, &frameNumber);
+    if (status == CK_OK)
+        m_LastDeviceFrame = frameNumber;
     FinishFrame();
     DeliverReadbacks();
     return status == CK_OK ? TRUE : FALSE;

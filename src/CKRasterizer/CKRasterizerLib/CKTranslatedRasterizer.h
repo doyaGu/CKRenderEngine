@@ -204,10 +204,18 @@ private:
         CKBOOL YFlip;
         std::vector<CKBYTE> Data;
         CKTranslatedContext *Owner;
+        // Texture readback of the native target (spec 5.8): armed by
+        // RequestReadback, issued at the end of the frame after the readback
+        // blit (Issued), the device fills Data once its frame counter reaches
+        // AvailableFrame. No device callback involved.
+        CKBOOL ViaTexture;
+        CKBOOL Issued;
+        CKDWORD AvailableFrame;
 
         PendingReadback()
             : Callback(NULL), User(NULL), HasRect(FALSE), Buffer(VXBUFFER_BACKBUFFER), Done(FALSE),
-              Success(FALSE), Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE), Owner(NULL) {
+              Success(FALSE), Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE), Owner(NULL),
+              ViaTexture(FALSE), Issued(FALSE), AvailableFrame(0) {
             Rect.left = Rect.top = Rect.right = Rect.bottom = 0;
         }
     };
@@ -252,6 +260,18 @@ private:
                                         CKDWORD Pitch, VX_PIXELFORMAT Format, const void *Data, CKDWORD Size,
                                         CKBOOL YFlip);
     CKBOOL BuildReadbackImage(const PendingReadback &Readback, VxImageDescEx &Desc, std::vector<CKBYTE> &Pixels) const;
+    // Native-target readback (spec 5.8). The swap chain is never read: the
+    // native color is blitted into the readback texture in a pass after the
+    // present pass and read from there. Falls back to the device screenshot
+    // when the frame does not render through the internal targets.
+    CKBOOL CanReadNativeTarget() const;
+    CKBOOL BlitNativeTargetForReadback();                 // opens the "readback" pass, needs the encoder
+    CKBOOL IssueTextureReadback(PendingReadback &Readback); // ReadTexture after the blit of this frame
+    CKBOOL HasArmedTextureReadbacks();
+    void IssueArmedTextureReadbacks();
+    // Frame without scene content: re-presents the native target (and blits
+    // it for a readback) so the window keeps its image while waiting.
+    CKBOOL PresentNativeTargetOnly(CKBOOL BlitForReadback, CKDWORD *FrameNumber);
     void DeliverReadbacks();
     void CancelReadbacks();
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
@@ -287,6 +307,8 @@ private:
     CKDWORD m_NextView;
     CKDWORD m_LastFrameViewCount;
     CKDWORD m_FrameNumber;
+    CKDWORD m_LastDeviceFrame;     // device frame counter after the last Frame()
+    CKBOOL m_NativePresented;      // the native target holds the last presented frame
     XString m_Marker;
 
     // Target

@@ -42,7 +42,7 @@ CKDWORD NowMilliseconds()
 CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerDevice *Device)
     : m_TranslatedDriver(Driver), m_Device(Device), m_Created(FALSE), m_ShuttingDown(FALSE), m_InScene(FALSE),
       m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
-      m_FrameTargetDecided(FALSE), m_Encoder(NULL), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0),
+      m_FrameTargetDecided(FALSE), m_Encoder(NULL), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0), m_LastDeviceFrame(0), m_NativePresented(FALSE),
       m_FrameNumber(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS), m_TargetWidth(0), m_TargetHeight(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
       m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
@@ -141,6 +141,7 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_Width = m_Device->m_Width;
     m_Height = m_Device->m_Height;
     m_Postprocess.DestroyTargets();
+    m_NativePresented = FALSE;
     return TRUE;
 }
 
@@ -1166,6 +1167,109 @@ CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, 
     return TRUE;
 }
 
+CKBOOL CKTranslatedContext::CanReadNativeTarget() const
+{
+    return !m_Target && m_InternalTargets && m_Postprocess.NativeTarget().IsActive() &&
+           m_Postprocess.GetReadbackTexture() != 0;
+}
+
+CKBOOL CKTranslatedContext::BlitNativeTargetForReadback()
+{
+    const CKPostprocessTarget &native = m_Postprocess.NativeTarget();
+    const CKDWORD readbackTexture = m_Postprocess.GetReadbackTexture();
+    if (!m_Encoder || !native.IsActive() || !readbackTexture)
+        return FALSE;
+    // Blits run before the draws of their view: a pass after the present pass
+    // copies the finished frame.
+    if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "readback"))
+        return FALSE;
+    m_Encoder->Blit(m_CurrentView, readbackTexture, 0, 0, 0, native.ColorTexture, 0, NULL);
+    return m_Encoder->GetStatus() == CK_OK ? TRUE : FALSE;
+}
+
+CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
+{
+    const CKDWORD readbackTexture = m_Postprocess.GetReadbackTexture();
+    if (!readbackTexture)
+        return FALSE;
+    CKReadbackDesc desc;
+    if (m_Device->ReadTexture(readbackTexture, 0, &desc, NULL) != CK_OK || desc.RequiredSize == 0 ||
+        desc.Width == 0 || desc.Height == 0 || desc.Format == UNKNOWN_PF)
+        return FALSE;
+    Readback.Data.assign(desc.RequiredSize, 0);
+    desc.Data = Readback.Data.data();
+    desc.Capacity = desc.RequiredSize;
+    CKDWORD available = 0;
+    if (m_Device->ReadTexture(readbackTexture, 0, &desc, &available) != CK_OK) {
+        Readback.Data.clear();
+        return FALSE;
+    }
+    Readback.Width = desc.Width;
+    Readback.Height = desc.Height;
+    Readback.Pitch = desc.RowPitch;
+    Readback.Format = desc.Format;
+    Readback.YFlip = desc.YFlip;
+    Readback.ViaTexture = TRUE;
+    Readback.Issued = TRUE;
+    Readback.AvailableFrame = available;
+    return TRUE;
+}
+
+CKBOOL CKTranslatedContext::HasArmedTextureReadbacks()
+{
+    VxMutexLock lock(m_ReadbackMutex);
+    for (size_t i = 0; i < m_Readbacks.size(); ++i)
+        if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
+            return TRUE;
+    return FALSE;
+}
+
+// End of frame, after the readback blit: issues every armed readback; the
+// ones the device refuses fall back to a screenshot of the swap chain.
+void CKTranslatedContext::IssueArmedTextureReadbacks()
+{
+    std::vector<PendingReadback *> armed;
+    {
+        VxMutexLock lock(m_ReadbackMutex);
+        for (size_t i = 0; i < m_Readbacks.size(); ++i)
+            if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
+                armed.push_back(m_Readbacks[i]);
+    }
+    for (size_t i = 0; i < armed.size(); ++i) {
+        if (IssueTextureReadback(*armed[i]))
+            continue;
+        armed[i]->ViaTexture = FALSE;
+        if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, armed[i]) != CK_OK) {
+            VxMutexLock lock(m_ReadbackMutex);
+            armed[i]->Done = TRUE;
+            armed[i]->Success = FALSE;
+        }
+    }
+}
+
+
+CKBOOL CKTranslatedContext::PresentNativeTargetOnly(CKBOOL BlitForReadback, CKDWORD *FrameNumber)
+{
+    if (m_Encoder || !EnsureEncoder())
+        return FALSE;
+    const CKDWORD nextView = m_NextView;
+    const CKRenderView currentView = m_CurrentView;
+    const CKBOOL passOpen = m_PassOpen;
+    const CKDWORD passes = m_FramePasses;
+    CKBOOL ok = PresentInternalTarget();
+    if (ok && BlitForReadback)
+        ok = BlitNativeTargetForReadback();
+    m_Device->EndEncoder(m_Encoder);
+    m_Encoder = NULL;
+    m_NextView = nextView;
+    m_CurrentView = currentView;
+    m_PassOpen = passOpen;
+    m_FramePasses = passes;
+    if (!ok)
+        return FALSE;
+    return m_Device->Frame(CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE, FrameNumber) == CK_OK;
+}
+
 CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer, CKReadbackCallback Callback,
                                             void *User)
 {
@@ -1193,6 +1297,20 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         VxMutexLock lock(m_ReadbackMutex);
         m_Readbacks.push_back(readback);
     }
+    if (CanReadNativeTarget()) {
+        readback->ViaTexture = TRUE;
+        if (m_Encoder)
+            return TRUE; // issued at the end of this frame (BackToFront)
+        // Between frames: a frame that only re-presents the native target
+        // carries the readback blit; the next BackToFront delivers it.
+        CKDWORD frame = 0;
+        if (m_NativePresented && PresentNativeTargetOnly(TRUE, &frame)) {
+            m_LastDeviceFrame = frame;
+            if (IssueTextureReadback(*readback))
+                return TRUE;
+        }
+        readback->ViaTexture = FALSE;
+    }
     if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, readback) != CK_OK) {
         VxMutexLock lock(m_ReadbackMutex);
         for (size_t i = 0; i < m_Readbacks.size(); ++i) {
@@ -1213,7 +1331,12 @@ void CKTranslatedContext::DeliverReadbacks()
     {
         VxMutexLock lock(m_ReadbackMutex);
         for (size_t i = 0; i < m_Readbacks.size();) {
-            if (m_Readbacks[i]->Done) {
+            PendingReadback *pending = m_Readbacks[i];
+            if (pending->ViaTexture && !pending->Done && m_LastDeviceFrame >= pending->AvailableFrame) {
+                pending->Success = TRUE;
+                pending->Done = TRUE;
+            }
+            if (pending->Done) {
                 ready.push_back(m_Readbacks[i]);
                 m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
             } else {
@@ -1243,6 +1366,20 @@ void CKTranslatedContext::CancelReadbacks()
         }
     }
     for (size_t i = 0; i < outstanding.size(); ++i) {
+        if (outstanding[i]->ViaTexture) {
+            // An issued readback writes into the buffer until AvailableFrame:
+            // run the frames rather than free the memory under it.
+            CKDWORD frame = m_LastDeviceFrame;
+            for (int guard = 0; outstanding[i]->Issued && guard < 8 && frame < outstanding[i]->AvailableFrame; ++guard) {
+                if (m_Device->Frame(CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE, &frame) != CK_OK)
+                    break;
+            }
+            m_LastDeviceFrame = frame;
+            VxMutexLock lock(m_ReadbackMutex);
+            outstanding[i]->Done = TRUE;
+            outstanding[i]->Success = FALSE;
+            continue;
+        }
         m_Device->CancelScreenShots(outstanding[i]);
         const CKDWORD start = NowMilliseconds();
         for (;;) {
@@ -1288,7 +1425,33 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback.Rect = *Rect;
         readback.HasRect = TRUE;
     }
-    if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, &readback) != CK_OK)
+    CKBOOL viaTexture = FALSE;
+    if (CanReadNativeTarget() && m_NativePresented) {
+        // Frame 1 re-presents the native target and blits it into the
+        // readback texture, the read is issued in that same frame; the device
+        // delivers the pixels once its frame counter reaches AvailableFrame.
+        // The waiting frames only re-present, so the window keeps its image.
+        readback.ViaTexture = TRUE;
+        CKDWORD frame = 0;
+        if (PresentNativeTargetOnly(TRUE, &frame)) {
+            m_LastDeviceFrame = frame;
+            if (IssueTextureReadback(readback)) {
+                for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
+                    if (!PresentNativeTargetOnly(FALSE, &frame))
+                        break;
+                }
+                m_LastDeviceFrame = frame;
+                if (frame < readback.AvailableFrame)
+                    return 0;
+                readback.Success = TRUE;
+                readback.Done = TRUE;
+                viaTexture = TRUE;
+            }
+        }
+        if (!viaTexture)
+            readback.ViaTexture = FALSE;
+    }
+    if (!viaTexture && m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, &readback) != CK_OK)
         return 0;
 
     const CKDWORD start = NowMilliseconds();

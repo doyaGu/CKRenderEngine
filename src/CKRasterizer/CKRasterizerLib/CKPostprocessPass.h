@@ -16,11 +16,9 @@ struct CKPostprocessTarget {
     CKDWORD Width;
     CKDWORD Height;
     CKDWORD Samples;      // 0 = single sampled
-    CKBOOL Readable;      // color texture created with CKRST_TEXTURE_READBACK
 
     CKPostprocessTarget()
-        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0),
-          Readable(FALSE) {}
+        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0) {}
     CKBOOL IsActive() const { return FrameBuffer != 0; }
 };
 
@@ -57,8 +55,9 @@ public:
     // Scene target of the given size and sample count; reuses the current one
     // when nothing changed. Returns FALSE when the device cannot provide it.
     CKBOOL EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples);
-    // Native target of the given size (single sampled, readable when the
-    // device supports texture readback).
+    // Native target of the given size (single sampled). Also keeps a readback
+    // texture of the same size when the device can blit and read textures
+    // back (render targets cannot be read directly): GetReadbackTexture().
     CKBOOL EnsureNativeTarget(CKDWORD width, CKDWORD height);
     void DestroyTargets();
     CKBOOL EnsureResources();
@@ -66,6 +65,7 @@ public:
 
     const CKPostprocessTarget &SceneTarget() const { return m_Scene; }
     const CKPostprocessTarget &NativeTarget() const { return m_Native; }
+    CKDWORD GetReadbackTexture() const { return m_ReadbackTexture; }
     const CKPostprocessResourceIds &GetResourceIds() const { return m_ResourceIds; }
 
     // Draws the scene color as a fullscreen triangle into `view` (the resolve).
@@ -78,9 +78,10 @@ public:
     static float ClampSharpness(float sharpness);
 
 private:
-    CKBOOL CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples,
-                        CKBOOL readable);
+    CKBOOL CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
     void DestroyTarget(CKPostprocessTarget &target);
+    void EnsureReadbackTexture(CKDWORD width, CKDWORD height);
+    void DestroyReadbackTexture();
     CKERROR Submit(CKRasterizerEncoder *encoder, CKRenderView view, const CKPostprocessTarget &source,
                    CKBOOL fxaa, float sharpness);
 
@@ -88,6 +89,7 @@ private:
     CKPostprocessResourceIds m_ResourceIds;
     CKPostprocessTarget m_Scene;
     CKPostprocessTarget m_Native;
+    CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target of the native color
     CKDWORD m_PostVertexShaderProfile;
 };
 
