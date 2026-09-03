@@ -8,88 +8,9 @@ uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[32];
 uniform vec4 u_ffSpec[10];
 
-#if defined(CKFF_FULL_SPECIALIZED)
-#ifndef CKFF_FS_STAGE0_SAMPLER_TYPE
-#define CKFF_FS_STAGE0_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE1_SAMPLER_TYPE
-#define CKFF_FS_STAGE1_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE2_SAMPLER_TYPE
-#define CKFF_FS_STAGE2_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE3_SAMPLER_TYPE
-#define CKFF_FS_STAGE3_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE4_SAMPLER_TYPE
-#define CKFF_FS_STAGE4_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE5_SAMPLER_TYPE
-#define CKFF_FS_STAGE5_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE6_SAMPLER_TYPE
-#define CKFF_FS_STAGE6_SAMPLER_TYPE 0
-#endif
-#ifndef CKFF_FS_STAGE7_SAMPLER_TYPE
-#define CKFF_FS_STAGE7_SAMPLER_TYPE 0
-#endif
-#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube0, 8);
-#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume0, 8);
-#else
-SAMPLER2D(s_texture0, 0);
-#endif
-#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube1, 9);
-#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume1, 9);
-#else
-SAMPLER2D(s_texture1, 1);
-#endif
-#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube2, 10);
-#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume2, 10);
-#else
-SAMPLER2D(s_texture2, 2);
-#endif
-#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube3, 11);
-#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume3, 11);
-#else
-SAMPLER2D(s_texture3, 3);
-#endif
-#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube4, 12);
-#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume4, 12);
-#else
-SAMPLER2D(s_texture4, 4);
-#endif
-#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube5, 13);
-#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume5, 13);
-#else
-SAMPLER2D(s_texture5, 5);
-#endif
-#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube6, 14);
-#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume6, 14);
-#else
-SAMPLER2D(s_texture6, 6);
-#endif
-#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube7, 15);
-#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume7, 15);
-#else
-SAMPLER2D(s_texture7, 7);
-#endif
-#elif defined(CKFF_MIXED_SAMPLER_LAYOUT)
+// Fixed sampler layout shared by every draw (spec 5.3): one 2D sampler per
+// texture stage, then four cube and four volume samplers that the C++ side
+// fills in stage order (the n-th cube stage binds s_textureCube{n}).
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
 SAMPLER2D(s_texture2, 2);
@@ -106,104 +27,8 @@ SAMPLER3D(s_textureVolume0, 12);
 SAMPLER3D(s_textureVolume1, 13);
 SAMPLER3D(s_textureVolume2, 14);
 SAMPLER3D(s_textureVolume3, 15);
-#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
-#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube0, 8);
-#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume0, 8);
-#else
-SAMPLER2D(s_texture0, 0);
-#endif
-#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube1, 9);
-#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume1, 9);
-#else
-SAMPLER2D(s_texture1, 1);
-#endif
-#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube2, 10);
-#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume2, 10);
-#else
-SAMPLER2D(s_texture2, 2);
-#endif
-#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube3, 11);
-#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume3, 11);
-#else
-SAMPLER2D(s_texture3, 3);
-#endif
-#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube4, 12);
-#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume4, 12);
-#else
-SAMPLER2D(s_texture4, 4);
-#endif
-#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube5, 13);
-#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume5, 13);
-#else
-SAMPLER2D(s_texture5, 5);
-#endif
-#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube6, 14);
-#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume6, 14);
-#else
-SAMPLER2D(s_texture6, 6);
-#endif
-#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
-SAMPLERCUBE(s_textureCube7, 15);
-#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
-SAMPLER3D(s_textureVolume7, 15);
-#else
-SAMPLER2D(s_texture7, 7);
-#endif
-#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)
-SAMPLER2D(s_texture0, 0);
-SAMPLER2D(s_texture1, 1);
-SAMPLER2D(s_texture2, 2);
-SAMPLER2D(s_texture3, 3);
-SAMPLER2D(s_texture4, 4);
-SAMPLER2D(s_texture5, 5);
-SAMPLER2D(s_texture6, 6);
-SAMPLER2D(s_texture7, 7);
-SAMPLER3D(s_textureVolume0, 8);
-SAMPLER3D(s_textureVolume1, 9);
-SAMPLER3D(s_textureVolume2, 10);
-SAMPLER3D(s_textureVolume3, 11);
-SAMPLER3D(s_textureVolume4, 12);
-SAMPLER3D(s_textureVolume5, 13);
-SAMPLER3D(s_textureVolume6, 14);
-SAMPLER3D(s_textureVolume7, 15);
-#else
-SAMPLER2D(s_texture0, 0);
-SAMPLER2D(s_texture1, 1);
-SAMPLER2D(s_texture2, 2);
-SAMPLER2D(s_texture3, 3);
-SAMPLER2D(s_texture4, 4);
-SAMPLER2D(s_texture5, 5);
-SAMPLER2D(s_texture6, 6);
-SAMPLER2D(s_texture7, 7);
-SAMPLERCUBE(s_textureCube0, 8);
-SAMPLERCUBE(s_textureCube1, 9);
-SAMPLERCUBE(s_textureCube2, 10);
-SAMPLERCUBE(s_textureCube3, 11);
-SAMPLERCUBE(s_textureCube4, 12);
-SAMPLERCUBE(s_textureCube5, 13);
-SAMPLERCUBE(s_textureCube6, 14);
-SAMPLERCUBE(s_textureCube7, 15);
-#endif
 
 #include "fs_ff_common.sc"
-
-#ifndef CKFF_FS_ACTIVE_STAGE_COUNT
-#define CKFF_FS_ACTIVE_STAGE_COUNT 8
-#endif
 
 float compareDepth(float depth, float ref, int func)
 {
@@ -227,232 +52,17 @@ vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
     return coord;
 }
 
-#if defined(CKFF_FULL_SPECIALIZED)
-#define CKFF_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
-
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
+// Ordinal of this stage among the stages sampling the same sampler type
+// (mirrors CKFFSamplerOrdinal on the C++ side).
+int ckffSamplerOrdinal(int stage, int samplerType)
 {
-    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
-    if (stage == 0) {
-#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube0, coord.xyz);
-#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume0, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture0, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 1) {
-#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube1, coord.xyz);
-#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume1, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture1, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 2) {
-#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube2, coord.xyz);
-#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume2, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture2, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 3) {
-#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube3, coord.xyz);
-#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume3, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture3, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 4) {
-#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube4, coord.xyz);
-#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume4, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture4, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 5) {
-#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube5, coord.xyz);
-#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume5, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture5, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 6) {
-#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube6, coord.xyz);
-#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume6, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture6, coord.xy);
-        return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
-    return textureCube(s_textureCube7, coord.xyz);
-#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
-    return texture3D(s_textureVolume7, coord.xyz);
-#else
-    vec4 color = texture2D(s_texture7, coord.xy);
-    return CKFF_DEPTH_TEXTURE_COLOR(color);
-#endif
-}
-#elif defined(CKFF_MIXED_SAMPLER_LAYOUT)
-#define CKFF_MIXED_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
-
-int getMixedSamplerIndex(int stage, int samplerType)
-{
-    int samplerIndex = 0;
+    int ordinal = 0;
     for (int previousStage = 0; previousStage < 8; ++previousStage) {
         if (previousStage >= stage) break;
         if (ckffSpecSamplerType(previousStage) == samplerType)
-            ++samplerIndex;
+            ++ordinal;
     }
-    return samplerIndex;
-}
-
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
-{
-    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
-    int samplerIndex = getMixedSamplerIndex(stage, samplerType);
-    if (samplerType == 1) {
-        if (samplerIndex == 0) return textureCube(s_textureCube0, coord.xyz);
-        if (samplerIndex == 1) return textureCube(s_textureCube1, coord.xyz);
-        if (samplerIndex == 2) return textureCube(s_textureCube2, coord.xyz);
-        return textureCube(s_textureCube3, coord.xyz);
-    }
-    if (samplerType == 3) {
-        if (samplerIndex == 0) return texture3D(s_textureVolume0, coord.xyz);
-        if (samplerIndex == 1) return texture3D(s_textureVolume1, coord.xyz);
-        if (samplerIndex == 2) return texture3D(s_textureVolume2, coord.xyz);
-        return texture3D(s_textureVolume3, coord.xyz);
-    }
-
-    vec4 color;
-    if (stage == 0) color = texture2D(s_texture0, coord.xy);
-    else if (stage == 1) color = texture2D(s_texture1, coord.xy);
-    else if (stage == 2) color = texture2D(s_texture2, coord.xy);
-    else if (stage == 3) color = texture2D(s_texture3, coord.xy);
-    else if (stage == 4) color = texture2D(s_texture4, coord.xy);
-    else if (stage == 5) color = texture2D(s_texture5, coord.xy);
-    else if (stage == 6) color = texture2D(s_texture6, coord.xy);
-    else color = texture2D(s_texture7, coord.xy);
-    return CKFF_MIXED_DEPTH_TEXTURE_COLOR(color);
-}
-#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)
-#define CKFF_STATIC_DEPTH_TEXTURE_COLOR(_sample) ((samplerType == 2) ? ((compareFunc != 0) ? vec4_splat(compareDepth((_sample).r, coord.z, compareFunc)) : (_sample).rrrr) : (_sample))
-
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
-{
-    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
-    if (stage == 0) {
-#if CKFF_FS_STAGE0_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube0, coord.xyz);
-#elif CKFF_FS_STAGE0_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume0, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture0, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 1) {
-#if CKFF_FS_STAGE1_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube1, coord.xyz);
-#elif CKFF_FS_STAGE1_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume1, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture1, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 2) {
-#if CKFF_FS_STAGE2_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube2, coord.xyz);
-#elif CKFF_FS_STAGE2_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume2, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture2, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 3) {
-#if CKFF_FS_STAGE3_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube3, coord.xyz);
-#elif CKFF_FS_STAGE3_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume3, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture3, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 4) {
-#if CKFF_FS_STAGE4_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube4, coord.xyz);
-#elif CKFF_FS_STAGE4_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume4, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture4, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 5) {
-#if CKFF_FS_STAGE5_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube5, coord.xyz);
-#elif CKFF_FS_STAGE5_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume5, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture5, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-    if (stage == 6) {
-#if CKFF_FS_STAGE6_SAMPLER_TYPE == 1
-        return textureCube(s_textureCube6, coord.xyz);
-#elif CKFF_FS_STAGE6_SAMPLER_TYPE == 3
-        return texture3D(s_textureVolume6, coord.xyz);
-#else
-        vec4 color = texture2D(s_texture6, coord.xy);
-        return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-    }
-#if CKFF_FS_STAGE7_SAMPLER_TYPE == 1
-    return textureCube(s_textureCube7, coord.xyz);
-#elif CKFF_FS_STAGE7_SAMPLER_TYPE == 3
-    return texture3D(s_textureVolume7, coord.xyz);
-#else
-    vec4 color = texture2D(s_texture7, coord.xy);
-    return CKFF_STATIC_DEPTH_TEXTURE_COLOR(color);
-#endif
-}
-#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)
-vec4 getVolumeTextureColor(int stage, vec4 coord)
-{
-    if (stage == 0) return texture3D(s_textureVolume0, coord.xyz);
-    if (stage == 1) return texture3D(s_textureVolume1, coord.xyz);
-    if (stage == 2) return texture3D(s_textureVolume2, coord.xyz);
-    if (stage == 3) return texture3D(s_textureVolume3, coord.xyz);
-    if (stage == 4) return texture3D(s_textureVolume4, coord.xyz);
-    if (stage == 5) return texture3D(s_textureVolume5, coord.xyz);
-    if (stage == 6) return texture3D(s_textureVolume6, coord.xyz);
-    return texture3D(s_textureVolume7, coord.xyz);
+    return ordinal;
 }
 
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
@@ -460,13 +70,20 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
-        // The volume runtime layout uses slots 8..15 for 3D samplers.
-        // Arbitrary cube+volume mixes require an exact full-specialized shader.
-        return vec4(0.0, 0.0, 0.0, 1.0);
+        int ordinal = ckffSamplerOrdinal(stage, samplerType);
+        if (ordinal == 0) return textureCube(s_textureCube0, coord.xyz);
+        if (ordinal == 1) return textureCube(s_textureCube1, coord.xyz);
+        if (ordinal == 2) return textureCube(s_textureCube2, coord.xyz);
+        return textureCube(s_textureCube3, coord.xyz);
     }
     if (samplerType == 3) {
-        return getVolumeTextureColor(stage, coord);
+        int ordinal = ckffSamplerOrdinal(stage, samplerType);
+        if (ordinal == 0) return texture3D(s_textureVolume0, coord.xyz);
+        if (ordinal == 1) return texture3D(s_textureVolume1, coord.xyz);
+        if (ordinal == 2) return texture3D(s_textureVolume2, coord.xyz);
+        return texture3D(s_textureVolume3, coord.xyz);
     }
+
     vec2 uv = coord.xy;
     vec4 color;
     if (stage == 0) color = texture2D(s_texture0, uv);
@@ -484,42 +101,6 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     }
     return color;
 }
-#else
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
-{
-    if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
-    coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
-    if (samplerType == 1) {
-        if (stage == 0) return textureCube(s_textureCube0, coord.xyz);
-        if (stage == 1) return textureCube(s_textureCube1, coord.xyz);
-        if (stage == 2) return textureCube(s_textureCube2, coord.xyz);
-        if (stage == 3) return textureCube(s_textureCube3, coord.xyz);
-        if (stage == 4) return textureCube(s_textureCube4, coord.xyz);
-        if (stage == 5) return textureCube(s_textureCube5, coord.xyz);
-        if (stage == 6) return textureCube(s_textureCube6, coord.xyz);
-        return textureCube(s_textureCube7, coord.xyz);
-    }
-    if (samplerType == 3) {
-        return vec4(0.0, 0.0, 0.0, 1.0);
-    }
-    vec2 uv = coord.xy;
-    vec4 color;
-    if (stage == 0) color = texture2D(s_texture0, uv);
-    else if (stage == 1) color = texture2D(s_texture1, uv);
-    else if (stage == 2) color = texture2D(s_texture2, uv);
-    else if (stage == 3) color = texture2D(s_texture3, uv);
-    else if (stage == 4) color = texture2D(s_texture4, uv);
-    else if (stage == 5) color = texture2D(s_texture5, uv);
-    else if (stage == 6) color = texture2D(s_texture6, uv);
-    else color = texture2D(s_texture7, uv);
-    if (samplerType == 2) {
-        float depth = color.r;
-        if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));
-        return color.rrrr;
-    }
-    return color;
-}
-#endif
 
 vec4 getSampleCoord(vec4 coord, int transformFlags)
 {
@@ -633,63 +214,6 @@ vec2 ckffDecodeBump(vec2 bump, bool unormEncoded)
         : bump;
 }
 
-#if defined(CKFF_FULL_SPECIALIZED)
-#define CKFF_APPLY_STAGE_CONST(STAGE_INDEX, STAGE_COORD_EXPR) \
-    if (stagesEnabled) { \
-        vec4 colorParams = vec4_splat(0.0); \
-        vec4 alphaParams = vec4_splat(0.0); \
-        vec4 colorExtra = u_stageParams[(STAGE_INDEX) * 4 + 2]; \
-        vec4 alphaExtra = u_stageParams[(STAGE_INDEX) * 4 + 3]; \
-        CKFFStageParams stageParams = ckffReadStageParams((STAGE_INDEX), colorParams, alphaParams, colorExtra, alphaExtra); \
-        int colorOp = stageParams.ColorOp; \
-        int alphaOp = stageParams.AlphaOp; \
-        bool hasTexture = stageParams.HasTexture; \
-        if (colorOp == 1) { \
-            stagesEnabled = false; \
-        } else { \
-            vec4 sampleCoord = getSampleCoord((STAGE_COORD_EXPR), stageParams.TexcoordTransformFlags); \
-            if ((STAGE_INDEX) != 0 && (previousColorOp == 22 || previousColorOp == 23)) { \
-                vec2 bump = ckffDecodeBump(previousTexture.xy, previousBumpUnorm); \
-                int bumpBase = ((STAGE_INDEX) - 1) * 2; \
-                sampleCoord.x += dot(u_bumpEnv[bumpBase].xy, bump); \
-                sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump); \
-            } \
-            vec4 texColor = getTextureColor((STAGE_INDEX), sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, stageParams.MirrorOnceMask, hasTexture); \
-            if ((STAGE_INDEX) != 0 && previousColorOp == 23) { \
-                int bumpBase = ((STAGE_INDEX) - 1) * 2; \
-                float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0); \
-                texColor *= lum; \
-            } \
-            bool premodulateColor = previousColorOp == 17 && hasTexture; \
-            bool premodulateAlpha = previousAlphaOp == 17 && hasTexture; \
-            vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
-            vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
-            vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor); \
-            vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
-            vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
-            vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha); \
-            int resultArg = stageParams.ResultArg; \
-            vec4 stageResult = resultArg == 5 ? temp : current; \
-            vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor); \
-            vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, stageResult, current, diffuse, texColor); \
-            stageResult.rgb = colorResult.rgb; \
-            stageResult.a = alphaResult.a; \
-            if (colorOp == 24) { \
-                stageResult = colorResult; \
-            } \
-            if (resultArg == 5) { \
-                temp = stageResult; \
-            } else { \
-                current = stageResult; \
-            } \
-            previousTexture = texColor; \
-            previousBumpUnorm = stageParams.BumpUnorm; \
-            previousColorOp = colorOp; \
-            previousAlphaOp = alphaOp; \
-        } \
-    }
-#endif
-
 void main()
 {
     bool flatShade = ckffSpecIsOptimized() && ckffSpecFlatShade();
@@ -702,20 +226,6 @@ void main()
     int previousColorOp = 0;
     int previousAlphaOp = 0;
 
-#if defined(CKFF_FULL_SPECIALIZED)
-    bool stagesEnabled = true;
-    CKFF_APPLY_STAGE_CONST(0, v_texcoord0);
-#if CKFF_FS_ACTIVE_STAGE_COUNT > 1
-    CKFF_APPLY_STAGE_CONST(1, v_texcoord1);
-#endif
-#if CKFF_FS_ACTIVE_STAGE_COUNT > 2
-    CKFF_APPLY_STAGE_CONST(2, v_texcoord2);
-#endif
-#if CKFF_FS_ACTIVE_STAGE_COUNT > 3
-    CKFF_APPLY_STAGE_CONST(3, v_texcoord3);
-#endif
-#undef CKFF_APPLY_STAGE_CONST
-#else
     for (int stage = 0; stage < 8; ++stage) {
         if (ckffSpecIsOptimized() && stage > ckffSpecLastActiveTextureStage()) break;
 
@@ -784,7 +294,6 @@ void main()
         previousColorOp = colorOp;
         previousAlphaOp = alphaOp;
     }
-#endif
 
     bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_ffDrawParams[8].z > 0.5);
     if (specularEnabled) {

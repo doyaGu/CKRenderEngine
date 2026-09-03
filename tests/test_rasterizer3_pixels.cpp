@@ -10,7 +10,6 @@
 // agree, so the two shader routes cannot drift apart.
 
 #include "CKRasterizer.h"
-#include "CKRenderSettings.h"
 #include "TestTriangleMultiset.h"
 
 #include <SDL3/SDL.h>
@@ -188,14 +187,6 @@ void ExpectCenter(const Pixels &pixels, int r, int g, int b, const char *what)
     TestCheckf(PixelNear(pixels, kWidth / 2, kHeight / 2, r, g, b),
                "%s: expected RGB(%d,%d,%d) got BGRA=(%u,%u,%u,%u)", what, r, g, b,
                (unsigned)bgra[0], (unsigned)bgra[1], (unsigned)bgra[2], (unsigned)bgra[3]);
-}
-
-CKBOOL SamplesMatch(const CKBYTE a[4], const CKBYTE b[4], int tolerance)
-{
-    for (int i = 0; i < 4; ++i)
-        if (abs((int)a[i] - (int)b[i]) > tolerance)
-            return FALSE;
-    return TRUE;
 }
 
 // ---------------------------------------------------------------------------
@@ -742,40 +733,17 @@ void BackendRendersFixedFunctionSemantics()
 
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
 
-    static const char *const kModes[2] = {"runtime-specialized", "full-specialized"};
-    Samples samples[2];
-    for (int modeIndex = 0; modeIndex < 2; ++modeIndex) {
-        CKRenderSettingsClearOverridesForTests();
-        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "ShaderMode", kModes[modeIndex]);
-
-        Backend backend;
-        if (!OpenBackend(backend, kWidth, kHeight)) {
-            CloseBackend(backend);
-            break;
-        }
-        if (modeIndex == 0)
-            CheckDriverCaps(backend);
-        RunPixelCases(backend.Context, kModes[modeIndex], samples[modeIndex]);
-        if (modeIndex == 0)
-            CheckResizeAndReadback(backend);
-        CloseBackend(backend);
+    Samples samples;
+    Backend backend;
+    if (OpenBackend(backend, kWidth, kHeight)) {
+        CheckDriverCaps(backend);
+        RunPixelCases(backend.Context, "uber", samples);
+        CheckResizeAndReadback(backend);
     }
-    CKRenderSettingsClearOverridesForTests();
-
-    static const char *const kSampleNames[SAMPLE_COUNT] = {
-        "flat shading", "stage saturation", "TEMP alpha", "final TEMP", "depth order", "texture matrix",
-        "luminance bump", "vertex tween", "pixel fog", "untextured constant", "render to texture"};
-    for (int i = 0; i < SAMPLE_COUNT; ++i) {
-        TestCheckf(SamplesMatch(samples[0].Center[i], samples[1].Center[i], 4),
-                   "runtime-specialized and full-specialized %s pixels differ: (%u,%u,%u,%u) vs (%u,%u,%u,%u)",
-                   kSampleNames[i], (unsigned)samples[0].Center[i][0], (unsigned)samples[0].Center[i][1],
-                   (unsigned)samples[0].Center[i][2], (unsigned)samples[0].Center[i][3],
-                   (unsigned)samples[1].Center[i][0], (unsigned)samples[1].Center[i][1],
-                   (unsigned)samples[1].Center[i][2], (unsigned)samples[1].Center[i][3]);
-    }
+    CloseBackend(backend);
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    printf("  coverage: pixelCases=%d shaderModes=2 tolerance=%d\n", (int)SAMPLE_COUNT, kTolerance);
+    printf("  coverage: pixelCases=%d tolerance=%d\n", (int)SAMPLE_COUNT, kTolerance);
 }
 
 } // namespace

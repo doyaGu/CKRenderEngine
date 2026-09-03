@@ -23,16 +23,16 @@ static CKDWORD CKFFTextureBindingSamplerType(CKDWORD samplerType)
 }
 
 static CKDWORD CKFFTextureBindingUniform(const CKFFUniformHandles &uniforms,
-                                         CKDWORD stage,
-                                         CKDWORD samplerType)
+                                         CKDWORD samplerType,
+                                         CKDWORD stageOrOrdinal)
 {
-    if (stage >= CKFF_MAX_TEXTURE_STAGES)
+    if (stageOrOrdinal >= CKFFSamplerTypeSlotCount(samplerType))
         return 0;
     if (samplerType == CKFF_SAMPLER_CUBE)
-        return uniforms.s_textureCube[stage];
+        return uniforms.s_textureCube[stageOrOrdinal];
     if (samplerType == CKFF_SAMPLER_VOLUME)
-        return uniforms.s_textureVolume[stage];
-    return uniforms.s_texture[stage];
+        return uniforms.s_textureVolume[stageOrOrdinal];
+    return uniforms.s_texture[stageOrOrdinal];
 }
 
 static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
@@ -49,14 +49,24 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     CKDWORD stageCount = activeTextureCount;
     if (stageCount > CKFF_MAX_TEXTURE_STAGES)
         stageCount = CKFF_MAX_TEXTURE_STAGES;
+    // Cube and volume stages take the next slot of their type block in stage
+    // order, matching ckffSamplerOrdinal in fs_ff_stage.sc. The shader key
+    // already dropped stages beyond the per-type slot count from the mask.
+    CKDWORD cubeOrdinal = 0;
+    CKDWORD volumeOrdinal = 0;
     for (CKDWORD stage = 0; stage < stageCount; ++stage) {
         if ((sampledTextureMask & (1u << stage)) == 0)
             continue;
         set->ActiveTextureCount = stage + 1;
         const CKDWORD samplerType = CKFFTextureBindingSamplerType(
             CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
-        set->Bindings[stage].Stage = CKFFSamplerBindStage(stage, samplerType);
-        set->Bindings[stage].Uniform = CKFFTextureBindingUniform(uniforms, stage, samplerType);
+        CKDWORD slotIndex = stage;
+        if (samplerType == CKFF_SAMPLER_CUBE)
+            slotIndex = cubeOrdinal++;
+        else if (samplerType == CKFF_SAMPLER_VOLUME)
+            slotIndex = volumeOrdinal++;
+        set->Bindings[stage].Stage = CKFFSamplerSlot(samplerType, slotIndex);
+        set->Bindings[stage].Uniform = CKFFTextureBindingUniform(uniforms, samplerType, slotIndex);
         set->Bindings[stage].Texture = textureHandles[stage];
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
@@ -122,9 +132,7 @@ CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
     if (m_InitializedPrograms.LookUp(program, initialized))
         return FALSE;
 
-    CKFFProgramSamplerLayout layout;
-    if (!m_ShaderCache.GetProgramSamplerLayout(program, &layout))
-        return FALSE;
+    const CKFFProgramSamplerLayout &layout = m_ShaderCache.GetSamplerLayout();
 
     // GLSL rejects draws when active sampler types retain the shared default unit.
     for (CKDWORD i = 0; i < layout.BindingCount; ++i) {

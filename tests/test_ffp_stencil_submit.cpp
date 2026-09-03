@@ -1,11 +1,9 @@
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFSpecializationInfo.h"
-#include "CKFFSpecializedModuleTable.h"
 #include "CKFFUniformState.h"
 #include "CKRenderSettings.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
-#include "shaders/generated/CKFFSpecializedModuleTable.generated.h"
 
 #include <math.h>
 #include <string.h>
@@ -81,14 +79,6 @@ CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
                         (((CKDWORD)it->second[i * 4 + 3] & 0xFFu) << 24);
         }
         info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
-    } else {
-        for (size_t i = 0; i < g_CKFFSpecializedModuleCount; ++i) {
-            const CKFFSpecializedModule &module = g_CKFFSpecializedModules[i].Module;
-            if (module.FSData == context.LastPixelShaderCode &&
-                module.FSSize == context.LastPixelShaderCodeSize) {
-                return module.Specialization;
-            }
-        }
     }
     return info;
 }
@@ -894,7 +884,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     ffp.Shutdown();
 }
 
-void VolumeTextureModulateCacheMissUsesRuntimeSpecializedShader() {
+void VolumeTextureBindsFirstVolumeSampler() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -914,15 +904,15 @@ void VolumeTextureModulateCacheMissUsesRuntimeSpecializedShader() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume texture cache miss must draw through the runtime shader");
+              "Volume texture draw must submit through the uber shader");
     TestCheck((spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE) &&
               ((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME),
-              "Volume runtime shader must keep runtime stage op and volume sampler specialization");
+              "Volume draw must keep the stage op and volume sampler type in the specialization data");
     TestCheck(context.Encoder.TextureBindCount == 1,
-              "Volume runtime draw must bind one texture");
-    TestCheck(context.Encoder.LastTextureStage == 8 &&
+              "Volume draw must bind one texture");
+    TestCheck(context.Encoder.LastTextureStage == 12 &&
               context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[0],
-              "Volume stage 0 must bind slot 8 and s_textureVolume0");
+              "The first volume stage must bind slot 12 and s_textureVolume0");
 
     ffp.Shutdown();
 }
@@ -951,17 +941,17 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume stage 7 must submit through the runtime shader");
+              "Volume stage 7 must submit through the uber shader");
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Volume stage 7 draw must bind one texture");
-    TestCheck(context.Encoder.LastTextureStage == 15 &&
-              context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[7],
-              "Volume stage 7 must bind slot 15 and s_textureVolume7");
+    TestCheck(context.Encoder.LastTextureStage == 12 &&
+              context.Encoder.LastTextureUniform == ffp.GetShaderCache().GetUniforms().s_textureVolume[0],
+              "A volume texture on stage 7 is the first volume stage and binds slot 12 / s_textureVolume0");
 
     ffp.Shutdown();
 }
 
-void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE profile) {
+void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
     FFPDiagnosticDriver driver(profile);
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -988,13 +978,13 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
     TestCheck(context.Encoder.SubmitCount == 1,
-              "Volume + cube cache miss must draw through the static sampler layout fallback");
+              "Volume + cube draw must submit through the uber shader");
     TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME &&
                   (((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 2) & 0x3u) == CKFF_SAMPLER_CUBE),
-              "Volume + cube fallback must preserve sampler types in runtime specialization data");
+              "Volume + cube draw must carry both sampler types in the specialization data");
     TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE &&
                   spec.Get(CKFF_SPEC_STAGE1_COLOR_OP) == CKRST_TOP_ADD,
-              "Volume + cube fallback must keep texture stage ops runtime-specialized");
+              "Volume + cube draw must keep the texture stage ops in the specialization data");
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     bool sawVolume = false;
     bool sawCube = false;
@@ -1005,19 +995,19 @@ void RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(CK_SHADER_PROFILE 
             sawCube = true;
     }
     TestCheck(sawVolume && sawCube,
-              "Volume + cube fallback must bind each texture to the sampler type declared for its stage");
+              "Volume + cube draw must bind each texture to the slot block of its sampler type");
 
     ffp.Shutdown();
 }
 
-void VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback() {
+void VolumeAndCubeBindTheirTypeSlots() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunVolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback(profile.Profile);
+        RunVolumeAndCubeBindTheirTypeSlots(profile.Profile);
     }
 }
 
-void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE profile) {
+void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_PROFILE profile) {
     FFPDiagnosticDriver driver(profile);
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1047,9 +1037,9 @@ void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE pro
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
     TestCheck(context.Encoder.SubmitCount == 1,
-              "arbitrary single volume+cube placement must draw through the generic fallback");
+              "arbitrary single volume+cube placement must draw through the uber shader");
     TestCheck(context.CreatedProgramCount == 1,
-              "generic mixed fallback must create one canonical program");
+              "arbitrary sampler placement must not create a dedicated program");
 
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     bool sawVolume = false;
@@ -1061,23 +1051,19 @@ void RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(CK_SHADER_PROFILE pro
             sawCube = true;
     }
     TestCheck(sawVolume && sawCube,
-              "generic mixed fallback must remap logical stages to canonical sampler slots");
+              "logical stages must map onto the type slot blocks by ordinal");
 
     ffp.Shutdown();
 }
 
-void ArbitrarySingleVolumeCubeLayoutUsesGenericFallback() {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "PrewarmPrograms", "0");
+void ArbitrarySingleVolumeCubePlacementSharesTheProgram() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunArbitrarySingleVolumeCubeLayoutUsesGenericFallback(profile.Profile);
+        RunArbitrarySingleVolumeCubePlacementSharesTheProgram(profile.Profile);
     }
-    CKRenderSettingsClearOverridesForTests();
 }
 
-void RunMultipleMixedSamplerLayoutUsesGenericFallback(CK_SHADER_PROFILE profile) {
+void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_PROFILE profile) {
     FFPDiagnosticDriver driver(profile);
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1093,7 +1079,7 @@ void RunMultipleMixedSamplerLayoutUsesGenericFallback(CK_SHADER_PROFILE profile)
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
     TestCheck(context.Encoder.SubmitCount == 1,
-              "multiple mixed samplers must draw through the generic fallback");
+              "multiple mixed samplers must draw through the uber shader");
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     bool found[4] = {};
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -1111,11 +1097,68 @@ void RunMultipleMixedSamplerLayoutUsesGenericFallback(CK_SHADER_PROFILE profile)
     ffp.Shutdown();
 }
 
-void MultipleMixedSamplerLayoutUsesGenericFallback() {
+void MultipleMixedSamplersUseTypeRankedSlots() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunMultipleMixedSamplerLayoutUsesGenericFallback(profile.Profile);
+        RunMultipleMixedSamplersUseTypeRankedSlots(profile.Profile);
     }
+}
+
+void FifthCubeStageSamplesAsUnbound() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+
+    for (CKDWORD stage = 0; stage < 5; ++stage) {
+        ffp.SetTexture(stage, 501 + stage, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+        ffp.SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ffp.SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+        ffp.SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+        ffp.SetTextureStageState(stage, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    }
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                              1, 0, 0, 3, 0, 0,
+                                              CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "five cube stages must still submit (approximation, not rejection)");
+    TestCheck(context.Encoder.TextureBindCount == 4,
+              "only four cube textures fit the fixed sampler layout");
+    const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
+    bool found[4] = {};
+    bool boundFifth = false;
+    for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
+        for (CKDWORD ordinal = 0; ordinal < 4; ++ordinal) {
+            if (binding.Stage == 8 + ordinal && binding.Uniform == u.s_textureCube[ordinal] &&
+                binding.Texture == 501 + ordinal)
+                found[ordinal] = true;
+        }
+        if (binding.Texture == 505)
+            boundFifth = true;
+    }
+    TestCheck(found[0] && found[1] && found[2] && found[3] && !boundFifth,
+              "the first four cube stages bind slots 8..11 and the fifth stays unbound");
+
+    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 8) & 0x3u) == CKFF_SAMPLER_2D &&
+                  spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 4,
+              "the overflowing stage must specialize as an untextured 2D stage that stays active");
+    const CKDWORD stageParams = u.u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
+        context.Encoder.FloatUniforms.find(stageParams);
+    TestCheck(it != context.Encoder.FloatUniforms.end() && it->second.size() >= 32 * 4 &&
+                  it->second[(3 * 4 + 0) * 4 + 3] == 1.0f &&
+                  it->second[(4 * 4 + 0) * 4 + 3] == 0.0f,
+              "stage params must mark the overflowing stage as having no texture");
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    TestCheck(ffp.GetProbes().Stats.SamplerSlotOverflows == 1 || !ffp.GetProbes().StatsEnabled(),
+              "sampler slot overflow must be counted when statistics are enabled");
+#endif
+
+    ffp.Shutdown();
 }
 
 void MultipleVolumeTexturesBindEachVolumeSampler() {
@@ -1150,15 +1193,15 @@ void MultipleVolumeTexturesBindEachVolumeSampler() {
     bool sawStage0 = false;
     bool sawStage2 = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
-        if (binding.Stage == 8 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 301)
+        if (binding.Stage == 12 && binding.Uniform == u.s_textureVolume[0] && binding.Texture == 301)
             sawStage0 = true;
-        if (binding.Stage == 10 && binding.Uniform == u.s_textureVolume[2] && binding.Texture == 302)
+        if (binding.Stage == 13 && binding.Uniform == u.s_textureVolume[1] && binding.Texture == 302)
             sawStage2 = true;
     }
     TestCheck(context.Encoder.SubmitCount == 1,
               "Multi-volume runtime draw must submit");
     TestCheck(sawStage0 && sawStage2,
-              "Multiple volume stages must bind their matching volume sampler uniforms");
+              "Multiple volume stages must bind consecutive volume samplers by ordinal");
 
     ffp.Shutdown();
 }
@@ -1588,11 +1631,7 @@ void PremodulateImplicitTextureDependencyBindsNextStage() {
     ffp.Shutdown();
 }
 
-void RuntimeSpecializedProgramModulesAreSharedAcrossStateBindings() {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "ShaderMode", "runtime-specialized");
-
+void ProgramFamilyIsSharedAcrossStateBindings() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1611,65 +1650,56 @@ void RuntimeSpecializedProgramModulesAreSharedAcrossStateBindings() {
 
     const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
     TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
-              "Runtime-specialized state variants sharing shader blobs must create one backend program");
-    TestCheck(ffp.GetShaderCache().CachedProgramCount() == 1 &&
-                  ffp.GetShaderCache().CachedBindingCount() == 2,
-              "Program-module cache and state-binding cache must have separate cardinality");
+              "State variants of one vertex layout must share one backend program");
+    TestCheck(ffp.GetShaderCache().CachedProgramCount() == 1,
+              "The shader cache must hold one program per created vertex variant");
     TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
-              "Shared runtime-specialized programs must upload current-draw specialization state");
+              "The shared program must receive the current-draw specialization data");
 
     ffp.Shutdown();
-    CKRenderSettingsClearOverridesForTests();
 }
 
-void ShaderModeNameResolvesRuntimeSpecialized() {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "ShaderMode", "runtime-specialized");
-
+void ProgramFamilyHasFourVertexVariants() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(&context) &&
-                  cache.GetShaderMode() == CKFF_SHADER_MODE_RUNTIME_SPECIALIZED,
-              "ShaderMode must select runtime-specialized mode");
-    cache.Shutdown();
-    CKRenderSettingsClearOverridesForTests();
-}
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
 
-void LegacyUberShaderEnablesRuntimeSpecializedMode() {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "UberShader", "1");
+    TestCheck(context.CreatedProgramCount == 0 && ffp.GetShaderCache().CachedProgramCount() == 0,
+              "Programs are created on first use");
 
-    FFPDiagnosticDriver driver;
-    FFPDiagnosticContext context(&driver);
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(&context) &&
-                  cache.GetShaderMode() == CKFF_SHADER_MODE_RUNTIME_SPECIALIZED,
-              "Legacy UberShader=1 must select runtime-specialized mode");
-    cache.Shutdown();
-    CKRenderSettingsClearOverridesForTests();
-}
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+    TestCheck(context.CreatedProgramCount == 2,
+              "3D and POSITIONT draws use two vertex variants");
 
-void RuntimeSpecializedProgramFamilyCanBePrewarmed() {
-    CKRenderSettingsClearOverridesForTests();
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "ShaderMode", "runtime-specialized");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP,
-                                        "PrewarmPrograms", "1");
+    VxPlane plane;
+    plane.m_Normal = VxVector(0.0f, 1.0f, 0.0f);
+    plane.m_D = 0.5f;
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1u);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+    TestCheck(context.CreatedProgramCount == 4 &&
+                  ffp.GetShaderCache().CachedProgramCount() == CKFF_PROGRAM_VARIANT_COUNT,
+              "User clip planes add the two clip-distance vertex variants");
 
-    FFPDiagnosticDriver driver;
-    FFPDiagnosticContext context(&driver);
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(&context),
-              "Runtime-specialized program prewarm must initialize");
-    TestCheck(context.CreatedProgramCount == 18 &&
-                  cache.CachedProgramCount() == 18,
-              "Runtime-specialized prewarm must create six vertex variants for each sampler family");
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    TestCheck(context.CreatedProgramCount == 4 && context.Encoder.SubmitCount == 5,
+              "Texture, fog and alpha-test state never create additional programs");
 
-    cache.Shutdown();
-    CKRenderSettingsClearOverridesForTests();
+    ffp.Shutdown();
 }
 
 void LegacyStageBlendZeroTerminatesStaleMultitextureState() {
@@ -2807,16 +2837,18 @@ int main() {
               &StageConstantDoesNotCreateTextureDependency);
     tests.Run("Cube texture uses cube sampler specialization and binding",
               &CubeTextureUsesCubeSamplerSpecializationAndBinding);
-    tests.Run("Volume texture modulate cache miss uses runtime shader",
-              &VolumeTextureModulateCacheMissUsesRuntimeSpecializedShader);
+    tests.Run("Volume texture binds the first volume sampler",
+              &VolumeTextureBindsFirstVolumeSampler);
     tests.Run("Volume texture stage seven binds volume sampler",
               &VolumeTextureStageSevenBindsVolumeSampler);
-    tests.Run("Volume and cube cache miss uses static sampler layout fallback",
-              &VolumeAndCubeCacheMissUsesStaticSamplerLayoutFallback);
-    tests.Run("Arbitrary single volume-cube layout uses generic fallback",
-              &ArbitrarySingleVolumeCubeLayoutUsesGenericFallback);
-    tests.Run("Multiple mixed sampler layout uses generic fallback",
-              &MultipleMixedSamplerLayoutUsesGenericFallback);
+    tests.Run("Volume and cube bind their type slots",
+              &VolumeAndCubeBindTheirTypeSlots);
+    tests.Run("Arbitrary single volume-cube placement shares the program",
+              &ArbitrarySingleVolumeCubePlacementSharesTheProgram);
+    tests.Run("Multiple mixed samplers use type-ranked slots",
+              &MultipleMixedSamplersUseTypeRankedSlots);
+    tests.Run("Fifth cube stage samples as unbound",
+              &FifthCubeStageSamplesAsUnbound);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
@@ -2835,14 +2867,10 @@ int main() {
               &UntexturedStageKeepsRuntimeStageParams);
     tests.Run("PREMODULATE implicit texture dependency binds next stage",
               &PremodulateImplicitTextureDependencyBindsNextStage);
-    tests.Run("Runtime-specialized program modules are shared across state bindings",
-              &RuntimeSpecializedProgramModulesAreSharedAcrossStateBindings);
-    tests.Run("Shader mode name resolves runtime-specialized",
-              &ShaderModeNameResolvesRuntimeSpecialized);
-    tests.Run("Legacy UberShader enables runtime-specialized mode",
-              &LegacyUberShaderEnablesRuntimeSpecializedMode);
-    tests.Run("Runtime-specialized program family can be prewarmed",
-              &RuntimeSpecializedProgramFamilyCanBePrewarmed);
+    tests.Run("Program family is shared across state bindings",
+              &ProgramFamilyIsSharedAcrossStateBindings);
+    tests.Run("Program family has four vertex variants",
+              &ProgramFamilyHasFourVertexVariants);
     tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",
               &LegacyStageBlendZeroTerminatesStaleMultitextureState);
     tests.Run("Legacy TEXTUREMAPBLEND clears explicit stage ops",

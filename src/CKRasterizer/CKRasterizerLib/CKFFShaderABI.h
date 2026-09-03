@@ -8,8 +8,8 @@
 // Internal fixed-function shader ABI. These values define the C++ uniform
 // packing contract consumed by the checked-in bgfx shader sources.
 
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 1u;
-static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x6f7e2a31u;
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 2u;
+static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x4c21b7e5u;
 
 enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_DIFFUSE = 0,
@@ -55,10 +55,30 @@ inline CKDWORD CKFFStageParamIndex(CKDWORD stage, CKFFStageParamSlot slot) {
     return stage * CKFF_STAGE_PARAM_VEC4S_PER_STAGE + (CKDWORD)slot;
 }
 
-inline CKDWORD CKFFSamplerBindStage(CKDWORD stage, CKDWORD samplerType) {
-    if (samplerType == CKFF_SAMPLER_CUBE || samplerType == CKFF_SAMPLER_VOLUME)
-        return stage + CKFF_MAX_TEXTURE_STAGES;
-    return stage;
+enum CKFFSamplerSlotABI {
+    CKFF_CUBE_SAMPLER_SLOT_BASE = CKFF_MAX_TEXTURE_STAGES,
+    CKFF_VOLUME_SAMPLER_SLOT_BASE = CKFF_MAX_TEXTURE_STAGES + CKFF_CUBE_SAMPLER_COUNT,
+    CKFF_SAMPLER_SLOT_COUNT = CKFF_MAX_TEXTURE_STAGES + CKFF_CUBE_SAMPLER_COUNT + CKFF_VOLUME_SAMPLER_COUNT,
+};
+
+// Texture slot of a sampler in the fixed layout: 2D and depth samplers sit on
+// their stage index, cube and volume samplers on their type block indexed by
+// the ordinal of the stage among the stages sampling the same type (see
+// CKFFSamplerOrdinal / ckffSamplerOrdinal in fs_ff_stage.sc).
+inline CKDWORD CKFFSamplerSlot(CKDWORD samplerType, CKDWORD stageOrOrdinal) {
+    if (samplerType == CKFF_SAMPLER_CUBE)
+        return CKFF_CUBE_SAMPLER_SLOT_BASE + stageOrOrdinal;
+    if (samplerType == CKFF_SAMPLER_VOLUME)
+        return CKFF_VOLUME_SAMPLER_SLOT_BASE + stageOrOrdinal;
+    return stageOrOrdinal;
+}
+
+inline CKDWORD CKFFSamplerTypeSlotCount(CKDWORD samplerType) {
+    if (samplerType == CKFF_SAMPLER_CUBE)
+        return CKFF_CUBE_SAMPLER_COUNT;
+    if (samplerType == CKFF_SAMPLER_VOLUME)
+        return CKFF_VOLUME_SAMPLER_COUNT;
+    return CKFF_MAX_TEXTURE_STAGES;
 }
 
 static_assert(CKFF_DRAW_PARAM_VEC4_COUNT == 20, "ABI break: draw param vec4 count changed");
@@ -66,5 +86,6 @@ static_assert(CKFF_STAGE_PARAM_VEC4S_PER_STAGE == 4, "ABI break: stage param vec
 static_assert(CKFF_MATRIX_VEC4_COUNT == 8, "ABI break: matrix vec4 count changed");
 static_assert(CKFF_CLIP_PLANE_COUNT == 6, "ABI break: clip plane count changed");
 static_assert(CKFF_DRAW_PARAM_INLINE_LIGHT_BASE == 12, "ABI break: inline light base changed");
+static_assert(CKFF_SAMPLER_SLOT_COUNT == 16, "ABI break: fixed sampler layout must stay within 16 slots");
 
 #endif // CKFFSHADERABI_H

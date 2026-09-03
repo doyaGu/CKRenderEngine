@@ -2,7 +2,6 @@
 #include "CKRasterizerDevice.h"
 #include "CKFFUniformState.h"
 #include "CKFFShaderABI.h"
-#include "CKFFSamplerLayout.h"
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
 #include "CKRenderPerfClock.h"
@@ -71,7 +70,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
                 (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)
             ? TRUE : FALSE;
         if (shaderBackend &&
-            caps.MaxTextureBindings < CKFF_MAX_PROGRAM_SAMPLER_BINDINGS) {
+            caps.MaxTextureBindings < CKFF_SAMPLER_SLOT_COUNT) {
             Shutdown();
             return false;
         }
@@ -130,7 +129,6 @@ static const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_STAGE_BLEND: return "texture-stage-blend";
     case CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL: return "sampler-lod-control";
     case CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT: return "sampler-anisotropy-limit";
-    case CKFF_DRAW_REJECT_SAMPLER_LAYOUT: return "sampler-layout";
     case CKFF_DRAW_REJECT_STATE_VALUE: return "state-value";
     case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
     case CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER: return "point-vertex-buffer";
@@ -142,8 +140,6 @@ static CKFFDrawRejectReason CKFFProgramPrepareRejectReason(
     CKFFProgramPrepareStatus status)
 {
     switch (status) {
-    case CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT:
-        return CKFF_DRAW_REJECT_SAMPLER_LAYOUT;
     case CKFF_PROGRAM_PREPARE_PROGRAM_MISSING:
         return CKFF_DRAW_REJECT_PROGRAM_MISSING;
     case CKFF_PROGRAM_PREPARE_INVALID_INPUT:
@@ -540,24 +536,10 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
     }
     m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
     bindingSet->ActiveStageCount = stageCount;
-    const CKFFSamplerLayoutKey samplerLayout = CKFFBuildSamplerLayoutKey(shaderKey.FS);
-    if (CKFFSamplerLayoutSupportsGenericMixed(samplerLayout)) {
-        const CKFFUniformHandles &uniforms = m_ShaderCache.GetUniforms();
-        CKDWORD cubeIndex = 0;
-        CKDWORD volumeIndex = 0;
-        for (CKDWORD stage = 0; stage < bindingSet->ActiveTextureCount; ++stage) {
-            CKFFTextureBinding &binding = bindingSet->Bindings[stage];
-            if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME) {
-                binding.Stage = CKFF_MAX_TEXTURE_STAGES + 4 + volumeIndex;
-                binding.Uniform = uniforms.s_textureVolume[volumeIndex];
-                ++volumeIndex;
-            } else if (shaderKey.FS.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE) {
-                binding.Stage = CKFF_MAX_TEXTURE_STAGES + cubeIndex;
-                binding.Uniform = uniforms.s_textureCube[cubeIndex];
-                ++cubeIndex;
-            }
-        }
-    }
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    if (shaderKey.FS.SamplerSlotOverflowMask != 0)
+        m_Probes.OnSamplerSlotOverflow();
+#endif
     for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
         CKSamplerDesc &sampler = bindingSet->Bindings[i].Sampler;
         if (sampler.AddressU != CKRST_ADDRESS_BORDER &&
@@ -1040,7 +1022,7 @@ CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
-    CKFF_PROBE(m_Probes, LogAndReset(m_DrawStateCache, m_ShaderCache));
+    CKFF_PROBE(m_Probes, LogAndReset(m_DrawStateCache));
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {

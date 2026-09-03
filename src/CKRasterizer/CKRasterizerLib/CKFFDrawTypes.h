@@ -39,7 +39,6 @@ struct CKFFPreparedState {
 enum CKFFProgramPrepareStatus {
     CKFF_PROGRAM_PREPARE_OK = 0,
     CKFF_PROGRAM_PREPARE_INVALID_INPUT,
-    CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT,
     CKFF_PROGRAM_PREPARE_PROGRAM_MISSING
 };
 
@@ -61,7 +60,6 @@ struct CKFFUniformEmissionContext {
     CKFFShaderKey ShaderKey;
     CKFFSpecializationInfo Specialization;
     CKDWORD ActiveTextureCount;
-    CKBOOL FullSpecialized;
     CKBOOL PositionT;
     CKBOOL LightingEnabled;
     CKBOOL FogEnabled;

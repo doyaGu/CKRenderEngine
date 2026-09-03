@@ -152,10 +152,6 @@ ckre_add_test(ffp_contract_exhaustive_tests
     test_ffp_contract_exhaustive.cpp
 )
 
-ckre_add_test(ffp_sampler_layout_exhaustive_tests
-    test_ffp_sampler_layout_exhaustive.cpp
-)
-
 # Real-backend pixel gate: the fixed-function semantics driven through the v3
 # contract on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
 if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)

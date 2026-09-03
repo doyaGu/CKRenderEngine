@@ -3,7 +3,6 @@
 #include "CKFFStageState.h"
 #include "CKFFShaderABI.h"
 #include "CKFFShaderKey.h"
-#include "CKFFSamplerLayout.h"
 #include "CKFFUniformState.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKVertexLayoutCache.h"
@@ -73,148 +72,6 @@ std::string ReadTextFile(const char *path) {
     return contents;
 }
 
-size_t CountOccurrences(const std::string &text, const std::string &needle) {
-    if (needle.empty())
-        return 0;
-
-    size_t count = 0;
-    std::string::size_type pos = 0;
-    while ((pos = text.find(needle, pos)) != std::string::npos) {
-        ++count;
-        pos += needle.size();
-    }
-    return count;
-}
-
-std::vector<int> ParseJsonIntArray(const std::string &arrayText) {
-    std::vector<int> values;
-    int value = 0;
-    bool inNumber = false;
-    for (char ch : arrayText) {
-        if (std::isdigit(static_cast<unsigned char>(ch))) {
-            value = value * 10 + (ch - '0');
-            inNumber = true;
-        } else if (inNumber) {
-            values.push_back(value);
-            value = 0;
-            inNumber = false;
-        }
-    }
-    if (inNumber)
-        values.push_back(value);
-    return values;
-}
-
-std::vector<std::string> ParseJsonStringArray(const std::string &arrayText) {
-    std::vector<std::string> values;
-    std::string current;
-    bool inString = false;
-    bool escaping = false;
-    for (char ch : arrayText) {
-        if (!inString) {
-            if (ch == '"') {
-                inString = true;
-                current.clear();
-            }
-            continue;
-        }
-
-        if (escaping) {
-            current.push_back(ch);
-            escaping = false;
-        } else if (ch == '\\') {
-            escaping = true;
-        } else if (ch == '"') {
-            values.push_back(current);
-            inString = false;
-        } else {
-            current.push_back(ch);
-        }
-    }
-    return values;
-}
-
-std::string SamplerLayoutIdentifier(const std::vector<int> &stageTypes) {
-    std::ostringstream out;
-    out << "layout";
-    for (int type : stageTypes) {
-        if (type == CKFF_SAMPLER_CUBE) {
-            out << "_cube";
-        } else if (type == CKFF_SAMPLER_VOLUME) {
-            out << "_volume";
-        } else {
-            out << "_2d";
-        }
-    }
-    return out.str();
-}
-
-const char *SamplerLayoutProfileName(const std::string &backend) {
-    if (backend == "dx11") return "CKRST_SHADER_PROFILE_DX11";
-    if (backend == "dx12") return "CKRST_SHADER_PROFILE_DX12";
-    if (backend == "spirv") return "CKRST_SHADER_PROFILE_SPIRV";
-    if (backend == "glsl") return "CKRST_SHADER_PROFILE_GLSL";
-    if (backend == "essl") return "CKRST_SHADER_PROFILE_ESSL";
-    if (backend == "metal") return "CKRST_SHADER_PROFILE_MSL";
-    return "";
-}
-
-std::string::size_type FindFullSpecializedBlockEnd(const std::string &contents) {
-    const std::string blockStart = "#if defined(CKFF_FULL_SPECIALIZED)";
-    std::string::size_type lineStart = contents.find(blockStart);
-    if (lineStart == std::string::npos)
-        return std::string::npos;
-
-    int depth = 0;
-    while (lineStart != std::string::npos) {
-        std::string::size_type lineEnd = contents.find('\n', lineStart);
-        if (lineEnd == std::string::npos)
-            lineEnd = contents.size();
-
-        std::string::size_type first = lineStart;
-        while (first < lineEnd && (contents[first] == ' ' || contents[first] == '\t'))
-            ++first;
-
-        if (contents.compare(first, 3, "#if") == 0) {
-            ++depth;
-        } else if (contents.compare(first, 6, "#endif") == 0) {
-            --depth;
-            if (depth == 0)
-                return first;
-        }
-
-        lineStart = lineEnd == contents.size() ? std::string::npos : lineEnd + 1;
-    }
-
-    return std::string::npos;
-}
-
-void RuntimeVertexShaderKeepsAdditionalTexcoordsActive(const char *path,
-                                                       const char *readErrorMessage) {
-    const std::string contents = ReadTextFile(path);
-    const std::string defaultGuard = "#ifndef CKFF_VS_ACTIVE_TEXCOORD_COUNT";
-    const std::string defaultDefine = "#define CKFF_VS_ACTIVE_TEXCOORD_COUNT 8";
-    const std::string firstTexcoordUse = "#if CKFF_VS_ACTIVE_TEXCOORD_COUNT > 1";
-
-    TestCheck(!contents.empty(), readErrorMessage);
-
-    const std::string::size_type specializedEnd = FindFullSpecializedBlockEnd(contents);
-    const std::string::size_type guardPos = contents.find(defaultGuard);
-    const std::string::size_type definePos = contents.find(defaultDefine, guardPos);
-    const std::string::size_type usePos = contents.find(firstTexcoordUse);
-
-    TestCheck(specializedEnd != std::string::npos,
-              "Runtime vertex shader test must find the CKFF_FULL_SPECIALIZED block");
-    TestCheck(guardPos != std::string::npos && definePos != std::string::npos,
-              "Runtime vertex shader must define a default active texcoord count");
-    TestCheck(usePos != std::string::npos,
-              "Runtime vertex shader test must find texcoord output gating");
-    TestCheck(specializedEnd < guardPos,
-              "Runtime vertex shader active texcoord default must be visible outside CKFF_FULL_SPECIALIZED");
-    TestCheck(definePos < usePos,
-              "Runtime vertex shader active texcoord default must precede texcoord output gating");
-}
-
 void BumpEnvUniformsPackEachStageIndependently() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
@@ -265,11 +122,16 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
               "u_ffSpec ABI must mirror the specialization dword count");
     TestCheck(CKFFStageParamIndex(3, CKFF_STAGE_PARAM_ALPHA_EXTRA) == 15,
               "Stage parameter index helper must encode four vec4s per stage");
-    TestCheck(CKFFSamplerBindStage(2, CKFF_SAMPLER_2D) == 2,
-              "2D samplers must bind to texture slots 0..7");
-    TestCheck(CKFFSamplerBindStage(2, CKFF_SAMPLER_CUBE) == 10 &&
-                  CKFFSamplerBindStage(2, CKFF_SAMPLER_VOLUME) == 10,
-              "Cube and volume samplers must bind to texture slots 8..15");
+    TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_2D, 2) == 2 &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, 7) == 7,
+              "2D and depth samplers must bind to the texture slot of their stage (0..7)");
+    TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_CUBE, 2) == 10 &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, 2) == 14,
+              "Cube samplers must bind to slots 8..11 and volume samplers to 12..15 by ordinal");
+    TestCheck(CKFF_SAMPLER_SLOT_COUNT == 16 &&
+                  CKFFSamplerTypeSlotCount(CKFF_SAMPLER_CUBE) == 4 &&
+                  CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME) == 4,
+              "Fixed sampler layout must hold 8 + 4 + 4 samplers");
 
     const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
     const std::string vs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
@@ -471,25 +333,6 @@ void LastActiveTextureStageSpecializationRoundTrips() {
         TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == lastStage,
                   "Last active texture stage must round-trip through specialization dwords");
     }
-}
-
-void FullSpecializedRejectsRuntimeOnlyTextureStagesBeforeLookup() {
-    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKFFShaderCache.cpp");
-    TestCheck(!shaderCache.empty(),
-              "Shader cache source must be readable");
-
-    const std::string functionNeedle = "CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram";
-    const std::string guardNeedle = "key.FS.LastActiveTextureStage > 3";
-    const std::string lookupNeedle = "CKFFFindSpecializedModule";
-    const std::string::size_type functionStart = shaderCache.find(functionNeedle);
-    const std::string::size_type guardPos = shaderCache.find(guardNeedle, functionStart);
-    const std::string::size_type lookupPos = shaderCache.find(lookupNeedle, functionStart);
-
-    TestCheck(functionStart != std::string::npos &&
-                  guardPos != std::string::npos &&
-                  lookupPos != std::string::npos &&
-                  guardPos < lookupPos,
-              "Full-specialized stage 4..7 guard must run before generated module lookup");
 }
 
 void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
@@ -723,18 +566,6 @@ void DepthTextureCompareUsesSamplerCompareOrdering() {
               "CKRST_COMPARE_ALWAYS must always pass shader depth compares");
 }
 
-void Runtime3DVertexShaderKeepsAdditionalTexcoordsActive() {
-    RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
-        "Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc",
-        "FFP 3D vertex shader source must be readable from the test working directory");
-}
-
-void RuntimePositionTVertexShaderKeepsAdditionalTexcoordsActive() {
-    RuntimeVertexShaderKeepsAdditionalTexcoordsActive(
-        "Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_positiont.sc",
-        "FFP POSITIONT vertex shader source must be readable from the test working directory");
-}
-
 void VertexBlendResolverMatchesDxvkWeightCounts() {
     CKFFVertexBlendState disabled = CKFFResolveVertexBlendState(
         VXVBLEND_DISABLE, FALSE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
@@ -935,190 +766,184 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
               "Volume sampler mask must be derivable from active shader key stages");
 }
 
-void SamplerLayoutKeyNormalizesInactiveAndDepthStages() {
-    CKFFShaderKeyFS key;
-    key.Stages[0].HasTexture = true;
-    key.Stages[0].SamplerType = CKFF_SAMPLER_DEPTH;
-    key.Stages[1].HasTexture = false;
-    key.Stages[1].SamplerType = CKFF_SAMPLER_CUBE;
-    key.Stages[2].HasTexture = true;
-    key.Stages[2].SamplerType = CKFF_SAMPLER_VOLUME;
-    key.Stages[3].HasTexture = true;
-    key.Stages[3].SamplerType = CKFF_SAMPLER_CUBE;
+void FragmentShaderDeclaresTheFixedSamplerLayout() {
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_common.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/vs_ff_positiont.sc");
+    TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
+              "FFP shader sources must be readable");
 
-    CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key);
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        char decl[64];
+        snprintf(decl, sizeof(decl), "SAMPLER2D(s_texture%d, %d);", stage, stage);
+        TestCheck(fs.find(decl) != std::string::npos,
+                  "Fragment shader must declare one 2D sampler per texture stage on slots 0..7");
+    }
+    for (int ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal) {
+        char decl[64];
+        snprintf(decl, sizeof(decl), "SAMPLERCUBE(s_textureCube%d, %d);", ordinal,
+                 (int)CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal));
+        TestCheck(fs.find(decl) != std::string::npos,
+                  "Fragment shader must declare the cube samplers on slots 8..11");
+    }
+    for (int ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal) {
+        char decl[64];
+        snprintf(decl, sizeof(decl), "SAMPLER3D(s_textureVolume%d, %d);", ordinal,
+                 (int)CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal));
+        TestCheck(fs.find(decl) != std::string::npos,
+                  "Fragment shader must declare the volume samplers on slots 12..15");
+    }
+    TestCheck(fs.find("SAMPLERCUBE(s_textureCube4") == std::string::npos &&
+                  fs.find("SAMPLER3D(s_textureVolume4") == std::string::npos,
+              "Fragment shader must not declare more than four cube or volume samplers");
+    TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") != std::string::npos &&
+                  fs.find("if (ckffSpecSamplerType(previousStage) == samplerType)") != std::string::npos,
+              "Fragment shader must pick cube / volume samplers by type ordinal from the specialization data");
 
-    TestCheck(CKFFSamplerLayoutStageType(layout, 0) == CKFF_SAMPLER_2D,
-              "Depth samplers must use the 2D static sampler layout");
-    TestCheck(CKFFSamplerLayoutStageType(layout, 1) == CKFF_SAMPLER_2D,
-              "Inactive stages must not split static sampler layouts");
-    TestCheck(CKFFSamplerLayoutStageType(layout, 2) == CKFF_SAMPLER_VOLUME,
-              "Active volume stages must stay volume in the sampler layout");
-    TestCheck(CKFFSamplerLayoutStageType(layout, 3) == CKFF_SAMPLER_CUBE,
-              "Active cube stages must stay cube in the sampler layout");
-    TestCheck(CKFFSamplerLayoutNeedsCubeSampler(layout) &&
-                  CKFFSamplerLayoutNeedsVolumeSampler(layout) &&
-                  CKFFSamplerLayoutNeedsMixedCubeVolume(layout),
-              "Mixed cube+volume layouts must be detectable from the normalized key");
-
-    key.Stages[0].HasTexture = true;
-    key.Stages[0].SamplerType = CKFF_SAMPLER_CUBE;
-    key.Stages[1].HasTexture = true;
-    key.Stages[1].SamplerType = CKFF_SAMPLER_VOLUME;
-    layout = CKFFBuildSamplerLayoutKey(key);
-    TestCheck(CKFFSamplerLayoutSupportsGenericMixed(layout),
-              "Multiple cube+volume stages within the fixed sampler budget must use the generic layout");
-    const CKFFSamplerLayoutKey canonical = CKFFCanonicalSamplerLayoutKey(layout);
-    TestCheck(CKFFSamplerLayoutStageType(canonical, 0) == CKFF_SAMPLER_VOLUME &&
-                  CKFFSamplerLayoutStageType(canonical, 1) == CKFF_SAMPLER_CUBE,
-              "Generic mixed layouts must share the canonical generated module");
-}
-
-void SamplerLayoutMissDiagnosticsAreActionable() {
-    CKFFShaderKeyFS key;
-    key.Stages[0].HasTexture = true;
-    key.Stages[0].SamplerType = CKFF_SAMPLER_VOLUME;
-    key.Stages[2].HasTexture = true;
-    key.Stages[2].SamplerType = CKFF_SAMPLER_CUBE;
-
-    const CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key);
-    char stageTypes[32];
-    char manifestEntry[128];
-    CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
-    CKFFFormatSamplerLayoutManifestEntry(layout, "dx11", manifestEntry, sizeof(manifestEntry));
-
-    TestCheck(std::strcmp(stageTypes, "[3,0,1,0,0,0,0,0]") == 0,
-              "Sampler layout diagnostics must report all eight normalized stage types");
-    TestCheck(std::strcmp(manifestEntry,
-                          "{\"backends\":[\"dx11\"],\"stageTypes\":[3,0,1,0,0,0,0,0]}") == 0,
-              "Sampler layout diagnostics must emit a copyable manifest entry");
-
-    const std::string shaderCache = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CKFFShaderCache.cpp");
-    TestCheck(shaderCache.find("FFP static sampler layout miss") != std::string::npos,
-              "Static sampler layout miss must be logged");
-    TestCheck(shaderCache.find("profile=0x%08X") != std::string::npos &&
-                  shaderCache.find("lastStage=%u") != std::string::npos &&
-                  shaderCache.find("activeTextureMask=0x%02X") != std::string::npos &&
-                  shaderCache.find("layout=0x%04X") != std::string::npos &&
-                  shaderCache.find("stageTypes=%s") != std::string::npos &&
-                  shaderCache.find("mixedCubeVolume=%u") != std::string::npos &&
-                  shaderCache.find("manifestEntry=%s") != std::string::npos,
-              "Static sampler layout miss log must include enough context to reproduce and patch the manifest");
-}
-
-void FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_stage.sc");
-    TestCheck(!contents.empty(),
-              "FFP fragment shader source must be readable from the test working directory");
-
-    const std::string staticLayout = "#elif defined(CKFF_STATIC_SAMPLER_LAYOUT)";
-    const std::string fullSpecialized = "#if defined(CKFF_FULL_SPECIALIZED)";
-    const std::string volumeLayout = "#elif defined(CKFF_VOLUME_SAMPLER_LAYOUT)";
-    const std::string::size_type staticPos = contents.find(staticLayout);
-    const std::string::size_type fullPos = contents.find(fullSpecialized);
-    const std::string::size_type volumePos = contents.find(volumeLayout);
-
-    TestCheck(staticPos != std::string::npos,
-              "FFP fragment shader must declare a static sampler layout branch");
-    TestCheck(fullPos != std::string::npos && staticPos != std::string::npos && fullPos < staticPos,
-              "Static sampler layout must be separate from the full-specialized branch");
-    TestCheck(staticPos != std::string::npos && volumePos != std::string::npos && staticPos < volumePos,
-              "Static sampler layout must run before the volume-only runtime layout");
-    TestCheck(contents.find("CKFF_STATIC_DEPTH_TEXTURE_COLOR") != std::string::npos,
-              "Static sampler layout must keep depth compare in the 2D sampling path");
-}
-
-void CMakeShaderSourcesIncludeSamplerLayoutManifest() {
-    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CMakeLists.txt");
-    TestCheck(!cmake.empty(),
-              "RenderEngine CMakeLists must be readable from the test working directory");
-    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json") != std::string::npos,
-              "Shader source dependencies must include the sampler layout manifest");
-    TestCheck(cmake.find("DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}") != std::string::npos,
-              "Shader generation must depend on CKRE_SHADER_SOURCES");
-    TestCheck(cmake.find("SOURCES ${CKRE_SHADER_SOURCES}") != std::string::npos,
-              "Shader generation target must expose CKRE_SHADER_SOURCES");
-}
-
-void SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration() {
-    const std::string manifest = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/ffp_sampler_layouts.json");
-    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
-    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/generated/CKFFSpecializedModuleTable.generated.h");
-
-    TestCheck(!manifest.empty(),
-              "FFP sampler layout manifest must be present");
-    TestCheck(manifest.find("\"stageTypes\": [3, 1, 0, 0, 0, 0, 0, 0]") != std::string::npos,
-              "Sampler layout manifest must keep the exact observed volume+cube layout");
-    TestCheck(manifest.find("\"backends\": [\"glsl\"]") == std::string::npos,
-              "Sampler layout manifest must not remain GLSL-only");
-    TestCheck(script.find("load_sampler_layout_manifest") != std::string::npos,
-              "Shader codegen must load sampler layouts from the manifest");
-    TestCheck(script.find("default_sampler_layout_variants") == std::string::npos &&
-                  script.find("itertools.product((0, 1, 3), repeat=4)") == std::string::npos,
-              "Shader codegen must not enumerate first-four mixed sampler layouts by default");
-    TestCheck(script.find("SAMPLER_LAYOUT_SIZE_LIMIT_BYTES") != std::string::npos,
-              "Shader codegen must enforce a small sampler-layout generated size budget");
-    TestCheck(!generated.empty(),
-              "Generated specialized module table must be readable");
-
-    size_t checkedBackendLayouts = 0;
-    std::string::size_type objectStart = 0;
-    while ((objectStart = manifest.find('{', objectStart)) != std::string::npos) {
-        const std::string::size_type objectEnd = manifest.find('}', objectStart);
-        TestCheck(objectEnd != std::string::npos,
-                  "Sampler layout manifest entries must be closed JSON objects");
-        const std::string object = manifest.substr(objectStart, objectEnd - objectStart + 1);
-        objectStart = objectEnd + 1;
-
-        const std::string::size_type stageKey = object.find("\"stageTypes\"");
-        if (stageKey == std::string::npos)
-            continue;
-
-        const std::string::size_type stageArrayStart = object.find('[', stageKey);
-        const std::string::size_type stageArrayEnd = object.find(']', stageArrayStart);
-        const std::string::size_type backendsKey = object.find("\"backends\"");
-        const std::string::size_type backendsArrayStart = object.find('[', backendsKey);
-        const std::string::size_type backendsArrayEnd = object.find(']', backendsArrayStart);
-        TestCheck(stageArrayStart != std::string::npos && stageArrayEnd != std::string::npos &&
-                      backendsKey != std::string::npos && backendsArrayStart != std::string::npos &&
-                      backendsArrayEnd != std::string::npos,
-                  "Sampler layout manifest entries must include backends and stageTypes arrays");
-
-        const std::vector<int> stageTypes = ParseJsonIntArray(
-            object.substr(stageArrayStart, stageArrayEnd - stageArrayStart + 1));
-        const std::vector<std::string> backends = ParseJsonStringArray(
-            object.substr(backendsArrayStart, backendsArrayEnd - backendsArrayStart + 1));
-        TestCheck(stageTypes.size() == CKFF_STATE_DESC_TEXTURE_STAGES,
-                  "Sampler layout manifest stageTypes must describe every FFP texture stage");
-        TestCheck(!backends.empty(),
-                  "Sampler layout manifest entries must list at least one backend");
-
-        const std::string identifier = SamplerLayoutIdentifier(stageTypes);
-        for (const std::string &backend : backends) {
-            const char *profile = SamplerLayoutProfileName(backend);
-            TestCheck(profile[0] != '\0',
-                      "Sampler layout manifest backend must map to a shader profile");
-
-            const std::string headerPath = std::string("shaders/generated/") + backend +
-                "/sampler_layout/" + identifier + "_fs_ff_stage.bin.h";
-            TestCheck(generated.find(headerPath) != std::string::npos,
-                      "Generated table must include every manifest sampler layout header");
-            TestCheck(!ReadTextFile((std::string("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/") + headerPath).c_str()).empty(),
-                      "Every generated sampler layout table include must point at an existing binary header");
-
-            const std::string moduleName = std::string("CKFFSamplerLayoutModule_") + backend + "_" + identifier;
-            const std::string entryNeedle = std::string("{ ") + profile + ", CKFFSamplerLayoutKey_" +
-                identifier + "(), " + moduleName + "() }";
-            TestCheck(generated.find(moduleName) != std::string::npos &&
-                          generated.find(entryNeedle) != std::string::npos,
-                      "Generated table must register every manifest sampler layout backend");
-            ++checkedBackendLayouts;
+    const std::string *sources[] = {&fs, &common, &vs3d, &vsPositionT};
+    const char *retiredMacros[] = {
+        "CKFF_FULL_SPECIALIZED", "CKFF_STATIC_SAMPLER_LAYOUT", "CKFF_VOLUME_SAMPLER_LAYOUT",
+        "CKFF_MIXED_SAMPLER_LAYOUT", "CKFF_VS_INSTANCED", "CKFF_VS_ACTIVE_TEXCOORD_COUNT",
+        "CKFF_FS_ACTIVE_STAGE_COUNT",
+    };
+    for (const std::string *source : sources) {
+        for (const char *macro : retiredMacros) {
+            TestCheck(source->find(macro) == std::string::npos,
+                      "Shader sources must not keep variant-selection macros of the retired shader routes");
         }
     }
-    TestCheck(checkedBackendLayouts > 0,
-              "Sampler layout manifest consistency test must inspect at least one backend layout");
-    TestCheck(CountOccurrences(generated, "static const CKFFSamplerLayoutModuleEntry g_CKFFSamplerLayoutModuleEntries[]") == 1,
-              "Generated table must contain one sampler-layout module entry table");
+    TestCheck(vs3d.find("CKFF_VS_CLIP_DISTANCE") != std::string::npos &&
+                  vsPositionT.find("CKFF_VS_CLIP_DISTANCE") != std::string::npos,
+              "Vertex shaders keep the clip-distance variant switch");
+}
+
+void ShaderCodegenCompilesOneProgramFamily() {
+    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
+    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CMakeLists.txt");
+    const std::string abi = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/generated/CKFFShaderABI.generated.h");
+    TestCheck(!script.empty() && !cmake.empty() && !abi.empty(),
+              "Shader codegen script, CMake list and generated ABI stamp must be readable");
+
+    const char *shaderNames[] = {
+        "\"vs_ff_3d\"", "\"vs_ff_3d_clip\"", "\"vs_ff_positiont\"", "\"vs_ff_positiont_clip\"",
+        "\"fs_ff_stage\"", "\"vs_postprocess\"", "\"fs_postprocess\"",
+    };
+    for (const char *name : shaderNames) {
+        TestCheck(script.find(std::string("\"name\": ") + name) != std::string::npos,
+                  "Shader codegen must compile every shader of the single program family");
+    }
+    TestCheck(script.find("ffp_specialized_variants") == std::string::npos &&
+                  script.find("sampler_layout") == std::string::npos &&
+                  script.find("CKFF_FULL_SPECIALIZED") == std::string::npos &&
+                  script.find("instanced") == std::string::npos &&
+                  script.find("fs_ff_stage_volume") == std::string::npos,
+              "Shader codegen must not generate specialized, sampler-layout, instanced or volume variants");
+    TestCheck(script.find("clean_stale_headers") != std::string::npos,
+              "Shader codegen must remove generated headers of retired variants");
+
+    char version[64];
+    snprintf(version, sizeof(version), "g_CKFFGeneratedShaderABIVersion = %uu;", (unsigned)CKFF_SHADER_ABI_VERSION);
+    char hash[64];
+    snprintf(hash, sizeof(hash), "g_CKFFGeneratedShaderInterfaceHash = 0x%08xu;", (unsigned)CKFF_SHADER_INTERFACE_HASH);
+    TestCheck(abi.find(version) != std::string::npos && abi.find(hash) != std::string::npos,
+              "Generated shader ABI stamp must match CKFFShaderABI.h");
+    char scriptVersion[64];
+    snprintf(scriptVersion, sizeof(scriptVersion), "SHADER_ABI_VERSION = %u\n", (unsigned)CKFF_SHADER_ABI_VERSION);
+    char scriptHash[64];
+    snprintf(scriptHash, sizeof(scriptHash), "SHADER_INTERFACE_HASH = 0x%08X\n", (unsigned)CKFF_SHADER_INTERFACE_HASH);
+    TestCheck(script.find(scriptVersion) != std::string::npos && script.find(scriptHash) != std::string::npos,
+              "Shader codegen ABI stamp constants must match CKFFShaderABI.h");
+
+    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_fog_common.sc") != std::string::npos &&
+                  cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc") != std::string::npos,
+              "Shader generation dependencies must include the shared shader includes");
+    TestCheck(cmake.find(".json") == std::string::npos &&
+                  cmake.find("CKFFSpecializedModuleTable") == std::string::npos &&
+                  cmake.find("CKFFSamplerLayout.h") == std::string::npos,
+              "Translation core build must not reference variant manifests or the module table");
+    TestCheck(cmake.find("DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}") != std::string::npos &&
+                  cmake.find("SOURCES ${CKRE_SHADER_SOURCES}") != std::string::npos,
+              "Shader generation must depend on CKRE_SHADER_SOURCES");
+}
+
+void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
+    CKFFFSStateDesc desc;
+    for (CKDWORD stage = 0; stage < 6; ++stage) {
+        desc.SetStageColorOp(stage, CKRST_TOP_SELECTARG1);
+        desc.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+        desc.SetStageAlphaOp(stage, CKRST_TOP_SELECTARG1);
+        desc.SetStageAlphaArg1(stage, CKRST_TA_TEXTURE);
+    }
+    desc.SetStageSamplerType(0, CKFF_SAMPLER_CUBE);
+    desc.SetStageColorArg1(1, CKRST_TA_CURRENT); // stage 1 does not sample
+    desc.SetStageAlphaArg1(1, CKRST_TA_CURRENT);
+    desc.SetStageSamplerType(1, CKFF_SAMPLER_CUBE);
+    desc.SetStageSamplerType(2, CKFF_SAMPLER_VOLUME);
+    desc.SetStageSamplerType(3, CKFF_SAMPLER_CUBE);
+    desc.SetStageSamplerType(4, CKFF_SAMPLER_2D);
+    desc.SetStageSamplerType(5, CKFF_SAMPLER_VOLUME);
+
+    const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
+    TestCheck(!key.Stages[1].HasTexture && key.Stages[1].SamplerType == CKFF_SAMPLER_2D,
+              "A non-sampling stage must normalize to a 2D sampler type");
+    TestCheck(CKFFSamplerOrdinal(key, 0) == 0 && CKFFSamplerOrdinal(key, 3) == 1,
+              "Cube ordinals must count only earlier sampling cube stages");
+    TestCheck(CKFFSamplerOrdinal(key, 2) == 0 && CKFFSamplerOrdinal(key, 5) == 1,
+              "Volume ordinals must count only earlier sampling volume stages");
+    TestCheck(CKFFSamplerOrdinal(key, 4) == 0,
+              "2D ordinals are not used for slot selection and must not count cube / volume stages");
+    TestCheck(key.SamplerSlotOverflowMask == 0,
+              "Within the fixed sampler budget no stage may overflow");
+    TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_CUBE, CKFFSamplerOrdinal(key, 3)) == 9 &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, CKFFSamplerOrdinal(key, 5)) == 13,
+              "Type ordinals must map onto the cube 8..11 and volume 12..15 slot blocks");
+}
+
+void SamplerSlotOverflowSamplesAsUnbound() {
+    CKFFFSStateDesc desc;
+    for (CKDWORD stage = 0; stage < 6; ++stage) {
+        desc.SetStageColorOp(stage, CKRST_TOP_MODULATE);
+        desc.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+        desc.SetStageColorArg2(stage, CKRST_TA_CURRENT);
+        desc.SetStageAlphaOp(stage, CKRST_TOP_SELECTARG1);
+        desc.SetStageAlphaArg1(stage, CKRST_TA_CURRENT);
+        desc.SetStageSamplerType(stage, CKFF_SAMPLER_CUBE);
+    }
+    desc.SetStageSamplerType(5, CKFF_SAMPLER_VOLUME);
+
+    const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
+    for (CKDWORD stage = 0; stage < 4; ++stage) {
+        TestCheck(key.Stages[stage].HasTexture && key.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE &&
+                      CKFFSamplerOrdinal(key, stage) == stage,
+                  "The first four cube stages must keep their cube sampler");
+    }
+    TestCheck(!key.Stages[4].HasTexture && key.Stages[4].SamplerType == CKFF_SAMPLER_2D,
+              "The fifth cube stage must sample as unbound (spec 5.3 fixed sampler budget)");
+    TestCheck(key.Stages[5].HasTexture && key.Stages[5].SamplerType == CKFF_SAMPLER_VOLUME &&
+                  CKFFSamplerOrdinal(key, 5) == 0,
+              "Volume stages keep their own four-slot budget");
+    TestCheck(key.SamplerSlotOverflowMask == (1u << 4),
+              "Overflowing stages must be reported in the shader key for diagnostics");
+    TestCheck(key.LastActiveTextureStage == 5,
+              "Sampler slot overflow must not truncate the active stage chain");
+
+    // The stage params mirror the fallback: colorParams.w (has texture) drops to 0.
+    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
+    CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {1, 2, 3, 4, 5, 6, 0, 0};
+    CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
+    for (int stage = 0; stage < 6; ++stage) {
+        stages[stage][CKRST_TSS_OP] = CKRST_TOP_MODULATE;
+        stages[stage][CKRST_TSS_ARG1] = CKRST_TA_TEXTURE;
+        stages[stage][CKRST_TSS_ARG2] = CKRST_TA_CURRENT;
+        textureFlags[stage] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP;
+    }
+    CKFFStageParamsUniform params;
+    CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params, NULL, key.SamplerSlotOverflowMask);
+    TestCheck(params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COLOR)][3] == 1.0f &&
+                  params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COLOR)][3] == 0.0f &&
+                  params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COLOR)][3] == 1.0f,
+              "Stage params must clear the has-texture flag of overflowing stages only");
 }
 
 void TextureStageCompareFuncStaysOutOfSamplerDesc() {
@@ -1337,8 +1162,6 @@ int main() {
               &MirrorOnceSpecializationPacksFirstFourStages);
     tests.Run("Last active texture stage specialization round trips",
               &LastActiveTextureStageSpecializationRoundTrips);
-    tests.Run("Full-specialized rejects runtime-only texture stages before lookup",
-              &FullSpecializedRejectsRuntimeOnlyTextureStagesBeforeLookup);
     tests.Run("MIRRORONCE shader source applies only to 2D and volume",
               &MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume);
     tests.Run("Texture combiner op formulas stay DXVK compatible",
@@ -1367,10 +1190,6 @@ int main() {
               &TextureCombinerTempInitializesAlphaToZero);
     tests.Run("Depth texture compare uses sampler compare ordering",
               &DepthTextureCompareUsesSamplerCompareOrdering);
-    tests.Run("Runtime 3D vertex shader keeps additional texcoords active",
-              &Runtime3DVertexShaderKeepsAdditionalTexcoordsActive);
-    tests.Run("Runtime POSITIONT vertex shader keeps additional texcoords active",
-              &RuntimePositionTVertexShaderKeepsAdditionalTexcoordsActive);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
     tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
@@ -1385,16 +1204,14 @@ int main() {
               &VolumeSamplerAndCompareFuncPackIntoSpecialization);
     tests.Run("Volume sampler mask can be derived from shader key",
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
-    tests.Run("Sampler layout key normalizes inactive and depth stages",
-              &SamplerLayoutKeyNormalizesInactiveAndDepthStages);
-    tests.Run("Sampler layout miss diagnostics are actionable",
-              &SamplerLayoutMissDiagnosticsAreActionable);
-    tests.Run("Fragment shader declares static sampler layout without full specialization",
-              &FragmentShaderDeclaresStaticSamplerLayoutWithoutFullSpecialization);
-    tests.Run("CMake shader sources include sampler layout manifest",
-              &CMakeShaderSourcesIncludeSamplerLayoutManifest);
-    tests.Run("Sampler layout codegen uses manifest instead of default enumeration",
-              &SamplerLayoutCodegenUsesManifestInsteadOfDefaultEnumeration);
+    tests.Run("Fragment shader declares the fixed sampler layout",
+              &FragmentShaderDeclaresTheFixedSamplerLayout);
+    tests.Run("Shader codegen compiles one program family",
+              &ShaderCodegenCompilesOneProgramFamily);
+    tests.Run("Sampler ordinal counts only sampling stages of the same type",
+              &SamplerOrdinalCountsOnlySamplingStagesOfTheSameType);
+    tests.Run("Sampler slot overflow samples as unbound",
+              &SamplerSlotOverflowSamplesAsUnbound);
     tests.Run("Texture stage compare func stays out of sampler desc",
               &TextureStageCompareFuncStaysOutOfSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",

@@ -49,85 +49,6 @@ static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
     return false;
 }
 
-static bool CKFFTextureArgUsesStageConstant(CKDWORD arg)
-{
-    return CKFFBaseTextureArg(arg) == CKRST_TA_CONSTANT;
-}
-
-static bool CKFFShaderStageUsesStageConstant(const CKFFShaderKeyFSStage &stage)
-{
-    if (CKFFTextureArgUsesStageConstant(stage.ColorArg0))
-        return true;
-    if (CKFFTextureArgUsesStageConstant(stage.ColorArg1))
-        return true;
-    if (CKFFTextureArgUsesStageConstant(stage.ColorArg2))
-        return true;
-    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg0))
-        return true;
-    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg1))
-        return true;
-    if (CKFFTextureArgUsesStageConstant(stage.AlphaArg2))
-        return true;
-    return false;
-}
-
-static bool CKFFProgramUsesStageConstant(const CKFFShaderKey &shaderKey)
-{
-    const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
-    for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
-        if (CKFFShaderStageUsesStageConstant(s))
-            return true;
-    }
-    return false;
-}
-
-static bool CKFFProgramUsesRenderTargetFlip(const CKFFStateStore &state,
-                                            CKDWORD shaderTargetFlags,
-                                            CKDWORD activeTextureCount)
-{
-    if ((shaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) == 0)
-        return false;
-    if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
-        activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
-        if (state.TextureHandles[stage] != 0 &&
-            (state.TextureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
-            (state.TextureFlags[stage] & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool CKFFProgramUsesViewSpaceUniforms(const CKFFShaderKey &shaderKey,
-                                             CKBOOL fullSpecialized)
-{
-    if (shaderKey.VS.GetHasPositionT())
-        return false;
-
-    if (!fullSpecialized)
-        return true;
-
-    const uint64_t bits = shaderKey.VS.Bits;
-    if (CKFFShaderKeyVertexBlendMode(shaderKey.VS) != CKFF_VERTEX_BLEND_DISABLED)
-        return true;
-    if ((bits & (1ull << 13)) != 0)
-        return true;
-    if ((bits & (1ull << 24)) != 0)
-        return true;
-
-    if (shaderKey.FS.VertexFogMode != 0)
-        return true;
-
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if ((shaderKey.VS.TexGen[stage] & 7u) != 0)
-            return true;
-    }
-
-    return false;
-}
-
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
                                 CKRasterizerEncoder *encoder,
                                 CKBOOL emitStatic,
@@ -154,11 +75,8 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->ShaderKey = programContext->ShaderKey;
     context->Specialization = programContext->Specialization;
     context->ActiveTextureCount = activeTextureCount;
-    context->FullSpecialized = programContext->FullSpecialized;
     context->PositionT = context->ShaderKey.VS.GetHasPositionT() ? TRUE : FALSE;
-    context->LightingEnabled = (!context->PositionT &&
-        (!context->FullSpecialized || ((context->ShaderKey.VS.Bits & (1ull << 13)) != 0)))
-        ? TRUE : FALSE;
+    context->LightingEnabled = context->PositionT ? FALSE : TRUE;
     context->FogEnabled = context->ShaderKey.FS.FogEnable ? TRUE : FALSE;
     context->VertexFogMode = context->FogEnabled ? context->ShaderKey.FS.VertexFogMode : 0;
     context->PixelFogMode = context->FogEnabled ? context->ShaderKey.FS.PixelFogMode : 0;
@@ -217,8 +135,7 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformSink *sink = context->Uniforms;
-    const bool viewSpaceUniforms = CKFFProgramUsesViewSpaceUniforms(context->ShaderKey,
-                                                                    context->FullSpecialized);
+    const bool viewSpaceUniforms = true;
     const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
     VxMatrix modelView;
     VxMatrix normalMatrix;
@@ -291,40 +208,37 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         Emit(sink, u.u_viewport, m_State.Viewport, 1, 1, FALSE);
 
     const CKDWORD targetFlags = m_ShaderCache.GetTargetFlags();
-    if (!context->FullSpecialized || CKFFProgramUsesStageConstant(context->ShaderKey) ||
-        CKFFProgramUsesBumpEnv(context->ShaderKey) ||
-        CKFFProgramUsesRenderTargetFlip(m_State, targetFlags, context->ActiveTextureCount)) {
-        CKFFStageParamsUniform stageParams;
-        CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
-                            context->ActiveTextureCount, targetFlags, stageParams,
-                            m_State.StageStateSetMasks);
-        if ((context->ShaderKey.VS.Bits & (1ull << 40)) != 0) {
-            for (CKDWORD stage = 0;
-                 stage < context->ActiveTextureCount &&
-                 stage < CKFF_MAX_TEXTURE_STAGES;
-                 ++stage) {
-                float *colorExtra = stageParams.Values[
-                    CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-                colorExtra[1] = 0.0f;
-                const CKDWORD samplingFlags =
-                    (CKDWORD)colorExtra[2] &
-                    (CKFF_TTF_MIRRORONCE_MASK |
-                     CKFF_TTF_RENDER_TARGET_FLIP_V |
-                     CKFF_TTF_BUMP_UNORM);
-                colorExtra[2] = (float)samplingFlags;
-            }
+    CKFFStageParamsUniform stageParams;
+    CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
+                        context->ActiveTextureCount, targetFlags, stageParams,
+                        m_State.StageStateSetMasks,
+                        context->ShaderKey.FS.SamplerSlotOverflowMask);
+    if (context->ShaderKey.VS.GetPointSprite()) {
+        // Expanded point sprites carry their own texcoords: bypass texgen,
+        // texture matrices and projection, keep only the sampling flags.
+        for (CKDWORD stage = 0;
+             stage < context->ActiveTextureCount &&
+             stage < CKFF_MAX_TEXTURE_STAGES;
+             ++stage) {
+            float *colorExtra = stageParams.Values[
+                CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
+            colorExtra[1] = 0.0f;
+            const CKDWORD samplingFlags =
+                (CKDWORD)colorExtra[2] &
+                (CKFF_TTF_MIRRORONCE_MASK |
+                 CKFF_TTF_RENDER_TARGET_FLIP_V |
+                 CKFF_TTF_BUMP_UNORM);
+            colorExtra[2] = (float)samplingFlags;
         }
-        Emit(sink, u.u_stageParams, stageParams.Values,
-             CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
     }
+    Emit(sink, u.u_stageParams, stageParams.Values,
+         CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
 
-    if (!context->FullSpecialized) {
-        CKFFSpecUniform ffSpec;
-        CKFFPackSpecializationDwords(context->Specialization, ffSpec);
-        Emit(sink, u.u_ffSpec, ffSpec.Values,
-             CKFFSpecializationInfo::MaxSpecDwords,
-             CKFFSpecializationInfo::MaxSpecDwords, FALSE);
-    }
+    CKFFSpecUniform ffSpec;
+    CKFFPackSpecializationDwords(context->Specialization, ffSpec);
+    Emit(sink, u.u_ffSpec, ffSpec.Values,
+         CKFFSpecializationInfo::MaxSpecDwords,
+         CKFFSpecializationInfo::MaxSpecDwords, FALSE);
 }
 
 void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext *context)
@@ -336,15 +250,13 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
     const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFClipPlaneUniform clip;
     const CKDWORD clipMask = m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
-    if (!context->FullSpecialized || ((context->ShaderKey.VS.Bits & (1ull << 34)) != 0)) {
-        if (clipMask != 0) {
-            CKFFPackClipPlaneUniforms(m_State.UserClipPlanes, clipMask, clip);
-            Emit(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
-        } else {
-            memset(&clip, 0, sizeof(clip));
-        }
-        Emit(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
+    if (clipMask != 0) {
+        CKFFPackClipPlaneUniforms(m_State.UserClipPlanes, clipMask, clip);
+        Emit(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
+    } else {
+        memset(&clip, 0, sizeof(clip));
     }
+    Emit(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
 }
 
 void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,

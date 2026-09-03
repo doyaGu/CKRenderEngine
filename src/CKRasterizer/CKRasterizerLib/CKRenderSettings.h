@@ -14,8 +14,7 @@ enum class CKRenderSettingsSection {
     DebugFrameCostStats,
     DebugFFPStats,
     DebugFFPLog,
-    DebugMeshLog,
-    FFP
+    DebugMeshLog
 };
 
 bool CKRenderSettingsParseBool(const char *value, bool fallback);
@@ -97,10 +96,6 @@ inline CKRenderSettingsView CKRenderFFPLogSettings() {
 
 inline CKRenderSettingsView CKRenderMeshLogSettings() {
     return CKRenderSettings(CKRenderSettingsSection::DebugMeshLog);
-}
-
-inline CKRenderSettingsView CKRenderFFPSettings() {
-    return CKRenderSettings(CKRenderSettingsSection::FFP);
 }
 
 struct CKRenderFrameLogConfig {

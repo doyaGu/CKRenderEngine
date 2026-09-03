@@ -1,5 +1,6 @@
 #include "CKFFShaderKey.h"
 
+#include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
 #include "CKRasterizerDeviceEnums.h"
 
@@ -38,7 +39,7 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 }
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
-    : Stages{}, LastActiveTextureStage(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
+    : Stages{}, LastActiveTextureStage(0), SamplerSlotOverflowMask(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
       GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false),
       FlatShade(false) {}
 
@@ -182,6 +183,8 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     CKDWORD activeCount = 0;
     CKDWORD previousColorOp = 0;
     CKDWORD previousAlphaOp = 0;
+    CKDWORD cubeStages = 0;
+    CKDWORD volumeStages = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         CKFFShaderKeyFSStage &dst = key.Stages[stage];
         dst.ColorOp = desc.GetStageColorOp(stage);
@@ -204,6 +207,18 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.HasTexture = CKFFShaderKeyStageUsesTexture(
                              dst, previousColorOp, previousAlphaOp) &&
                          ((textureBoundMask & (1u << stage)) != 0);
+        if (dst.HasTexture &&
+            (dst.SamplerType == CKFF_SAMPLER_CUBE || dst.SamplerType == CKFF_SAMPLER_VOLUME)) {
+            // Fixed sampler layout: four cube and four volume samplers per draw.
+            // A stage beyond that samples as unbound (spec 5.3) and is reported.
+            CKDWORD &typeStages = dst.SamplerType == CKFF_SAMPLER_CUBE ? cubeStages : volumeStages;
+            if (typeStages >= CKFFSamplerTypeSlotCount(dst.SamplerType)) {
+                dst.HasTexture = false;
+                key.SamplerSlotOverflowMask |= 1u << stage;
+            } else {
+                ++typeStages;
+            }
+        }
         if (!dst.HasTexture) {
             dst.ProjectedSampler = false;
             dst.SamplerType = CKFF_SAMPLER_2D;
@@ -220,6 +235,18 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         key.LastActiveTextureStage = activeCount - 1;
 
     return key;
+}
+
+CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage) {
+    if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES)
+        return 0;
+    const CKDWORD samplerType = key.Stages[stage].SamplerType;
+    CKDWORD ordinal = 0;
+    for (CKDWORD previous = 0; previous < stage; ++previous) {
+        if (key.Stages[previous].HasTexture && key.Stages[previous].SamplerType == samplerType)
+            ++ordinal;
+    }
+    return ordinal;
 }
 
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask) {

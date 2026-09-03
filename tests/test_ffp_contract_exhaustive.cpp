@@ -1,7 +1,6 @@
 #include "FFPCoverageDomain.h"
 #include "TestTriangleMultiset.h"
 
-#include "CKFFSamplerLayout.h"
 #include "CKFFSpecializationInfo.h"
 
 #include <stdarg.h>

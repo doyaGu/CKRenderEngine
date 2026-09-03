@@ -4,7 +4,8 @@
 #   * fixed-function pipeline translation (CKFF*, CKFixedFunctionPipeline,
 #     draw-state / vertex-layout caches, transient geometry, postprocess pass)
 #   * render settings / debug logger / frame-cost stats it depends on
-#   * bgfx fixed-function shaders (shaders/, generated headers checked in)
+#   * bgfx fixed-function shaders (shaders/, generated headers checked in):
+#     one program family (vs_ff_3d[_clip], vs_ff_positiont[_clip], fs_ff_stage)
 set(CKRASTERIZER_LIB_SOURCES
         CKRasterizerDeviceLibrary.cpp
         CKRasterizerDeviceDriver.cpp
@@ -25,7 +26,6 @@ set(CKRASTERIZER_LIB_SOURCES
         CKFFUniformState.cpp
         CKFFShaderKey.cpp
         CKFFSpecializationInfo.cpp
-        CKFFSpecializedModuleTable.cpp
         CKFFShaderCache.cpp
         CKDrawAnnotation.cpp
         CKDrawAnnotationParser.cpp
@@ -60,9 +60,7 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFShaderABI.h
         CKFFUniformState.h
         CKFFShaderKey.h
-        CKFFSamplerLayout.h
         CKFFSpecializationInfo.h
-        CKFFSpecializedModuleTable.h
         CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
@@ -148,8 +146,6 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_postprocess.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_fog_common.sc
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_specialized_variants.json
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ffp_sampler_layouts.json
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 

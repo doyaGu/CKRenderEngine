@@ -2,7 +2,6 @@
 #define CKFFDRAWPROBES_H
 
 #include "CKFFConstants.h"
-#include "CKFFShaderCache.h"
 #include "CKRasterizerDeviceEnums.h"
 #include "CKRasterizerDeviceTypes.h"
 #include "CKRenderConfig.h"
@@ -17,9 +16,7 @@ struct CKFFFrameStats {
     CKDWORD SubmittedDraws;
     CKDWORD PrepareFailures;
     CKDWORD ProgramMisses;
-    CKDWORD ProgramBindingCacheHits;
-    CKDWORD ProgramBindingCacheMisses;
-    CKDWORD ProgramBindingCacheEvictions;
+    CKDWORD SamplerSlotOverflows;
     CKDWORD UniformSets;
     CKDWORD UniformVec4s;
     CKDWORD UniformHandleSets[64];
@@ -98,6 +95,7 @@ public:
     void OnSubmittedDraw() { if (StatsEnabled()) ++Stats.SubmittedDraws; }
     void OnPrepareFailure() { if (StatsEnabled()) ++Stats.PrepareFailures; }
     void OnProgramMiss() { if (StatsEnabled()) ++Stats.ProgramMisses; }
+    void OnSamplerSlotOverflow() { if (StatsEnabled()) ++Stats.SamplerSlotOverflows; }
     void OnTransformSet() { if (StatsEnabled()) ++Stats.TransformSets; }
     void OnVertexLayoutSet() { if (StatsEnabled()) ++Stats.VertexLayoutSets; }
     void OnVertexBufferSet() { if (StatsEnabled()) ++Stats.VertexBufferSets; }
@@ -110,14 +108,12 @@ public:
     void OnTextureSet(CKDWORD activeTextureCount, const CKDWORD *textures);
     void OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout);
     void OnUniform(const CKFFUniformHandles &uniforms, CKDWORD uniform, CKDWORD count);
-    void LogAndReset(CKDrawStateCache &drawStateCache,
-                     const CKFFShaderCache &shaderCache);
+    void LogAndReset(CKDrawStateCache &drawStateCache);
 
     CKFFFrameStats Stats;
     CKFFDiagnosticConfig Config;
 
 private:
-    CKFFShaderCacheStats m_PreviousShaderCacheStats;
 };
 
 #define CKFF_SCOPE_TIME(probes, field) \

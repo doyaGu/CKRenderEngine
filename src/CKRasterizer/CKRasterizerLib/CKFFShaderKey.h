@@ -19,13 +19,8 @@ struct CKFFShaderKeyVS {
     explicit CKFFShaderKeyVS(const CKFFVSStateDesc &desc);
 
     bool GetHasPositionT() const { return (Bits & (1ull << 12)) != 0; }
-    bool GetInstanced() const { return (Bits & (1ull << 40)) != 0; }
-    void SetInstanced(bool v) {
-        if (v)
-            Bits |= (1ull << 40);
-        else
-            Bits &= ~(1ull << 40);
-    }
+    bool GetVertexClipping() const { return (Bits & (1ull << 34)) != 0; }
+    bool GetPointSprite() const { return (Bits & (1ull << 40)) != 0; }
     bool operator==(const CKFFShaderKeyVS &other) const;
     bool operator!=(const CKFFShaderKeyVS &other) const { return !(*this == other); }
 };
@@ -50,6 +45,10 @@ struct CKFFShaderKeyFSStage {
 struct CKFFShaderKeyFS {
     CKFFShaderKeyFSStage Stages[CKFF_STATE_DESC_TEXTURE_STAGES];
     CKDWORD LastActiveTextureStage;
+    // Stages whose cube / volume texture did not fit the fixed sampler layout
+    // (more than CKFF_CUBE_SAMPLER_COUNT / CKFF_VOLUME_SAMPLER_COUNT stages of
+    // one type). They sample as unbound; derived, not part of key identity.
+    CKDWORD SamplerSlotOverflowMask;
     CKDWORD AlphaFunc;
     CKDWORD VertexFogMode;
     CKDWORD PixelFogMode;
@@ -85,6 +84,8 @@ bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
                                    CKDWORD previousColorOp,
                                    CKDWORD previousAlphaOp);
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask);
+// Ordinal of a sampling stage among the stages of the same sampler type.
+CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);
 

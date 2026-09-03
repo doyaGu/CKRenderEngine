@@ -18,81 +18,20 @@ struct CKFFStageParams
     vec4 Constant;
 };
 
-#if defined(CKFF_FULL_SPECIALIZED)
-#ifndef CKFF_SPEC_DWORD0
-#define CKFF_SPEC_DWORD0 0
-#endif
-#ifndef CKFF_SPEC_DWORD1
-#define CKFF_SPEC_DWORD1 0
-#endif
-#ifndef CKFF_SPEC_DWORD2
-#define CKFF_SPEC_DWORD2 0
-#endif
-#ifndef CKFF_SPEC_DWORD3
-#define CKFF_SPEC_DWORD3 0
-#endif
-#ifndef CKFF_SPEC_DWORD4
-#define CKFF_SPEC_DWORD4 0
-#endif
-#ifndef CKFF_SPEC_DWORD5
-#define CKFF_SPEC_DWORD5 0
-#endif
-#ifndef CKFF_SPEC_DWORD6
-#define CKFF_SPEC_DWORD6 0
-#endif
-#ifndef CKFF_SPEC_DWORD7
-#define CKFF_SPEC_DWORD7 0
-#endif
-#ifndef CKFF_SPEC_DWORD8
-#define CKFF_SPEC_DWORD8 0
-#endif
-#ifndef CKFF_SPEC_DWORD9
-#define CKFF_SPEC_DWORD9 0
-#endif
-#ifndef CKFF_FS_STAGE0_HAS_TEXTURE
-#define CKFF_FS_STAGE0_HAS_TEXTURE 0
-#endif
-#ifndef CKFF_FS_STAGE1_HAS_TEXTURE
-#define CKFF_FS_STAGE1_HAS_TEXTURE 0
-#endif
-#ifndef CKFF_FS_STAGE2_HAS_TEXTURE
-#define CKFF_FS_STAGE2_HAS_TEXTURE 0
-#endif
-#ifndef CKFF_FS_STAGE3_HAS_TEXTURE
-#define CKFF_FS_STAGE3_HAS_TEXTURE 0
-#endif
-#endif
-
+// Specialization data is uploaded per draw as u_ffSpec: each dword is split
+// into four bytes carried as small integer floats (exact in fp32).
 bool ckffSpecIsOptimized()
 {
-#if defined(CKFF_FULL_SPECIALIZED)
-    return true;
-#else
     return int(u_ffSpec[0].x) != 0;
-#endif
 }
 
 uint ckffSpecDword(int index)
 {
-#if defined(CKFF_FULL_SPECIALIZED)
-    if (index == 0) return uint(CKFF_SPEC_DWORD0);
-    if (index == 1) return uint(CKFF_SPEC_DWORD1);
-    if (index == 2) return uint(CKFF_SPEC_DWORD2);
-    if (index == 3) return uint(CKFF_SPEC_DWORD3);
-    if (index == 4) return uint(CKFF_SPEC_DWORD4);
-    if (index == 5) return uint(CKFF_SPEC_DWORD5);
-    if (index == 6) return uint(CKFF_SPEC_DWORD6);
-    if (index == 7) return uint(CKFF_SPEC_DWORD7);
-    if (index == 8) return uint(CKFF_SPEC_DWORD8);
-    if (index == 9) return uint(CKFF_SPEC_DWORD9);
-    return uint(0);
-#else
     vec4 b = u_ffSpec[index];
     return (uint(b.x) & uint(255)) |
            ((uint(b.y) & uint(255)) << uint(8)) |
            ((uint(b.z) & uint(255)) << uint(16)) |
            ((uint(b.w) & uint(255)) << uint(24));
-#endif
 }
 
 int ckffSpecBits(uint word, int offset, int bits)
@@ -119,19 +58,6 @@ bool ckffSpecGlobalSpecularEnabled()
 int ckffSpecProjectedSamplerMask()
 {
     return ckffSpecBits(ckffSpecDword(5), 0, 4);
-}
-
-bool ckffSpecStageHasTexture(int stage)
-{
-#if defined(CKFF_FULL_SPECIALIZED)
-    if (stage == 0) return CKFF_FS_STAGE0_HAS_TEXTURE != 0;
-    if (stage == 1) return CKFF_FS_STAGE1_HAS_TEXTURE != 0;
-    if (stage == 2) return CKFF_FS_STAGE2_HAS_TEXTURE != 0;
-    if (stage == 3) return CKFF_FS_STAGE3_HAS_TEXTURE != 0;
-    return false;
-#else
-    return false;
-#endif
 }
 
 bool ckffSpecAlphaTestEnabled()
@@ -188,24 +114,6 @@ int ckffSpecMirrorOnceMask(int stage)
 CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
 {
     CKFFStageParams params;
-#if defined(CKFF_FULL_SPECIALIZED)
-    params.ColorOp = 0;
-    params.ColorArg0 = 0;
-    params.ColorArg1 = 0;
-    params.ColorArg2 = 0;
-    params.AlphaOp = 0;
-    params.AlphaArg0 = 0;
-    params.AlphaArg1 = 0;
-    params.AlphaArg2 = 0;
-    params.ResultArg = 1;
-    params.TexcoordTransformFlags = int(colorExtra.z) & 0x3000;
-    params.MirrorOnceMask = ckffSpecMirrorOnceMask(stage);
-    params.SamplerType = ckffSpecSamplerType(stage);
-    params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
-    params.BumpUnorm = (int(colorExtra.z) & 0x2000) != 0;
-    params.HasTexture = ckffSpecStageHasTexture(stage);
-    params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
-#else
     params.ColorOp = int(colorParams.x);
     params.ColorArg0 = int(colorExtra.x);
     params.ColorArg1 = int(colorParams.y);
@@ -222,7 +130,6 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParam
     params.BumpUnorm = (int(colorExtra.z) & 0x2000) != 0;
     params.HasTexture = colorParams.w > 0.5;
     params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
-#endif
 
     if (stage < 4 && ckffSpecIsOptimized()) {
         uint word = ckffSpecDword(6 + stage);

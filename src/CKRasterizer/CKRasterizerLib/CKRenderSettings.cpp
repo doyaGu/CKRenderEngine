@@ -96,8 +96,6 @@ static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) 
         return "Debug.FFPLog";
     case CKRenderSettingsSection::DebugMeshLog:
         return "Debug.MeshLog";
-    case CKRenderSettingsSection::FFP:
-        return "FFP";
     default:
         return "";
     }

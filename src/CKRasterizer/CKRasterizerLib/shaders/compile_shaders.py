@@ -1,52 +1,39 @@
 #!/usr/bin/env python3
-"""Compile CK2_3D fixed-function shaders with bgfx shaderc.
+"""Compile the CK2_3D fixed-function shaders with bgfx shaderc.
 
-The generated headers contain bgfx shader binary blobs for each supported
-renderer backend. Runtime code selects the matching set after bgfx initializes.
+One program family serves every draw: two vertex shaders (3D, POSITIONT), each
+with a clip-distance variant, one fragment uber shader with the fixed sampler
+layout, and the postprocess pair. The generated headers hold the bgfx binary
+blob per renderer backend; the runtime selects the set for its shader profile.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-SHADER_ABI_VERSION = 1
-SHADER_INTERFACE_HASH = 0x6F7E2A31
+# Bump both whenever the C++ uniform / sampler ABI changes; the runtime refuses
+# generated blobs whose stamp does not match CKFFShaderABI.h.
+SHADER_ABI_VERSION = 2
+SHADER_INTERFACE_HASH = 0x4C21B7E5
 
 
 SHADERS = [
     {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d"},
     {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_clip",
      "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
-    {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_instanced",
-     "defines": ["CKFF_VS_INSTANCED=1", "CKFF_VS_ACTIVE_TEXCOORD_COUNT=4"]},
-    {"source": "vs_ff_3d.sc", "stage": "vertex", "name": "vs_ff_3d_instanced_clip",
-     "defines": ["CKFF_VS_INSTANCED=1", "CKFF_VS_CLIP_DISTANCE=1",
-                 "CKFF_VS_ACTIVE_TEXCOORD_COUNT=4"]},
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont"},
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont_clip",
      "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage"},
-    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_volume",
-     "defines": ["CKFF_VOLUME_SAMPLER_LAYOUT=1"]},
     {"source": "vs_postprocess.sc", "stage": "vertex", "name": "vs_postprocess"},
     {"source": "fs_postprocess.sc", "stage": "fragment", "name": "fs_postprocess"},
 ]
-
-
-def shader_by_name(name: str) -> dict[str, object]:
-    for shader in SHADERS:
-        if shader["name"] == name:
-            return shader
-    raise KeyError(name)
 
 BACKENDS = [
     {"name": "dx11", "platform": "windows", "profile": "s_5_0"},
@@ -57,18 +44,7 @@ BACKENDS = [
     {"name": "metal", "platform": "osx", "profile": "metal"},
 ]
 
-PROFILE_ENUMS = {
-    "dx11": "CKRST_SHADER_PROFILE_DX11",
-    "dx12": "CKRST_SHADER_PROFILE_DX12",
-    "spirv": "CKRST_SHADER_PROFILE_SPIRV",
-    "glsl": "CKRST_SHADER_PROFILE_GLSL",
-    "essl": "CKRST_SHADER_PROFILE_ESSL",
-    "metal": "CKRST_SHADER_PROFILE_MSL",
-}
-
-FFP_VARIANT_MANIFEST = "ffp_specialized_variants.json"
-SAMPLER_LAYOUT_MANIFEST = "ffp_sampler_layouts.json"
-SAMPLER_LAYOUT_SIZE_LIMIT_BYTES = 2 * 1024 * 1024
+ABI_HEADER = "CKFFShaderABI.generated.h"
 
 
 def _exe_name(name: str) -> str:
@@ -115,13 +91,8 @@ def include_dirs(script_dir: Path) -> list[Path]:
     ]
 
 
-def varying_def_for_backend(script_dir: Path, backend: dict[str, str]) -> Path:
-    return script_dir / "varying.def.sc"
-
-
-def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
-                backend: dict[str, str], output: Path,
-                defines: list[str] | None = None) -> None:
+def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, object],
+                backend: dict[str, str], output: Path) -> None:
     cmd = [
         str(shaderc),
         "-f", str(script_dir / shader["source"]),
@@ -129,9 +100,9 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         "--type", shader["stage"],
         "--platform", backend["platform"],
         "-p", backend["profile"],
-        "--varyingdef", str(varying_def_for_backend(script_dir, backend)),
+        "--varyingdef", str(script_dir / "varying.def.sc"),
     ]
-    compile_defines = list(defines or [])
+    compile_defines = list(shader.get("defines") or [])
     if backend["name"] in ("glsl", "essl"):
         compile_defines.append("CKFF_NDC_MINUS_ONE_TO_ONE=1")
     if compile_defines:
@@ -151,336 +122,6 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, str],
         raise RuntimeError("shaderc failed:\n" + " ".join(cmd) + "\n" + result.stdout)
     if result.stdout.strip():
         print(result.stdout.strip())
-
-
-def ffp_stage_arg_base(arg: int) -> int:
-    return arg & ~(0x10 | 0x20)
-
-
-def ffp_stage_uses_arg(stages: list[dict[str, object]], base_arg: int) -> bool:
-    for stage in stages:
-        for field in ("colorArg0", "colorArg1", "colorArg2", "alphaArg0", "alphaArg1", "alphaArg2"):
-            if ffp_stage_arg_base(int(stage[field])) == base_arg:
-                return True
-    return False
-
-
-def ffp_stage_args_mask(op: int) -> int:
-    if op == 1:
-        return 0
-    if op == 2 or op == 17:
-        return 0b010
-    if op == 3:
-        return 0b100
-    if op == 25 or op == 26:
-        return 0b111
-    return 0b110
-
-
-def ffp_op_uses_texture(stage: dict[str, object], op_field: str, arg_prefix: str) -> bool:
-    mask = ffp_stage_args_mask(int(stage[op_field]))
-    return (
-        ((mask & 0b001) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg0"])) == 2) or
-        ((mask & 0b010) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg1"])) == 2) or
-        ((mask & 0b100) != 0 and ffp_stage_arg_base(int(stage[f"{arg_prefix}Arg2"])) == 2)
-    )
-
-
-def ffp_stage_uses_texture(stage: dict[str, object]) -> bool:
-    return ffp_op_uses_texture(stage, "colorOp", "color") or ffp_op_uses_texture(stage, "alphaOp", "alpha")
-
-
-def ffp_specialized_shader_defines(spec_dwords: list[int], key: dict[str, object]) -> list[str]:
-    if len(spec_dwords) != 10:
-        raise ValueError("FFP specialized shader payload must contain exactly 10 dwords")
-
-    stages = key["stages"]
-    last_active_stage = int(key["lastActiveTextureStage"])
-    active_stages = stages[:last_active_stage + 1]
-    uses_bump_env = any(int(stage["colorOp"]) in (22, 23) for stage in active_stages)
-    uses_texfactor = ffp_stage_uses_arg(active_stages, 3) or any(
-        int(stage["colorOp"]) == 14 or int(stage["alphaOp"]) == 14
-        for stage in active_stages
-    )
-    defines = [
-        "CKFF_FULL_SPECIALIZED=1",
-        f"CKFF_FS_ACTIVE_STAGE_COUNT={((spec_dwords[4] >> 16) & 7) + 1}",
-        f"CKFF_FS_USES_BUMP_ENV={1 if uses_bump_env else 0}",
-        f"CKFF_FS_USES_TEXFACTOR={1 if uses_texfactor else 0}",
-    ]
-    for index, stage in enumerate(stages[:4]):
-        has_texture = index <= last_active_stage and bool(stage["hasTexture"])
-        defines.append(f"CKFF_FS_STAGE{index}_HAS_TEXTURE={1 if has_texture else 0}")
-    for index, stage in enumerate(stages):
-        defines.append(f"CKFF_FS_STAGE{index}_SAMPLER_TYPE={int(stage['samplerType']) & 3}")
-    for index, dword in enumerate(spec_dwords):
-        if not isinstance(dword, int) or dword < 0 or dword > 0xffffffff:
-            raise ValueError(f"FFP specialization dword {index} must be a uint32")
-        defines.append(f"CKFF_SPEC_DWORD{index}=0x{dword:08x}u")
-    return defines
-
-
-def ffp_specialized_vs_defines(variant: dict[str, object]) -> list[str]:
-    key = variant["key"]
-    vs_bits = key["vsBits"]
-    defines = [
-        "CKFF_FULL_SPECIALIZED=1",
-        f"CKFF_VS_CLIP_DISTANCE={(vs_bits >> 34) & 1}",
-        f"CKFF_VS_BITS={vs_bits & 0xffffffff}",
-        f"CKFF_VS_DIFFUSE_SOURCE={(vs_bits >> 25) & 3}",
-        f"CKFF_VS_AMBIENT_SOURCE={(vs_bits >> 27) & 3}",
-        f"CKFF_VS_SPECULAR_SOURCE={(vs_bits >> 29) & 3}",
-        f"CKFF_VS_EMISSIVE_SOURCE={(vs_bits >> 31) & 3}",
-        f"CKFF_VS_FOG_MODE={(vs_bits >> 21) & 3}",
-        f"CKFF_VS_VERTEX_BLEND_MODE={(vs_bits >> 35) & 3}",
-        f"CKFF_VS_VERTEX_BLEND_INDEXED={(vs_bits >> 37) & 1}",
-        f"CKFF_VS_VERTEX_BLEND_COUNT={(vs_bits >> 38) & 3}",
-        f"CKFF_VS_INSTANCED={(vs_bits >> 40) & 1}",
-        f"CKFF_VS_ACTIVE_TEXCOORD_COUNT={int(key['lastActiveTextureStage']) + 1}",
-    ]
-    for index, value in enumerate(key["vsTexGen"]):
-        defines.append(f"CKFF_VS_TEXGEN{index}={value}")
-    for index, value in enumerate(key["vsTexCoordIndex"]):
-        defines.append(f"CKFF_VS_TEXCOORD{index}={value}")
-    for index, value in enumerate(key["vsTexTransformFlags"]):
-        defines.append(f"CKFF_VS_TEXFLAGS{index}={value}")
-    defines.append(f"CKFF_VS_TEXCOORD_DECL_MASK={key['vsTexcoordDeclMask']}")
-    return defines
-
-
-def sanitize_identifier(value: str) -> str:
-    ident = re.sub(r"[^0-9A-Za-z_]", "_", value)
-    if not ident or ident[0].isdigit():
-        ident = "variant_" + ident
-    return ident
-
-
-def specialization_identifier(spec_dwords: list[int], key: dict[str, object] | None = None) -> str:
-    payload_obj = {"specDwords": spec_dwords, "clipEnable": False}
-    payload = json.dumps(payload_obj, sort_keys=True, separators=(",", ":")).encode("ascii")
-    return "spec_" + hashlib.sha1(payload).hexdigest()[:16]
-
-
-def vs_specialization_identifier(vs: str, key: dict[str, object]) -> str:
-    payload = json.dumps({
-        "vs": vs,
-        "vsBits": key["vsBits"],
-        "vsTexcoordDeclMask": key["vsTexcoordDeclMask"],
-        "vsTexGen": key["vsTexGen"],
-        "vsTexCoordIndex": key["vsTexCoordIndex"],
-        "vsTexTransformFlags": key["vsTexTransformFlags"],
-    }, sort_keys=True, separators=(",", ":")).encode("ascii")
-    return "vsspec_" + hashlib.sha1(payload).hexdigest()[:16]
-
-
-def read_uint32(value: object, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 0xffffffff:
-        raise ValueError(f"{field} must be a uint32")
-    return value
-
-
-def read_uint64(value: object, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 0xffffffffffffffff:
-        raise ValueError(f"{field} must be a uint64")
-    return value
-
-
-def read_bool(value: object, field: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{field} must be a bool")
-    return value
-
-
-def repack_ffp_arg(arg: int) -> int:
-    return (arg & 0b111) | ((arg & 0b110000) >> 1)
-
-
-def set_spec_bits(dwords: list[int], word: int, offset: int, bits: int, value: int) -> None:
-    mask = ((1 << bits) - 1) << offset
-    dwords[word] &= ~mask
-    dwords[word] |= (value << offset) & mask
-
-
-def ffp_specialization_dwords_from_key(key: dict[str, object]) -> list[int]:
-    dwords = [0] * 10
-    dwords[0] = 1
-    set_spec_bits(dwords, 4, 16, 3, key["lastActiveTextureStage"])
-    set_spec_bits(dwords, 6, 31, 1, 1 if key["globalSpecularEnable"] else 0)
-    set_spec_bits(dwords, 5, 4, 1, 1 if key["alphaTestEnable"] else 0)
-    set_spec_bits(dwords, 5, 5, 4, key["alphaFunc"])
-    set_spec_bits(dwords, 5, 9, 1, 1 if key["fogEnable"] else 0)
-    set_spec_bits(dwords, 5, 10, 2, key["vertexFogMode"])
-    set_spec_bits(dwords, 5, 12, 2, key["pixelFogMode"])
-    set_spec_bits(dwords, 5, 14, 1, 1 if key["rangeFog"] else 0)
-    set_spec_bits(dwords, 5, 15, 1, 1 if key["flatShade"] else 0)
-    projected_sampler_mask = 0
-    mirror_once_sampler_mask = 0
-    for stage_index, stage in enumerate(key["stages"][:4]):
-        if stage["projectedSampler"]:
-            projected_sampler_mask |= (1 << stage_index)
-        mirror_once_sampler_mask |= (stage["mirrorOnceMask"] & 0x7) << (stage_index * 3)
-        word = 6 + stage_index
-        set_spec_bits(dwords, 1, stage_index * 5, 5, repack_ffp_arg(stage["colorArg0"]))
-        set_spec_bits(dwords, 2, stage_index * 5, 5, repack_ffp_arg(stage["alphaArg0"]))
-        set_spec_bits(dwords, word, 0, 5, stage["colorOp"])
-        set_spec_bits(dwords, word, 5, 5, repack_ffp_arg(stage["colorArg1"]))
-        set_spec_bits(dwords, word, 10, 5, repack_ffp_arg(stage["colorArg2"]))
-        set_spec_bits(dwords, word, 15, 5, stage["alphaOp"])
-        set_spec_bits(dwords, word, 20, 5, repack_ffp_arg(stage["alphaArg1"]))
-        set_spec_bits(dwords, word, 25, 5, repack_ffp_arg(stage["alphaArg2"]))
-        set_spec_bits(dwords, word, 30, 1, 1 if stage["resultIsTemp"] else 0)
-    for stage_index, stage in enumerate(key["stages"]):
-        set_spec_bits(dwords, 5, 16 + stage_index * 2, 2, stage["samplerType"])
-        set_spec_bits(dwords, 3, stage_index * 4, 4, stage["samplerCompareFunc"])
-
-    set_spec_bits(dwords, 5, 0, 4, projected_sampler_mask)
-    set_spec_bits(dwords, 4, 19, 12, mirror_once_sampler_mask)
-    return dwords
-
-
-def normalize_specialized_stage(stage: object, field: str) -> dict[str, object]:
-    if not isinstance(stage, dict):
-        raise ValueError(f"{field} must be an object")
-
-    normalized = {
-        "colorOp": read_uint32(stage.get("colorOp"), f"{field}.colorOp"),
-        "colorArg0": read_uint32(stage.get("colorArg0"), f"{field}.colorArg0"),
-        "colorArg1": read_uint32(stage.get("colorArg1"), f"{field}.colorArg1"),
-        "colorArg2": read_uint32(stage.get("colorArg2"), f"{field}.colorArg2"),
-        "alphaOp": read_uint32(stage.get("alphaOp"), f"{field}.alphaOp"),
-        "alphaArg0": read_uint32(stage.get("alphaArg0"), f"{field}.alphaArg0"),
-        "alphaArg1": read_uint32(stage.get("alphaArg1"), f"{field}.alphaArg1"),
-        "alphaArg2": read_uint32(stage.get("alphaArg2"), f"{field}.alphaArg2"),
-        "resultIsTemp": read_bool(stage.get("resultIsTemp"), f"{field}.resultIsTemp"),
-        "hasTexture": False,
-        "projectedSampler": read_bool(stage.get("projectedSampler", False), f"{field}.projectedSampler"),
-        "samplerType": read_uint32(stage.get("samplerType", 0), f"{field}.samplerType") & 3,
-        "samplerCompareFunc": read_uint32(stage.get("samplerCompareFunc", 0), f"{field}.samplerCompareFunc") & 0xF,
-        "mirrorOnceMask": read_uint32(stage.get("mirrorOnceMask", 0), f"{field}.mirrorOnceMask") & 0x7,
-    }
-    normalized["hasTexture"] = read_bool(
-        stage.get("hasTexture", ffp_stage_uses_texture(normalized)),
-        f"{field}.hasTexture")
-    return normalized
-
-
-def default_specialized_stage() -> dict[str, object]:
-    return {
-        "colorOp": 0,
-        "colorArg0": 0,
-        "colorArg1": 0,
-        "colorArg2": 0,
-        "alphaOp": 0,
-        "alphaArg0": 0,
-        "alphaArg1": 0,
-        "alphaArg2": 0,
-        "resultIsTemp": False,
-        "hasTexture": False,
-        "projectedSampler": False,
-        "samplerType": 0,
-        "samplerCompareFunc": 0,
-        "mirrorOnceMask": 0,
-    }
-
-
-def normalize_specialized_key(key: object, field: str) -> dict[str, object]:
-    if not isinstance(key, dict):
-        raise ValueError(f"{field} must be an object")
-
-    tex_gen = key.get("vsTexGen")
-    if not isinstance(tex_gen, list) or len(tex_gen) != 8:
-        raise ValueError(f"{field}.vsTexGen must contain exactly 8 uint32 values")
-    tex_coord_index = key.get("vsTexCoordIndex", [0, 1, 2, 3, 4, 5, 6, 7])
-    if not isinstance(tex_coord_index, list) or len(tex_coord_index) != 8:
-        raise ValueError(f"{field}.vsTexCoordIndex must contain exactly 8 uint32 values")
-    tex_transform_flags = key.get("vsTexTransformFlags", [0, 0, 0, 0, 0, 0, 0, 0])
-    if not isinstance(tex_transform_flags, list) or len(tex_transform_flags) != 8:
-        raise ValueError(f"{field}.vsTexTransformFlags must contain exactly 8 uint32 values")
-    default_texcoord_decl_mask = sum(2 << (index * 3) for index in range(8))
-
-    stages = key.get("stages")
-    if not isinstance(stages, list) or len(stages) > 8:
-        raise ValueError(f"{field}.stages must contain up to 8 stage objects")
-    normalized_stages = [normalize_specialized_stage(stage, f"{field}.stages[{index}]")
-                         for index, stage in enumerate(stages)]
-    while len(normalized_stages) < 8:
-        normalized_stages.append(default_specialized_stage())
-
-    alpha_test_enable = read_bool(key.get("alphaTestEnable", False), f"{field}.alphaTestEnable")
-    alpha_func = read_uint32(key.get("alphaFunc", 0), f"{field}.alphaFunc")
-    if alpha_func > 0xf:
-        raise ValueError(f"{field}.alphaFunc must fit in 4 bits")
-    if not alpha_test_enable and alpha_func != 0:
-        raise ValueError(f"{field}.alphaFunc must be 0 when alphaTestEnable is false")
-
-    vs_bits = read_uint64(key.get("vsBits"), f"{field}.vsBits")
-    fog_enable = read_bool(key.get("fogEnable", False), f"{field}.fogEnable")
-    vertex_fog_mode = read_uint32(key.get("vertexFogMode", (vs_bits >> 21) & 3 if fog_enable else 0),
-                                  f"{field}.vertexFogMode")
-    pixel_fog_mode = read_uint32(key.get("pixelFogMode", 0), f"{field}.pixelFogMode")
-    if vertex_fog_mode > 3:
-        raise ValueError(f"{field}.vertexFogMode must fit in 2 bits")
-    if pixel_fog_mode > 3:
-        raise ValueError(f"{field}.pixelFogMode must fit in 2 bits")
-
-    return {
-        "vsBits": vs_bits,
-        "vsTexcoordDeclMask": read_uint32(key.get("vsTexcoordDeclMask", default_texcoord_decl_mask),
-                                          f"{field}.vsTexcoordDeclMask") & 0xffffff,
-        "vsTexGen": [read_uint32(value, f"{field}.vsTexGen[{index}]")
-                     for index, value in enumerate(tex_gen)],
-        "vsTexCoordIndex": [read_uint32(value, f"{field}.vsTexCoordIndex[{index}]") & 7
-                            for index, value in enumerate(tex_coord_index)],
-        "vsTexTransformFlags": [read_uint32(value, f"{field}.vsTexTransformFlags[{index}]") & 0x1ff
-                                for index, value in enumerate(tex_transform_flags)],
-        "lastActiveTextureStage": read_uint32(key.get("lastActiveTextureStage"),
-                                              f"{field}.lastActiveTextureStage"),
-        "globalSpecularEnable": read_bool(key.get("globalSpecularEnable"),
-                                          f"{field}.globalSpecularEnable"),
-        "alphaTestEnable": alpha_test_enable,
-        "alphaFunc": alpha_func,
-        "fogEnable": fog_enable,
-        "vertexFogMode": vertex_fog_mode if fog_enable else 0,
-        "pixelFogMode": pixel_fog_mode if fog_enable else 0,
-        "rangeFog": read_bool(key.get("rangeFog", False), f"{field}.rangeFog") if fog_enable else False,
-        "flatShade": read_bool(key.get("flatShade", False), f"{field}.flatShade"),
-        "stages": normalized_stages,
-    }
-
-
-def normalize_specialized_variant(variant: dict[str, object], index: int) -> dict[str, object]:
-    name = variant.get("name")
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].name must be a non-empty string")
-
-    vs = variant.get("vs")
-    if vs not in ("3d", "positiont"):
-        raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].vs must be '3d' or 'positiont'")
-
-    key = normalize_specialized_key(variant.get("key"),
-                                    f"{FFP_VARIANT_MANIFEST} variants[{index}].key")
-    spec_dwords = ffp_specialization_dwords_from_key(key)
-    explicit_spec_dwords = variant.get("specDwords")
-    if explicit_spec_dwords is not None:
-        if not isinstance(explicit_spec_dwords, list):
-            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords must be an array")
-        explicit_spec_dwords = [
-            read_uint32(value, f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords[{dword_index}]")
-            for dword_index, value in enumerate(explicit_spec_dwords)
-        ]
-        if explicit_spec_dwords != spec_dwords:
-            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}].specDwords does not match key-derived FFP specialization payload")
-
-    return {
-        "name": name,
-        "identifier": sanitize_identifier(name),
-        "vs": vs,
-        "vsIdentifier": vs_specialization_identifier(vs, key),
-        "specDwords": spec_dwords,
-        "fsIdentifier": specialization_identifier(spec_dwords, key),
-        "defines": ffp_specialized_shader_defines(spec_dwords, key),
-        "key": key,
-    }
 
 
 def ensure_dxc_runtime(script_dir: Path, shaderc: Path) -> None:
@@ -539,469 +180,29 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
         f.write("};\n")
 
 
-def specialized_fs_var_name(backend: dict[str, str], variant: dict[str, object]) -> str:
-    return f"s_{backend['name']}_ffp_{variant['fsIdentifier']}_fs_ff_stage"
-
-
-def specialized_vs_var_name(backend: dict[str, str], variant: dict[str, object]) -> str:
-    suffix = "positiont" if variant["vs"] == "positiont" else "3d"
-    return f"s_{backend['name']}_ffp_{variant['vsIdentifier']}_vs_ff_{suffix}"
-
-
-def sampler_layout_identifier(stage_types: list[int]) -> str:
-    names = {0: "2d", 1: "cube", 3: "volume"}
-    return "layout_" + "_".join(names[value] for value in stage_types)
-
-
-def sampler_layout_fs_var_name(backend: dict[str, str], layout: dict[str, object]) -> str:
-    return f"s_{backend['name']}_ffp_{layout['identifier']}_fs_ff_stage"
-
-
-def sampler_layout_bits(stage_types: list[int]) -> int:
-    bits = 0
-    for index, value in enumerate(stage_types):
-        bits |= (value & 3) << (index * 2)
-    return bits
-
-
-def sampler_layout_defines(stage_types: list[int]) -> list[str]:
-    if stage_types.count(1) == 1 and stage_types.count(3) == 1:
-        return ["CKFF_MIXED_SAMPLER_LAYOUT=1"]
-    defines = ["CKFF_STATIC_SAMPLER_LAYOUT=1"]
-    for index, value in enumerate(stage_types):
-        defines.append(f"CKFF_FS_STAGE{index}_SAMPLER_TYPE={value & 3}")
-    return defines
-
-
-def read_sampler_layout_stage_types(value: object, location: str) -> list[int]:
-    if not isinstance(value, list) or len(value) != 8:
-        raise ValueError(f"{location}.stageTypes must be an array of 8 sampler type integers")
-
-    stage_types: list[int] = []
-    for stage, sampler_type in enumerate(value):
-        if not isinstance(sampler_type, int) or sampler_type not in (0, 1, 3):
-            raise ValueError(f"{location}.stageTypes[{stage}] must be 0=2d, 1=cube, or 3=volume")
-        stage_types.append(sampler_type)
-
-    if 1 not in stage_types or 3 not in stage_types:
-        raise ValueError(f"{location}.stageTypes must describe an exact mixed cube+volume layout")
-    return stage_types
-
-
-def read_sampler_layout_backends(value: object, location: str) -> list[str]:
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{location}.backends must be a non-empty array")
-
-    backends: list[str] = []
-    seen: set[str] = set()
-    for index, backend in enumerate(value):
-        if not isinstance(backend, str) or backend not in PROFILE_ENUMS:
-            raise ValueError(f"{location}.backends[{index}] must name a supported shader backend")
-        if backend not in seen:
-            backends.append(backend)
-            seen.add(backend)
-    return backends
-
-
-def load_sampler_layout_manifest(script_dir: Path) -> list[dict[str, object]]:
-    manifest_path = script_dir / SAMPLER_LAYOUT_MANIFEST
-    if not manifest_path.exists():
-        return []
-
-    with manifest_path.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    if not isinstance(payload, dict):
-        raise ValueError(f"{SAMPLER_LAYOUT_MANIFEST} must contain a JSON object")
-    entries = payload.get("layouts")
-    if not isinstance(entries, list):
-        raise ValueError(f"{SAMPLER_LAYOUT_MANIFEST} must contain a 'layouts' array")
-
-    layouts_by_bits: dict[int, dict[str, object]] = {}
-    for index, entry in enumerate(entries):
-        location = f"{SAMPLER_LAYOUT_MANIFEST} layouts[{index}]"
-        if not isinstance(entry, dict):
-            raise ValueError(f"{location} must be an object")
-        stage_types = read_sampler_layout_stage_types(entry.get("stageTypes"), location)
-        backends = read_sampler_layout_backends(entry.get("backends"), location)
-        bits = sampler_layout_bits(stage_types)
-        layout = layouts_by_bits.get(bits)
-        if layout is None:
-            layouts_by_bits[bits] = {
-                "identifier": sampler_layout_identifier(stage_types),
-                "stageTypes": stage_types,
-                "bits": bits,
-                "defines": sampler_layout_defines(stage_types),
-                "backends": backends,
-            }
-        else:
-            merged = list(layout["backends"])
-            for backend in backends:
-                if backend not in merged:
-                    merged.append(backend)
-            layout["backends"] = merged
-
-    return sorted(layouts_by_bits.values(), key=lambda layout: layout["identifier"])
-
-
-def unique_specialized_fs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
-    unique: dict[str, dict[str, object]] = {}
-    for variant in variants:
-        unique.setdefault(variant["fsIdentifier"], variant)
-    return list(unique.values())
-
-
-def unique_specialized_vs_variants(variants: list[dict[str, object]]) -> list[dict[str, object]]:
-    unique: dict[str, dict[str, object]] = {}
-    for variant in variants:
-        unique.setdefault(variant["vsIdentifier"], variant)
-    return list(unique.values())
-
-
-def write_specialized_key_function(f, variant: dict[str, object]) -> None:
-    ident = variant["identifier"]
-    key = variant["key"]
-    f.write(f"static CKFFShaderKey CKFFSpecializedKey_{ident}() {{\n")
-    f.write("    CKFFShaderKey key;\n")
-    f.write(f"    key.VS.Bits = {key['vsBits']}ull;\n")
-    f.write(f"    key.VS.VertexTexcoordDeclMask = {key['vsTexcoordDeclMask']}u;\n")
-    for index, value in enumerate(key["vsTexGen"]):
-        f.write(f"    key.VS.TexGen[{index}] = {value}u;\n")
-    for index, value in enumerate(key["vsTexCoordIndex"]):
-        f.write(f"    key.VS.TexCoordIndex[{index}] = {value}u;\n")
-    for index, value in enumerate(key["vsTexTransformFlags"]):
-        f.write(f"    key.VS.TexTransformFlags[{index}] = {value}u;\n")
-    f.write(f"    key.FS.LastActiveTextureStage = {key['lastActiveTextureStage']}u;\n")
-    f.write(f"    key.FS.AlphaFunc = {key['alphaFunc']}u;\n")
-    f.write(f"    key.FS.VertexFogMode = {key['vertexFogMode']}u;\n")
-    f.write(f"    key.FS.PixelFogMode = {key['pixelFogMode']}u;\n")
-    f.write(f"    key.FS.GlobalSpecularEnable = {'true' if key['globalSpecularEnable'] else 'false'};\n")
-    f.write(f"    key.FS.AlphaTestEnable = {'true' if key['alphaTestEnable'] else 'false'};\n")
-    f.write(f"    key.FS.FogEnable = {'true' if key['fogEnable'] else 'false'};\n")
-    f.write(f"    key.FS.RangeFog = {'true' if key['rangeFog'] else 'false'};\n")
-    f.write(f"    key.FS.FlatShade = {'true' if key['flatShade'] else 'false'};\n")
-    for index, stage in enumerate(key["stages"]):
-        prefix = f"    key.FS.Stages[{index}]"
-        f.write(f"{prefix}.ColorOp = {stage['colorOp']}u;\n")
-        f.write(f"{prefix}.ColorArg0 = {stage['colorArg0']}u;\n")
-        f.write(f"{prefix}.ColorArg1 = {stage['colorArg1']}u;\n")
-        f.write(f"{prefix}.ColorArg2 = {stage['colorArg2']}u;\n")
-        f.write(f"{prefix}.AlphaOp = {stage['alphaOp']}u;\n")
-        f.write(f"{prefix}.AlphaArg0 = {stage['alphaArg0']}u;\n")
-        f.write(f"{prefix}.AlphaArg1 = {stage['alphaArg1']}u;\n")
-        f.write(f"{prefix}.AlphaArg2 = {stage['alphaArg2']}u;\n")
-        f.write(f"{prefix}.ResultIsTemp = {'true' if stage['resultIsTemp'] else 'false'};\n")
-        f.write(f"{prefix}.HasTexture = {'true' if stage['hasTexture'] else 'false'};\n")
-        f.write(f"{prefix}.ProjectedSampler = {'true' if stage['projectedSampler'] else 'false'};\n")
-        f.write(f"{prefix}.SamplerType = {stage['samplerType']};\n")
-        f.write(f"{prefix}.SamplerCompareFunc = {stage['samplerCompareFunc']};\n")
-        f.write(f"{prefix}.MirrorOnceMask = {stage['mirrorOnceMask']}u;\n")
-    f.write("    return key;\n")
-    f.write("}\n\n")
-
-
-def write_specialized_spec_function(f, variant: dict[str, object]) -> None:
-    ident = variant["identifier"]
-    dwords = ", ".join(f"{value}u" for value in variant["specDwords"])
-    f.write(f"static CKFFSpecializationInfo CKFFSpecializedSpec_{ident}() {{\n")
-    f.write(f"    const CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = {{ {dwords} }};\n")
-    f.write("    CKFFSpecializationInfo info;\n")
-    f.write("    info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);\n")
-    f.write("    return info;\n")
-    f.write("}\n\n")
-
-
-def write_specialized_module_function(f, backend: dict[str, str], variant: dict[str, object]) -> None:
-    backend_name = backend["name"]
-    ident = variant["identifier"]
-    vs_name = specialized_vs_var_name(backend, variant)
-    fs_name = specialized_fs_var_name(backend, variant)
-    f.write(f"static CKFFSpecializedModule CKFFSpecializedModule_{backend_name}_{ident}() {{\n")
-    f.write("    CKFFSpecializedModule module = {};\n")
-    f.write(f"    module.VSData = {vs_name};\n")
-    f.write(f"    module.VSSize = sizeof({vs_name});\n")
-    f.write(f"    module.FSData = {fs_name};\n")
-    f.write(f"    module.FSSize = sizeof({fs_name});\n")
-    f.write(f"    module.Specialization = CKFFSpecializedSpec_{ident}();\n")
-    f.write("    return module;\n")
-    f.write("}\n\n")
-
-
-def write_specialized_module_table(generated_dir: Path, backends: list[dict[str, str]],
-                                   variants: list[dict[str, object]],
-                                   sampler_layouts: list[dict[str, object]]) -> None:
-    path = generated_dir / "CKFFSpecializedModuleTable.generated.h"
+def write_abi_header(generated_dir: Path) -> None:
+    path = generated_dir / ABI_HEADER
     path.parent.mkdir(parents=True, exist_ok=True)
-    sampler_layout_entries = [
-        (backend, layout)
-        for backend in backends
-        for layout in sampler_layouts
-        if backend["name"] in layout["backends"]
-    ]
     with path.open("w", encoding="utf-8", newline="\n") as f:
         f.write("// Auto-generated by compile_shaders.py - DO NOT EDIT\n")
         f.write("#pragma once\n\n")
         f.write(f"static const CKDWORD g_CKFFGeneratedShaderABIVersion = {SHADER_ABI_VERSION}u;\n")
-        f.write(f"static const CKDWORD g_CKFFGeneratedShaderInterfaceHash = 0x{SHADER_INTERFACE_HASH:08x}u;\n\n")
-        if not variants and not sampler_layout_entries:
-            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
-            f.write("static const size_t g_CKFFSpecializedModuleCount = 0;\n")
-            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = nullptr;\n")
-            f.write("static const size_t g_CKFFSamplerLayoutModuleCount = 0;\n")
-            return
-
-        for backend in backends:
-            backend_name = backend["name"]
-            for variant in unique_specialized_vs_variants(variants):
-                ident = variant["vsIdentifier"]
-                suffix = "positiont" if variant["vs"] == "positiont" else "3d"
-                f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_vs_ff_{suffix}.bin.h\"\n")
-            for variant in unique_specialized_fs_variants(variants):
-                ident = variant["fsIdentifier"]
-                f.write(f"#include \"shaders/generated/{backend_name}/specialized/{ident}_fs_ff_stage.bin.h\"\n")
-            for layout in sampler_layouts:
-                if backend_name in layout["backends"]:
-                    ident = layout["identifier"]
-                    f.write(f"#include \"shaders/generated/{backend_name}/sampler_layout/{ident}_fs_ff_stage.bin.h\"\n")
-        f.write("\n")
-
-        for variant in variants:
-            write_specialized_key_function(f, variant)
-            write_specialized_spec_function(f, variant)
-        for backend in backends:
-            for variant in variants:
-                write_specialized_module_function(f, backend, variant)
-
-        f.write("static const CKFFSpecializedModuleEntry g_CKFFSpecializedModuleEntries[] = {\n")
-        for backend in backends:
-            for variant in variants:
-                ident = variant["identifier"]
-                f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, CKFFSpecializedKey_{ident}(), "
-                        f"CKFFSpecializedModule_{backend['name']}_{ident}() }},\n")
-        f.write("};\n\n")
-        if variants:
-            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = g_CKFFSpecializedModuleEntries;\n")
-            f.write("static const size_t g_CKFFSpecializedModuleCount = "
-                    "sizeof(g_CKFFSpecializedModuleEntries) / sizeof(g_CKFFSpecializedModuleEntries[0]);\n\n")
-        else:
-            f.write("static const CKFFSpecializedModuleEntry *g_CKFFSpecializedModules = nullptr;\n")
-            f.write("static const size_t g_CKFFSpecializedModuleCount = 0;\n\n")
-
-        for layout in sampler_layouts:
-            ident = layout["identifier"]
-            f.write(f"static CKFFSamplerLayoutKey CKFFSamplerLayoutKey_{ident}() {{\n")
-            f.write("    CKFFSamplerLayoutKey key;\n")
-            f.write(f"    key.Bits = 0x{layout['bits']:04x}u;\n")
-            f.write("    return key;\n")
-            f.write("}\n\n")
-        for backend in backends:
-            backend_name = backend["name"]
-            for layout in sampler_layouts:
-                if backend_name not in layout["backends"]:
-                    continue
-                ident = layout["identifier"]
-                var_name = sampler_layout_fs_var_name(backend, layout)
-                f.write(f"static CKFFSamplerLayoutModule CKFFSamplerLayoutModule_{backend_name}_{ident}() {{\n")
-                f.write("    CKFFSamplerLayoutModule module = {};\n")
-                f.write(f"    module.FSData = {var_name};\n")
-                f.write(f"    module.FSSize = sizeof({var_name});\n")
-                f.write("    return module;\n")
-                f.write("}\n\n")
-
-        if sampler_layout_entries:
-            f.write("static const CKFFSamplerLayoutModuleEntry g_CKFFSamplerLayoutModuleEntries[] = {\n")
-            for backend, layout in sampler_layout_entries:
-                ident = layout["identifier"]
-                f.write(f"    {{ {PROFILE_ENUMS[backend['name']]}, CKFFSamplerLayoutKey_{ident}(), "
-                        f"CKFFSamplerLayoutModule_{backend['name']}_{ident}() }},\n")
-            f.write("};\n\n")
-            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = g_CKFFSamplerLayoutModuleEntries;\n")
-            f.write("static const size_t g_CKFFSamplerLayoutModuleCount = "
-                    "sizeof(g_CKFFSamplerLayoutModuleEntries) / sizeof(g_CKFFSamplerLayoutModuleEntries[0]);\n")
-        else:
-            f.write("static const CKFFSamplerLayoutModuleEntry *g_CKFFSamplerLayoutModules = nullptr;\n")
-            f.write("static const size_t g_CKFFSamplerLayoutModuleCount = 0;\n")
+        f.write(f"static const CKDWORD g_CKFFGeneratedShaderInterfaceHash = 0x{SHADER_INTERFACE_HASH:08x}u;\n")
 
 
-def load_specialized_variant_manifest(script_dir: Path) -> list[dict[str, object]]:
-    manifest_path = script_dir / FFP_VARIANT_MANIFEST
-    with manifest_path.open("r", encoding="utf-8") as f:
-        manifest = json.load(f)
-
-    if not isinstance(manifest, dict):
-        raise ValueError(f"{FFP_VARIANT_MANIFEST} must contain a JSON object")
-
-    variants = manifest.get("variants")
-    if not isinstance(variants, list):
-        raise ValueError(f"{FFP_VARIANT_MANIFEST} must contain a 'variants' array")
-
-    for index, variant in enumerate(variants):
-        if not isinstance(variant, dict):
-            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants[{index}] must be an object")
-
-    normalized = [normalize_specialized_variant(variant, index)
-                  for index, variant in enumerate(variants)]
-    validate_specialized_variants(normalized)
-    return normalized
-
-
-def variant_key_fingerprint(variant: dict[str, object]) -> str:
-    key = variant["key"]
-    return json.dumps(key, sort_keys=True, separators=(",", ":"))
-
-
-def validate_specialized_variants(variants: list[dict[str, object]]) -> None:
-    identifiers: dict[str, str] = {}
-    keys: dict[str, str] = {}
-    for variant in variants:
-        name = variant["name"]
-        ident = variant["identifier"]
-        previous_name = identifiers.get(ident)
-        if previous_name is not None:
-            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants '{previous_name}' and '{name}' produce duplicate identifier '{ident}'")
-        identifiers[ident] = name
-
-        fingerprint = variant_key_fingerprint(variant)
-        previous_key_name = keys.get(fingerprint)
-        if previous_key_name is not None:
-            raise ValueError(f"{FFP_VARIANT_MANIFEST} variants '{previous_key_name}' and '{name}' produce duplicate FFP shader key")
-        keys[fingerprint] = name
-
-
-def compile_specialized_variants(shaderc: Path, script_dir: Path, generated_dir: Path,
-                                 tmp_dir: Path, backends: list[dict[str, str]],
-                                 variants: list[dict[str, object]],
-                                 sampler_layouts: list[dict[str, object]]) -> None:
-    vs_variants = unique_specialized_vs_variants(variants)
-    fs_variants = unique_specialized_fs_variants(variants)
-    clean_stale_specialized_headers(generated_dir, backends, vs_variants, fs_variants)
-    clean_stale_sampler_layout_headers(generated_dir, BACKENDS, sampler_layouts)
-    clean_stale_volume_layout_headers(generated_dir, backends)
+def clean_stale_headers(generated_dir: Path, backends: list[dict[str, str]]) -> None:
+    """Remove generated headers that no longer correspond to a shader in SHADERS."""
+    expected = {shader["name"] + ".bin.h" for shader in SHADERS}
     for backend in backends:
-        for variant in vs_variants:
-            ident = variant["vsIdentifier"]
-            suffix = "positiont" if variant["vs"] == "positiont" else "3d"
-            shader = shader_by_name("vs_ff_positiont") if variant["vs"] == "positiont" else shader_by_name("vs_ff_3d")
-            bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_vs_ff_{suffix}.bin"
-            bin_path.parent.mkdir(parents=True, exist_ok=True)
-            run_shaderc(shaderc, script_dir, shader, backend, bin_path, ffp_specialized_vs_defines(variant))
-            header = generated_dir / backend["name"] / "specialized" / f"{ident}_vs_ff_{suffix}.bin.h"
-            write_header(header, specialized_vs_var_name(backend, variant), bin_path.read_bytes())
-        for variant in fs_variants:
-            ident = variant["fsIdentifier"]
-            bin_path = tmp_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin"
-            bin_path.parent.mkdir(parents=True, exist_ok=True)
-            run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, variant["defines"])
-            header = generated_dir / backend["name"] / "specialized" / f"{ident}_fs_ff_stage.bin.h"
-            write_header(header, specialized_fs_var_name(backend, variant), bin_path.read_bytes())
-        for layout in sampler_layouts:
-            if backend["name"] in layout["backends"]:
-                ident = layout["identifier"]
-                bin_path = tmp_dir / backend["name"] / "sampler_layout" / f"{ident}_fs_ff_stage.bin"
-                bin_path.parent.mkdir(parents=True, exist_ok=True)
-                run_shaderc(shaderc, script_dir, shader_by_name("fs_ff_stage"), backend, bin_path, layout["defines"])
-                header = generated_dir / backend["name"] / "sampler_layout" / f"{ident}_fs_ff_stage.bin.h"
-                write_header(header, sampler_layout_fs_var_name(backend, layout), bin_path.read_bytes())
-
-
-def clean_stale_specialized_headers(generated_dir: Path, backends: list[dict[str, str]],
-                                    vs_variants: list[dict[str, object]],
-                                    fs_variants: list[dict[str, object]]) -> None:
-    expected = {f"{variant['fsIdentifier']}_fs_ff_stage.bin.h" for variant in fs_variants}
-    expected.update(
-        f"{variant['vsIdentifier']}_vs_ff_{'positiont' if variant['vs'] == 'positiont' else '3d'}.bin.h"
-        for variant in vs_variants)
-    for backend in backends:
-        specialized_dir = generated_dir / backend["name"] / "specialized"
-        if not specialized_dir.is_dir():
+        backend_dir = generated_dir / backend["name"]
+        if not backend_dir.is_dir():
             continue
-        for header in specialized_dir.glob("*.bin.h"):
+        for header in backend_dir.glob("*.bin.h"):
             if header.name not in expected:
                 header.unlink()
-
-
-def clean_stale_sampler_layout_headers(generated_dir: Path, backends: list[dict[str, str]],
-                                       sampler_layouts: list[dict[str, object]]) -> None:
-    expected_by_backend: dict[str, set[str]] = {}
-    for layout in sampler_layouts:
-        header = f"{layout['identifier']}_fs_ff_stage.bin.h"
-        for backend in layout["backends"]:
-            expected_by_backend.setdefault(backend, set()).add(header)
-    for backend in backends:
-        expected = expected_by_backend.get(backend["name"], set())
-        sampler_layout_dir = generated_dir / backend["name"] / "sampler_layout"
-        if not sampler_layout_dir.is_dir():
-            continue
-        if not expected:
-            for header in sampler_layout_dir.glob("*.bin.h"):
-                header.unlink()
-            try:
-                sampler_layout_dir.rmdir()
-            except OSError:
-                pass
-            continue
-        for header in sampler_layout_dir.glob("*.bin.h"):
-            if header.name not in expected:
-                header.unlink()
-
-
-def validate_sampler_layout_headers(generated_dir: Path, selected_backends: list[dict[str, str]],
-                                    all_backends: list[dict[str, str]],
-                                    sampler_layouts: list[dict[str, object]]) -> None:
-    expected_by_backend: dict[str, set[str]] = {}
-    selected_names = {backend["name"] for backend in selected_backends}
-    supported_names = {backend["name"] for backend in all_backends}
-    for layout in sampler_layouts:
-        header = f"{layout['identifier']}_fs_ff_stage.bin.h"
-        for backend in layout["backends"]:
-            expected_by_backend.setdefault(backend, set()).add(header)
-
-    missing: list[str] = []
-    for backend in selected_names:
-        for header in expected_by_backend.get(backend, set()):
-            path = generated_dir / backend / "sampler_layout" / header
-            if not path.is_file():
-                missing.append(path.relative_to(generated_dir).as_posix())
-    if missing:
-        raise RuntimeError("Missing generated sampler-layout headers: " + ", ".join(sorted(missing)))
-
-    unexpected: list[str] = []
-    for sampler_layout_dir in generated_dir.glob("*/sampler_layout"):
-        if not sampler_layout_dir.is_dir():
-            continue
-        backend = sampler_layout_dir.parent.name
-        if backend not in supported_names:
-            continue
-        expected = expected_by_backend.get(backend, set())
-        for header in sampler_layout_dir.glob("*.bin.h"):
-            if header.name not in expected:
-                unexpected.append(header.relative_to(generated_dir).as_posix())
-    if unexpected:
-        raise RuntimeError("Unexpected stale sampler-layout headers: " + ", ".join(sorted(unexpected)))
-
-
-def check_sampler_layout_size_budget(generated_dir: Path) -> None:
-    total = 0
-    for header in generated_dir.glob("*/sampler_layout/*.bin.h"):
-        if header.is_file():
-            total += header.stat().st_size
-    if total > SAMPLER_LAYOUT_SIZE_LIMIT_BYTES:
-        raise RuntimeError(
-            f"Generated sampler-layout headers are {total} bytes; "
-            f"limit is {SAMPLER_LAYOUT_SIZE_LIMIT_BYTES} bytes"
-        )
-
-
-def clean_stale_volume_layout_headers(generated_dir: Path, backends: list[dict[str, str]]) -> None:
-    for backend in backends:
-        volume_dir = generated_dir / backend["name"] / "volume"
-        if not volume_dir.is_dir():
-            continue
-        for header in volume_dir.glob("*.bin.h"):
-            header.unlink()
-        try:
-            volume_dir.rmdir()
-        except OSError:
-            pass
+        for stale_dir in backend_dir.iterdir():
+            if stale_dir.is_dir():
+                shutil.rmtree(stale_dir)
 
 
 def main() -> int:
@@ -1011,38 +212,28 @@ def main() -> int:
     parser.add_argument("--shaderc", help="Path to bgfx shaderc executable.")
     parser.add_argument("--backend", choices=[b["name"] for b in BACKENDS],
                         action="append", help="Backend to compile. May be repeated.")
-    parser.add_argument("--skip-module-table", action="store_true",
-                        help="Compile selected backend headers without rewriting the shared module table.")
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
     generated_dir = script_dir / "generated"
     shaderc = find_shaderc(args.shaderc)
     selected = [b for b in BACKENDS if not args.backend or b["name"] in args.backend]
-    specialized_variants = load_specialized_variant_manifest(script_dir)
-    sampler_layouts = load_sampler_layout_manifest(script_dir)
 
     print(f"Using shaderc: {shaderc}")
-    print(f"FFP specialized variants: {len(specialized_variants)}")
-    print(f"FFP sampler layout variants: {len(sampler_layouts)}")
     with tempfile.TemporaryDirectory(prefix="ck2_3d_shaders_") as tmp:
         tmp_dir = Path(tmp)
         for backend in selected:
             for shader in SHADERS:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
-                run_shaderc(shaderc, script_dir, shader, backend, bin_path, shader.get("defines"))
+                run_shaderc(shaderc, script_dir, shader, backend, bin_path)
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())
-        compile_specialized_variants(shaderc, script_dir, generated_dir, tmp_dir, selected,
-                                     specialized_variants, sampler_layouts)
-        validate_sampler_layout_headers(generated_dir, selected, BACKENDS, sampler_layouts)
-        check_sampler_layout_size_budget(generated_dir)
-        if not args.skip_module_table:
-            write_specialized_module_table(generated_dir, BACKENDS, specialized_variants, sampler_layouts)
+    clean_stale_headers(generated_dir, selected)
+    write_abi_header(generated_dir)
 
-    print("All shaders compiled successfully.")
+    print(f"All shaders compiled successfully ({len(SHADERS)} shaders x {len(selected)} backends).")
     return 0
 
 

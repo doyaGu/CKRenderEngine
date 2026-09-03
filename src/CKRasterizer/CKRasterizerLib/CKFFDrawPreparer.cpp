@@ -59,11 +59,6 @@ CKFFProgramPrepareStatus CKFFDrawPreparer::PrepareProgram(
 
     const CKFFShaderKey shaderKey =
         CKFFBuildShaderKeyFromPreparedState(&preparation->PreparedState);
-    CKFFInitProgramContext(
-        &preparation->ProgramContext, shaderKey, CKFFProgramBinding());
-    if (!m_ShaderCache.SupportsSamplerLayout(shaderKey))
-        return CKFF_PROGRAM_PREPARE_SAMPLER_LAYOUT;
-
     CKFFProgramBinding programBinding;
     {
         CKFF_SCOPE_TIME(m_Probes, ProgramUs);

@@ -111,30 +111,6 @@ static void ForceAnisotropicFilteringUpdatesFfpSamplers() {
               "DisableMipmap must prevent mip sampling even when anisotropic filtering is forced");
 }
 
-static void FfpRuntimeOptionsDoNotLiveUnderDebugStats() {
-    CKRenderSettingsClearOverridesForTests();
-
-    // A key the shipped ini does not define reads back its default.
-    TestCheck(!CKRenderFFPSettings().GetBool("RuntimeOption", false),
-              "unset FFP option must return its default (false)");
-    TestCheck(CKRenderFFPSettings().GetBool("RuntimeOption", true),
-              "unset FFP option must return its default (true)");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFFPStats, "RuntimeOption", "0");
-    const CKRenderDiagnosticsConfig &diagnostics = CKRenderDiagnosticsSettings();
-
-    TestCheck(!diagnostics.FFPStats.Any(),
-              "Debug.FFPStats must remain pure diagnostics even if FFP runtime options are present");
-    TestCheck(CKRenderFFPSettings().GetBool("RuntimeOption", true),
-              "Debug.FFPStats must not override FFP.RuntimeOption");
-
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::FFP, "RuntimeOption", "0");
-    TestCheck(!CKRenderFFPSettings().GetBool("RuntimeOption", true),
-              "RuntimeOption must be read from the FFP runtime section");
-
-    CKRenderSettingsClearOverridesForTests();
-}
-
 static void FrameCostStatsDefaultsAndFallbacks() {
     CKRenderSettingsClearOverridesForTests();
 
@@ -169,7 +145,6 @@ int main() {
     tests.Run("CK2_3D root settings parse legacy options", &OverridesReadEveryLegacyRootOption);
     tests.Run("CK2_3D defaults prefer the full quality render path", &ModernDefaultsPreferFullQualityRenderPath);
     tests.Run("forced anisotropic filtering updates FFP samplers", &ForceAnisotropicFilteringUpdatesFfpSamplers);
-    tests.Run("FFP runtime options do not live under Debug.FFPStats", &FfpRuntimeOptionsDoNotLiveUnderDebugStats);
     tests.Run("FrameCostStats defaults and fallbacks", &FrameCostStatsDefaultsAndFallbacks);
     return tests.ExitCode();
 }

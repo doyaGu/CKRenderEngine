@@ -9,6 +9,10 @@
 #define CKFF_MAX_TEXTURE_STAGES 8
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 #define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
+// Fixed sampler layout (spec 5.3): one 2D sampler per stage plus four cube and
+// four volume samplers filled by type ordinal.
+#define CKFF_CUBE_SAMPLER_COUNT 4
+#define CKFF_VOLUME_SAMPLER_COUNT 4
 
 // ============================================================================
 // Light data for shader upload (view-space)
@@ -90,8 +94,8 @@ struct CKFFUniformHandles {
     CKDWORD u_clipPlanes;   // vec4 array: compact enabled user clip planes
     CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
     CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES];     // 2D samplers
-    CKDWORD s_textureCube[CKFF_MAX_TEXTURE_STAGES]; // cube samplers
-    CKDWORD s_textureVolume[CKFF_MAX_TEXTURE_STAGES]; // volume samplers
+    CKDWORD s_textureCube[CKFF_CUBE_SAMPLER_COUNT]; // cube samplers (type ordinal)
+    CKDWORD s_textureVolume[CKFF_VOLUME_SAMPLER_COUNT]; // volume samplers (type ordinal)
 
     CKFFUniformHandles() { memset(this, 0, sizeof(*this)); }
 };

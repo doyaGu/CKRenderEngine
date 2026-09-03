@@ -38,71 +38,6 @@ static CKDWORD CKFFResolverSamplerTypeFromTextureFlags(CKDWORD textureFlags)
     return CKFF_SAMPLER_2D;
 }
 
-static bool CKFFTextureArgUsesTexFactor(CKDWORD arg)
-{
-    return (arg & ~(0x10u | 0x20u)) == CKRST_TA_TFACTOR;
-}
-
-static bool CKFFShaderStageUsesTexFactor(const CKFFShaderKeyFSStage &stage)
-{
-    if (stage.ColorOp == CKRST_TOP_BLENDFACTORALPHA || stage.AlphaOp == CKRST_TOP_BLENDFACTORALPHA)
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.ColorArg0))
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.ColorArg1))
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.ColorArg2))
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg0))
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg1))
-        return true;
-    if (CKFFTextureArgUsesTexFactor(stage.AlphaArg2))
-        return true;
-    return false;
-}
-
-static bool CKFFProgramUsesTexFactor(const CKFFShaderKey &shaderKey)
-{
-    const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
-    for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKFFShaderKeyFSStage &s = shaderKey.FS.Stages[stage];
-        if (CKFFShaderStageUsesTexFactor(s))
-            return true;
-    }
-    return false;
-}
-
-static bool CKFFProgramUsesMaterialUniform(const CKFFShaderKey &shaderKey,
-                                           CKBOOL fullSpecialized)
-{
-    if (shaderKey.VS.GetHasPositionT())
-        return false;
-
-    if (!fullSpecialized)
-        return true;
-
-    const uint64_t bits = shaderKey.VS.Bits;
-    const CKDWORD diffuseSource = (CKDWORD)((bits >> 25) & 3u);
-    if (diffuseSource == CKFF_MS_MATERIAL)
-        return true;
-
-    const bool lightingEnabled = (bits & (1ull << 13)) != 0;
-    if (!lightingEnabled)
-        return false;
-
-    const CKDWORD ambientSource = (CKDWORD)((bits >> 27) & 3u);
-    const CKDWORD specularSource = (CKDWORD)((bits >> 29) & 3u);
-    const CKDWORD emissiveSource = (CKDWORD)((bits >> 31) & 3u);
-    if (ambientSource == CKFF_MS_MATERIAL ||
-        specularSource == CKFF_MS_MATERIAL ||
-        emissiveSource == CKFF_MS_MATERIAL) {
-        return true;
-    }
-
-    return true; // Lighting still reads u_ffDrawParams[4].x for specular power.
-}
-
 void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
                                            const CKDrawStateCache &drawState,
                                            CKFFPreparedState *out,
@@ -307,14 +242,6 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
             drawParams[CKFF_DRAW_PARAM_LIGHT_FLAGS][3] = 1.0f;
         }
     }
-    const bool shaderUsesVertexParams = !context->PositionT &&
-        (!context->FullSpecialized ||
-         context->LightingEnabled ||
-         CKFFProgramUsesMaterialUniform(context->ShaderKey, context->FullSpecialized));
-    CKDWORD drawParamCount = shaderUsesVertexParams
-        ? (context->LightingEnabled ? (packedLightCount == 1 ? 19 : 8) : 6)
-        : 0;
-
     drawParams[CKFF_DRAW_PARAM_ALPHA][0] = (float)CKFFAlphaRefByte(drawState.GetRenderState(VXRENDERSTATE_ALPHAREF));
     drawParams[CKFF_DRAW_PARAM_ALPHA][1] = drawState.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE)
         ? CKFFPackAlphaFuncPrecision(drawState.GetRenderState(VXRENDERSTATE_ALPHAFUNC), state.AlphaTestPrecision)
@@ -344,26 +271,6 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
         (float)CKFFExplicitVertexBlendWeightCount(vertexBlend);
     drawParams[CKFF_DRAW_PARAM_TWEEN][3] =
         drawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) ? 1.0f : 0.0f;
-    const CKDWORD shaderVertexBlendMode =
-        (CKDWORD)((shaderKey.VS.Bits >> 35) & 3u);
-    if (!context->FullSpecialized ||
-        shaderVertexBlendMode == CKFF_VERTEX_BLEND_TWEEN) {
-        drawParamCount = CKFF_DRAW_PARAM_VEC4_COUNT;
-    }
-
-    CKDWORD fragmentParamCount = 0;
-    if (!context->FullSpecialized) {
-        fragmentParamCount = 4;
-    } else if (context->FogEnabled) {
-        fragmentParamCount = 4;
-    } else if (CKFFProgramUsesTexFactor(context->ShaderKey)) {
-        fragmentParamCount = 2;
-    } else if (shaderKey.FS.AlphaTestEnable) {
-        fragmentParamCount = 1;
-    }
-    if (fragmentParamCount > 0 && drawParamCount < 8 + fragmentParamCount)
-        drawParamCount = 8 + fragmentParamCount;
-    if (!context->FullSpecialized && !context->PositionT && context->FogEnabled && drawParamCount < 8)
-        drawParamCount = 8;
-    return drawParamCount;
+    // The uber shader reads every draw parameter slot.
+    return CKFF_DRAW_PARAM_VEC4_COUNT;
 }

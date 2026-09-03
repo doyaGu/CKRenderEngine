@@ -1,63 +1,43 @@
 #include "CKFFShaderCache.h"
-#include "CKFFSpecializedModuleTable.h"
-#include "CKFFSamplerLayout.h"
 #include "CKFFShaderABI.h"
 #include "CKRasterizerDevice.h"
 #include "CKDebugLogger.h"
-#include "CKRenderSettings.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "shaders/generated/CKFFShaderABI.generated.h"
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/dx11/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/dx11/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage.bin.h"
-#include "shaders/generated/dx11/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/dx12/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/dx12/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage.bin.h"
-#include "shaders/generated/dx12/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/spirv/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/spirv/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage.bin.h"
-#include "shaders/generated/spirv/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/glsl/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/glsl/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
-#include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/essl/vs_ff_3d.bin.h"
 #include "shaders/generated/essl/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/essl/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/essl/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/essl/vs_ff_positiont.bin.h"
 #include "shaders/generated/essl/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/essl/fs_ff_stage.bin.h"
-#include "shaders/generated/essl/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/metal/vs_ff_3d.bin.h"
 #include "shaders/generated/metal/vs_ff_3d_clip.bin.h"
-#include "shaders/generated/metal/vs_ff_3d_instanced.bin.h"
-#include "shaders/generated/metal/vs_ff_3d_instanced_clip.bin.h"
 #include "shaders/generated/metal/vs_ff_positiont.bin.h"
 #include "shaders/generated/metal/vs_ff_positiont_clip.bin.h"
 #include "shaders/generated/metal/fs_ff_stage.bin.h"
-#include "shaders/generated/metal/fs_ff_stage_volume.bin.h"
 
 void CKFFInitProgramContext(CKFFProgramContext *context,
                             const CKFFShaderKey &key,
@@ -68,96 +48,42 @@ void CKFFInitProgramContext(CKFFProgramContext *context,
     context->ShaderKey = key;
     context->Binding = binding;
     context->Program = binding.Program;
-    context->FullSpecialized = binding.FullSpecialized ? TRUE : FALSE;
     context->Specialization = binding.Specialization;
 }
 
-CKBOOL CKFFCanUseInstancedProgramForPacket(const CKFFProgramContext &normalContext,
-                                           const CKFFProgramContext &instancedContext)
-{
-    if (normalContext.Program == 0 || instancedContext.Program == 0)
-        return FALSE;
-    if (normalContext.FullSpecialized && !instancedContext.FullSpecialized)
-        return FALSE;
-    return TRUE;
-}
+struct CKFFShaderBlob {
+    const unsigned char *Data;
+    unsigned int Size;
+};
 
 struct CKFFShaderBlobSet {
     CK_SHADER_PROFILE Profile;
     const char *Name;
-    const unsigned char *VS3D;
-    unsigned int VS3DSize;
-    const unsigned char *VS3DClip;
-    unsigned int VS3DClipSize;
-    const unsigned char *VS3DInstanced;
-    unsigned int VS3DInstancedSize;
-    const unsigned char *VS3DInstancedClip;
-    unsigned int VS3DInstancedClipSize;
-    const unsigned char *VSPositionT;
-    unsigned int VSPositionTSize;
-    const unsigned char *VSPositionTClip;
-    unsigned int VSPositionTClipSize;
-    const unsigned char *FSStage;
-    unsigned int FSStageSize;
-    const unsigned char *FSStageVolume;
-    unsigned int FSStageVolumeSize;
+    CKFFShaderBlob VS[CKFF_PROGRAM_VARIANT_COUNT]; // indexed by CKFFProgramVariant
+    CKFFShaderBlob FS;
 };
 
+#define CKFF_BLOB(name) {name, sizeof(name)}
+#define CKFF_BLOB_SET(profile, backend) \
+    {profile, #backend, \
+     {CKFF_BLOB(s_##backend##_vs_ff_3d), CKFF_BLOB(s_##backend##_vs_ff_3d_clip), \
+      CKFF_BLOB(s_##backend##_vs_ff_positiont), CKFF_BLOB(s_##backend##_vs_ff_positiont_clip)}, \
+     CKFF_BLOB(s_##backend##_fs_ff_stage)}
+
 static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
-    {CKRST_SHADER_PROFILE_DX11, "dx11",
-     s_dx11_vs_ff_3d, sizeof(s_dx11_vs_ff_3d),
-     s_dx11_vs_ff_3d_clip, sizeof(s_dx11_vs_ff_3d_clip),
-     s_dx11_vs_ff_3d_instanced, sizeof(s_dx11_vs_ff_3d_instanced),
-     s_dx11_vs_ff_3d_instanced_clip, sizeof(s_dx11_vs_ff_3d_instanced_clip),
-     s_dx11_vs_ff_positiont, sizeof(s_dx11_vs_ff_positiont),
-     s_dx11_vs_ff_positiont_clip, sizeof(s_dx11_vs_ff_positiont_clip),
-     s_dx11_fs_ff_stage, sizeof(s_dx11_fs_ff_stage),
-     s_dx11_fs_ff_stage_volume, sizeof(s_dx11_fs_ff_stage_volume)},
-    {CKRST_SHADER_PROFILE_DX12, "dx12",
-     s_dx12_vs_ff_3d, sizeof(s_dx12_vs_ff_3d),
-     s_dx12_vs_ff_3d_clip, sizeof(s_dx12_vs_ff_3d_clip),
-     s_dx12_vs_ff_3d_instanced, sizeof(s_dx12_vs_ff_3d_instanced),
-     s_dx12_vs_ff_3d_instanced_clip, sizeof(s_dx12_vs_ff_3d_instanced_clip),
-     s_dx12_vs_ff_positiont, sizeof(s_dx12_vs_ff_positiont),
-     s_dx12_vs_ff_positiont_clip, sizeof(s_dx12_vs_ff_positiont_clip),
-     s_dx12_fs_ff_stage, sizeof(s_dx12_fs_ff_stage),
-     s_dx12_fs_ff_stage_volume, sizeof(s_dx12_fs_ff_stage_volume)},
-    {CKRST_SHADER_PROFILE_SPIRV, "spirv",
-     s_spirv_vs_ff_3d, sizeof(s_spirv_vs_ff_3d),
-     s_spirv_vs_ff_3d_clip, sizeof(s_spirv_vs_ff_3d_clip),
-     s_spirv_vs_ff_3d_instanced, sizeof(s_spirv_vs_ff_3d_instanced),
-     s_spirv_vs_ff_3d_instanced_clip, sizeof(s_spirv_vs_ff_3d_instanced_clip),
-     s_spirv_vs_ff_positiont, sizeof(s_spirv_vs_ff_positiont),
-     s_spirv_vs_ff_positiont_clip, sizeof(s_spirv_vs_ff_positiont_clip),
-     s_spirv_fs_ff_stage, sizeof(s_spirv_fs_ff_stage),
-     s_spirv_fs_ff_stage_volume, sizeof(s_spirv_fs_ff_stage_volume)},
-    {CKRST_SHADER_PROFILE_GLSL, "glsl",
-     s_glsl_vs_ff_3d, sizeof(s_glsl_vs_ff_3d),
-     s_glsl_vs_ff_3d_clip, sizeof(s_glsl_vs_ff_3d_clip),
-     s_glsl_vs_ff_3d_instanced, sizeof(s_glsl_vs_ff_3d_instanced),
-     s_glsl_vs_ff_3d_instanced_clip, sizeof(s_glsl_vs_ff_3d_instanced_clip),
-     s_glsl_vs_ff_positiont, sizeof(s_glsl_vs_ff_positiont),
-     s_glsl_vs_ff_positiont_clip, sizeof(s_glsl_vs_ff_positiont_clip),
-     s_glsl_fs_ff_stage, sizeof(s_glsl_fs_ff_stage),
-     s_glsl_fs_ff_stage_volume, sizeof(s_glsl_fs_ff_stage_volume)},
-    {CKRST_SHADER_PROFILE_ESSL, "essl",
-     s_essl_vs_ff_3d, sizeof(s_essl_vs_ff_3d),
-     s_essl_vs_ff_3d_clip, sizeof(s_essl_vs_ff_3d_clip),
-     s_essl_vs_ff_3d_instanced, sizeof(s_essl_vs_ff_3d_instanced),
-     s_essl_vs_ff_3d_instanced_clip, sizeof(s_essl_vs_ff_3d_instanced_clip),
-     s_essl_vs_ff_positiont, sizeof(s_essl_vs_ff_positiont),
-     s_essl_vs_ff_positiont_clip, sizeof(s_essl_vs_ff_positiont_clip),
-     s_essl_fs_ff_stage, sizeof(s_essl_fs_ff_stage),
-     s_essl_fs_ff_stage_volume, sizeof(s_essl_fs_ff_stage_volume)},
-    {CKRST_SHADER_PROFILE_MSL, "metal",
-     s_metal_vs_ff_3d, sizeof(s_metal_vs_ff_3d),
-     s_metal_vs_ff_3d_clip, sizeof(s_metal_vs_ff_3d_clip),
-     s_metal_vs_ff_3d_instanced, sizeof(s_metal_vs_ff_3d_instanced),
-     s_metal_vs_ff_3d_instanced_clip, sizeof(s_metal_vs_ff_3d_instanced_clip),
-     s_metal_vs_ff_positiont, sizeof(s_metal_vs_ff_positiont),
-     s_metal_vs_ff_positiont_clip, sizeof(s_metal_vs_ff_positiont_clip),
-     s_metal_fs_ff_stage, sizeof(s_metal_fs_ff_stage),
-     s_metal_fs_ff_stage_volume, sizeof(s_metal_fs_ff_stage_volume)},
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_DX11, dx11),
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_DX12, dx12),
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_SPIRV, spirv),
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_GLSL, glsl),
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_ESSL, essl),
+    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_MSL, metal),
+};
+
+#undef CKFF_BLOB_SET
+#undef CKFF_BLOB
+
+static const char *const g_ProgramVariantNames[CKFF_PROGRAM_VARIANT_COUNT] = {
+    "3d", "3d_clip", "positiont", "positiont_clip"
 };
 
 static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
@@ -171,47 +97,10 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
     return nullptr;
 }
 
-static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key);
-static bool CKFFShaderKeyNeedsCubeSampler(const CKFFShaderKey &key);
-static CKDWORD CKFFShaderKeyActiveTextureMask(const CKFFShaderKey &key);
-static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
-                                       const CKFFShaderKey &key,
-                                       const unsigned char **vsData,
-                                       unsigned int *vsSize);
-
-static CKFFShaderMode CKFFResolveShaderMode()
-{
-    char mode[64];
-    if (CKRenderFFPSettings().GetString("ShaderMode", mode, sizeof(mode))) {
-        if (strcmp(mode, "runtime-specialized") == 0)
-            return CKFF_SHADER_MODE_RUNTIME_SPECIALIZED;
-        if (strcmp(mode, "full-specialized") != 0) {
-            CK_LOG_FMT("ShaderCache",
-                       "Unknown FFP ShaderMode '%s'; using full-specialized",
-                       mode);
-        }
-        return CKFF_SHADER_MODE_FULL_SPECIALIZED;
-    }
-
-    return CKRenderFFPSettings().GetBool("UberShader", false)
-        ? CKFF_SHADER_MODE_RUNTIME_SPECIALIZED
-        : CKFF_SHADER_MODE_FULL_SPECIALIZED;
-}
-
-static bool CKFFResolveProgramPrewarm(CK_SHADER_PROFILE profile)
-{
-    char value[32];
-    if (!CKRenderFFPSettings().GetString("PrewarmPrograms", value, sizeof(value)) ||
-        strcmp(value, "auto") == 0)
-        return profile == CKRST_SHADER_PROFILE_SPIRV;
-    return CKRenderSettingsParseBool(value, false);
-}
-
 CKFFShaderCache::CKFFShaderCache()
-    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr),
-      m_ShaderMode(CKFF_SHADER_MODE_FULL_SPECIALIZED),
-      m_PrewarmPrograms(false), m_ProgramBindingClockHand(0),
-      m_CacheStats() {}
+    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_SamplerLayout() {
+    memset(m_Programs, 0, sizeof(m_Programs));
+}
 
 CKFFShaderCache::~CKFFShaderCache() {
     Shutdown();
@@ -220,23 +109,19 @@ CKFFShaderCache::~CKFFShaderCache() {
 bool CKFFShaderCache::Init(CKRasterizerDevice *ctx) {
     Shutdown();
     m_Context = ctx;
-    m_ShaderMode = CKFFResolveShaderMode();
     if (!ResolveShaderTarget() || !CreateUniforms()) {
         Shutdown();
         return false;
     }
-    m_PrewarmPrograms = CKFFResolveProgramPrewarm(m_Target.ShaderProfile);
-    if (m_PrewarmPrograms)
-        PrewarmPrograms();
+    BuildSamplerLayout();
     return true;
 }
 
 void CKFFShaderCache::Shutdown() {
     if (m_Context) {
-        for (CKFFProgramModuleCacheTable::Iterator it = m_ModuleProgramCache.Begin();
-             it != m_ModuleProgramCache.End(); ++it) {
-            if (*it)
-                m_Context->DeleteObject(*it, CKRST_OBJ_PROGRAM);
+        for (CKDWORD i = 0; i < CKFF_PROGRAM_VARIANT_COUNT; ++i) {
+            if (m_Programs[i])
+                m_Context->DeleteObject(m_Programs[i], CKRST_OBJ_PROGRAM);
         }
         CKDWORD uniforms[sizeof(m_Uniforms) / sizeof(CKDWORD)];
         memcpy(uniforms, &m_Uniforms, sizeof(uniforms));
@@ -246,17 +131,11 @@ void CKFFShaderCache::Shutdown() {
                 m_Context->DeleteObject(uniforms[i], CKRST_OBJ_UNIFORM);
         }
     }
-    m_ModuleProgramCache.Clear();
-    m_ProgramSamplerLayouts.Clear();
-    m_ProgramCache.Clear();
-    m_ProgramBindingClock.Clear();
-    m_ProgramBindingClockHand = 0;
-    m_CacheStats = CKFFShaderCacheStats();
+    memset(m_Programs, 0, sizeof(m_Programs));
+    m_SamplerLayout = CKFFProgramSamplerLayout();
     m_Uniforms = CKFFUniformHandles();
     m_Context = nullptr;
     m_BlobSet = nullptr;
-    m_ShaderMode = CKFF_SHADER_MODE_FULL_SPECIALIZED;
-    m_PrewarmPrograms = false;
 }
 
 bool CKFFShaderCache::CreateUniforms() {
@@ -320,13 +199,13 @@ bool CKFFShaderCache::CreateUniforms() {
         desc.Name = name;
         m_Context->CreateUniform(&desc, &m_Uniforms.s_texture[i]);
     }
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
+    for (int i = 0; i < CKFF_CUBE_SAMPLER_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof(name), "s_textureCube%d", i);
         desc.Name = name;
         m_Context->CreateUniform(&desc, &m_Uniforms.s_textureCube[i]);
     }
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
+    for (int i = 0; i < CKFF_VOLUME_SAMPLER_COUNT; i++) {
         char name[32];
         snprintf(name, sizeof(name), "s_textureVolume%d", i);
         desc.Name = name;
@@ -365,347 +244,90 @@ bool CKFFShaderCache::ResolveShaderTarget() {
                    m_Target.ShaderProfile);
         return false;
     }
-    if (CKFFGeneratedShaderABIVersion() != CKFF_SHADER_ABI_VERSION ||
-        CKFFGeneratedShaderInterfaceHash() != CKFF_SHADER_INTERFACE_HASH) {
+    if (g_CKFFGeneratedShaderABIVersion != CKFF_SHADER_ABI_VERSION ||
+        g_CKFFGeneratedShaderInterfaceHash != CKFF_SHADER_INTERFACE_HASH) {
         CK_LOG_FMT("ShaderCache",
                    "FFP shader ABI mismatch: generatedVersion=%u expectedVersion=%u generatedHash=0x%08X expectedHash=0x%08X",
-                   (unsigned)CKFFGeneratedShaderABIVersion(),
+                   (unsigned)g_CKFFGeneratedShaderABIVersion,
                    (unsigned)CKFF_SHADER_ABI_VERSION,
-                   (unsigned)CKFFGeneratedShaderInterfaceHash(),
+                   (unsigned)g_CKFFGeneratedShaderInterfaceHash,
                    (unsigned)CKFF_SHADER_INTERFACE_HASH);
         return false;
     }
 
     m_BlobSet = set;
     CK_LOG_FMT("ShaderCache",
-               "FFP shader mode: backend=%s profile=0x%08X mode=%s specializedModules=%u samplerLayoutModules=%u abiDrawParams=%u abiStageParams=%u abiSpecDwords=%u",
-                set->Name, m_Target.ShaderProfile,
-               UsesRuntimeSpecializedShader() ? "runtime-specialized" : "full-specialized",
-               (unsigned)CKFFSpecializedModuleCount(),
-               (unsigned)CKFFSamplerLayoutModuleCount(),
+               "FFP shader family: backend=%s profile=0x%08X variants=%u abiDrawParams=%u abiStageParams=%u abiSpecDwords=%u",
+               set->Name, m_Target.ShaderProfile,
+               (unsigned)CKFF_PROGRAM_VARIANT_COUNT,
                (unsigned)CKFF_DRAW_PARAM_VEC4_COUNT,
                (unsigned)CKFF_STAGE_PARAM_VEC4_COUNT,
                (unsigned)CKFF_SPEC_UNIFORM_VEC4_COUNT);
     return true;
 }
 
-void CKFFShaderCache::PrewarmPrograms()
+void CKFFShaderCache::BuildSamplerLayout()
 {
-    const CKFFShaderBlobSet *set =
-        static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
-    if (!set || !m_Context)
-        return;
-
-    const size_t before = (size_t)m_ModuleProgramCache.Size();
-    CKDWORD failures = 0;
-
-    if (!UsesRuntimeSpecializedShader()) {
-        const size_t count = CKFFSpecializedModuleCount();
-        for (size_t i = 0; i < count; ++i) {
-            CKFFSpecializedModuleEntry entry;
-            if (!CKFFGetSpecializedModule(i, entry) ||
-                entry.Profile != m_Target.ShaderProfile)
-                continue;
-            if (CreateProgramFromBinary(
-                    m_Target,
-                    entry.Module.VSData, entry.Module.VSSize,
-                    entry.Module.FSData, entry.Module.FSSize,
-                    entry.Module.Specialization) == 0)
-                ++failures;
-        }
-    } else {
-        const unsigned char *vsData[] = {
-            set->VS3D,
-            set->VS3DClip,
-            set->VS3DInstanced,
-            set->VS3DInstancedClip,
-            set->VSPositionT,
-            set->VSPositionTClip
-        };
-        const unsigned int vsSize[] = {
-            set->VS3DSize,
-            set->VS3DClipSize,
-            set->VS3DInstancedSize,
-            set->VS3DInstancedClipSize,
-            set->VSPositionTSize,
-            set->VSPositionTClipSize
-        };
-        CKFFSpecializationInfo specialization;
-        const size_t vertexVariantCount = sizeof(vsData) / sizeof(vsData[0]);
-        for (size_t i = 0; i < vertexVariantCount; ++i) {
-            if (CreateProgramFromBinary(
-                    m_Target, vsData[i], vsSize[i],
-                    set->FSStage, set->FSStageSize,
-                    specialization) == 0)
-                ++failures;
-            if (CreateProgramFromBinary(
-                    m_Target, vsData[i], vsSize[i],
-                    set->FSStageVolume, set->FSStageVolumeSize,
-                    specialization) == 0)
-                ++failures;
-        }
-
-        const size_t layoutCount = CKFFSamplerLayoutModuleCount();
-        for (size_t layoutIndex = 0; layoutIndex < layoutCount; ++layoutIndex) {
-            CKFFSamplerLayoutModuleEntry entry;
-            if (!CKFFGetSamplerLayoutModule(layoutIndex, entry) ||
-                entry.Profile != m_Target.ShaderProfile)
-                continue;
-            for (size_t i = 0; i < vertexVariantCount; ++i) {
-                if (CreateProgramFromBinary(
-                        m_Target, vsData[i], vsSize[i],
-                        entry.Module.FSData, entry.Module.FSSize,
-                        specialization) == 0)
-                    ++failures;
-            }
-        }
+    m_SamplerLayout = CKFFProgramSamplerLayout();
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
+        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_2D, stage);
+        binding.Uniform = m_Uniforms.s_texture[stage];
     }
-
-    CK_LOG_FMT("ShaderCache",
-               "FFP program prewarm complete: mode=%s created=%u failures=%u",
-               UsesRuntimeSpecializedShader()
-                   ? "runtime-specialized"
-                   : "full-specialized",
-               (unsigned)((size_t)m_ModuleProgramCache.Size() - before),
-               (unsigned)failures);
+    for (CKDWORD ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal) {
+        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
+        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal);
+        binding.Uniform = m_Uniforms.s_textureCube[ordinal];
+    }
+    for (CKDWORD ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal) {
+        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
+        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal);
+        binding.Uniform = m_Uniforms.s_textureVolume[ordinal];
+    }
 }
 
-CKFFProgramBinding CKFFShaderCache::CreateVariantProgram(const CKFFShaderKey &key) {
-    if (!UsesRuntimeSpecializedShader())
-        return CreateFullSpecializedProgram(key);
-    if (CKFFShaderKeyNeedsVolumeSampler(key)) {
-        if (CKFFShaderKeyNeedsCubeSampler(key)) {
-            return CreateStaticSamplerLayoutProgram(key);
-        }
-        return CreateVolumeSamplerLayoutProgram(key);
-    }
-    return CreateRuntimeSpecializedProgram(key);
-}
-
-static bool CKFFShaderKeyNeedsVolumeSampler(const CKFFShaderKey &key) {
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
-        const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
-        if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_VOLUME)
-            return true;
-    }
-    return false;
-}
-
-static bool CKFFShaderKeyNeedsCubeSampler(const CKFFShaderKey &key) {
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
-        const CKFFShaderKeyFSStage &s = key.FS.Stages[stage];
-        if (s.HasTexture && s.SamplerType == CKFF_SAMPLER_CUBE)
-            return true;
-    }
-    return false;
-}
-
-static CKDWORD CKFFShaderKeyActiveTextureMask(const CKFFShaderKey &key) {
-    CKDWORD mask = 0;
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
-        if (key.FS.Stages[stage].HasTexture)
-            mask |= 1u << stage;
-    }
-    return mask;
-}
-
-static void CKFFSelectVertexShaderBlob(const CKFFShaderBlobSet *set,
-                                       const CKFFShaderKey &key,
-                                       const unsigned char **vsData,
-                                       unsigned int *vsSize) {
-    if (!set || !vsData || !vsSize)
-        return;
+CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &key)
+{
     const bool positionT = key.VS.GetHasPositionT();
-    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const bool instanced = key.VS.GetInstanced();
-    if (positionT) {
-        *vsData = clipDistance ? set->VSPositionTClip : set->VSPositionT;
-        *vsSize = clipDistance ? set->VSPositionTClipSize : set->VSPositionTSize;
-    } else if (instanced) {
-        *vsData = clipDistance ? set->VS3DInstancedClip : set->VS3DInstanced;
-        *vsSize = clipDistance ? set->VS3DInstancedClipSize : set->VS3DInstancedSize;
-    } else {
-        *vsData = clipDistance ? set->VS3DClip : set->VS3D;
-        *vsSize = clipDistance ? set->VS3DClipSize : set->VS3DSize;
-    }
+    const bool clipDistance = key.VS.GetVertexClipping();
+    if (positionT)
+        return clipDistance ? CKFF_PROGRAM_POSITIONT_CLIP : CKFF_PROGRAM_POSITIONT;
+    return clipDistance ? CKFF_PROGRAM_3D_CLIP : CKFF_PROGRAM_3D;
 }
 
-CKFFProgramBinding CKFFShaderCache::CreateFullSpecializedProgram(const CKFFShaderKey &key) {
-    if (key.FS.LastActiveTextureStage > 3) {
-        CK_LOG_FMT("ShaderCache",
-                   "FFP full-specialized rejected: lastStage=%u exceeds specialized stage limit; falling back",
-                   key.FS.LastActiveTextureStage);
-        if (CKFFShaderKeyNeedsVolumeSampler(key)) {
-            if (CKFFShaderKeyNeedsCubeSampler(key)) {
-                return CreateStaticSamplerLayoutProgram(key);
-            }
-            return CreateVolumeSamplerLayoutProgram(key);
-        }
-        return CreateRuntimeSpecializedProgram(key);
+size_t CKFFShaderCache::CachedProgramCount() const
+{
+    size_t count = 0;
+    for (CKDWORD i = 0; i < CKFF_PROGRAM_VARIANT_COUNT; ++i) {
+        if (m_Programs[i])
+            ++count;
     }
-
-    CKFFSpecializedModule module;
-    if (CKFFFindSpecializedModule(key, m_Target.ShaderProfile, module)) {
-        CKDWORD program = CreateProgramFromBinary(
-            m_Target,
-            module.VSData, module.VSSize,
-            module.FSData, module.FSSize,
-            module.Specialization);
-        return CKFFProgramBinding(program, program != 0, module.Specialization);
-    }
-
-    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
-    const CKFFSamplerLayoutKey layout = CKFFBuildSamplerLayoutKey(key.FS);
-    char stageTypes[32];
-    CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
-    CK_LOG_FMT("ShaderCache",
-               "Full FFP specialized module cache miss: backend=%s profile=0x%08X positionT=%u vsBits=%llu vsTexcoordDeclMask=%u vsTexGen0=%u vsTexGen1=%u vsTexGen2=%u vsTexGen3=%u vsTexGen4=%u vsTexGen5=%u vsTexGen6=%u vsTexGen7=%u vsTexCoordIndex0=%u vsTexCoordIndex1=%u vsTexCoordIndex2=%u vsTexCoordIndex3=%u vsTexCoordIndex4=%u vsTexCoordIndex5=%u vsTexCoordIndex6=%u vsTexCoordIndex7=%u vsTexTransformFlags0=%u vsTexTransformFlags1=%u vsTexTransformFlags2=%u vsTexTransformFlags3=%u vsTexTransformFlags4=%u vsTexTransformFlags5=%u vsTexTransformFlags6=%u vsTexTransformFlags7=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u projectedMask=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
-               m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
-               m_Target.ShaderProfile,
-               key.VS.GetHasPositionT() ? 1u : 0u,
-               (unsigned long long)key.VS.Bits,
-               key.VS.VertexTexcoordDeclMask,
-               key.VS.TexGen[0], key.VS.TexGen[1], key.VS.TexGen[2], key.VS.TexGen[3],
-               key.VS.TexGen[4], key.VS.TexGen[5], key.VS.TexGen[6], key.VS.TexGen[7],
-               key.VS.TexCoordIndex[0], key.VS.TexCoordIndex[1], key.VS.TexCoordIndex[2], key.VS.TexCoordIndex[3],
-               key.VS.TexCoordIndex[4], key.VS.TexCoordIndex[5], key.VS.TexCoordIndex[6], key.VS.TexCoordIndex[7],
-               key.VS.TexTransformFlags[0], key.VS.TexTransformFlags[1], key.VS.TexTransformFlags[2], key.VS.TexTransformFlags[3],
-               key.VS.TexTransformFlags[4], key.VS.TexTransformFlags[5], key.VS.TexTransformFlags[6], key.VS.TexTransformFlags[7],
-               key.FS.LastActiveTextureStage,
-               CKFFShaderKeyActiveTextureMask(key),
-               layout.Bits,
-               stageTypes,
-               CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u,
-               key.FS.GlobalSpecularEnable ? 1u : 0u,
-               key.FS.AlphaTestEnable ? 1u : 0u,
-               key.FS.AlphaFunc,
-               key.FS.FogEnable ? 1u : 0u,
-               specInfo.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK),
-               specInfo.Data()[0], specInfo.Data()[1], specInfo.Data()[2],
-               specInfo.Data()[3], specInfo.Data()[4], specInfo.Data()[5],
-               specInfo.Data()[6], specInfo.Data()[7], specInfo.Data()[8],
-               specInfo.Data()[9]);
-    if (CKFFShaderKeyNeedsVolumeSampler(key)) {
-        if (CKFFShaderKeyNeedsCubeSampler(key)) {
-            return CreateStaticSamplerLayoutProgram(key);
-        }
-        return CreateVolumeSamplerLayoutProgram(key);
-    }
-    return CreateRuntimeSpecializedProgram(key);
+    return count;
 }
 
-CKFFProgramBinding CKFFShaderCache::CreateVolumeSamplerLayoutProgram(const CKFFShaderKey &key) {
+CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
+{
     const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
-    if (!set)
-        return CKFFProgramBinding();
-
-    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
-    const bool positionT = key.VS.GetHasPositionT();
-    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const bool instanced = key.VS.GetInstanced();
-    const unsigned char *vsData = nullptr;
-    unsigned int vsSize = 0;
-    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
-    CKDWORD program = CreateProgramFromBinary(
-        m_Target, vsData, vsSize, set->FSStageVolume, set->FSStageVolumeSize, specInfo);
-
-    CK_LOG_FMT("ShaderCache",
-               "FFP volume sampler program: %u backend=%s positionT=%u clip=%u instanced=%u lastStage=%u",
-               program, set->Name, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
-               instanced ? 1u : 0u,
-               key.FS.LastActiveTextureStage);
-    return CKFFProgramBinding(program, false, specInfo);
-}
-
-CKFFProgramBinding CKFFShaderCache::CreateStaticSamplerLayoutProgram(const CKFFShaderKey &key) {
-    const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
-    if (!set)
-        return CKFFProgramBinding();
-
-    const CKFFSamplerLayoutKey sourceLayout = CKFFBuildSamplerLayoutKey(key.FS);
-    const CKFFSamplerLayoutKey layout = CKFFCanonicalSamplerLayoutKey(sourceLayout);
-    CKFFSamplerLayoutModule module;
-    if (!CKFFFindSamplerLayoutModule(layout, m_Target.ShaderProfile, module)) {
-        char stageTypes[32];
-        char manifestEntry[128];
-        CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
-        CKFFFormatSamplerLayoutManifestEntry(layout, set->Name, manifestEntry, sizeof(manifestEntry));
-        CK_LOG_FMT("ShaderCache",
-                   "FFP static sampler layout miss: backend=%s profile=0x%08X lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u manifestEntry=%s",
-                   set->Name, m_Target.ShaderProfile, key.FS.LastActiveTextureStage,
-                   CKFFShaderKeyActiveTextureMask(key), layout.Bits,
-                   stageTypes,
-                   CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u,
-                   manifestEntry);
-        return CKFFProgramBinding();
-    }
-
-    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
-    const bool positionT = key.VS.GetHasPositionT();
-    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const bool instanced = key.VS.GetInstanced();
-    char stageTypes[32];
-    CKFFFormatSamplerLayoutStageTypes(layout, stageTypes, sizeof(stageTypes));
-    const unsigned char *vsData = nullptr;
-    unsigned int vsSize = 0;
-    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
-    CKDWORD program = CreateProgramFromBinary(
-        m_Target, vsData, vsSize, module.FSData, module.FSSize, specInfo);
-
-    CK_LOG_FMT("ShaderCache",
-               "FFP static sampler layout program: %u backend=%s profile=0x%08X positionT=%u clip=%u instanced=%u lastStage=%u activeTextureMask=0x%02X layout=0x%04X stageTypes=%s mixedCubeVolume=%u",
-               program, set->Name, m_Target.ShaderProfile, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
-               instanced ? 1u : 0u,
-               key.FS.LastActiveTextureStage, CKFFShaderKeyActiveTextureMask(key), layout.Bits,
-               stageTypes, CKFFSamplerLayoutNeedsMixedCubeVolume(layout) ? 1u : 0u);
-    return CKFFProgramBinding(program, false, specInfo);
-}
-
-CKFFProgramBinding CKFFShaderCache::CreateRuntimeSpecializedProgram(const CKFFShaderKey &key) {
-    const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
-    if (!set)
-        return CKFFProgramBinding();
-
-    CKFFSpecializationInfo specInfo = CKFFBuildSpecializationInfo(key.FS);
-    const bool positionT = key.VS.GetHasPositionT();
-    const bool clipDistance = (key.VS.Bits & (1ull << 34)) != 0;
-    const bool instanced = key.VS.GetInstanced();
-    const unsigned char *vsData = nullptr;
-    unsigned int vsSize = 0;
-    CKFFSelectVertexShaderBlob(set, key, &vsData, &vsSize);
-    CKDWORD program = CreateProgramFromBinary(
-        m_Target, vsData, vsSize, set->FSStage, set->FSStageSize, specInfo);
-
-    CK_LOG_FMT("ShaderCache",
-               "FFP runtime-specialized program: %u backend=%s positionT=%u clip=%u instanced=%u lastStage=%u specular=%u alphaTest=%u alphaFunc=%u fog=%u",
-               program, set->Name, positionT ? 1u : 0u, clipDistance ? 1u : 0u,
-               instanced ? 1u : 0u,
-               key.FS.LastActiveTextureStage, key.FS.GlobalSpecularEnable ? 1u : 0u,
-               key.FS.AlphaTestEnable ? 1u : 0u, key.FS.AlphaFunc,
-               key.FS.FogEnable ? 1u : 0u);
-    return CKFFProgramBinding(program, false, specInfo);
+    if (!set || variant >= CKFF_PROGRAM_VARIANT_COUNT)
+        return 0;
+    const CKFFShaderBlob &vs = set->VS[variant];
+    const CKDWORD program = CreateProgramFromBinary(vs.Data, vs.Size, set->FS.Data, set->FS.Size);
+    CK_LOG_FMT("ShaderCache", "FFP program variant %s: %u backend=%s",
+               g_ProgramVariantNames[variant], program, set->Name);
+    return program;
 }
 
 CKDWORD CKFFShaderCache::CreateProgramFromBinary(
-    const CKRasterizerTargetDesc &target,
     const unsigned char *vsData, unsigned int vsSize,
-    const unsigned char *fsData, unsigned int fsSize,
-    const CKFFSpecializationInfo &specInfo)
+    const unsigned char *fsData, unsigned int fsSize)
 {
     if (!m_Context) return 0;
-
-    CKFFProgramModuleKey moduleKey = {
-        target.ShaderProfile, vsData, vsSize, fsData, fsSize
-    };
-    CKDWORD cachedProgram = 0;
-    if (m_ModuleProgramCache.LookUp(moduleKey, cachedProgram))
-        return cachedProgram;
 
     CKDWORD hVS = 0;
     CKShaderDesc vsDesc = {};
     vsDesc.Stage = CKRST_SHADER_VERTEX;
     vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    vsDesc.Profile = target.ShaderProfile;
+    vsDesc.Profile = m_Target.ShaderProfile;
     vsDesc.Code = vsData;
     vsDesc.CodeSize = vsSize;
     CKERROR err = m_Context->CreateShader(&vsDesc, &hVS);
@@ -718,7 +340,7 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     CKShaderDesc fsDesc = {};
     fsDesc.Stage = CKRST_SHADER_PIXEL;
     fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    fsDesc.Profile = target.ShaderProfile;
+    fsDesc.Profile = m_Target.ShaderProfile;
     fsDesc.Code = fsData;
     fsDesc.CodeSize = fsSize;
     err = m_Context->CreateShader(&fsDesc, &hFS);
@@ -735,211 +357,24 @@ CKDWORD CKFFShaderCache::CreateProgramFromBinary(
     progDesc.ConsumeShaders = TRUE;
     err = m_Context->CreateProgram(&progDesc, &hProgram);
     if (err != CK_OK) {
-        const CKDWORD *spec = specInfo.Data();
         CK_LOG_FMT("ShaderCache",
-                   "CreateProgram FAILED: err=%d backend=%s profile=0x%08X vs=%u fs=%u vsSize=%u fsSize=%u specDwordCount=%u specDword0=%u specDword1=%u specDword2=%u specDword3=%u specDword4=%u specDword5=%u specDword6=%u specDword7=%u specDword8=%u specDword9=%u",
+                   "CreateProgram FAILED: err=%d backend=%s profile=0x%08X vs=%u fs=%u vsSize=%u fsSize=%u",
                    err,
                    m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
-                   target.ShaderProfile,
-                   hVS, hFS, vsSize, fsSize, specInfo.DwordCount(),
-                   spec[0], spec[1], spec[2], spec[3], spec[4],
-                   spec[5], spec[6], spec[7], spec[8], spec[9]);
+                   m_Target.ShaderProfile,
+                   hVS, hFS, vsSize, fsSize);
         m_Context->DeleteObject(hVS, CKRST_OBJ_SHADER);
         m_Context->DeleteObject(hFS, CKRST_OBJ_SHADER);
         return 0;
     }
 
     CK_LOG_FMT("ShaderCache", "CreateProgram OK: program=%u vs=%u fs=%u", hProgram, hVS, hFS);
-    m_ModuleProgramCache.Insert(moduleKey, hProgram);
     return hProgram;
 }
 
-static CKDWORD CKFFProgramSamplerUniform(const CKFFUniformHandles &uniforms,
-                                         CKDWORD logicalStage,
-                                         CKDWORD samplerType)
-{
-    if (logicalStage >= CKFF_MAX_TEXTURE_STAGES)
-        return 0;
-    if (samplerType == CKFF_SAMPLER_CUBE)
-        return uniforms.s_textureCube[logicalStage];
-    if (samplerType == CKFF_SAMPLER_VOLUME)
-        return uniforms.s_textureVolume[logicalStage];
-    return uniforms.s_texture[logicalStage];
-}
-
-static void CKFFAddProgramSamplerBinding(CKFFProgramSamplerLayout *layout,
-                                         CKDWORD stage,
-                                         CKDWORD uniform)
-{
-    if (!layout || uniform == 0 ||
-        layout->BindingCount >= CKFF_MAX_PROGRAM_SAMPLER_BINDINGS)
-        return;
-    CKFFProgramSamplerBinding &binding =
-        layout->Bindings[layout->BindingCount++];
-    binding.Stage = stage;
-    binding.Uniform = uniform;
-}
-
-void CKFFShaderCache::CacheProgramSamplerLayout(
-    const CKFFShaderKey &key, const CKFFProgramBinding &binding)
-{
-    if (binding.Program == 0 ||
-        m_ProgramSamplerLayouts.FindPtr(binding.Program) != NULL)
-        return;
-
-    CKFFProgramSamplerLayout layout;
-    const CKFFSamplerLayoutKey samplerLayout =
-        CKFFBuildSamplerLayoutKey(key.FS);
-    const CKBOOL needsCube =
-        CKFFSamplerLayoutNeedsCubeSampler(samplerLayout) ? TRUE : FALSE;
-    const CKBOOL needsVolume =
-        CKFFSamplerLayoutNeedsVolumeSampler(samplerLayout) ? TRUE : FALSE;
-
-    if (binding.FullSpecialized ||
-        (needsCube && needsVolume &&
-         !CKFFSamplerLayoutSupportsGenericMixed(samplerLayout))) {
-        for (CKDWORD logicalStage = 0;
-             logicalStage < CKFF_MAX_TEXTURE_STAGES; ++logicalStage) {
-            const CKDWORD samplerType =
-                CKFFSamplerLayoutStageType(samplerLayout, logicalStage);
-            CKFFAddProgramSamplerBinding(
-                &layout,
-                CKFFSamplerBindStage(logicalStage, samplerType),
-                CKFFProgramSamplerUniform(
-                    m_Uniforms, logicalStage, samplerType));
-        }
-    } else {
-        for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-            CKFFAddProgramSamplerBinding(
-                &layout, stage, m_Uniforms.s_texture[stage]);
-        }
-
-        if (needsCube && needsVolume) {
-            for (CKDWORD stage = 0; stage < 4; ++stage) {
-                CKFFAddProgramSamplerBinding(
-                    &layout, CKFF_MAX_TEXTURE_STAGES + stage,
-                    m_Uniforms.s_textureCube[stage]);
-                CKFFAddProgramSamplerBinding(
-                    &layout, CKFF_MAX_TEXTURE_STAGES + 4 + stage,
-                    m_Uniforms.s_textureVolume[stage]);
-            }
-        } else {
-            const CKDWORD samplerType = needsVolume
-                ? CKFF_SAMPLER_VOLUME : CKFF_SAMPLER_CUBE;
-            for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-                CKFFAddProgramSamplerBinding(
-                    &layout, CKFF_MAX_TEXTURE_STAGES + stage,
-                    CKFFProgramSamplerUniform(
-                        m_Uniforms, stage, samplerType));
-            }
-        }
-    }
-
-    m_ProgramSamplerLayouts.Insert(binding.Program, layout);
-}
-
-CKBOOL CKFFShaderCache::GetProgramSamplerLayout(
-    CKDWORD program, CKFFProgramSamplerLayout *layout) const
-{
-    if (!layout)
-        return FALSE;
-    const CKFFProgramSamplerLayout *cached =
-        m_ProgramSamplerLayouts.FindPtr(program);
-    if (!cached)
-        return FALSE;
-    *layout = *cached;
-    return TRUE;
-}
-
 CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    CKFFProgramBindingCacheEntry *cached = m_ProgramCache.FindPtr(key);
-    if (cached) {
-        cached->RecentlyUsed = true;
-        ++m_CacheStats.BindingHits;
-        CacheProgramSamplerLayout(key, cached->Binding);
-        return cached->Binding;
-    }
-
-    ++m_CacheStats.BindingMisses;
-
-    const CKFFProgramBinding binding = CreateVariantProgram(key);
-    if (binding.Program) {
-        CacheProgramBinding(key, binding);
-        CacheProgramSamplerLayout(key, binding);
-    }
-    return binding;
-}
-
-void CKFFShaderCache::CacheProgramBinding(
-    const CKFFShaderKey &key,
-    const CKFFProgramBinding &binding)
-{
-    if (m_ProgramCache.Size() < CKFF_MAX_PROGRAM_BINDINGS) {
-        m_ProgramCache.Insert(key, CKFFProgramBindingCacheEntry(binding));
-        m_ProgramBindingClock.PushBack(key);
-        return;
-    }
-
-    int clockSize = m_ProgramBindingClock.Size();
-    if (clockSize != m_ProgramCache.Size()) {
-        m_ProgramBindingClock.Clear();
-        for (CKFFProgramCacheTable::Iterator it = m_ProgramCache.Begin();
-             it != m_ProgramCache.End(); ++it) {
-            m_ProgramBindingClock.PushBack(it.GetKey());
-        }
-        clockSize = m_ProgramBindingClock.Size();
-        m_ProgramBindingClockHand = 0;
-    }
-
-    // A full table always has at least one clock entry after rebuilding.
-    if (clockSize <= 0)
-        return;
-
-    if (m_ProgramBindingClockHand < 0 ||
-        m_ProgramBindingClockHand >= clockSize) {
-        m_ProgramBindingClockHand = 0;
-    }
-
-    for (;;) {
-        const CKFFShaderKey &candidateKey =
-            m_ProgramBindingClock[m_ProgramBindingClockHand];
-        CKFFProgramBindingCacheEntry *candidate =
-            m_ProgramCache.FindPtr(candidateKey);
-        if (!candidate || !candidate->RecentlyUsed)
-            break;
-
-        candidate->RecentlyUsed = false;
-        m_ProgramBindingClockHand =
-            (m_ProgramBindingClockHand + 1) % clockSize;
-    }
-
-    const CKFFShaderKey evictedKey =
-        m_ProgramBindingClock[m_ProgramBindingClockHand];
-    m_ProgramCache.Remove(evictedKey);
-    m_ProgramBindingClock[m_ProgramBindingClockHand] = key;
-    m_ProgramBindingClockHand =
-        (m_ProgramBindingClockHand + 1) % clockSize;
-    m_ProgramCache.Insert(key, CKFFProgramBindingCacheEntry(binding));
-    ++m_CacheStats.BindingEvictions;
-}
-
-CKBOOL CKFFShaderCache::SupportsSamplerLayout(const CKFFShaderKey &key) const
-{
-    if (!CKFFShaderKeyNeedsVolumeSampler(key) ||
-        !CKFFShaderKeyNeedsCubeSampler(key)) {
-        return TRUE;
-    }
-
-    if (!UsesRuntimeSpecializedShader() && key.FS.LastActiveTextureStage <= 3) {
-        CKFFSpecializedModule specialized;
-        if (CKFFFindSpecializedModule(key, m_Target.ShaderProfile, specialized))
-            return TRUE;
-    }
-
-    CKFFSamplerLayoutModule module;
-    return CKFFFindSamplerLayoutModule(
-        CKFFCanonicalSamplerLayoutKey(CKFFBuildSamplerLayoutKey(key.FS)),
-        m_Target.ShaderProfile, module)
-        ? TRUE
-        : FALSE;
+    const CKFFProgramVariant variant = ProgramVariantForKey(key);
+    if (m_Programs[variant] == 0)
+        m_Programs[variant] = CreateProgramVariant(variant);
+    return CKFFProgramBinding(m_Programs[variant], CKFFBuildSpecializationInfo(key.FS));
 }
