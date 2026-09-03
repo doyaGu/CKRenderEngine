@@ -216,6 +216,8 @@ private:
     Resource *FindResource(CKDWORD Type, CKDWORD Handle);
     const Resource *FindResource(CKDWORD Type, CKDWORD Handle) const;
     void Diag(CKRST_DIAGNOSTIC Kind) { ++m_Stats.Diagnostics[Kind]; }
+    CKRST_DIAGNOSTIC DrawRejectDiagnostic() const;
+    void RecordDrawApproximations();
 
     // Frame flow
     void PrepareFrameTarget();

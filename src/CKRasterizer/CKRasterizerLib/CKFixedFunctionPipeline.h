@@ -13,6 +13,7 @@
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
 #include "CKFFDrawTypes.h"
+#include "CKRasterizerEnums.h"
 #include "CKFFDrawPreparer.h"
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
@@ -33,33 +34,23 @@ struct CKLightData;
 
 struct CKFFPipelineTestAccess;
 
+// Reasons a draw returns FALSE. Every fixed-function state the backend cannot
+// express is approximated instead (see RecordDrawApproximation); only invalid
+// input / state values and device failures still reject.
 enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_NONE = 0,
     CKFF_DRAW_REJECT_INVALID_INPUT,
     CKFF_DRAW_REJECT_PREPARE_FAILED,
     CKFF_DRAW_REJECT_PROGRAM_MISSING,
-    CKFF_DRAW_REJECT_STENCIL_WRITE_MASK,
-    CKFF_DRAW_REJECT_VERTEX_TWEEN,
-    CKFF_DRAW_REJECT_VERTEX_BLEND_INPUT,
-    CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE,
-    CKFF_DRAW_REJECT_AFFINE_TEXCOORD,
     CKFF_DRAW_REJECT_TEXTURE_OP,
-    CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
-    CKFF_DRAW_REJECT_BORDER_PALETTE,
-    CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER,
-    CKFF_DRAW_REJECT_DITHER,
-    CKFF_DRAW_REJECT_ZBIAS,
-    CKFF_DRAW_REJECT_LINE_PATTERN,
-    CKFF_DRAW_REJECT_EDGE_ANTIALIAS,
-    CKFF_DRAW_REJECT_CLIPPING_DISABLED,
-    CKFF_DRAW_REJECT_STAGE_BLEND,
-    CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL,
-    CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT,
     CKFF_DRAW_REJECT_STATE_VALUE,
     CKFF_DRAW_REJECT_ENCODER_ERROR,
-    CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
     CKFF_DRAW_REJECT_COUNT
 };
+
+const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason);
+// Name of an APPROX_* / IGNORE_* contract diagnostic recorded for a draw.
+const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code);
 
 class CKFixedFunctionPipeline {
 public:
@@ -135,6 +126,12 @@ public:
             ? m_DrawRejectCounts[reason]
             : 0;
     }
+    // Approximations applied to the last draw (bit = CKRST_DIAGNOSTIC code) and
+    // the number of draws that used each approximation since Init.
+    uint64_t GetLastDrawApproximationMask() const { return m_LastDrawApproximationMask; }
+    CKDWORD GetApproximatedDrawCount(CKRST_DIAGNOSTIC code) const {
+        return (CKDWORD)code < CKRST_DIAG_COUNT ? m_DrawApproximationCounts[code] : 0;
+    }
 
     // === Subsystem access ===
     CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
@@ -200,6 +197,8 @@ private:
     CKFFDrawRejectReason m_LastDrawRejectReason;
     CKBOOL m_FrameDrawRejected;
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
+    uint64_t m_LastDrawApproximationMask;
+    CKDWORD m_DrawApproximationCounts[CKRST_DIAG_COUNT];
     CKDWORD m_BorderPaletteColors[16];
     CKDWORD m_BorderPaletteCount;
     CKDWORD m_BorderPaletteFrameSerial;
@@ -211,6 +210,10 @@ private:
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags);
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
+    void RecordDrawApproximation(CKRST_DIAGNOSTIC code);
+    void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
+    CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
+    CKDWORD NearestBorderPaletteSlot(CKDWORD argb) const;
     CKBOOL RejectPendingSubmission(CKRasterizerEncoder *encoder,
                                    CKFFDrawRejectReason reason);
     CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);

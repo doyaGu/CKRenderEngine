@@ -120,14 +120,13 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
             ? (double)Stats.TextureBinds / (double)Stats.SubmittedDraws
             : 0.0;
         CK_LOG_FMT("FFPStats.Core",
-                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u samplerSlotOverflows=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u",
+                   "frame=%u sw=%u hw=%u submitted=%u prepareFail=%u programMiss=%u uniforms=%u uniformsPerDraw=%.2f vec4=%u vec4PerDraw=%.2f texBinds=%u texBindsPerDraw=%.2f layouts=%u vbSets=%u ibSets=%u transforms=%u repeatProgram=%u repeatState=%u repeatTexSet=%u repeatVB=%u repeatIB=%u repeatWorld=%u drawStateHits=%u drawStateRebuilds=%u transientVB=%u transientIB=%u",
                    Stats.FrameIndex,
                    Stats.SoftwareDraws,
                    Stats.HardwareDraws,
                    Stats.SubmittedDraws,
                    Stats.PrepareFailures,
                    Stats.ProgramMisses,
-                   Stats.SamplerSlotOverflows,
                    Stats.UniformSets,
                    uniformsPerDraw,
                    Stats.UniformVec4s,

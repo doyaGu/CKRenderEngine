@@ -119,9 +119,13 @@ CKDWORD CKFFBaseTextureArg(CKDWORD arg);
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
+// Converts a Virtools STAGEBLEND(src, dst) pair into texture combiner ops.
+// Always succeeds; *exact is FALSE when the pair has no exact combiner and
+// the nearest op was chosen (spec appendix D).
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
                                   CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
-                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2);
+                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2,
+                                  CKBOOL *exact = NULL);
 
 CKDWORD CKFFResolveStageColorOp(const CKDWORD *stage, bool stageActive, bool hasTexture);
 CKDWORD CKFFResolveStageAlphaOp(const CKDWORD *stage, bool stageActive, bool hasTexture);

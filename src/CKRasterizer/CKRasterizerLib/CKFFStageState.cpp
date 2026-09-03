@@ -82,21 +82,49 @@ CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend) {
 
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
                                   CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
-                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2) {
+                                  CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2,
+                                  CKBOOL *exact) {
     const CKDWORD src = (stageBlend >> 4) & 0xF;
     const CKDWORD dst = stageBlend & 0xF;
 
-    if (!((src == VXBLEND_ZERO && dst == VXBLEND_SRCCOLOR) ||
-          (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO))) {
-        return FALSE;
-    }
-
-    colorOp = CKRST_TOP_MODULATE;
+    // STAGEBLEND(src, dst) means result = texture * src + current * dst with the
+    // usual blend factor semantics. Arg1 is the texture, arg2 the current colour.
     colorArg1 = CKRST_TA_TEXTURE;
     colorArg2 = CKRST_TA_CURRENT;
     alphaOp = CKRST_TOP_SELECTARG2;
     alphaArg1 = CKRST_TA_TEXTURE;
     alphaArg2 = CKRST_TA_CURRENT;
+    CKBOOL isExact = TRUE;
+    if ((src == VXBLEND_ZERO && dst == VXBLEND_SRCCOLOR) ||
+        (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO)) {
+        colorOp = CKRST_TOP_MODULATE;
+    } else if (src == VXBLEND_ONE && dst == VXBLEND_ONE) {
+        colorOp = CKRST_TOP_ADD;
+    } else if (src == VXBLEND_ONE && dst == VXBLEND_ZERO) {
+        colorOp = CKRST_TOP_SELECTARG1;
+    } else if (src == VXBLEND_ZERO && dst == VXBLEND_ONE) {
+        colorOp = CKRST_TOP_SELECTARG2;
+    } else if (src == VXBLEND_SRCALPHA && dst == VXBLEND_INVSRCALPHA) {
+        colorOp = CKRST_TOP_BLENDTEXTUREALPHA;
+    } else if (src == VXBLEND_SRCALPHA && dst == VXBLEND_ONE) {
+        colorOp = CKRST_TOP_MODULATEALPHA_ADDCOLOR;
+    } else if (src == VXBLEND_ONE && dst == VXBLEND_INVSRCALPHA) {
+        colorOp = CKRST_TOP_BLENDTEXTUREALPHAPM;
+    } else if (src == VXBLEND_DESTCOLOR && dst == VXBLEND_SRCCOLOR) {
+        colorOp = CKRST_TOP_MODULATE2X;
+    } else if (src == VXBLEND_INVSRCALPHA && dst == VXBLEND_SRCALPHA) {
+        // current blended over the texture by the texture alpha: swap the args.
+        colorOp = CKRST_TOP_BLENDTEXTUREALPHA;
+        colorArg1 = CKRST_TA_CURRENT;
+        colorArg2 = CKRST_TA_TEXTURE;
+    } else {
+        // No exact combiner: keep the modulation the material channel code
+        // path expects and report the approximation.
+        colorOp = CKRST_TOP_MODULATE;
+        isExact = FALSE;
+    }
+    if (exact)
+        *exact = isExact;
     return TRUE;
 }
 

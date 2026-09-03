@@ -55,7 +55,7 @@ options of our engine.
 # our engine (any platform, shared build with CKRE_BUILD_TOOLS=ON)
 bin/ckre_scene_capture --render-engine-dir <dir with CK2_3D.dll + CKBgfxRasterizer.dll> ^
       --scene all --out tests/reference/frames/local ^
-      --compare tests/reference/frames/oracle --skip stencil_write_mask
+      --compare tests/reference/frames/oracle
 ```
 
 Per-scene thresholds live in the scene table (`--list-scenes`);

@@ -355,6 +355,30 @@ void CKTranslatedContext::CountDraw(VXPRIMITIVETYPE Type, int ElementCount)
     m_FramePrimitives += (CKDWORD)PrimitiveCount(Type, ElementCount);
 }
 
+// Fixed-function draw failures: invalid values are the caller's fault, the
+// rest is the device (program creation / encoder). Approximated states are
+// counted through the APPROX_* / IGNORE_* diagnostics after a successful draw.
+CKRST_DIAGNOSTIC CKTranslatedContext::DrawRejectDiagnostic() const
+{
+    switch (m_FFP.GetLastDrawRejectReason()) {
+    case CKFF_DRAW_REJECT_INVALID_INPUT:
+    case CKFF_DRAW_REJECT_TEXTURE_OP:
+    case CKFF_DRAW_REJECT_STATE_VALUE:
+        return CKRST_DIAG_REJECT_INVALID_PARAMETER;
+    default:
+        return CKRST_DIAG_REJECT_UNSUPPORTED_STATE;
+    }
+}
+
+void CKTranslatedContext::RecordDrawApproximations()
+{
+    uint64_t mask = m_FFP.GetLastDrawApproximationMask();
+    for (CKDWORD code = 0; mask != 0 && code < CKRST_DIAG_COUNT; ++code, mask >>= 1) {
+        if ((mask & 1ull) != 0)
+            Diag((CKRST_DIAGNOSTIC)code);
+    }
+}
+
 CKBOOL CKTranslatedContext::DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices, int IndexCount, VxDrawPrimitiveData *Data)
 {
     if (!CheckDeviceForDraw())
@@ -373,9 +397,10 @@ CKBOOL CKTranslatedContext::DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices,
         m_Marker = "";
     }
     if (!m_FFP.DrawPrimitive(m_Encoder, m_CurrentView, Type, Indices, elementCount, Data)) {
-        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        Diag(DrawRejectDiagnostic());
         return FALSE;
     }
+    RecordDrawApproximations();
     CountDraw(Type, elementCount);
     return TRUE;
 }
@@ -393,9 +418,10 @@ CKBOOL CKTranslatedContext::SubmitVertexBuffer(VXPRIMITIVETYPE Type, const Resou
     if (!m_FFP.DrawVertexBuffer(m_Encoder, m_CurrentView, Type, VB.Handle, IBHandle, BaseVertex, VertexCount,
                                 StartIndex, IndexCount, VB.VertexBuffer.m_VertexFormat, VB.FormatFlags,
                                 VB.DeviceLayout)) {
-        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        Diag(DrawRejectDiagnostic());
         return FALSE;
     }
+    RecordDrawApproximations();
     CountDraw(Type, IBHandle ? (int)IndexCount : (int)VertexCount);
     return TRUE;
 }
@@ -590,9 +616,10 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
     guard.Restore();
     m_FFP.SetViewport(m_Viewport);
     if (!drawn) {
-        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        Diag(DrawRejectDiagnostic());
         return 0;
     }
+    RecordDrawApproximations();
     CountDraw(VX_TRIANGLEFAN, 4);
     return videoImageSize;
 }

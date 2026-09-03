@@ -16,7 +16,6 @@ struct CKFFFrameStats {
     CKDWORD SubmittedDraws;
     CKDWORD PrepareFailures;
     CKDWORD ProgramMisses;
-    CKDWORD SamplerSlotOverflows;
     CKDWORD UniformSets;
     CKDWORD UniformVec4s;
     CKDWORD UniformHandleSets[64];
@@ -95,7 +94,6 @@ public:
     void OnSubmittedDraw() { if (StatsEnabled()) ++Stats.SubmittedDraws; }
     void OnPrepareFailure() { if (StatsEnabled()) ++Stats.PrepareFailures; }
     void OnProgramMiss() { if (StatsEnabled()) ++Stats.ProgramMisses; }
-    void OnSamplerSlotOverflow() { if (StatsEnabled()) ++Stats.SamplerSlotOverflows; }
     void OnTransformSet() { if (StatsEnabled()) ++Stats.TransformSets; }
     void OnVertexLayoutSet() { if (StatsEnabled()) ++Stats.VertexLayoutSets; }
     void OnVertexBufferSet() { if (StatsEnabled()) ++Stats.VertexBufferSets; }

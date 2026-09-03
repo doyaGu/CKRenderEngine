@@ -94,8 +94,6 @@ if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
             -DENGINE_DIR=$<TARGET_FILE_DIR:CK2_3D>
             -DGOLDEN_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/reference/frames/golden
             -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture
-            # stencil_write_mask: the v2 pipeline rejects partial stencil write masks (KNOWN_DIFFERENCES.md)
-            -DSKIP=stencil_write_mask
             -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_golden.cmake
     )
     set_tests_properties(scene_capture_golden PROPERTIES

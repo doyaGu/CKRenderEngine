@@ -107,5 +107,7 @@ void main()
     float fogFactor = ckffPositionTFogFactor(u_ffDrawParams[10].w > 0.5, a_color1.a);
     v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     v_texcoord7Fog.z = fogFactor;
+    // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
+    gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     ckffApplyBackendClipSpace(gl_Position);
 }

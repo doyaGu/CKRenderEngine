@@ -8,15 +8,20 @@
 // Internal fixed-function shader ABI. These values define the C++ uniform
 // packing contract consumed by the checked-in bgfx shader sources.
 
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 3u;
-static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x7d3a91c6u;
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 4u;
+static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x2B9E5D14u;
+
+// VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
+// depth of the draw towards the viewer by this fraction of the depth range
+// (u_ffDrawParams[CKFF_DRAW_PARAM_MATERIAL_POWER].y, applied in the vertex shaders).
+static const float CKFF_ZBIAS_DEPTH_UNIT = 0.000005f;
 
 enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_DIFFUSE = 0,
     CKFF_DRAW_PARAM_MATERIAL_AMBIENT = 1,
     CKFF_DRAW_PARAM_MATERIAL_SPECULAR = 2,
     CKFF_DRAW_PARAM_MATERIAL_EMISSIVE = 3,
-    CKFF_DRAW_PARAM_MATERIAL_POWER = 4,
+    CKFF_DRAW_PARAM_MATERIAL_POWER = 4, // x = specular power, y = ZBIAS depth offset
     CKFF_DRAW_PARAM_MATERIAL_SOURCES = 5,
     CKFF_DRAW_PARAM_LIGHTING = 6,
     CKFF_DRAW_PARAM_LIGHT_FLAGS = 7,

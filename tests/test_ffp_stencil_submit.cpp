@@ -74,7 +74,7 @@ CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
     return CKFFSpecializationInfo::Unpack24(it->second.data(), CKFF_SPEC_UNIFORM_VEC4_COUNT * 4);
 }
 
-void DrawVertexBufferRejectsPartialStencilWriteMask() {
+void DrawVertexBufferApproximatesStencilWriteMasks() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -87,17 +87,38 @@ void DrawVertexBufferRejectsPartialStencilWriteMask() {
     ffp.SetRenderState(VXRENDERSTATE_STENCILMASK, 0xF0);
     ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
 
-    const CKBOOL drawn = ffp.DrawVertexBuffer(
+    CKBOOL drawn = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    TestCheck(!drawn,
-              "A partial stencil write mask must be rejected explicitly");
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "A rejected stencil write mask must not reach the backend");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STENCIL_WRITE_MASK,
-              "Partial stencil write mask rejection must report its reason");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "A partial stencil write mask must still submit the draw");
+    TestCheck(context.Encoder.LastStencilWriteMask == 0xFF &&
+                  context.Encoder.LastStencilReadMask == 0xF0,
+              "A partial stencil write mask approximates to writing every bit");
+    TestCheck((ffp.GetLastDrawApproximationMask() & (1ull << CKRST_DIAG_APPROX_STENCIL_WRITE_MASK)) != 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 1,
+              "Partial stencil write mask approximation must be reported once per draw");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "An approximated draw is not a rejected draw");
+
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x00);
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKDWORD stencilOps = context.Encoder.LastState.Mid &
+        (CKRST_STENCIL_FAIL(0xF) | CKRST_STENCIL_ZFAIL(0xF) | CKRST_STENCIL_PASS(0xF));
+    TestCheck(drawn && context.Encoder.SubmitCount == 2,
+              "A zero stencil write mask must still submit the draw");
+    TestCheck(stencilOps == (CKRST_STENCIL_FAIL(VXSTENCILOP_KEEP) |
+                             CKRST_STENCIL_ZFAIL(VXSTENCILOP_KEEP) |
+                             CKRST_STENCIL_PASS(VXSTENCILOP_KEEP)) &&
+                  (context.Encoder.LastState.Mid & CKRST_STENCIL_ENABLE) != 0,
+              "A zero stencil write mask approximates to KEEP operations with the test still enabled");
+    TestCheck(ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 2,
+              "Zero stencil write mask approximation must be counted");
 
     ffp.Shutdown();
 }
@@ -164,19 +185,21 @@ void DrawVertexBufferPropagatesEncoderFailure() {
     ffp.Shutdown();
 }
 
-void UnsupportedRenderStatesRejectExplicitly() {
-    struct UnsupportedStateCase {
+void IgnoredRenderStatesReportDiagnostics() {
+    struct IgnoredStateCase {
         VXRENDERSTATETYPE State;
         CKDWORD Value;
         CKDWORD ResetValue;
-        CKFFDrawRejectReason Reason;
+        CKRST_DIAGNOSTIC Diagnostic;
     };
-    const UnsupportedStateCase cases[] = {
-        {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKFF_DRAW_REJECT_DITHER},
-        {VXRENDERSTATE_ZBIAS, 1, 0, CKFF_DRAW_REJECT_ZBIAS},
-        {VXRENDERSTATE_LINEPATTERN, 0xFFFFu, 0, CKFF_DRAW_REJECT_LINE_PATTERN},
-        {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKFF_DRAW_REJECT_EDGE_ANTIALIAS},
-        {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKFF_DRAW_REJECT_CLIPPING_DISABLED},
+    const IgnoredStateCase cases[] = {
+        {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKRST_DIAG_IGNORE_DITHER},
+        {VXRENDERSTATE_ZBIAS, 1, 0, CKRST_DIAG_APPROX_ZBIAS},
+        {VXRENDERSTATE_LINEPATTERN, 0xFFFFu, 0, CKRST_DIAG_IGNORE_LINEPATTERN},
+        {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
+        {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
+        {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
+        {VXRENDERSTATE_FILLMODE, VXFILL_POINT, VXFILL_SOLID, CKRST_DIAG_APPROX_FILLMODE_POINT},
     };
 
     FFPDiagnosticDriver driver;
@@ -184,22 +207,32 @@ void UnsupportedRenderStatesRejectExplicitly() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(&context);
 
-    CKBOOL allRejected = TRUE;
+    CKBOOL allDrawn = TRUE;
+    CKBOOL allReported = TRUE;
     for (CKDWORD i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
         ffp.SetRenderState(cases[i].State, cases[i].Value);
         const CKBOOL drawn = ffp.DrawVertexBuffer(
             &context.Encoder, 1, VX_TRIANGLELIST,
             1, 0, 0, 3, 0, 0,
             CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-        allRejected = allRejected && !drawn &&
-            ffp.GetLastDrawRejectReason() == cases[i].Reason;
+        allDrawn = allDrawn && drawn;
+        allReported = allReported &&
+            ffp.GetLastDrawApproximationMask() == (1ull << cases[i].Diagnostic) &&
+            ffp.GetApproximatedDrawCount(cases[i].Diagnostic) == 1;
         ffp.SetRenderState(cases[i].State, cases[i].ResetValue);
     }
 
-    TestCheck(allRejected,
-              "Unsupported output-affecting render states must report explicit rejection reasons");
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "Unsupported render states must not reach backend submission");
+    TestCheck(allDrawn && context.Encoder.SubmitCount == sizeof(cases) / sizeof(cases[0]),
+              "Ignored or approximated render states must keep submitting draws");
+    TestCheck(allReported,
+              "Each ignored or approximated render state must report exactly its own diagnostic");
+
+    const CKBOOL clean = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(clean && ffp.GetLastDrawApproximationMask() == 0,
+              "A draw with default states must report no approximation");
 
     ffp.Shutdown();
 }
@@ -239,7 +272,7 @@ void InvalidStateValuesRejectBeforeBackendEncoding() {
     ffp.Shutdown();
 }
 
-void UnsupportedTextureStageStatesRejectExplicitly() {
+void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -247,14 +280,28 @@ void UnsupportedTextureStageStatesRejectExplicitly() {
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
 
     ffp.SetTextureStageState(
-        0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_ONE, VXBLEND_ONE));
+        0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA));
     CKBOOL drawn = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(!drawn &&
-                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STAGE_BLEND,
-              "Unsupported STAGEBLEND must reject instead of reusing prior texture ops");
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(drawn && context.Encoder.SubmitCount == 1 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STAGEBLEND) == 1 &&
+                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE,
+              "An inexact STAGEBLEND pair must draw with the nearest op and report the approximation");
+
+    ffp.ResetTextureStage(0);
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_ONE, VXBLEND_ONE));
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
+                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_ADD,
+              "STAGEBLEND(ONE, ONE) is the exact ADD combiner");
 
     ffp.ResetTextureStage(0);
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
@@ -264,9 +311,8 @@ void UnsupportedTextureStageStatesRejectExplicitly() {
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(!drawn &&
-                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_SAMPLER_LOD_CONTROL,
-              "Unsupported mip LOD controls must reject instead of being ignored");
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_SAMPLER_LOD),
+              "Mip LOD controls are ignored with a diagnostic");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, FloatStageState(0.0f));
     ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
@@ -275,19 +321,27 @@ void UnsupportedTextureStageStatesRejectExplicitly() {
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(!drawn &&
-                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_SAMPLER_ANISOTROPY_LIMIT,
-              "Unrepresentable anisotropy limits must reject explicitly");
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ANISOTROPY) &&
+                  context.Encoder.LastTextureSampler.MinFilter == CKRST_FILTER_ANISOTROPIC,
+              "Anisotropy levels above one approximate to the anisotropic switch with a diagnostic");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
     drawn = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn &&
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
                   context.Encoder.LastTextureSampler.MinFilter == CKRST_FILTER_LINEAR &&
                   context.Encoder.LastTextureSampler.MipFilter == CKRST_FILTER_LINEAR,
               "MAXANISOTROPY one must reduce anisotropic filtering to linear filtering");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_MIRROR_ONCE),
+              "MIRRORONCE addressing reports the shader-side approximation");
 
     ffp.Shutdown();
 }
@@ -1146,10 +1200,9 @@ void FifthCubeStageSamplesAsUnbound() {
                   it->second[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 1.0f &&
                   it->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 0.0f,
               "stage params must mark the overflowing stage as having no texture");
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    TestCheck(ffp.GetProbes().Stats.SamplerSlotOverflows == 1 || !ffp.GetProbes().StatsEnabled(),
-              "sampler slot overflow must be counted when statistics are enabled");
-#endif
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_SAMPLER_SLOTS) &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 1,
+              "sampler slot overflow must be reported as an approximation");
 
     ffp.Shutdown();
 }
@@ -1239,7 +1292,7 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
     ffp.Shutdown();
 }
 
-void FilteredDepthTextureCompareRejectsDraw() {
+void FilteredDepthTextureCompareApproximates() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1255,15 +1308,18 @@ void FilteredDepthTextureCompareRejectsDraw() {
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
-              "Filtered shader depth compare must reject instead of changing PCF semantics");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_DEPTH_COMPARE_FILTER,
-              "Filtered shader depth compare must expose its rejection reason");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Filtered shader depth compare must draw");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_COMPAREFUNC_FILTER),
+              "Filtered shader depth compare must report its approximation");
+    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
+              "The compare function still reaches the shader");
 
     ffp.Shutdown();
 }
 
-void AffineTextureCoordinatesRejectDraw() {
+void AffineTextureCoordinatesAreIgnoredWithDiagnostic() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1277,10 +1333,10 @@ void AffineTextureCoordinatesRejectDraw() {
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
-              "Affine texture coordinates must not silently render as perspective-correct");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_AFFINE_TEXCOORD,
-              "Affine texture-coordinate rejection must expose its reason");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Affine texture coordinates render perspective-correct");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF),
+              "Disabled texture perspective must be reported as ignored");
     ffp.Shutdown();
 }
 
@@ -1304,6 +1360,8 @@ void InactiveUnsupportedStateDoesNotRejectDraw() {
               "Unsupported state bits with no output effect must not reject a draw");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
               "A successful no-effect state draw must clear the reject reason");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0,
+              "State bits without output effect must not report approximations");
     ffp.Shutdown();
 }
 
@@ -1397,13 +1455,46 @@ void UnknownTextureOpRejectsDraw() {
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     TestCheck(!drawn && context.Encoder.SubmitCount == 0,
-              "An unknown texture op must not fall through to an approximate shader formula");
+              "An unknown texture op is an invalid value and must not draw");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
               "Unknown texture-op rejection must expose its reason");
     ffp.Shutdown();
 }
 
-void BottomLeftCubeRenderTargetRejectsDraw() {
+void AlphaBumpOpApproximatesToSelectArg1() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAP);
+    ffp.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "A bump op on the alpha channel must still draw");
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_OP) == CKRST_TOP_SELECTARG1,
+              "The alpha bump op approximates to SELECTARG1 in the specialization data");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ALPHA_BUMP_OP),
+              "The alpha bump op must report its approximation");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
+              "A bump op on a texture without DuDv data samples it as an ordinary texture with a diagnostic");
+    ffp.Shutdown();
+}
+
+void BottomLeftCubeRenderTargetSamplesWithDiagnostic() {
     FFPDiagnosticDriver driver(CKRST_SHADER_PROFILE_GLSL,
                                CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
@@ -1419,10 +1510,10 @@ void BottomLeftCubeRenderTargetRejectsDraw() {
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(!drawn && context.Encoder.SubmitCount == 0,
-              "Bottom-left cube render targets must fail until face orientation is defined");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_RENDER_TARGET_TYPE,
-              "Unsupported render-target type must expose its rejection reason");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1,
+              "Bottom-left cube render targets must draw");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_RENDER_TARGET_ORIGIN),
+              "Sampling a cube render target on a bottom-left backend reports the origin approximation");
     ffp.Shutdown();
 }
 
@@ -1461,7 +1552,7 @@ void BorderColorUsesStableBgfxPaletteSlots() {
     ffp.Shutdown();
 }
 
-void BorderPaletteOverflowRejectsDraw() {
+void BorderPaletteOverflowReusesNearestColor() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1474,24 +1565,30 @@ void BorderPaletteOverflowRejectsDraw() {
 
     CKBOOL firstSixteenSucceeded = TRUE;
     for (CKDWORD i = 0; i < 16; ++i) {
-        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | i);
+        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | (i * 0x10u));
         firstSixteenSucceeded = firstSixteenSucceeded && ffp.DrawVertexBuffer(
             &context.Encoder, 1, VX_TRIANGLELIST,
             1, 0, 0, 3, 0, 0,
             CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     }
-    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000010u);
+    TestCheck(firstSixteenSucceeded && context.PaletteSetCount == 16 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 0,
+              "All sixteen bgfx border palette slots must be usable");
+
+    // Closest to slot 5 (blue 0x50): 0x52.
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000052u);
     const CKBOOL overflow = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    TestCheck(firstSixteenSucceeded && context.PaletteSetCount == 16,
-              "All sixteen bgfx border palette slots must be usable");
-    TestCheck(!overflow && context.Encoder.SubmitCount == 16,
-              "A seventeenth border color must fail without backend submission");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BORDER_PALETTE,
-              "Border palette overflow must expose a stable rejection reason");
+    TestCheck(overflow && context.Encoder.SubmitCount == 17 && context.PaletteSetCount == 16,
+              "A seventeenth border color must draw without a new palette entry");
+    TestCheck(context.Encoder.LastTextureSampler.BorderColor == 5,
+              "The seventeenth border color must reuse the nearest palette slot");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BORDER_COLOR) &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 1,
+              "Border palette overflow must report its approximation");
 
     ffp.Shutdown();
 }
@@ -1924,7 +2021,7 @@ void PointSizeExpandsWithoutSpriteTexcoordReplacement() {
     ffp.Shutdown();
 }
 
-void PersistentPointBuffersRejectUnsupportedModesAndSetExactSize() {
+void PersistentPointBuffersApproximateUnsupportedModesAndClampSize() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1936,27 +2033,35 @@ void PersistentPointBuffersRejectUnsupportedModesAndSetExactSize() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE,
               "integer constant point size must submit through native point state");
     TestCheck(context.Encoder.PointSizeSetCount == 1 &&
-                  context.Encoder.LastPointSize == 4.0f,
+                  context.Encoder.LastPointSize == 4.0f &&
+                  ffp.GetLastDrawApproximationMask() == 0,
               "persistent point buffers must submit their exact constant point size");
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
     TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE,
-              "persistent point sprites must reject without fragment point coordinates");
-    TestCheck(ffp.GetLastDrawRejectReason() ==
-                  CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
-              "persistent point sprite rejection must be explicit");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE,
+              "persistent point sprites draw as plain points");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
+              "persistent point sprites must report the point approximation");
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(1.5f));
     TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE,
-              "fractional persistent point size must not be rounded silently");
-    TestCheck(ffp.GetLastDrawRejectReason() ==
-                  CKFF_DRAW_REJECT_POINT_VERTEX_BUFFER,
-              "fractional point size rejection must be explicit");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE &&
+                  context.Encoder.LastPointSize == 2.0f,
+              "fractional persistent point size rounds to the nearest integer");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
+              "fractional point size must report the point approximation");
+
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(40.0f));
+    TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_POINTLIST,
+                                   1, 0, 0, 1, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE &&
+                  context.Encoder.LastPointSize == 15.0f &&
+                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
+              "oversized persistent point size clamps to the backend maximum");
 
     ffp.Shutdown();
 }
@@ -2168,7 +2273,7 @@ void DrawUploadsPerStageBumpEnvUniforms() {
     ffp.Shutdown();
 }
 
-void UnsupportedBumpInputsRejectExplicitly() {
+void UnsupportedBumpInputsApproximateWithDiagnostics() {
     {
         FFPDiagnosticDriver driver;
         FFPDiagnosticContext context(&driver);
@@ -2178,12 +2283,12 @@ void UnsupportedBumpInputsRejectExplicitly() {
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
-                                        1, 0, 0, 3, 0, 0,
-                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "unsigned textures must not silently enter signed bump mapping");
-        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
-                  "unsigned bump mapping must report texture-op rejection");
+        TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                       1, 0, 0, 3, 0, 0,
+                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "unsigned textures in bump mapping draw as ordinary textures");
+        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
+                  "unsigned bump mapping must report the bump texture approximation");
         ffp.Shutdown();
     }
     {
@@ -2195,12 +2300,12 @@ void UnsupportedBumpInputsRejectExplicitly() {
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
-                                        1, 0, 0, 3, 0, 0,
-                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "luminance bump mapping without a luminance channel must reject");
-        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
-                  "missing luminance bump channel must report texture-op rejection");
+        TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                       1, 0, 0, 3, 0, 0,
+                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "luminance bump mapping without a luminance channel still draws");
+        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
+                  "missing luminance bump channel must report the bump texture approximation");
         ffp.Shutdown();
     }
     {
@@ -2218,8 +2323,9 @@ void UnsupportedBumpInputsRejectExplicitly() {
                                        1, 0, 0, 3, 0, 0,
                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
                   "packed luminance bump mapping must submit");
-        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
-                  "supported luminance bump mapping must not report rejection");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE &&
+                      ffp.GetLastDrawApproximationMask() == 0,
+                  "supported luminance bump mapping must report neither rejection nor approximation");
         ffp.Shutdown();
     }
     {
@@ -2231,12 +2337,12 @@ void UnsupportedBumpInputsRejectExplicitly() {
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
         ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAP);
-        TestCheck(!ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
-                                        1, 0, 0, 3, 0, 0,
-                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "BUMPENVMAP must not be accepted as an alpha-only operation");
-        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP,
-                  "alpha bump mapping must report texture-op rejection");
+        TestCheck(ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST,
+                                       1, 0, 0, 3, 0, 0,
+                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "BUMPENVMAP on the alpha channel draws with SELECTARG1");
+        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ALPHA_BUMP_OP),
+                  "alpha bump mapping must report the alpha bump approximation");
         ffp.Shutdown();
     }
 }
@@ -2601,7 +2707,7 @@ void VertexBlendWeightFlagsCreateWeightLayout() {
     ffp.Shutdown();
 }
 
-void VertexTweenRejectsMissingStreamsWithTweenReason() {
+void VertexTweenWithoutStreamsRendersUntweened() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2615,11 +2721,18 @@ void VertexTweenRejectsMissingStreamsWithTweenReason() {
     data.PositionStride = sizeof(VxVector);
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
-    TestCheck(!ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
-                                 NULL, 0, &data),
-              "Vertex tween without its second stream must be rejected");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_TWEEN,
-              "Vertex tween input failures must use the tween rejection category");
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                NULL, 0, &data) && context.Encoder.SubmitCount == 1,
+              "Vertex tween without its second stream must still draw");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN),
+              "Vertex tween input failures must report the tween approximation");
+    const CKDWORD drawParams = ffp.GetShaderCache().GetUniforms().u_ffDrawParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(drawParams);
+    TestCheck(params != context.Encoder.FloatUniforms.end() &&
+                  params->second.size() >= (CKFF_DRAW_PARAM_TWEEN + 1) * 4 &&
+                  params->second[CKFF_DRAW_PARAM_TWEEN * 4 + 1] == (float)CKFF_VERTEX_BLEND_DISABLED,
+              "The shader must receive the resolved (disabled) blend mode, not the raw render state");
 
     ffp.Shutdown();
 }
@@ -2654,7 +2767,7 @@ void IndexedVertexBlendRequiresIndexLayout() {
     ffp.Shutdown();
 }
 
-void IndexedVertexBlendRejectsPaletteOverflow() {
+void IndexedVertexBlendClampsPaletteOverflow() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2676,17 +2789,26 @@ void IndexedVertexBlendRejectsPaletteOverflow() {
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
     ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
     TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
-                                nullptr, 0, &data) == FALSE,
-              "indexed blend must reject an out-of-range matrix index");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_VERTEX_BLEND_PALETTE,
-              "indexed blend palette overflow must expose its reject reason");
-    TestCheck(context.Encoder.SubmitCount == 0,
-              "indexed blend palette overflow must stop before backend submission");
+                                nullptr, 0, &data) && context.Encoder.SubmitCount == 1,
+              "indexed blend must draw with an out-of-range matrix index");
+    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE),
+              "indexed blend palette overflow must report the clamp approximation");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
+              "indexed blend palette overflow is not a rejection");
+
+    vertices[0].Indices = 0;
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                nullptr, 0, &data) && ffp.GetLastDrawApproximationMask() == 0,
+              "in-range indices draw without approximation");
 
     VxMatrix matrix;
     matrix.Identity();
     TestCheck(ffp.SetVertexBlendMatrix(CKFF_VERTEX_BLEND_MATRIX_COUNT, matrix) == FALSE,
               "setting a matrix outside the supported palette must fail");
+    TestCheck(ffp.DrawPrimitive(&context.Encoder, 1, VX_TRIANGLELIST,
+                                nullptr, 0, &data) &&
+                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE),
+              "a palette overflow recorded by SetVertexBlendMatrix reports on the next indexed draw");
 
     ffp.Shutdown();
 }
@@ -2771,16 +2893,16 @@ int main() {
     TestFramework tests;
     tests.Run("Null rasterizer supports headless FFP",
               &NullRasterizerSupportsHeadlessFFP);
-    tests.Run("DrawVertexBuffer rejects partial stencil write masks",
-              &DrawVertexBufferRejectsPartialStencilWriteMask);
+    tests.Run("DrawVertexBuffer approximates stencil write masks",
+              &DrawVertexBufferApproximatesStencilWriteMasks);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
-    tests.Run("Unsupported render states reject explicitly",
-              &UnsupportedRenderStatesRejectExplicitly);
+    tests.Run("Ignored render states report diagnostics",
+              &IgnoredRenderStatesReportDiagnostics);
     tests.Run("Invalid state values reject before backend encoding",
               &InvalidStateValuesRejectBeforeBackendEncoding);
-    tests.Run("Unsupported texture-stage states reject explicitly",
-              &UnsupportedTextureStageStatesRejectExplicitly);
+    tests.Run("Unsupported texture-stage states approximate with diagnostics",
+              &UnsupportedTextureStageStatesApproximateWithDiagnostics);
     tests.Run("Single cube-volume layout uses generic mixed sampler module",
               &SingleCubeVolumeLayoutUsesGenericMixedSamplerModule);
     tests.Run("DrawVertexBuffer propagates encoder failure",
@@ -2789,8 +2911,8 @@ int main() {
               &DrawVertexBufferStopsBeforeSubmitAfterBindingFailure);
     tests.Run("DrawVertexBuffer stops uniform uploads after failure",
               &DrawVertexBufferStopsUniformUploadsAfterFailure);
-    tests.Run("Affine texture coordinates reject draw",
-              &AffineTextureCoordinatesRejectDraw);
+    tests.Run("Affine texture coordinates are ignored with diagnostic",
+              &AffineTextureCoordinatesAreIgnoredWithDiagnostic);
     tests.Run("Inactive unsupported state does not reject draw",
               &InactiveUnsupportedStateDoesNotRejectDraw);
     tests.Run("Disabled texture stage ignores later unsupported state",
@@ -2801,8 +2923,10 @@ int main() {
               &TextureStageSnapshotPreservesExplicitZeroArgument);
     tests.Run("Unknown texture op rejects draw",
               &UnknownTextureOpRejectsDraw);
-    tests.Run("Bottom-left cube render target rejects draw",
-              &BottomLeftCubeRenderTargetRejectsDraw);
+    tests.Run("Alpha bump op approximates to SELECTARG1",
+              &AlphaBumpOpApproximatesToSelectArg1);
+    tests.Run("Bottom-left cube render target samples with diagnostic",
+              &BottomLeftCubeRenderTargetSamplesWithDiagnostic);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
     tests.Run("DrawVertexBuffer sets flat shade specialization",
@@ -2851,12 +2975,12 @@ int main() {
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
-    tests.Run("Filtered depth texture compare rejects draw",
-              &FilteredDepthTextureCompareRejectsDraw);
+    tests.Run("Filtered depth texture compare approximates",
+              &FilteredDepthTextureCompareApproximates);
     tests.Run("Border color uses stable bgfx palette slots",
               &BorderColorUsesStableBgfxPaletteSlots);
-    tests.Run("Border palette overflow rejects draw",
-              &BorderPaletteOverflowRejectsDraw);
+    tests.Run("Border palette overflow reuses nearest color",
+              &BorderPaletteOverflowReusesNearestColor);
     tests.Run("Border palette slots are reused across frames",
               &BorderPaletteSlotsAreReusedAcrossFrames);
     tests.Run("Unused border textures do not consume palette slots",
@@ -2877,8 +3001,8 @@ int main() {
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
     tests.Run("Point size expands without sprite texcoord replacement",
               &PointSizeExpandsWithoutSpriteTexcoordReplacement);
-    tests.Run("Persistent point buffers reject unsupported modes and set exact size",
-              &PersistentPointBuffersRejectUnsupportedModesAndSetExactSize);
+    tests.Run("Persistent point buffers approximate unsupported modes and clamp size",
+              &PersistentPointBuffersApproximateUnsupportedModesAndClampSize);
     tests.Run("Wrapped line strip submits as line list",
               &WrappedLineStripSubmitsAsLineList);
     tests.Run("Point sprite uses per-vertex point size",
@@ -2901,8 +3025,8 @@ int main() {
               &ProjectedSamplerStageFourEntersSpecialization);
     tests.Run("Draw uploads per-stage bump env uniforms",
               &DrawUploadsPerStageBumpEnvUniforms);
-    tests.Run("Unsupported bump inputs reject explicitly",
-              &UnsupportedBumpInputsRejectExplicitly);
+    tests.Run("Unsupported bump inputs approximate with diagnostics",
+              &UnsupportedBumpInputsApproximateWithDiagnostics);
     tests.Run("Vertex blend zero weights uploads matrix palette",
               &VertexBlendZeroWeightsUploadsMatrixPalette);
     tests.Run("Vertex blend uploads world matrix palette for clip planes",
@@ -2911,12 +3035,12 @@ int main() {
               &VertexBlendUploadsExplicitMatrixPaletteSlot);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
-    tests.Run("Vertex tween rejects missing streams with tween reason",
-              &VertexTweenRejectsMissingStreamsWithTweenReason);
+    tests.Run("Vertex tween without streams renders untweened",
+              &VertexTweenWithoutStreamsRendersUntweened);
     tests.Run("Indexed vertex blend requires index layout",
               &IndexedVertexBlendRequiresIndexLayout);
-    tests.Run("Indexed vertex blend rejects palette overflow",
-              &IndexedVertexBlendRejectsPaletteOverflow);
+    tests.Run("Indexed vertex blend clamps palette overflow",
+              &IndexedVertexBlendClampsPaletteOverflow);
     tests.Run("POSITIONT vertex blend does not upload matrix palette",
               &PositionTVertexBlendDoesNotUploadMatrixPalette);
     tests.Run("LOCALVIEWER does not split shader when lighting disabled",

@@ -789,6 +789,197 @@ void TestDrawPrimitiveValidation()
 }
 
 // ---------------------------------------------------------------------------
+// Approximations (spec 1.4 item 7, appendices C / D): states the backends
+// cannot express still draw and count one APPROX_* / IGNORE_* diagnostic.
+// ---------------------------------------------------------------------------
+
+struct ApproximationCase {
+    const char *Name;
+    CKRST_DIAGNOSTIC Diagnostic;
+    void (*Setup)(CKRasterizerContext *ctx, CKDWORD texture);
+};
+
+void DrawTexturedTriangle(CKRasterizerContext *ctx)
+{
+    static VxVector positions[3] = {VxVector(0, 0, 0), VxVector(1, 0, 0), VxVector(0, 1, 0)};
+    static CKDWORD colors[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    static float uvs[3][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}};
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = colors;
+    data.ColorStride = sizeof(colors[0]);
+    data.TexCoordPtr = uvs;
+    data.TexCoordStride = sizeof(uvs[0]);
+    TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data), "DrawPrimitive (textured)");
+}
+
+void SetupDither(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE); }
+void SetupZBias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 4); }
+void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u); }
+void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE); }
+void SetupClippingOff(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE); }
+void SetupSoftwareVP(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE); }
+void SetupFillPoint(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT); }
+void SetupStencilWriteMask(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
+}
+void SetupAffineTexcoords(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE); }
+void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA));
+}
+void SetupSamplerLod(CKRasterizerContext *ctx, CKDWORD)
+{
+    const float bias = 1.0f;
+    CKDWORD bits = 0;
+    memcpy(&bits, &bias, sizeof(bits));
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPLINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, bits);
+}
+void SetupAnisotropy(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 8);
+}
+void SetupMirrorOnce(CKRasterizerContext *ctx, CKDWORD) { ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE); }
+void SetupAlphaBumpOp(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAP);
+    ctx->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+}
+void SetupBumpWithoutDuDv(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+}
+void SetupTweenWithoutStreams(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING); }
+void SetupBlendWithoutWeights(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS); }
+
+void TestApproximationsKeepDrawing()
+{
+    const ApproximationCase cases[] = {
+        {"dither", CKRST_DIAG_IGNORE_DITHER, &SetupDither},
+        {"z-bias", CKRST_DIAG_APPROX_ZBIAS, &SetupZBias},
+        {"line pattern", CKRST_DIAG_IGNORE_LINEPATTERN, &SetupLinePattern},
+        {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
+        {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
+        {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
+        {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
+        {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
+        {"texture perspective off", CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF, &SetupAffineTexcoords},
+        {"inexact STAGEBLEND", CKRST_DIAG_APPROX_STAGEBLEND, &SetupStageBlend},
+        {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
+        {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
+        {"MIRRORONCE", CKRST_DIAG_APPROX_MIRROR_ONCE, &SetupMirrorOnce},
+        {"alpha bump op", CKRST_DIAG_APPROX_ALPHA_BUMP_OP, &SetupAlphaBumpOp},
+        {"bump op without DuDv texture", CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS, &SetupBumpWithoutDuDv},
+        {"tween without streams", CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN, &SetupTweenWithoutStreams},
+        {"vertex blend without weights", CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS, &SetupBlendWithoutWeights},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        const CKDWORD texture = CreateTexture2D(ctx, 8, 8, 0, 0);
+        TestCheck(ctx->SetTexture(texture, 0), "bind texture");
+        ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+        cases[i].Setup(ctx, texture);
+
+        TestCheck(ctx->BeginScene(), "BeginScene");
+        const int drawsBefore = CountDraws(f);
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene");
+
+        printf("  approximation: %s\n", cases[i].Name);
+        TestCheck(CountDraws(f) == drawsBefore + 1, "the approximated draw must reach the device");
+        TestCheck(Diag(f.Context, cases[i].Diagnostic) == 1, "the approximation diagnostic must count once");
+        CKDWORD others = 0;
+        for (CKDWORD code = CKRST_DIAG_APPROX_FILLMODE_POINT; code < CKRST_DIAG_COUNT; ++code) {
+            if (code != (CKDWORD)cases[i].Diagnostic)
+                others += Diag(f.Context, (CKRST_DIAGNOSTIC)code);
+        }
+        TestCheck(others == 0, "no other approximation diagnostic must count");
+        TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE) == 0 &&
+                      Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
+                  "approximations must not count as rejections");
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
+    }
+
+    // Overflowing the sixteen border colours reuses a palette slot.
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        const CKDWORD texture = CreateTexture2D(ctx, 8, 8, 0, 0);
+        TestCheck(ctx->SetTexture(texture, 0), "bind texture");
+        ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSBORDER);
+        TestCheck(ctx->BeginScene(), "BeginScene");
+        for (CKDWORD i = 0; i < 17; ++i) {
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | (i * 0x0Fu));
+            DrawTexturedTriangle(ctx);
+        }
+        TestCheck(ctx->EndScene(), "EndScene");
+        TestCheck(CountDraws(f) == 17, "seventeen border colour draws submitted");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_BORDER_COLOR) == 1, "the seventeenth colour counts one approximation");
+    }
+
+    // A fifth cube stage samples as unbound.
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        CKDWORD cubes[5];
+        for (int stage = 0; stage < 5; ++stage) {
+            cubes[stage] = CreateTexture2D(ctx, 8, 8, CKRST_TEXTURE_CUBEMAP, 0);
+            TestCheck(ctx->SetTexture(cubes[stage], stage), "bind cube");
+            ctx->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+            ctx->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, 0);
+        }
+        TestCheck(ctx->BeginScene(), "BeginScene");
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene");
+        TestCheck(CountDraws(f) == 1, "five cube stages still draw");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 1, "the fifth cube stage counts one approximation");
+    }
+
+    // Device-buffer points with a fractional size clamp instead of failing.
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        const CKDWORD vb = CreateVB(ctx, CKRST_DP_TR_CL_V, 4);
+        void *mem = ctx->LockVertexBuffer(vb, 0, 4, CKRST_LOCK_DEFAULT);
+        TestCheck(mem != NULL, "lock point VB");
+        memset(mem, 0, 4 * 16);
+        TestCheck(ctx->UnlockVertexBuffer(vb), "unlock point VB");
+        const float size = 2.5f;
+        CKDWORD bits = 0;
+        memcpy(&bits, &size, sizeof(bits));
+        ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, bits);
+        ctx->SetRenderState(VXRENDERSTATE_WRAP0, VXWRAP_U);
+        TestCheck(ctx->BeginScene(), "BeginScene");
+        TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 4, NULL, 0), "point VB draw");
+        TestCheck(ctx->EndScene(), "EndScene");
+        TestCheck(CountDraws(f) == 1, "point VB draw submitted");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_POINT_SIZE) == 1, "fractional point size counts one approximation");
+        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 1, "WRAP0 on a device-buffer draw counts one ignored state");
+        TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Frame flow
 // ---------------------------------------------------------------------------
 
@@ -1140,6 +1331,7 @@ int main()
     framework.Run("textures", TestTextures);
     framework.Run("buffers", TestBuffers);
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
+    framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);
     framework.Run("clear rect semantics", TestClearRectSemantics);
     framework.Run("mid-scene stencil clear splits pass", TestMidSceneStencilClearSplitsPass);

@@ -78,10 +78,11 @@ int ckffBlendIndex(int index, uvec4 blendIndices)
 
 mat4 ckffBlendMatrix(int index)
 {
+    // Indices beyond the palette clamp to the last matrix (spec appendix C).
+    if (index <= 0) return u_vertexBlendMatrices[0];
     if (index == 1) return u_vertexBlendMatrices[1];
     if (index == 2) return u_vertexBlendMatrices[2];
-    if (index == 3) return u_vertexBlendMatrices[3];
-    return u_vertexBlendMatrices[0];
+    return u_vertexBlendMatrices[3];
 }
 
 vec4 selectMaterialSource(float source, vec4 materialValue, vec4 color0, vec4 color1)
@@ -318,5 +319,7 @@ void main()
     v_texcoord7Fog = transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     float fogDepth = u_ffDrawParams[7].z > 0.5 ? length(viewPos.xyz) : abs(viewPos.z);
     v_texcoord7Fog.z = ckffFogFactor(fogDepth, int(u_ffDrawParams[10].w + 0.5), u_ffDrawParams[10]);
+    // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
+    gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     ckffApplyBackendClipSpace(gl_Position);
 }

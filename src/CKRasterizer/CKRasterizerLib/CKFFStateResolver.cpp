@@ -165,7 +165,11 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
             state.StageStates[stage], hasTexture, stateSetMask));
         stateDesc.FS.SetStageColorArg2(stage, CKFFResolveStageColorArg2(
             state.StageStates[stage], stateSetMask));
-        stateDesc.FS.SetStageAlphaOp(stage, alphaOp);
+        // A bump op on the alpha channel is invalid in D3D; it approximates to
+        // SELECTARG1 (spec appendix D). The pipeline reports it per draw.
+        stateDesc.FS.SetStageAlphaOp(stage,
+            (alphaOp == CKRST_TOP_BUMPENVMAP || alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE)
+                ? (CKDWORD)CKRST_TOP_SELECTARG1 : alphaOp);
         stateDesc.FS.SetStageAlphaArg0(stage, CKFFResolveStageAlphaArg0(
             state.StageStates[stage], stateSetMask));
         stateDesc.FS.SetStageAlphaArg1(stage, CKFFResolveStageAlphaArg1(
@@ -214,6 +218,8 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     memcpy(drawParams[2], state.Material.Specular, sizeof(drawParams[2]));
     memcpy(drawParams[3], state.Material.Emissive, sizeof(drawParams[3]));
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.Material.Power;
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][1] =
+        (float)drawState.GetRenderState(VXRENDERSTATE_ZBIAS) * CKFF_ZBIAS_DEPTH_UNIT;
     float materialSource[4];
     CKFFShaderKeyMaterialSources(shaderKey.VS, materialSource);
     memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], materialSource,
@@ -261,16 +267,12 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
     drawParams[CKFF_DRAW_PARAM_TWEEN][0] = CKFFReadFloatRenderState(
         drawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
-    const CKDWORD vertexBlend = drawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND);
-    drawParams[CKFF_DRAW_PARAM_TWEEN][1] = vertexBlend == VXVBLEND_TWEENING
-        ? (float)CKFF_VERTEX_BLEND_TWEEN
-        : (vertexBlend == VXVBLEND_DISABLE
-               ? (float)CKFF_VERTEX_BLEND_DISABLED
-               : (float)CKFF_VERTEX_BLEND_NORMAL);
-    drawParams[CKFF_DRAW_PARAM_TWEEN][2] =
-        (float)CKFFExplicitVertexBlendWeightCount(vertexBlend);
-    drawParams[CKFF_DRAW_PARAM_TWEEN][3] =
-        drawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) ? 1.0f : 0.0f;
+    // Vertex blend mode, weight count and indexing come from the shader key so
+    // that approximated inputs (missing tween streams, missing weights) render
+    // the way the key resolved them.
+    drawParams[CKFF_DRAW_PARAM_TWEEN][1] = (float)((shaderKey.VS.Bits >> 35) & 3u);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][2] = (float)((shaderKey.VS.Bits >> 38) & 3u);
+    drawParams[CKFF_DRAW_PARAM_TWEEN][3] = ((shaderKey.VS.Bits >> 37) & 1u) ? 1.0f : 0.0f;
     // The uber shader reads every draw parameter slot.
     return CKFF_DRAW_PARAM_VEC4_COUNT;
 }
