@@ -1,7 +1,10 @@
 #include "FFPCoverageDomain.h"
 #include "TestTriangleMultiset.h"
 
+#include "CKFFShaderABI.h"
 #include "CKFFSpecializationInfo.h"
+
+#include <math.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -50,64 +53,133 @@ void SetStageAlphaArg(CKFFFSStateDesc &desc, CKDWORD stage, CKDWORD slot, CKDWOR
         desc.SetStageAlphaArg2(stage, arg);
 }
 
-CKDWORD RepackedStageSpecValue(const CKFFSpecializationInfo &spec, CKDWORD stage, CKDWORD field)
+void SpecLayoutFieldsAreDisjointAndRoundTrip()
 {
-    const CKFFSpecConstantId id = (CKFFSpecConstantId)(
-        (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP + stage * 9u + field);
-    return spec.Get(id);
-}
-
-void SpecBitfieldsRoundTripSupportedValues()
-{
-    CKDWORD checkedIds = 0;
+    // Every field of CKFFSpecLayout.def fits its 24-bit lane and no two fields
+    // share a bit; setting one field never disturbs another.
+    CKDWORD occupancy[CKFF_SPEC_LANE_COUNT] = {};
+    CKDWORD checkedFields = 0;
     CKDWORD checkedValues = 0;
 
-    for (CKDWORD idValue = 0; idValue < (CKDWORD)CKFF_SPEC_CONSTANT_COUNT; ++idValue) {
-        const CKFFSpecConstantId id = (CKFFSpecConstantId)idValue;
-        const CKFFSpecBitfield layout = CKFFSpecializationInfo::Layout(id);
-        TestCheckf(layout.BitCount > 0 && layout.DwordOffset < CKFFSpecializationInfo::MaxSpecDwords,
-                   "Spec id %u must have a valid bitfield layout", idValue);
-        ++checkedIds;
+    auto occupy = [&](const CKFFSpecBitfield &layout, const char *name) {
+        TestCheckf(layout.BitCount > 0 && layout.BitOffset + layout.BitCount <= CKFF_SPEC_LANE_BITS,
+                   "Spec field %s must fit inside one 24-bit lane", name);
+        TestCheckf(layout.Lane < CKFF_SPEC_LANE_COUNT,
+                   "Spec field %s must use a lane below CKFF_SPEC_LANE_COUNT", name);
+        const CKDWORD mask = ((1u << layout.BitCount) - 1u) << layout.BitOffset;
+        TestCheckf((occupancy[layout.Lane] & mask) == 0,
+                   "Spec field %s must not overlap another field in lane %u", name, layout.Lane);
+        occupancy[layout.Lane] |= mask;
+        ++checkedFields;
+    };
 
-        if (layout.BitCount < 32) {
-            const CKDWORD maxValue = 1u << layout.BitCount;
-            for (CKDWORD value = 0; value < maxValue; ++value) {
-                CKFFSpecializationInfo spec;
-                spec.Set(id, value);
-                TestCheckf(spec.Get(id) == value,
-                           "Spec id %u value %u must round-trip", idValue, value);
-                ++checkedValues;
-            }
-        } else {
-            static const CKDWORD kWideValues[] = {
-                0x00000000u, 0xffffffffu, 0x01234567u, 0x76543210u,
-                0x11111111u, 0x88888888u,
-            };
-            for (CKDWORD i = 0; i < (CKDWORD)FFPCoverageArrayCount(kWideValues); ++i) {
-                CKFFSpecializationInfo spec;
-                spec.Set(id, kWideValues[i]);
-                TestCheckf(spec.Get(id) == kWideValues[i],
-                           "Spec id %u wide value 0x%08X must round-trip",
-                           idValue, kWideValues[i]);
-                ++checkedValues;
-            }
-            for (CKDWORD nibble = 0; nibble < 8; ++nibble) {
-                for (CKDWORD value = 0; value < 16; ++value) {
-                    const CKDWORD packed = value << (nibble * 4u);
-                    CKFFSpecializationInfo spec;
-                    spec.Set(id, packed);
-                    TestCheckf(spec.Get(id) == packed,
-                               "Spec id %u nibble %u value %u must round-trip",
-                               idValue, nibble, value);
-                    ++checkedValues;
-                }
-            }
+    for (CKDWORD stage = 0; stage < CKFF_SPEC_STAGE_COUNT; ++stage) {
+        for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_STAGE_FIELD_COUNT; ++fieldIndex) {
+            const CKFFSpecStageField field = (CKFFSpecStageField)fieldIndex;
+            occupy(CKFFSpecStageFieldLayout(stage, field), CKFFSpecStageFieldDesc(field).Name);
         }
     }
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_GLOBAL_FIELD_COUNT; ++fieldIndex) {
+        const CKFFSpecGlobalField field = (CKFFSpecGlobalField)fieldIndex;
+        const CKFFSpecBitfield layout = CKFFSpecGlobalFieldLayout(field);
+        TestCheckf(layout.Lane >= CKFF_SPEC_GLOBAL_LANE_BASE,
+                   "Global spec field %s must live in the global lanes", CKFFSpecGlobalFieldDesc(field).Name);
+        occupy(layout, CKFFSpecGlobalFieldDesc(field).Name);
+    }
+    TestCheck(CKFF_SPEC_STAGE_LANE_BASE + CKFF_SPEC_STAGE_COUNT * CKFF_SPEC_STAGE_LANE_STRIDE <= CKFF_SPEC_GLOBAL_LANE_BASE,
+              "Stage lanes must end before the global lanes");
 
-    TestCheckf(checkedIds == (CKDWORD)CKFF_SPEC_CONSTANT_COUNT,
-               "Spec coverage must visit every id, visited %u", checkedIds);
-    printf("  coverage: specIds=%u specValues=%u\n", checkedIds, checkedValues);
+    // Round trip every value of every field (sampled for fields wider than 8 bits)
+    // against a background of all-ones.
+    CKFFSpecializationInfo background;
+    for (CKDWORD stage = 0; stage < CKFF_SPEC_STAGE_COUNT; ++stage) {
+        for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_STAGE_FIELD_COUNT; ++fieldIndex)
+            background.SetStage(stage, (CKFFSpecStageField)fieldIndex, 0xFFFFFFFFu);
+    }
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_GLOBAL_FIELD_COUNT; ++fieldIndex)
+        background.Set((CKFFSpecGlobalField)fieldIndex, 0xFFFFFFFFu);
+    for (CKDWORD lane = 0; lane < CKFF_SPEC_LANE_COUNT; ++lane) {
+        TestCheckf(background.Lanes()[lane] == occupancy[lane],
+                   "Lane %u must hold exactly the bits of its fields", lane);
+    }
+
+    auto roundTrip = [&](CKDWORD bits, const char *name, auto setter, auto getter) {
+        const CKDWORD maxValue = 1u << bits;
+        const CKDWORD step = bits <= 8 ? 1u : (maxValue / 4096u);
+        for (CKDWORD value = 0; value < maxValue; value += step) {
+            CKFFSpecializationInfo spec = background;
+            setter(spec, value);
+            TestCheckf(getter(spec) == value, "Spec field %s value %u must round-trip", name, value);
+            setter(spec, maxValue - 1u);
+            TestCheckf(spec == background, "Spec field %s must not disturb other fields", name);
+            ++checkedValues;
+        }
+        CKFFSpecializationInfo spec = background;
+        setter(spec, maxValue - 1u);
+        TestCheckf(getter(spec) == maxValue - 1u, "Spec field %s maximum must round-trip", name);
+    };
+    for (CKDWORD stage = 0; stage < CKFF_SPEC_STAGE_COUNT; ++stage) {
+        for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_STAGE_FIELD_COUNT; ++fieldIndex) {
+            const CKFFSpecStageField field = (CKFFSpecStageField)fieldIndex;
+            roundTrip(CKFFSpecStageFieldDesc(field).Layout.BitCount, CKFFSpecStageFieldDesc(field).Name,
+                      [&](CKFFSpecializationInfo &spec, CKDWORD value) { spec.SetStage(stage, field, value); },
+                      [&](const CKFFSpecializationInfo &spec) { return spec.GetStage(stage, field); });
+        }
+        roundTrip(3, "MIRRORONCE(stage)",
+                  [&](CKFFSpecializationInfo &spec, CKDWORD value) { spec.SetMirrorOnceMask(stage, value); },
+                  [&](const CKFFSpecializationInfo &spec) { return spec.GetMirrorOnceMask(stage); });
+    }
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_GLOBAL_FIELD_COUNT; ++fieldIndex) {
+        const CKFFSpecGlobalField field = (CKFFSpecGlobalField)fieldIndex;
+        roundTrip(CKFFSpecGlobalFieldDesc(field).Layout.BitCount, CKFFSpecGlobalFieldDesc(field).Name,
+                  [&](CKFFSpecializationInfo &spec, CKDWORD value) { spec.Set(field, value); },
+                  [&](const CKFFSpecializationInfo &spec) { return spec.Get(field); });
+    }
+
+    printf("  coverage: specFields=%u specValues=%u\n", checkedFields, checkedValues);
+}
+
+void SpecPack24IsExactInFp32()
+{
+    // u_ffSpec lanes travel as float components: every lane value must survive
+    // the float conversion bit-exactly, including the 24-bit maximum.
+    CKDWORD checkedLanes = 0;
+    const CKDWORD patterns[] = {
+        0u, 1u, 0x7FFFFFu, 0x800000u, 0xFFFFFEu, 0xFFFFFFu, 0xAAAAAAu, 0x555555u, 0x123456u, 0xFEDCBAu,
+    };
+    for (CKDWORD patternIndex = 0; patternIndex < (CKDWORD)FFPCoverageArrayCount(patterns); ++patternIndex) {
+        CKDWORD lanes[CKFF_SPEC_LANE_COUNT];
+        for (CKDWORD lane = 0; lane < CKFF_SPEC_LANE_COUNT; ++lane)
+            lanes[lane] = (patterns[patternIndex] + lane * 0x010101u) & CKFFSpecializationInfo::LaneMask;
+        CKFFSpecializationInfo spec;
+        spec.SetLanes(lanes, CKFF_SPEC_LANE_COUNT);
+
+        float packed[CKFF_SPEC_VEC4_COUNT][4];
+        spec.Pack24(packed);
+        for (CKDWORD lane = 0; lane < CKFF_SPEC_LANE_COUNT; ++lane) {
+            const float value = packed[lane / 4][lane % 4];
+            TestCheckf(value == floorf(value) && value >= 0.0f && value < 16777216.0f,
+                       "Packed lane %u must be a non-negative integer below 2^24", lane);
+            TestCheckf((CKDWORD)value == lanes[lane],
+                       "Packed lane %u must equal its 24-bit value exactly", lane);
+            ++checkedLanes;
+        }
+        const CKFFSpecializationInfo unpacked =
+            CKFFSpecializationInfo::Unpack24(&packed[0][0], CKFF_SPEC_LANE_COUNT);
+        TestCheckf(unpacked == spec, "Pack24 / Unpack24 must round-trip pattern %u", patternIndex);
+    }
+    TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFF_SPEC_VEC4_COUNT &&
+                  CKFF_SPEC_LANE_COUNT == CKFF_SPEC_VEC4_COUNT * 4,
+              "u_ffSpec must carry exactly the specialization lanes");
+    // fp32 exactness of every 24-bit integer: sample the full range densely
+    // plus every value near the top.
+    for (CKDWORD value = 0; value <= 0xFFFFFFu; value += 4093u) {
+        TestCheckf((CKDWORD)(float)value == value, "24-bit value %u must be exact in fp32", value);
+    }
+    for (CKDWORD value = 0xFFFFF0u; value <= 0xFFFFFFu; ++value) {
+        TestCheckf((CKDWORD)(float)value == value, "24-bit value %u must be exact in fp32", value);
+    }
+    printf("  coverage: packedLanes=%u\n", checkedLanes);
 }
 
 void TextureOpsAndArgsDriveTextureDependency()
@@ -176,7 +248,7 @@ void StageSpecializationPacksAllOpsAndArgs()
     CKDWORD checkedOps = 0;
     CKDWORD checkedArgs = 0;
 
-    for (CKDWORD stage = 0; stage < 4; ++stage) {
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         for (CKDWORD opIndex = 0; opIndex < (CKDWORD)FFPCoverageArrayCount(kFFPCoverageTextureOps); ++opIndex) {
             CKFFFSStateDesc desc;
             for (CKDWORD prior = 0; prior <= stage; ++prior)
@@ -186,10 +258,10 @@ void StageSpecializationPacksAllOpsAndArgs()
 
             CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0);
             CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
-            TestCheckf(RepackedStageSpecValue(spec, stage, 0) == kFFPCoverageTextureOps[opIndex].Value,
+            TestCheckf(spec.GetStage(stage, CKFF_SPEC_STAGE_COLOR_OP) == kFFPCoverageTextureOps[opIndex].Value,
                        "Stage %u color op %s must pack into specialization",
                        stage, kFFPCoverageTextureOps[opIndex].Name);
-            TestCheckf(RepackedStageSpecValue(spec, stage, 4) == kFFPCoverageTextureOps[opIndex].Value,
+            TestCheckf(spec.GetStage(stage, CKFF_SPEC_STAGE_ALPHA_OP) == kFFPCoverageTextureOps[opIndex].Value,
                        "Stage %u alpha op %s must pack into specialization",
                        stage, kFFPCoverageTextureOps[opIndex].Name);
             checkedOps += 2;
@@ -211,14 +283,16 @@ void StageSpecializationPacksAllOpsAndArgs()
             CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1u << stage);
             CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
             const CKDWORD expected = CKFFSpecializationInfo::RepackArg(kFFPCoverageTextureArgs[argIndex].Value);
-            TestCheckf(RepackedStageSpecValue(spec, stage, 1) == expected &&
-                           RepackedStageSpecValue(spec, stage, 2) == expected &&
-                           RepackedStageSpecValue(spec, stage, 3) == expected &&
-                           RepackedStageSpecValue(spec, stage, 5) == expected &&
-                           RepackedStageSpecValue(spec, stage, 6) == expected &&
-                           RepackedStageSpecValue(spec, stage, 7) == expected,
+            TestCheckf(spec.GetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG0) == expected &&
+                           spec.GetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG1) == expected &&
+                           spec.GetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG2) == expected &&
+                           spec.GetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG0) == expected &&
+                           spec.GetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG1) == expected &&
+                           spec.GetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG2) == expected,
                        "Stage %u arg %s must pack into every color/alpha arg field",
                        stage, kFFPCoverageTextureArgs[argIndex].Name);
+            TestCheckf(CKFFSpecializationInfo::UnpackArg(expected) == kFFPCoverageTextureArgs[argIndex].Value,
+                       "Arg %s must survive the 5-bit repack", kFFPCoverageTextureArgs[argIndex].Name);
             checkedArgs += 6;
         }
     }
@@ -243,9 +317,9 @@ void SamplerAndStageFlagsPackAcrossAllStages()
 
             CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1u << stage);
             CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
-            const CKDWORD maskValue = (spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> (stage * 2u)) & 3u;
+            const CKDWORD maskValue = spec.GetStage(stage, CKFF_SPEC_STAGE_SAMPLER_TYPE);
             TestCheckf(maskValue == kFFPCoverageSamplerTypes[samplerIndex].Value,
-                       "Stage %u sampler type %s must pack into sampler type mask",
+                       "Stage %u sampler type %s must pack into its specialization field",
                        stage, kFFPCoverageSamplerTypes[samplerIndex].Name);
             ++checkedSamplerTypes;
         }
@@ -260,9 +334,9 @@ void SamplerAndStageFlagsPackAcrossAllStages()
 
             CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1u << stage);
             CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
-            const CKDWORD maskValue = (spec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) >> (stage * 4u)) & 0xFu;
+            const CKDWORD maskValue = spec.GetStage(stage, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC);
             TestCheckf(maskValue == kFFPCoverageSamplerCompareFuncs[funcIndex].Value,
-                       "Stage %u sampler compare %s must pack into compare mask",
+                       "Stage %u sampler compare %s must pack into its specialization field",
                        stage, kFFPCoverageSamplerCompareFuncs[funcIndex].Name);
             ++checkedCompareFuncs;
         }
@@ -274,11 +348,8 @@ void SamplerAndStageFlagsPackAcrossAllStages()
         desc.SetStageProjectedSampler(stage, true);
         CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 1u << stage);
         CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
-        const bool expectedProjected = stage < 4;
-        const bool projectedPacked = (spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << stage)) != 0;
-        TestCheckf(projectedPacked == expectedProjected,
-                   "Stage %u projected sampler must %s specialization mask",
-                   stage, expectedProjected ? "enter" : "stay out of");
+        TestCheckf(spec.GetStage(stage, CKFF_SPEC_STAGE_PROJECTED) == 1,
+                   "Stage %u projected sampler must enter its specialization field", stage);
         ++checkedProjected;
 
         for (CKDWORD mirror = 0; mirror < 8; ++mirror) {
@@ -289,9 +360,9 @@ void SamplerAndStageFlagsPackAcrossAllStages()
             desc.SetStageMirrorOnceMask(stage, mirror);
             key = CKFFBuildShaderKeyFS(desc, 1u << stage);
             spec = CKFFBuildSpecializationInfo(key);
-            const CKDWORD packed = (spec.Get(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK) >> (stage * 3u)) & 7u;
-            TestCheckf(packed == (stage < 4 ? mirror : 0u),
-                       "Stage %u mirror-once mask %u must follow first-four-stage specialization ABI",
+            TestCheckf(spec.GetMirrorOnceMask(stage) == mirror &&
+                           ((spec.Get(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK) >> (stage * 3u)) & 7u) == mirror,
+                       "Stage %u mirror-once mask %u must pack three bits per stage for all eight stages",
                        stage, mirror);
             ++checkedMirror;
         }
@@ -411,7 +482,8 @@ int main()
 {
     TestFramework tests;
     tests.Run("Domain tables cover current enum shape", &DomainTablesCoverCurrentEnumShape);
-    tests.Run("Spec bitfields round-trip supported values", &SpecBitfieldsRoundTripSupportedValues);
+    tests.Run("Spec layout fields are disjoint and round-trip", &SpecLayoutFieldsAreDisjointAndRoundTrip);
+    tests.Run("Spec Pack24 is exact in fp32", &SpecPack24IsExactInFp32);
     tests.Run("Texture ops and args drive texture dependency", &TextureOpsAndArgsDriveTextureDependency);
     tests.Run("Stage specialization packs all ops and args", &StageSpecializationPacksAllOpsAndArgs);
     tests.Run("Sampler and stage flags pack across all stages", &SamplerAndStageFlagsPackAcrossAllStages);

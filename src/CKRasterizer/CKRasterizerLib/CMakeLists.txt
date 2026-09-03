@@ -61,6 +61,8 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFUniformState.h
         CKFFShaderKey.h
         CKFFSpecializationInfo.h
+        CKFFSpecLayout.h
+        CKFFSpecLayout.def
         CKFFStateDesc.h
         CKFFShaderCache.h
         CKFFConstants.h
@@ -146,6 +148,8 @@ set(CKRE_SHADER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_postprocess.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_fog_common.sc
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_spec_layout.sh
+        ${CMAKE_CURRENT_SOURCE_DIR}/CKFFSpecLayout.def
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 

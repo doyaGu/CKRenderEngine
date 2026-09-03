@@ -65,22 +65,13 @@ static const ShaderProfileCase kSamplerLayoutProfiles[] = {
 
 CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
                                                  const FFPDiagnosticContext &context) {
-    CKFFSpecializationInfo info;
     const CKDWORD uniform = ffp.GetShaderCache().GetUniforms().u_ffSpec;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
-    if (it != context.Encoder.FloatUniforms.end() &&
-        it->second.size() >= CKFF_SPEC_UNIFORM_VEC4_COUNT * 4) {
-        CKDWORD dwords[CKFFSpecializationInfo::MaxSpecDwords] = {};
-        for (CKDWORD i = 0; i < CKFF_SPEC_UNIFORM_VEC4_COUNT; ++i) {
-            dwords[i] = ((CKDWORD)it->second[i * 4 + 0] & 0xFFu) |
-                        (((CKDWORD)it->second[i * 4 + 1] & 0xFFu) << 8) |
-                        (((CKDWORD)it->second[i * 4 + 2] & 0xFFu) << 16) |
-                        (((CKDWORD)it->second[i * 4 + 3] & 0xFFu) << 24);
-        }
-        info.SetDwords(dwords, CKFFSpecializationInfo::MaxSpecDwords);
-    }
-    return info;
+    if (it == context.Encoder.FloatUniforms.end() ||
+        it->second.size() < CKFF_SPEC_UNIFORM_VEC4_COUNT * 4)
+        return CKFFSpecializationInfo();
+    return CKFFSpecializationInfo::Unpack24(it->second.data(), CKFF_SPEC_UNIFORM_VEC4_COUNT * 4);
 }
 
 void DrawVertexBufferRejectsPartialStencilWriteMask() {
@@ -710,9 +701,9 @@ void ResultArgTempPreservesEveryActiveStage() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_RESULT_IS_TEMP) == 1,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_RESULT_IS_TEMP) == 1,
               "Non-final active stage must preserve RESULTARG=TEMP");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE1_RESULT_IS_TEMP) == 1,
+    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_RESULT_IS_TEMP) == 1,
               "Final TEMP writes must leave the final CURRENT color unchanged");
 
     ffp.Shutdown();
@@ -734,7 +725,7 @@ void Modulate4XStaysInTextureStageSpecialization() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE4X,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE4X,
               "MODULATE4X must remain a normal texture-stage specialization op");
 
     ffp.Shutdown();
@@ -756,7 +747,7 @@ void PremodulateStaysInTextureStageSpecialization() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_PREMODULATE,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_PREMODULATE,
               "PREMODULATE must remain encoded as the stage color op");
     TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 0,
               "Single-stage PREMODULATE draw must keep last active stage at zero");
@@ -781,10 +772,10 @@ void TextureArgModifiersStayInSpecialization() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) ==
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) ==
                   CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT),
               "COMPLEMENT must remain in stage specialization");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_ALPHA_ARG1) ==
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_ARG1) ==
                   CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE),
               "ALPHAREPLICATE must remain in stage specialization");
 
@@ -809,9 +800,9 @@ void NullTextureStagePreservesSpecialization() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_SELECTARG1,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
               "Unbound texture stage must keep its original color op");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) == CKRST_TA_TEXTURE,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) == CKRST_TA_TEXTURE,
               "Unbound texture stage must keep TEXTURE as its color arg");
     TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 1,
               "Unbound texture stage must not truncate later active stages");
@@ -840,16 +831,17 @@ void StageConstantDoesNotCreateTextureDependency() {
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Encoder.FloatUniforms.find(stageParamsUniform);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_SELECTARG1,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
               "D3DTA_CONSTANT must not disable the stage when no texture is bound");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_ARG1) == CKRST_TA_CONSTANT,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) == CKRST_TA_CONSTANT,
               "D3DTA_CONSTANT must remain encoded in specialization");
+    const size_t constant = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_CONSTANT) * 4;
     TestCheck(stageParams != context.Encoder.FloatUniforms.end() &&
-                  stageParams->second.size() >= 16 &&
-                  stageParams->second[11] == 0x40 / 255.0f &&
-                  stageParams->second[13] == 0x20 / 255.0f &&
-                  stageParams->second[14] == 0x10 / 255.0f &&
-                  stageParams->second[15] == 0x80 / 255.0f,
+                  stageParams->second.size() >= constant + 4 &&
+                  stageParams->second[constant + 0] == 0x40 / 255.0f &&
+                  stageParams->second[constant + 1] == 0x20 / 255.0f &&
+                  stageParams->second[constant + 2] == 0x10 / 255.0f &&
+                  stageParams->second[constant + 3] == 0x80 / 255.0f,
               "Stage constant must upload in stage params");
 
     ffp.Shutdown();
@@ -872,7 +864,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_CUBE,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
               "Cubemap texture must mark stage 0 as cube sampler");
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Cubemap draw must bind one texture");
@@ -905,8 +897,8 @@ void VolumeTextureBindsFirstVolumeSampler() {
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(context.Encoder.SubmitCount == 1,
               "Volume texture draw must submit through the uber shader");
-    TestCheck((spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE) &&
-              ((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME),
+    TestCheck((spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE) &&
+              (spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME),
               "Volume draw must keep the stage op and volume sampler type in the specialization data");
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Volume draw must bind one texture");
@@ -979,11 +971,11 @@ void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
 
     TestCheck(context.Encoder.SubmitCount == 1,
               "Volume + cube draw must submit through the uber shader");
-    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME &&
-                  (((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 2) & 0x3u) == CKFF_SAMPLER_CUBE),
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME &&
+                  spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
               "Volume + cube draw must carry both sampler types in the specialization data");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE &&
-                  spec.Get(CKFF_SPEC_STAGE1_COLOR_OP) == CKRST_TOP_ADD,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE &&
+                  spec.GetStage(1, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_ADD,
               "Volume + cube draw must keep the texture stage ops in the specialization data");
     const CKFFUniformHandles &u = ffp.GetShaderCache().GetUniforms();
     bool sawVolume = false;
@@ -1143,15 +1135,16 @@ void FifthCubeStageSamplesAsUnbound() {
               "the first four cube stages bind slots 8..11 and the fifth stays unbound");
 
     const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 8) & 0x3u) == CKFF_SAMPLER_2D &&
+    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
                   spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 4,
               "the overflowing stage must specialize as an untextured 2D stage that stays active");
     const CKDWORD stageParams = u.u_stageParams;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(stageParams);
-    TestCheck(it != context.Encoder.FloatUniforms.end() && it->second.size() >= 32 * 4 &&
-                  it->second[(3 * 4 + 0) * 4 + 3] == 1.0f &&
-                  it->second[(4 * 4 + 0) * 4 + 3] == 0.0f,
+    TestCheck(it != context.Encoder.FloatUniforms.end() &&
+                  it->second.size() >= CKFF_STAGE_PARAM_VEC4_COUNT * 4 &&
+                  it->second[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 1.0f &&
+                  it->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 0.0f,
               "stage params must mark the overflowing stage as having no texture");
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     TestCheck(ffp.GetProbes().Stats.SamplerSlotOverflows == 1 || !ffp.GetProbes().StatsEnabled(),
@@ -1223,9 +1216,9 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
     const CKFFSpecializationInfo noCompareSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_DEPTH,
+    TestCheck(noCompareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
               "Depth texture must mark stage 0 as depth sampler");
-    TestCheck((noCompareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_NONE,
+    TestCheck(noCompareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
               "Depth texture without compare func must keep compare mask empty");
     TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth texture without compare func must bind a non-compare sampler");
@@ -1238,7 +1231,7 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
     const CKFFSpecializationInfo compareSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck((compareSpec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) & 0xFu) == CKRST_COMPARE_LEQUAL,
+    TestCheck(compareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
               "Depth compare func must enter specialization mask");
     TestCheck(context.Encoder.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth compare func must stay shader-evaluated and bind a non-compare sampler");
@@ -1590,11 +1583,16 @@ void UntexturedStageKeepsRuntimeStageParams() {
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
         context.Encoder.FloatUniforms.find(uniform);
     TestCheck(drawn && params != context.Encoder.FloatUniforms.end(),
-              "An untextured constant stage must upload runtime stage params");
-    TestCheck(params != context.Encoder.FloatUniforms.end() &&
-                  params->second.size() >= 4 &&
-                  params->second[0] == (float)CKRST_TOP_SELECTARG1,
+              "An untextured constant stage must upload stage params");
+    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1 &&
+                  spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 0,
               "Texture binding span must not disable an active untextured stage");
+    TestCheck(params != context.Encoder.FloatUniforms.end() &&
+                  params->second.size() >= 8 &&
+                  params->second[CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 0.0f &&
+                  params->second[CKFFStageParamIndex(0, CKFF_STAGE_PARAM_CONSTANT) * 4 + 3] == 0x80 / 255.0f,
+              "Untextured stage params must carry no texture and the stage constant");
     TestCheck(context.Encoder.TextureBindCount == 0,
               "An untextured constant stage must not create a texture binding");
 
@@ -1805,9 +1803,9 @@ void LegacyTextureMapBlendClearsExplicitStageOps() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_COLOR_OP) == CKRST_TOP_MODULATE,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE,
               "TEXTUREMAPBLEND must restore legacy modulate color op over stale explicit op");
-    TestCheck(spec.Get(CKFF_SPEC_STAGE0_ALPHA_OP) == CKRST_TOP_MODULATE,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_OP) == CKRST_TOP_MODULATE,
               "TEXTUREMAPBLEND must restore legacy modulate alpha op over stale explicit op");
 
     ffp.Shutdown();
@@ -1857,16 +1855,16 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
               "One point sprite must expand to six transient indices");
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) == 0,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_PROJECTED) == 0,
               "point sprite sampling must bypass projected texture coordinates");
     const CKDWORD stageUniform = ffp.GetShaderCache().GetUniforms().u_stageParams;
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator packedStage =
         context.Encoder.FloatUniforms.find(stageUniform);
-    const int colorExtra = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA) * 4;
+    const int coord = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD) * 4;
     TestCheck(packedStage != context.Encoder.FloatUniforms.end() &&
-                  packedStage->second.size() > (size_t)(colorExtra + 2) &&
-                  packedStage->second[colorExtra + 1] == 0.0f &&
-                  packedStage->second[colorExtra + 2] == 0.0f,
+                  packedStage->second.size() > (size_t)(coord + 1) &&
+                  packedStage->second[coord + 0] == 0.0f &&
+                  packedStage->second[coord + 1] == 0.0f,
               "point sprite runtime params must bypass texgen and texture matrices");
 
     float uv0[2], uv1[2], uv2[2], uv3[2];
@@ -2074,13 +2072,13 @@ void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    TestCheck((spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << 2)) != 0,
+    TestCheck(spec.GetStage(2, CKFF_SPEC_STAGE_PROJECTED) == 1,
               "Stage 2 projected sampler must be encoded in the specialization mask");
 
     ffp.Shutdown();
 }
 
-void ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams() {
+void ProjectedSamplerStageFourEntersSpecialization() {
     FFPDiagnosticDriver driver;
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2107,13 +2105,13 @@ void ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams() {
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Encoder.FloatUniforms.find(stageParamsUniform);
 
-    TestCheck((spec.Get(CKFF_SPEC_PROJECTED_SAMPLER_MASK) & (1u << 4)) == 0,
-              "Stage 4 projected sampler must not be encoded in the 4-bit optimized mask");
-    TestCheck(stageParams != context.Encoder.FloatUniforms.end(),
-              "Stage 4 projected sampler must force runtime stage params");
-    TestCheck(stageParams->second.size() >= 4 * (4 * 4 + 3) &&
-                  stageParams->second[(4 * 4 + 2) * 4 + 2] == (float)CKRST_TTF_PROJECTED,
-              "Stage 4 runtime stage params must preserve projected transform flags");
+    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_PROJECTED) == 1 &&
+                  spec.GetStage(3, CKFF_SPEC_STAGE_PROJECTED) == 0,
+              "Stage 4 projected sampler must be encoded in its own specialization field");
+    TestCheck(stageParams != context.Encoder.FloatUniforms.end() &&
+                  stageParams->second.size() >= CKFF_STAGE_PARAM_VEC4_COUNT * 4 &&
+                  stageParams->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 1] == (float)CKRST_TTF_PROJECTED,
+              "Stage 4 stage params must preserve the projected transform flag for the vertex shader");
 
     ffp.Shutdown();
 }
@@ -2899,8 +2897,8 @@ int main() {
               &SimpleDrawPrimitiveDataUsesLegacyTexcoordPath);
     tests.Run("Projected sampler stages zero to three enter specialization mask",
               &ProjectedSamplerStagesZeroToThreeEnterSpecializationMask);
-    tests.Run("Projected sampler stages four to seven stay in runtime stage params",
-              &ProjectedSamplerStagesFourToSevenStayInRuntimeStageParams);
+    tests.Run("Projected sampler stage four enters specialization",
+              &ProjectedSamplerStageFourEntersSpecialization);
     tests.Run("Draw uploads per-stage bump env uniforms",
               &DrawUploadsPerStageBumpEnvUniforms);
     tests.Run("Unsupported bump inputs reject explicitly",

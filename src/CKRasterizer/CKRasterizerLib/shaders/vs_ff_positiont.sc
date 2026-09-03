@@ -24,7 +24,7 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 
 uniform vec4 u_viewport;
 uniform vec4 u_ffDrawParams[20];
-uniform vec4 u_stageParams[32];
+uniform vec4 u_stageParams[16];
 uniform mat4 u_texMatrix[8];
 #if CKFF_VS_CLIP_DISTANCE
 uniform vec4 u_clipPlanes[6];
@@ -45,8 +45,7 @@ vec4 selectTexcoord(int index, vec4 tc0, vec4 tc1, vec4 tc2, vec4 tc3, vec4 tc4,
 
 vec4 transformTexcoord(int stage, vec4 coord)
 {
-    vec4 params = u_stageParams[stage * 4 + 2];
-    int flags = int(params.z);
+    int flags = int(u_stageParams[stage * 2].y);
     if (flags == 0) return coord;
 
     int count = flags & 0xff;
@@ -90,14 +89,14 @@ void main()
     v_color1 = a_color1;
     v_flatColor0 = v_color0;
     v_flatColor1 = v_color1;
-    int tc0 = int(u_stageParams[0 * 4 + 2].y) & 7;
-    int tc1 = int(u_stageParams[1 * 4 + 2].y) & 7;
-    int tc2 = int(u_stageParams[2 * 4 + 2].y) & 7;
-    int tc3 = int(u_stageParams[3 * 4 + 2].y) & 7;
-    int tc4 = int(u_stageParams[4 * 4 + 2].y) & 7;
-    int tc5 = int(u_stageParams[5 * 4 + 2].y) & 7;
-    int tc6 = int(u_stageParams[6 * 4 + 2].y) & 7;
-    int tc7 = int(u_stageParams[7 * 4 + 2].y) & 7;
+    int tc0 = int(u_stageParams[0 * 2].x) & 7;
+    int tc1 = int(u_stageParams[1 * 2].x) & 7;
+    int tc2 = int(u_stageParams[2 * 2].x) & 7;
+    int tc3 = int(u_stageParams[3 * 2].x) & 7;
+    int tc4 = int(u_stageParams[4 * 2].x) & 7;
+    int tc5 = int(u_stageParams[5 * 2].x) & 7;
+    int tc6 = int(u_stageParams[6 * 2].x) & 7;
+    int tc7 = int(u_stageParams[7 * 2].x) & 7;
     v_texcoord0 = transformTexcoord(0, selectTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     v_texcoord1 = transformTexcoord(1, selectTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     v_texcoord2 = transformTexcoord(2, selectTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));

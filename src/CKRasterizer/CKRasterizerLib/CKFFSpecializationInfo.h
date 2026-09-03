@@ -1,92 +1,50 @@
 #ifndef CKFFSPECIALIZATIONINFO_H
 #define CKFFSPECIALIZATIONINFO_H
 
-#include "CKRenderEngineTypes.h"
+#include "CKFFSpecLayout.h"
 
-enum CKFFSpecConstantId {
-    CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE = 0,
-    CKFF_SPEC_GLOBAL_SPECULAR_ENABLED,
-    CKFF_SPEC_PROJECTED_SAMPLER_MASK,
-    CKFF_SPEC_ALPHA_TEST_ENABLED,
-    CKFF_SPEC_ALPHA_FUNC,
-    CKFF_SPEC_FOG_ENABLED,
-    CKFF_SPEC_VERTEX_FOG_MODE,
-    CKFF_SPEC_PIXEL_FOG_MODE,
-    CKFF_SPEC_RANGE_FOG,
-    CKFF_SPEC_FLAT_SHADE,
-    CKFF_SPEC_SAMPLER_TYPE_MASK,
-    CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK,
-    CKFF_SPEC_MIRRORONCE_SAMPLER_MASK,
-
-    CKFF_SPEC_STAGE0_COLOR_OP,
-    CKFF_SPEC_STAGE0_COLOR_ARG0,
-    CKFF_SPEC_STAGE0_COLOR_ARG1,
-    CKFF_SPEC_STAGE0_COLOR_ARG2,
-    CKFF_SPEC_STAGE0_ALPHA_OP,
-    CKFF_SPEC_STAGE0_ALPHA_ARG0,
-    CKFF_SPEC_STAGE0_ALPHA_ARG1,
-    CKFF_SPEC_STAGE0_ALPHA_ARG2,
-    CKFF_SPEC_STAGE0_RESULT_IS_TEMP,
-
-    CKFF_SPEC_STAGE1_COLOR_OP,
-    CKFF_SPEC_STAGE1_COLOR_ARG0,
-    CKFF_SPEC_STAGE1_COLOR_ARG1,
-    CKFF_SPEC_STAGE1_COLOR_ARG2,
-    CKFF_SPEC_STAGE1_ALPHA_OP,
-    CKFF_SPEC_STAGE1_ALPHA_ARG0,
-    CKFF_SPEC_STAGE1_ALPHA_ARG1,
-    CKFF_SPEC_STAGE1_ALPHA_ARG2,
-    CKFF_SPEC_STAGE1_RESULT_IS_TEMP,
-
-    CKFF_SPEC_STAGE2_COLOR_OP,
-    CKFF_SPEC_STAGE2_COLOR_ARG0,
-    CKFF_SPEC_STAGE2_COLOR_ARG1,
-    CKFF_SPEC_STAGE2_COLOR_ARG2,
-    CKFF_SPEC_STAGE2_ALPHA_OP,
-    CKFF_SPEC_STAGE2_ALPHA_ARG0,
-    CKFF_SPEC_STAGE2_ALPHA_ARG1,
-    CKFF_SPEC_STAGE2_ALPHA_ARG2,
-    CKFF_SPEC_STAGE2_RESULT_IS_TEMP,
-
-    CKFF_SPEC_STAGE3_COLOR_OP,
-    CKFF_SPEC_STAGE3_COLOR_ARG0,
-    CKFF_SPEC_STAGE3_COLOR_ARG1,
-    CKFF_SPEC_STAGE3_COLOR_ARG2,
-    CKFF_SPEC_STAGE3_ALPHA_OP,
-    CKFF_SPEC_STAGE3_ALPHA_ARG0,
-    CKFF_SPEC_STAGE3_ALPHA_ARG1,
-    CKFF_SPEC_STAGE3_ALPHA_ARG2,
-    CKFF_SPEC_STAGE3_RESULT_IS_TEMP,
-
-    CKFF_SPEC_CONSTANT_COUNT
-};
-
-struct CKFFSpecBitfield {
-    CKDWORD DwordOffset;
-    CKDWORD BitOffset;
-    CKDWORD BitCount;
-};
-
+// Per-draw specialization data of the fixed-function uber shader: which
+// combiner ops / args, sampler kinds and global switches the fragment shader
+// must apply. Stored as CKFF_SPEC_LANE_COUNT 24-bit lanes laid out by
+// CKFFSpecLayout.def and uploaded as u_ffSpec (one lane per float component).
 class CKFFSpecializationInfo {
 public:
-    static const CKDWORD MaxSpecDwords = 10;
+    static const CKDWORD LaneCount = CKFF_SPEC_LANE_COUNT;
+    static const CKDWORD Vec4Count = CKFF_SPEC_VEC4_COUNT;
+    static const CKDWORD LaneMask = (1u << CKFF_SPEC_LANE_BITS) - 1u;
 
     CKFFSpecializationInfo();
 
-    void Set(CKFFSpecConstantId id, CKDWORD value);
-    CKDWORD Get(CKFFSpecConstantId id) const;
-    void SetDwords(const CKDWORD *data, CKDWORD count);
-    void SetOptimized(bool optimized);
-    bool IsOptimized() const;
+    void Set(CKFFSpecGlobalField field, CKDWORD value);
+    CKDWORD Get(CKFFSpecGlobalField field) const;
+    void SetStage(CKDWORD stage, CKFFSpecStageField field, CKDWORD value);
+    CKDWORD GetStage(CKDWORD stage, CKFFSpecStageField field) const;
 
-    const CKDWORD *Data() const { return m_Data; }
-    CKDWORD DwordCount() const { return MaxSpecDwords; }
+    // MIRRORONCE axes of one stage (3 bits inside MIRRORONCE_SAMPLER_MASK).
+    void SetMirrorOnceMask(CKDWORD stage, CKDWORD mask);
+    CKDWORD GetMirrorOnceMask(CKDWORD stage) const;
 
-    static CKFFSpecBitfield Layout(CKFFSpecConstantId id);
+    void SetLanes(const CKDWORD *lanes, CKDWORD count);
+    const CKDWORD *Lanes() const { return m_Lanes; }
+
+    // u_ffSpec encoding: every lane becomes one float holding its integer
+    // value (exact below 2^24), four lanes per vec4.
+    void Pack24(float outVec4[CKFF_SPEC_VEC4_COUNT][4]) const;
+    static CKFFSpecializationInfo Unpack24(const float *floats, CKDWORD floatCount);
+
+    bool operator==(const CKFFSpecializationInfo &other) const;
+    bool operator!=(const CKFFSpecializationInfo &other) const { return !(*this == other); }
+
+    // Texture argument (CKRST_TA_*) <-> 5-bit field: base arg in bits 0..2,
+    // COMPLEMENT / ALPHAREPLICATE modifiers in bits 3..4.
     static CKDWORD RepackArg(CKDWORD arg);
+    static CKDWORD UnpackArg(CKDWORD packed);
 
 private:
-    CKDWORD m_Data[MaxSpecDwords];
+    void SetBits(const CKFFSpecBitfield &layout, CKDWORD value);
+    CKDWORD GetBits(const CKFFSpecBitfield &layout) const;
+
+    CKDWORD m_Lanes[CKFF_SPEC_LANE_COUNT];
 };
 
 #endif // CKFFSPECIALIZATIONINFO_H

@@ -220,25 +220,24 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
              stage < context->ActiveTextureCount &&
              stage < CKFF_MAX_TEXTURE_STAGES;
              ++stage) {
-            float *colorExtra = stageParams.Values[
-                CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-            colorExtra[1] = 0.0f;
+            float *coord = stageParams.Values[
+                CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COORD)];
+            coord[0] = 0.0f;
             const CKDWORD samplingFlags =
-                (CKDWORD)colorExtra[2] &
+                (CKDWORD)coord[1] &
                 (CKFF_TTF_MIRRORONCE_MASK |
                  CKFF_TTF_RENDER_TARGET_FLIP_V |
                  CKFF_TTF_BUMP_UNORM);
-            colorExtra[2] = (float)samplingFlags;
+            coord[1] = (float)samplingFlags;
         }
     }
     Emit(sink, u.u_stageParams, stageParams.Values,
          CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
 
     CKFFSpecUniform ffSpec;
-    CKFFPackSpecializationDwords(context->Specialization, ffSpec);
+    CKFFPackSpecialization(context->Specialization, ffSpec);
     Emit(sink, u.u_ffSpec, ffSpec.Values,
-         CKFFSpecializationInfo::MaxSpecDwords,
-         CKFFSpecializationInfo::MaxSpecDwords, FALSE);
+         CKFF_SPEC_UNIFORM_VEC4_COUNT, CKFF_SPEC_UNIFORM_VEC4_COUNT, FALSE);
 }
 
 void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext *context)

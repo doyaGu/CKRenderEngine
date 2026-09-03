@@ -116,12 +116,13 @@ void TextureArgModifierRepackRoundTripsBothModifierBits() {
 void ShaderABIConstantsMatchShaderUniformDeclarations() {
     TestCheck(CKFF_DRAW_PARAM_VEC4_COUNT == 20,
               "u_ffDrawParams ABI must include the tween parameter vec4");
-    TestCheck(CKFF_STAGE_PARAM_VEC4_COUNT == 32,
-              "u_stageParams ABI must remain 32 vec4s");
-    TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFFSpecializationInfo::MaxSpecDwords,
-              "u_ffSpec ABI must mirror the specialization dword count");
-    TestCheck(CKFFStageParamIndex(3, CKFF_STAGE_PARAM_ALPHA_EXTRA) == 15,
-              "Stage parameter index helper must encode four vec4s per stage");
+    TestCheck(CKFF_STAGE_PARAM_VEC4_COUNT == 16,
+              "u_stageParams ABI must be 16 vec4s (coord + constant per stage)");
+    TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFFSpecializationInfo::Vec4Count &&
+                  CKFF_SPEC_UNIFORM_VEC4_COUNT == 5,
+              "u_ffSpec ABI must mirror the specialization lane count (20 lanes = 5 vec4)");
+    TestCheck(CKFFStageParamIndex(3, CKFF_STAGE_PARAM_CONSTANT) == 7,
+              "Stage parameter index helper must encode two vec4s per stage");
     TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_2D, 2) == 2 &&
                   CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, 7) == 7,
               "2D and depth samplers must bind to the texture slot of their stage (0..7)");
@@ -138,10 +139,10 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
     TestCheck(fs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos &&
                   vs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos,
               "Shader sources must declare u_ffDrawParams with the ABI count");
-    TestCheck(fs.find("uniform vec4 u_stageParams[32]") != std::string::npos &&
-                  vs.find("uniform vec4 u_stageParams[32]") != std::string::npos,
+    TestCheck(fs.find("uniform vec4 u_stageParams[16]") != std::string::npos &&
+                  vs.find("uniform vec4 u_stageParams[16]") != std::string::npos,
               "Shader sources must declare u_stageParams with the ABI count");
-    TestCheck(fs.find("uniform vec4 u_ffSpec[10]") != std::string::npos,
+    TestCheck(fs.find("uniform vec4 u_ffSpec[5]") != std::string::npos,
               "Fragment shader must declare u_ffSpec with the specialization ABI count");
 }
 
@@ -166,29 +167,19 @@ void StageParamsPackThroughABIIndices() {
     CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
     CKFFPackStageParams(stages, textures, textureFlags, 3, 0, params);
 
-    const float *color = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COLOR)];
-    const float *alpha = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_ALPHA)];
-    const float *colorExtra = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-    const float *alphaExtra = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_ALPHA_EXTRA)];
+    const float *coord = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COORD)];
+    const float *constant = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_CONSTANT)];
+    const float *inactive = params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD)];
 
-    TestCheck(color[0] == (float)CKRST_TOP_SELECTARG1 &&
-                  color[1] == (float)CKRST_TA_TEXTURE &&
-                  color[2] == (float)CKRST_TA_TFACTOR &&
-                  color[3] == 1.0f,
-              "Stage color params must pack through the declared ABI slot");
-    TestCheck(alpha[0] == (float)CKRST_TOP_SELECTARG2 &&
-                  alpha[1] == (float)CKRST_TA_CURRENT &&
-                  alpha[2] == (float)CKRST_TA_TEXTURE,
-              "Stage alpha params must pack through the declared ABI slot");
-    TestCheck(colorExtra[0] == (float)CKRST_TA_CONSTANT &&
-                  colorExtra[1] == 6.0f &&
-                  colorExtra[2] == (float)0x103,
-              "Stage color extra params must pack texcoord and transform ABI fields");
-    TestCheck(colorExtra[3] > 0.24f && colorExtra[3] < 0.26f &&
-                  alphaExtra[1] > 0.12f && alphaExtra[1] < 0.13f &&
-                  alphaExtra[2] > 0.06f && alphaExtra[2] < 0.07f &&
-                  alphaExtra[3] > 0.49f && alphaExtra[3] < 0.51f,
-              "Stage constant must pack RGBA into color/alpha extra ABI fields");
+    TestCheck(coord[0] == 6.0f && coord[1] == (float)0x103 && coord[2] == 1.0f && coord[3] == 0.0f,
+              "Stage coord params must pack texcoord index, transform flags and the has-texture flag");
+    TestCheck(constant[0] > 0.24f && constant[0] < 0.26f &&
+                  constant[1] > 0.12f && constant[1] < 0.13f &&
+                  constant[2] > 0.06f && constant[2] < 0.07f &&
+                  constant[3] > 0.49f && constant[3] < 0.51f,
+              "Stage constant must pack RGBA into the constant ABI slot");
+    TestCheck(inactive[1] == 0.0f && inactive[2] == 0.0f,
+              "Inactive stages must pack neither transform flags nor a texture");
 }
 
 void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
@@ -221,14 +212,14 @@ void RenderTargetFlipFlagFollowsBackendOrigin() {
 
     CKFFPackStageParams(stages, textures, textureFlags, 1, 0, params);
     const CKDWORD topLeftFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
     TestCheck((topLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
               "Top-left backends must sample render targets without a V flip");
 
     CKFFPackStageParams(stages, textures, textureFlags, 1,
                         CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
     const CKDWORD bottomLeftFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
     TestCheck((bottomLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) != 0,
               "Bottom-left backends must flip 2D render-target sampling in V");
 
@@ -236,7 +227,7 @@ void RenderTargetFlipFlagFollowsBackendOrigin() {
     CKFFPackStageParams(stages, textures, textureFlags, 1,
                         CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
     const CKDWORD regularTextureFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
     TestCheck((regularTextureFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
               "Bottom-left backends must not flip ordinary texture assets");
 
@@ -245,7 +236,7 @@ void RenderTargetFlipFlagFollowsBackendOrigin() {
     CKFFPackStageParams(stages, textures, textureFlags, 1,
                         CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
     const CKDWORD cubeFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COLOR_EXTRA)][2];
+        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
     TestCheck((cubeFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
               "Cube render targets must not receive an invalid 2D V flip");
 }
@@ -275,17 +266,17 @@ void MirrorOnceAddressModesPackIntoStageParams() {
     CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
     CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params);
 
-    const float *stage1 = params.Values[CKFFStageParamIndex(1, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-    const CKDWORD stage1Flags = (CKDWORD)stage1[2];
-    TestCheck(stage1[1] == (float)CKFFPackTexcoordIndex(3, CKFF_TEXGEN_NONE),
+    const float *stage1 = params.Values[CKFFStageParamIndex(1, CKFF_STAGE_PARAM_COORD)];
+    const CKDWORD stage1Flags = (CKDWORD)stage1[1];
+    TestCheck(stage1[0] == (float)CKFFPackTexcoordIndex(3, CKFF_TEXGEN_NONE),
               "MIRRORONCE packing must not overwrite packed texcoord index");
     TestCheck((stage1Flags & 0x1ffu) == (CKRST_TTF_COUNT2 | CKRST_TTF_PROJECTED),
               "MIRRORONCE packing must preserve transform count and projected bits");
     TestCheck((stage1Flags & CKFF_TTF_MIRRORONCE_MASK) == (CKFF_TTF_MIRRORONCE_U | CKFF_TTF_MIRRORONCE_W),
               "Inherited MIRRORONCE must apply per-axis override rules before packing");
 
-    const float *stage5 = params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-    const CKDWORD stage5Flags = (CKDWORD)stage5[2];
+    const float *stage5 = params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COORD)];
+    const CKDWORD stage5Flags = (CKDWORD)stage5[1];
     TestCheck((stage5Flags & CKFF_TTF_MIRRORONCE_MASK) == CKFF_TTF_MIRRORONCE_MASK,
               "Runtime stages 4..7 must carry U/V/W MIRRORONCE masks through stage params");
 }
@@ -306,24 +297,28 @@ void MirrorOnceSamplerDescFallsBackToClamp() {
               "FFP shader mask must preserve the original MIRRORONCE axes despite sampler fallback");
 }
 
-void MirrorOnceSpecializationPacksFirstFourStages() {
+void MirrorOnceSpecializationPacksEveryStage() {
     CKFFFSStateDesc desc;
-    for (CKDWORD stage = 0; stage < 4; ++stage) {
+    CKDWORD expectedMask = 0;
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         desc.SetStageColorOp(stage, CKRST_TOP_SELECTARG1);
         desc.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
         desc.SetStageAlphaOp(stage, CKRST_TOP_SELECTARG1);
         desc.SetStageAlphaArg1(stage, CKRST_TA_TEXTURE);
-        desc.SetStageMirrorOnceMask(stage, stage + 1);
+        const CKDWORD mask = (stage % 7u) + 1u;
+        desc.SetStageMirrorOnceMask(stage, mask);
+        expectedMask |= mask << (stage * 3);
     }
 
-    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x0Fu);
+    CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0xFFu);
     CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
-    const CKDWORD expectedMask = 1u | (2u << 3) | (3u << 6) | (4u << 9);
 
-    TestCheck(key.Stages[3].MirrorOnceMask == 4,
+    TestCheck(key.Stages[3].MirrorOnceMask == 4 && key.Stages[7].MirrorOnceMask == 1,
               "Shader key must preserve per-stage MIRRORONCE mask");
     TestCheck(spec.Get(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK) == expectedMask,
-              "Full-specialized spec dwords must pack stage 0..3 MIRRORONCE masks");
+              "Specialization data must pack the MIRRORONCE masks of all eight stages");
+    TestCheck(spec.GetMirrorOnceMask(7) == 1 && spec.GetMirrorOnceMask(2) == 3,
+              "Per-stage MIRRORONCE accessor must read three bits per stage");
 }
 
 void LastActiveTextureStageSpecializationRoundTrips() {
@@ -345,8 +340,8 @@ void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
               "FFP shader sources must be readable");
     TestCheck(common.find("int MirrorOnceMask;") != std::string::npos &&
                   common.find("ckffSpecMirrorOnceMask") != std::string::npos &&
-                  common.find(">> uint(9)") != std::string::npos,
-              "Fragment common shader must read MIRRORONCE masks from spec/runtime stage params");
+                  common.find("ckffSpec_MIRRORONCE_SAMPLER_MASK() >> (stage * 3)") != std::string::npos,
+              "Fragment common shader must read MIRRORONCE masks from the specialization data");
     TestCheck(fs.find("vec4 applyMirrorOnceCoord") != std::string::npos &&
                   fs.find("if (samplerType == 1 || mirrorOnceMask == 0) return coord") != std::string::npos &&
                   fs.find("samplerType == 3 && (mirrorOnceMask & 4)") != std::string::npos,
@@ -384,26 +379,74 @@ void TextureCombinerOpFormulasStayDxvkCompatible() {
               "PREMODULATE must feed Arg1 through and premultiply next-stage CURRENT arguments");
 }
 
-void SpecUniformMirrorsSpecializationDwordsAsBytes() {
+void SpecUniformCarriesLanesAsExactIntegers() {
     CKFFSpecializationInfo info;
-    info.SetOptimized(true);
     info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, 1);
     info.Set(CKFF_SPEC_ALPHA_FUNC, VXCMP_GREATER);
-    info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK,
-             CKFF_SAMPLER_CUBE | (CKFF_SAMPLER_VOLUME << 2));
+    info.Set(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK, 0xFFFFFFu);
+    info.SetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_CUBE);
+    info.SetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_VOLUME);
+    info.SetStage(7, CKFF_SPEC_STAGE_COLOR_OP, CKRST_TOP_LERP);
 
     CKFFSpecUniform packed;
-    CKFFPackSpecializationDwords(info, packed);
+    CKFFPackSpecialization(info, packed);
 
-    const CKDWORD *dwords = info.Data();
-    for (CKDWORD i = 0; i < CKFF_SPEC_UNIFORM_VEC4_COUNT; ++i) {
-        CKDWORD unpacked = ((CKDWORD)packed.Values[i][0] & 0xFFu) |
-                           (((CKDWORD)packed.Values[i][1] & 0xFFu) << 8) |
-                           (((CKDWORD)packed.Values[i][2] & 0xFFu) << 16) |
-                           (((CKDWORD)packed.Values[i][3] & 0xFFu) << 24);
-        TestCheck(unpacked == dwords[i],
-                  "u_ffSpec uniform byte mirror must round-trip every specialization dword");
+    const CKDWORD *lanes = info.Lanes();
+    for (CKDWORD lane = 0; lane < CKFFSpecializationInfo::LaneCount; ++lane) {
+        const float value = packed.Values[lane / 4][lane % 4];
+        TestCheck((CKDWORD)value == lanes[lane] && value < 16777216.0f,
+                  "u_ffSpec must carry every 24-bit lane as an exact integer float");
     }
+    TestCheck(packed.Values[17 / 4][17 % 4] == 16777215.0f,
+              "A full 24-bit lane must survive the float encoding");
+    const CKFFSpecializationInfo unpacked =
+        CKFFSpecializationInfo::Unpack24(&packed.Values[0][0], CKFF_SPEC_UNIFORM_VEC4_COUNT * 4);
+    TestCheck(unpacked == info,
+              "u_ffSpec encoding must round-trip the specialization data");
+}
+
+void SpecLayoutShaderHeaderMatchesTheDef() {
+    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/ff_spec_layout.sh");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/fs_ff_common.sc");
+    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
+    TestCheck(!generated.empty() && !common.empty() && !script.empty(),
+              "Generated spec layout header, fragment common shader and codegen script must be readable");
+
+    char line[160];
+    snprintf(line, sizeof(line), "#define CKFF_SPEC_LANE_COUNT %u", (unsigned)CKFF_SPEC_LANE_COUNT);
+    TestCheck(generated.find(line) != std::string::npos,
+              "Generated spec layout must define the lane count");
+    snprintf(line, sizeof(line), "#define CKFF_SPEC_STAGE_LANE_STRIDE %u", (unsigned)CKFF_SPEC_STAGE_LANE_STRIDE);
+    TestCheck(generated.find(line) != std::string::npos,
+              "Generated spec layout must define the stage lane stride");
+    snprintf(line, sizeof(line), "#define CKFF_SPEC_GLOBAL_LANE_BASE %u", (unsigned)CKFF_SPEC_GLOBAL_LANE_BASE);
+    TestCheck(generated.find(line) != std::string::npos,
+              "Generated spec layout must define the global lane base");
+
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_STAGE_FIELD_COUNT; ++fieldIndex) {
+        const CKFFSpecFieldDesc &desc = CKFFSpecStageFieldDesc((CKFFSpecStageField)fieldIndex);
+        snprintf(line, sizeof(line), "int ckffSpecStage_%s(int stage) { return ckffSpecStageBits(stage, %u, %u, %u); }",
+                 desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated spec layout must expose every stage field with the C++ bit positions");
+    }
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_GLOBAL_FIELD_COUNT; ++fieldIndex) {
+        const CKFFSpecFieldDesc &desc = CKFFSpecGlobalFieldDesc((CKFFSpecGlobalField)fieldIndex);
+        snprintf(line, sizeof(line), "int ckffSpec_%s() { return ckffSpecBits(%u, %u, %u); }",
+                 desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated spec layout must expose every global field with the C++ bit positions");
+    }
+    TestCheck(common.find("#include \"ff_spec_layout.sh\"") != std::string::npos &&
+                  common.find("int ckffSpecLane(int lane)") != std::string::npos &&
+                  common.find("return int(v.x)") != std::string::npos &&
+                  common.find("floatBitsToUint") == std::string::npos &&
+                  common.find("uint(255)") == std::string::npos,
+              "Fragment shader must read u_ffSpec lanes with int() through the generated layout, not bytes or bit casts");
+    TestCheck(script.find("gen-spec-layout") != std::string::npos &&
+                  script.find("CKFFSpecLayout.def") != std::string::npos &&
+                  script.find("def validate_spec_layout") != std::string::npos,
+              "Shader codegen must generate and validate the spec layout from CKFFSpecLayout.def");
 }
 
 void PremodulateCoverageIsExact() {
@@ -699,9 +742,11 @@ void SamplerTypesPackIntoSpecialization() {
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 3));
     CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
 
-    TestCheck(spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) ==
-                  (CKFF_SAMPLER_CUBE | (CKFF_SAMPLER_DEPTH << 6)),
-              "Sampler type specialization must pack two bits per stage");
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
+                  spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
+                  spec.GetStage(2, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
+                  spec.GetStage(3, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
+              "Sampler type specialization must pack per stage");
 }
 
 void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
@@ -722,11 +767,12 @@ void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 1));
     CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
 
-    TestCheck((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) & 0x3u) == CKFF_SAMPLER_VOLUME,
+    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME,
               "Volume sampler type must pack into specialization");
-    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_TYPE_MASK) >> 2) & 0x3u) == CKFF_SAMPLER_DEPTH,
+    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
               "Depth sampler type must remain packed independently");
-    TestCheck(((spec.Get(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK) >> 4) & 0xFu) == CKRST_COMPARE_LEQUAL,
+    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL &&
+                  spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
               "Depth compare func must pack four bits per stage");
 }
 
@@ -798,14 +844,14 @@ void FragmentShaderDeclaresTheFixedSamplerLayout() {
                   fs.find("SAMPLER3D(s_textureVolume4") == std::string::npos,
               "Fragment shader must not declare more than four cube or volume samplers");
     TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") != std::string::npos &&
-                  fs.find("if (ckffSpecSamplerType(previousStage) == samplerType)") != std::string::npos,
+                  fs.find("if (ckffSpecStage_SAMPLER_TYPE(previousStage) == samplerType)") != std::string::npos,
               "Fragment shader must pick cube / volume samplers by type ordinal from the specialization data");
 
     const std::string *sources[] = {&fs, &common, &vs3d, &vsPositionT};
     const char *retiredMacros[] = {
         "CKFF_FULL_SPECIALIZED", "CKFF_STATIC_SAMPLER_LAYOUT", "CKFF_VOLUME_SAMPLER_LAYOUT",
         "CKFF_MIXED_SAMPLER_LAYOUT", "CKFF_VS_INSTANCED", "CKFF_VS_ACTIVE_TEXCOORD_COUNT",
-        "CKFF_FS_ACTIVE_STAGE_COUNT",
+        "CKFF_FS_ACTIVE_STAGE_COUNT", "ckffSpecIsOptimized", "u_ffDrawParams[8].y",
     };
     for (const std::string *source : sources) {
         for (const char *macro : retiredMacros) {
@@ -940,9 +986,9 @@ void SamplerSlotOverflowSamplesAsUnbound() {
     }
     CKFFStageParamsUniform params;
     CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params, NULL, key.SamplerSlotOverflowMask);
-    TestCheck(params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COLOR)][3] == 1.0f &&
-                  params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COLOR)][3] == 0.0f &&
-                  params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COLOR)][3] == 1.0f,
+    TestCheck(params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD)][2] == 1.0f &&
+                  params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD)][2] == 0.0f &&
+                  params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COORD)][2] == 1.0f,
               "Stage params must clear the has-texture flag of overflowing stages only");
 }
 
@@ -1158,16 +1204,18 @@ int main() {
               &MirrorOnceAddressModesPackIntoStageParams);
     tests.Run("MIRRORONCE sampler desc falls back to clamp",
               &MirrorOnceSamplerDescFallsBackToClamp);
-    tests.Run("MIRRORONCE specialization packs first four stages",
-              &MirrorOnceSpecializationPacksFirstFourStages);
+    tests.Run("MIRRORONCE specialization packs every stage",
+              &MirrorOnceSpecializationPacksEveryStage);
     tests.Run("Last active texture stage specialization round trips",
               &LastActiveTextureStageSpecializationRoundTrips);
     tests.Run("MIRRORONCE shader source applies only to 2D and volume",
               &MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume);
     tests.Run("Texture combiner op formulas stay DXVK compatible",
               &TextureCombinerOpFormulasStayDxvkCompatible);
-    tests.Run("Spec uniform mirrors specialization dwords as bytes",
-              &SpecUniformMirrorsSpecializationDwordsAsBytes);
+    tests.Run("Spec uniform carries lanes as exact integers",
+              &SpecUniformCarriesLanesAsExactIntegers);
+    tests.Run("Spec layout shader header matches the def",
+              &SpecLayoutShaderHeaderMatchesTheDef);
     tests.Run("PREMODULATE coverage is exact",
               &PremodulateCoverageIsExact);
     tests.Run("BUMPENVMAP always creates texture dependency",

@@ -5,8 +5,8 @@ $input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1,
 
 uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_bumpEnv[16];
-uniform vec4 u_stageParams[32];
-uniform vec4 u_ffSpec[10];
+uniform vec4 u_stageParams[16];
+uniform vec4 u_ffSpec[5];
 
 // Fixed sampler layout shared by every draw (spec 5.3): one 2D sampler per
 // texture stage, then four cube and four volume samplers that the C++ side
@@ -59,7 +59,7 @@ int ckffSamplerOrdinal(int stage, int samplerType)
     int ordinal = 0;
     for (int previousStage = 0; previousStage < 8; ++previousStage) {
         if (previousStage >= stage) break;
-        if (ckffSpecSamplerType(previousStage) == samplerType)
+        if (ckffSpecStage_SAMPLER_TYPE(previousStage) == samplerType)
             ++ordinal;
     }
     return ordinal;
@@ -216,7 +216,8 @@ vec2 ckffDecodeBump(vec2 bump, bool unormEncoded)
 
 void main()
 {
-    bool flatShade = ckffSpecIsOptimized() && ckffSpecFlatShade();
+    bool flatShade = ckffSpec_FLAT_SHADE() != 0;
+    int lastActiveStage = ckffSpec_LAST_ACTIVE_TEXTURE_STAGE();
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
     vec4 specular = flatShade ? v_flatColor1 : v_color1;
     vec4 current = diffuse;
@@ -227,13 +228,9 @@ void main()
     int previousAlphaOp = 0;
 
     for (int stage = 0; stage < 8; ++stage) {
-        if (ckffSpecIsOptimized() && stage > ckffSpecLastActiveTextureStage()) break;
+        if (stage > lastActiveStage) break;
 
-        vec4 colorParams = u_stageParams[stage * 4 + 0];
-        vec4 alphaParams = u_stageParams[stage * 4 + 1];
-        vec4 colorExtra = u_stageParams[stage * 4 + 2];
-        vec4 alphaExtra = u_stageParams[stage * 4 + 3];
-        CKFFStageParams stageParams = ckffReadStageParams(stage, colorParams, alphaParams, colorExtra, alphaExtra);
+        CKFFStageParams stageParams = ckffReadStageParams(stage, u_stageParams[stage * 2 + 0], u_stageParams[stage * 2 + 1]);
         int colorOp = stageParams.ColorOp;
         int alphaOp = stageParams.AlphaOp;
         bool hasTexture = stageParams.HasTexture;
@@ -295,18 +292,14 @@ void main()
         previousAlphaOp = alphaOp;
     }
 
-    bool specularEnabled = ckffSpecIsOptimized() ? ckffSpecGlobalSpecularEnabled() : (u_ffDrawParams[8].z > 0.5);
-    if (specularEnabled) {
+    if (ckffSpec_GLOBAL_SPECULAR_ENABLED() != 0) {
         current.rgb += specular.rgb;
     }
-    if (ckffSpecIsOptimized()) {
-        if (ckffSpecAlphaTestEnabled() && !alphaPass(current.a, ckffSpecAlphaFunc())) discard;
-    } else {
-        if (!alphaPass(current.a, int(u_ffDrawParams[8].y))) discard;
-    }
-    bool fogEnabled = ckffSpecIsOptimized() ? ckffSpecFogEnabled() : true;
-    if (fogEnabled) {
-        int pixelFogMode = ckffSpecIsOptimized() ? ckffSpecPixelFogMode() : int(u_ffDrawParams[8].w);
+    // Alpha test precision (the high nibble of the packed alpha draw param) is not applied yet:
+    // the 8-bit path matches the reference; wider alpha targets are a phase 2.3 item.
+    if (ckffSpec_ALPHA_TEST_ENABLED() != 0 && !alphaPass(current.a, ckffSpec_ALPHA_FUNC())) discard;
+    if (ckffSpec_FOG_ENABLED() != 0) {
+        int pixelFogMode = ckffSpec_PIXEL_FOG_MODE();
         float fogFactor = pixelFogMode == 0
             ? v_texcoord7Fog.z
             : computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);

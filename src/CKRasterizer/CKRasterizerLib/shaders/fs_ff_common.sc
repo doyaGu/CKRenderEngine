@@ -18,136 +18,66 @@ struct CKFFStageParams
     vec4 Constant;
 };
 
-// Specialization data is uploaded per draw as u_ffSpec: each dword is split
-// into four bytes carried as small integer floats (exact in fp32).
-bool ckffSpecIsOptimized()
+// Specialization data (spec 5.3): u_ffSpec carries CKFF_SPEC_LANE_COUNT lanes
+// of 24 bits, one lane per float component. Integers below 2^24 are exact in
+// fp32, so int() recovers the lane and the fields are sliced with shifts. The
+// field positions come from ff_spec_layout.sh, generated from
+// CKFFSpecLayout.def together with the C++ side.
+int ckffSpecLane(int lane)
 {
-    return int(u_ffSpec[0].x) != 0;
+    vec4 v = u_ffSpec[lane / 4];
+    int component = lane - (lane / 4) * 4;
+    if (component == 0) return int(v.x);
+    if (component == 1) return int(v.y);
+    if (component == 2) return int(v.z);
+    return int(v.w);
 }
 
-uint ckffSpecDword(int index)
+int ckffSpecBits(int lane, int offset, int bits)
 {
-    vec4 b = u_ffSpec[index];
-    return (uint(b.x) & uint(255)) |
-           ((uint(b.y) & uint(255)) << uint(8)) |
-           ((uint(b.z) & uint(255)) << uint(16)) |
-           ((uint(b.w) & uint(255)) << uint(24));
+    return (ckffSpecLane(lane) >> offset) & ((1 << bits) - 1);
 }
 
-int ckffSpecBits(uint word, int offset, int bits)
-{
-    uint mask = (uint(1) << uint(bits)) - uint(1);
-    return int((word >> uint(offset)) & mask);
-}
+#include "ff_spec_layout.sh"
 
 int ckffUnpackSpecArg(int arg)
 {
     return (arg & 0x7) | ((arg & 0x18) << 1);
 }
 
-int ckffSpecLastActiveTextureStage()
-{
-    return ckffSpecBits(ckffSpecDword(4), 16, 3);
-}
-
-bool ckffSpecGlobalSpecularEnabled()
-{
-    return ckffSpecBits(ckffSpecDword(6), 31, 1) != 0;
-}
-
-int ckffSpecProjectedSamplerMask()
-{
-    return ckffSpecBits(ckffSpecDword(5), 0, 4);
-}
-
-bool ckffSpecAlphaTestEnabled()
-{
-    return ckffSpecBits(ckffSpecDword(5), 4, 1) != 0;
-}
-
-int ckffSpecAlphaFunc()
-{
-    return ckffSpecBits(ckffSpecDword(5), 5, 4);
-}
-
-bool ckffSpecFogEnabled()
-{
-    return ckffSpecBits(ckffSpecDword(5), 9, 1) != 0;
-}
-
-int ckffSpecVertexFogMode()
-{
-    return ckffSpecBits(ckffSpecDword(5), 10, 2);
-}
-
-int ckffSpecPixelFogMode()
-{
-    return ckffSpecBits(ckffSpecDword(5), 12, 2);
-}
-
-bool ckffSpecRangeFog()
-{
-    return ckffSpecBits(ckffSpecDword(5), 14, 1) != 0;
-}
-
-bool ckffSpecFlatShade()
-{
-    return ckffSpecBits(ckffSpecDword(5), 15, 1) != 0;
-}
-
-int ckffSpecSamplerType(int stage)
-{
-    return ckffSpecBits(ckffSpecDword(5), 16 + stage * 2, 2);
-}
-
-int ckffSpecSamplerCompareFunc(int stage)
-{
-    return ckffSpecBits(ckffSpecDword(3), stage * 4, 4);
-}
-
 int ckffSpecMirrorOnceMask(int stage)
 {
-    if (stage < 4) return ckffSpecBits(ckffSpecDword(4), 19 + stage * 3, 3);
-    return 0;
+    return (ckffSpec_MIRRORONCE_SAMPLER_MASK() >> (stage * 3)) & 7;
 }
 
-CKFFStageParams ckffReadStageParams(int stage, vec4 colorParams, vec4 alphaParams, vec4 colorExtra, vec4 alphaExtra)
+// coordParams = u_stageParams[stage * 2 + 0]: x = packed texcoord index,
+// y = texture transform flags (+ MIRRORONCE / render-target flip / bump bits),
+// z = has texture. constant = u_stageParams[stage * 2 + 1].
+CKFFStageParams ckffReadStageParams(int stage, vec4 coordParams, vec4 constant)
 {
     CKFFStageParams params;
-    params.ColorOp = int(colorParams.x);
-    params.ColorArg0 = int(colorExtra.x);
-    params.ColorArg1 = int(colorParams.y);
-    params.ColorArg2 = int(colorParams.z);
-    params.AlphaOp = int(alphaParams.x);
-    params.AlphaArg0 = int(alphaExtra.x);
-    params.AlphaArg1 = int(alphaParams.y);
-    params.AlphaArg2 = int(alphaParams.z);
-    params.ResultArg = int(alphaParams.w);
-    params.TexcoordTransformFlags = int(colorExtra.z);
-    params.MirrorOnceMask = int((uint(int(colorExtra.z)) >> uint(9)) & uint(7));
-    params.SamplerType = ckffSpecSamplerType(stage);
-    params.SamplerCompareFunc = ckffSpecSamplerCompareFunc(stage);
-    params.BumpUnorm = (int(colorExtra.z) & 0x2000) != 0;
-    params.HasTexture = colorParams.w > 0.5;
-    params.Constant = vec4(colorExtra.w, alphaExtra.y, alphaExtra.z, alphaExtra.w);
+    params.ColorOp = ckffSpecStage_COLOR_OP(stage);
+    params.ColorArg0 = ckffUnpackSpecArg(ckffSpecStage_COLOR_ARG0(stage));
+    params.ColorArg1 = ckffUnpackSpecArg(ckffSpecStage_COLOR_ARG1(stage));
+    params.ColorArg2 = ckffUnpackSpecArg(ckffSpecStage_COLOR_ARG2(stage));
+    params.AlphaOp = ckffSpecStage_ALPHA_OP(stage);
+    params.AlphaArg0 = ckffUnpackSpecArg(ckffSpecStage_ALPHA_ARG0(stage));
+    params.AlphaArg1 = ckffUnpackSpecArg(ckffSpecStage_ALPHA_ARG1(stage));
+    params.AlphaArg2 = ckffUnpackSpecArg(ckffSpecStage_ALPHA_ARG2(stage));
+    params.ResultArg = ckffSpecStage_RESULT_IS_TEMP(stage) != 0 ? 5 : 1;
 
-    if (stage < 4 && ckffSpecIsOptimized()) {
-        uint word = ckffSpecDword(6 + stage);
-        params.ColorOp = ckffSpecBits(word, 0, 5);
-        params.ColorArg0 = ckffUnpackSpecArg(ckffSpecBits(ckffSpecDword(1), stage * 5, 5));
-        params.ColorArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 5, 5));
-        params.ColorArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 10, 5));
-        params.AlphaOp = ckffSpecBits(word, 15, 5);
-        params.AlphaArg0 = ckffUnpackSpecArg(ckffSpecBits(ckffSpecDword(2), stage * 5, 5));
-        params.AlphaArg1 = ckffUnpackSpecArg(ckffSpecBits(word, 20, 5));
-        params.AlphaArg2 = ckffUnpackSpecArg(ckffSpecBits(word, 25, 5));
-        params.ResultArg = ckffSpecBits(word, 30, 1) != 0 ? 5 : 1;
-        if ((ckffSpecProjectedSamplerMask() & (1 << stage)) != 0) {
-            params.TexcoordTransformFlags |= 0x100;
-        } else {
-            params.TexcoordTransformFlags &= ~0x100;
-        }
+    int flags = int(coordParams.y);
+    if (ckffSpecStage_PROJECTED(stage) != 0) {
+        flags |= 0x100;
+    } else {
+        flags &= ~0x100;
     }
-
+    params.TexcoordTransformFlags = flags;
+    params.MirrorOnceMask = ckffSpecMirrorOnceMask(stage);
+    params.SamplerType = ckffSpecStage_SAMPLER_TYPE(stage);
+    params.SamplerCompareFunc = ckffSpecStage_SAMPLER_COMPARE_FUNC(stage);
+    params.BumpUnorm = (flags & 0x2000) != 0;
+    params.HasTexture = coordParams.z > 0.5;
+    params.Constant = constant;
     return params;
 }

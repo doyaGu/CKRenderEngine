@@ -44,7 +44,7 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks = NULL,
                          CKDWORD samplerSlotOverflowMask = 0);
-void CKFFPackSpecializationDwords(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec);
+void CKFFPackSpecialization(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec);
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip);
 int CKFFPackViewLights(const CKFFLightData lights[CKFF_MAX_LIGHTS],
                        const CKBOOL lightEnabled[CKFF_MAX_LIGHTS],

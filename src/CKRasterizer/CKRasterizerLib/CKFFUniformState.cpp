@@ -93,6 +93,7 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks,
                          CKDWORD samplerSlotOverflowMask) {
+    (void)stageStateSetMasks;
     memset(&outParams, 0, sizeof(outParams));
     if (!stageStates)
         return;
@@ -101,9 +102,6 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     CKFFPackStageConstantUniforms(stageStates, stageConstants);
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const uint64_t stateSetMask = stageStateSetMasks
-            ? stageStateSetMasks[stage]
-            : 0;
         const bool stageActive = stage < activeTextureCount;
         // Stages beyond the fixed cube / volume sampler budget sample as unbound.
         const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0 &&
@@ -122,41 +120,20 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
             (textureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) != 0) {
             textureTransformFlags |= CKFF_TTF_BUMP_UNORM;
         }
-        float *color = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR)];
-        float *alpha = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA)];
-        float *colorExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COLOR_EXTRA)];
-        float *alphaExtra = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_ALPHA_EXTRA)];
+        float *coord = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COORD)];
+        float *constant = outParams.Values[CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_CONSTANT)];
 
-        color[0] = (float)CKFFResolveStageColorOp(stageStates[stage], stageActive, hasTexture);
-        color[1] = (float)CKFFResolveStageColorArg1(
-            stageStates[stage], hasTexture, stateSetMask);
-        color[2] = (float)CKFFResolveStageColorArg2(stageStates[stage], stateSetMask);
-        color[3] = hasTexture ? 1.0f : 0.0f;
-        alpha[0] = (float)CKFFResolveStageAlphaOp(stageStates[stage], stageActive, hasTexture);
-        alpha[1] = (float)CKFFResolveStageAlphaArg1(
-            stageStates[stage], hasTexture, stateSetMask);
-        alpha[2] = (float)CKFFResolveStageAlphaArg2(stageStates[stage], stateSetMask);
-        alpha[3] = (float)CKFFResolveStageResultArg(stageStates[stage], stateSetMask);
-        colorExtra[0] = (float)CKFFResolveStageColorArg0(stageStates[stage], stateSetMask);
-        colorExtra[1] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
-        colorExtra[2] = (float)textureTransformFlags;
-        colorExtra[3] = stageConstants[stage][0];
-        alphaExtra[0] = (float)CKFFResolveStageAlphaArg0(stageStates[stage], stateSetMask);
-        alphaExtra[1] = stageConstants[stage][1];
-        alphaExtra[2] = stageConstants[stage][2];
-        alphaExtra[3] = stageConstants[stage][3];
+        coord[0] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
+        coord[1] = (float)textureTransformFlags;
+        coord[2] = hasTexture ? 1.0f : 0.0f;
+        coord[3] = 0.0f;
+        memcpy(constant, stageConstants[stage], sizeof(float) * 4);
     }
 }
 
-void CKFFPackSpecializationDwords(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec) {
+void CKFFPackSpecialization(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec) {
     memset(&outSpec, 0, sizeof(outSpec));
-    const CKDWORD *specDwords = info.Data();
-    for (CKDWORD i = 0; i < CKFFSpecializationInfo::MaxSpecDwords; ++i) {
-        outSpec.Values[i][0] = (float)(specDwords[i] & 0xFFu);
-        outSpec.Values[i][1] = (float)((specDwords[i] >> 8) & 0xFFu);
-        outSpec.Values[i][2] = (float)((specDwords[i] >> 16) & 0xFFu);
-        outSpec.Values[i][3] = (float)((specDwords[i] >> 24) & 0xFFu);
-    }
+    info.Pack24(outSpec.Values);
 }
 
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip) {

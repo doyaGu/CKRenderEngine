@@ -258,7 +258,6 @@ CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBound
 
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     CKFFSpecializationInfo info;
-    info.SetOptimized(true);
     info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
     info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
     info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, key.AlphaTestEnable ? 1u : 0u);
@@ -268,36 +267,22 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.Set(CKFF_SPEC_PIXEL_FOG_MODE, key.PixelFogMode);
     info.Set(CKFF_SPEC_RANGE_FOG, key.RangeFog ? 1u : 0u);
     info.Set(CKFF_SPEC_FLAT_SHADE, key.FlatShade ? 1u : 0u);
-    CKDWORD projectedSamplerMask = 0;
-    CKDWORD samplerTypeMask = 0;
-    CKDWORD samplerCompareFuncMask = 0;
-    CKDWORD mirrorOnceMask = 0;
-    for (CKDWORD stage = 0; stage < 4; ++stage) {
-        if (key.Stages[stage].ProjectedSampler)
-            projectedSamplerMask |= (1u << stage);
-        mirrorOnceMask |= (key.Stages[stage].MirrorOnceMask & 7u) << (stage * 3);
-    }
-    info.Set(CKFF_SPEC_PROJECTED_SAMPLER_MASK, projectedSamplerMask);
-    info.Set(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK, mirrorOnceMask);
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
-        samplerTypeMask |= (key.Stages[stage].SamplerType & 3u) << (stage * 2);
-    info.Set(CKFF_SPEC_SAMPLER_TYPE_MASK, samplerTypeMask);
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
-        samplerCompareFuncMask |= (key.Stages[stage].SamplerCompareFunc & 0xFu) << (stage * 4);
-    info.Set(CKFF_SPEC_SAMPLER_COMPARE_FUNC_MASK, samplerCompareFuncMask);
 
-    for (CKDWORD stage = 0; stage < 4; ++stage) {
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
-        const CKDWORD base = (CKDWORD)CKFF_SPEC_STAGE0_COLOR_OP + stage * 9;
-        info.Set((CKFFSpecConstantId)(base + 0), src.ColorOp);
-        info.Set((CKFFSpecConstantId)(base + 1), CKFFSpecializationInfo::RepackArg(src.ColorArg0));
-        info.Set((CKFFSpecConstantId)(base + 2), CKFFSpecializationInfo::RepackArg(src.ColorArg1));
-        info.Set((CKFFSpecConstantId)(base + 3), CKFFSpecializationInfo::RepackArg(src.ColorArg2));
-        info.Set((CKFFSpecConstantId)(base + 4), src.AlphaOp);
-        info.Set((CKFFSpecConstantId)(base + 5), CKFFSpecializationInfo::RepackArg(src.AlphaArg0));
-        info.Set((CKFFSpecConstantId)(base + 6), CKFFSpecializationInfo::RepackArg(src.AlphaArg1));
-        info.Set((CKFFSpecConstantId)(base + 7), CKFFSpecializationInfo::RepackArg(src.AlphaArg2));
-        info.Set((CKFFSpecConstantId)(base + 8), src.ResultIsTemp ? 1u : 0u);
+        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_OP, src.ColorOp);
+        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG0, CKFFSpecializationInfo::RepackArg(src.ColorArg0));
+        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG1, CKFFSpecializationInfo::RepackArg(src.ColorArg1));
+        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG2, CKFFSpecializationInfo::RepackArg(src.ColorArg2));
+        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_OP, src.AlphaOp);
+        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG0, CKFFSpecializationInfo::RepackArg(src.AlphaArg0));
+        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG1, CKFFSpecializationInfo::RepackArg(src.AlphaArg1));
+        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG2, CKFFSpecializationInfo::RepackArg(src.AlphaArg2));
+        info.SetStage(stage, CKFF_SPEC_STAGE_RESULT_IS_TEMP, src.ResultIsTemp ? 1u : 0u);
+        info.SetStage(stage, CKFF_SPEC_STAGE_SAMPLER_TYPE, src.SamplerType & 3u);
+        info.SetStage(stage, CKFF_SPEC_STAGE_PROJECTED, src.ProjectedSampler ? 1u : 0u);
+        info.SetStage(stage, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC, src.SamplerCompareFunc & 0xFu);
+        info.SetMirrorOnceMask(stage, src.MirrorOnceMask & 7u);
     }
 
     return info;
