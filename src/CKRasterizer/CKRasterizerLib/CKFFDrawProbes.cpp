@@ -148,7 +148,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
                    Stats.TransientVertexBytes,
                    Stats.TransientIndexBytes);
         CK_LOG_FMT("FFPStats.Timing",
-                   "frame=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f encoderStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f",
+                   "frame=%u prepareUs=%.1f stateUs=%.1f programUs=%.1f uniformUs=%.1f textureUs=%.1f transformUs=%.1f drawStateBuildUs=%.1f pipelineStateUs=%.1f stencilUs=%.1f layoutUs=%.1f bufferBindUs=%.1f submitUs=%.1f",
                    Stats.FrameIndex,
                    Stats.PrepareUs,
                    Stats.StateUs,
@@ -157,7 +157,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
                    Stats.TextureUs,
                    Stats.TransformUs,
                    Stats.DrawStateBuildUs,
-                   Stats.EncoderStateUs,
+                   Stats.PipelineStateUs,
                    Stats.StencilUs,
                    Stats.LayoutUs,
                    Stats.BufferBindUs,

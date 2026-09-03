@@ -1,13 +1,13 @@
-#ifndef CKRASTERIZERDEVICETYPES_H
-#define CKRASTERIZERDEVICETYPES_H
+#ifndef CKRASTERIZERBACKENDTYPES_H
+#define CKRASTERIZERBACKENDTYPES_H
 
 #include "VxDefines.h"
 #include "VxColor.h"
 #include "XArray.h"
 #include "CKTypes.h"
-#include "CKRasterizerDeviceEnums.h"
-// CKTextureDesc, CKVertexBufferDesc and CKIndexBufferDesc are the v3 contract
-// descriptors; the device interface shares them.
+#include "CKRasterizerBackendEnums.h"
+// Descriptor types of the backend interface. CKTextureDesc, CKVertexBufferDesc
+// and CKIndexBufferDesc are the v3 contract descriptors and are shared.
 #include "CKRasterizerTypes.h"
 
 // ===========================================================================
@@ -29,9 +29,8 @@ struct CKRasterizerTargetDesc {
           OriginBottomLeft(FALSE) {}
 };
 
-struct CKRasterizerDeviceCapsDesc {
-    CKDWORD Size;
-    CKDWORD Version;
+// Limits and features of the device behind a backend (bgfx: the bgfx caps).
+struct CKBackendDeviceLimits {
     CKRST_DEVCAPS Features;
     CKDWORD MaxDrawCalls;
     CKDWORD MaxBlits;
@@ -45,7 +44,6 @@ struct CKRasterizerDeviceCapsDesc {
     CKDWORD MaxTextures;
     CKDWORD MaxTextureStages;
     CKDWORD MaxTextureBindings;
-    CKDWORD MaxComputeBindings;
     CKDWORD MaxVertexLayouts;
     CKDWORD MaxVertexStreams;
     CKDWORD MaxIndexBuffers;
@@ -53,28 +51,15 @@ struct CKRasterizerDeviceCapsDesc {
     CKDWORD MaxDynamicIndexBuffers;
     CKDWORD MaxDynamicVertexBuffers;
     CKDWORD MaxUniforms;
-    CKDWORD MaxOcclusionQueries;
-    CKDWORD MaxEncoders;
-    CKDWORD MinResourceCommandBufferSize;
     CKDWORD MaxTransientVertexBufferSize;
     CKDWORD MaxTransientIndexBufferSize;
-    CKDWORD MinUniformBufferSize;
-    CKDWORD MaxTransforms;
 
-    CKRasterizerDeviceCapsDesc()
-        : Size(sizeof(CKRasterizerDeviceCapsDesc)), Version(1), Features(0),
-          MaxDrawCalls(0), MaxBlits(0), MaxTextureSize(0),
-          MaxTextureLayers(0), MaxRenderViews(0), MaxFrameBuffers(0),
-          MaxColorAttachments(0), MaxPrograms(0), MaxShaders(0),
-          MaxTextures(0), MaxTextureStages(0), MaxTextureBindings(0),
-          MaxComputeBindings(0),
-          MaxVertexLayouts(0), MaxVertexStreams(0), MaxIndexBuffers(0),
-          MaxVertexBuffers(0), MaxDynamicIndexBuffers(0),
-          MaxDynamicVertexBuffers(0), MaxUniforms(0),
-          MaxOcclusionQueries(0), MaxEncoders(0),
-          MinResourceCommandBufferSize(0), MaxTransientVertexBufferSize(0),
-          MaxTransientIndexBufferSize(0), MinUniformBufferSize(0),
-          MaxTransforms(0) {}
+    CKBackendDeviceLimits()
+        : Features(0), MaxDrawCalls(0), MaxBlits(0), MaxTextureSize(0), MaxTextureLayers(0), MaxRenderViews(0),
+          MaxFrameBuffers(0), MaxColorAttachments(0), MaxPrograms(0), MaxShaders(0), MaxTextures(0),
+          MaxTextureStages(0), MaxTextureBindings(0), MaxVertexLayouts(0), MaxVertexStreams(0), MaxIndexBuffers(0),
+          MaxVertexBuffers(0), MaxDynamicIndexBuffers(0), MaxDynamicVertexBuffers(0), MaxUniforms(0),
+          MaxTransientVertexBufferSize(0), MaxTransientIndexBufferSize(0) {}
 };
 
 struct CKTextureFormatCaps {
@@ -147,4 +132,4 @@ struct CKSamplerDesc {
     CK_COMPARE_MODE CompareFunc;
 };
 
-#endif // CKRASTERIZERDEVICETYPES_H
+#endif // CKRASTERIZERBACKENDTYPES_H

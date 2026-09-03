@@ -87,7 +87,7 @@ static bool DisplayModesAreSorted(CKRasterizerBackendDriver *driver)
 }
 
 // ============================================================================
-// Test 1: Fill mode / topology interaction
+// Fill mode / topology interaction
 // ============================================================================
 
 static void TestFillModeTopology()
@@ -190,11 +190,7 @@ static void TestFillModeTopology()
 }
 
 // ============================================================================
-// Test 2: Atomic encoder slot acquisition (thread safety)
-// ============================================================================
-// Test 3: Atomic transient buffer counter (thread safety)
-// ============================================================================
-// Test 4: CKDrawStateBuilder bit layout correctness
+// CKDrawStateBuilder bit layout correctness
 // ============================================================================
 
 static void TestDrawStateBuilderLayout()
@@ -512,7 +508,7 @@ static void TestOpenGLAutoMipPolicy()
 }
 
 // ============================================================================
-// Test 5: Rasterizer start/close lifecycle
+// Backend library start/close lifecycle
 // ============================================================================
 
 static void TestBgfxRasterizerLifecycle()
@@ -548,9 +544,7 @@ static void TestBgfxRasterizerLifecycle()
 }
 
 // ============================================================================
-// Test 6: Stress test - multi-threaded slot acquisition with release/reuse
-// ============================================================================
-// Test 7: DrawMap trace contract helpers
+// DrawMap trace contract helpers
 // ============================================================================
 
 static void TestDrawMapTraceContractHelpers()
@@ -617,7 +611,7 @@ static void TestPersistentCacheCallback()
 }
 
 // ============================================================================
-// Test 8: Debug overlay view map contract
+// Debug overlay view map contract
 // ============================================================================
 
 static void TestDebugOverlayViewMapContract()
@@ -633,9 +627,7 @@ static void TestDebugOverlayViewMapContract()
 }
 
 // ============================================================================
-// Test 10: Uniform reflection handle contract
-// ============================================================================
-// Test 11: Exact pixel-format mapping
+// Exact pixel-format mapping
 // ============================================================================
 
 static void TestExactPixelFormatMapping()

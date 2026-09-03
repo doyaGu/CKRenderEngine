@@ -3,8 +3,8 @@
 
 #include "CKFFConstants.h"
 #include "CKRasterizerBackend.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 #include "CKRenderConfig.h"
 #include "CKRenderPerfClock.h"
 
@@ -43,7 +43,7 @@ struct CKFFFrameStats {
     double TextureUs;
     double TransformUs;
     double DrawStateBuildUs;
-    double EncoderStateUs;
+    double PipelineStateUs;
     double StencilUs;
     double LayoutUs;
     double BufferBindUs;

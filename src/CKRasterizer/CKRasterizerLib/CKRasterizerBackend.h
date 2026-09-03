@@ -18,8 +18,8 @@
 #include "CKError.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
-#include "CKRasterizerDeviceEnums.h"   // CKDrawState, CK_DEPTH_FORMAT, CK_SHADER_PROFILE, CKRST_DEVCAPS_*, CK_FILTER_MODE...
-#include "CKRasterizerDeviceTypes.h"   // CKSamplerDesc, CKVertexLayoutDesc, CKShaderDesc, CKReadbackDesc
+#include "CKRasterizerBackendEnums.h"   // CKDrawState, CK_DEPTH_FORMAT, CK_SHADER_PROFILE, CKRST_DEVCAPS_*, CK_FILTER_MODE...
+#include "CKRasterizerBackendTypes.h"   // CKSamplerDesc, CKVertexLayoutDesc, CKShaderDesc, CKReadbackDesc
 
 // Backend-only object types (the contract defines TEXTURE / VERTEXBUFFER /
 // INDEXBUFFER).
@@ -89,7 +89,7 @@ struct CKBackendStats {
 
 // Textures use the contract's CKTextureDesc (flags: CKRST_TEXTURE_CUBEMAP /
 // VOLUMEMAP / RENDERTARGET / MIPMAP..., plus the backend-only
-// CKRST_TEXTURE_MSAA_Xn / READBACK / BLIT_DST from CKRasterizerDeviceEnums.h).
+// CKRST_TEXTURE_MSAA_Xn / READBACK / BLIT_DST from CKRasterizerBackendEnums.h).
 
 struct CKBackendDepthDesc {
     CKDWORD Width, Height;

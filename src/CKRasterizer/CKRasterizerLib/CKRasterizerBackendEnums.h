@@ -1,19 +1,17 @@
-#ifndef CKRASTERIZERDEVICEENUMS_H
-#define CKRASTERIZERDEVICEENUMS_H
+#ifndef CKRASTERIZERBACKENDENUMS_H
+#define CKRASTERIZERBACKENDENUMS_H
 
 #include <stdint.h>
 
 #include "VxDefines.h"
 
-// Internal device interface (formerly CKRasterizer v2). Everything shared with
-// the v3 contract - object kinds, clear flags, cube faces, texture / buffer /
-// lock flags, debug flags, CKRST_MAX_TEXTURE_STAGES - comes from the public
-// header; this file only adds what the bgfx device needs on top of it.
+// Enumerations of the backend interface (CKRasterizerBackend.h) and the
+// fixed-function translation core. Everything shared with the v3 contract -
+// object kinds, clear flags, cube faces, texture / buffer / lock flags, debug
+// flags, CKRST_MAX_TEXTURE_STAGES - comes from the public header; this file
+// only adds what the backends need on top of it.
 #include "CKRasterizerEnums.h"
 
-
-/******************************************************************************
-*******************************************************************************/
 // ===========================================================================
 // Constants
 // ===========================================================================
@@ -99,7 +97,7 @@ typedef enum CK_VERTEX_ATTRIB_TYPE {
 } CK_VERTEX_ATTRIB_TYPE;
 
 // ---------------------------------------------------------------------------
-// Render View
+// Pass index (the bgfx view id a pass is bound to)
 // ---------------------------------------------------------------------------
 
 typedef uint16_t CKRenderView;
@@ -150,7 +148,7 @@ typedef enum CK_COMPARE_MODE {
 } CK_COMPARE_MODE;
 
 // ---------------------------------------------------------------------------
-// Discard Flags (encoder Submit)
+// Discard flags (bgfx submit semantics; every backend draw discards all)
 // ---------------------------------------------------------------------------
 
 typedef enum CK_DISCARD_FLAGS {
@@ -165,7 +163,7 @@ typedef enum CK_DISCARD_FLAGS {
 } CK_DISCARD_FLAGS;
 
 // ---------------------------------------------------------------------------
-// Texture Flags (v2 extensions to CKRST_TEXTUREFLAGS)
+// Backend texture flags (extend the contract's CKRST_TEXTUREFLAGS)
 // ---------------------------------------------------------------------------
 
 #define CKRST_TEXTURE_MSAA_X2         0x00800000
@@ -527,4 +525,4 @@ private:
     CKDrawState m_State;
 };
 
-#endif // CKRASTERIZERDEVICEENUMS_H
+#endif // CKRASTERIZERBACKENDENUMS_H

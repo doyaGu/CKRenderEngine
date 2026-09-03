@@ -3,8 +3,8 @@
 
 #include "VxDefines.h"
 #include "VxMatrix.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 #include "CKRasterizerBackend.h"
 #include "XArray.h"
 

@@ -884,7 +884,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     m_Caps.ShaderProfile = CKBgfxShaderProfile(actualRenderer);
     m_Caps.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
     m_Caps.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
-    m_CapsDesc = CKRasterizerDeviceCapsDesc();
+    m_CapsDesc = CKBackendDeviceLimits();
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
     if (caps) {
         m_NativeSupported = caps->supported;

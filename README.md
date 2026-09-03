@@ -1,6 +1,19 @@
 # CKRenderEngine
 
-CKRenderEngine implements the Virtools rendering layer used by Ballanced. It contains the `CK2_3D` engine module (scene and render-object implementations, talking to the D3D7-shaped `CKRasterizer` v3 contract in `include/CKRasterizer.h`), the translation core `CKRasterizerLib` (fixed-function pipeline, virtual backbuffer and present stage over the thin `CKRasterizerBackend` interface, with a NULL backend), and the bgfx-backed `CKBgfxRasterizer` plugin. Design: `docs/spec/2026-09-01-render-engine-redesign-v3.md` in the Ballanced superproject.
+CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `CK2_3D` engine module, a translation core that turns the engine's Direct3D 7 style calls into GPU work, and the bgfx-backed `CKBgfxRasterizer` plugin.
+
+## Architecture
+
+The render engine is layered around one contract and one thin backend interface:
+
+- **Engine** (`src/`, `include/RCK*.h`) — scene graph, render objects, materials, textures, sprites. It drives the rasterizer through the D3D7-shaped `CKRasterizer` v3 contract in `include/CKRasterizer.h` (render states, texture stage states, transforms, lights, materials, `DrawPrimitive*`, vertex/index buffer locks, `Clear` / `BeginScene` / `EndScene` / `BackToFront`, render-target textures, readbacks).
+- **Translation core** (`src/CKRasterizer/CKRasterizerLib/`, static library linked into `CK2_3D` and every rasterizer plugin) — `CKTranslatedRasterizer` / `CKTranslatedDriver` / `CKTranslatedContext` implement the contract: a verbatim state mirror, the fixed-function pipeline (`CKFixedFunctionPipeline`, `CKFF*`: one uber shader family plus per-draw specialization data), the virtual backbuffer and present stage (render scale, MSAA, FXAA, sharpening, readbacks), transient geometry and vertex layouts. Draws reach the GPU through the ~30-method `CKRasterizerBackend` interface (`CKRasterizerBackend.h`).
+- **Backends** — `CKBgfxRasterizer` (`src/CKRasterizer/CKBgfxRasterizer/`, `CKBgfxBackend` on bgfx: Direct3D 11/12, Vulkan, OpenGL/ES, Metal) and the built-in NULL backend (`CKNullBackend`, the fallback when no plugin loads and the base of the test harness).
+- **Reference and tests** — `tests/reference/` holds the capability baseline and the reference frames captured from the original Virtools rasterizer; `tools/scene_capture/` renders procedural scenes through any rasterizer and compares them (`ckre_scene_capture --compare`). Unit and contract tests live in `tests/` and `src/CKRasterizer/tests/`; the GPU pixel gate `rasterizer3_pixel_tests` runs when `CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1` (`CKBGFX_RENDERER_BACKEND` selects d3d11 / d3d12 / vulkan / opengl / opengles / metal).
+
+The design is documented in the Ballanced superproject: `docs/spec/2026-09-01-render-engine-redesign-v3.md` (specification) and `docs/superpowers/plans/2026-09-02-render-engine-v3-implementation-plan.md` (phased implementation record).
+
+Runtime configuration: `src/CK2_3D.ini` (engine and translation core, installed next to `CK2_3D`) and `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini` (bgfx backend selection, shader cache, logging).
 
 ## Support scope
 

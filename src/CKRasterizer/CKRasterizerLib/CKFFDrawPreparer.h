@@ -22,7 +22,7 @@ public:
                      CKFFShaderCache &shaderCache);
 #endif
 
-    // Resolve shader state without touching an encoder. The result can be
+    // Resolve shader state without touching the backend. The result can be
     // consumed by either immediate submission or deferred packet capture.
     CKFFProgramPrepareStatus PrepareProgram(
         CKFFProgramPreparation *preparation,

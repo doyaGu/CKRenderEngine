@@ -4,7 +4,7 @@
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFShaderCache.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendTypes.h"
 
 class CKDrawStateCache;
 class CKRasterizerBackend;

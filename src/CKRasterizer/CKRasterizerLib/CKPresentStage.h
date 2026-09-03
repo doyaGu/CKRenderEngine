@@ -3,7 +3,7 @@
 
 #include "VxMath.h"
 #include "CKTypes.h"
-#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerBackendEnums.h"
 #include "CKRasterizerBackend.h"
 
 // One internal render target: color + depth-stencil + backend render target.

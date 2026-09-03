@@ -633,7 +633,7 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
     if (dev->m_RenderManager->m_SortTransparentObjects.Value && count > 1) {
         dev->m_TransparentObjectsSortTimeProfiler.Reset();
 
-        // Phase 1: compute viewProj from FF pipeline (v2 has no UpdateMatrices/m_ViewProjMatrix)
+        // Phase 1: viewProj from the context's own view / projection matrices
         VxMatrix viewProj;
         Vx3DMultiplyMatrix4(viewProj, dev->m_ProjectionMatrix, dev->m_ViewMatrix);
 

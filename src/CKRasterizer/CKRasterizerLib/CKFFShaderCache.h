@@ -4,8 +4,8 @@
 #include "CKFFShaderKey.h"
 #include "CKFFShaderABI.h"
 #include "CKFFConstants.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 
 class CKRasterizerBackend;
 

@@ -4,8 +4,8 @@
 #include "VxMath.h"
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 #include "CKRasterizerBackend.h"
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
@@ -34,7 +34,7 @@ struct CKFFPipelineTestAccess;
 
 // Reasons a draw returns FALSE. Every fixed-function state the backend cannot
 // express is approximated instead (see RecordDrawApproximation); only invalid
-// input / state values and backend failures (ENCODER_ERROR: a PushConstants /
+// input / state values and backend failures (BACKEND_ERROR: a PushConstants /
 // Draw call the backend refused) still reject.
 enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_NONE = 0,
@@ -43,7 +43,7 @@ enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_PROGRAM_MISSING,
     CKFF_DRAW_REJECT_TEXTURE_OP,
     CKFF_DRAW_REJECT_STATE_VALUE,
-    CKFF_DRAW_REJECT_ENCODER_ERROR,
+    CKFF_DRAW_REJECT_BACKEND_ERROR,
     CKFF_DRAW_REJECT_COUNT
 };
 

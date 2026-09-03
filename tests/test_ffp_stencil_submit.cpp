@@ -177,7 +177,7 @@ void DrawVertexBufferPropagatesEncoderFailure() {
               "A backend submit failure must fail the originating FFP draw");
     TestCheck(context.Encoder.SubmitCount == 1,
               "The failing backend submit must be attempted exactly once");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BACKEND_ERROR,
               "A backend submit failure must report the encoder-error reason");
     TestCheck(context.Encoder.DiscardCount == 1 &&
                   context.Encoder.LastDiscardFlags == CKRST_DISCARD_ALL,
@@ -403,7 +403,7 @@ void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
               "A backend state-binding failure must fail the originating FFP draw");
     TestCheck(context.Encoder.SubmitCount == 0,
               "A state-binding failure must stop before backend submit");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BACKEND_ERROR,
               "A state-binding failure must report the encoder-error reason");
     TestCheck(context.Encoder.DiscardCount == 1,
               "A failed state binding must discard pending encoder state");
@@ -435,7 +435,7 @@ void DrawVertexBufferStopsUniformUploadsAfterFailure() {
               "Uniform upload must stop at the first backend failure");
     TestCheck(context.Encoder.StateSetCount == 0 && context.Encoder.SubmitCount == 0,
               "A uniform failure must stop before state binding and submit");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_ENCODER_ERROR,
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BACKEND_ERROR,
               "A uniform failure must report the encoder-error reason");
     TestCheck(context.Encoder.DiscardCount == 1,
               "A failed uniform upload must discard pending encoder state");

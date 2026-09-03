@@ -2,7 +2,7 @@
 #define CKDRAWSTATECACHE_H
 
 #include "CKTypes.h"
-#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerBackendEnums.h"
 
 #define CKFF_RS_COUNT 256
 

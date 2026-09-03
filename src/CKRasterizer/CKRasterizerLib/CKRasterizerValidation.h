@@ -2,8 +2,8 @@
 #define CKRASTERIZERVALIDATION_H
 
 #include "CKError.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 
 inline CKERROR CKRasterizerValidateDiscard(CKDWORD Flags)
 {

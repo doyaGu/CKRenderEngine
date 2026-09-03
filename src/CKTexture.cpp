@@ -378,7 +378,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             if (!converted)
                 return FALSE;
         }
-        // Upload texture data via v2 API
+        // Upload the pixels through the contract
         if (m_MipMaps && m_MipMapLevel) {
             if (!m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, nullptr)) {
                 delete[] converted;

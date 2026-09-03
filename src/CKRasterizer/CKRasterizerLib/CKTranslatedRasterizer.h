@@ -1,8 +1,7 @@
 #ifndef CKTRANSLATEDRASTERIZER_H
 #define CKTRANSLATEDRASTERIZER_H
 
-// Translation core of the CKRasterizer v3 contract (spec section 5, plan
-// phase 1 step 1.4).
+// Translation core of the CKRasterizer v3 contract (spec section 5).
 //
 // A CKTranslatedRasterizer wraps a CKRasterizerBackendLibrary (bgfx, NULL,
 // ...) and exposes it to the engine as the D3D7-shaped v3 contract. Every

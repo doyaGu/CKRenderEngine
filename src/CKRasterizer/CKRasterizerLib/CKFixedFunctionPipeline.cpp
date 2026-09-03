@@ -116,7 +116,7 @@ const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_PROGRAM_MISSING: return "program-missing";
     case CKFF_DRAW_REJECT_TEXTURE_OP: return "texture-operation";
     case CKFF_DRAW_REJECT_STATE_VALUE: return "state-value";
-    case CKFF_DRAW_REJECT_ENCODER_ERROR: return "backend-error";
+    case CKFF_DRAW_REJECT_BACKEND_ERROR: return "backend-error";
     default: return "none";
     }
 }
@@ -916,7 +916,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         if (!m_UniformEmitter.UploadUniforms(m_Backend, programContext, textures->ActiveStageCount))
-            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
+            return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     }
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
 
@@ -947,7 +947,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
         ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_DrawStateCache))
         : 1.0f;
     {
-        CKFF_SCOPE_TIME(m_Probes, EncoderStateUs);
+        CKFF_SCOPE_TIME(m_Probes, PipelineStateUs);
         m_Backend->SetPipelineState(&pipeline);
     }
 
@@ -988,7 +988,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     {
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
         if (m_Backend->Draw(&draw) != CK_OK)
-            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
+            return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {

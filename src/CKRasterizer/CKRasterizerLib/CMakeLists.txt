@@ -42,8 +42,8 @@ set(CKRASTERIZER_LIB_HEADERS
         CKRasterizerValidation.h
         CKRasterizerCapsBaseline.h
         CKRasterizerCapsBaseline.generated.h
-        CKRasterizerDeviceEnums.h
-        CKRasterizerDeviceTypes.h
+        CKRasterizerBackendEnums.h
+        CKRasterizerBackendTypes.h
         CKRasterizerBackend.h
         CKNullBackend.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h

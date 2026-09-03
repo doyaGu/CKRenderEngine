@@ -341,7 +341,7 @@ private:
     bgfx::RendererType::Enum m_RendererType;
     CKBackendCaps m_Caps;
     CKBackendStats m_Stats;
-    CKRasterizerDeviceCapsDesc m_CapsDesc;   // bgfx limits and CKRST_DEVCAPS_* features
+    CKBackendDeviceLimits m_CapsDesc;   // bgfx limits and CKRST_DEVCAPS_* features
     uint64_t m_NativeSupported;
     uint32_t m_NativeFormatCaps[bgfx::TextureFormat::Count];
     bgfx::TextureHandle m_DefaultWhiteTexture;

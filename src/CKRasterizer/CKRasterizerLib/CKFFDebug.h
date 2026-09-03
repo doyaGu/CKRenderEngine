@@ -4,12 +4,12 @@
 #include "CKRenderConfig.h"
 #include "VxMath.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerDeviceEnums.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerBackendTypes.h"
 #include "CKFFConstants.h"
 #include "CKFFStateDesc.h"
 #include "CKDrawStateCache.h"
-#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerBackendEnums.h"
 
 struct VxDrawPrimitiveData;
 
