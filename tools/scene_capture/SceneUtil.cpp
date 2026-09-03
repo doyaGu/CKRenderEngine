@@ -205,8 +205,8 @@ CKMesh *SceneCreateBoxMesh(SceneContext &sc, const char *name, const VxVector &s
         {VxVector(0, 0, 1), VxVector(-1, 0, 0), VxVector(0, 1, 0)},  // back (+Z)
         {VxVector(-1, 0, 0), VxVector(0, 0, -1), VxVector(0, 1, 0)}, // left
         {VxVector(1, 0, 0), VxVector(0, 0, 1), VxVector(0, 1, 0)},   // right
-        {VxVector(0, 1, 0), VxVector(1, 0, 0), VxVector(0, 0, -1)},  // top
-        {VxVector(0, -1, 0), VxVector(1, 0, 0), VxVector(0, 0, 1)},  // bottom
+        {VxVector(0, 1, 0), VxVector(1, 0, 0), VxVector(0, 0, 1)},   // top
+        {VxVector(0, -1, 0), VxVector(1, 0, 0), VxVector(0, 0, -1)}, // bottom
     };
     for (int f = 0; f < 6; ++f) {
         const Face &face = faces[f];
@@ -218,7 +218,8 @@ CKMesh *SceneCreateBoxMesh(SceneContext &sc, const char *name, const VxVector &s
         const int i1 = b.AddVertex(VxVector(center.x + du.x - dv.x, center.y + du.y - dv.y, center.z + du.z - dv.z), face.n, uvRepeat, uvRepeat);
         const int i2 = b.AddVertex(VxVector(center.x + du.x + dv.x, center.y + du.y + dv.y, center.z + du.z + dv.z), face.n, uvRepeat, 0.0f);
         const int i3 = b.AddVertex(VxVector(center.x - du.x + dv.x, center.y - du.y + dv.y, center.z - du.z + dv.z), face.n, 0.0f, 0.0f);
-        // Clockwise when seen from outside (Virtools / D3D front face).
+        // Clockwise when seen from outside (Virtools / D3D front face): every
+        // face keeps n == -(u x v) so the winding is outward.
         b.AddFace(i0, i2, i1);
         b.AddFace(i0, i3, i2);
     }
@@ -295,6 +296,17 @@ CKMesh *SceneCreateQuadMesh(SceneContext &sc, const char *name, float width, flo
     return b.Commit(sc, name, mat);
 }
 
+void SceneAddRenderObject(SceneContext &sc, CKRenderObject *obj)
+{
+    if (!obj)
+        return;
+    sc.RenderContext->AddObject(obj);
+    CKLevel *level = sc.Context->GetCurrentLevel();
+    CKScene *scene = level ? level->GetLevelScene() : NULL;
+    if (scene)
+        scene->AddObjectToScene(obj, FALSE);
+}
+
 CK3dEntity *SceneCreateEntity(SceneContext &sc, const char *name, CKMesh *mesh, const VxVector &position)
 {
     CK3dEntity *entity = CreateCK<CK3dEntity>(sc, CKCID_3DOBJECT, name);
@@ -303,7 +315,7 @@ CK3dEntity *SceneCreateEntity(SceneContext &sc, const char *name, CKMesh *mesh, 
     if (mesh)
         entity->SetCurrentMesh(mesh);
     entity->SetPosition(&position);
-    sc.RenderContext->AddObject(entity);
+    SceneAddRenderObject(sc, entity);
     return entity;
 }
 
@@ -319,7 +331,7 @@ CKCamera *SceneCreateCamera(SceneContext &sc, const char *name, const VxVector &
     camera->SetFrontPlane(nearPlane);
     camera->SetBackPlane(farPlane);
     camera->SetAspectRatio(sc.Width, sc.Height);
-    sc.RenderContext->AddObject(camera);
+    SceneAddRenderObject(sc, camera);
     return camera;
 }
 
@@ -345,7 +357,7 @@ CKLight *SceneCreateLight(SceneContext &sc, const char *name, VXLIGHT_TYPE type,
     }
     light->SetSpecularFlag(TRUE);
     light->Active(TRUE);
-    sc.RenderContext->AddObject(light);
+    SceneAddRenderObject(sc, light);
     return light;
 }
 
@@ -358,7 +370,7 @@ CK2dEntity *SceneCreate2dQuad(SceneContext &sc, const char *name, const VxRect &
     entity->SetRect(rect);
     entity->SetMaterial(mat);
     entity->SetBackground(background ? TRUE : FALSE);
-    sc.RenderContext->AddObject(entity);
+    SceneAddRenderObject(sc, entity);
     return entity;
 }
 

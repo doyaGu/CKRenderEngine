@@ -43,6 +43,10 @@ window handle as a Win32 `HWND`. The same flag exists in the Player
 (`--native-window-handle`, `Graphics.NativeWindowHandle`) for whole-game
 comparisons against the original render engine DLLs.
 
+The tool creates a `CKLevel` and adds every scene object to its scene (2D
+entities only render when they belong to the current scene) and registers the
+render context as the level's main context.
+
 Capture conditions of the committed set: Ballance retail DLLs
 (`CK2_3D.dll` 2002-10-30, `CKDX8Rasterizer.dll`), NVIDIA GeForce RTX 4090
 "T&L DX8" driver 0, Windows 11, 640x480, 3 frames, captured 2026-09-02.

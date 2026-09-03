@@ -255,6 +255,18 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     }
     m_RenderContext->SetClearBackground(TRUE);
     m_RenderContext->SetClearZBuffer(TRUE);
+
+    // A level with its default scene and this render context as the player
+    // context, as a loaded composition would have: 2D entities only render
+    // when they are in the current scene and lay themselves out against the
+    // player render context (SceneAddRenderObject adds the scene objects).
+    CKLevel *level = static_cast<CKLevel *>(m_Context->CreateObject(CKCID_LEVEL, (CKSTRING)"Level", CK_OBJECTCREATION_NONAMECHECK));
+    if (!level) {
+        Fail("CreateObject(CKCID_LEVEL) failed");
+        return false;
+    }
+    m_Context->SetCurrentLevel(level);
+    level->AddRenderContext(m_RenderContext, TRUE);
     if (options.Verbose)
         printf("render context %dx%d on driver %d (%s)\n", m_RenderContext->GetWidth(),
                m_RenderContext->GetHeight(), options.Driver, m_DriverName.c_str());

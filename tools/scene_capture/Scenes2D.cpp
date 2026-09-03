@@ -62,7 +62,7 @@ bool BuildSpritesText(SceneContext &sc)
     sprite->SetHomogeneousCoordinates(FALSE);
     Vx2DVector spritePos(24.0f, 24.0f);
     sprite->SetPosition(spritePos);
-    sc.RenderContext->AddObject(sprite);
+    SceneAddRenderObject(sc, sprite);
 
     // Sprite text: exercises the text raster path; glyph shapes depend on the
     // platform font, so its area is masked when comparing across machines.
@@ -77,7 +77,7 @@ bool BuildSpritesText(SceneContext &sc)
     text->SetHomogeneousCoordinates(FALSE);
     Vx2DVector textPos(20.0f, h - 72.0f);
     text->SetPosition(textPos);
-    sc.RenderContext->AddObject(text);
+    SceneAddRenderObject(sc, text);
     return sc.MainCamera != NULL;
 }
 

@@ -20,6 +20,10 @@ CKMesh *SceneCreatePlaneMesh(SceneContext &sc, const char *name, float width, fl
 CKMesh *SceneCreateSphereMesh(SceneContext &sc, const char *name, float radius, int rings, int segments, CKMaterial *mat);
 CKMesh *SceneCreateQuadMesh(SceneContext &sc, const char *name, float width, float height, CKMaterial *mat);
 
+// Adds a render object to the render context and to the current level's
+// scene. 2D entities (sprites, sprite text) only render when they belong to
+// the current scene, exactly like in a loaded composition.
+void SceneAddRenderObject(SceneContext &sc, CKRenderObject *obj);
 CK3dEntity *SceneCreateEntity(SceneContext &sc, const char *name, CKMesh *mesh, const VxVector &position);
 CKCamera *SceneCreateCamera(SceneContext &sc, const char *name, const VxVector &position, const VxVector &target,
                             float fovDegrees, float nearPlane = 0.1f, float farPlane = 200.0f);
