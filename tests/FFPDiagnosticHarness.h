@@ -47,8 +47,8 @@ struct FFPViewState {
     FFPViewState() : FrameBuffer(0) { memset(&Rect, 0, sizeof(Rect)); }
 };
 
-// The draw-level log (named after the encoder the recording device used to
-// have; the fields keep their meaning).
+// The draw-level log: one record per draw plus the running counters of
+// everything the pipeline pushed down with it.
 struct FFPEncoderRecord {
     CKDrawState LastState = {};
     CKDWORD StateSetCount = 0;

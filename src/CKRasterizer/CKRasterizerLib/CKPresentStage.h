@@ -51,7 +51,7 @@ public:
     void Shutdown();
 
     // Scene target of the given size and sample count; reuses the current one
-    // when nothing changed. Returns FALSE when the device cannot provide it.
+    // when nothing changed. Returns FALSE when the backend cannot provide it.
     CKBOOL EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples);
     // Native target of the given size (single sampled).
     CKBOOL EnsureNativeTarget(CKDWORD width, CKDWORD height);
@@ -62,7 +62,7 @@ public:
     const CKPresentTarget &SceneTarget() const { return m_Scene; }
     const CKPresentTarget &NativeTarget() const { return m_Native; }
     // Readback texture (BLIT_DST | READBACK) of the given size, recreated when
-    // the size changes; 0 when the device cannot blit or read textures back.
+    // the size changes; 0 when the backend cannot blit or read textures back.
     // Render targets cannot be read directly, readbacks blit into this one.
     CKDWORD AcquireReadbackTexture(CKDWORD width, CKDWORD height);
     CKDWORD GetReadbackTexture() const { return m_ReadbackTexture; }

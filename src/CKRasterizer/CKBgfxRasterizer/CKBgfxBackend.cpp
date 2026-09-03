@@ -463,7 +463,7 @@ static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscre
 }
 
 // ===========================================================================
-// Helper: allocate a context-local wrapper slot. Slot zero stays invalid.
+// Helper: allocate a backend-local wrapper slot. Slot zero stays invalid.
 // ===========================================================================
 
 static const CKDWORD CKBGFX_RESOURCE_SLOT_MASK = 0xffffu;
@@ -3224,7 +3224,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     if (err != CK_OK)
         return DrawFailed(err, "Draw.geometry");
 
-    // The device has CKFF_SAMPLER_SLOT_COUNT texture stages; the present
+    // bgfx offers CKFF_SAMPLER_SLOT_COUNT texture stages; the present
     // sampler (slot 16) shares stage 0 with fixed-function slot 0, which a
     // present draw never samples.
     const CKBOOL presentBound = m_Slots[CKRST_BACKEND_SLOT_PRESENT].Texture != 0;

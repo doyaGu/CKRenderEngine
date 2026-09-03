@@ -309,7 +309,7 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
     const CKDWORD writeMask =
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
     *forceKeepOps = FALSE;
-    // The device only knows "write nothing" or "write every bit".
+    // The backend only knows "write nothing" or "write every bit".
     *effectiveWriteMask = writeMask == 0x00u ? 0x00u : 0xffu;
     if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILENABLE))
         return FALSE;
@@ -863,7 +863,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
         return FALSE;
     if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
-        // Indices inside a device buffer cannot be validated; the shader clamps
+        // Indices inside a backend buffer cannot be validated; the shader clamps
         // them to the palette (spec appendix C).
         RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
     }

@@ -5,8 +5,8 @@
 // CKRasterizerBackend -- the thin GPU interface under the translation core
 // (spec 5.10). Everything above it (CKTranslatedContext, the fixed-function
 // pipeline, CKPresentStage) speaks D3D7 semantics translated into this small
-// set of operations; everything below it (bgfx, NULL, later SDL_GPU) only has
-// to implement these ~30 methods.
+// set of operations; everything below it (bgfx, NULL) only has to implement
+// these ~30 methods.
 //
 // Handles are opaque non-zero CKDWORDs; 0 is never a valid object. Object
 // types are the CKRST_OBJ_* ids shared with the contract (CKRasterizerEnums.h)
@@ -45,9 +45,9 @@ struct CKBackendInitDesc {
           Fullscreen(FALSE), RefreshRate(0), DebugFlags(0) {}
 };
 
-// What the translation core needs to know about the device. Format lists and
-// display modes stay on the driver (CKTranslatedDriver reads the device
-// driver's tables); this is the per-context, post-Init view.
+// What the translation core needs to know about the backend. Format lists and
+// display modes stay on the driver (CKTranslatedDriver reads the backend
+// driver's tables); this is the per-backend, post-Init view.
 struct CKBackendCaps {
     uint64_t Features;             // CKRST_DEVCAPS_* (RENDER_VIEWS / FRAMEBUFFER / TEXTURE_READBACK / BLIT / DEPTH_TEXTURE / TEXTURE_CUBE / ...)
     CKDWORD MaxTextureSize;
@@ -305,7 +305,7 @@ public:
     virtual CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                          CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect) = 0;
     // Ends the frame: executes every pass, presents the swap chain (unless
-    // PRESERVE) and returns the device frame number.
+    // PRESERVE) and returns the backend frame number.
     virtual CKERROR Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber) = 0;
 
     // --- Readback ---------------------------------------------------------

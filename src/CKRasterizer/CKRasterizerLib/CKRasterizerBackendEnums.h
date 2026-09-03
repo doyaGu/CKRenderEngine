@@ -21,7 +21,7 @@
 
 
 // ===========================================================================
-// Object Kinds (device-internal objects; the contract kinds are in CKRasterizerEnums.h)
+// Object Kinds (backend-internal objects; the contract kinds are in CKRasterizerEnums.h)
 // ===========================================================================
 
 #define CKRST_OBJ_SHADER          0x00000010
@@ -179,7 +179,7 @@ typedef enum CK_DISCARD_FLAGS {
 
 // Multisampled render targets (color textures created with RENDERTARGET and
 // depth textures): one of the MSAA_Xn flags selects the sample count. The
-// device resolves the samples when the texture is sampled; multisampled
+// samples are resolved when the texture is sampled; multisampled
 // textures cannot be read back or blitted directly.
 inline CKDWORD CKRSTTextureMSAAFlag(CKDWORD samples)
 {
@@ -340,27 +340,7 @@ struct CKDrawState {
      CKRST_STATE_BLEND(VXBLEND_ONE, VXBLEND_ONE))
 
 // ---------------------------------------------------------------------------
-// Compute Access Mode
-// ---------------------------------------------------------------------------
-
-typedef enum CK_ACCESS_MODE {
-    CKRST_ACCESS_READ      = 0,
-    CKRST_ACCESS_WRITE     = 1,
-    CKRST_ACCESS_READWRITE = 2,
-} CK_ACCESS_MODE;
-
-// ---------------------------------------------------------------------------
-// Occlusion Query Result
-// ---------------------------------------------------------------------------
-
-typedef enum CK_OCCLUSION_RESULT {
-    CKRST_OCCLUSION_INVISIBLE = 0,
-    CKRST_OCCLUSION_VISIBLE   = 1,
-    CKRST_OCCLUSION_NORESULT  = 2,
-} CK_OCCLUSION_RESULT;
-
-// ---------------------------------------------------------------------------
-// Debug Flags (device-only bits; the shared ones are in CKRasterizerEnums.h)
+// Debug Flags (backend-only bits; the shared ones are in CKRasterizerEnums.h)
 // ---------------------------------------------------------------------------
 
 #define CKRST_DEBUG_TEXT       0x00000008

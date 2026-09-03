@@ -1,7 +1,7 @@
-// Translation core (CKTranslatedRasterizer / Driver / Context, phase 1 step
-// 1.4) on top of the recording device from FFPDiagnosticHarness.h: verbatim
-// state mirror forwarded to the fixed-function pipeline, resources with
-// Lock/Unlock shadows, one device view per pass, targets and shutdown.
+// Translation core (CKTranslatedRasterizer / Driver / Context) on top of the
+// recording backend from FFPDiagnosticHarness.h: verbatim state mirror
+// forwarded to the fixed-function pipeline, resources with Lock/Unlock
+// shadows, one backend pass per pass, targets and shutdown.
 
 #include <stdio.h>
 #include <string.h>
@@ -287,7 +287,7 @@ void TestFrameFlowAndDraws()
                (unsigned)Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER),
                (unsigned)Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE));
     TestCheck(firstDraw, "DrawPrimitiveVBIB");
-    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "one device submit");
+    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "one backend submit");
     const CKRenderView firstView = f.Device->Encoder.SubmitViews[submitsBefore];
 
     const CKDWORD passesBefore = f.Context->GetPassCountForTests();
@@ -398,7 +398,7 @@ void TestOverlayPhase()
     const CKDWORD scaledPasses = f.Context->GetPassCountForTests();
     const CKDWORD submits = f.Device->Encoder.SubmitCount;
     TestCheck(f.Context->BeginOverlayPhase(), "overlay after a scaled scene");
-    // resolve pass + overlay pass, and the resolve is a device submit
+    // resolve pass + overlay pass, and the resolve is a backend submit
     TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 2, "resolve and overlay passes");
     TestCheck(f.Device->Encoder.SubmitCount == submits + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present scaled frame");

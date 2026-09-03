@@ -137,7 +137,7 @@ CKRECT CKTranslatedContext::CurrentPassRect() const
 // x RenderScale, MSAA) receives every pass that does not go to a user target,
 // its resolve lands on the native target and the frame finally blits the
 // native target to the swap chain. Falls back to drawing straight into the
-// swap chain when the device cannot provide the targets.
+// swap chain when the backend cannot provide the targets.
 void CKTranslatedContext::PrepareFrameTarget()
 {
     if (m_FrameTargetDecided)
@@ -152,7 +152,7 @@ void CKTranslatedContext::PrepareFrameTarget()
     const CKDWORD height = CKPresentStage::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
     CKBOOL sceneReady = m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
     if (!sceneReady && m_Options.MSAASamples > 1) {
-        // The device has no multisampled targets: render single sampled.
+        // The backend has no multisampled targets: render single sampled.
         Diag(CKRST_DIAG_APPROX_MSAA);
         sceneReady = m_Present.EnsureSceneTarget(width, height, 0);
     }

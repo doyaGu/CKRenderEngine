@@ -141,9 +141,8 @@ typedef enum CKRST_LOCKFLAGS {
 // ===========================================================================
 // Render state extensions (spec 4.6)
 // ===========================================================================
-// VXRENDERSTATE_COLORWRITEENABLE = 168 has the D3D8 value and is free in the
-// VxDefines.h enumeration. Phase 1 adds it to the VXRENDERSTATETYPE enum in
-// VxMath and deletes this macro.
+// VXRENDERSTATE_COLORWRITEENABLE = 168 has the D3D8 value; VxMath's
+// VXRENDERSTATETYPE enumeration leaves it free and does not declare it.
 
 #define VXRENDERSTATE_COLORWRITEENABLE ((VXRENDERSTATETYPE)168)
 
@@ -274,8 +273,9 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_REJECT_INVALID_PARAMETER,
     CKRST_DIAG_REJECT_DEVICE_LOST,
     CKRST_DIAG_REJECT_SCENE_STATE,      // operation not allowed in the current scene state
-    CKRST_DIAG_REJECT_UNSUPPORTED_STATE, // the device could not encode the draw (program creation or
-                                         // encoder failure); every fixed-function state is approximated
+    CKRST_DIAG_REJECT_UNSUPPORTED_STATE, // the rasterizer could not encode the draw (program creation
+                                         // failed or the draw was refused); every fixed-function state
+                                         // is approximated
 
     // State call rejected (returned FALSE, state unchanged)
     CKRST_DIAG_INVALID_RENDER_STATE,

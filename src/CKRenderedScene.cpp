@@ -631,9 +631,6 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     rst->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
     rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
-    // m_PresentInterval / m_CurrentPresentInterval were v1 rasterizer fields;
-    // filter / mipmap modes are texture stage states of the contract.
-
     rst->SetRenderState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
     rst->SetRenderState(VXRENDERSTATE_ZENABLE,   TRUE);
     rst->SetRenderState(VXRENDERSTATE_CULLMODE,  VXCULL_CCW);

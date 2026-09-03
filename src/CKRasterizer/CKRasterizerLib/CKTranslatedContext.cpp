@@ -530,8 +530,8 @@ CKBOOL CKTranslatedContext::GetUserClipPlane(CKDWORD Index, VxPlane &Plane)
 void CKTranslatedContext::ResetStateMirror()
 {
     // Contract-visible defaults (spec 4.6). Create() only resets the mirror:
-    // the fixed-function pipeline keeps its own richer defaults (they are what
-    // the engine renders with today), and the engine sets everything it
+    // the fixed-function pipeline keeps its own richer defaults (they are the
+    // ones the engine renders with), and the engine sets everything it
     // depends on every frame anyway.
     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
         m_RenderStates[state] = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
@@ -615,7 +615,7 @@ CKBOOL CKTranslatedContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *Ou
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    // CKRST_MIPMAP_GENERATE ((CKDWORD)-1) is passed through: the device treats
+    // CKRST_MIPMAP_GENERATE ((CKDWORD)-1) is passed through: the backend treats
     // it as an auto-mip request and builds the chain from level 0. 0 and 1
     // both mean "no mip levels" (spec 4.5).
     CKTextureDesc deviceDesc = *Desc;
@@ -709,7 +709,7 @@ CKBOOL CKTranslatedContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, c
     }
     resource.VertexBuffer.m_VertexSize = canonicalStride;
 
-    // The device keeps the fixed-function pipeline's own interleaved layout;
+    // The backend keeps the fixed-function pipeline's own interleaved layout;
     // Unlock converts from the canonical layout the engine writes.
     const bool hasNormal = resource.Layout.NormalOffset >= 0;
     const bool hasUV = resource.Layout.TexcoordCount > 0;

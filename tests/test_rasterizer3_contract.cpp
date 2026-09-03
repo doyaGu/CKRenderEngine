@@ -56,11 +56,11 @@ VxMatrix Matrix(CKRasterizerContext *ctx, VXMATRIX_TYPE type)
     return m;
 }
 
-// --- Device log views -------------------------------------------------------
+// --- Backend log views ------------------------------------------------------
 
-// Draws are the encoder submits (the recording device receives one submit per
-// contract draw; the postprocess composite would be one too, but the default
-// options never composite).
+// Draws are the recording backend's submits (one per contract draw; the
+// postprocess composite would be one too, but the default options never
+// composite).
 int CountDraws(const Fixture &f)
 {
     return (int)f.Device->Encoder.Submits.size();
@@ -194,7 +194,7 @@ void TestLifecycle()
     TestCheck(!f.Context->GetCaps(NULL), "GetCaps(NULL) must fail");
     TestCheck(CKRST_INTERFACE_REVISION == 0x00030000u, "v3 revision value");
 
-    // A second context on the same driver is allowed for the recording device.
+    // A second context on the same driver is allowed for the recording backend.
     CKRasterizerContext *second = f.Driver->CreateContext();
     TestCheck(second != NULL, "second context");
     TestCheck(f.Driver->DestroyContext(second), "DestroyContext");
@@ -202,7 +202,7 @@ void TestLifecycle()
     TestCheck(f.Driver->m_Contexts.Size() == 1, "second context removed from the driver");
 }
 
-// The built-in NULL device (engine fallback when no plugin loads) must report
+// The built-in NULL backend (engine fallback when no plugin loads) must report
 // the capability baseline like any driver.
 void TestNullDeviceDriverCaps()
 {
@@ -238,7 +238,7 @@ void TestNullDeviceDriverCaps()
     if (CKRSTGetCapsBaseline(&baseline3D, &baseline2D)) {
         TestCheck(CKRSTGetCapsBaselineSource() != NULL, "baseline source string");
         // Bit fields must match the baseline exactly (spec 4.9.2); the NULL
-        // device only rewrites the hardware / software specific bits.
+        // backend only rewrites the hardware / software specific bits.
         TestCheck(caps.RasterCaps == baseline3D.RasterCaps, "RasterCaps == baseline");
         TestCheck(caps.TextureCaps == baseline3D.TextureCaps, "TextureCaps == baseline");
         TestCheck(caps.TextureFilterCaps == baseline3D.TextureFilterCaps, "TextureFilterCaps == baseline");

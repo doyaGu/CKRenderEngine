@@ -5,9 +5,7 @@
 //
 // Gated by CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 (or the older
 // CKRE_RUN_OPENGL_RUNTIME_TESTS=1); the backend comes from
-// CKBGFX_RENDERER_BACKEND (default opengl). Every case runs once per shader
-// mode (runtime-specialized and full-specialized) and the centre pixels must
-// agree, so the two shader routes cannot drift apart.
+// CKBGFX_RENDERER_BACKEND (default opengl).
 
 #include "CKRasterizer.h"
 #include "TestTriangleMultiset.h"
@@ -27,11 +25,6 @@ namespace {
 const int kWidth = 64;
 const int kHeight = 64;
 const int kTolerance = 24;
-// CopyToMemoryBuffer reads the swap chain backbuffer, which holds a frame only
-// once it has been presented into every swap-chain buffer (ckre_scene_capture
-// renders 3 frames for the same reason). The phase 3 virtual backbuffer makes
-// a single frame readable; until then every case renders its frame this often.
-
 
 char g_Failure[512];
 

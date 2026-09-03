@@ -166,12 +166,12 @@ public:
 private:
     struct Resource {
         CKDWORD Type;                      // CKRST_OBJ_*
-        CKDWORD Handle;                    // device handle (== contract handle)
+        CKDWORD Handle;                    // backend handle (== contract handle)
         CKTextureDesc Texture;
         CKVertexBufferDesc VertexBuffer;
         CKIndexBufferDesc IndexBuffer;
         CKRSTVertexLayout Layout;          // canonical layout the engine writes
-        CKDWORD FormatFlags;               // fixed-function layout the device sees
+        CKDWORD FormatFlags;               // fixed-function layout the backend sees
         CKDWORD DeviceStride;
         CKDWORD DeviceLayout;
         std::vector<CKBYTE> Shadow;        // Lock storage (canonical layout / indices)

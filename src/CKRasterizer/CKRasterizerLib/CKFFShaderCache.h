@@ -11,8 +11,8 @@ class CKRasterizerBackend;
 
 // The fixed-function program family (spec 5.3): every draw runs the single
 // fragment uber shader with one of four vertex shaders selected by the
-// POSITIONT and user-clip bits of the shader key. All state that used to
-// select a shader variant now travels in u_ffSpec / u_stageParams.
+// POSITIONT and user-clip bits of the shader key. Every other state travels
+// in u_ffSpec / u_stageParams instead of selecting a variant.
 enum CKFFProgramVariant {
     CKFF_PROGRAM_3D = 0,
     CKFF_PROGRAM_3D_CLIP = 1,

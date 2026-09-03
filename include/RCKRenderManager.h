@@ -83,9 +83,9 @@ public:
 
     // Driver management
     CKRasterizerDriver *GetDriver(int DriverIndex);
-    // Phase 1 migration: the engine still creates the device context itself
-    // from the device driver behind the translated v3 driver, and refreshes
-    // the v3 driver caps after the device reported its real limits.
+    // A driver reports the capability baseline until one of its contexts
+    // exists; the backend below then lowers the numeric limits to what it
+    // really supports, so the caps are refreshed after a context is created.
     void RefreshDriverCaps(int DriverIndex);
     CKRasterizerContext *GetFullscreenContext();
     int GetPreferredSoftwareDriver();

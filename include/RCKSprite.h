@@ -55,7 +55,7 @@ protected:
     // CKSprite members
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_VideoFormat;
-    VxImageDescEx m_VideoFormatDesc;   // Cached video format (Phase 1 stub for CKSpriteDesc)
+    VxImageDescEx m_VideoFormatDesc;   // Cached video format (stands in for CKSpriteDesc)
     CKRasterizerContext *m_RasterizerContext; // v3 context the video texture belongs to
     CKDWORD m_ObjectIndex;
     CKBOOL m_InVideoMemory;

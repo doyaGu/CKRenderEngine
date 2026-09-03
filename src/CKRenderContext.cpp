@@ -1695,8 +1695,8 @@ CKBOOL RCKRenderContext::ConsumeDrawAnnotation(CKDrawAnnotation *annotation,
     if (m_DrawAnnotationState &&
         CKDrawAnnotationStateConsume(m_DrawAnnotationState, annotation))
         return TRUE;
-    // The rasterizer attributes the marker to the pass it is drawn in; the
-    // engine no longer knows a view.
+    // The rasterizer attributes the marker to the pass the draw lands in, so
+    // the fallback annotation carries no view.
     CKDrawAnnotationStateBuildFallback(m_DrawAnnotationState, annotation,
                                        0, primitiveType,
                                        indexCount, vertexCount);
