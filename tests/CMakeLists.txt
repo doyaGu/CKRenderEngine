@@ -159,6 +159,10 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
     target_link_libraries(rasterizer3_pixel_tests PRIVATE CKBgfxRasterizerStatic SDL3::SDL3)
 endif ()
 
+ckre_add_test(rasterizer_backend_tests
+        test_rasterizer_backend.cpp
+)
+
 ckre_add_test(ff_state_store_tests
     test_ff_state_store.cpp
 )

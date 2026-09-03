@@ -34,6 +34,8 @@ set(CKRASTERIZER_LIB_SOURCES
         CKTransientGeometry.cpp
         CKPresentStage.cpp
         CKRenderSettings.cpp
+        CKRasterizerBackend.cpp
+        CKDeviceBackend.cpp
 
         CKTranslatedRasterizer.cpp
         CKTranslatedContext.cpp
@@ -47,6 +49,8 @@ set(CKRASTERIZER_LIB_HEADERS
         CKRasterizerDevice.h
         CKRasterizerDeviceEnums.h
         CKRasterizerDeviceTypes.h
+        CKRasterizerBackend.h
+        CKDeviceBackend.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h

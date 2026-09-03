@@ -328,11 +328,17 @@ public:
         return fb == FrameBufferColorTexture.end() ? 0 : fb->second;
     }
 
+    std::unordered_set<CKDWORD> LiveHandles;   // every allocated, not yet deleted handle
+
     CKERROR AllocateHandle(CKDWORD *out) {
         if (!out)
             return CKERR_INVALIDPARAMETER;
         *out = NextResourceHandle++;
+        LiveHandles.insert(*out);
         return CK_OK;
+    }
+    CKBOOL IsObjectAlive(CKDWORD object, CKDWORD) const override {
+        return LiveHandles.count(object) != 0;
     }
     CKERROR CreateVertexBuffer(const CKVertexBufferDesc *, const void *, CKDWORD *out) override {
         return AllocateHandle(out);
@@ -407,6 +413,7 @@ public:
         ++DeletedObjectCount;
         LastDeletedObject = object;
         LastDeletedObjectType = type;
+        LiveHandles.erase(object);
         return CK_OK;
     }
     CKERROR FlushObjects(CKDWORD) override { return CK_OK; }
