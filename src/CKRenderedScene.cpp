@@ -563,15 +563,15 @@ void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
 }
 
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
-    // Update the viewport data stored on the render context.
-    // The v2 API configures the viewport through BeginFrame/SetViewRect on the
-    // render pipeline - this local copy is kept for picks, frustum building,
-    // and any code that reads rc->m_ViewportData directly.
+    // Restores the camera viewport after the 2D passes (which may have used
+    // the full window) on the render context and on the rasterizer.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     rc->m_ViewportData.ViewX = (int) rect.left;
     rc->m_ViewportData.ViewY = (int) rect.top;
     rc->m_ViewportData.ViewWidth  = (int) rect.GetWidth();
     rc->m_ViewportData.ViewHeight = (int) rect.GetHeight();
+    if (rc->m_RasterizerContext)
+        rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
 }
 
 void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
@@ -816,6 +816,12 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
 
     double rcAspect = static_cast<double>(right) / static_cast<double>(bottom);
     double camAspect = static_cast<double>(width) / static_cast<double>(height);
+
+    // Rendering into a texture fills the texture: the original engine does not
+    // letterbox a render target to the camera ratio (oracle scenes rtt_2d /
+    // rtt_cube show the full texture), so the ratio only applies to the window.
+    if (rc->m_TargetTexture)
+        Flags = (CK_RENDER_FLAGS)(Flags & ~CK_RENDER_USECAMERARATIO);
 
     if ((Flags & CK_RENDER_USECAMERARATIO) != 0) {
         if (rcAspect >= camAspect) {

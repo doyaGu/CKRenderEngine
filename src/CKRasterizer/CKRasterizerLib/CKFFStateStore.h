@@ -30,7 +30,18 @@ struct CKFFStateStore {
     uint64_t StageStateSetMasks[CKFF_MAX_TEXTURE_STAGES];
     CKBYTE TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
-    float Viewport[4];
+    float Viewport[4];               // POSITIONT screen -> viewport-relative clip mapping
+    // D3D viewport emulation (spec 4.4): the engine's viewport is a sub
+    // rectangle of the logical target (window pixels or texture size); every
+    // draw remaps viewport-relative clip space into the target and clips with
+    // a scissor scaled to the physical target (window x RenderScale).
+    CKViewportData ViewportData;
+    CKDWORD TargetLogicalWidth, TargetLogicalHeight;
+    CKDWORD TargetPhysicalWidth, TargetPhysicalHeight;
+    float ViewportRemap[4];          // clip x,y scale (0,1) and offset (2,3); identity = 1,1,0,0
+    CKBOOL ViewportRemapIdentity;
+    CKRECT Scissor;                  // physical target pixels (already mirrored for a flipped target)
+    CKBOOL ScissorEnabled;
     VxPlane UserClipPlanes[6];
     CKDWORD AlphaTestPrecision;
 

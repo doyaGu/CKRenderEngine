@@ -114,6 +114,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_Viewport.ViewZMin = 0.0f;
     m_Viewport.ViewZMax = 1.0f;
     m_FFP.SetViewport(m_Viewport);
+    UpdateTargetExtents();
 
     VxMatrix identity;
     Vx3DMatrixIdentity(identity);
@@ -142,6 +143,14 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_Height = m_Device->m_Height;
     m_Postprocess.DestroyTargets();
     m_NativePresented = FALSE;
+    // The viewport follows the window like on creation; the engine sets its
+    // own viewport again after a resize anyway.
+    m_Viewport.ViewX = 0;
+    m_Viewport.ViewY = 0;
+    m_Viewport.ViewWidth = m_Width;
+    m_Viewport.ViewHeight = m_Height;
+    m_FFP.SetViewport(m_Viewport);
+    UpdateTargetExtents();
     return TRUE;
 }
 
@@ -987,6 +996,7 @@ void CKTranslatedContext::ReleaseTarget()
     m_TargetWidth = 0;
     m_TargetHeight = 0;
     m_FFP.SetRenderTargetActive(FALSE);
+    UpdateTargetExtents();
 }
 
 void CKTranslatedContext::UpdateAlphaTestPrecision()
@@ -1075,6 +1085,7 @@ CKBOOL CKTranslatedContext::SetTargetTexture(CKDWORD Texture, int Width, int Hei
     m_TargetFrameBuffer = frameBuffer;
     m_TargetDepthTexture = depthTexture;
     m_FFP.SetRenderTargetActive(TRUE);
+    UpdateTargetExtents();
     UpdateAlphaTestPrecision();
     return TRUE;
 }
@@ -1279,7 +1290,7 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    const CKRECT target = CurrentTargetRect();
+    const CKRECT target = LogicalTargetRect();
     if (!ValidateRect(Rect, (CKDWORD)target.right, (CKDWORD)target.bottom)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
@@ -1412,7 +1423,7 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return 0;
     }
-    const CKRECT target = CurrentTargetRect();
+    const CKRECT target = LogicalTargetRect();
     if (!ValidateRect(Rect, (CKDWORD)target.right, (CKDWORD)target.bottom)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;
@@ -1524,7 +1535,7 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
         return FALSE;
     }
 
-    const CKRECT target = CurrentTargetRect();
+    const CKRECT target = LogicalTargetRect();
     CKRECT srcRect = target;
     if (Src) {
         srcRect.left = (int)Src->left;

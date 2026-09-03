@@ -783,6 +783,49 @@ void CheckPresentation(Backend &b)
     TestCheck(ctx->IsIdle(), "idle after the presentation checks");
 }
 
+// D3D viewport (spec 4.4): a sub-rectangle viewport moves and clips the
+// scene; RenderScale must not change where it lands in the window.
+void CheckViewport(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    const int width = (int)ctx->m_Width, height = (int)ctx->m_Height;
+    CKViewportData rightHalf;
+    rightHalf.ViewX = width / 2;
+    rightHalf.ViewY = 0;
+    rightHalf.ViewWidth = width / 2;
+    rightHalf.ViewHeight = height;
+    rightHalf.ViewZMin = 0.0f;
+    rightHalf.ViewZMax = 1.0f;
+    CKViewportData full = rightHalf;
+    full.ViewX = 0;
+    full.ViewWidth = width;
+
+    const float scales[2] = {1.0f, 0.5f};
+    for (int i = 0; i < 2; ++i) {
+        CKRasterizerOptions options;
+        options.RenderScale = scales[i];
+        TestCheck(ctx->SetOptions(&options), "SetOptions(RenderScale)");
+        // Larger than the viewport: the viewport edge, not the triangle, clips it.
+        const VxVector covering[3] = {VxVector(-3.0f, -3.0f, 0.5f), VxVector(3.0f, -3.0f, 0.5f), VxVector(0.0f, 3.0f, 0.5f)};
+        Pixels pixels;
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(ctx->SetViewport(&rightHalf), "right-half viewport");
+            TestCheck(DrawColorTriangle(ctx, covering, kGreen), "triangle in the right half");
+            TestCheck(ctx->SetViewport(&full), "full viewport");
+        }, pixels);
+        TestCheckf(PixelNear(pixels, width * 3 / 4, height * 3 / 5, 0, 255, 0),
+                   "RenderScale %.1f: the viewport triangle must land in the right half", scales[i]);
+        TestCheckf(PixelNear(pixels, width / 4, height * 3 / 5, 0, 0, 0),
+                   "RenderScale %.1f: the left half must stay clear", scales[i]);
+        TestCheckf(PixelNear(pixels, width / 2 - 2, height * 3 / 5, 0, 0, 0) &&
+                       PixelNear(pixels, width / 2 + 1, height * 3 / 5, 0, 255, 0),
+                   "RenderScale %.1f: the viewport must clip at its left edge", scales[i]);
+    }
+    CKRasterizerOptions defaults;
+    TestCheck(ctx->SetOptions(&defaults), "SetOptions(defaults)");
+}
+
 // ---------------------------------------------------------------------------
 
 void BackendRendersFixedFunctionSemantics()
@@ -806,6 +849,7 @@ void BackendRendersFixedFunctionSemantics()
         RunPixelCases(backend.Context, "uber", samples);
         CheckResizeAndReadback(backend);
         CheckPresentation(backend);
+        CheckViewport(backend);
     }
     CloseBackend(backend);
 

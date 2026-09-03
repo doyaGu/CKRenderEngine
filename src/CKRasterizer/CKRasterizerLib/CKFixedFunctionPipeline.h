@@ -93,12 +93,20 @@ public:
     void SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags);
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
+    // Extents of the current target (spec 4.4): the logical size the engine's
+    // viewport and PositionT coordinates refer to (window pixels or texture
+    // size) and the physical size of the texture actually rendered into
+    // (window x RenderScale for the scene target). 0 = unknown, no mapping.
+    void SetTargetExtents(CKDWORD logicalWidth, CKDWORD logicalHeight, CKDWORD physicalWidth, CKDWORD physicalHeight);
+    const float *GetViewportRemap() const { return m_State.ViewportRemap; }
+    CKBOOL GetViewportScissor(CKRECT *rect) const;
     // Render-target binding (spec 5.9 RTT origin): on bottom-left-origin
     // backends draws into a texture flip the projection and the winding so
     // the texture memory ends up in the D3D (top-down) layout.
     void SetRenderTargetActive(CKBOOL active);
     CKBOOL IsRenderTargetActive() const { return m_State.RenderTargetActive; }
     CKBOOL RenderTargetOriginFlip() const;
+    void UpdateViewportMapping();
     // The frame renders into a multisampled scene target (spec 4.4).
     void SetMultisampledTarget(CKBOOL multisampled) { m_DrawStateCache.SetMultisampledTarget(multisampled); }
     CKBOOL IsMultisampledTarget() const { return m_DrawStateCache.GetMultisampledTarget(); }

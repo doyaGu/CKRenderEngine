@@ -158,6 +158,18 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
         }
     }
     Vx3DMultiplyMatrix4(viewProj, m_State.Projection, m_State.View);
+    if (!m_State.ViewportRemapIdentity) {
+        // Viewport emulation (spec 4.4): viewport-relative clip -> target clip.
+        VxMatrix remap;
+        Vx3DMatrixIdentity(remap);
+        remap[0][0] = m_State.ViewportRemap[0];
+        remap[1][1] = m_State.ViewportRemap[1];
+        remap[3][0] = m_State.ViewportRemap[2];
+        remap[3][1] = m_State.ViewportRemap[3];
+        VxMatrix remapped;
+        Vx3DMultiplyMatrix4(remapped, remap, viewProj);
+        viewProj = remapped;
+    }
     if (RenderTargetOriginFlip()) {
         // Render upside down into the target so its memory matches the D3D
         // layout on bottom-left-origin backends (spec 5.9, RTT origin).
@@ -223,6 +235,13 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     if (context->PositionT) {
         float viewport[4];
         memcpy(viewport, m_State.Viewport, sizeof(viewport));
+        if (!m_State.ViewportRemapIdentity) {
+            // Same remap as the projection: scale, then offset (times w in the shader).
+            viewport[0] *= m_State.ViewportRemap[0];
+            viewport[2] = viewport[2] * m_State.ViewportRemap[0] + m_State.ViewportRemap[2];
+            viewport[1] *= m_State.ViewportRemap[1];
+            viewport[3] = viewport[3] * m_State.ViewportRemap[1] + m_State.ViewportRemap[3];
+        }
         if (RenderTargetOriginFlip()) {
             // Pre-transformed vertices: mirror the screen-to-clip Y mapping.
             viewport[1] = -viewport[1];

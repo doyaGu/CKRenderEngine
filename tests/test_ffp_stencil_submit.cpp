@@ -1527,6 +1527,95 @@ void BottomLeftRenderTargetsSampleWithoutFlip() {
     ffp.Shutdown();
 }
 
+static bool NearlyEqual(float a, float b) {
+    return a > b - 1e-4f && a < b + 1e-4f;
+}
+
+// Spec 4.4: the engine's viewport is a sub rectangle of the logical target;
+// draws remap viewport-relative clip space into the target and clip with a
+// scissor on the physical (RenderScale) target.
+void ViewportMappingRemapsClipSpaceAndScissors() {
+    FFPDiagnosticDriver driver;
+    FFPDiagnosticContext context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    const CKDWORD viewportUniform = ffp.GetShaderCache().GetUniforms().u_viewport;
+
+    // Window 640x480 rendered into a 320x240 scene target, viewport 100,50 200x100.
+    ffp.SetTargetExtents(640, 480, 320, 240);
+    CKViewportData viewport = {};
+    viewport.ViewX = 100;
+    viewport.ViewY = 50;
+    viewport.ViewWidth = 200;
+    viewport.ViewHeight = 100;
+    viewport.ViewZMax = 1.0f;
+    ffp.SetViewport(viewport);
+    const float *remap = ffp.GetViewportRemap();
+    TestCheck(NearlyEqual(remap[0], 200.0f / 640.0f) && NearlyEqual(remap[1], 100.0f / 480.0f) &&
+                  NearlyEqual(remap[2], -0.375f) && NearlyEqual(remap[3], 1.0f - 200.0f / 480.0f),
+              "the viewport remap scales and offsets clip space into the target");
+    CKRECT scissor;
+    TestCheck(ffp.GetViewportScissor(&scissor) && scissor.left == 50 && scissor.top == 25 &&
+                  scissor.right == 150 && scissor.bottom == 75,
+              "the scissor is the viewport scaled to the physical target");
+
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    std::vector<float> matrices = context.Encoder.FloatUniforms[matrixUniform];
+    TestCheck(matrices.size() >= 16 && NearlyEqual(matrices[0], 200.0f / 640.0f) &&
+                  NearlyEqual(matrices[5], 100.0f / 480.0f) && NearlyEqual(matrices[12], -0.375f) &&
+                  NearlyEqual(matrices[13], 1.0f - 200.0f / 480.0f) && matrices[10] == 1.0f && matrices[15] == 1.0f,
+              "3D draws carry the viewport remap in the projection");
+    TestCheck(context.Encoder.ScissorEnabled && context.Encoder.LastScissor.left == 50 &&
+                  context.Encoder.LastScissor.right == 150 && context.Encoder.LastScissor.bottom == 75,
+              "3D draws set the viewport scissor");
+
+    // Pre-transformed vertices are absolute window pixels: the remapped
+    // mapping equals the full-window mapping.
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+    std::vector<float> vp = context.Encoder.FloatUniforms[viewportUniform];
+    TestCheck(vp.size() >= 4 && NearlyEqual(vp[0], 2.0f / 640.0f) && NearlyEqual(vp[1], -2.0f / 480.0f) &&
+                  NearlyEqual(vp[2], -1.0f) && NearlyEqual(vp[3], 1.0f),
+              "POSITIONT pixels stay absolute window pixels under a sub viewport");
+
+    // Full viewport: identity, no scissor.
+    viewport.ViewX = 0;
+    viewport.ViewY = 0;
+    viewport.ViewWidth = 640;
+    viewport.ViewHeight = 480;
+    ffp.SetViewport(viewport);
+    remap = ffp.GetViewportRemap();
+    TestCheck(remap[0] == 1.0f && remap[1] == 1.0f && remap[2] == 0.0f && remap[3] == 0.0f &&
+                  !ffp.GetViewportScissor(NULL),
+              "a full viewport maps identically and needs no scissor");
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    TestCheck(!context.Encoder.ScissorEnabled, "full-viewport draws clear the scissor");
+    ffp.Shutdown();
+
+    // Render target on a bottom-left backend: the scissor rows are mirrored
+    // like the image (spec 5.9).
+    FFPDiagnosticDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
+                                   CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
+                                   CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
+    FFPDiagnosticContext rttContext(&bottomLeft);
+    CKFixedFunctionPipeline rtt;
+    rtt.Init(&rttContext);
+    rtt.SetRenderTargetActive(TRUE);
+    rtt.SetTargetExtents(128, 64, 128, 64);
+    CKViewportData topHalf = {};
+    topHalf.ViewWidth = 64;
+    topHalf.ViewHeight = 32;
+    topHalf.ViewZMax = 1.0f;
+    rtt.SetViewport(topHalf);
+    TestCheck(rtt.GetViewportScissor(&scissor) && scissor.left == 0 && scissor.right == 64 &&
+                  scissor.top == 32 && scissor.bottom == 64,
+              "a flipped render target mirrors the viewport scissor");
+    rtt.Shutdown();
+}
+
 void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     FFPDiagnosticDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
                                    CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
@@ -3014,6 +3103,8 @@ int main() {
               &BottomLeftRenderTargetsSampleWithoutFlip);
     tests.Run("Render target origin flips projection, viewport and winding",
               &RenderTargetOriginFlipsProjectionViewportAndWinding);
+    tests.Run("Viewport mapping remaps clip space and scissors",
+              &ViewportMappingRemapsClipSpaceAndScissors);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
     tests.Run("DrawVertexBuffer sets flat shade specialization",

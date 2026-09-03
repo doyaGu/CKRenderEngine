@@ -3260,7 +3260,10 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     else
         m_ProjectionMatrix.Orthographic(m_Zoom, aspect, m_NearPlane, m_FarPlane);
 
-    if (m_RasterizerContext) m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
+    // The viewport and the projection derived from it travel together: the
+    // rasterizer maps clip space into m_ViewportData (spec 4.4).
+    m_RasterizerContext->SetViewport(&m_ViewportData);
+    m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
     m_ProjectionUpdated = TRUE;
 
     const float right = (float) m_Settings.m_Rect.right;

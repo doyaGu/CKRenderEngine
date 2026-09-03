@@ -267,6 +267,7 @@ void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
         return;
     m_State.RenderTargetActive = active;
     m_DrawStateCache.SetWindingFlip(RenderTargetOriginFlip());
+    UpdateViewportMapping();
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
@@ -287,7 +288,90 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     m_State.Viewport[1] = -2.0f / h;
     m_State.Viewport[2] = -1.0f - (2.0f * x / w);
     m_State.Viewport[3] = 1.0f + (2.0f * y / h);
+    m_State.ViewportData = viewport;
+    UpdateViewportMapping();
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+}
+
+void CKFixedFunctionPipeline::SetTargetExtents(CKDWORD logicalWidth, CKDWORD logicalHeight,
+                                               CKDWORD physicalWidth, CKDWORD physicalHeight) {
+    if (m_State.TargetLogicalWidth == logicalWidth && m_State.TargetLogicalHeight == logicalHeight &&
+        m_State.TargetPhysicalWidth == physicalWidth && m_State.TargetPhysicalHeight == physicalHeight)
+        return;
+    m_State.TargetLogicalWidth = logicalWidth;
+    m_State.TargetLogicalHeight = logicalHeight;
+    m_State.TargetPhysicalWidth = physicalWidth;
+    m_State.TargetPhysicalHeight = physicalHeight;
+    UpdateViewportMapping();
+    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+}
+
+CKBOOL CKFixedFunctionPipeline::GetViewportScissor(CKRECT *rect) const {
+    if (rect)
+        *rect = m_State.Scissor;
+    return m_State.ScissorEnabled;
+}
+
+// Viewport-relative clip space -> target clip space, and the scissor that
+// clips to the viewport on the physical target. Identity / no scissor when the
+// viewport covers the whole logical target or the extents are unknown.
+void CKFixedFunctionPipeline::UpdateViewportMapping() {
+    CKFFStateStore &st = m_State;
+    st.ViewportRemap[0] = st.ViewportRemap[1] = 1.0f;
+    st.ViewportRemap[2] = st.ViewportRemap[3] = 0.0f;
+    st.ViewportRemapIdentity = TRUE;
+    st.ScissorEnabled = FALSE;
+    st.Scissor.left = st.Scissor.top = st.Scissor.right = st.Scissor.bottom = 0;
+
+    const CKDWORD lw = st.TargetLogicalWidth, lh = st.TargetLogicalHeight;
+    const CKDWORD pw = st.TargetPhysicalWidth, ph = st.TargetPhysicalHeight;
+    if (lw == 0 || lh == 0 || pw == 0 || ph == 0)
+        return;
+    const CKViewportData &vp = st.ViewportData;
+    if (vp.ViewWidth == 0 || vp.ViewHeight == 0)
+        return;
+    const CKBOOL fullViewport = vp.ViewX == 0 && vp.ViewY == 0 && vp.ViewWidth == lw && vp.ViewHeight == lh;
+    if (fullViewport)
+        return;
+
+    const float fw = (float)vp.ViewWidth, fh = (float)vp.ViewHeight;
+    const float fx = (float)vp.ViewX, fy = (float)vp.ViewY;
+    st.ViewportRemap[0] = fw / (float)lw;
+    st.ViewportRemap[1] = fh / (float)lh;
+    st.ViewportRemap[2] = (2.0f * fx + fw) / (float)lw - 1.0f;
+    st.ViewportRemap[3] = 1.0f - (2.0f * fy + fh) / (float)lh;
+    st.ViewportRemapIdentity = FALSE;
+
+    // Scissor on the physical target, rounded outwards so scaled edges do not
+    // leave gaps; mirrored when the target renders upside down (RTT origin).
+    const double sx = (double)pw / (double)lw;
+    const double sy = (double)ph / (double)lh;
+    double left = fx * sx, top = fy * sy;
+    double right = (fx + fw) * sx, bottom = (fy + fh) * sy;
+    int l = (int)floor(left), t = (int)floor(top);
+    int r = (int)ceil(right), b = (int)ceil(bottom);
+    if (l < 0) l = 0;
+    if (t < 0) t = 0;
+    if (r > (int)pw) r = (int)pw;
+    if (b > (int)ph) b = (int)ph;
+    if (r <= l || b <= t) {
+        // Viewport outside the target: clip everything.
+        l = t = 0;
+        r = b = 1;
+        if (pw < 1 || ph < 1)
+            return;
+    }
+    if (RenderTargetOriginFlip()) {
+        const int mirroredTop = (int)ph - b;
+        const int mirroredBottom = (int)ph - t;
+        t = mirroredTop;
+        b = mirroredBottom;
+    }
+    st.Scissor.left = l;
+    st.Scissor.top = t;
+    st.Scissor.right = r;
+    st.Scissor.bottom = b;
+    st.ScissorEnabled = TRUE;
 }
 
 void CKFixedFunctionPipeline::SetUserClipPlane(int index, const VxPlane &plane) {

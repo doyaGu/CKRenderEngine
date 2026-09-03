@@ -969,6 +969,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
             encoder->SetPointSize(CKFFClampVertexBufferPointSize(
                 CKFFResolveConstantPointSize(m_DrawStateCache)));
         encoder->SetState(drawState);
+        encoder->SetScissor(m_State.ScissorEnabled ? &m_State.Scissor : NULL);
     }
     if (encoder->GetStatus() != CK_OK)
         return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);

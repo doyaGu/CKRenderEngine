@@ -61,4 +61,15 @@ void CKFFStateStore::Reset()
     Viewport[1] = -2.0f / 600.0f;
     Viewport[2] = -1.0f;
     Viewport[3] = 1.0f;
+    memset(&ViewportData, 0, sizeof(ViewportData));
+    ViewportData.ViewWidth = 800;
+    ViewportData.ViewHeight = 600;
+    ViewportData.ViewZMax = 1.0f;
+    TargetLogicalWidth = TargetLogicalHeight = 0;
+    TargetPhysicalWidth = TargetPhysicalHeight = 0;
+    ViewportRemap[0] = ViewportRemap[1] = 1.0f;
+    ViewportRemap[2] = ViewportRemap[3] = 0.0f;
+    ViewportRemapIdentity = TRUE;
+    Scissor.left = Scissor.top = Scissor.right = Scissor.bottom = 0;
+    ScissorEnabled = FALSE;
 }

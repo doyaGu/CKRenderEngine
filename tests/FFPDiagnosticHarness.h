@@ -90,6 +90,9 @@ public:
     CKSamplerDesc LastTextureSampler = {};
     float LastPointSize = 0.0f;
     CKDWORD PointSizeSetCount = 0;
+    CKBOOL ScissorEnabled = FALSE;
+    CKRECT LastScissor = {0, 0, 0, 0};
+    CKDWORD ScissorSetCount = 0;
     CKDWORD VertexBufferSetCount = 0;
     CKDWORD IndexBufferSetCount = 0;
     CKDWORD SubmitFlags[32] = {};
@@ -139,7 +142,12 @@ public:
         LastStencilWriteMask = WriteMask;
         ++StencilMaskSetCount;
     }
-    void SetScissor(const CKRECT *) override {}
+    void SetScissor(const CKRECT *rect) override {
+        ScissorEnabled = rect != NULL;
+        if (rect)
+            LastScissor = *rect;
+        ++ScissorSetCount;
+    }
     void SetPointSize(float size) override {
         LastPointSize = size;
         ++PointSizeSetCount;

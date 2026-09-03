@@ -4,6 +4,7 @@
 #include "CKTranslatedRasterizer.h"
 #include "CKDebugLogger.h"
 
+#include <math.h>
 #include <string.h>
 
 namespace {
@@ -59,6 +60,50 @@ CKRECT CKTranslatedContext::CurrentTargetRect() const
         rect.bottom = (int)m_Height;
     }
     return rect;
+}
+
+CKRECT CKTranslatedContext::LogicalTargetRect() const
+{
+    CKRECT rect;
+    rect.left = 0;
+    rect.top = 0;
+    rect.right = (int)(m_Target ? m_TargetWidth : m_Width);
+    rect.bottom = (int)(m_Target ? m_TargetHeight : m_Height);
+    return rect;
+}
+
+// Window-pixel rectangle -> pixels of the pass target, rounded outwards so
+// scaled edges never leave a gap.
+CKRECT CKTranslatedContext::ScaleToPhysical(const CKRECT &Rect) const
+{
+    const CKRECT logical = LogicalTargetRect();
+    const CKRECT physical = CurrentPassRect();
+    if (logical.right == physical.right && logical.bottom == physical.bottom)
+        return Rect;
+    if (logical.right <= 0 || logical.bottom <= 0)
+        return Rect;
+    const double sx = (double)physical.right / (double)logical.right;
+    const double sy = (double)physical.bottom / (double)logical.bottom;
+    CKRECT scaled;
+    scaled.left = (int)floor(Rect.left * sx);
+    scaled.top = (int)floor(Rect.top * sy);
+    scaled.right = (int)ceil(Rect.right * sx);
+    scaled.bottom = (int)ceil(Rect.bottom * sy);
+    if (scaled.left < 0) scaled.left = 0;
+    if (scaled.top < 0) scaled.top = 0;
+    if (scaled.right > physical.right) scaled.right = physical.right;
+    if (scaled.bottom > physical.bottom) scaled.bottom = physical.bottom;
+    return scaled;
+}
+
+// Tells the pipeline the logical and physical extents of the current pass
+// target so the engine's viewport (window pixels) lands on the right pixels.
+void CKTranslatedContext::UpdateTargetExtents()
+{
+    const CKRECT logical = LogicalTargetRect();
+    const CKRECT physical = m_Target ? logical : CurrentPassRect();
+    m_FFP.SetTargetExtents((CKDWORD)logical.right, (CKDWORD)logical.bottom,
+                           (CKDWORD)physical.right, (CKDWORD)physical.bottom);
 }
 
 CKDWORD CKTranslatedContext::CurrentSceneFrameBuffer() const
@@ -121,6 +166,7 @@ void CKTranslatedContext::PrepareFrameTarget()
     if (m_Postprocess.NativeTarget().ColorTexture != nativeBefore)
         m_NativePresented = FALSE;
     m_FFP.SetMultisampledTarget(m_InternalTargets && m_Postprocess.SceneTarget().Samples > 0);
+    UpdateTargetExtents();
 }
 
 CKBOOL CKTranslatedContext::EnsureEncoder()
@@ -208,6 +254,7 @@ void CKTranslatedContext::FinishFrame()
     m_OverlayPhase = FALSE;
     m_Composited = FALSE;
     m_FrameTargetDecided = FALSE;
+    UpdateTargetExtents();
     ++m_FrameNumber;
     m_FFP.SetFrameNumber(m_FrameNumber);
 
@@ -239,8 +286,9 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
     PrepareFrameTarget();
 
     // RectCount == 0 clears the current viewport (D3D7 semantics); otherwise
-    // every rectangle gets a clear pass of its own.
-    const CKRECT target = CurrentPassRect();
+    // every rectangle gets a clear pass of its own. Rectangles are engine
+    // (window) pixels and get scaled to the pass target.
+    const CKRECT target = LogicalTargetRect();
     CKRECT viewportRect;
     viewportRect.left = (int)m_Viewport.ViewX;
     viewportRect.top = (int)m_Viewport.ViewY;
@@ -257,7 +305,7 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
         if (rect.bottom > target.bottom) rect.bottom = target.bottom;
         if (rect.right <= rect.left || rect.bottom <= rect.top)
             continue;
-        if (!OpenPass(frameBuffer, rect, Flags, Color, Z, Stencil, "clear"))
+        if (!OpenPass(frameBuffer, ScaleToPhysical(rect), Flags, Color, Z, Stencil, "clear"))
             return FALSE;
         ++m_FrameClears;
         cleared = TRUE;
@@ -265,7 +313,7 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
     if (cleared && m_InScene) {
         // Mid-scene clear: the following draws need a pass of their own so
         // the clear stays at the call position.
-        if (!OpenPass(frameBuffer, target, 0, 0, 1.0f, 0, "scene"))
+        if (!OpenPass(frameBuffer, CurrentPassRect(), 0, 0, 1.0f, 0, "scene"))
             return FALSE;
     }
     return TRUE;
@@ -322,6 +370,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "overlay"))
         return FALSE;
     m_OverlayPhase = TRUE;
+    UpdateTargetExtents();
     return TRUE;
 }
 
@@ -569,7 +618,7 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
         return 0;
     }
     PrepareFrameTarget();
-    const CKRECT target = CurrentTargetRect();
+    const CKRECT target = LogicalTargetRect();
     CKRECT rect = Rect ? *Rect : target;
     if (rect.left < 0) rect.left = 0;
     if (rect.top < 0) rect.top = 0;

@@ -404,6 +404,60 @@ void TestOverlayPhase()
     TestCheck(f.Context->BackToFront(FALSE), "present scaled frame");
 }
 
+// Spec 4.4: engine rectangles are window pixels; passes, clears and the
+// viewport scissor are scaled to the scene target, the overlay is not.
+void TestRenderScaleCoordinates()
+{
+    Fixture f;
+    CKRasterizerOptions options;
+    options.RenderScale = 0.5f;
+    TestCheck(f.Context->SetOptions(&options), "SetOptions(RenderScale 0.5)");
+
+    // The fixture window is 64x64: the scene target is 32x32.
+    CKRECT clearRect = {8, 8, 40, 24};
+    TestCheck(f.Context->Clear(CKRST_CTXCLEAR_COLOR, 0, 1.0f, 0, 1, &clearRect), "clear rect");
+    TestCheck(!f.Device->ViewClears.empty(), "clear recorded");
+    if (!f.Device->ViewClears.empty()) {
+        const CKRECT &r = f.Device->ViewClears.back().Rect;
+        TestCheck(r.left == 4 && r.top == 4 && r.right == 20 && r.bottom == 12,
+                  "clear rectangles are scaled to the scene target");
+    }
+    TestCheck(f.Context->BeginScene(), "BeginScene");
+    CKViewportData viewport;
+    viewport.ViewX = 8;
+    viewport.ViewY = 4;
+    viewport.ViewWidth = 32;
+    viewport.ViewHeight = 16;
+    viewport.ViewZMin = 0.0f;
+    viewport.ViewZMax = 1.0f;
+    TestCheck(f.Context->SetViewport(&viewport), "viewport");
+    CKRECT scissor;
+    TestCheck(f.FFP->GetViewportScissor(&scissor) && scissor.left == 4 && scissor.top == 2 &&
+                  scissor.right == 20 && scissor.bottom == 10,
+              "the scene viewport scissor is scaled to the scene target");
+    const float *remap = f.FFP->GetViewportRemap();
+    TestCheck(remap[0] == 0.5f && remap[1] == 0.25f && remap[2] == -0.25f && remap[3] == 0.625f,
+              "the viewport remap uses window pixels");
+    TestCheck(f.Context->EndScene(), "EndScene");
+    TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
+    TestCheck(f.FFP->GetViewportScissor(&scissor) && scissor.left == 8 && scissor.top == 4 &&
+                  scissor.right == 40 && scissor.bottom == 20,
+              "the overlay viewport scissor is not scaled");
+    TestCheck(f.Context->BackToFront(FALSE), "present");
+
+    // A texture target has no scaling at all.
+    const CKDWORD target = MakeTexture(f, 64, CKRST_TEXTURE_RENDERTARGET);
+    TestCheck(f.Context->SetTargetTexture(target, 64, 64, CKRST_CUBEFACE_XPOS), "SetTargetTexture");
+    viewport.ViewX = 0;
+    viewport.ViewY = 0;
+    viewport.ViewWidth = 32;
+    viewport.ViewHeight = 64;
+    TestCheck(f.Context->SetViewport(&viewport), "target viewport");
+    TestCheck(f.FFP->GetViewportScissor(&scissor) && scissor.right == 32 && scissor.bottom == 64,
+              "target viewports use texture pixels");
+    TestCheck(f.Context->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "release target");
+}
+
 void TestShutdown()
 {
     Fixture f;
@@ -433,6 +487,7 @@ int main()
     framework.Run("frame flow and draws", TestFrameFlowAndDraws);
     framework.Run("render targets", TestRenderTargets);
     framework.Run("overlay phase", TestOverlayPhase);
+    framework.Run("RenderScale coordinates", TestRenderScaleCoordinates);
     framework.Run("shutdown", TestShutdown);
     return framework.ExitCode();
 }
