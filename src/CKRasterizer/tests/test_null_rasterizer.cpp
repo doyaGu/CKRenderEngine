@@ -84,7 +84,7 @@ int main()
     if ((caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) !=
             (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER) ||
         (caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) == 0 ||
-        caps.MaxPasses != CKRST_MAX_RENDER_VIEWS ||
+        caps.MaxPasses != CKRST_MAX_PASSES ||
         caps.MaxTextureBindings != CKRST_BACKEND_SLOT_COUNT ||
         caps.ShaderProfile != CKRST_SHADER_PROFILE_DX11 ||
         caps.OriginBottomLeft || caps.HomogeneousDepth)

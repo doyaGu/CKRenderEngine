@@ -688,8 +688,6 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     if (!m_Backend || !data || data->VertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     CKFF_PROBE(m_Probes, OnSoftwareDraw());
-    const CKRenderView view = 0;   // draw logs: the backend owns the pass
-    (void)view;
 
     const CKDWORD formatFlags =
         CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
@@ -697,10 +695,9 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
-    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
+    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial() : -1;
     if (debugLogging) {
         CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
         debugInfo.Type = type;
         debugInfo.Indices = indices;
         debugInfo.IndexCount = indexCount;
@@ -773,7 +770,6 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (debugLogging) {
         CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
         debugInfo.Type = type;
         debugInfo.Indices = indices;
         debugInfo.IndexCount = indexCount;
@@ -1017,14 +1013,11 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     if (!m_Backend || !vb)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     CKFF_PROBE(m_Probes, OnHardwareDraw());
-    const CKRenderView view = 0;   // draw logs: the backend owns the pass
-    (void)view;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
-    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
+    const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial() : -1;
     if (debugLogging) {
         CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
         debugInfo.Type = type;
         debugInfo.World = &m_State.World;
         debugInfo.ViewMatrix = &m_State.View;
@@ -1051,7 +1044,6 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     if (debugLogging) {
         CKFFDrawDebugInfo debugInfo = {};
-        debugInfo.View = view;
         debugInfo.Type = type;
         debugInfo.World = &m_State.World;
         debugInfo.ViewMatrix = &m_State.View;

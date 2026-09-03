@@ -17,7 +17,7 @@
 // ===========================================================================
 
 #define CKRST_MAX_VERTEX_STREAMS   4
-#define CKRST_MAX_RENDER_VIEWS     256
+#define CKRST_MAX_PASSES     256
 
 
 // ===========================================================================
@@ -94,12 +94,6 @@ typedef enum CK_VERTEX_ATTRIB_TYPE {
     CKRST_ATTRIBTYPE_HALF   = 5,
     CKRST_ATTRIBTYPE_FLOAT  = 6,
 } CK_VERTEX_ATTRIB_TYPE;
-
-// ---------------------------------------------------------------------------
-// Pass index (the bgfx view id a pass is bound to)
-// ---------------------------------------------------------------------------
-
-typedef uint16_t CKRenderView;
 
 // ---------------------------------------------------------------------------
 // Depth Format (for depth/stencil textures)
@@ -204,7 +198,7 @@ typedef uint64_t CKRST_DEVCAPS;
 
 #define CKRST_DEVCAPS_VERTEX_SHADER       UINT64_C(0x0000000000000001)
 #define CKRST_DEVCAPS_PIXEL_SHADER        UINT64_C(0x0000000000000002)
-#define CKRST_DEVCAPS_RENDER_VIEWS        UINT64_C(0x0000000000000004)
+#define CKRST_DEVCAPS_PASSES        UINT64_C(0x0000000000000004)
 #define CKRST_DEVCAPS_FRAMEBUFFER         UINT64_C(0x0000000000000008)
 #define CKRST_DEVCAPS_TRANSIENT_BUFFERS   UINT64_C(0x0000000000000010)
 #define CKRST_DEVCAPS_SCISSOR             UINT64_C(0x0000000000000020)

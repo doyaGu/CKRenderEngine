@@ -676,7 +676,7 @@ CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
     for (int i = 0; i < CKRST_BACKEND_SLOT_COUNT; ++i)
         m_SamplerUniforms[i] = BGFX_INVALID_HANDLE;
     m_BgfxCallback.SetContext(this);
-    for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i) {
+    for (int i = 0; i < CKRST_MAX_PASSES; ++i) {
         m_DebugViewSubmitSerial[i].store(0, std::memory_order_relaxed);
         m_DebugViewName[i][0] = '\0';
         m_ViewFrameBuffer[i] = 0;
@@ -726,9 +726,9 @@ void CKBgfxBackend::RecordTextureBlit(
         (CKBYTE)CKBgfxMergeOrientation(current, source, FullOverwrite);
 }
 
-void CKBgfxBackend::RecordViewColorWrite(CKRenderView View, CKBOOL HasDraw)
+void CKBgfxBackend::RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw)
 {
-    if (View >= CKRST_MAX_RENDER_VIEWS)
+    if (View >= CKRST_MAX_PASSES)
         return;
 
     VxMutexLock lock(m_ResourceStateMutex);
@@ -896,7 +896,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         m_CapsDesc.MaxTextureSize = limits.maxTextureSize;
         m_CapsDesc.MaxTextureLayers = limits.maxTextureLayers;
         m_CapsDesc.MaxRenderViews = XMin((CKDWORD)limits.maxViews,
-                                         (CKDWORD)CKRST_MAX_RENDER_VIEWS);
+                                         (CKDWORD)CKRST_MAX_PASSES);
         if (actualRenderer == bgfx::RendererType::Vulkan &&
             m_CapsDesc.MaxRenderViews != 0)
             --m_CapsDesc.MaxRenderViews;
@@ -921,7 +921,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
 
         m_CapsDesc.Features = CKRST_DEVCAPS_VERTEX_SHADER |
                               CKRST_DEVCAPS_PIXEL_SHADER |
-                              CKRST_DEVCAPS_RENDER_VIEWS |
+                              CKRST_DEVCAPS_PASSES |
                               CKRST_DEVCAPS_FRAMEBUFFER |
                               CKRST_DEVCAPS_TRANSIENT_BUFFERS |
                               CKRST_DEVCAPS_SCISSOR |
@@ -1372,7 +1372,7 @@ void CKBgfxBackend::TraceBufferMap(CKSTRING Event, CKSTRING Kind,
     trace.Flags = Flags;
     CKBgfxDrawMapTraceBuffer(&trace);
 }
-void CKBgfxBackend::RecordInvalidSubmit(CKSTRING Kind, CKRenderView View,
+void CKBgfxBackend::RecordInvalidSubmit(CKSTRING Kind, bgfx::ViewId View,
                                                   CKDWORD Program, CKSTRING Reason)
 {
     m_DebugInvalidSubmitCount.fetch_add(1, std::memory_order_relaxed);
@@ -2788,10 +2788,10 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
     }
 
     m_FrameInProgress = TRUE;
-    CKRenderView view;
+    bgfx::ViewId view;
     CKDWORD clearFlags = Desc->ClearFlags;
     if (m_NextView < m_CapsDesc.MaxRenderViews) {
-        view = (CKRenderView)m_NextView++;
+        view = (bgfx::ViewId)m_NextView++;
     } else {
         // Out of views: keep drawing into the last pass; a clear would apply
         // to the whole pass, so it is dropped.
@@ -3248,7 +3248,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     if (m_DrawMapSubmitActive)
         TraceSubmit(Draw->Program, rec->Handle, Draw->SortKey);
     RecordViewColorWrite(m_CurrentView, TRUE);
-    bgfx::submit((bgfx::ViewId)m_CurrentView, rec->Handle, Draw->SortKey, BGFX_DISCARD_ALL);
+    bgfx::submit(m_CurrentView, rec->Handle, Draw->SortKey, BGFX_DISCARD_ALL);
     if (m_DrawMapMarkerCaptureActive)
         m_LastMarker[0] = '\0';
     ResetDebugBindings();
@@ -3301,7 +3301,7 @@ CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
         actualCopiedWidth == dstWidth && actualCopiedHeight == dstHeight;
     RecordViewColorWrite(m_CurrentView, FALSE);
     RecordTextureBlit(dst, DstMip, src, SrcMip, fullDestination);
-    bgfx::blit((bgfx::ViewId)m_CurrentView,
+    bgfx::blit(m_CurrentView,
                dst->Handle, (uint8_t)DstMip, (uint16_t)DstX, (uint16_t)DstY, (uint16_t)DstLayer,
                src->Handle, (uint8_t)SrcMip, (uint16_t)srcX, (uint16_t)srcY, (uint16_t)SrcLayer,
                (uint16_t)copiedWidth, (uint16_t)copiedHeight, 1);
@@ -3364,7 +3364,7 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
                        m_DebugSourceSubmitCount[CKDRAW_SOURCE_SPRITE].load(std::memory_order_relaxed),
                        m_DebugSourceSubmitCount[CKDRAW_SOURCE_CALLBACK].load(std::memory_order_relaxed),
                        m_DebugSourceSubmitCount[CKDRAW_SOURCE_RAW_PRIMITIVE].load(std::memory_order_relaxed));
-            for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i) {
+            for (int i = 0; i < CKRST_MAX_PASSES; ++i) {
                 CKDWORD viewSubmits = m_DebugViewSubmitSerial[i].load(std::memory_order_relaxed);
                 if (viewSubmits != 0) {
                     CKBgfxLogf("ViewMap",
@@ -3406,7 +3406,7 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
             m_ViewRect[view].left = m_ViewRect[view].top = m_ViewRect[view].right = m_ViewRect[view].bottom = 0;
             m_ViewClearFlags[view] = 0;
         }
-        for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i)
+        for (int i = 0; i < CKRST_MAX_PASSES; ++i)
             m_ViewClearRecorded[i] = FALSE;
     }
     m_LastFrameViewCount = m_NextView;
@@ -3444,7 +3444,7 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
         m_DebugRawPrimitiveCount.store(0, std::memory_order_relaxed);
         for (int i = 0; i < CKDRAW_SOURCE_COUNT; ++i)
             m_DebugSourceSubmitCount[i].store(0, std::memory_order_relaxed);
-        for (int i = 0; i < CKRST_MAX_RENDER_VIEWS; ++i)
+        for (int i = 0; i < CKRST_MAX_PASSES; ++i)
             m_DebugViewSubmitSerial[i].store(0, std::memory_order_relaxed);
         if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_FRAME))
             CKBgfxLogf("FrameMap", "Begin frame=%u", m_DebugFrameId);
@@ -3457,7 +3457,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
 {
     if (!m_DrawMapSubmitActive)
         return;
-    const CKRenderView View = m_CurrentView;
+    const bgfx::ViewId View = m_CurrentView;
     const CKDWORD submitSerial = m_DebugSubmitSerial.fetch_add(1, std::memory_order_relaxed) + 1;
     CKDWORD viewSubmitSerial = 0;
     CKDrawAnnotationParsed parsed;
@@ -3506,7 +3506,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
     }
     vbFields[sizeof(vbFields) - 1] = '\0';
 
-    if (View < CKRST_MAX_RENDER_VIEWS)
+    if (View < CKRST_MAX_PASSES)
         viewSubmitSerial = m_DebugViewSubmitSerial[View].fetch_add(1, std::memory_order_relaxed) + 1;
 
     if (m_LastMarker[0] == '\0') {

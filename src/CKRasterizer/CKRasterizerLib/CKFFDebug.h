@@ -64,7 +64,6 @@ struct CKFFDrawDebugStage {
 };
 
 struct CKFFDrawDebugInfo {
-    CKRenderView View;
     VXPRIMITIVETYPE Type;
     CKWORD *Indices;
     int IndexCount;
@@ -100,7 +99,7 @@ public:
 
     void BeginFrame();
     bool AnyLoggingEnabled() const;
-    int NextDrawSerial(CKRenderView view);
+    int NextDrawSerial();
 
     void LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info);
     void LogDrawPrimitivePrepareFailed();
@@ -111,7 +110,6 @@ public:
     void LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info);
 
 private:
-    bool Is3DView(CKRenderView view) const;
     bool HasNonIdentityViewTranslation(const VxMatrix &view) const;
 
     void LogMatrixRows(const char *label, const VxMatrix &m) const;
@@ -139,7 +137,7 @@ public:
     CKFFDebugState() {}
     void BeginFrame() {}
     bool AnyLoggingEnabled() const { return false; }
-    int NextDrawSerial(CKRenderView) { return -1; }
+    int NextDrawSerial() { return -1; }
     void LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &) {}
     void LogDrawPrimitivePrepareFailed() {}
     void LogDrawPrimitiveProgramMissing() {}

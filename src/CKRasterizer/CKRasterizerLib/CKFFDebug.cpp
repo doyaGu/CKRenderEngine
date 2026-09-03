@@ -49,18 +49,17 @@ bool CKFFDebugState::AnyLoggingEnabled() const {
            config.DrawSerialPerFrame;
 }
 
-int CKFFDebugState::NextDrawSerial(CKRenderView view) {
-    // Views are allocated per pass by the frame flow; the log numbers every
-    // draw of the frame in submission order.
-    (void)view;
+int CKFFDebugState::NextDrawSerial() {
+    // The backend owns the pass; the log numbers every draw of the frame in
+    // submission order.
     return m_Opaque3DDrawSerial++;
 }
 
 void CKFFDebugState::LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &info) {
     const int limit = CKFFDebugConfig::Get().DrawLogLimit;
     if (limit > 0 && m_DrawLogCount < limit) {
-        CK_LOG_FMT("FFPipeline", "DrawPrimitive: view=%d serial=%d verts=%d indices=%d flags=0x%X",
-                   (int)info.View, info.DrawSerial, info.Data ? info.Data->VertexCount : 0,
+        CK_LOG_FMT("FFPipeline", "DrawPrimitive: serial=%d verts=%d indices=%d flags=0x%X",
+                   info.DrawSerial, info.Data ? info.Data->VertexCount : 0,
                    info.IndexCount, info.Data ? info.Data->Flags : 0);
         ++m_DrawLogCount;
     }
@@ -87,11 +86,11 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
         return;
 
     const CKFFDebugConfig &config = CKFFDebugConfig::Get();
-    if (Is3DView(info.View) && config.Real3DLogLimit > 0 && m_Real3DDrawLogCount < config.Real3DLogLimit) {
+    if (config.Real3DLogLimit > 0 && m_Real3DDrawLogCount < config.Real3DLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
         CK_LOG_FMT("FFPipeline",
-                   "Real3D DrawPrimitive #%d: serial=%d view=%d type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
-                   m_Real3DDrawLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
+                   "Real3D DrawPrimitive #%d: serial=%d type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
+                   m_Real3DDrawLogCount, info.DrawSerial, (int)info.Type, PrimitiveName(info.Type),
                    info.Data->VertexCount, info.IndexCount, info.Data->Flags, info.FormatFlags, stride,
                    info.Stage0.Texture, info.DrawState->GetRenderState(VXRENDERSTATE_LIGHTING),
                    info.ActiveLightCount, info.Program);
@@ -112,12 +111,12 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
         ++m_Real3DDrawLogCount;
     }
 
-    if (Is3DView(info.View) && config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
+    if (config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
         const CKDWORD vertexBlend = info.DrawState->GetRenderState(VXRENDERSTATE_VERTEXBLEND);
         CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X dpFlags=0x%X fmt=0x%X stride=%u positionStride=%u hasNormal=%u vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
-                   m_3DContractLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
+                   "3D contract #%d: serial=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X dpFlags=0x%X fmt=0x%X stride=%u positionStride=%u hasNormal=%u vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
+                   m_3DContractLogCount, info.DrawSerial, (int)info.Type, PrimitiveName(info.Type),
                    info.Data->VertexCount, info.IndexCount, info.Data->Flags, info.Data->Flags, info.FormatFlags,
                    stride, info.Data->PositionStride, info.Data->NormalPtr ? 1u : 0u,
                    VertexBlendName(vertexBlend), vertexBlend,
@@ -144,8 +143,8 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
         config.PositionTLogLimit > 0 && m_PositionTDrawLogCount < config.PositionTLogLimit) {
         CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
         CK_LOG_FMT("FFPipeline",
-                   "PositionT DrawPrimitive #%d: view=%d type=%d verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u program=%u stage0=%u/%u/%u",
-                   m_PositionTDrawLogCount, (int)info.View, (int)info.Type,
+                   "PositionT DrawPrimitive #%d: type=%d verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u program=%u stage0=%u/%u/%u",
+                   m_PositionTDrawLogCount, (int)info.Type,
                    info.Data->VertexCount, info.IndexCount, info.Data->Flags, info.FormatFlags,
                    stride, info.Stage0.Texture, info.Program, info.Stage0.ColorOp,
                    info.Stage0.ColorArg1, info.Stage0.ColorArg2);
@@ -153,11 +152,10 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
         ++m_PositionTDrawLogCount;
     }
 
-    if (Is3DView(info.View) &&
-        config.Real3DLogLimit > 0 && m_Real3DViewLogCount < config.Real3DLogLimit &&
+    if (config.Real3DLogLimit > 0 && m_Real3DViewLogCount < config.Real3DLogLimit &&
         HasNonIdentityViewTranslation(*info.ViewMatrix)) {
-        CK_LOG_FMT("FFPipeline", "Real3D non-identity view #%d: view=%d verts=%d indices=%d flags=0x%X program=%u",
-                   m_Real3DViewLogCount, (int)info.View, info.Data->VertexCount, info.IndexCount,
+        CK_LOG_FMT("FFPipeline", "Real3D non-identity view #%d: verts=%d indices=%d flags=0x%X program=%u",
+                   m_Real3DViewLogCount, info.Data->VertexCount, info.IndexCount,
                    info.Data->Flags, info.Program);
         LogMatrixRows("World", *info.World);
         LogMatrixRows("View", *info.ViewMatrix);
@@ -170,8 +168,8 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
 void CKFFDebugState::LogDrawVertexBufferHeader(const CKFFDrawDebugInfo &info) {
     const int limit = CKFFDebugConfig::Get().DrawLogLimit;
     if (limit > 0 && m_DrawLogCount < limit) {
-        CK_LOG_FMT("FFPipeline", "DrawVertexBuffer: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u",
-                   (int)info.View, info.VertexBuffer, info.IndexBuffer, info.VertexCount,
+        CK_LOG_FMT("FFPipeline", "DrawVertexBuffer: vb=%u ib=%u verts=%u indices=%u layout=%u",
+                   info.VertexBuffer, info.IndexBuffer, info.VertexCount,
                    info.PersistentIndexCount, info.VertexLayout);
         if (info.World) {
             CK_LOG_FMT("FFPipeline", "  World row0: %.3f %.3f %.3f %.3f",
@@ -192,10 +190,10 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
         return;
 
     const CKFFDebugConfig &config = CKFFDebugConfig::Get();
-    if (Is3DView(info.View) && config.Real3DLogLimit > 0 && m_Real3DDrawLogCount < config.Real3DLogLimit) {
+    if (config.Real3DLogLimit > 0 && m_Real3DDrawLogCount < config.Real3DLogLimit) {
         CK_LOG_FMT("FFPipeline",
-                   "Real3D DrawVertexBuffer #%d: serial=%d view=%d type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
-                   m_Real3DDrawLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
+                   "Real3D DrawVertexBuffer #%d: serial=%d type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X fmt=0x%X layout=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
+                   m_Real3DDrawLogCount, info.DrawSerial, (int)info.Type, PrimitiveName(info.Type),
                    info.VertexBuffer, info.IndexBuffer, info.BaseVertex, info.VertexCount,
                    info.StartIndex, info.PersistentIndexCount, info.DPFlags, info.FormatFlags,
                    info.VertexLayout, info.Stage0.Texture,
@@ -215,11 +213,11 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
         ++m_Real3DDrawLogCount;
     }
 
-    if (Is3DView(info.View) && config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
+    if (config.Contract3DLogLimit > 0 && m_3DContractLogCount < config.Contract3DLogLimit) {
         const CKDWORD vertexBlend = info.DrawState->GetRenderState(VXRENDERSTATE_VERTEXBLEND);
         CK_LOG_FMT("FFPipeline",
-                   "3D contract #%d: serial=%d view=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X dpFlags=0x%X fmt=0x%X layout=%u hasNormal=%u positionStride=0 vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
-                   m_3DContractLogCount, info.DrawSerial, (int)info.View, (int)info.Type, PrimitiveName(info.Type),
+                   "3D contract #%d: serial=%d path=DrawVertexBuffer type=%d(%s) vb=%u ib=%u base=%u verts=%u start=%u indices=%u dp=0x%X dpFlags=0x%X fmt=0x%X layout=%u hasNormal=%u positionStride=0 vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
+                   m_3DContractLogCount, info.DrawSerial, (int)info.Type, PrimitiveName(info.Type),
                    info.VertexBuffer, info.IndexBuffer, info.BaseVertex, info.VertexCount,
                    info.StartIndex, info.PersistentIndexCount, info.DPFlags, info.DPFlags, info.FormatFlags,
                    info.VertexLayout, info.StateDesc->VS.GetHasNormal() ? 1u : 0u,
@@ -244,11 +242,10 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
         ++m_3DContractLogCount;
     }
 
-    if (Is3DView(info.View) &&
-        config.Real3DLogLimit > 0 && m_Real3DViewLogCount < config.Real3DLogLimit &&
+    if (config.Real3DLogLimit > 0 && m_Real3DViewLogCount < config.Real3DLogLimit &&
         HasNonIdentityViewTranslation(*info.ViewMatrix)) {
-        CK_LOG_FMT("FFPipeline", "Real3D VB non-identity view #%d: view=%d vb=%u ib=%u verts=%u indices=%u layout=%u program=%u",
-                   m_Real3DViewLogCount, (int)info.View, info.VertexBuffer,
+        CK_LOG_FMT("FFPipeline", "Real3D VB non-identity view #%d: vb=%u ib=%u verts=%u indices=%u layout=%u program=%u",
+                   m_Real3DViewLogCount, info.VertexBuffer,
                    info.IndexBuffer, info.VertexCount, info.PersistentIndexCount,
                    info.VertexLayout, info.Program);
         LogMatrixRows("World", *info.World);
@@ -256,11 +253,6 @@ void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &info) {
         LogMatrixRows("Proj", *info.Projection);
         ++m_Real3DViewLogCount;
     }
-}
-
-bool CKFFDebugState::Is3DView(CKRenderView view) const {
-    (void)view;
-    return true;
 }
 
 const char *CKFFDebugState::VertexBlendName(CKDWORD vertexBlend) const {

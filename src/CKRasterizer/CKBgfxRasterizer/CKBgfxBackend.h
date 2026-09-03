@@ -320,9 +320,9 @@ private:
     void TraceProgramMap(CKSTRING Event, CKDWORD Program, const CKBgfxProgramRecord *Record);
     void TraceBufferMap(CKSTRING Event, CKSTRING Kind, CKDWORD Buffer, CKDWORD BgfxHandle, CKDWORD Layout,
                         CKDWORD Stride, CKDWORD Count, CKDWORD Index32, CKDWORD Flags);
-    void RecordInvalidSubmit(CKSTRING Kind, CKRenderView View, CKDWORD Program, CKSTRING Reason);
+    void RecordInvalidSubmit(CKSTRING Kind, bgfx::ViewId View, CKDWORD Program, CKSTRING Reason);
     void RecordTransientAllocMiss(const char *Kind, CKDWORD Requested, CKDWORD Available);
-    void RecordViewColorWrite(CKRenderView View, CKBOOL HasDraw);
+    void RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw);
     void RecordTextureWrite(CKBgfxTextureRecord *Texture, CKDWORD Mip, CKBgfxTextureOrientation Orientation,
                             CKBOOL FullOverwrite);
     void RecordTextureBlit(CKBgfxTextureRecord *Destination, CKDWORD DestinationMip,
@@ -357,14 +357,14 @@ private:
     // Frame
     CKBOOL m_FrameInProgress;        // a pass was begun since the last Present
     CKBOOL m_PassOpen;
-    CKRenderView m_CurrentView;
+    bgfx::ViewId m_CurrentView;
     CKDWORD m_NextView;
     CKDWORD m_LastFrameViewCount;
     CKDWORD m_FramePasses, m_FrameDraws, m_FrameBlits, m_FrameTextureUploads, m_FrameBufferUploads;
-    CKDWORD m_ViewFrameBuffer[CKRST_MAX_RENDER_VIEWS];
-    CKRECT m_ViewRect[CKRST_MAX_RENDER_VIEWS];
-    CKDWORD m_ViewClearFlags[CKRST_MAX_RENDER_VIEWS];
-    CKBOOL m_ViewClearRecorded[CKRST_MAX_RENDER_VIEWS];
+    CKDWORD m_ViewFrameBuffer[CKRST_MAX_PASSES];
+    CKRECT m_ViewRect[CKRST_MAX_PASSES];
+    CKDWORD m_ViewClearFlags[CKRST_MAX_PASSES];
+    CKBOOL m_ViewClearRecorded[CKRST_MAX_PASSES];
 
     // Draw state
     CKBackendPipelineState m_State;
@@ -389,7 +389,7 @@ private:
     // Debug
     CKDWORD m_DebugFrameId;
     std::atomic<CKDWORD> m_DebugSubmitSerial;
-    std::atomic<CKDWORD> m_DebugViewSubmitSerial[CKRST_MAX_RENDER_VIEWS];
+    std::atomic<CKDWORD> m_DebugViewSubmitSerial[CKRST_MAX_PASSES];
     std::atomic<CKDWORD> m_DebugMissingAnnotationCount;
     std::atomic<CKDWORD> m_DebugMarkerOverwriteCount;
     std::atomic<CKDWORD> m_DebugMarkerStaleCount;
@@ -399,7 +399,7 @@ private:
     std::atomic<CKDWORD> m_DebugRawPrimitiveCount;
     std::atomic<CKDWORD> m_DebugSourceSubmitCount[CKBGFX_DRAWMAP_SOURCE_COUNT];
     std::atomic<CKDWORD> m_DebugTransientAllocMissCount;
-    char m_DebugViewName[CKRST_MAX_RENDER_VIEWS][64];
+    char m_DebugViewName[CKRST_MAX_PASSES][64];
     CKDWORD m_DebugFlags;
     CKDWORD m_DrawMapFlags;
     CKBOOL m_DrawMapActive;

@@ -288,7 +288,7 @@ void TestFrameFlowAndDraws()
                (unsigned)Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE));
     TestCheck(firstDraw, "DrawPrimitiveVBIB");
     TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "one backend submit");
-    const CKRenderView firstView = f.Device->Encoder.SubmitViews[submitsBefore];
+    const CKDWORD firstView = f.Device->Encoder.SubmitViews[submitsBefore];
 
     const CKDWORD passesBefore = f.Context->GetPassCountForTests();
     TestCheck(f.Context->Clear(CKRST_CTXCLEAR_STENCIL, 0, 1.0f, 0x7, 0, NULL), "mid-scene stencil clear");

@@ -335,7 +335,7 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
     config.DrawMap.Enabled = drawMap.GetBool("Enabled", false);
     config.DrawMap.Submits = drawMap.GetBool("Submits", false);
     config.DrawMap.Resources = drawMap.GetBool("Resources", false);
-    config.DrawMap.Views = drawMap.GetBool("Views", false);
+    config.DrawMap.Passes = drawMap.GetBool("Passes", false);
     config.DrawMap.Markers = drawMap.GetBool("Markers", false);
     config.DrawMap.Frame = drawMap.GetBool("Frame", false);
     config.DrawMap.Summary = drawMap.GetBool("Summary", false);

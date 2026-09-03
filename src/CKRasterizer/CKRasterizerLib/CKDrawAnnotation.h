@@ -30,7 +30,6 @@ struct CKDrawAnnotationObjectRef {
 
 struct CKDrawAnnotation {
     CKDrawAnnotationSource Source;
-    CKRenderView View;
     VXPRIMITIVETYPE PrimitiveType;
     CKDWORD IndexCount;
     CKDWORD VertexCount;
@@ -60,7 +59,6 @@ struct CKDrawAnnotationState {
 struct CKDrawAnnotationParsed {
     CKBOOL Valid;
     CKDWORD Token;
-    CKRenderView View;
     VXPRIMITIVETYPE PrimitiveType;
     CKDWORD IndexCount;
     CKDWORD VertexCount;
@@ -105,7 +103,6 @@ CKBOOL CKDrawAnnotationStateGetCallbackObject(CKDrawAnnotationState *State,
                                               CKDrawAnnotationObjectRef *Object);
 void CKDrawAnnotationStateBuildFallback(CKDrawAnnotationState *State,
                                         CKDrawAnnotation *Annotation,
-                                        CKRenderView View,
                                         VXPRIMITIVETYPE PrimitiveType,
                                         CKDWORD IndexCount,
                                         CKDWORD VertexCount);

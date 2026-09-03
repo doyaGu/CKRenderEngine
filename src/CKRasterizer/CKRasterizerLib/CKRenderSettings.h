@@ -128,13 +128,13 @@ struct CKRenderDrawMapConfig {
     bool Enabled;
     bool Submits;
     bool Resources;
-    bool Views;
+    bool Passes;
     bool Markers;
     bool Frame;
     bool Summary;
 
     bool Any() const {
-        return Enabled || Submits || Resources || Views ||
+        return Enabled || Submits || Resources || Passes ||
                Markers || Frame || Summary;
     }
 };

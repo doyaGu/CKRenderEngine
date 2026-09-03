@@ -23,7 +23,7 @@ struct FFPTextureBinding {
 };
 
 struct FFPViewClearRecord {
-    CKRenderView View;    // pass index within the frame
+    CKDWORD View;    // pass index within the frame
     CKDWORD Flags;
     CKDWORD Color;
     float Z;
@@ -33,7 +33,7 @@ struct FFPViewClearRecord {
 
 // One Draw() on the backend.
 struct FFPSubmitRecord {
-    CKRenderView View;    // pass index within the frame
+    CKDWORD View;    // pass index within the frame
     CKDWORD Program;
     CKDWORD Flags;
     XString Marker;       // marker set before the draw, consumed
@@ -57,7 +57,7 @@ struct FFPEncoderRecord {
     CKDWORD DiscardCount = 0;          // draws / uploads the backend refused
     CKDWORD LastDiscardFlags = 0;
     CKDWORD TouchCount = 0;            // passes begun
-    CKRenderView LastTouchedView = 0;
+    CKDWORD LastTouchedView = 0;
     CKDWORD TextureBindCount = 0;
     CKDWORD UniformSetCount = 0;
     CKDWORD MatrixUniformSetCount = 0;
@@ -78,9 +78,9 @@ struct FFPEncoderRecord {
     CKDWORD VertexBufferSetCount = 0;
     CKDWORD IndexBufferSetCount = 0;
     CKDWORD SubmitFlags[32] = {};
-    CKRenderView SubmitViews[32] = {};
+    CKDWORD SubmitViews[32] = {};
     std::vector<FFPSubmitRecord> Submits;
-    std::vector<CKRenderView> Touches;
+    std::vector<CKDWORD> Touches;
     XString LastMarker;
     CKDWORD VertexBufferOrder[32] = {};
     CKDWORD IndexBufferOrder[32] = {};
@@ -161,14 +161,14 @@ public:
     CKDWORD LastPixelShaderCodeSize = 0;
     std::vector<CKVertexElementDesc> LastVertexLayoutElements;
     std::vector<FFPViewClearRecord> ViewClears;
-    std::unordered_map<CKRenderView, FFPViewState> Views;   // pass index -> pass
+    std::unordered_map<CKDWORD, FFPViewState> Views;   // pass index -> pass
     std::unordered_map<CKDWORD, CKDWORD> FrameBufferColorTexture;   // render target -> colour texture
     std::vector<CKBackendPresentMode> Frames;
     std::unordered_set<CKDWORD> LiveHandles;   // every allocated, not yet destroyed handle
 
     // Colour texture (0 = swap chain) a pass draws into.
-    CKDWORD ViewTarget(CKRenderView view) const {
-        std::unordered_map<CKRenderView, FFPViewState>::const_iterator it = Views.find(view);
+    CKDWORD ViewTarget(CKDWORD view) const {
+        std::unordered_map<CKDWORD, FFPViewState>::const_iterator it = Views.find(view);
         if (it == Views.end() || it->second.FrameBuffer == 0)
             return 0;
         std::unordered_map<CKDWORD, CKDWORD>::const_iterator fb = FrameBufferColorTexture.find(it->second.FrameBuffer);
@@ -303,7 +303,7 @@ public:
         const CKERROR result = CKNullBackend::BeginPass(desc);
         if (result != CK_OK)
             return result;
-        const CKRenderView view = (CKRenderView)GetCurrentPass();
+        const CKDWORD view = GetCurrentPass();
         Views[view].Rect = desc->Rect;
         Views[view].FrameBuffer = desc->RenderTarget;
         FFPViewClearRecord record = { view, GetPasses().back().ClearFlags, desc->ClearColor, desc->ClearZ,
@@ -441,7 +441,7 @@ inline CKERROR FFPDiagnosticContext::Draw(const CKBackendDraw *draw)
         ++Encoder.IndexBufferSetCount;
     }
 
-    const CKRenderView view = (CKRenderView)GetCurrentPass();
+    const CKDWORD view = GetCurrentPass();
     const CKERROR result = CKNullBackend::Draw(draw);
     if (result != CK_OK) {
         ++Encoder.DiscardCount;
@@ -469,7 +469,7 @@ inline CKERROR FFPDiagnosticContext::Draw(const CKBackendDraw *draw)
     record.Marker = Encoder.LastMarker;
     record.Target = ViewTarget(view);
     memset(&record.Rect, 0, sizeof(record.Rect));
-    std::unordered_map<CKRenderView, FFPViewState>::const_iterator it = Views.find(view);
+    std::unordered_map<CKDWORD, FFPViewState>::const_iterator it = Views.find(view);
     if (it != Views.end())
         record.Rect = it->second.Rect;
     Encoder.LastMarker = "";

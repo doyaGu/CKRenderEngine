@@ -1393,7 +1393,7 @@ void RCKRenderContext::ApplyRenderOptions() {
         debugFlags |= CKRST_DEBUG_DRAWMAP_SUBMITS;
     if (drawMap.Resources)
         debugFlags |= CKRST_DEBUG_DRAWMAP_RESOURCES;
-    if (drawMap.Views)
+    if (drawMap.Passes)
         debugFlags |= CKRST_DEBUG_DRAWMAP_PASSES;
     if (drawMap.Markers)
         debugFlags |= CKRST_DEBUG_DRAWMAP_MARKERS;
@@ -1695,11 +1695,8 @@ CKBOOL RCKRenderContext::ConsumeDrawAnnotation(CKDrawAnnotation *annotation,
     if (m_DrawAnnotationState &&
         CKDrawAnnotationStateConsume(m_DrawAnnotationState, annotation))
         return TRUE;
-    // The rasterizer attributes the marker to the pass the draw lands in, so
-    // the fallback annotation carries no view.
     CKDrawAnnotationStateBuildFallback(m_DrawAnnotationState, annotation,
-                                       0, primitiveType,
-                                       indexCount, vertexCount);
+                                       primitiveType, indexCount, vertexCount);
     return FALSE;
 }
 

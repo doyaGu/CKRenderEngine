@@ -7,7 +7,6 @@ static void AnnotationFormatterWritesStableMeshLabel()
 {
     CKDrawAnnotation annotation;
     CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_MESH);
-    annotation.View = 3;
     annotation.PrimitiveType = VX_TRIANGLELIST;
     annotation.IndexCount = 36;
     annotation.VertexCount = 24;
@@ -47,7 +46,6 @@ static void AnnotationLifecycleConsumesPendingOnce()
 
     CKDrawAnnotation annotation;
     CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_SPRITE);
-    annotation.View = 6;
     annotation.Object.Id = 44;
     CKDrawAnnotationCopyText(annotation.Object.Name, sizeof(annotation.Object.Name), "Sprite");
 
@@ -67,7 +65,6 @@ static void AnnotationParserRoundTripsStructuredFields()
     CKDrawAnnotation annotation;
     CKDrawAnnotationInit(&annotation, CKDRAW_SOURCE_MESH);
     annotation.Token = 123;
-    annotation.View = 3;
     annotation.PrimitiveType = VX_TRIANGLELIST;
     annotation.IndexCount = 36;
     annotation.VertexCount = 24;
@@ -158,14 +155,12 @@ static void AnnotationLifecycleBuildsCallbackFallback()
 
     CKDrawAnnotation fallback;
     CKDrawAnnotationStateBuildFallback(&state, &fallback,
-                                       5, VX_TRIANGLEFAN, 4, 4);
+                                       VX_TRIANGLEFAN, 4, 4);
 
     TestCheck(fallback.Source == CKDRAW_SOURCE_CALLBACK,
               "fallback must use callback source when a callback object is active");
     TestCheck(fallback.Object.Id == 77,
               "callback fallback must preserve callback object id");
-    TestCheck(fallback.View == 5,
-              "callback fallback must preserve view");
 
     CKDrawAnnotationCounters counters;
     CKDrawAnnotationStateGetCounters(&state, &counters);
@@ -180,7 +175,7 @@ static void AnnotationLifecycleBuildsRawFallback()
 
     CKDrawAnnotation fallback;
     CKDrawAnnotationStateBuildFallback(&state, &fallback,
-                                       5, VX_LINESTRIP, 8, 9);
+                                       VX_LINESTRIP, 8, 9);
 
     TestCheck(fallback.Source == CKDRAW_SOURCE_RAW_PRIMITIVE,
               "fallback without callback object must be raw primitive");

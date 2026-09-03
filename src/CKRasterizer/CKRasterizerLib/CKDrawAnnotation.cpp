@@ -199,7 +199,6 @@ CKBOOL CKDrawAnnotationStateGetCallbackObject(CKDrawAnnotationState *State,
 
 void CKDrawAnnotationStateBuildFallback(CKDrawAnnotationState *State,
                                         CKDrawAnnotation *Annotation,
-                                        CKRenderView View,
                                         VXPRIMITIVETYPE PrimitiveType,
                                         CKDWORD IndexCount,
                                         CKDWORD VertexCount)
@@ -215,7 +214,6 @@ void CKDrawAnnotationStateBuildFallback(CKDrawAnnotationState *State,
         if (State)
             ++State->RawFallbackCount;
     }
-    Annotation->View = View;
     Annotation->PrimitiveType = PrimitiveType;
     Annotation->IndexCount = IndexCount;
     Annotation->VertexCount = VertexCount;
@@ -237,9 +235,8 @@ void CKDrawAnnotationFormatLabel(const CKDrawAnnotation *Annotation,
     CKDrawAnnotationAppendText(Label, LabelSize, &offset, "CKDrawV1 source=");
     CKDrawAnnotationAppendText(Label, LabelSize, &offset,
                                CKDrawAnnotationGetSourceName(Annotation->Source));
-    snprintf(value, sizeof(value), " token=%u view=%u type=%d indices=%u verts=%u",
+    snprintf(value, sizeof(value), " token=%u type=%d indices=%u verts=%u",
              (unsigned)Annotation->Token,
-             (unsigned)Annotation->View,
              (int)Annotation->PrimitiveType,
              (unsigned)Annotation->IndexCount,
              (unsigned)Annotation->VertexCount);

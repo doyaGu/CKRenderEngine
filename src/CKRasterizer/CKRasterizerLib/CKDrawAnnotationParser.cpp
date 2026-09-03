@@ -139,9 +139,6 @@ static void CKDrawAnnotationParsePair(CKDrawAnnotationParsed *Parsed,
     } else if (CKDrawAnnotationTextEquals(Key, "token")) {
         if (CKDrawAnnotationParseUnsigned(Value, &unsignedValue))
             Parsed->Token = unsignedValue;
-    } else if (CKDrawAnnotationTextEquals(Key, "view")) {
-        if (CKDrawAnnotationParseUnsigned(Value, &unsignedValue))
-            Parsed->View = (CKRenderView)unsignedValue;
     } else if (CKDrawAnnotationTextEquals(Key, "type")) {
         if (CKDrawAnnotationParseSigned(Value, &signedValue))
             Parsed->PrimitiveType = (VXPRIMITIVETYPE)signedValue;

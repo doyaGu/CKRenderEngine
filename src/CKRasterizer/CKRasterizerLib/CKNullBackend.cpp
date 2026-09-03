@@ -179,14 +179,14 @@ CKERROR CKNullBackend::Init(const CKBackendInitDesc *Desc)
     m_Stats = CKBackendStats();
 
     m_Caps = CKBackendCaps();
-    m_Caps.Features = CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER | CKRST_DEVCAPS_RENDER_VIEWS |
+    m_Caps.Features = CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER | CKRST_DEVCAPS_PASSES |
                       CKRST_DEVCAPS_FRAMEBUFFER | CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_SCISSOR |
                       CKRST_DEVCAPS_BUFFER_UPDATE | CKRST_DEVCAPS_TEXTURE_UPDATE | CKRST_DEVCAPS_DEPTH_TEXTURE |
                       CKRST_DEVCAPS_TEXTURE_CUBE | CKRST_DEVCAPS_TEXTURE_3D | CKRST_DEVCAPS_TEXTURE_READBACK |
                       CKRST_DEVCAPS_BLIT | CKRST_DEVCAPS_BLEND_EQUATION | CKRST_DEVCAPS_INDEX32;
     m_Caps.MaxTextureSize = 4096;
     m_Caps.MaxTextureBindings = CKRST_BACKEND_SLOT_COUNT;
-    m_Caps.MaxPasses = CKRST_MAX_RENDER_VIEWS;
+    m_Caps.MaxPasses = CKRST_MAX_PASSES;
     m_Caps.MaxMSAASamples = 16;
     m_Caps.ShaderProfile = m_Driver ? m_Driver->Profile : CKRST_SHADER_PROFILE_DX11;
     m_Caps.OriginBottomLeft = m_Driver ? m_Driver->OriginBottomLeft : FALSE;
