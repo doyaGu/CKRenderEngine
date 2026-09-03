@@ -1,6 +1,6 @@
 #include "CKFFShaderCache.h"
 #include "CKFFShaderABI.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 #include "CKDebugLogger.h"
 
 #include <stddef.h>
@@ -98,18 +98,19 @@ static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
 }
 
 CKFFShaderCache::CKFFShaderCache()
-    : m_Context(nullptr), m_Target(), m_BlobSet(nullptr), m_SamplerLayout() {
+    : m_Backend(nullptr), m_Target(), m_BlobSet(nullptr), m_PixelShader(0), m_SamplerLayout() {
     memset(m_Programs, 0, sizeof(m_Programs));
+    memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
 }
 
 CKFFShaderCache::~CKFFShaderCache() {
     Shutdown();
 }
 
-bool CKFFShaderCache::Init(CKRasterizerDevice *ctx) {
+bool CKFFShaderCache::Init(CKRasterizerBackend *backend) {
     Shutdown();
-    m_Context = ctx;
-    if (!ResolveShaderTarget() || !CreateUniforms()) {
+    m_Backend = backend;
+    if (!ResolveShaderTarget()) {
         Shutdown();
         return false;
     }
@@ -118,124 +119,35 @@ bool CKFFShaderCache::Init(CKRasterizerDevice *ctx) {
 }
 
 void CKFFShaderCache::Shutdown() {
-    if (m_Context) {
+    if (m_Backend) {
         for (CKDWORD i = 0; i < CKFF_PROGRAM_VARIANT_COUNT; ++i) {
             if (m_Programs[i])
-                m_Context->DeleteObject(m_Programs[i], CKRST_OBJ_PROGRAM);
+                m_Backend->DestroyObject(m_Programs[i], CKRST_OBJ_PROGRAM);
+            if (m_VertexShaders[i])
+                m_Backend->DestroyObject(m_VertexShaders[i], CKRST_OBJ_SHADER);
         }
-        CKDWORD uniforms[sizeof(m_Uniforms) / sizeof(CKDWORD)];
-        memcpy(uniforms, &m_Uniforms, sizeof(uniforms));
-        const size_t uniformCount = sizeof(uniforms) / sizeof(uniforms[0]);
-        for (size_t i = 0; i < uniformCount; ++i) {
-            if (uniforms[i])
-                m_Context->DeleteObject(uniforms[i], CKRST_OBJ_UNIFORM);
-        }
+        if (m_PixelShader)
+            m_Backend->DestroyObject(m_PixelShader, CKRST_OBJ_SHADER);
     }
     memset(m_Programs, 0, sizeof(m_Programs));
+    memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
+    m_PixelShader = 0;
     m_SamplerLayout = CKFFProgramSamplerLayout();
-    m_Uniforms = CKFFUniformHandles();
-    m_Context = nullptr;
+    m_Backend = nullptr;
     m_BlobSet = nullptr;
 }
 
-bool CKFFShaderCache::CreateUniforms() {
-    if (!m_Context) return false;
-
-    CKUniformDesc desc;
-
-    desc.Type = CKRST_UNIFORM_MAT4;
-    desc.Name = (char *)"u_ffMatrices";
-    desc.Count = CKFF_MATRIX_VEC4_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffMatrices);
-
-    desc.Name = (char *)"u_vertexBlendMatrices";
-    desc.Count = CKFF_VERTEX_BLEND_MATRIX_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_vertexBlendMatrices);
-
-    desc.Type = CKRST_UNIFORM_VEC4;
-    desc.Name = (char *)"u_ffDrawParams";
-    desc.Count = CKFF_DRAW_PARAM_VEC4_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffDrawParams);
-
-    desc.Type = CKRST_UNIFORM_MAT4;
-    desc.Name = (char *)"u_texMatrix";
-    desc.Count = CKFF_MAX_TEXTURE_STAGES;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_texMatrix);
-
-    desc.Type = CKRST_UNIFORM_VEC4;
-    desc.Name = (char *)"u_lights";
-    desc.Count = CKFF_MAX_LIGHTS * 7;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_lights);
-
-    desc.Name = (char *)"u_bumpEnv";
-    desc.Count = CKFF_MAX_TEXTURE_STAGES * 2;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_bumpEnv);
-
-    desc.Name = (char *)"u_viewport";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_viewport);
-
-    desc.Name = (char *)"u_stageParams";
-    desc.Count = CKFF_STAGE_PARAM_VEC4_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_stageParams);
-
-    desc.Name = (char *)"u_ffSpec";
-    desc.Count = CKFF_SPEC_UNIFORM_VEC4_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_ffSpec);
-
-    desc.Name = (char *)"u_clipPlanes";
-    desc.Count = CKFF_CLIP_PLANE_COUNT;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_clipPlanes);
-
-    desc.Name = (char *)"u_clipParams";
-    desc.Count = 1;
-    m_Context->CreateUniform(&desc, &m_Uniforms.u_clipParams);
-
-    desc.Type = CKRST_UNIFORM_SAMPLER;
-    desc.Count = 1;
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++) {
-        char name[32];
-        snprintf(name, sizeof(name), "s_texture%d", i);
-        desc.Name = name;
-        m_Context->CreateUniform(&desc, &m_Uniforms.s_texture[i]);
-    }
-    for (int i = 0; i < CKFF_CUBE_SAMPLER_COUNT; i++) {
-        char name[32];
-        snprintf(name, sizeof(name), "s_textureCube%d", i);
-        desc.Name = name;
-        m_Context->CreateUniform(&desc, &m_Uniforms.s_textureCube[i]);
-    }
-    for (int i = 0; i < CKFF_VOLUME_SAMPLER_COUNT; i++) {
-        char name[32];
-        snprintf(name, sizeof(name), "s_textureVolume%d", i);
-        desc.Name = name;
-        m_Context->CreateUniform(&desc, &m_Uniforms.s_textureVolume[i]);
-    }
-
-    CKDWORD uniforms[sizeof(m_Uniforms) / sizeof(CKDWORD)];
-    memcpy(uniforms, &m_Uniforms, sizeof(uniforms));
-    const size_t uniformCount = sizeof(uniforms) / sizeof(uniforms[0]);
-    for (size_t i = 0; i < uniformCount; ++i) {
-        if (uniforms[i] != 0)
-            continue;
-        CK_LOG_FMT("ShaderCache", "FFP uniform initialization failed at slot=%u",
-                   (unsigned)i);
-        for (size_t j = 0; j < uniformCount; ++j) {
-            if (uniforms[j])
-                m_Context->DeleteObject(uniforms[j], CKRST_OBJ_UNIFORM);
-        }
-        m_Uniforms = CKFFUniformHandles();
-        return false;
-    }
-    return true;
-}
 
 bool CKFFShaderCache::ResolveShaderTarget() {
-    if (!m_Context) return false;
+    if (!m_Backend) return false;
 
-    CKERROR targetErr = m_Context->GetTargetDesc(&m_Target);
-    if (targetErr != CK_OK) {
-        CK_LOG_FMT("ShaderCache", "GetTargetDesc failed: err=%d", targetErr);
+    const CKBackendCaps &caps = m_Backend->GetCaps();
+    m_Target = CKRasterizerTargetDesc();
+    m_Target.ShaderProfile = caps.ShaderProfile;
+    m_Target.HomogeneousDepth = caps.HomogeneousDepth;
+    m_Target.OriginBottomLeft = caps.OriginBottomLeft;
+    if (m_Target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN) {
+        CK_LOG_FMT("ShaderCache", "backend reports no shader profile");
         return false;
     }
     const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.ShaderProfile);
@@ -269,21 +181,12 @@ bool CKFFShaderCache::ResolveShaderTarget() {
 void CKFFShaderCache::BuildSamplerLayout()
 {
     m_SamplerLayout = CKFFProgramSamplerLayout();
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
-        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_2D, stage);
-        binding.Uniform = m_Uniforms.s_texture[stage];
-    }
-    for (CKDWORD ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal) {
-        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
-        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal);
-        binding.Uniform = m_Uniforms.s_textureCube[ordinal];
-    }
-    for (CKDWORD ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal) {
-        CKFFProgramSamplerBinding &binding = m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++];
-        binding.Stage = CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal);
-        binding.Uniform = m_Uniforms.s_textureVolume[ordinal];
-    }
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_2D, stage);
+    for (CKDWORD ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal)
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal);
+    for (CKDWORD ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal)
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal);
 }
 
 CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &key)
@@ -305,72 +208,54 @@ size_t CKFFShaderCache::CachedProgramCount() const
     return count;
 }
 
+// The fragment shader is shared by the four vertex variants; shader handles
+// stay alive with the cache (the backend does not consume them).
 CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
 {
     const CKFFShaderBlobSet *set = static_cast<const CKFFShaderBlobSet *>(m_BlobSet);
-    if (!set || variant >= CKFF_PROGRAM_VARIANT_COUNT)
+    if (!set || !m_Backend || variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return 0;
+    if (!m_PixelShader) {
+        CKShaderDesc fsDesc = {};
+        fsDesc.Stage = CKRST_SHADER_PIXEL;
+        fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+        fsDesc.Profile = m_Target.ShaderProfile;
+        fsDesc.Code = set->FS.Data;
+        fsDesc.CodeSize = set->FS.Size;
+        const CKERROR err = m_Backend->CreateShader(&fsDesc, &m_PixelShader);
+        if (err != CK_OK) {
+            CK_LOG_FMT("ShaderCache", "CreateShader(FS) FAILED: err=%d size=%u", err, set->FS.Size);
+            m_PixelShader = 0;
+            return 0;
+        }
+    }
     const CKFFShaderBlob &vs = set->VS[variant];
-    const CKDWORD program = CreateProgramFromBinary(vs.Data, vs.Size, set->FS.Data, set->FS.Size);
+    if (!m_VertexShaders[variant]) {
+        CKShaderDesc vsDesc = {};
+        vsDesc.Stage = CKRST_SHADER_VERTEX;
+        vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+        vsDesc.Profile = m_Target.ShaderProfile;
+        vsDesc.Code = vs.Data;
+        vsDesc.CodeSize = vs.Size;
+        const CKERROR err = m_Backend->CreateShader(&vsDesc, &m_VertexShaders[variant]);
+        if (err != CK_OK) {
+            CK_LOG_FMT("ShaderCache", "CreateShader(VS %s) FAILED: err=%d size=%u", g_ProgramVariantNames[variant], err, vs.Size);
+            m_VertexShaders[variant] = 0;
+            return 0;
+        }
+    }
+    CKDWORD program = 0;
+    const CKERROR err = m_Backend->CreateProgram(m_VertexShaders[variant], m_PixelShader, &program);
+    if (err != CK_OK) {
+        CK_LOG_FMT("ShaderCache", "CreateProgram FAILED: err=%d backend=%s profile=0x%08X variant=%s",
+                   err, set->Name, m_Target.ShaderProfile, g_ProgramVariantNames[variant]);
+        return 0;
+    }
     CK_LOG_FMT("ShaderCache", "FFP program variant %s: %u backend=%s",
                g_ProgramVariantNames[variant], program, set->Name);
     return program;
 }
 
-CKDWORD CKFFShaderCache::CreateProgramFromBinary(
-    const unsigned char *vsData, unsigned int vsSize,
-    const unsigned char *fsData, unsigned int fsSize)
-{
-    if (!m_Context) return 0;
-
-    CKDWORD hVS = 0;
-    CKShaderDesc vsDesc = {};
-    vsDesc.Stage = CKRST_SHADER_VERTEX;
-    vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    vsDesc.Profile = m_Target.ShaderProfile;
-    vsDesc.Code = vsData;
-    vsDesc.CodeSize = vsSize;
-    CKERROR err = m_Context->CreateShader(&vsDesc, &hVS);
-    if (err != CK_OK) {
-        CK_LOG_FMT("ShaderCache", "CreateShader(VS) FAILED: err=%d handle=%u size=%u", err, hVS, vsSize);
-        return 0;
-    }
-
-    CKDWORD hFS = 0;
-    CKShaderDesc fsDesc = {};
-    fsDesc.Stage = CKRST_SHADER_PIXEL;
-    fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    fsDesc.Profile = m_Target.ShaderProfile;
-    fsDesc.Code = fsData;
-    fsDesc.CodeSize = fsSize;
-    err = m_Context->CreateShader(&fsDesc, &hFS);
-    if (err != CK_OK) {
-        CK_LOG_FMT("ShaderCache", "CreateShader(FS) FAILED: err=%d handle=%u size=%u", err, hFS, fsSize);
-        m_Context->DeleteObject(hVS, CKRST_OBJ_SHADER);
-        return 0;
-    }
-
-    CKDWORD hProgram = 0;
-    CKProgramDesc progDesc = {};
-    progDesc.VertexShader = hVS;
-    progDesc.PixelShader = hFS;
-    progDesc.ConsumeShaders = TRUE;
-    err = m_Context->CreateProgram(&progDesc, &hProgram);
-    if (err != CK_OK) {
-        CK_LOG_FMT("ShaderCache",
-                   "CreateProgram FAILED: err=%d backend=%s profile=0x%08X vs=%u fs=%u vsSize=%u fsSize=%u",
-                   err,
-                   m_BlobSet ? static_cast<const CKFFShaderBlobSet *>(m_BlobSet)->Name : "unknown",
-                   m_Target.ShaderProfile,
-                   hVS, hFS, vsSize, fsSize);
-        m_Context->DeleteObject(hVS, CKRST_OBJ_SHADER);
-        m_Context->DeleteObject(hFS, CKRST_OBJ_SHADER);
-        return 0;
-    }
-
-    CK_LOG_FMT("ShaderCache", "CreateProgram OK: program=%u vs=%u fs=%u", hProgram, hVS, hFS);
-    return hProgram;
-}
 
 CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     const CKFFProgramVariant variant = ProgramVariantForKey(key);

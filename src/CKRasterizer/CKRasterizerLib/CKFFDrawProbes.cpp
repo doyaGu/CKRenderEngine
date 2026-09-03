@@ -88,13 +88,13 @@ void CKFFDrawProbes::OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayou
     Stats.HasLastIndexBuffer = TRUE;
 }
 
-void CKFFDrawProbes::OnUniform(const CKFFUniformHandles &uniforms, CKDWORD uniform, CKDWORD count)
+void CKFFDrawProbes::OnUniform(CKBackendConstantBlock block, CKDWORD count)
 {
     if (StatsEnabled()) {
         ++Stats.UniformSets;
         Stats.UniformVec4s += count;
     }
-    CKDWORD slot = Config.UniformHistEnabled ? CKFFUniformDebugSlot(uniforms, uniform) : 64;
+    CKDWORD slot = Config.UniformHistEnabled ? CKFFUniformDebugSlot(block) : 64;
     if (slot < 64) {
         ++Stats.UniformHandleSets[slot];
         Stats.UniformHandleVec4s[slot] += count;
@@ -163,7 +163,6 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
                    Stats.BufferBindUs,
                    Stats.SubmitUs);
         if (Config.UniformHistEnabled) {
-            const CKFFUniformHandles &uniforms = shaderCache.GetUniforms();
             for (CKDWORD slot = 0; slot < 64; ++slot) {
                 if (Stats.UniformHandleSets[slot] == 0)
                     continue;
@@ -171,7 +170,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
                            "frame=%u uniform=%u name=%s sets=%u vec4=%u",
                            Stats.FrameIndex,
                            slot,
-                           CKFFUniformDebugName(uniforms, slot),
+                           slot >= 1 ? CKFFUniformDebugName((CKBackendConstantBlock)(slot - 1)) : "unknown",
                            Stats.UniformHandleSets[slot],
                            Stats.UniformHandleVec4s[slot]);
             }

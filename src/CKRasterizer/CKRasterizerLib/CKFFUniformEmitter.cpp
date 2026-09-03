@@ -5,7 +5,7 @@
 #include "CKFFStageState.h"
 #include "CKFFStateResolver.h"
 #include "CKFFUniformState.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 
 #include <string.h>
 
@@ -56,14 +56,14 @@ static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
 }
 
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
-                                CKRasterizerEncoder *encoder,
+                                CKRasterizerBackend *backend,
                                 CKBOOL emitStatic,
                                 CKBOOL emitObject)
 {
     if (!sink)
         return;
     memset(sink, 0, sizeof(CKFFUniformSink));
-    sink->Encoder = encoder;
+    sink->Backend = backend;
     sink->EmitStatic = emitStatic;
     sink->EmitObject = emitObject;
 }
@@ -107,12 +107,12 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
 {
 }
 
-CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKDWORD uniform,
+CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKBackendConstantBlock block,
                                 const void *data, CKDWORD count,
                                 CKDWORD vec4Count, CKBOOL objectUniform)
 {
-    (void)vec4Count;
-    if (!sink || !data || count == 0)
+    (void)count;
+    if (!sink || !data || vec4Count == 0)
         return TRUE;
     if (sink->Failed)
         return FALSE;
@@ -120,16 +120,9 @@ CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKDWORD uniform,
         return TRUE;
     if (!objectUniform && !sink->EmitStatic)
         return TRUE;
-    if (sink->Encoder) {
-        if (sink->Encoder->GetStatus() != CK_OK) {
-            sink->Failed = TRUE;
-            return FALSE;
-        }
-        UploadUniform(sink->Encoder, uniform, data, count);
-        if (sink->Encoder->GetStatus() != CK_OK) {
-            sink->Failed = TRUE;
-            return FALSE;
-        }
+    if (sink->Backend && !UploadUniform(sink->Backend, block, data, vec4Count)) {
+        sink->Failed = TRUE;
+        return FALSE;
     }
     return TRUE;
 }
@@ -139,7 +132,6 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
     if (!context || !context->Uniforms || context->PositionT)
         return;
 
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformSink *sink = context->Uniforms;
     const bool viewSpaceUniforms = true;
     const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
@@ -198,12 +190,12 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
             else
                 palette[i] = (i == 0) ? m_State.World : identity;
         }
-        Emit(sink, u.u_vertexBlendMatrices, palette,
+        Emit(sink, CKRST_BLOCK_VERTEX_BLEND_MATRICES, palette,
              CKFF_VERTEX_BLEND_MATRIX_COUNT,
              CKFF_VERTEX_BLEND_MATRIX_COUNT * 4, TRUE);
     }
     const CKDWORD matrixCount = viewSpaceUniforms ? 4 : 2;
-    Emit(sink, u.u_ffMatrices, matrices, matrixCount, matrixCount * 4, TRUE);
+    Emit(sink, CKRST_BLOCK_MATRICES, matrices, matrixCount, matrixCount * 4, TRUE);
 }
 
 void CKFFUniformEmitter::EmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context)
@@ -211,10 +203,9 @@ void CKFFUniformEmitter::EmitTextureMatrixUniforms(const CKFFUniformEmissionCont
     if (!context || !context->Uniforms)
         return;
     CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     const CKDWORD texMatrixCount = CKFFCurrentTextureMatrixUploadCount(context, m_State.StageStates);
     if (texMatrixCount > 0)
-        Emit(sink, u.u_texMatrix, m_State.TexMatrix,
+        Emit(sink, CKRST_BLOCK_TEX_MATRICES, m_State.TexMatrix,
              texMatrixCount, texMatrixCount * 4, FALSE);
 }
 
@@ -224,11 +215,10 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     if (CKFFProgramUsesBumpEnv(context->ShaderKey)) {
         float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
         CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
-        Emit(sink, u.u_bumpEnv, bumpEnv,
+        Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
              CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
     }
 
@@ -247,7 +237,7 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             viewport[1] = -viewport[1];
             viewport[3] = -viewport[3];
         }
-        Emit(sink, u.u_viewport, viewport, 1, 1, FALSE);
+        Emit(sink, CKRST_BLOCK_VIEWPORT, viewport, 1, 1, FALSE);
     }
 
     CKFFStageParamsUniform stageParams;
@@ -272,12 +262,12 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             coord[1] = (float)samplingFlags;
         }
     }
-    Emit(sink, u.u_stageParams, stageParams.Values,
+    Emit(sink, CKRST_BLOCK_STAGE_PARAMS, stageParams.Values,
          CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
 
     CKFFSpecUniform ffSpec;
     CKFFPackSpecialization(context->Specialization, ffSpec);
-    Emit(sink, u.u_ffSpec, ffSpec.Values,
+    Emit(sink, CKRST_BLOCK_SPEC, ffSpec.Values,
          CKFF_SPEC_UNIFORM_VEC4_COUNT, CKFF_SPEC_UNIFORM_VEC4_COUNT, FALSE);
 }
 
@@ -287,16 +277,15 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFClipPlaneUniform clip;
     const CKDWORD clipMask = m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
     if (clipMask != 0) {
         CKFFPackClipPlaneUniforms(m_State.UserClipPlanes, clipMask, clip);
-        Emit(sink, u.u_clipPlanes, clip.Planes, 6, 6, FALSE);
+        Emit(sink, CKRST_BLOCK_CLIP_PLANES, clip.Planes, 6, 6, FALSE);
     } else {
         memset(&clip, 0, sizeof(clip));
     }
-    Emit(sink, u.u_clipParams, clip.Params, 1, 1, FALSE);
+    Emit(sink, CKRST_BLOCK_CLIP_PARAMS, clip.Params, 1, 1, FALSE);
 }
 
 void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
@@ -305,7 +294,6 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 {
     if (!sink || !programContext)
         return;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKFFUniformEmissionContext context;
     CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount);
     const bool emitStatic = sink->EmitStatic;
@@ -328,7 +316,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
                                     m_State.View, viewLights);
 
         if (packed > 1)
-            Emit(sink, u.u_lights, viewLights, packed * 7, packed * 7, FALSE);
+            Emit(sink, CKRST_BLOCK_LIGHTS, viewLights, packed * 7, packed * 7, FALSE);
     }
 
     float drawParams[CKFF_DRAW_PARAM_VEC4_COUNT][4];
@@ -336,53 +324,56 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
                                                                  drawParams, viewLights,
                                                                  packed, &context);
     if (drawParamCount > 0)
-        Emit(sink, u.u_ffDrawParams, drawParams, drawParamCount, drawParamCount, FALSE);
+        Emit(sink, CKRST_BLOCK_DRAW_PARAMS, drawParams, drawParamCount, drawParamCount, FALSE);
 
     EmitStageAndSpecUniforms(&context);
     EmitClipPlaneUniforms(&context);
 }
 
-void CKFFUniformEmitter::UploadUniforms(CKRasterizerEncoder *encoder,
-                                        const CKFFProgramContext *programContext,
-                                        CKDWORD activeTextureCount)
+CKBOOL CKFFUniformEmitter::UploadUniforms(CKRasterizerBackend *backend,
+                                          const CKFFProgramContext *programContext,
+                                          CKDWORD activeTextureCount)
 {
-    if (!encoder || !programContext)
-        return;
-    UploadObjectUniforms(encoder, programContext, activeTextureCount);
-    if (encoder->GetStatus() == CK_OK)
-        UploadStaticUniforms(encoder, programContext, activeTextureCount);
+    if (!backend || !programContext)
+        return FALSE;
+    if (!UploadObjectUniforms(backend, programContext, activeTextureCount))
+        return FALSE;
+    return UploadStaticUniforms(backend, programContext, activeTextureCount);
 }
 
-void CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerEncoder *encoder,
-                                              const CKFFProgramContext *programContext,
-                                              CKDWORD activeTextureCount)
+CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerBackend *backend,
+                                                const CKFFProgramContext *programContext,
+                                                CKDWORD activeTextureCount)
 {
-    if (!encoder || !programContext)
-        return;
+    if (!backend || !programContext)
+        return FALSE;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, encoder, FALSE, TRUE);
+    CKFFInitUniformSink(&sink, backend, FALSE, TRUE);
     EmitPayloads(&sink, programContext, activeTextureCount);
+    return sink.Failed ? FALSE : TRUE;
 }
 
-void CKFFUniformEmitter::UploadStaticUniforms(CKRasterizerEncoder *encoder,
-                                              const CKFFProgramContext *programContext,
-                                              CKDWORD activeTextureCount)
+CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKRasterizerBackend *backend,
+                                                const CKFFProgramContext *programContext,
+                                                CKDWORD activeTextureCount)
 {
-    if (!encoder || !programContext)
-        return;
+    if (!backend || !programContext)
+        return FALSE;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, encoder, TRUE, FALSE);
+    CKFFInitUniformSink(&sink, backend, TRUE, FALSE);
     EmitPayloads(&sink, programContext, activeTextureCount);
+    return sink.Failed ? FALSE : TRUE;
 }
 
-void CKFFUniformEmitter::UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform,
-                                       const void *data, CKDWORD count)
+CKBOOL CKFFUniformEmitter::UploadUniform(CKRasterizerBackend *backend, CKBackendConstantBlock block,
+                                         const void *data, CKDWORD vec4Count)
 {
-    if (!encoder)
-        return;
-    encoder->SetUniform(uniform, data, count);
+    if (!backend)
+        return FALSE;
+    if (backend->PushConstants(block, data, vec4Count) != CK_OK)
+        return FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-    if (encoder->GetStatus() == CK_OK)
-        m_Probes.OnUniform(m_ShaderCache.GetUniforms(), uniform, count);
+    m_Probes.OnUniform(block, vec4Count);
 #endif
+    return TRUE;
 }

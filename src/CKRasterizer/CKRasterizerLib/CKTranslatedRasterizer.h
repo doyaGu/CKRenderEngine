@@ -9,10 +9,14 @@
 // engine as the D3D7-shaped v3 contract. Every fixed-function state call is
 // mirrored verbatim (so Get* returns exactly what was set) and forwarded to
 // the fixed-function pipeline; draws go through CKFixedFunctionPipeline onto
-// the device encoder; the frame flow allocates one device view per pass.
+// the CKRasterizerBackend; the frame flow opens one backend pass per pass.
+// Phase 4.2: the context drives a CKDeviceBackend adapter over the device;
+// phase 4.3 replaces the adapter with the native bgfx backend.
 
 #include "CKRasterizer.h"
 #include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
+#include "CKDeviceBackend.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKPresentStage.h"
 
@@ -150,6 +154,7 @@ public:
 
     // --- Internal access ---
     CKRasterizerDevice *GetDevice() const { return m_Device; }
+    CKRasterizerBackend *GetBackend() const { return m_Backend; }
 
     // --- Test access (the translated tests read the pipeline and the mirror) ---
     CKFixedFunctionPipeline *GetFFPipelineForTests() { return &m_FFP; }
@@ -188,13 +193,16 @@ private:
         }
     };
 
+    // Texture readback of the current target (spec 5.8): armed by
+    // RequestReadback, issued at the end of the frame after the readback blit
+    // (Issued), the backend fills Data once its frame counter reaches
+    // AvailableFrame.
     struct PendingReadback {
         CKReadbackCallback Callback;
         void *User;
         CKRECT Rect;
         CKBOOL HasRect;
         VXBUFFER_TYPE Buffer;
-        // Filled by the device callback
         CKBOOL Done;
         CKBOOL Success;
         CKDWORD Width;
@@ -203,19 +211,13 @@ private:
         VX_PIXELFORMAT Format;
         CKBOOL YFlip;
         std::vector<CKBYTE> Data;
-        CKTranslatedContext *Owner;
-        // Texture readback of the native target (spec 5.8): armed by
-        // RequestReadback, issued at the end of the frame after the readback
-        // blit (Issued), the device fills Data once its frame counter reaches
-        // AvailableFrame. No device callback involved.
-        CKBOOL ViaTexture;
         CKBOOL Issued;
         CKDWORD AvailableFrame;
 
         PendingReadback()
             : Callback(NULL), User(NULL), HasRect(FALSE), Buffer(VXBUFFER_BACKBUFFER), Done(FALSE),
-              Success(FALSE), Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE), Owner(NULL),
-              ViaTexture(FALSE), Issued(FALSE), AvailableFrame(0) {
+              Success(FALSE), Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE),
+              Issued(FALSE), AvailableFrame(0) {
             Rect.left = Rect.top = Rect.right = Rect.bottom = 0;
         }
     };
@@ -229,8 +231,7 @@ private:
 
     // Frame flow
     void PrepareFrameTarget();
-    CKBOOL EnsureEncoder();
-    CKBOOL OpenPass(CKDWORD FrameBuffer, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
+    CKBOOL OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
                     float Z, CKDWORD Stencil, const char *Name);
     CKBOOL EnsureDrawPass();
     CKRECT CurrentTargetRect() const;
@@ -261,23 +262,21 @@ private:
                               CKDWORD VertexCount, CKDWORD StartIndex, CKDWORD IndexCount);
 
     // Readback helpers
-    static void ReadbackCallbackAdapter(void *UserData, CKDWORD FrameBuffer, CKDWORD Width, CKDWORD Height,
-                                        CKDWORD Pitch, VX_PIXELFORMAT Format, const void *Data, CKDWORD Size,
-                                        CKBOOL YFlip);
     CKBOOL BuildReadbackImage(const PendingReadback &Readback, VxImageDescEx &Desc, std::vector<CKBYTE> &Pixels) const;
-    // Native-target readback (spec 5.8). The swap chain is never read: the
-    // native color is blitted into the readback texture in a pass after the
-    // present pass and read from there. Falls back to the device screenshot
-    // when the frame does not render through the internal targets.
-    // Readback source: the native target (target 0) or the bound 2D target
-    // texture; cube faces cannot be blitted and are rejected.
+    // Readback (spec 5.8). The swap chain is never read: the source is
+    // blitted into the readback texture in a pass after the present pass (or
+    // after the target's scene passes) and read from there. Readback source:
+    // the native target (target 0) or the bound 2D target texture; cube faces
+    // cannot be blitted and are rejected, as is a frame that does not render
+    // through the internal targets.
     CKBOOL CanReadNativeTarget();
     CKBOOL CanReadTargetTexture();
     CKBOOL CanReadCurrentTarget();
-    CKBOOL BlitForReadback();                             // opens the "readback" pass, needs the encoder
+    CKBOOL BlitForReadback();                             // opens the "readback" pass
     CKBOOL IssueTextureReadback(PendingReadback &Readback); // ReadTexture after the blit of this frame
     CKBOOL HasArmedTextureReadbacks();
     void IssueArmedTextureReadbacks();
+    void FailArmedTextureReadbacks();
     // Frame without scene content: re-presents the native target so the window
     // keeps its image while waiting, and/or blits the readback source.
     CKBOOL SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber);
@@ -286,7 +285,8 @@ private:
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
 
     CKTranslatedDriver *m_TranslatedDriver;
-    CKRasterizerDevice *m_Device;
+    CKRasterizerDevice *m_Device;      // window / mode state (transitional, until the backend reports it)
+    CKDeviceBackend *m_Backend;        // owned; the FFP, the present stage and the frame flow talk to it
     CKFixedFunctionPipeline m_FFP;
     CKPresentStage m_Present;
     CKRasterizerOptions m_Options;
@@ -311,12 +311,9 @@ private:
     CKBOOL m_InternalTargets;     // frame renders through the scene / native targets
     CKBOOL m_Composited;
     CKBOOL m_FrameTargetDecided;
-    CKRasterizerEncoder *m_Encoder;
-    CKRenderView m_CurrentView;
-    CKDWORD m_NextView;
-    CKDWORD m_LastFrameViewCount;
+    CKBOOL m_FrameOpen;            // a backend pass was begun since the last Present
     CKDWORD m_FrameNumber;
-    CKDWORD m_LastDeviceFrame;     // device frame counter after the last Frame()
+    CKDWORD m_LastDeviceFrame;     // backend frame counter after the last Present()
     CKBOOL m_NativePresented;      // the native target holds the last presented frame
     XString m_Marker;
 
@@ -336,7 +333,6 @@ private:
     CKDWORD m_CopyHeight;
 
     // Readback
-    VxMutex m_ReadbackMutex;
     std::vector<PendingReadback *> m_Readbacks;
 
     // Stats

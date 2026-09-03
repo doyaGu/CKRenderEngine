@@ -47,7 +47,7 @@ public:
     CKERROR BeginPass(const CKBackendPassDesc *Desc) override;
     void SetPipelineState(const CKBackendPipelineState *State) override;
     void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) override;
-    void PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count) override;
+    CKERROR PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count) override;
     void SetMarker(const char *Name) override;
     CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) override;
     CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) override;
@@ -73,6 +73,7 @@ private:
         CKDWORD Texture;
         CKSamplerDesc Sampler;
         CKBOOL HasSampler;
+        CKBOOL PendingZero;   // explicit zero binding requested for the next draw
     };
 
     CKBOOL EnsureEncoder();

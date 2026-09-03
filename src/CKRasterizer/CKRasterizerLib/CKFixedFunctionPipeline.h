@@ -6,6 +6,7 @@
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerDeviceEnums.h"
 #include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackend.h"
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
@@ -27,16 +28,14 @@
 #define CKRE_ENABLE_TEST_ACCESS 0
 #endif
 
-class CKRasterizerDevice;
-class CKRasterizerEncoder;
-
 struct CKLightData;
 
 struct CKFFPipelineTestAccess;
 
 // Reasons a draw returns FALSE. Every fixed-function state the backend cannot
 // express is approximated instead (see RecordDrawApproximation); only invalid
-// input / state values and device failures still reject.
+// input / state values and backend failures (ENCODER_ERROR: a PushConstants /
+// Draw call the backend refused) still reject.
 enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_NONE = 0,
     CKFF_DRAW_REJECT_INVALID_INPUT,
@@ -57,7 +56,7 @@ public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 
-    bool Init(CKRasterizerDevice *ctx);
+    bool Init(CKRasterizerBackend *backend);
     CKERROR PrepareShutdown();
     CKERROR Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
@@ -125,14 +124,13 @@ public:
     CKDWORD GetFrameNumber() const { return m_FrameNumber; }
 
     // === Drawing ===
+    // Draws go to the backend's current pass (the frame flow opened it).
     // Draw using VxDrawPrimitiveData (software vertex path)
-    CKBOOL DrawPrimitive(CKRasterizerEncoder *encoder, CKRenderView view,
-                         VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
+    CKBOOL DrawPrimitive(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
                          VxDrawPrimitiveData *data);
 
     // Draw using persistent vertex/index buffer handles
-    CKBOOL DrawVertexBuffer(CKRasterizerEncoder *encoder, CKRenderView view,
-                            VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+    CKBOOL DrawVertexBuffer(VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
                             CKDWORD baseVertex, CKDWORD vertexCount,
                             CKDWORD startIndex, CKDWORD indexCount,
                             CKDWORD dpFlags, CKDWORD formatFlags,
@@ -179,7 +177,6 @@ private:
     enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
     struct CKFFDrawSubmission {
-        CKRenderView View;
         VXPRIMITIVETYPE DrawStateType;
         const CKFFProgramContext *ProgramContext;
         const CKFFTextureBindingSet *Textures;
@@ -193,7 +190,7 @@ private:
         CKFFSubmitSource Source;
     };
 
-    CKRasterizerDevice *m_Context;
+    CKRasterizerBackend *m_Backend;
     // Subsystems
     CKFFShaderCache m_ShaderCache;
     CKDrawStateCache m_DrawStateCache;
@@ -231,21 +228,15 @@ private:
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
     CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
     CKDWORD NearestBorderPaletteSlot(CKDWORD argb) const;
-    CKBOOL RejectPendingSubmission(CKRasterizerEncoder *encoder,
-                                   CKFFDrawRejectReason reason);
-    CKBOOL SubmitPrepared(CKRasterizerEncoder *encoder, const CKFFDrawSubmission &submission);
-    void BindTextures(CKRasterizerEncoder *encoder, CKDWORD program,
-                      const CKFFTextureBindingSet *bindingSet);
-    CKDWORD SubmitDiscardFlags() const;
+    CKBOOL SubmitPrepared(const CKFFDrawSubmission &submission);
+    void BindTextures(CKDWORD program, const CKFFTextureBindingSet *bindingSet);
     void LogAndResetFrameStats();
 
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);
     float ComputeDepthKey() const;
-    CKBOOL SubmitVertexBufferImmediate(CKRasterizerEncoder *encoder,
-                                       const CKFFProgramPreparation &preparation,
-                                       CKRenderView view,
+    CKBOOL SubmitVertexBufferImmediate(const CKFFProgramPreparation &preparation,
                                        VXPRIMITIVETYPE type,
                                        CKDWORD vb,
                                        CKDWORD ib,

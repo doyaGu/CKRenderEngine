@@ -364,23 +364,38 @@ void CKDeviceBackend::BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSampler
 {
     if (Slot >= CKRST_BACKEND_SLOT_COUNT)
         return;
-    m_Slots[Slot].Texture = Texture;
-    m_Slots[Slot].HasSampler = Sampler != NULL;
+    SlotBinding &slot = m_Slots[Slot];
+    if (Texture == 0) {
+        // The encoder forgets its bindings after every submit, so clearing a
+        // bound slot costs nothing; an explicit zero binding on an empty slot
+        // is the sampler-unit assignment GLSL programs need.
+        slot.PendingZero = slot.Texture == 0 ? TRUE : FALSE;
+        slot.Texture = 0;
+        slot.HasSampler = FALSE;
+        return;
+    }
+    slot.Texture = Texture;
+    slot.PendingZero = FALSE;
+    slot.HasSampler = Sampler != NULL;
     if (Sampler)
-        m_Slots[Slot].Sampler = *Sampler;
+        slot.Sampler = *Sampler;
 }
 
-void CKDeviceBackend::PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count)
+CKERROR CKDeviceBackend::PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count)
 {
     if ((int)Block < 0 || (int)Block >= CKRST_BLOCK_COUNT || !Data || Vec4Count == 0)
-        return;
+        return CKERR_INVALIDPARAMETER;
     if (!EnsureEncoder())
-        return;
+        return CKERR_INVALIDOPERATION;
     const CKBackendConstantBlockDesc &info = CKBackendConstantBlockInfo(Block);
     const CKDWORD count = info.Mat4 ? Vec4Count / 4 : Vec4Count;
     if (count == 0)
-        return;
+        return CKERR_INVALIDPARAMETER;
     m_Encoder->SetUniform(m_BlockUniforms[Block], Data, count);
+    const CKERROR status = m_Encoder->GetStatus();
+    if (status != CK_OK)
+        m_Encoder->Discard();
+    return status;
 }
 
 void CKDeviceBackend::SetMarker(const char *Name)
@@ -472,11 +487,24 @@ CKERROR CKDeviceBackend::Draw(const CKBackendDraw *Draw)
         m_Encoder->Discard();
         return status;
     }
+    // The device has CKFF_SAMPLER_SLOT_COUNT texture stages; the present
+    // sampler (slot 16) shares stage 0 with fixed-function slot 0, which a
+    // present draw never samples.
+    const CKBOOL presentBound = m_Slots[CKRST_BACKEND_SLOT_PRESENT].Texture != 0;
     for (CKDWORD slot = 0; slot < CKRST_BACKEND_SLOT_COUNT; ++slot) {
-        if (!m_Slots[slot].Texture)
+        SlotBinding &binding = m_Slots[slot];
+        if (slot == 0 && presentBound)
             continue;
-        m_Encoder->SetTexture(slot, m_SamplerUniforms[slot], m_Slots[slot].Texture,
-                              m_Slots[slot].HasSampler ? &m_Slots[slot].Sampler : NULL);
+        const CKDWORD stage = slot == CKRST_BACKEND_SLOT_PRESENT ? 0 : slot;
+        if (binding.PendingZero) {
+            m_Encoder->SetTexture(stage, m_SamplerUniforms[slot], 0, NULL);
+            binding.PendingZero = FALSE;
+            continue;
+        }
+        if (!binding.Texture)
+            continue;
+        m_Encoder->SetTexture(stage, m_SamplerUniforms[slot], binding.Texture,
+                              binding.HasSampler ? &binding.Sampler : NULL);
     }
     if (m_Marker) {
         m_Encoder->SetMarker((CKSTRING)m_Marker);

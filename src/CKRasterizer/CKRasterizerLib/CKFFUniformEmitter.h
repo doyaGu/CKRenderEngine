@@ -6,7 +6,7 @@
 #include "CKFFStateStore.h"
 
 class CKDrawStateCache;
-class CKRasterizerEncoder;
+class CKRasterizerBackend;
 
 class CKFFUniformEmitter {
 public:
@@ -21,19 +21,22 @@ public:
                        CKFFShaderCache &shaderCache);
 #endif
 
-    void UploadUniforms(CKRasterizerEncoder *encoder,
-                        const CKFFProgramContext *programContext,
-                        CKDWORD activeTextureCount);
+    // Pushes every constant block of the draw; FALSE when the backend refused
+    // an upload (the draw is then rejected).
+    CKBOOL UploadUniforms(CKRasterizerBackend *backend,
+                          const CKFFProgramContext *programContext,
+                          CKDWORD activeTextureCount);
 
 private:
-    void UploadObjectUniforms(CKRasterizerEncoder *encoder,
-                              const CKFFProgramContext *programContext,
-                              CKDWORD activeTextureCount);
-    void UploadStaticUniforms(CKRasterizerEncoder *encoder,
-                              const CKFFProgramContext *programContext,
-                              CKDWORD activeTextureCount);
-    void UploadUniform(CKRasterizerEncoder *encoder, CKDWORD uniform, const void *data, CKDWORD count);
-    CKBOOL Emit(CKFFUniformSink *sink, CKDWORD uniform, const void *data,
+    CKBOOL UploadObjectUniforms(CKRasterizerBackend *backend,
+                                const CKFFProgramContext *programContext,
+                                CKDWORD activeTextureCount);
+    CKBOOL UploadStaticUniforms(CKRasterizerBackend *backend,
+                                const CKFFProgramContext *programContext,
+                                CKDWORD activeTextureCount);
+    CKBOOL UploadUniform(CKRasterizerBackend *backend, CKBackendConstantBlock block, const void *data,
+                         CKDWORD vec4Count);
+    CKBOOL Emit(CKFFUniformSink *sink, CKBackendConstantBlock block, const void *data,
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
     void EmitPayloads(CKFFUniformSink *sink,
                       const CKFFProgramContext *programContext,

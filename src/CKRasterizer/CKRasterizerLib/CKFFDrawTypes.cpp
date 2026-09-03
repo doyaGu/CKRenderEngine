@@ -22,14 +22,6 @@ CKDWORD CKFFEncodeDepthKey(float depth)
     return bits;
 }
 
-CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCache &drawState)
-{
-    (void)state;
-    (void)drawState;
-
-    return CKRST_DISCARD_ALL;
-}
-
 CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b)
 {
     return a.Lo == b.Lo && a.Mid == b.Mid && a.Hi == b.Hi ? TRUE : FALSE;
@@ -59,7 +51,6 @@ CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureB
     for (CKDWORD i = 0; textures && i < activeTextureCount && i < CKFF_MAX_TEXTURE_STAGES; ++i) {
         const CKFFTextureBinding &binding = textures[i];
         hash = CKFFHashBytes(&binding.Stage, sizeof(binding.Stage), hash);
-        hash = CKFFHashBytes(&binding.Uniform, sizeof(binding.Uniform), hash);
         hash = CKFFHashBytes(&binding.Texture, sizeof(binding.Texture), hash);
         hash = CKFFHashBytes(&binding.TextureFlags, sizeof(binding.TextureFlags), hash);
         hash = CKFFHashBytes(&binding.Sampler, sizeof(binding.Sampler), hash);

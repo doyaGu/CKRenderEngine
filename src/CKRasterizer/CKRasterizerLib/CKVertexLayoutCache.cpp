@@ -1,5 +1,5 @@
 #include "CKVertexLayoutCache.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 #include "CKFFConstants.h"
 
 static int ActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
@@ -17,25 +17,25 @@ static CK_VERTEX_ATTRIB TexCoordAttrib(int stage) {
 }
 
 CKVertexLayoutCache::CKVertexLayoutCache()
-    : m_Context(nullptr) {}
+    : m_Backend(nullptr) {}
 
 CKVertexLayoutCache::~CKVertexLayoutCache() {
     Shutdown();
 }
 
-void CKVertexLayoutCache::Init(CKRasterizerDevice *ctx) {
-    m_Context = ctx;
+void CKVertexLayoutCache::Init(CKRasterizerBackend *backend) {
+    m_Backend = backend;
     m_Cache.Clear();
 }
 
 void CKVertexLayoutCache::Shutdown() {
-    if (m_Context) {
+    if (m_Backend) {
         for (XHashTable<CKDWORD, CKDWORD>::Iterator it = m_Cache.Begin(); it != m_Cache.End(); ++it) {
-            m_Context->DeleteObject(*it, CKRST_OBJ_VERTEXLAYOUT);
+            m_Backend->DestroyObject(*it, CKRST_OBJ_VERTEXLAYOUT);
         }
     }
     m_Cache.Clear();
-    m_Context = nullptr;
+    m_Backend = nullptr;
 }
 
 CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
@@ -256,7 +256,7 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
     desc.Stride = offset;
 
     CKDWORD handle = 0;
-    if (m_Context->CreateVertexLayout(&desc, &handle) != CK_OK)
+    if (!m_Backend || m_Backend->CreateVertexLayout(&desc, &handle) != CK_OK)
         return 0;
     m_Cache.Insert(formatFlags, handle);
 

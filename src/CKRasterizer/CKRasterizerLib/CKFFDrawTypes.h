@@ -7,21 +7,21 @@
 #include "CKRasterizerDeviceTypes.h"
 
 class CKDrawStateCache;
-class CKRasterizerEncoder;
+class CKRasterizerBackend;
 struct CKFFStateStore;
 
 struct CKFFUniformSink {
-    CKRasterizerEncoder *Encoder;
+    CKRasterizerBackend *Backend;
     CKBOOL EmitStatic;
     CKBOOL EmitObject;
     CKBOOL Failed;
 };
 
-// One texture stage resolved for the encoder: which sampler uniform / bind
-// slot it lands on, the texture handle and its sampler state.
+// One texture stage resolved for the backend: the sampler slot it lands on
+// (Stage, fixed layout of CKFFShaderABI.h), the texture handle and its
+// sampler state.
 struct CKFFTextureBinding {
-    CKDWORD Stage;
-    CKDWORD Uniform;
+    CKDWORD Stage;          // backend sampler slot
     CKDWORD Texture;
     CKDWORD TextureFlags;
     CKSamplerDesc Sampler;
@@ -91,7 +91,6 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
     set->Hash = 0;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         set->Bindings[stage].Stage = stage;
-        set->Bindings[stage].Uniform = 0;
         set->Bindings[stage].Texture = 0;
         set->Bindings[stage].TextureFlags = 0;
         set->Bindings[stage].Sampler = CKSamplerDesc();
@@ -100,7 +99,6 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
 
 float CKFFComputeDepthKey(const CKFFStateStore &state, const CKDrawStateCache &drawState);
 CKDWORD CKFFEncodeDepthKey(float depth);
-CKDWORD CKFFSubmitDiscardFlags(const CKFFStateStore &state, const CKDrawStateCache &drawState);
 CKBOOL CKFFDrawStateEquals(const CKDrawState &a, const CKDrawState &b);
 CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash);
 // Texture flags that select the sampler type (and therefore the program).

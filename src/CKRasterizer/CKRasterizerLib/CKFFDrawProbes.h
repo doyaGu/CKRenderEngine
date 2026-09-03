@@ -2,6 +2,7 @@
 #define CKFFDRAWPROBES_H
 
 #include "CKFFConstants.h"
+#include "CKRasterizerBackend.h"
 #include "CKRasterizerDeviceEnums.h"
 #include "CKRasterizerDeviceTypes.h"
 #include "CKRenderConfig.h"
@@ -105,7 +106,7 @@ public:
     void OnDrawState(const CKDrawState &drawState);
     void OnTextureSet(CKDWORD activeTextureCount, const CKDWORD *textures);
     void OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayout);
-    void OnUniform(const CKFFUniformHandles &uniforms, CKDWORD uniform, CKDWORD count);
+    void OnUniform(CKBackendConstantBlock block, CKDWORD count);
     void LogAndReset(CKDrawStateCache &drawStateCache);
 
     CKFFFrameStats Stats;

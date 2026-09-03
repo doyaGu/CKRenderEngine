@@ -1,5 +1,4 @@
 #include "CKPresentStage.h"
-#include "CKRasterizerDevice.h"
 
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_postprocess.bin.h"
@@ -88,7 +87,7 @@ float CKPresentStage::ClampSharpness(float sharpness)
 }
 
 CKPresentStage::CKPresentStage()
-    : m_Device(nullptr), m_ReadbackTexture(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
+    : m_Backend(nullptr), m_ReadbackTexture(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
       m_VertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
 CKPresentStage::~CKPresentStage()
@@ -96,23 +95,23 @@ CKPresentStage::~CKPresentStage()
     Shutdown();
 }
 
-void CKPresentStage::Init(CKRasterizerDevice *device)
+void CKPresentStage::Init(CKRasterizerBackend *backend)
 {
     Shutdown();
-    m_Device = device;
+    m_Backend = backend;
 }
 
 void CKPresentStage::Shutdown()
 {
     DestroyTargets();
     DestroyResources();
-    m_Device = nullptr;
+    m_Backend = nullptr;
     m_ResourceIds = CKPresentResources();
 }
 
 CKBOOL CKPresentStage::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples)
 {
-    if (!m_Device || width == 0 || height == 0)
+    if (!m_Backend || width == 0 || height == 0)
         return FALSE;
     if (samples <= 1)
         samples = 0;
@@ -124,7 +123,7 @@ CKBOOL CKPresentStage::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD 
 
 CKBOOL CKPresentStage::EnsureNativeTarget(CKDWORD width, CKDWORD height)
 {
-    if (!m_Device || width == 0 || height == 0)
+    if (!m_Backend || width == 0 || height == 0)
         return FALSE;
     if (m_Native.IsActive() && m_Native.Width == width && m_Native.Height == height)
         return TRUE;
@@ -141,7 +140,7 @@ void CKPresentStage::DestroyTargets()
 
 CKDWORD CKPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height)
 {
-    if (!m_Device || width == 0 || height == 0)
+    if (!m_Backend || width == 0 || height == 0)
         return 0;
     if (m_ReadbackTexture && m_ReadbackWidth == width && m_ReadbackHeight == height)
         return m_ReadbackTexture;
@@ -154,7 +153,7 @@ CKDWORD CKPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height)
     desc.Depth = 1;
     desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
                  CKRST_TEXTURE_BLIT_DST | CKRST_TEXTURE_READBACK;
-    if (m_Device->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK) {
+    if (m_Backend->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK) {
         m_ReadbackTexture = 0;
         return 0;
     }
@@ -165,8 +164,8 @@ CKDWORD CKPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height)
 
 void CKPresentStage::DestroyReadbackTexture()
 {
-    if (m_Device && m_ReadbackTexture)
-        m_Device->DeleteObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
+    if (m_Backend && m_ReadbackTexture)
+        m_Backend->DestroyObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
     m_ReadbackTexture = 0;
     m_ReadbackWidth = m_ReadbackHeight = 0;
 }
@@ -187,41 +186,31 @@ CKBOOL CKPresentStage::CreateTarget(CKPresentTarget &target, CKDWORD width, CKDW
     colorDesc.Depth = 1;
     colorDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
                       CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET | msaaFlag;
-    if (m_Device->CreateTexture(&colorDesc, nullptr, &target.ColorTexture) != CK_OK)
+    if (m_Backend->CreateTexture(&colorDesc, nullptr, &target.ColorTexture) != CK_OK)
         return FALSE;
 
-    CKDepthTextureDesc depthDesc = {};
-    depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL | msaaFlag;
+    CKBackendDepthDesc depthDesc;
     depthDesc.Width = width;
     depthDesc.Height = height;
-    depthDesc.MipMapCount = 1;
+    depthDesc.Samples = samples;
     static const CK_DEPTH_FORMAT kDepthFormats[] = {CKRST_DEPTHFMT_D24S8, CKRST_DEPTHFMT_D24, CKRST_DEPTHFMT_D16};
     CKERROR depthErr = CKERR_NOTIMPLEMENTED;
     for (size_t i = 0; i < sizeof(kDepthFormats) / sizeof(kDepthFormats[0]) && depthErr != CK_OK; ++i) {
-        depthDesc.DepthFormat = kDepthFormats[i];
-        depthErr = m_Device->CreateDepthTexture(&depthDesc, &target.DepthTexture);
+        depthDesc.Format = kDepthFormats[i];
+        depthErr = m_Backend->CreateDepthTexture(&depthDesc, &target.DepthTexture);
     }
     if (depthErr != CK_OK) {
-        m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
+        m_Backend->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
         target.ColorTexture = 0;
         return FALSE;
     }
 
-    CKFrameBufferAttachmentDesc colorAttachment;
-    colorAttachment.Texture = target.ColorTexture;
-    colorAttachment.Mip = 0;
-    colorAttachment.Layer = 0;
-
-    CKFrameBufferDesc fbDesc;
-    fbDesc.Color = &colorAttachment;
-    fbDesc.ColorCount = 1;
-    fbDesc.DepthStencil.Texture = target.DepthTexture;
-    fbDesc.DepthStencil.Mip = 0;
-    fbDesc.DepthStencil.Layer = 0;
-
-    if (m_Device->CreateFrameBuffer(&fbDesc, &target.FrameBuffer) != CK_OK) {
-        m_Device->DeleteObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
-        m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
+    CKBackendRenderTargetDesc rtDesc;
+    rtDesc.ColorTexture = target.ColorTexture;
+    rtDesc.DepthTexture = target.DepthTexture;
+    if (m_Backend->CreateRenderTarget(&rtDesc, &target.FrameBuffer) != CK_OK) {
+        m_Backend->DestroyObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
+        m_Backend->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
         target = CKPresentTarget();
         return FALSE;
     }
@@ -234,66 +223,45 @@ CKBOOL CKPresentStage::CreateTarget(CKPresentTarget &target, CKDWORD width, CKDW
 
 void CKPresentStage::DestroyTarget(CKPresentTarget &target)
 {
-    if (m_Device) {
+    if (m_Backend) {
         if (target.FrameBuffer)
-            m_Device->DeleteObject(target.FrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+            m_Backend->DestroyObject(target.FrameBuffer, CKRST_OBJ_RENDERTARGET);
         if (target.DepthTexture)
-            m_Device->DeleteObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
+            m_Backend->DestroyObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
         if (target.ColorTexture)
-            m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
+            m_Backend->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
     }
     target = CKPresentTarget();
 }
 
 CKBOOL CKPresentStage::EnsureResources()
 {
-    if (!m_Device || !m_Device->m_Driver)
+    if (!m_Backend)
         return FALSE;
-    CKRasterizerTargetDesc target;
-    if (m_Device->GetTargetDesc(&target) != CK_OK)
+    const CKBackendCaps &caps = m_Backend->GetCaps();
+    if (caps.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
         return FALSE;
-    if (target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
-        return FALSE;
-    if (m_VertexShaderProfile == target.ShaderProfile &&
-        m_Device->IsObjectAlive(m_ResourceIds.Program, CKRST_OBJ_PROGRAM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER) &&
-        m_Device->IsObjectAlive(m_ResourceIds.SamplerUniform, CKRST_OBJ_UNIFORM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.ParamsUniform, CKRST_OBJ_UNIFORM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT))
+    if (m_VertexShaderProfile == caps.ShaderProfile &&
+        m_Backend->IsObjectAlive(m_ResourceIds.Program, CKRST_OBJ_PROGRAM) &&
+        m_Backend->IsObjectAlive(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER) &&
+        m_Backend->IsObjectAlive(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER) &&
+        m_Backend->IsObjectAlive(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT))
         return TRUE;
 
     DestroyResources();
 
-    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(target.ShaderProfile);
+    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(caps.ShaderProfile);
     if (!blobs)
         return FALSE;
 
-    CKUniformDesc uniformDesc;
-    uniformDesc.Name = (CKSTRING)"s_sceneColor";
-    uniformDesc.Type = CKRST_UNIFORM_SAMPLER;
-    uniformDesc.Count = 1;
-    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.SamplerUniform) != CK_OK) {
-        DestroyResources();
-        return FALSE;
-    }
-
-    uniformDesc.Name = (CKSTRING)"u_postParams";
-    uniformDesc.Type = CKRST_UNIFORM_VEC4;
-    uniformDesc.Count = 1;
-    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.ParamsUniform) != CK_OK) {
-        DestroyResources();
-        return FALSE;
-    }
-
     CKShaderDesc shaderDesc;
     shaderDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
-    shaderDesc.Profile = target.ShaderProfile;
+    shaderDesc.Profile = caps.ShaderProfile;
 
     shaderDesc.Stage = CKRST_SHADER_VERTEX;
     shaderDesc.Code = blobs->VS;
     shaderDesc.CodeSize = blobs->VSSize;
-    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.VertexShader) != CK_OK) {
+    if (m_Backend->CreateShader(&shaderDesc, &m_ResourceIds.VertexShader) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -301,16 +269,12 @@ CKBOOL CKPresentStage::EnsureResources()
     shaderDesc.Stage = CKRST_SHADER_PIXEL;
     shaderDesc.Code = blobs->FS;
     shaderDesc.CodeSize = blobs->FSSize;
-    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.PixelShader) != CK_OK) {
+    if (m_Backend->CreateShader(&shaderDesc, &m_ResourceIds.PixelShader) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
 
-    CKProgramDesc programDesc;
-    programDesc.VertexShader = m_ResourceIds.VertexShader;
-    programDesc.PixelShader = m_ResourceIds.PixelShader;
-    programDesc.ConsumeShaders = FALSE;
-    if (m_Device->CreateProgram(&programDesc, &m_ResourceIds.Program) != CK_OK) {
+    if (m_Backend->CreateProgram(m_ResourceIds.VertexShader, m_ResourceIds.PixelShader, &m_ResourceIds.Program) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -334,55 +298,44 @@ CKBOOL CKPresentStage::EnsureResources()
     layoutDesc.Elements = elements;
     layoutDesc.ElementCount = 2;
     layoutDesc.Stride = 20;
-    if (m_Device->CreateVertexLayout(&layoutDesc, &m_ResourceIds.VertexLayout) != CK_OK) {
+    if (m_Backend->CreateVertexLayout(&layoutDesc, &m_ResourceIds.VertexLayout) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
 
-    m_VertexShaderProfile = target.ShaderProfile;
+    m_VertexShaderProfile = caps.ShaderProfile;
     return TRUE;
 }
 
 void CKPresentStage::DestroyResources()
 {
-    if (m_Device) {
+    if (m_Backend) {
         if (m_ResourceIds.Program)
-            m_Device->DeleteObject(m_ResourceIds.Program, CKRST_OBJ_PROGRAM);
+            m_Backend->DestroyObject(m_ResourceIds.Program, CKRST_OBJ_PROGRAM);
         if (m_ResourceIds.VertexShader)
-            m_Device->DeleteObject(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER);
+            m_Backend->DestroyObject(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER);
         if (m_ResourceIds.PixelShader)
-            m_Device->DeleteObject(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER);
-        if (m_ResourceIds.SamplerUniform)
-            m_Device->DeleteObject(m_ResourceIds.SamplerUniform, CKRST_OBJ_UNIFORM);
-        if (m_ResourceIds.ParamsUniform)
-            m_Device->DeleteObject(m_ResourceIds.ParamsUniform, CKRST_OBJ_UNIFORM);
+            m_Backend->DestroyObject(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER);
         if (m_ResourceIds.VertexLayout)
-            m_Device->DeleteObject(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT);
+            m_Backend->DestroyObject(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT);
     }
-    m_ResourceIds.Program = 0;
-    m_ResourceIds.VertexShader = 0;
-    m_ResourceIds.PixelShader = 0;
-    m_ResourceIds.SamplerUniform = 0;
-    m_ResourceIds.ParamsUniform = 0;
-    m_ResourceIds.VertexLayout = 0;
+    m_ResourceIds = CKPresentResources();
     m_VertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
 }
 
-CKERROR CKPresentStage::SubmitResolve(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa,
-                                         float sharpness)
+CKERROR CKPresentStage::SubmitResolve(CKBOOL fxaa, float sharpness)
 {
-    return Submit(encoder, view, m_Scene, fxaa, sharpness);
+    return Submit(m_Scene, fxaa, sharpness);
 }
 
-CKERROR CKPresentStage::SubmitBlit(CKRasterizerEncoder *encoder, CKRenderView view)
+CKERROR CKPresentStage::SubmitBlit()
 {
-    return Submit(encoder, view, m_Native, FALSE, 0.0f);
+    return Submit(m_Native, FALSE, 0.0f);
 }
 
-CKERROR CKPresentStage::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
-                                  const CKPresentTarget &source, CKBOOL fxaa, float sharpness)
+CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float sharpness)
 {
-    if (!m_Device || !encoder || !source.IsActive() || !EnsureResources())
+    if (!m_Backend || !source.IsActive() || !EnsureResources())
         return CKERR_NOTIMPLEMENTED;
 
     struct PresentVertex {
@@ -390,15 +343,12 @@ CKERROR CKPresentStage::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
         float U, V;
     };
 
-    CKTransientVertexBuffer tvb;
-    memset(&tvb, 0, sizeof(tvb));
-    if (!m_Device->AllocTransientVertexBuffer(&tvb, 3, m_ResourceIds.VertexLayout))
+    CKBackendTransientVertices tvb;
+    if (!m_Backend->AllocTransientVertices(3, m_ResourceIds.VertexLayout, &tvb) || tvb.Stride < sizeof(PresentVertex))
         return CKERR_OUTOFMEMORY;
 
     PresentVertex *vertices = (PresentVertex *)tvb.Data;
-    CKRasterizerTargetDesc target;
-    const CKBOOL originBottomLeft =
-        m_Device->GetTargetDesc(&target) == CK_OK && target.OriginBottomLeft;
+    const CKBOOL originBottomLeft = m_Backend->GetCaps().OriginBottomLeft;
     const float bottomV = originBottomLeft ? 0.0f : 1.0f;
     const float extendedTopV = originBottomLeft ? 2.0f : -1.0f;
     vertices[0] = {-1.0f, -1.0f, 0.0f, 0.0f, bottomV};
@@ -422,19 +372,24 @@ CKERROR CKPresentStage::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
         sharpness
     };
 
-    CKDrawState state = CKDrawStateBuilder()
+    CKBackendPipelineState state;
+    state.State = CKDrawStateBuilder()
         .Depth(FALSE, FALSE, VXCMP_ALWAYS)
         .Cull(VXCULL_NONE)
         .Build();
+    m_Backend->SetPipelineState(&state);
+    m_Backend->BindTexture(CKRST_BACKEND_SLOT_PRESENT, source.ColorTexture, &sampler);
+    const CKERROR pushed = m_Backend->PushConstants(CKRST_BLOCK_PRESENT_PARAMS, params, 1);
+    if (pushed != CK_OK)
+        return pushed;
 
-    encoder->SetState(state);
-    encoder->SetStencilRef(0);
-    encoder->SetStencilMask(0xFF, 0xFF);
-    encoder->SetScissor(nullptr);
-    encoder->SetPointSize(1.0f);
-    encoder->SetTransientVertexBuffer(0, &tvb);
-    encoder->SetTexture(0, m_ResourceIds.SamplerUniform, source.ColorTexture, &sampler);
-    encoder->SetUniform(m_ResourceIds.ParamsUniform, params, 1);
-    encoder->Submit(view, m_ResourceIds.Program, 0, CKRST_DISCARD_ALL);
-    return encoder->GetStatus();
+    CKBackendDraw draw;
+    draw.Program = m_ResourceIds.Program;
+    draw.Layout = m_ResourceIds.VertexLayout;
+    draw.TransientVertices = &tvb;
+    draw.VertexCount = 3;
+    const CKERROR drawn = m_Backend->Draw(&draw);
+    // The present sampler is only used by these fullscreen draws.
+    m_Backend->BindTexture(CKRST_BACKEND_SLOT_PRESENT, 0, NULL);
+    return drawn;
 }

@@ -266,9 +266,12 @@ void TestFrame()
               "PRESERVE maps to the device's preserve-present frame");
     TestCheck(b->GetStats().Passes == 0 && b->GetStats().Draws == 0, "an empty frame has no passes");
 
-    // Readback goes through the device (the recording device has none).
+    // Readback goes through the device (the recording device reports the
+    // layout of a zero-filled image).
     CKReadbackDesc readback;
-    TestCheck(b->ReadTexture(dst, 0, &readback, NULL) == CKERR_NOTIMPLEMENTED, "ReadTexture forwards to the device");
+    TestCheck(b->ReadTexture(dst, 0, &readback, NULL) == CK_OK && readback.Width == 4 && readback.Height == 4 &&
+                  readback.RequiredSize == 4 * 4 * 4,
+              "ReadTexture forwards to the device");
     TestCheck(b->DestroyObject(dst, CKRST_OBJ_TEXTURE) == CK_OK && b->DestroyObject(texture, CKRST_OBJ_TEXTURE) == CK_OK,
               "cleanup");
 }

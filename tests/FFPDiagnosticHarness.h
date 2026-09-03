@@ -2,6 +2,7 @@
 #define CKRE_FFP_DIAGNOSTIC_HARNESS_H
 
 #include "CKRasterizerDevice.h"
+#include "CKDeviceBackend.h"
 #include "CKTranslatedRasterizer.h"
 #include "TestTriangleMultiset.h"
 
@@ -247,9 +248,20 @@ public:
     void Blit(CKRenderView, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, CKDWORD, const CKRECT *) override {}
 };
 
+// Backend adapter for the fixed-function unit tests: FFPBackend() opens one
+// pass that stays open for the whole test, so IsIdle() reports TRUE to let the
+// pipeline shut down at the end of the test.
+class FFPTestBackend : public CKDeviceBackend {
+public:
+    explicit FFPTestBackend(CKRasterizerDevice *device) : CKDeviceBackend(device) {}
+    CKBOOL IsIdle() const override { return TRUE; }
+};
+
+// Recording device. Reports a shader-capable backend once created, like the
+// bgfx device does; the fixed-function pipeline builds programs only then.
 class FFPDiagnosticContext : public CKRasterizerDevice {
 public:
-    explicit FFPDiagnosticContext(CKRasterizerDeviceDriver *driver) {
+    explicit FFPDiagnosticContext(CKRasterizerDeviceDriver *driver) : Backend(this) {
         Encoder.Owner = this;
         m_Driver = driver;
         m_Width = 64;
@@ -275,6 +287,36 @@ public:
 
     CKERROR GetDeviceStatus() const override { return DeviceStatus; }
 
+    CKERROR GetCaps(CKRasterizerDeviceCapsDesc *caps) const override {
+        const CKERROR status = CKRasterizerDevice::GetCaps(caps);
+        if (status != CK_OK)
+            return status;
+        caps->Features |= CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER |
+                          CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_TEXTURE_READBACK;
+        caps->MaxTextureBindings = 16;
+        return CK_OK;
+    }
+
+    // Backend the fixed-function unit tests drive the pipeline through:
+    // initialised on first use with the device size and one open pass.
+    CKRasterizerBackend *FFPBackend() {
+        if (!m_BackendReady) {
+            CKBackendInitDesc init;
+            init.Width = (int)m_Width;
+            init.Height = (int)m_Height;
+            init.Bpp = 32;
+            init.ZBpp = 24;
+            init.StencilBpp = 8;
+            TestCheck(Backend.Init(&init) == CK_OK, "FFP diagnostic backend must initialise");
+            CKBackendPassDesc pass;
+            pass.Rect.right = (int)m_Width;
+            pass.Rect.bottom = (int)m_Height;
+            TestCheck(Backend.BeginPass(&pass) == CK_OK, "FFP diagnostic backend must open its pass");
+            m_BackendReady = TRUE;
+        }
+        return &Backend;
+    }
+
     FFPDiagnosticEncoder Encoder;
     CKBOOL AllowTransientInstanceBuffer = TRUE;
     CKBOOL FailTransientInstanceBuffer = FALSE;
@@ -287,8 +329,9 @@ public:
     CKBOOL FailBeginEncoder = FALSE;
     CKDWORD TransientVertexCapacity = 0xFFFFFFFFu;
     CKDWORD TransientIndexCapacity = 0xFFFFFFFFu;
-    CKDWORD TransientVertexAllocations = 0;
+    CKDWORD TransientVertexAllocations = 0;   // successful allocations
     CKDWORD TransientIndexAllocations = 0;
+    CKDWORD ReadTextureCount = 0;
     CKDWORD CreatedShaderCount = 0;
     CKDWORD CreatedProgramCount = 0;
     CKDWORD CreatedTextureCount = 0;
@@ -356,6 +399,8 @@ public:
         }
         CKERROR result = AllocateHandle(out);
         LastCreatedTexture = out ? *out : 0;
+        if (result == CK_OK && desc)
+            m_TextureSizes[*out] = std::make_pair((CKDWORD)desc->Format.Width, (CKDWORD)desc->Format.Height);
         return result;
     }
     CKERROR CreateShader(const CKShaderDesc *desc, CKDWORD *out) override {
@@ -432,8 +477,32 @@ public:
             LastTextureUpdateDesc = *desc;
         return FailUpdateTexture ? CKERR_INVALIDPARAMETER : CK_OK;
     }
-    CKERROR ReadTexture(CKDWORD, CKDWORD, CKReadbackDesc *, CKDWORD *) override {
-        return CKERR_NOTIMPLEMENTED;
+    // Readbacks deliver a zero-filled ARGB image of the texture size, available
+    // after the next Frame() (the recording device draws nothing).
+    CKERROR ReadTexture(CKDWORD texture, CKDWORD, CKReadbackDesc *desc, CKDWORD *available) override {
+        if (!desc || !LiveHandles.count(texture))
+            return CKERR_INVALIDPARAMETER;
+        ++ReadTextureCount;
+        CKDWORD width = m_Width, height = m_Height;
+        std::unordered_map<CKDWORD, std::pair<CKDWORD, CKDWORD> >::const_iterator it = m_TextureSizes.find(texture);
+        if (it != m_TextureSizes.end()) {
+            width = it->second.first;
+            height = it->second.second;
+        }
+        desc->Width = width;
+        desc->Height = height;
+        desc->RowPitch = width * 4;
+        desc->Format = _32_ARGB8888;
+        desc->YFlip = FALSE;
+        desc->RequiredSize = desc->RowPitch * height;
+        if (!desc->Data)
+            return CK_OK;
+        if (desc->Capacity < desc->RequiredSize)
+            return CKERR_INVALIDPARAMETER;
+        memset(desc->Data, 0, desc->RequiredSize);
+        if (available)
+            *available = FrameSerial + 1;
+        return CK_OK;
     }
     CK_OCCLUSION_RESULT GetOcclusionResult(CKDWORD, CKDWORD *) override { return CKRST_OCCLUSION_NORESULT; }
     CKERROR SetPaletteColor(CKDWORD index, CKDWORD color) override {
@@ -518,6 +587,8 @@ public:
     CKERROR TouchView(CKRenderView) override { return CK_OK; }
     CKDWORD AllocTransform(VxMatrix *, CKDWORD) override { return 1; }
     CKBOOL AllocTransientVertexBuffer(CKTransientVertexBuffer *buffer, CKDWORD vertexCount, CKDWORD layout) override {
+        if (vertexCount > TransientVertexCapacity)
+            return FALSE;
         ++TransientVertexAllocations;
         const CKDWORD stride = m_LayoutStride[layout];
         TestCheck(stride > 0, "FFP diagnostic context must know transient vertex stride");
@@ -531,6 +602,8 @@ public:
         return TRUE;
     }
     CKBOOL AllocTransientIndexBuffer(CKTransientIndexBuffer *buffer, CKDWORD indexCount, CKBOOL index32) override {
+        if (indexCount > TransientIndexCapacity)
+            return FALSE;
         ++TransientIndexAllocations;
         m_IndexStorage.assign(indexCount * (index32 ? sizeof(CKDWORD) : sizeof(CKWORD)), 0);
         buffer->Data = m_IndexStorage.data();
@@ -588,10 +661,17 @@ public:
 private:
     CKRasterizerDeviceStats m_Stats = {};
     CKDWORD NextResourceHandle = 1;
+    CKBOOL m_BackendReady = FALSE;
     std::unordered_map<CKDWORD, CKDWORD> m_LayoutStride;
+    std::unordered_map<CKDWORD, std::pair<CKDWORD, CKDWORD> > m_TextureSizes;
     std::vector<CKBYTE> m_VertexStorage;
     std::vector<CKBYTE> m_IndexStorage;
     std::vector<CKBYTE> m_InstanceStorage;
+
+public:
+    // Last member: its destructor releases the backend's device objects on
+    // this device, so it has to run before the handle tables above go away.
+    FFPTestBackend Backend;
 };
 
 inline void FFPDiagnosticEncoder::Submit(CKRenderView view, CKDWORD program, CKDWORD, CKDWORD flags) {
@@ -623,21 +703,10 @@ inline void FFPDiagnosticEncoder::Submit(CKRenderView view, CKDWORD program, CKD
 // Recording device behind the v3 translation core
 // ===========================================================================
 
-// Reports a shader-capable backend once created, like the bgfx device does;
-// the fixed-function pipeline builds programs only then.
+// The device behind the translated context (it owns its own CKDeviceBackend).
 class FFPRecordingContext : public FFPDiagnosticContext {
 public:
     explicit FFPRecordingContext(CKRasterizerDeviceDriver *driver) : FFPDiagnosticContext(driver) {}
-
-    CKERROR GetCaps(CKRasterizerDeviceCapsDesc *caps) const override {
-        const CKERROR status = CKRasterizerDevice::GetCaps(caps);
-        if (status != CK_OK)
-            return status;
-        caps->Features |= CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER |
-                          CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_TEXTURE_READBACK;
-        caps->MaxTextureBindings = 16;
-        return CK_OK;
-    }
 };
 
 class FFPRecordingDriver : public FFPDiagnosticDriver {

@@ -8,7 +8,7 @@
 #include "CKFFStateStore.h"
 #include "XHashTable.h"
 
-class CKRasterizerEncoder;
+class CKRasterizerBackend;
 
 class CKFFTextureBinder {
 public:
@@ -25,9 +25,11 @@ public:
     void ResetProgramBindings();
     void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
                          CKDWORD sampledTextureMask) const;
-    CKBOOL InitializeProgramSamplers(CKRasterizerEncoder *encoder,
+    CKBOOL InitializeProgramSamplers(CKRasterizerBackend *backend,
                                      CKDWORD program);
-    void Bind(CKRasterizerEncoder *encoder, CKDWORD program,
+    // Binds the set's textures on their slots and clears the slots the
+    // previous draw used but this one does not (backend bindings are sticky).
+    void Bind(CKRasterizerBackend *backend, CKDWORD program,
               const CKFFTextureBindingSet *set);
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 
@@ -35,6 +37,7 @@ private:
     const CKFFStateStore &m_State;
     CKFFShaderCache &m_ShaderCache;
     XHashTable<CKBOOL, CKDWORD> m_InitializedPrograms;
+    CKDWORD m_BoundSlotMask;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes &m_Probes;
 #endif

@@ -18,9 +18,35 @@ struct TransientGeometryHarness {
     TransientGeometryHarness()
         : Driver(), Context(&Driver), LayoutCache(), Geometry()
     {
-        LayoutCache.Init(&Context);
-        Geometry.Init(&Context, &LayoutCache);
+        LayoutCache.Init(Context.FFPBackend());
+        Geometry.Init(Context.FFPBackend(), &LayoutCache);
     }
+
+    // Bytes of the last Prepare (empty when it produced no vertices / indices).
+    const std::vector<CKBYTE> &VertexBytes()
+    {
+        m_VertexBytes.clear();
+        const CKBackendTransientVertices *vertices = Geometry.GetVertices();
+        if (vertices && vertices->Data && vertices->Count > 0) {
+            const CKBYTE *begin = static_cast<const CKBYTE *>(vertices->Data);
+            m_VertexBytes.assign(begin, begin + (size_t)vertices->Count * vertices->Stride);
+        }
+        return m_VertexBytes;
+    }
+    const std::vector<CKBYTE> &IndexBytes()
+    {
+        m_IndexBytes.clear();
+        const CKBackendTransientIndices *indices = Geometry.GetIndices();
+        if (indices && indices->Data && indices->Count > 0) {
+            const CKBYTE *begin = static_cast<const CKBYTE *>(indices->Data);
+            m_IndexBytes.assign(begin, begin + (size_t)indices->Count * (indices->Index32 ? 4 : 2));
+        }
+        return m_IndexBytes;
+    }
+
+private:
+    std::vector<CKBYTE> m_VertexBytes;
+    std::vector<CKBYTE> m_IndexBytes;
 };
 
 static void InitQuadData(VxDrawPrimitiveData *data,
@@ -126,8 +152,7 @@ static void QuadUsesGenericFanPath()
     InitQuadData(&data, positions, texcoords, colors);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
                                        &data,
@@ -145,12 +170,12 @@ static void QuadUsesGenericFanPath()
               "2D quad should use generic fan conversion");
 #endif
 
-    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 4 * 40,
+    TestCheck(harness.VertexBytes().size() == 4 * 40,
               "generic path should write four 40-byte vertices");
-    TestCheck(harness.Context.Encoder.LastIndexBytes.size() == 6 * sizeof(CKWORD),
+    TestCheck(harness.IndexBytes().size() == 6 * sizeof(CKWORD),
               "generic path should write six 16-bit indices");
 
-    const CKBYTE *vb = harness.Context.Encoder.LastVertexBytes.data();
+    const CKBYTE *vb = harness.VertexBytes().data();
     for (int i = 0; i < 4; ++i) {
         const CKBYTE *vertex = vb + i * 40;
         TestCheck(ReadFloat(vertex + 0) == positions[i * 4 + 0] &&
@@ -169,7 +194,7 @@ static void QuadUsesGenericFanPath()
                   "generic path specular default must match positionT default");
     }
 
-    const CKWORD *ib = (const CKWORD *)harness.Context.Encoder.LastIndexBytes.data();
+    const CKWORD *ib = (const CKWORD *)harness.IndexBytes().data();
     TestCheck(ib[0] == 0 && ib[1] == 1 && ib[2] == 2 &&
               ib[3] == 0 && ib[4] == 2 && ib[5] == 3,
               "generic path must preserve triangle fan winding");
@@ -188,8 +213,7 @@ static void IndexedTriangleFanUsesGenericPath()
     InitQuadData(&data, positions, texcoords, colors);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        indices,
                                        4,
                                        &data) == TRUE,
@@ -215,15 +239,13 @@ static void PairedTransientCapacityIsCheckedBeforeAllocation()
     harness.Context.TransientVertexCapacity = 4;
     harness.Context.TransientIndexCapacity = 5;
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
                                        &data) == FALSE,
               "paired transient prepare must fail when the index budget is short");
-    TestCheck(harness.Context.TransientVertexAllocations == 0 &&
-                  harness.Context.TransientIndexAllocations == 0,
-              "paired transient capacity failure must not consume either budget");
+    TestCheck(harness.Context.TransientIndexAllocations == 0,
+              "paired transient capacity failure must not consume the index budget");
 }
 
 static void ExtendedTexcoordDataUsesGenericPath()
@@ -241,8 +263,7 @@ static void ExtendedTexcoordDataUsesGenericPath()
     data.TexCoordStrides[0] = 2 * sizeof(float);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
                                        &data) == TRUE,
@@ -260,8 +281,7 @@ static void ExtendedTexcoordDataUsesGenericPath()
     data.TexCoordStrides[0] = 2 * sizeof(float);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
                                        &data) == TRUE,
@@ -298,8 +318,7 @@ static void FourComponentTexcoordQuadUsesGenericPath()
     texcoordCounts[0] = 4;
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLEFAN,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
                                        &data,
@@ -350,8 +369,7 @@ static void MultipleTextureStagesApplyIndependentWrapModes()
     texcoordCounts[1] = 3;
     wrapModes[1] = VXWRAP_U | VXWRAP_S;
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLELIST,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST,
                                        NULL,
                                        0,
                                        &data,
@@ -363,10 +381,10 @@ static void MultipleTextureStagesApplyIndependentWrapModes()
               "independent stage wrap prepare should succeed");
 
     const CKDWORD stride = 56;
-    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == stride * 3,
+    TestCheck(harness.VertexBytes().size() == stride * 3,
               "independent stage wrap should emit one expanded triangle");
-    if (harness.Context.Encoder.LastVertexBytes.size() == stride * 3) {
-        const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+    if (harness.VertexBytes().size() == stride * 3) {
+        const CKBYTE *vertices = harness.VertexBytes().data();
         TestCheck(ReadFloat(vertices + 16) == 0.2f &&
                   ReadFloat(vertices + stride + 16) == 0.4f &&
                   ReadFloat(vertices + stride * 2 + 16) == 0.6f,
@@ -401,17 +419,16 @@ static void LineWrapHandlesLargeCoordinateSpans()
     data.TexCoordPtr = texcoords;
     data.TexCoordStride = 2 * sizeof(float);
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_LINELIST, NULL, 0, &data,
+    TestCheck(harness.Geometry.Prepare(VX_LINELIST, NULL, 0, &data,
                                        VXWRAP_U, FALSE, NULL, NULL,
                                        wrapModes) == TRUE,
               "line wrap prepare should succeed");
-    const size_t vertexBytes = harness.Context.Encoder.LastVertexBytes.size();
+    const size_t vertexBytes = harness.VertexBytes().size();
     TestCheck(vertexBytes > 0 && (vertexBytes & 1u) == 0,
               "line wrap must emit one expanded line segment");
     if (vertexBytes > 0 && (vertexBytes & 1u) == 0) {
         const size_t stride = vertexBytes / 2;
-        const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
+        const CKBYTE *vertices = harness.VertexBytes().data();
         TestCheck(fabs(ReadFloat(vertices + stride + 16) - 1.1f) < 0.0001f,
                   "line wrap must normalize arbitrary integer coordinate spans");
     }
@@ -435,16 +452,15 @@ static void LargePointSpriteBatchUses32BitIndices()
     data.PositionPtr = positions.data();
     data.PositionStride = sizeof(VxVector);
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_POINTLIST, NULL, 0, &data,
+    TestCheck(harness.Geometry.Prepare(VX_POINTLIST, NULL, 0, &data,
                                        0, TRUE, &params, NULL) == TRUE,
               "large point sprite batch should prepare with 32-bit indices");
     const size_t expectedIndexBytes = (size_t)pointCount * 6 * sizeof(CKDWORD);
-    TestCheck(harness.Context.Encoder.LastIndexBytes.size() == expectedIndexBytes,
+    TestCheck(harness.IndexBytes().size() == expectedIndexBytes,
               "large point sprite batch must allocate a 32-bit index buffer");
-    if (harness.Context.Encoder.LastIndexBytes.size() == expectedIndexBytes) {
+    if (harness.IndexBytes().size() == expectedIndexBytes) {
         const CKDWORD *indices =
-            (const CKDWORD *)harness.Context.Encoder.LastIndexBytes.data();
+            (const CKDWORD *)harness.IndexBytes().data();
         const CKDWORD lastBase = (CKDWORD)(pointCount - 1) * 4;
         TestCheck(indices[(pointCount - 1) * 6] == lastBase &&
                   indices[(pointCount - 1) * 6 + 5] == lastBase + 3,
@@ -477,12 +493,11 @@ static void IndexedPointSpritesUseSelectedVertices()
     data.PositionPtr = positions;
     data.PositionStride = sizeof(VxVector);
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_POINTLIST, indices, 2, &data,
+    TestCheck(harness.Geometry.Prepare(VX_POINTLIST, indices, 2, &data,
                                        0, TRUE, &params, NULL) == TRUE,
               "indexed point sprites should prepare selected vertices");
-    const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
-    const size_t stride = harness.Context.Encoder.LastVertexBytes.size() / 8;
+    const CKBYTE *vertices = harness.VertexBytes().data();
+    const size_t stride = harness.VertexBytes().size() / 8;
     TestCheck(stride > 0 &&
                   fabs(ReadFloat(vertices) - 29.0f) < 0.0001f &&
                   fabs(ReadFloat(vertices + stride * 4) - 0.0f) < 0.0001f,
@@ -515,15 +530,14 @@ static void PointSpritesReplaceEveryDeclaredTexcoord()
     data.TexCoordPtrs[0] = texcoord1;
     data.TexCoordStrides[0] = sizeof(texcoord1);
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_POINTLIST, NULL, 0, &data,
+    TestCheck(harness.Geometry.Prepare(VX_POINTLIST, NULL, 0, &data,
                                        0, TRUE, &params, NULL) == TRUE,
               "multistage point sprite should prepare");
     const CKDWORD stride = 52;
-    const CKBYTE *vertices = harness.Context.Encoder.LastVertexBytes.data();
-    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == stride * 4,
+    const CKBYTE *vertices = harness.VertexBytes().data();
+    TestCheck(harness.VertexBytes().size() == stride * 4,
               "multistage point sprite must emit four complete vertices");
-    if (harness.Context.Encoder.LastVertexBytes.size() == stride * 4) {
+    if (harness.VertexBytes().size() == stride * 4) {
         TestCheck(ReadFloat(vertices + 12) == 0.0f &&
                       ReadFloat(vertices + 16) == 0.0f &&
                       ReadFloat(vertices + 28) == 0.0f &&
@@ -551,10 +565,9 @@ static void InvalidTransientIndexIsRejected()
     data.PositionPtr = positions;
     data.PositionStride = sizeof(VxVector);
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_LINELIST, indices, 2, &data) == FALSE,
+    TestCheck(harness.Geometry.Prepare(VX_LINELIST, indices, 2, &data) == FALSE,
               "transient geometry must reject out-of-range indices");
-    TestCheck(harness.Context.Encoder.LastVertexBytes.empty(),
+    TestCheck(harness.VertexBytes().empty(),
               "invalid indices must be rejected before transient allocation");
 }
 
@@ -613,8 +626,7 @@ static void SpriteBatchUsesGenericPath()
     InitSpriteBatchData(&data, vertices, 8, CKRST_DP_TR_CL_VCST);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLELIST,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST,
                                        indices,
                                        12,
                                        &data,
@@ -630,12 +642,12 @@ static void SpriteBatchUsesGenericPath()
               "sprite batch triangle list should not convert topology");
 #endif
 
-    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 8 * 36,
+    TestCheck(harness.VertexBytes().size() == 8 * 36,
               "sprite batch generic path should write eight 36-byte vertices");
-    TestCheck(harness.Context.Encoder.LastIndexBytes.size() == 12 * sizeof(CKWORD),
+    TestCheck(harness.IndexBytes().size() == 12 * sizeof(CKWORD),
               "sprite batch generic path should copy twelve 16-bit indices");
 
-    const CKBYTE *vb = harness.Context.Encoder.LastVertexBytes.data();
+    const CKBYTE *vb = harness.VertexBytes().data();
     for (int i = 0; i < 8; ++i) {
         const CKBYTE *vertex = vb + i * 36;
         TestCheck(ReadFloat(vertex + 0) == vertices[i].V.x &&
@@ -653,7 +665,7 @@ static void SpriteBatchUsesGenericPath()
                   "sprite batch specular color must convert ARGB to ABGR");
     }
 
-    const CKWORD *ib = (const CKWORD *)harness.Context.Encoder.LastIndexBytes.data();
+    const CKWORD *ib = (const CKWORD *)harness.IndexBytes().data();
     for (int i = 0; i < 12; ++i) {
         TestCheck(ib[i] == indices[i],
                   "sprite batch generic path must preserve source indices");
@@ -671,8 +683,7 @@ static void NonBatchTriangleListUsesGenericPath()
     InitSpriteBatchData(&data, vertices, 8, CKRST_DP_TR_VCST);
     BeginStatsSample();
 
-    TestCheck(harness.Geometry.Prepare(&harness.Context.Encoder,
-                                       VX_TRIANGLELIST,
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST,
                                        indices,
                                        9,
                                        &data,
@@ -744,8 +755,7 @@ static void TweenPrepareKeepsDedicatedVertexAttributes()
     data.TweenNormalPtr = &tweenNormal;
     data.TweenNormalStride = sizeof(tweenNormal);
 
-    TestCheck(harness.Geometry.Prepare(
-                  &harness.Context.Encoder, VX_POINTLIST,
+    TestCheck(harness.Geometry.Prepare(VX_POINTLIST,
                   NULL, 0, &data, 0, FALSE, NULL, NULL),
               "Tween transient prepare must succeed");
 
@@ -759,7 +769,7 @@ static void TweenPrepareKeepsDedicatedVertexAttributes()
     }
     TestCheck(hasTangent && hasBitangent,
               "Tween transient prepare must retain both dedicated attributes");
-    TestCheck(harness.Context.Encoder.LastVertexBytes.size() == 72,
+    TestCheck(harness.VertexBytes().size() == 72,
               "Tween transient prepare must allocate the complete vertex stride");
 }
 

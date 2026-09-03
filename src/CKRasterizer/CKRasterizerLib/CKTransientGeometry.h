@@ -5,10 +5,9 @@
 #include "VxMatrix.h"
 #include "CKRasterizerDeviceEnums.h"
 #include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerBackend.h"
 #include "XArray.h"
 
-class CKRasterizerDevice;
-class CKRasterizerEncoder;
 class CKVertexLayoutCache;
 
 struct CKFFPointSpriteParams {
@@ -31,14 +30,13 @@ public:
     CKTransientGeometry();
     ~CKTransientGeometry();
 
-    void Init(CKRasterizerDevice *ctx, CKVertexLayoutCache *layoutCache);
+    void Init(CKRasterizerBackend *backend, CKVertexLayoutCache *layoutCache);
     void Shutdown();
 
     // Pack VxDrawPrimitiveData (scattered attribute pointers with varying strides)
-    // into an interleaved transient vertex buffer, optionally with an index buffer,
-    // and bind them to the encoder ready for Submit.
+    // into transient backend vertices, optionally with transient indices; the
+    // results (GetVertices / GetIndices) go into the CKBackendDraw of this draw.
     CKBOOL Prepare(
-        CKRasterizerEncoder *encoder,
         VXPRIMITIVETYPE primType,
         CKWORD *indices,
         int indexCount,
@@ -53,6 +51,9 @@ public:
     CKDWORD GetLayoutHandle() const { return m_LastLayout; }
     CKDWORD GetLastVertexBytes() const { return m_LastVertexBytes; }
     CKDWORD GetLastIndexBytes() const { return m_LastIndexBytes; }
+    // Geometry of the last successful Prepare (indices NULL when non-indexed).
+    const CKBackendTransientVertices *GetVertices() const { return &m_Vertices; }
+    const CKBackendTransientIndices *GetIndices() const { return m_HasIndices ? &m_Indices : NULL; }
 
     // Convert triangle fan/strip indices to triangle list.
     // Returns the number of output indices written to dst.
@@ -84,8 +85,11 @@ public:
                                  const float *texcoordOverrides = nullptr);
 
 private:
-    CKRasterizerDevice *m_Context;
+    CKRasterizerBackend *m_Backend;
     CKVertexLayoutCache *m_LayoutCache;
+    CKBackendTransientVertices m_Vertices;
+    CKBackendTransientIndices m_Indices;
+    CKBOOL m_HasIndices;
     CKDWORD m_LastLayout;
     CKDWORD m_LastVertexBytes;
     CKDWORD m_LastIndexBytes;

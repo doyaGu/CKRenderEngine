@@ -1,4 +1,4 @@
-// CKTranslatedContext: frame flow (one device view per pass), draws and the
+// CKTranslatedContext: frame flow (one backend pass per pass), draws and the
 // backbuffer upload. See CKTranslatedRasterizer.h.
 
 #include "CKTranslatedRasterizer.h"
@@ -31,7 +31,7 @@ int PrimitiveCount(VXPRIMITIVETYPE Type, int ElementCount)
 } // namespace
 
 // ===========================================================================
-// Pass / view management
+// Pass management
 // ===========================================================================
 
 CKRECT CKTranslatedContext::WindowRect() const
@@ -145,8 +145,8 @@ void CKTranslatedContext::PrepareFrameTarget()
     m_FrameTargetDecided = TRUE;
     m_InternalTargets = FALSE;
     m_Composited = FALSE;
-    CKRasterizerDeviceCapsDesc caps;
-    if (m_Device->GetCaps(&caps) != CK_OK || caps.MaxTextureSize == 0)
+    const CKBackendCaps &caps = m_Backend->GetCaps();
+    if (caps.MaxTextureSize == 0)
         return;
     const CKDWORD width = CKPresentStage::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD height = CKPresentStage::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
@@ -169,39 +169,23 @@ void CKTranslatedContext::PrepareFrameTarget()
     UpdateTargetExtents();
 }
 
-CKBOOL CKTranslatedContext::EnsureEncoder()
-{
-    if (m_Encoder)
-        return TRUE;
-    m_Encoder = m_Device->BeginEncoder();
-    return m_Encoder != NULL;
-}
-
-CKBOOL CKTranslatedContext::OpenPass(CKDWORD FrameBuffer, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
+CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
                                      float Z, CKDWORD Stencil, const char *Name)
 {
-    if (!EnsureEncoder())
+    CKBackendPassDesc pass;
+    pass.RenderTarget = RenderTarget;
+    pass.Rect = Rect;
+    pass.ClearFlags = ClearFlags;
+    pass.ClearColor = Color;
+    pass.ClearZ = Z;
+    pass.ClearStencil = Stencil;
+    pass.Name = Name;
+    if (m_Backend->BeginPass(&pass) != CK_OK)
         return FALSE;
-    CKRenderView view;
-    if (m_NextView < CKRST_MAX_RENDER_VIEWS) {
-        view = (CKRenderView)m_NextView++;
-    } else {
-        // Out of device views: keep drawing into the last one. Clears would
-        // apply to the whole pass, so drop them.
-        view = m_CurrentView;
-        ClearFlags = 0;
-    }
-    m_Device->SetViewMode(view, CKRST_VIEWMODE_SEQUENTIAL);
-    m_Device->SetViewFrameBuffer(view, FrameBuffer);
-    m_Device->SetViewRect(view, Rect);
-    m_Device->SetViewClear(view, ClearFlags, Color, Z, Stencil);
-    if (m_Options.DebugFlags & CKRST_DEBUG_DRAWMAP)
-        m_Device->SetViewName(view, (CKSTRING)Name);
-    m_Encoder->Touch(view);
-    m_CurrentView = view;
+    m_FrameOpen = TRUE;
     m_PassOpen = TRUE;
     ++m_FramePasses;
-    return m_Encoder->GetStatus() == CK_OK ? TRUE : FALSE;
+    return TRUE;
 }
 
 CKBOOL CKTranslatedContext::EnsureDrawPass()
@@ -219,7 +203,7 @@ CKBOOL CKTranslatedContext::CompositeScene()
         return TRUE;
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "composite"))
         return FALSE;
-    if (m_Present.SubmitResolve(m_Encoder, m_CurrentView, m_Options.FXAA, m_Options.Sharpness) != CK_OK)
+    if (m_Present.SubmitResolve(m_Options.FXAA, m_Options.Sharpness) != CK_OK)
         return FALSE;
     m_Composited = TRUE;
     return TRUE;
@@ -233,23 +217,19 @@ CKBOOL CKTranslatedContext::PresentInternalTarget()
         return TRUE;
     if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "present"))
         return FALSE;
-    return m_Present.SubmitBlit(m_Encoder, m_CurrentView) == CK_OK ? TRUE : FALSE;
+    return m_Present.SubmitBlit() == CK_OK ? TRUE : FALSE;
 }
 
 void CKTranslatedContext::ReleaseFrameScratch()
 {
     for (size_t i = 0; i < m_FrameIndexBuffers.size(); ++i)
-        m_Device->DeleteObject(m_FrameIndexBuffers[i], CKRST_OBJ_INDEXBUFFER);
+        m_Backend->DestroyObject(m_FrameIndexBuffers[i], CKRST_OBJ_INDEXBUFFER);
     m_FrameIndexBuffers.clear();
 }
 
 void CKTranslatedContext::FinishFrame()
 {
     ReleaseFrameScratch();
-    for (CKDWORD view = m_NextView; view < m_LastFrameViewCount; ++view)
-        m_Device->ResetView((CKRenderView)view);
-    m_LastFrameViewCount = m_NextView;
-    m_NextView = 0;
     m_PassOpen = FALSE;
     m_OverlayPhase = FALSE;
     m_Composited = FALSE;
@@ -327,7 +307,7 @@ CKBOOL CKTranslatedContext::BeginScene()
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
-    if (m_Device->GetDeviceStatus() != CK_OK) {
+    if (m_Backend->GetDeviceStatus() != CK_OK) {
         Diag(CKRST_DIAG_REJECT_DEVICE_LOST);
         return FALSE;
     }
@@ -382,49 +362,31 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
-    if (m_Encoder) {
-        CKBOOL readbackBlitted = FALSE;
+    if (m_FrameOpen) {
         if (!m_Target) {
             CompositeScene();
             if (PresentInternalTarget())
                 m_NativePresented = m_InternalTargets;
         }
-        if ((m_Target || m_NativePresented) && HasArmedTextureReadbacks() && CanReadCurrentTarget())
-            readbackBlitted = BlitForReadback();
-        m_Device->EndEncoder(m_Encoder);
-        m_Encoder = NULL;
-        if (readbackBlitted)
+        if (HasArmedTextureReadbacks() && CanReadCurrentTarget() && BlitForReadback())
             IssueArmedTextureReadbacks();
     }
     if (HasArmedTextureReadbacks()) {
         // No frame carried the blit (no scene at all): one more frame with
         // the present and the readback blit.
         CKDWORD frame = 0;
-        if ((m_Target || m_NativePresented) && CanReadCurrentTarget() && SubmitReadbackFrame(TRUE, TRUE, &frame)) {
+        if (!m_FrameOpen && CanReadCurrentTarget() && SubmitReadbackFrame(m_NativePresented, TRUE, &frame)) {
             m_LastDeviceFrame = frame;
             IssueArmedTextureReadbacks();
         } else {
-            std::vector<PendingReadback *> armed;
-            {
-                VxMutexLock lock(m_ReadbackMutex);
-                for (size_t i = 0; i < m_Readbacks.size(); ++i)
-                    if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
-                        armed.push_back(m_Readbacks[i]);
-            }
-            for (size_t i = 0; i < armed.size(); ++i) {
-                armed[i]->ViaTexture = FALSE;
-                if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, armed[i]) != CK_OK) {
-                    VxMutexLock lock(m_ReadbackMutex);
-                    armed[i]->Done = TRUE;
-                    armed[i]->Success = FALSE;
-                }
-            }
+            FailArmedTextureReadbacks();
         }
     }
-    const CKRST_FRAME_SYNC_MODE mode = m_Target ? CKRST_FRAME_SYNC_PRESERVE_PRESENT
-                                       : (VSync ? CKRST_FRAME_SYNC_VSYNC : CKRST_FRAME_SYNC_IMMEDIATE);
+    const CKBackendPresentMode mode = m_Target ? CKRST_BACKEND_PRESENT_PRESERVE
+                                      : (VSync ? CKRST_BACKEND_PRESENT_VSYNC : CKRST_BACKEND_PRESENT_IMMEDIATE);
     CKDWORD frameNumber = 0;
-    const CKERROR status = m_Device->Frame(mode, CKRST_FRAME_NONE, &frameNumber);
+    const CKERROR status = m_Backend->Present(mode, &frameNumber);
+    m_FrameOpen = FALSE;
     if (status == CK_OK)
         m_LastDeviceFrame = frameNumber;
     FinishFrame();
@@ -461,7 +423,7 @@ CKBOOL CKTranslatedContext::CheckDeviceForDraw()
 {
     if (!m_Created || m_ShuttingDown)
         return FALSE;
-    if (m_Device->GetDeviceStatus() != CK_OK) {
+    if (m_Backend->GetDeviceStatus() != CK_OK) {
         Diag(CKRST_DIAG_REJECT_DEVICE_LOST);
         return FALSE;
     }
@@ -475,7 +437,7 @@ void CKTranslatedContext::CountDraw(VXPRIMITIVETYPE Type, int ElementCount)
 }
 
 // Fixed-function draw failures: invalid values are the caller's fault, the
-// rest is the device (program creation / encoder). Approximated states are
+// rest is the backend (program creation / refused draw). Approximated states are
 // counted through the APPROX_* / IGNORE_* diagnostics after a successful draw.
 CKRST_DIAGNOSTIC CKTranslatedContext::DrawRejectDiagnostic() const
 {
@@ -511,11 +473,15 @@ CKBOOL CKTranslatedContext::DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices,
         return FALSE;
     if (!EnsureDrawPass())
         return FALSE;
-    if (m_Marker.Length() > 0) {
-        m_Encoder->SetMarker((CKSTRING)m_Marker.Str());
+    const CKBOOL marker = m_Marker.Length() > 0;
+    if (marker)
+        m_Backend->SetMarker(m_Marker.Str());
+    const CKBOOL drawn = m_FFP.DrawPrimitive(Type, Indices, elementCount, Data);
+    if (marker) {
+        m_Backend->SetMarker(NULL);
         m_Marker = "";
     }
-    if (!m_FFP.DrawPrimitive(m_Encoder, m_CurrentView, Type, Indices, elementCount, Data)) {
+    if (!drawn) {
         Diag(DrawRejectDiagnostic());
         return FALSE;
     }
@@ -530,13 +496,17 @@ CKBOOL CKTranslatedContext::SubmitVertexBuffer(VXPRIMITIVETYPE Type, const Resou
 {
     if (!EnsureDrawPass())
         return FALSE;
-    if (m_Marker.Length() > 0) {
-        m_Encoder->SetMarker((CKSTRING)m_Marker.Str());
+    const CKBOOL marker = m_Marker.Length() > 0;
+    if (marker)
+        m_Backend->SetMarker(m_Marker.Str());
+    const CKBOOL drawn = m_FFP.DrawVertexBuffer(Type, VB.Handle, IBHandle, BaseVertex, VertexCount, StartIndex,
+                                                IndexCount, VB.VertexBuffer.m_VertexFormat, VB.FormatFlags,
+                                                VB.DeviceLayout);
+    if (marker) {
+        m_Backend->SetMarker(NULL);
         m_Marker = "";
     }
-    if (!m_FFP.DrawVertexBuffer(m_Encoder, m_CurrentView, Type, VB.Handle, IBHandle, BaseVertex, VertexCount,
-                                StartIndex, IndexCount, VB.VertexBuffer.m_VertexFormat, VB.FormatFlags,
-                                VB.DeviceLayout)) {
+    if (!drawn) {
         Diag(DrawRejectDiagnostic());
         return FALSE;
     }
@@ -567,12 +537,14 @@ CKBOOL CKTranslatedContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB, CK
     if (!ValidatePrimitive(Type, IndexCount))
         return FALSE;
     // Indices are relative to StartVertex; upload them for this frame.
-    CKIndexBufferDesc desc;
-    desc.m_Flags = CKRST_VB_VALID | CKRST_VB_DYNAMIC;
-    desc.m_MaxIndexCount = (CKDWORD)IndexCount;
-    desc.m_CurrentICount = (CKDWORD)IndexCount;
+    CKBackendBufferDesc desc;
+    desc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+    desc.Size = (CKDWORD)IndexCount * 2;
+    desc.Index32 = FALSE;
+    desc.Dynamic = TRUE;
+    desc.InitialData = Indices;
     CKDWORD ib = 0;
-    if (m_Device->CreateIndexBuffer(&desc, FALSE, Indices, &ib) != CK_OK || ib == 0) {
+    if (m_Backend->CreateBuffer(&desc, &ib) != CK_OK || ib == 0) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
@@ -651,22 +623,22 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
 
     CKERROR err = CK_OK;
     if (m_CopyWidth != (CKDWORD)width || m_CopyHeight != (CKDWORD)height ||
-        !m_Device->IsObjectAlive(m_CopyTexture, CKRST_OBJ_TEXTURE)) {
+        !m_Backend->IsObjectAlive(m_CopyTexture, CKRST_OBJ_TEXTURE)) {
         if (m_CopyTexture != 0) {
-            m_Device->DeleteObject(m_CopyTexture, CKRST_OBJ_TEXTURE);
+            m_Backend->DestroyObject(m_CopyTexture, CKRST_OBJ_TEXTURE);
             m_CopyTexture = 0;
         }
         CKTextureDesc texDesc;
         texDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
         texDesc.Format = videoFormat;
         texDesc.MipMapCount = 1;
-        err = m_Device->CreateTexture(&texDesc, &uploadDesc, &m_CopyTexture);
+        err = m_Backend->CreateTexture(&texDesc, &uploadDesc, &m_CopyTexture);
         if (err == CK_OK) {
             m_CopyWidth = (CKDWORD)width;
             m_CopyHeight = (CKDWORD)height;
         }
     } else {
-        err = m_Device->UpdateTexture(m_CopyTexture, 0, 0, NULL, &uploadDesc);
+        err = m_Backend->UpdateTexture(m_CopyTexture, 0, 0, NULL, &uploadDesc);
     }
     if (err != CK_OK)
         return 0;
@@ -731,7 +703,7 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
     dp.TexCoordPtr = uvs;
     dp.TexCoordStride = sizeof(uvs[0]);
 
-    const CKBOOL drawn = m_FFP.DrawPrimitive(m_Encoder, m_CurrentView, VX_TRIANGLEFAN, NULL, 4, &dp);
+    const CKBOOL drawn = m_FFP.DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, &dp);
     guard.Restore();
     m_FFP.SetViewport(m_Viewport);
     if (!drawn) {

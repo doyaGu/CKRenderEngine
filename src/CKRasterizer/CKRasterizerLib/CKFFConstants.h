@@ -74,30 +74,5 @@ struct CKFFFragmentConstants {
     float BumpEnvLum[4];    // x=scale, y=offset, z=0, w=0
 };
 
-// ============================================================================
-// Uniform handle table - created once at init
-// ============================================================================
-
-struct CKFFUniformHandles {
-    // User uniforms (uploaded via SetUniform per draw)
-    // Transform uniforms are NOT here: bgfx handles u_model, u_modelView,
-    // u_modelViewProj, u_viewProj automatically via SetViewTransform/SetTransform.
-    CKDWORD u_lights;       // vec4 array: 8 lights x 7 vec4 = 56 elements
-    CKDWORD u_ffMatrices;   // mat4 array: MVP/projection, model, modelView, normal, blend worldView[4]
-    CKDWORD u_vertexBlendMatrices; // mat4 array: fixed-function vertex blend world matrix palette
-    CKDWORD u_ffDrawParams; // vec4 array: vertex/fragment params[0..11], inline light[12..18], tween[19]
-    CKDWORD u_texMatrix;   // mat4 array: one texture matrix per stage
-    CKDWORD u_bumpEnv;      // vec4 array: 2 elements per texture stage (matrix, luminance)
-    CKDWORD u_viewport;     // vec4: scaleX, scaleY, offsetX, offsetY
-    CKDWORD u_stageParams;  // vec4 array: per-stage color/alpha ops and args
-    CKDWORD u_ffSpec;       // vec4 array: FFP variant specialization dwords mirror
-    CKDWORD u_clipPlanes;   // vec4 array: compact enabled user clip planes
-    CKDWORD u_clipParams;   // vec4: x=enabled clip plane count
-    CKDWORD s_texture[CKFF_MAX_TEXTURE_STAGES];     // 2D samplers
-    CKDWORD s_textureCube[CKFF_CUBE_SAMPLER_COUNT]; // cube samplers (type ordinal)
-    CKDWORD s_textureVolume[CKFF_VOLUME_SAMPLER_COUNT]; // volume samplers (type ordinal)
-
-    CKFFUniformHandles() { memset(this, 0, sizeof(*this)); }
-};
 
 #endif // CKFFCONSTANTS_H

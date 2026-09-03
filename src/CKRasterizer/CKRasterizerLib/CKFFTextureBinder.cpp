@@ -2,7 +2,7 @@
 
 #include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 
 static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
 {
@@ -22,21 +22,8 @@ static CKDWORD CKFFTextureBindingSamplerType(CKDWORD samplerType)
     return CKFF_SAMPLER_2D;
 }
 
-static CKDWORD CKFFTextureBindingUniform(const CKFFUniformHandles &uniforms,
-                                         CKDWORD samplerType,
-                                         CKDWORD stageOrOrdinal)
-{
-    if (stageOrOrdinal >= CKFFSamplerTypeSlotCount(samplerType))
-        return 0;
-    if (samplerType == CKFF_SAMPLER_CUBE)
-        return uniforms.s_textureCube[stageOrOrdinal];
-    if (samplerType == CKFF_SAMPLER_VOLUME)
-        return uniforms.s_textureVolume[stageOrOrdinal];
-    return uniforms.s_texture[stageOrOrdinal];
-}
 
 static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
-                                       const CKFFUniformHandles &uniforms,
                                        CKDWORD activeTextureCount,
                                        CKDWORD sampledTextureMask,
                                        const CKDWORD *textureHandles,
@@ -66,7 +53,6 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         else if (samplerType == CKFF_SAMPLER_VOLUME)
             slotIndex = volumeOrdinal++;
         set->Bindings[stage].Stage = CKFFSamplerSlot(samplerType, slotIndex);
-        set->Bindings[stage].Uniform = CKFFTextureBindingUniform(uniforms, samplerType, slotIndex);
         set->Bindings[stage].Texture = textureHandles[stage];
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
@@ -87,7 +73,8 @@ CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
       m_Probes(probes),
 #endif
-      m_SamplerOverrides()
+      m_SamplerOverrides(),
+      m_BoundSlotMask(0)
 {
 }
 
@@ -103,7 +90,6 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
 {
     if (!out)
         return;
-    const CKFFUniformHandles &u = m_ShaderCache.GetUniforms();
     CKDWORD activeCount = activeTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
@@ -112,19 +98,20 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
         if ((sampledTextureMask & (1u << i)) != 0)
             samplers[i] = BuildSamplerDesc((int)i);
     }
-    CKFFBuildTextureBindingSet(out, u, activeCount, sampledTextureMask,
+    CKFFBuildTextureBindingSet(out, activeCount, sampledTextureMask,
                                m_State.TextureHandles, m_State.TextureFlags, samplers);
 }
 
 void CKFFTextureBinder::ResetProgramBindings()
 {
     m_InitializedPrograms.Clear();
+    m_BoundSlotMask = 0;
 }
 
 CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
-    CKRasterizerEncoder *encoder, CKDWORD program)
+    CKRasterizerBackend *backend, CKDWORD program)
 {
-    if (!encoder || program == 0 ||
+    if (!backend || program == 0 ||
         !m_ShaderCache.RequiresExplicitSamplerInitialization())
         return FALSE;
 
@@ -136,10 +123,7 @@ CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
 
     // GLSL rejects draws when active sampler types retain the shared default unit.
     for (CKDWORD i = 0; i < layout.BindingCount; ++i) {
-        const CKFFProgramSamplerBinding &binding = layout.Bindings[i];
-        encoder->SetTexture(binding.Stage, binding.Uniform, 0, NULL);
-        if (encoder->GetStatus() != CK_OK)
-            return FALSE;
+        backend->BindTexture(layout.Bindings[i].Stage, 0, NULL);
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
         m_Probes.OnTextureBind();
 #endif
@@ -148,15 +132,13 @@ CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
     return TRUE;
 }
 
-void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, CKDWORD program,
+void CKFFTextureBinder::Bind(CKRasterizerBackend *backend, CKDWORD program,
                              const CKFFTextureBindingSet *set)
 {
-    if (!encoder || !set)
+    if (!backend || !set)
         return;
 
-    InitializeProgramSamplers(encoder, program);
-    if (encoder->GetStatus() != CK_OK)
-        return;
+    InitializeProgramSamplers(backend, program);
 
     CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
     for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i)
@@ -165,19 +147,27 @@ void CKFFTextureBinder::Bind(CKRasterizerEncoder *encoder, CKDWORD program,
     m_Probes.OnTextureSet(set->ActiveTextureCount, desiredTextures);
 #endif
 
+    CKDWORD boundMask = 0;
     for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i) {
-        if (encoder->GetStatus() != CK_OK)
-            return;
         const CKFFTextureBinding &binding = set->Bindings[i];
         if (binding.Texture == 0)
             continue;
         CKSamplerDesc sampler = binding.Sampler;
-        encoder->SetTexture(binding.Stage, binding.Uniform, binding.Texture, &sampler);
+        backend->BindTexture(binding.Stage, binding.Texture, &sampler);
+        boundMask |= 1u << binding.Stage;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
-        if (encoder->GetStatus() == CK_OK)
-            m_Probes.OnTextureBind();
+        m_Probes.OnTextureBind();
 #endif
     }
+    // Slots the previous draw used and this one does not.
+    CKDWORD stale = m_BoundSlotMask & ~boundMask;
+    for (CKDWORD slot = 0; stale != 0 && slot < CKFF_SAMPLER_SLOT_COUNT; ++slot) {
+        if (stale & (1u << slot)) {
+            backend->BindTexture(slot, 0, NULL);
+            stale &= ~(1u << slot);
+        }
+    }
+    m_BoundSlotMask = boundMask;
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const

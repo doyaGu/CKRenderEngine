@@ -1,5 +1,5 @@
 #include "CKFixedFunctionPipeline.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 #include "CKFFUniformState.h"
 #include "CKFFShaderABI.h"
 #include "CKDebugLogger.h"
@@ -12,7 +12,7 @@
 
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
-    : m_Context(nullptr),
+    : m_Backend(nullptr),
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
       m_DrawPreparer(m_State, m_DrawStateCache, m_ShaderCache, m_Probes),
       m_TextureBinder(m_State, m_ShaderCache, m_Probes),
@@ -52,10 +52,10 @@ CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
 }
 
-bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
+bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend) {
     if (Shutdown() != CK_OK)
         return false;
-    m_Context = ctx;
+    m_Backend = backend;
     m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
     m_LastDrawApproximationMask = 0;
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
@@ -64,29 +64,27 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerDevice *ctx) {
     m_BorderPaletteCount = 0;
     m_BorderPaletteFrameSerial = (CKDWORD)-1;
     memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
-    if (!ctx)
+    if (!backend)
         return false;
-    CKBOOL shaderBackend = TRUE;
-    CKRasterizerDeviceCapsDesc caps;
-    if (ctx->GetCaps(&caps) == CK_OK) {
-        shaderBackend =
-            (caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) ==
-                (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)
-            ? TRUE : FALSE;
-        if (shaderBackend &&
-            caps.MaxTextureBindings < CKFF_SAMPLER_SLOT_COUNT) {
-            Shutdown();
-            return false;
-        }
+    const CKBackendCaps &caps = backend->GetCaps();
+    // A backend without programmable shaders (the NULL backend) records the
+    // fixed-function state but has no programs to build.
+    const CKBOOL shaderBackend =
+        (caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) ==
+            (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)
+        ? TRUE : FALSE;
+    if (shaderBackend && caps.MaxTextureBindings < CKFF_SAMPLER_SLOT_COUNT) {
+        Shutdown();
+        return false;
     }
-    if (shaderBackend && !m_ShaderCache.Init(ctx)) {
+    if (shaderBackend && !m_ShaderCache.Init(backend)) {
         Shutdown();
         return false;
     }
     m_DrawStateCache.Reset();
-    m_VertexLayoutCache.Init(ctx);
+    m_VertexLayoutCache.Init(backend);
     m_TextureBinder.ResetProgramBindings();
-    m_TransientGeometry.Init(ctx, &m_VertexLayoutCache);
+    m_TransientGeometry.Init(backend, &m_VertexLayoutCache);
     m_FrameNumber = 0;
     m_State.MarkViewProjectionDirty();
     MarkPreparedProgramDirty();
@@ -101,13 +99,13 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
     m_VertexLayoutCache.Shutdown();
     m_TextureBinder.ResetProgramBindings();
     m_ShaderCache.Shutdown();
-    m_Context = nullptr;
+    m_Backend = nullptr;
     return CK_OK;
 }
 
 CKERROR CKFixedFunctionPipeline::PrepareShutdown() {
-    // The frame flow (translated context) must have closed its encoder.
-    return m_Context && !m_Context->IsIdle() ? CKERR_INVALIDOPERATION : CK_OK;
+    // The frame flow (translated context) must have ended its frame.
+    return m_Backend && !m_Backend->IsIdle() ? CKERR_INVALIDOPERATION : CK_OK;
 }
 
 const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
@@ -118,7 +116,7 @@ const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason)
     case CKFF_DRAW_REJECT_PROGRAM_MISSING: return "program-missing";
     case CKFF_DRAW_REJECT_TEXTURE_OP: return "texture-operation";
     case CKFF_DRAW_REJECT_STATE_VALUE: return "state-value";
-    case CKFF_DRAW_REJECT_ENCODER_ERROR: return "encoder-error";
+    case CKFF_DRAW_REJECT_ENCODER_ERROR: return "backend-error";
     default: return "none";
     }
 }
@@ -372,14 +370,6 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
     return FALSE;
 }
 
-CKBOOL CKFixedFunctionPipeline::RejectPendingSubmission(
-    CKRasterizerEncoder *encoder, CKFFDrawRejectReason reason)
-{
-    if (encoder)
-        encoder->Discard(CKRST_DISCARD_ALL);
-    return RecordDrawReject(reason);
-}
-
 CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
@@ -621,7 +611,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
                                                                CKDWORD activeTextureCount,
                                                                const CKFFShaderKey &shaderKey)
 {
-    if (!bindingSet || !m_Context)
+    if (!bindingSet || !m_Backend)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     const CKDWORD frameSerial = m_FrameNumber;
     if (m_BorderPaletteFrameSerial != frameSerial) {
@@ -668,7 +658,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
                                      ((argb >> 8) & 0xffu) << 16 |
                                      (argb & 0xffu) << 8 |
                                      ((argb >> 24) & 0xffu);
-                m_Context->SetPaletteColor(slot, rgba);
+                m_Backend->SetPaletteColor(slot, rgba);
             }
         }
         sampler.BorderColor = slot;
@@ -691,14 +681,15 @@ void CKFixedFunctionPipeline::BeginDebugFrame() {
 // ============================================================================
 
 CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
-    CKRasterizerEncoder *encoder, CKRenderView view,
     VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
     VxDrawPrimitiveData *data)
 {
     BeginDrawDiagnostics();
-    if (!encoder || !data || data->VertexCount == 0)
+    if (!m_Backend || !data || data->VertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     CKFF_PROBE(m_Probes, OnSoftwareDraw());
+    const CKRenderView view = 0;   // draw logs: the backend owns the pass
+    (void)view;
 
     const CKDWORD formatFlags =
         CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
@@ -826,7 +817,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     {
         CKFF_SCOPE_TIME(m_Probes, PrepareUs);
         prepared = m_TransientGeometry.Prepare(
-            encoder, type, indices, indexCount, data, wrapModes[0],
+            type, indices, indexCount, data, wrapModes[0],
             pointSprites, &pointParams,
             m_State.TexcoordComponentCounts, wrapModes);
     }
@@ -835,7 +826,6 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         if (debugLogging)
             m_DebugState.LogDrawPrimitivePrepareFailed();
 #endif
-        encoder->Discard(CKRST_DISCARD_ALL);
         CKFF_PROBE(m_Probes, OnPrepareFailure());
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     }
@@ -850,16 +840,14 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         drawStateType = VX_LINELIST;
     }
     CKFFDrawSubmission submission = {};
-    submission.View = view;
     submission.DrawStateType = drawStateType;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
     submission.Source = CKFF_SUBMIT_PRIMITIVE;
-    return SubmitPrepared(encoder, submission);
+    return SubmitPrepared(submission);
 }
 
 CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
-    CKRasterizerEncoder *encoder, CKRenderView view,
     VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
     CKDWORD baseVertex, CKDWORD vertexCount,
     CKDWORD startIndex, CKDWORD indexCount,
@@ -867,7 +855,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD vertexLayout)
 {
     BeginDrawDiagnostics();
-    if (!encoder || !vb || vertexCount == 0)
+    if (!m_Backend || !vb || vertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
         m_State.TextureHandles, m_State.StageStates);
@@ -907,7 +895,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
             CKFF_PROBE(m_Probes, OnProgramMiss());
         return RecordDrawReject(CKFFProgramPrepareRejectReason(prepareStatus));
     }
-    return SubmitVertexBufferImmediate(encoder, preparation, view, type, vb, ib,
+    return SubmitVertexBufferImmediate(preparation, type, vb, ib,
                                        baseVertex, vertexCount, startIndex, indexCount,
                                        dpFlags, formatFlags, vertexLayout);
 }
@@ -916,107 +904,91 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
 // Internal methods
 // ============================================================================
 
-CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
-    CKRasterizerEncoder *encoder,
-    const CKFFDrawSubmission &submission)
+CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submission)
 {
     const CKFFProgramContext *programContext = submission.ProgramContext;
     const CKFFTextureBindingSet *textures = submission.Textures;
-    if (!encoder || !programContext || !textures)
+    if (!m_Backend || !programContext || !textures || !programContext->Program)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
 
+    // Constant blocks. A refused upload aborts the draw (the backend drops
+    // its pending state).
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
-        m_UniformEmitter.UploadUniforms(encoder, programContext, textures->ActiveStageCount);
+        if (!m_UniformEmitter.UploadUniforms(m_Backend, programContext, textures->ActiveStageCount))
+            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
     }
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
-
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
-    CKDWORD transformIdx = m_Context->AllocTransform(&m_State.World, 1);
-    {
-        CKFF_SCOPE_TIME(m_Probes, TransformUs);
-        encoder->SetTransform(transformIdx, 1);
-    }
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
-    CKFF_PROBE(m_Probes, OnTransformSet());
 
-    CKDrawState drawState;
+    // Pipeline state.
+    CKBackendPipelineState pipeline;
     {
         CKFF_SCOPE_TIME(m_Probes, DrawStateBuildUs);
-        drawState = m_DrawStateCache.BuildDrawState(submission.DrawStateType);
+        pipeline.State = m_DrawStateCache.BuildDrawState(submission.DrawStateType);
     }
-    CKFF_PROBE(m_Probes, OnDrawState(drawState));
+    CKFF_PROBE(m_Probes, OnDrawState(pipeline.State));
     // Stencil reference and masks are DWORD render states of which the 8-bit
     // stencil buffer uses the low byte (D3D7 semantics).
-    const CKDWORD stencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF) & 0xffu;
-    const CKDWORD stencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK) & 0xffu;
+    pipeline.StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF) & 0xffu;
+    pipeline.StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK) & 0xffu;
     CKBOOL forceKeepStencilOps = FALSE;
     CKDWORD stencilWriteMask = 0xffu;
     ResolveStencilWrite(&forceKeepStencilOps, &stencilWriteMask);
+    pipeline.StencilWriteMask = stencilWriteMask;
     if (forceKeepStencilOps) {
-        drawState.Mid &= ~(CKRST_STENCIL_FAIL(0xF) | CKRST_STENCIL_ZFAIL(0xF) | CKRST_STENCIL_PASS(0xF));
-        drawState.Mid |= CKRST_STENCIL_FAIL(VXSTENCILOP_KEEP) |
-                         CKRST_STENCIL_ZFAIL(VXSTENCILOP_KEEP) |
-                         CKRST_STENCIL_PASS(VXSTENCILOP_KEEP);
+        pipeline.State.Mid &= ~(CKRST_STENCIL_FAIL(0xF) | CKRST_STENCIL_ZFAIL(0xF) | CKRST_STENCIL_PASS(0xF));
+        pipeline.State.Mid |= CKRST_STENCIL_FAIL(VXSTENCILOP_KEEP) |
+                              CKRST_STENCIL_ZFAIL(VXSTENCILOP_KEEP) |
+                              CKRST_STENCIL_PASS(VXSTENCILOP_KEEP);
     }
+    pipeline.ScissorEnabled = m_State.ScissorEnabled;
+    pipeline.Scissor = m_State.Scissor;
+    pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
+        ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_DrawStateCache))
+        : 1.0f;
     {
         CKFF_SCOPE_TIME(m_Probes, EncoderStateUs);
-        if (submission.DrawStateType == VX_POINTLIST)
-            encoder->SetPointSize(CKFFClampVertexBufferPointSize(
-                CKFFResolveConstantPointSize(m_DrawStateCache)));
-        encoder->SetState(drawState);
-        encoder->SetScissor(m_State.ScissorEnabled ? &m_State.Scissor : NULL);
+        m_Backend->SetPipelineState(&pipeline);
     }
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
-    {
-        CKFF_SCOPE_TIME(m_Probes, StencilUs);
-        encoder->SetStencilRef(stencilRef);
-        if (encoder->GetStatus() != CK_OK)
-            return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
-        encoder->SetStencilMask(stencilReadMask, stencilWriteMask);
-    }
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
 
+    // Geometry.
+    CKBackendDraw draw;
+    draw.Program = programContext->Program;
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
-
     if (submission.VertexBuffer) {
         CKFF_PROBE(m_Probes, OnVertexBuffers(submission.VertexBuffer, submission.IndexBuffer, submission.VertexLayout));
-        {
-            CKFF_SCOPE_TIME(m_Probes, BufferBindUs);
-            encoder->SetVertexBuffer(0, submission.VertexBuffer, submission.BaseVertex,
-                                     submission.VertexCount, submission.VertexLayout);
-            if (encoder->GetStatus() != CK_OK)
-                return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
-            if (submission.IndexBuffer)
-                encoder->SetIndexBuffer(submission.IndexBuffer, submission.StartIndex, submission.IndexCount);
-        }
-        if (encoder->GetStatus() != CK_OK)
-            return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
+        draw.Layout = submission.VertexLayout;
+        draw.VertexBuffer = submission.VertexBuffer;
+        draw.StartVertex = submission.BaseVertex;
+        draw.VertexCount = submission.VertexCount;
+        draw.IndexBuffer = submission.IndexBuffer;
+        draw.StartIndex = submission.StartIndex;
+        draw.IndexCount = submission.IndexBuffer ? submission.IndexCount : 0;
         CKFF_PROBE(m_Probes, OnVertexBufferSet());
         if (submission.IndexBuffer)
             CKFF_PROBE(m_Probes, OnIndexBufferSet());
+    } else {
+        const CKBackendTransientVertices *vertices = m_TransientGeometry.GetVertices();
+        const CKBackendTransientIndices *indices = m_TransientGeometry.GetIndices();
+        draw.Layout = m_TransientGeometry.GetLayoutHandle();
+        draw.TransientVertices = vertices;
+        draw.VertexCount = vertices->Count;
+        draw.TransientIndices = indices;
+        draw.IndexCount = indices ? indices->Count : 0;
     }
 
+    // Textures.
     {
         CKFF_SCOPE_TIME(m_Probes, TextureUs);
-        BindTextures(encoder, programContext->Program, textures);
+        BindTextures(programContext->Program, textures);
     }
-    if (encoder->GetStatus() != CK_OK)
-        return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
 
-    const CKDWORD depth = CKFFEncodeDepthKey(ComputeDepthKey());
+    draw.SortKey = CKFFEncodeDepthKey(ComputeDepthKey());
     {
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
-        encoder->Submit(submission.View, programContext->Program, depth, SubmitDiscardFlags());
-        if (encoder->GetStatus() != CK_OK)
-            return RejectPendingSubmission(encoder, CKFF_DRAW_REJECT_ENCODER_ERROR);
+        if (m_Backend->Draw(&draw) != CK_OK)
+            return RecordDrawReject(CKFF_DRAW_REJECT_ENCODER_ERROR);
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {
@@ -1030,9 +1002,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(
 }
 
 CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
-    CKRasterizerEncoder *encoder,
     const CKFFProgramPreparation &preparation,
-    CKRenderView view,
     VXPRIMITIVETYPE type,
     CKDWORD vb,
     CKDWORD ib,
@@ -1044,9 +1014,11 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
-    if (!encoder || !vb)
+    if (!m_Backend || !vb)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     CKFF_PROBE(m_Probes, OnHardwareDraw());
+    const CKRenderView view = 0;   // draw logs: the backend owns the pass
+    (void)view;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial(view) : -1;
@@ -1127,7 +1099,6 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
         return FALSE;
 
     CKFFDrawSubmission submission = {};
-    submission.View = view;
     submission.DrawStateType = type;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
@@ -1139,17 +1110,11 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     submission.IndexCount = indexCount;
     submission.VertexLayout = vertexLayout;
     submission.Source = CKFF_SUBMIT_VERTEX_BUFFER;
-    return SubmitPrepared(encoder, submission);
+    return SubmitPrepared(submission);
 }
 
-void CKFixedFunctionPipeline::BindTextures(
-    CKRasterizerEncoder *encoder, CKDWORD program,
-    const CKFFTextureBindingSet *bindingSet) {
-    m_TextureBinder.Bind(encoder, program, bindingSet);
-}
-
-CKDWORD CKFixedFunctionPipeline::SubmitDiscardFlags() const {
-    return CKFFSubmitDiscardFlags(m_State, m_DrawStateCache);
+void CKFixedFunctionPipeline::BindTextures(CKDWORD program, const CKFFTextureBindingSet *bindingSet) {
+    m_TextureBinder.Bind(m_Backend, program, bindingSet);
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {

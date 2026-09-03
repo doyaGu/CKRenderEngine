@@ -1,7 +1,7 @@
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 #include "CKFFConstants.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerBackend.h"
 #include "CKRenderFrameCostStats.h"
 
 #include <math.h>
@@ -303,25 +303,24 @@ static void ReadTexcoord(VxDrawPrimitiveData *data, int stage, CKDWORD srcIndex,
 }
 
 CKTransientGeometry::CKTransientGeometry()
-    : m_Context(nullptr), m_LayoutCache(nullptr), m_LastLayout(0),
+    : m_Backend(nullptr), m_LayoutCache(nullptr), m_Vertices(), m_Indices(), m_HasIndices(FALSE), m_LastLayout(0),
       m_LastVertexBytes(0), m_LastIndexBytes(0) {}
 
 CKTransientGeometry::~CKTransientGeometry() {
     Shutdown();
 }
 
-void CKTransientGeometry::Init(CKRasterizerDevice *ctx, CKVertexLayoutCache *layoutCache) {
-    m_Context = ctx;
+void CKTransientGeometry::Init(CKRasterizerBackend *backend, CKVertexLayoutCache *layoutCache) {
+    m_Backend = backend;
     m_LayoutCache = layoutCache;
 }
 
 void CKTransientGeometry::Shutdown() {
-    m_Context = nullptr;
+    m_Backend = nullptr;
     m_LayoutCache = nullptr;
 }
 
 CKBOOL CKTransientGeometry::Prepare(
-    CKRasterizerEncoder *encoder,
     VXPRIMITIVETYPE primType,
     CKWORD *indices,
     int indexCount,
@@ -332,10 +331,13 @@ CKBOOL CKTransientGeometry::Prepare(
     const CKBYTE *texcoordComponentCounts,
     const CKDWORD *wrapModes)
 {
-    if (!data || data->VertexCount == 0 || !m_Context || !encoder)
+    if (!data || data->VertexCount == 0 || !m_Backend || !m_LayoutCache)
         return FALSE;
     m_LastVertexBytes = 0;
     m_LastIndexBytes = 0;
+    m_Vertices = CKBackendTransientVertices();
+    m_Indices = CKBackendTransientIndices();
+    m_HasIndices = FALSE;
 
     // Determine vertex format from data
     const CKDWORD formatFlags =
@@ -373,27 +375,21 @@ CKBOOL CKTransientGeometry::Prepare(
         }
         const CKDWORD pointCount = indices && indexCount > 0
             ? (CKDWORD)indexCount : vertexCount;
-        CKTransientVertexBuffer tvb;
-        memset(&tvb, 0, sizeof(tvb));
         if (pointCount > 0x2aaaaaaau)
             return FALSE;
         const CKDWORD spriteIndexCount = pointCount * 6;
         const CKDWORD spriteVertexCount = pointCount * 4;
         const CKBOOL index32 = spriteVertexCount > 0x10000u ? TRUE : FALSE;
-        if (m_Context->GetAvailTransientVertexBuffer(
-                spriteVertexCount, layoutHandle) < spriteVertexCount ||
-            m_Context->GetAvailTransientIndexBuffer(
-                spriteIndexCount, index32) < spriteIndexCount)
+        CKBackendTransientVertices &tvb = m_Vertices;
+        if (!m_Backend->AllocTransientVertices(spriteVertexCount, layoutHandle, &tvb))
             return FALSE;
-        if (!m_Context->AllocTransientVertexBuffer(&tvb, spriteVertexCount, layoutHandle))
-            return FALSE;
-        m_LastVertexBytes = tvb.Size;
+        m_LastVertexBytes = tvb.Count * tvb.Stride;
 
-        CKTransientIndexBuffer tib;
-        memset(&tib, 0, sizeof(tib));
-        if (!m_Context->AllocTransientIndexBuffer(&tib, spriteIndexCount, index32))
+        CKBackendTransientIndices &tib = m_Indices;
+        if (!m_Backend->AllocTransientIndices(spriteIndexCount, index32, &tib))
             return FALSE;
-        m_LastIndexBytes = tib.Size;
+        m_HasIndices = TRUE;
+        m_LastIndexBytes = tib.Count * (index32 ? 4 : 2);
 
         VxMatrix invWorld;
         VxMatrix invView;
@@ -516,8 +512,6 @@ CKBOOL CKTransientGeometry::Prepare(
             }
         }
 
-        encoder->SetTransientVertexBuffer(0, &tvb);
-        encoder->SetTransientIndexBuffer(&tib);
         CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   FALSE);
@@ -596,15 +590,10 @@ CKBOOL CKTransientGeometry::Prepare(
         if (primitiveIndices.IsEmpty())
             return FALSE;
 
-        CKTransientVertexBuffer tvb;
-        memset(&tvb, 0, sizeof(tvb));
-        if (m_Context->GetAvailTransientVertexBuffer(
-                (CKDWORD)primitiveIndices.Size(), layoutHandle) <
-            (CKDWORD)primitiveIndices.Size())
+        CKBackendTransientVertices &tvb = m_Vertices;
+        if (!m_Backend->AllocTransientVertices((CKDWORD)primitiveIndices.Size(), layoutHandle, &tvb))
             return FALSE;
-        if (!m_Context->AllocTransientVertexBuffer(&tvb, (CKDWORD)primitiveIndices.Size(), layoutHandle))
-            return FALSE;
-        m_LastVertexBytes = tvb.Size;
+        m_LastVertexBytes = tvb.Count * tvb.Stride;
 
         for (int i = 0; i < primitiveIndices.Size(); i += primitiveVertexCount) {
             float texcoords[3][CKFF_MAX_TEXTURE_STAGES][4] = {};
@@ -630,7 +619,6 @@ CKBOOL CKTransientGeometry::Prepare(
             }
         }
 
-        encoder->SetTransientVertexBuffer(0, &tvb);
         CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                                   m_LastIndexBytes,
                                                   primType == VX_TRIANGLEFAN ||
@@ -650,36 +638,25 @@ CKBOOL CKTransientGeometry::Prepare(
         transientIndexCount = (CKDWORD)indexCount;
     }
 
-    if (m_Context->GetAvailTransientVertexBuffer(vertexCount, layoutHandle) <
-        vertexCount)
+    // Allocate transient vertices
+    CKBackendTransientVertices &tvb = m_Vertices;
+    if (!m_Backend->AllocTransientVertices(vertexCount, layoutHandle, &tvb))
         return FALSE;
-    if (transientIndexCount != 0 &&
-        m_Context->GetAvailTransientIndexBuffer(
-            transientIndexCount, FALSE) < transientIndexCount)
-        return FALSE;
-
-    // Allocate transient vertex buffer
-    CKTransientVertexBuffer tvb;
-    memset(&tvb, 0, sizeof(tvb));
-    if (!m_Context->AllocTransientVertexBuffer(&tvb, vertexCount, layoutHandle))
-        return FALSE;
-    m_LastVertexBytes = tvb.Size;
+    m_LastVertexBytes = tvb.Count * tvb.Stride;
 
     // Interleave vertex data into the transient buffer
     InterleaveVertices(tvb.Data, stride, vertexCount, formatFlags, data, texcoordComponentCounts);
 
     // Handle indices and topology conversion
-    CKTransientIndexBuffer tib;
-    memset(&tib, 0, sizeof(tib));
+    CKBackendTransientIndices &tib = m_Indices;
     CKBOOL hasIndexBuffer = FALSE;
     if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
         // Must convert to triangle list (bgfx doesn't support fan/strip natively)
         int srcCount = (indices && indexCount > 0) ? indexCount : (int)vertexCount;
 
-        if (!m_Context->AllocTransientIndexBuffer(
-                &tib, transientIndexCount, FALSE))
+        if (!m_Backend->AllocTransientIndices(transientIndexCount, FALSE, &tib))
             return FALSE;
-        m_LastIndexBytes = tib.Size;
+        m_LastIndexBytes = tib.Count * 2;
         hasIndexBuffer = TRUE;
 
         if (indices && indexCount > 0) {
@@ -693,16 +670,13 @@ CKBOOL CKTransientGeometry::Prepare(
         }
     } else if (indices && indexCount > 0) {
         // Triangle list or line list with explicit indices
-        if (!m_Context->AllocTransientIndexBuffer(&tib, indexCount, FALSE))
+        if (!m_Backend->AllocTransientIndices((CKDWORD)indexCount, FALSE, &tib))
             return FALSE;
-        m_LastIndexBytes = tib.Size;
+        m_LastIndexBytes = tib.Count * 2;
         hasIndexBuffer = TRUE;
         memcpy(tib.Data, indices, indexCount * sizeof(CKWORD));
     }
-
-    encoder->SetTransientVertexBuffer(0, &tvb);
-    if (hasIndexBuffer)
-        encoder->SetTransientIndexBuffer(&tib);
+    m_HasIndices = hasIndexBuffer;
 
     CK_FRAME_COST_ADD_TRANSIENT_PREPARE(m_LastVertexBytes,
                                               m_LastIndexBytes,

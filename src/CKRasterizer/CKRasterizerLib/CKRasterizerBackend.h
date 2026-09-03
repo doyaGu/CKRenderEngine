@@ -15,6 +15,7 @@
 
 #include "VxMath.h"
 #include "CKTypes.h"
+#include "CKError.h"
 #include "CKRasterizerEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKRasterizerDeviceEnums.h"   // CKDrawState, CK_DEPTH_FORMAT, CK_SHADER_PROFILE, CKRST_DEVCAPS_*, CK_FILTER_MODE...
@@ -281,8 +282,13 @@ public:
     // BeginPass or Present. Blits submitted in a pass run before its draws.
     virtual CKERROR BeginPass(const CKBackendPassDesc *Desc) = 0;
     virtual void SetPipelineState(const CKBackendPipelineState *State) = 0;   // sticky until changed
-    virtual void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) = 0; // 0 = unbind
-    virtual void PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count) = 0;
+    // Texture bindings are sticky until changed; Texture 0 clears the slot
+    // (backends whose shaders need every sampler assigned, like GLSL, get the
+    // explicit zero binding once per program from the pipeline).
+    virtual void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) = 0;
+    // Uploads a constant block for the next Draw. A failure aborts the draw
+    // being prepared (the backend drops its pending state).
+    virtual CKERROR PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count) = 0;
     virtual void SetMarker(const char *Name) = 0;          // consumed by the next Draw (drawmap)
     virtual CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) = 0;
     virtual CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) = 0;

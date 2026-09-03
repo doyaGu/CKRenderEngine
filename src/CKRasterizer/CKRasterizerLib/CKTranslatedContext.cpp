@@ -9,29 +9,14 @@
 #include "CKDebugLogger.h"
 #include <stdio.h>
 
-#include <chrono>
 #include <string.h>
-#include <thread>
 
 namespace {
-
-const CKDWORD kReadbackTimeoutMs = 30000;
 
 CKBOOL SameImageFormat(const VxImageDescEx &a, const VxImageDescEx &b)
 {
     return a.BitsPerPixel == b.BitsPerPixel && a.RedMask == b.RedMask && a.GreenMask == b.GreenMask &&
            a.BlueMask == b.BlueMask && a.AlphaMask == b.AlphaMask;
-}
-
-void SleepMilliseconds(int ms)
-{
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-}
-
-CKDWORD NowMilliseconds()
-{
-    return (CKDWORD)std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 } // namespace
@@ -41,9 +26,9 @@ CKDWORD NowMilliseconds()
 // ===========================================================================
 
 CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerDevice *Device)
-    : m_TranslatedDriver(Driver), m_Device(Device), m_Created(FALSE), m_ShuttingDown(FALSE), m_InScene(FALSE),
-      m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
-      m_FrameTargetDecided(FALSE), m_Encoder(NULL), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0), m_LastDeviceFrame(0), m_NativePresented(FALSE),
+    : m_TranslatedDriver(Driver), m_Device(Device), m_Backend(NULL), m_Created(FALSE), m_ShuttingDown(FALSE),
+      m_InScene(FALSE), m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
+      m_FrameTargetDecided(FALSE), m_FrameOpen(FALSE), m_LastDeviceFrame(0), m_NativePresented(FALSE),
       m_FrameNumber(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS), m_TargetWidth(0), m_TargetHeight(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
       m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
@@ -70,6 +55,8 @@ CKTranslatedContext::~CKTranslatedContext()
     for (size_t i = 0; i < m_Readbacks.size(); ++i)
         delete m_Readbacks[i];
     m_Readbacks.clear();
+    delete m_Backend;
+    m_Backend = NULL;
 }
 
 CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
@@ -77,9 +64,25 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
 {
     if (m_Created || !m_Device)
         return FALSE;
-    if (m_Device->Create(Window, PosX, PosY, Width, Height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp) != CK_OK)
+    if (!m_Backend)
+        m_Backend = new CKDeviceBackend(m_Device);
+    CKBackendInitDesc init;
+    init.Window = Window;
+    init.PosX = PosX;
+    init.PosY = PosY;
+    init.Width = Width;
+    init.Height = Height;
+    init.Bpp = Bpp;
+    init.ZBpp = Zbpp;
+    init.StencilBpp = StencilBpp;
+    init.Fullscreen = Fullscreen;
+    init.RefreshRate = RefreshRate;
+    init.DebugFlags = m_Options.DebugFlags;
+    if (m_Backend->Init(&init) != CK_OK)
         return FALSE;
 
+    // Window and mode state as the device settled it (the adapter's device;
+    // the native backend reports these itself in phase 4.3).
     m_Window = Window;
     m_PosX = m_Device->m_PosX;
     m_PosY = m_Device->m_PosY;
@@ -91,11 +94,11 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_Fullscreen = m_Device->m_Fullscreen;
     m_RefreshRate = m_Device->m_RefreshRate;
 
-    if (!m_FFP.Init(m_Device)) {
-        m_Device->BeginShutdown();
+    if (!m_FFP.Init(m_Backend)) {
+        m_Backend->Shutdown();
         return FALSE;
     }
-    m_Present.Init(m_Device);
+    m_Present.Init(m_Backend);
     if (m_TranslatedDriver)
         m_TranslatedDriver->SyncCapsFromDevice();
 
@@ -103,8 +106,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_ShuttingDown = FALSE;
     memset(&m_Stats, 0, sizeof(m_Stats));
     m_FrameNumber = 0;
-    m_NextView = 0;
-    m_LastFrameViewCount = 0;
+    m_FrameOpen = FALSE;
 
     ResetStateMirror();
 
@@ -134,9 +136,9 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
 
 CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CKDWORD Flags)
 {
-    if (!m_Created || m_ShuttingDown || m_Encoder)
+    if (!m_Created || m_ShuttingDown || m_FrameOpen || Flags != 0)
         return FALSE;
-    if (m_Device->Resize(PosX, PosY, Width, Height, Flags) != CK_OK)
+    if (m_Backend->Resize(PosX, PosY, Width, Height) != CK_OK)
         return FALSE;
     m_PosX = m_Device->m_PosX;
     m_PosY = m_Device->m_PosY;
@@ -144,6 +146,10 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_Height = m_Device->m_Height;
     m_Present.DestroyTargets();
     m_NativePresented = FALSE;
+    // The internal targets follow the new size at the next frame (a readback
+    // between frames may have decided the previous ones already).
+    m_InternalTargets = FALSE;
+    m_FrameTargetDecided = FALSE;
     // The viewport follows the window like on creation; the engine sets its
     // own viewport again after a resize anyway.
     m_Viewport.ViewX = 0;
@@ -170,8 +176,13 @@ CKBOOL CKTranslatedContext::SetOptions(const CKRasterizerOptions *Options)
     m_Options.Sharpness = CKPresentStage::ClampSharpness(m_Options.Sharpness);
     if (m_Options.MSAASamples <= 1)
         m_Options.MSAASamples = 0;
-    if (m_Created && !m_ShuttingDown)
+    if (m_Created && !m_ShuttingDown) {
+        // Between frames the next frame decides its targets again (a readback
+        // may have prepared them with the previous options).
+        if (!m_FrameOpen)
+            m_FrameTargetDecided = FALSE;
         ApplyOptions();
+    }
     return TRUE;
 }
 
@@ -179,39 +190,36 @@ void CKTranslatedContext::ApplyOptions()
 {
     m_FFP.SetRenderOptions(m_Options.DisableTextureFiltering, m_Options.DisableMipmaps,
                            m_Options.ForceAnisotropicFiltering);
-    m_Device->SetDebug(m_Options.DebugFlags);
+    m_Backend->SetDebugFlags(m_Options.DebugFlags);
 }
 
 CKBOOL CKTranslatedContext::GetCaps(CKRasterizerCapsDesc *Caps) const
 {
-    if (!Caps)
+    if (!Caps || !m_Backend || !m_Created)
         return FALSE;
-    CKRasterizerDeviceCapsDesc device;
-    if (!m_Device || m_Device->GetCaps(&device) != CK_OK)
-        return FALSE;
+    const CKBackendCaps &backend = m_Backend->GetCaps();
 
     CKRasterizerCapsDesc caps;
     CKRST_CAPS features = 0;
-    if (device.Features & CKRST_DEVCAPS_TEXTURE_READBACK)
+    if (backend.Features & CKRST_DEVCAPS_TEXTURE_READBACK)
         features |= CKRST_CAPS_SYNC_READBACK;
     features |= CKRST_CAPS_POINT_SIZE;   // 1..15 (approximated beyond)
     features |= CKRST_CAPS_MSAA;
-    if (device.Features & CKRST_DEVCAPS_TEXTURE_CUBE)
+    if (backend.Features & CKRST_DEVCAPS_TEXTURE_CUBE)
         features |= CKRST_CAPS_TEXTURE_CUBE;
-    if (device.Features & CKRST_DEVCAPS_TEXTURE_3D)
+    if (backend.Features & CKRST_DEVCAPS_TEXTURE_3D)
         features |= CKRST_CAPS_TEXTURE_VOLUME;
     features |= CKRST_CAPS_BORDER_COLOR;
-    if (device.Features & CKRST_DEVCAPS_BLEND_EQUATION)
+    if (backend.Features & CKRST_DEVCAPS_BLEND_EQUATION)
         features |= CKRST_CAPS_SEPARATE_ALPHA_BLEND;
     features |= CKRST_CAPS_TEXTURE_DXT;
     caps.Features = features;
-    caps.MaxTextureSize = device.MaxTextureSize;
-    caps.MaxTextureStages = device.MaxTextureStages < CKRST_MAX_TEXTURE_STAGES
-                                ? device.MaxTextureStages : CKRST_MAX_TEXTURE_STAGES;
+    caps.MaxTextureSize = backend.MaxTextureSize;
+    caps.MaxTextureStages = CKRST_MAX_TEXTURE_STAGES;
     caps.MaxAnisotropy = 16;
     caps.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
     caps.MaxVertexBlendMatrices = CKRST_MAX_WORLD_MATRICES;
-    caps.MaxMSAASamples = 16;
+    caps.MaxMSAASamples = backend.MaxMSAASamples > 1 ? backend.MaxMSAASamples : 1;
     caps.MaxPointSize = 15.0f;
     caps.MaxLights = CKRST_MAX_LIGHTS;
     *Caps = caps;
@@ -220,18 +228,21 @@ CKBOOL CKTranslatedContext::GetCaps(CKRasterizerCapsDesc *Caps) const
 
 CKERROR CKTranslatedContext::GetDeviceStatus() const
 {
-    if (!m_Created || !m_Device)
+    if (!m_Created || !m_Backend)
         return CKERR_INVALIDRENDERCONTEXT;
-    return m_Device->GetDeviceStatus();
+    return m_Backend->GetDeviceStatus();
 }
 
 CKBOOL CKTranslatedContext::BeginShutdown()
 {
     if (!m_Created || m_ShuttingDown)
         return TRUE;
-    if (m_Encoder) {
-        m_Device->EndEncoder(m_Encoder);
-        m_Encoder = NULL;
+    if (m_FrameOpen) {
+        // An open frame (scene without BackToFront) ends without presenting.
+        CKDWORD frame = 0;
+        if (m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK)
+            m_LastDeviceFrame = frame;
+        m_FrameOpen = FALSE;
     }
     m_InScene = FALSE;
     m_PassOpen = FALSE;
@@ -240,16 +251,15 @@ CKBOOL CKTranslatedContext::BeginShutdown()
     CancelReadbacks();
     ReleaseTarget();
     if (m_CopyTexture) {
-        m_Device->DeleteObject(m_CopyTexture, CKRST_OBJ_TEXTURE);
+        m_Backend->DestroyObject(m_CopyTexture, CKRST_OBJ_TEXTURE);
         m_CopyTexture = 0;
         m_CopyWidth = m_CopyHeight = 0;
     }
     m_Present.Shutdown();
     if (m_FFP.PrepareShutdown() != CK_OK)
         return FALSE;
-    if (m_Device->BeginShutdown() != CK_OK)
-        return FALSE;
     m_FFP.Shutdown();
+    m_Backend->Shutdown();
     m_Resources.clear();
     m_ShuttingDown = TRUE;
     return TRUE;
@@ -257,9 +267,9 @@ CKBOOL CKTranslatedContext::BeginShutdown()
 
 CKBOOL CKTranslatedContext::IsIdle() const
 {
-    if (m_Encoder)
+    if (m_FrameOpen)
         return FALSE;
-    return !m_Device || m_Device->IsIdle();
+    return !m_Backend || m_Backend->IsIdle();
 }
 
 // ===========================================================================
@@ -622,7 +632,7 @@ CKBOOL CKTranslatedContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *Ou
         deviceDesc.MipMapCount = 1;
 
     CKDWORD handle = 0;
-    if (m_Device->CreateTexture(&deviceDesc, NULL, &handle) != CK_OK || handle == 0) {
+    if (m_Backend->CreateTexture(&deviceDesc, NULL, &handle) != CK_OK || handle == 0) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
@@ -665,7 +675,7 @@ CKBOOL CKTranslatedContext::LoadTexture(CKDWORD Texture, const VxImageDescEx &Im
             return FALSE;
         }
     }
-    if (m_Device->UpdateTexture(Texture, (CKDWORD)MipLevel, (CKDWORD)Face, Region, &Image) != CK_OK)
+    if (m_Backend->UpdateTexture(Texture, (CKDWORD)MipLevel, (CKDWORD)Face, Region, &Image) != CK_OK)
         return FALSE;
     ++m_FrameTextureUploads;
     return TRUE;
@@ -728,9 +738,12 @@ CKBOOL CKTranslatedContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, c
         return FALSE;
     }
 
-    CKVertexBufferDesc deviceDesc = *Desc;
-    deviceDesc.m_Flags |= CKRST_VB_VALID;
-    deviceDesc.m_VertexSize = resource.DeviceStride;
+    CKBackendBufferDesc deviceDesc;
+    deviceDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+    deviceDesc.Size = Desc->m_MaxVertexCount * resource.DeviceStride;
+    deviceDesc.Stride = resource.DeviceStride;
+    deviceDesc.Layout = resource.DeviceLayout;
+    deviceDesc.Dynamic = (Desc->m_Flags & CKRST_VB_DYNAMIC) != 0 ? TRUE : FALSE;
     std::vector<CKBYTE> converted;
     const void *deviceData = NULL;
     if (Data) {
@@ -770,7 +783,8 @@ CKBOOL CKTranslatedContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, c
     }
 
     CKDWORD handle = 0;
-    if (m_Device->CreateVertexBuffer(&deviceDesc, deviceData, &handle) != CK_OK || handle == 0) {
+    deviceDesc.InitialData = deviceData;
+    if (m_Backend->CreateBuffer(&deviceDesc, &handle) != CK_OK || handle == 0) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
@@ -792,10 +806,14 @@ CKBOOL CKTranslatedContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc, con
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    CKIndexBufferDesc deviceDesc = *Desc;
-    deviceDesc.m_Flags |= CKRST_VB_VALID;
+    CKBackendBufferDesc deviceDesc;
+    deviceDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+    deviceDesc.Size = Desc->m_MaxIndexCount * 2;
+    deviceDesc.Index32 = FALSE;
+    deviceDesc.Dynamic = (Desc->m_Flags & CKRST_VB_DYNAMIC) != 0 ? TRUE : FALSE;
+    deviceDesc.InitialData = Data;
     CKDWORD handle = 0;
-    if (m_Device->CreateIndexBuffer(&deviceDesc, FALSE, Data, &handle) != CK_OK || handle == 0) {
+    if (m_Backend->CreateBuffer(&deviceDesc, &handle) != CK_OK || handle == 0) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
@@ -880,8 +898,8 @@ CKBOOL CKTranslatedContext::UnlockVertexBuffer(CKDWORD VB)
         resource->Scratch.resize(deviceBytes);
     CKTransientGeometry::InterleaveVertices(resource->Scratch.data(), resource->DeviceStride, count,
                                             resource->FormatFlags, &dp, dims);
-    if (m_Device->UpdateVertexBuffer(VB, start * resource->DeviceStride, (CKDWORD)deviceBytes,
-                                     resource->Scratch.data()) != CK_OK)
+    if (m_Backend->UpdateBuffer(VB, start * resource->DeviceStride, (CKDWORD)deviceBytes,
+                                resource->Scratch.data()) != CK_OK)
         return FALSE;
     ++m_FrameBufferUploads;
     return TRUE;
@@ -922,8 +940,8 @@ CKBOOL CKTranslatedContext::UnlockIndexBuffer(CKDWORD IB)
         return FALSE;
     }
     resource->Locked = FALSE;
-    if (m_Device->UpdateIndexBuffer(IB, resource->LockStart * 2, resource->LockCount * 2,
-                                    resource->Shadow.data() + (size_t)resource->LockStart * 2) != CK_OK)
+    if (m_Backend->UpdateBuffer(IB, resource->LockStart * 2, resource->LockCount * 2,
+                                resource->Shadow.data() + (size_t)resource->LockStart * 2) != CK_OK)
         return FALSE;
     ++m_FrameBufferUploads;
     return TRUE;
@@ -950,8 +968,8 @@ CKBOOL CKTranslatedContext::DeleteObject(CKDWORD Handle, CKDWORD Type)
             }
         }
     }
-    if (m_Device)
-        m_Device->DeleteObject(Handle, Type);
+    if (m_Backend)
+        m_Backend->DestroyObject(Handle, Type);
     m_Resources.erase(ResourceKey(Type, Handle));
     return TRUE;
 }
@@ -974,8 +992,8 @@ CKBOOL CKTranslatedContext::FlushObjects(CKDWORD TypeMask)
 
 void CKTranslatedContext::SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING Name)
 {
-    if (m_Device && FindResource(Type, Handle))
-        m_Device->SetResourceName(Handle, Type, Name);
+    if (m_Backend && FindResource(Type, Handle))
+        m_Backend->SetObjectName(Handle, Type, Name);
 }
 
 // ===========================================================================
@@ -984,11 +1002,11 @@ void CKTranslatedContext::SetResourceName(CKDWORD Handle, CKDWORD Type, CKSTRING
 
 void CKTranslatedContext::ReleaseTarget()
 {
-    if (m_Device) {
+    if (m_Backend) {
         if (m_TargetFrameBuffer)
-            m_Device->DeleteObject(m_TargetFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+            m_Backend->DestroyObject(m_TargetFrameBuffer, CKRST_OBJ_RENDERTARGET);
         if (m_TargetDepthTexture)
-            m_Device->DeleteObject(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
+            m_Backend->DestroyObject(m_TargetDepthTexture, CKRST_OBJ_TEXTURE);
     }
     m_TargetFrameBuffer = 0;
     m_TargetDepthTexture = 0;
@@ -1046,35 +1064,30 @@ CKBOOL CKTranslatedContext::SetTargetTexture(CKDWORD Texture, int Width, int Hei
 
     ReleaseTarget();
 
-    CKDepthTextureDesc depthDesc = {};
-    depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
+    CKBackendDepthDesc depthDesc;
     depthDesc.Width = (CKDWORD)textureWidth;
     depthDesc.Height = (CKDWORD)textureHeight;
-    depthDesc.MipMapCount = 1;
     const CKBOOL needsStencil = m_StencilBpp > 0;
-    depthDesc.DepthFormat = needsStencil ? CKRST_DEPTHFMT_D24S8 : CKRST_DEPTHFMT_D24;
+    depthDesc.Format = needsStencil ? CKRST_DEPTHFMT_D24S8 : CKRST_DEPTHFMT_D24;
     CKDWORD depthTexture = 0;
-    CKERROR depthErr = m_Device->CreateDepthTexture(&depthDesc, &depthTexture);
+    CKERROR depthErr = m_Backend->CreateDepthTexture(&depthDesc, &depthTexture);
     if (depthErr != CK_OK && !needsStencil) {
-        depthDesc.DepthFormat = CKRST_DEPTHFMT_D16;
-        depthErr = m_Device->CreateDepthTexture(&depthDesc, &depthTexture);
+        depthDesc.Format = CKRST_DEPTHFMT_D16;
+        depthErr = m_Backend->CreateDepthTexture(&depthDesc, &depthTexture);
     }
     if (depthErr != CK_OK) {
         Diag(CKRST_DIAG_INVALID_TARGET);
         return FALSE;
     }
 
-    CKFrameBufferAttachmentDesc color = {};
-    color.Texture = Texture;
-    color.Mip = 0;
-    color.Layer = (CKDWORD)Face;
-    CKFrameBufferDesc fbDesc = {};
-    fbDesc.Color = &color;
-    fbDesc.ColorCount = 1;
-    fbDesc.DepthStencil.Texture = depthTexture;
+    CKBackendRenderTargetDesc rtDesc;
+    rtDesc.ColorTexture = Texture;
+    rtDesc.ColorMip = 0;
+    rtDesc.ColorLayer = (CKDWORD)Face;
+    rtDesc.DepthTexture = depthTexture;
     CKDWORD frameBuffer = 0;
-    if (m_Device->CreateFrameBuffer(&fbDesc, &frameBuffer) != CK_OK) {
-        m_Device->DeleteObject(depthTexture, CKRST_OBJ_TEXTURE);
+    if (m_Backend->CreateRenderTarget(&rtDesc, &frameBuffer) != CK_OK) {
+        m_Backend->DestroyObject(depthTexture, CKRST_OBJ_TEXTURE);
         Diag(CKRST_DIAG_INVALID_TARGET);
         return FALSE;
     }
@@ -1101,28 +1114,6 @@ CKBOOL CKTranslatedContext::ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDW
         return TRUE;
     return Rect->left >= 0 && Rect->top >= 0 && Rect->right > Rect->left && Rect->bottom > Rect->top &&
            (CKDWORD)Rect->right <= Width && (CKDWORD)Rect->bottom <= Height;
-}
-
-void CKTranslatedContext::ReadbackCallbackAdapter(void *UserData, CKDWORD FrameBuffer, CKDWORD Width, CKDWORD Height,
-                                                  CKDWORD Pitch, VX_PIXELFORMAT Format, const void *Data, CKDWORD Size,
-                                                  CKBOOL YFlip)
-{
-    (void)FrameBuffer;
-    PendingReadback *readback = static_cast<PendingReadback *>(UserData);
-    if (!readback || !readback->Owner)
-        return;
-    VxMutexLock lock(readback->Owner->m_ReadbackMutex);
-    if (Data && Size != 0 && Width != 0 && Height != 0 && Pitch != 0 && Format != UNKNOWN_PF) {
-        readback->Width = Width;
-        readback->Height = Height;
-        readback->Pitch = Pitch;
-        readback->Format = Format;
-        readback->YFlip = YFlip;
-        readback->Data.resize(Size);
-        memcpy(readback->Data.data(), Data, Size);
-        readback->Success = TRUE;
-    }
-    readback->Done = TRUE;
 }
 
 CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, VxImageDescEx &Desc,
@@ -1181,6 +1172,7 @@ CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, 
 
 CKBOOL CKTranslatedContext::CanReadNativeTarget()
 {
+    PrepareFrameTarget();
     const CKPresentTarget &native = m_Present.NativeTarget();
     if (m_Target || !m_InternalTargets || !native.IsActive())
         return FALSE;
@@ -1211,15 +1203,14 @@ CKBOOL CKTranslatedContext::BlitForReadback()
     } else if (m_Present.NativeTarget().IsActive()) {
         source = m_Present.NativeTarget().ColorTexture;
     }
-    if (!m_Encoder || !source || !readbackTexture)
+    if (!source || !readbackTexture)
         return FALSE;
-    // Blits run before the draws of their view: a pass after the present pass
+    // Blits run before the draws of their pass: a pass after the present pass
     // (or after the target's scene passes) copies the finished frame.
     if (!OpenPass(m_Target ? m_TargetFrameBuffer : 0, m_Target ? CurrentTargetRect() : WindowRect(),
                   0, 0, 1.0f, 0, "readback"))
         return FALSE;
-    m_Encoder->Blit(m_CurrentView, readbackTexture, 0, 0, 0, source, 0, NULL);
-    return m_Encoder->GetStatus() == CK_OK ? TRUE : FALSE;
+    return m_Backend->Blit(readbackTexture, 0, 0, 0, 0, source, 0, 0, NULL) == CK_OK ? TRUE : FALSE;
 }
 
 CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
@@ -1228,14 +1219,14 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
     if (!readbackTexture)
         return FALSE;
     CKReadbackDesc desc;
-    if (m_Device->ReadTexture(readbackTexture, 0, &desc, NULL) != CK_OK || desc.RequiredSize == 0 ||
+    if (m_Backend->ReadTexture(readbackTexture, 0, &desc, NULL) != CK_OK || desc.RequiredSize == 0 ||
         desc.Width == 0 || desc.Height == 0 || desc.Format == UNKNOWN_PF)
         return FALSE;
     Readback.Data.assign(desc.RequiredSize, 0);
     desc.Data = Readback.Data.data();
     desc.Capacity = desc.RequiredSize;
     CKDWORD available = 0;
-    if (m_Device->ReadTexture(readbackTexture, 0, &desc, &available) != CK_OK) {
+    if (m_Backend->ReadTexture(readbackTexture, 0, &desc, &available) != CK_OK) {
         Readback.Data.clear();
         return FALSE;
     }
@@ -1244,10 +1235,9 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
     Readback.Pitch = desc.RowPitch;
     Readback.Format = desc.Format;
     // A target texture was rendered in the D3D (top-down) layout already
-    // (spec 5.9): the flip the device reports for framebuffer writes on
+    // (spec 5.9): the flip the backend reports for framebuffer writes on
     // bottom-left backends has been done at render time.
     Readback.YFlip = m_Target ? FALSE : desc.YFlip;
-    Readback.ViaTexture = TRUE;
     Readback.Issued = TRUE;
     Readback.AvailableFrame = available;
     return TRUE;
@@ -1255,43 +1245,44 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
 
 CKBOOL CKTranslatedContext::HasArmedTextureReadbacks()
 {
-    VxMutexLock lock(m_ReadbackMutex);
     for (size_t i = 0; i < m_Readbacks.size(); ++i)
-        if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
+        if (!m_Readbacks[i]->Issued)
             return TRUE;
     return FALSE;
 }
 
 // End of frame, after the readback blit: issues every armed readback; the
-// ones the device refuses fall back to a screenshot of the swap chain.
+// ones the backend refuses fail.
 void CKTranslatedContext::IssueArmedTextureReadbacks()
 {
-    std::vector<PendingReadback *> armed;
-    {
-        VxMutexLock lock(m_ReadbackMutex);
-        for (size_t i = 0; i < m_Readbacks.size(); ++i)
-            if (m_Readbacks[i]->ViaTexture && !m_Readbacks[i]->Issued)
-                armed.push_back(m_Readbacks[i]);
-    }
-    for (size_t i = 0; i < armed.size(); ++i) {
-        if (IssueTextureReadback(*armed[i]))
+    for (size_t i = 0; i < m_Readbacks.size(); ++i) {
+        PendingReadback *pending = m_Readbacks[i];
+        if (pending->Issued || IssueTextureReadback(*pending))
             continue;
-        armed[i]->ViaTexture = FALSE;
-        if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, armed[i]) != CK_OK) {
-            VxMutexLock lock(m_ReadbackMutex);
-            armed[i]->Done = TRUE;
-            armed[i]->Success = FALSE;
-        }
+        pending->Issued = TRUE;
+        pending->Done = TRUE;
+        pending->Success = FALSE;
     }
 }
 
+// No frame can carry the blit (no internal targets, cube-face target): the
+// armed readbacks fail at the next delivery.
+void CKTranslatedContext::FailArmedTextureReadbacks()
+{
+    for (size_t i = 0; i < m_Readbacks.size(); ++i) {
+        PendingReadback *pending = m_Readbacks[i];
+        if (pending->Issued)
+            continue;
+        pending->Issued = TRUE;
+        pending->Done = TRUE;
+        pending->Success = FALSE;
+    }
+}
 
 CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber)
 {
-    if (m_Encoder || !EnsureEncoder())
+    if (m_FrameOpen)
         return FALSE;
-    const CKDWORD nextView = m_NextView;
-    const CKRenderView currentView = m_CurrentView;
     const CKBOOL passOpen = m_PassOpen;
     const CKDWORD passes = m_FramePasses;
     CKBOOL ok = TRUE;
@@ -1299,15 +1290,14 @@ CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKD
         ok = PresentInternalTarget();
     if (ok && Blit)
         ok = BlitForReadback();
-    m_Device->EndEncoder(m_Encoder);
-    m_Encoder = NULL;
-    m_NextView = nextView;
-    m_CurrentView = currentView;
+    CKDWORD frame = 0;
+    const CKERROR status = m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame);
+    m_FrameOpen = FALSE;
     m_PassOpen = passOpen;
     m_FramePasses = passes;
-    if (!ok)
-        return FALSE;
-    return m_Device->Frame(CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE, FrameNumber) == CK_OK;
+    if (FrameNumber)
+        *FrameNumber = frame;
+    return ok && status == CK_OK ? TRUE : FALSE;
 }
 
 CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer, CKReadbackCallback Callback,
@@ -1324,8 +1314,13 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
+    if (!CanReadCurrentTarget()) {
+        // Cube-face targets and frames outside the internal targets have no
+        // readback source.
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        return FALSE;
+    }
     PendingReadback *readback = new PendingReadback();
-    readback->Owner = this;
     readback->Callback = Callback;
     readback->User = User;
     readback->Buffer = Buffer;
@@ -1333,72 +1328,37 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback->Rect = *Rect;
         readback->HasRect = TRUE;
     }
-    {
-        VxMutexLock lock(m_ReadbackMutex);
-        m_Readbacks.push_back(readback);
+    m_Readbacks.push_back(readback);
+    if (m_FrameOpen)
+        return TRUE; // issued at the end of this frame (BackToFront)
+    // Between frames: a frame that only re-presents the native target (or
+    // just blits the target texture) carries the readback blit; the next
+    // BackToFront delivers it.
+    CKDWORD frame = 0;
+    if (SubmitReadbackFrame(m_NativePresented, TRUE, &frame)) {
+        m_LastDeviceFrame = frame;
+        if (IssueTextureReadback(*readback))
+            return TRUE;
     }
-    if (CanReadCurrentTarget()) {
-        readback->ViaTexture = TRUE;
-        if (m_Encoder)
-            return TRUE; // issued at the end of this frame (BackToFront)
-        // Between frames: a frame that only re-presents the native target
-        // (or just blits the target texture) carries the readback blit; the
-        // next BackToFront delivers it.
-        CKDWORD frame = 0;
-        if ((m_Target || m_NativePresented) && SubmitReadbackFrame(TRUE, TRUE, &frame)) {
-            m_LastDeviceFrame = frame;
-            if (IssueTextureReadback(*readback))
-                return TRUE;
-        }
-        readback->ViaTexture = FALSE;
-    }
-    if (m_Target) {
-        // A cube-face target cannot be read back yet; the swap chain would be
-        // the wrong image.
-        {
-            VxMutexLock lock(m_ReadbackMutex);
-            for (size_t i = 0; i < m_Readbacks.size(); ++i) {
-                if (m_Readbacks[i] == readback) {
-                    m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
-                    break;
-                }
-            }
-        }
-        delete readback;
-        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
-        return FALSE;
-    }
-    if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, readback) != CK_OK) {
-        VxMutexLock lock(m_ReadbackMutex);
-        for (size_t i = 0; i < m_Readbacks.size(); ++i) {
-            if (m_Readbacks[i] == readback) {
-                m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
-                break;
-            }
-        }
-        delete readback;
-        return FALSE;
-    }
-    return TRUE;
+    m_Readbacks.pop_back();
+    delete readback;
+    return FALSE;
 }
 
 void CKTranslatedContext::DeliverReadbacks()
 {
     std::vector<PendingReadback *> ready;
-    {
-        VxMutexLock lock(m_ReadbackMutex);
-        for (size_t i = 0; i < m_Readbacks.size();) {
-            PendingReadback *pending = m_Readbacks[i];
-            if (pending->ViaTexture && !pending->Done && m_LastDeviceFrame >= pending->AvailableFrame) {
-                pending->Success = TRUE;
-                pending->Done = TRUE;
-            }
-            if (pending->Done) {
-                ready.push_back(m_Readbacks[i]);
-                m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
-            } else {
-                ++i;
-            }
+    for (size_t i = 0; i < m_Readbacks.size();) {
+        PendingReadback *pending = m_Readbacks[i];
+        if (pending->Issued && !pending->Done && m_LastDeviceFrame >= pending->AvailableFrame) {
+            pending->Success = TRUE;
+            pending->Done = TRUE;
+        }
+        if (pending->Done) {
+            ready.push_back(pending);
+            m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
+        } else {
+            ++i;
         }
     }
     for (size_t i = 0; i < ready.size(); ++i) {
@@ -1414,45 +1374,23 @@ void CKTranslatedContext::DeliverReadbacks()
 
 void CKTranslatedContext::CancelReadbacks()
 {
-    std::vector<PendingReadback *> outstanding;
-    {
-        VxMutexLock lock(m_ReadbackMutex);
-        for (size_t i = 0; i < m_Readbacks.size(); ++i) {
-            if (!m_Readbacks[i]->Done)
-                outstanding.push_back(m_Readbacks[i]);
-        }
-    }
-    for (size_t i = 0; i < outstanding.size(); ++i) {
-        if (outstanding[i]->ViaTexture) {
+    for (size_t i = 0; i < m_Readbacks.size(); ++i) {
+        PendingReadback *pending = m_Readbacks[i];
+        if (pending->Done)
+            continue;
+        if (pending->Issued) {
             // An issued readback writes into the buffer until AvailableFrame:
             // run the frames rather than free the memory under it.
             CKDWORD frame = m_LastDeviceFrame;
-            for (int guard = 0; outstanding[i]->Issued && guard < 8 && frame < outstanding[i]->AvailableFrame; ++guard) {
-                if (m_Device->Frame(CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE, &frame) != CK_OK)
+            for (int guard = 0; guard < 8 && frame < pending->AvailableFrame; ++guard) {
+                if (m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) != CK_OK)
                     break;
             }
             m_LastDeviceFrame = frame;
-            VxMutexLock lock(m_ReadbackMutex);
-            outstanding[i]->Done = TRUE;
-            outstanding[i]->Success = FALSE;
-            continue;
         }
-        m_Device->CancelScreenShots(outstanding[i]);
-        const CKDWORD start = NowMilliseconds();
-        for (;;) {
-            {
-                VxMutexLock lock(m_ReadbackMutex);
-                if (outstanding[i]->Done)
-                    break;
-            }
-            if (NowMilliseconds() - start >= kReadbackTimeoutMs) {
-                VxMutexLock lock(m_ReadbackMutex);
-                outstanding[i]->Done = TRUE;
-                outstanding[i]->Success = FALSE;
-                break;
-            }
-            SleepMilliseconds(1);
-        }
+        pending->Issued = TRUE;
+        pending->Done = TRUE;
+        pending->Success = FALSE;
     }
     DeliverReadbacks();
 }
@@ -1465,7 +1403,7 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;
     }
-    if (m_InScene || m_Encoder) {
+    if (m_InScene || m_FrameOpen) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return 0;
     }
@@ -1474,81 +1412,37 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;
     }
+    if (!CanReadCurrentTarget()) {
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE); // cube-face targets, no internal targets
+        return 0;
+    }
 
     PendingReadback readback;
-    readback.Owner = this;
     readback.Buffer = Buffer;
     if (Rect) {
         readback.Rect = *Rect;
         readback.HasRect = TRUE;
     }
-    CKBOOL viaTexture = FALSE;
-    if (CanReadCurrentTarget() && (m_Target || m_NativePresented)) {
-        // Frame 1 re-presents the native target (target 0) and blits the
-        // source into the readback texture; the read is issued right after and
-        // the device delivers the pixels once its frame counter reaches
-        // AvailableFrame. The waiting frames only re-present, so the window
-        // keeps its image.
-        readback.ViaTexture = TRUE;
-        CKDWORD frame = 0;
-        if (SubmitReadbackFrame(TRUE, TRUE, &frame)) {
-            m_LastDeviceFrame = frame;
-            if (IssueTextureReadback(readback)) {
-                for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
-                    if (!SubmitReadbackFrame(TRUE, FALSE, &frame))
-                        break;
-                }
-                m_LastDeviceFrame = frame;
-                if (frame < readback.AvailableFrame)
-                    return 0;
-                readback.Success = TRUE;
-                readback.Done = TRUE;
-                viaTexture = TRUE;
-            }
-        }
-        if (!viaTexture)
-            readback.ViaTexture = FALSE;
-    }
-    if (!viaTexture && m_Target) {
-        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE); // cube-face targets: no readback yet
+    // Frame 1 re-presents the native target (target 0, once it holds a frame)
+    // and blits the source into the readback texture; the read is issued
+    // right after and the backend delivers the pixels once its frame counter
+    // reaches AvailableFrame. The waiting frames only re-present, so the
+    // window keeps its image.
+    CKDWORD frame = 0;
+    if (!SubmitReadbackFrame(m_NativePresented, TRUE, &frame))
         return 0;
-    }
-    if (!viaTexture && m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, &readback) != CK_OK)
+    m_LastDeviceFrame = frame;
+    if (!IssueTextureReadback(readback))
         return 0;
-
-    const CKDWORD start = NowMilliseconds();
-    for (;;) {
-        {
-            VxMutexLock lock(m_ReadbackMutex);
-            if (readback.Done)
-                break;
-        }
-        if (m_Device->Frame(CKRST_FRAME_SYNC_PRESERVE_PRESENT, CKRST_FRAME_NONE, NULL) != CK_OK)
+    for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
+        if (!SubmitReadbackFrame(m_NativePresented, FALSE, &frame))
             break;
-        if (NowMilliseconds() - start >= kReadbackTimeoutMs)
-            break;
-        SleepMilliseconds(1);
     }
-    CKBOOL done = FALSE;
-    {
-        VxMutexLock lock(m_ReadbackMutex);
-        done = readback.Done;
-    }
-    if (!done) {
-        m_Device->CancelScreenShots(&readback);
-        const CKDWORD cancelStart = NowMilliseconds();
-        for (;;) {
-            {
-                VxMutexLock lock(m_ReadbackMutex);
-                if (readback.Done)
-                    break;
-            }
-            if (NowMilliseconds() - cancelStart >= kReadbackTimeoutMs)
-                return 0; // the device still owns the request; leak the copy rather than a use-after-free
-            SleepMilliseconds(1);
-        }
+    m_LastDeviceFrame = frame;
+    if (frame < readback.AvailableFrame)
         return 0;
-    }
+    readback.Success = TRUE;
+    readback.Done = TRUE;
 
     VxImageDescEx captured;
     std::vector<CKBYTE> pixels;
@@ -1581,7 +1475,7 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    if (m_InScene || m_Encoder) {
+    if (m_InScene || m_FrameOpen) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
@@ -1655,7 +1549,9 @@ void CKTranslatedContext::SetDebugMarker(CKSTRING Name)
 
 const CKRenderStats *CKTranslatedContext::GetStats()
 {
-    const CKRasterizerDeviceStats *device = m_Device ? m_Device->GetStats() : NULL;
+    // Timings and memory come from the device (transitional: the backend
+    // interface reports counts only).
+    const CKRasterizerDeviceStats *device = m_Device && m_Created ? m_Device->GetStats() : NULL;
     if (device) {
         m_Stats.CpuTimeFrame = device->CpuTimeFrame;
         m_Stats.CpuTimerFreq = device->CpuTimerFreq;

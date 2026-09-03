@@ -7,7 +7,7 @@
 #include "CKRasterizerDeviceEnums.h"
 #include "CKRasterizerDeviceTypes.h"
 
-class CKRasterizerDevice;
+class CKRasterizerBackend;
 
 // The fixed-function program family (spec 5.3): every draw runs the single
 // fragment uber shader with one of four vertex shaders selected by the
@@ -43,10 +43,9 @@ struct CKFFProgramContext {
 };
 
 struct CKFFProgramSamplerBinding {
-    CKDWORD Stage;
-    CKDWORD Uniform;
+    CKDWORD Stage;          // backend sampler slot
 
-    CKFFProgramSamplerBinding() : Stage(0), Uniform(0) {}
+    CKFFProgramSamplerBinding() : Stage(0) {}
 };
 
 // The fixed sampler layout shared by every program: s_texture0..7 on slots
@@ -67,7 +66,7 @@ public:
     CKFFShaderCache();
     ~CKFFShaderCache();
 
-    bool Init(CKRasterizerDevice *ctx);
+    bool Init(CKRasterizerBackend *backend);
     void Shutdown();
 
     // Select the fixed-function program for the given FFP shader key and
@@ -81,8 +80,6 @@ public:
     }
     const CKFFProgramSamplerLayout &GetSamplerLayout() const { return m_SamplerLayout; }
 
-    // Get uniform handles (created once at Init)
-    const CKFFUniformHandles &GetUniforms() const { return m_Uniforms; }
     CKDWORD GetTargetFlags() const {
         CKDWORD flags = 0;
         if (m_Target.HomogeneousDepth)
@@ -96,20 +93,17 @@ public:
     size_t CachedProgramCount() const;
 
 private:
-    CKRasterizerDevice *m_Context;
-    CKFFUniformHandles m_Uniforms;
+    CKRasterizerBackend *m_Backend;
     CKRasterizerTargetDesc m_Target;
     const void *m_BlobSet;
     CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT];
+    CKDWORD m_VertexShaders[CKFF_PROGRAM_VARIANT_COUNT];
+    CKDWORD m_PixelShader;
     CKFFProgramSamplerLayout m_SamplerLayout;
 
-    bool CreateUniforms();
     bool ResolveShaderTarget();
     void BuildSamplerLayout();
     CKDWORD CreateProgramVariant(CKFFProgramVariant variant);
-    CKDWORD CreateProgramFromBinary(
-        const unsigned char *vsData, unsigned int vsSize,
-        const unsigned char *fsData, unsigned int fsSize);
 };
 
 #endif // CKFFSHADERCACHE_H

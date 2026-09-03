@@ -13,46 +13,18 @@
 
 struct VxDrawPrimitiveData;
 
-inline const char *CKFFUniformDebugName(const CKFFUniformHandles &u, CKDWORD uniform)
+#include "CKRasterizerBackend.h"
+
+inline const char *CKFFUniformDebugName(CKBackendConstantBlock block)
 {
-    if (uniform == u.u_ffMatrices) return "u_ffMatrices";
-    if (uniform == u.u_vertexBlendMatrices) return "u_vertexBlendMatrices";
-    if (uniform == u.u_ffDrawParams) return "u_ffDrawParams";
-    if (uniform == u.u_lights) return "u_lights";
-    if (uniform == u.u_texMatrix) return "u_texMatrix";
-    if (uniform == u.u_bumpEnv) return "u_bumpEnv";
-    if (uniform == u.u_viewport) return "u_viewport";
-    if (uniform == u.u_stageParams) return "u_stageParams";
-    if (uniform == u.u_ffSpec) return "u_ffSpec";
-    if (uniform == u.u_clipPlanes) return "u_clipPlanes";
-    if (uniform == u.u_clipParams) return "u_clipParams";
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        if (uniform == u.s_texture[i]) return "s_texture";
-        if (uniform == u.s_textureCube[i]) return "s_textureCube";
-        if (uniform == u.s_textureVolume[i]) return "s_textureVolume";
-    }
-    return "unknown";
+    const char *name = CKBackendConstantBlockInfo(block).Name;
+    return name ? name : "unknown";
 }
 
-inline CKDWORD CKFFUniformDebugSlot(const CKFFUniformHandles &u, CKDWORD uniform)
+// Histogram slot of a constant block (0 = none).
+inline CKDWORD CKFFUniformDebugSlot(CKBackendConstantBlock block)
 {
-    if (uniform == u.u_ffMatrices) return 1;
-    if (uniform == u.u_vertexBlendMatrices) return 2;
-    if (uniform == u.u_ffDrawParams) return 3;
-    if (uniform == u.u_lights) return 6;
-    if (uniform == u.u_texMatrix) return 11;
-    if (uniform == u.u_bumpEnv) return 20;
-    if (uniform == u.u_viewport) return 21;
-    if (uniform == u.u_stageParams) return 22;
-    if (uniform == u.u_ffSpec) return 23;
-    if (uniform == u.u_clipPlanes) return 24;
-    if (uniform == u.u_clipParams) return 25;
-    for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; ++i) {
-        if (uniform == u.s_texture[i]) return 32 + (CKDWORD)i;
-        if (uniform == u.s_textureCube[i]) return 40 + (CKDWORD)i;
-        if (uniform == u.s_textureVolume[i]) return 48 + (CKDWORD)i;
-    }
-    return 0;
+    return (int)block >= 0 && (int)block < CKRST_BLOCK_COUNT ? (CKDWORD)block + 1 : 0;
 }
 
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
