@@ -973,7 +973,8 @@ void TestApproximationsKeepDrawing()
         const CKDWORD vb = CreateVB(ctx, CKRST_DP_TR_CL_V, 4);
         void *mem = ctx->LockVertexBuffer(vb, 0, 4, CKRST_LOCK_DEFAULT);
         TestCheck(mem != NULL, "lock point VB");
-        memset(mem, 0, 4 * 16);
+        // Untransformed positions only: the canonical stride is 12 bytes.
+        memset(mem, 0, 4 * CKRSTGetVertexSize(CKRST_DP_TR_CL_V, NULL));
         TestCheck(ctx->UnlockVertexBuffer(vb), "unlock point VB");
         const float size = 2.5f;
         CKDWORD bits = 0;

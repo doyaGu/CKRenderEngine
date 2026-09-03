@@ -50,6 +50,12 @@ CK_CLASSID RCK2dEntity::GetClassID() {
 RCK2dEntity::RCK2dEntity(CKContext *Context, CKSTRING name) : RCKRenderObject(Context, name) {
     m_Flags = CK_2DENTITY_RESERVED3 | CK_2DENTITY_RATIOOFFSET | CK_2DENTITY_CLIPTOCAMERAVIEW | CK_2DENTITY_STICKLEFT | CK_2DENTITY_STICKTOP;
     m_Parent = nullptr;
+    // Every rectangle starts empty: the 2D roots only get their window rect
+    // at the first render, and SetRect lays children out relative to the
+    // previous parent rect, so an uninitialised rect would scatter them.
+    m_Rect = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
+    m_VtxPos = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
+    m_SrcRect = VxRect(0.0f, 0.0f, 0.0f, 0.0f);
     m_SourceRect = VxRect(0.0f, 0.0f, 1.0f, 1.0f);
     m_HomogeneousRect = nullptr;
     m_ZOrder = 0;
