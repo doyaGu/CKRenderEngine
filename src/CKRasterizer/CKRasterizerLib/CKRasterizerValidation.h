@@ -1,7 +1,9 @@
 #ifndef CKRASTERIZERVALIDATION_H
 #define CKRASTERIZERVALIDATION_H
 
-#include "CKRasterizerDevice.h"
+#include "CKError.h"
+#include "CKRasterizerDeviceEnums.h"
+#include "CKRasterizerDeviceTypes.h"
 
 inline CKERROR CKRasterizerValidateDiscard(CKDWORD Flags)
 {
@@ -22,11 +24,8 @@ inline CKDWORD CKRasterizerKnownObjectMask()
            CKRST_OBJ_INDEXBUFFER |
            CKRST_OBJ_SHADER |
            CKRST_OBJ_PROGRAM |
-           CKRST_OBJ_UNIFORM |
            CKRST_OBJ_FRAMEBUFFER |
-           CKRST_OBJ_VERTEXLAYOUT |
-           CKRST_OBJ_OCCLUSIONQUERY |
-           CKRST_OBJ_INDIRECTBUFFER;
+           CKRST_OBJ_VERTEXLAYOUT;
 }
 
 inline CKERROR CKRasterizerValidateObjectMask(CKDWORD TypeMask)

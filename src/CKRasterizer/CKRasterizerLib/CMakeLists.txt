@@ -1,15 +1,11 @@
 # CKRasterizerLib - translation core shared by the rasterizer plugins:
-#   * internal device interface (CKRasterizerDevice*.h, formerly v2)
-#     with its NULL fallback
+#   * backend interface (CKRasterizerBackend.h) with its NULL implementation
 #   * fixed-function pipeline translation (CKFF*, CKFixedFunctionPipeline,
 #     draw-state / vertex-layout caches, transient geometry, postprocess pass)
 #   * render settings / debug logger / frame-cost stats it depends on
 #   * bgfx fixed-function shaders (shaders/, generated headers checked in):
 #     one program family (vs_ff_3d[_clip], vs_ff_positiont[_clip], fs_ff_stage)
 set(CKRASTERIZER_LIB_SOURCES
-        CKRasterizerDeviceLibrary.cpp
-        CKRasterizerDeviceDriver.cpp
-        CKRasterizerDevice.cpp
         CKRasterizerCapsBaseline.cpp
 
         CKFixedFunctionPipeline.cpp
@@ -35,7 +31,7 @@ set(CKRASTERIZER_LIB_SOURCES
         CKPresentStage.cpp
         CKRenderSettings.cpp
         CKRasterizerBackend.cpp
-        CKDeviceBackend.cpp
+        CKNullBackend.cpp
 
         CKTranslatedRasterizer.cpp
         CKTranslatedContext.cpp
@@ -46,11 +42,10 @@ set(CKRASTERIZER_LIB_HEADERS
         CKRasterizerValidation.h
         CKRasterizerCapsBaseline.h
         CKRasterizerCapsBaseline.generated.h
-        CKRasterizerDevice.h
         CKRasterizerDeviceEnums.h
         CKRasterizerDeviceTypes.h
         CKRasterizerBackend.h
-        CKDeviceBackend.h
+        CKNullBackend.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h

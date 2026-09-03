@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 #include "CKDrawStateCache.h"
-#include "CKRasterizerDevice.h"
+#include "CKRasterizerDeviceEnums.h"
 #include "TestTriangleMultiset.h"
 
 namespace {

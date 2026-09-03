@@ -1,12 +1,7 @@
 #include "CKTranslatedRasterizer.h"
-#include "CKDeviceBackend.h"
+#include "CKNullBackend.h"
 
 #include <new>
-
-// Built-in NULL device (CKRasterizerDeviceLibrary.cpp), wrapped by the
-// device adapter until the NULL backend lands (phase 4.4).
-extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *rst);
 
 // ===========================================================================
 // CKTranslatedRasterizer
@@ -162,10 +157,14 @@ void CKTranslatedRasterizerClose(CKRasterizer *Rasterizer)
 
 CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd)
 {
-    CKRasterizerDeviceLibrary *device = CKNULLRasterizerStart(AppWnd);
-    if (!device)
+    CKNullBackendLibrary *library = new (std::nothrow) CKNullBackendLibrary();
+    if (!library)
         return NULL;
-    return CKTranslatedRasterizerStartOverDevice(device, CKNULLRasterizerClose);
+    if (!library->Start(AppWnd)) {
+        delete library;
+        return NULL;
+    }
+    return CKTranslatedRasterizerStart(library, NULL);
 }
 
 void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer)

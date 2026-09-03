@@ -9,8 +9,8 @@
 // API happens below this boundary (spec: docs/spec/2026-09-01-render-engine-
 // redesign-v3.md, section 4).
 //
-// The internal device interface of the translation core
-// (src/CKRasterizer/CKRasterizerLib/CKRasterizerDevice*.h) includes this header for the
+// The backend interface of the translation core
+// (src/CKRasterizer/CKRasterizerLib/CKRasterizerBackend.h) includes this header for the
 // enumerations both layers share.
 
 #include <stdint.h>

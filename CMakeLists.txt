@@ -47,7 +47,6 @@ set(CKRE_BGFX_OPENGLES_VERSION "" CACHE STRING
 set_property(CACHE CKRE_BGFX_OPENGLES_VERSION PROPERTY STRINGS "" 20 30 31 32)
 option(CKRE_GENERATE_SHADERS "Regenerate CK2_3D bgfx fixed-function shader headers at build time" ${_ckre_generate_shaders_default})
 option(CKRE_BUILD_TESTS "Build tests" OFF)
-option(CKRE_BUILD_EXAMPLES "Build examples" OFF)
 option(CKRE_BUILD_TOOLS "Build ckre_scene_capture (needs CKRE_BUILD_SHARED)" ${CKRE_BUILD_TESTS})
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
 option(CKRE_ENABLE_DIAGNOSTICS "Enable optional CK2_3D diagnostic code unless a category overrides it" OFF)
@@ -69,8 +68,8 @@ function(ckre_apply_diagnostic_definitions TARGET_NAME SCOPE)
     )
 endfunction()
 
-if ((CKRE_BUILD_TESTS OR CKRE_BUILD_EXAMPLES) AND NOT CKRE_BUILD_STATIC)
-    message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests/examples require static libraries")
+if (CKRE_BUILD_TESTS AND NOT CKRE_BUILD_STATIC)
+    message(STATUS "[CKRenderEngine] Enabling CKRE_BUILD_STATIC because tests require static libraries")
     set(CKRE_BUILD_STATIC ON CACHE BOOL "Build static library" FORCE)
 endif ()
 
@@ -306,9 +305,6 @@ endif ()
 # =============================================================================
 # Examples
 # =============================================================================
-if (CKRE_BUILD_EXAMPLES)
-    add_subdirectory(examples)
-endif ()
 
 if (CKRE_INSTALL)
     include(CMakePackageConfigHelpers)
@@ -351,7 +347,6 @@ if (CKRE_IS_TOP_LEVEL)
     message(STATUS "  Build Static:         ${CKRE_BUILD_STATIC}")
     message(STATUS "  Build bgfx Rasterizer:${CKRE_BUILD_BGFX_RASTERIZER}")
     message(STATUS "  Build Tests:          ${CKRE_BUILD_TESTS}")
-    message(STATUS "  Build Examples:       ${CKRE_BUILD_EXAMPLES}")
     if (VIRTOOLS_SDK_PATH)
         message(STATUS "  Virtools SDK:         ${VIRTOOLS_SDK_PATH}")
     endif ()

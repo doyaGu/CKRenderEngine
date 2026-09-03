@@ -1,13 +1,12 @@
-// CKRasterizerBackend (spec 5.10) exercised through the transitional device
-// adapter over the recording device: the interface a backend has to
-// implement, and the frame semantics the translation core relies on (passes
-// are sequential, draws carry the sticky pipeline state and bound textures,
-// Present closes the frame and reports stats).
+// CKRasterizerBackend (spec 5.10) exercised on the recording backend (the
+// NULL backend plus a log): the interface a backend has to implement, and
+// the frame semantics the translation core relies on (passes are sequential,
+// draws carry the sticky pipeline state and bound textures, Present closes
+// the frame and reports stats).
 
 #include <stdio.h>
 #include <string.h>
 
-#include "CKDeviceBackend.h"
 #include "CKFFShaderABI.h"
 #include "FFPDiagnosticHarness.h"
 #include "TestTriangleMultiset.h"
@@ -16,27 +15,26 @@ namespace {
 
 struct Fixture {
     FFPRecordingDriver Driver;
-    FFPRecordingContext *Device;
-    CKDeviceBackend *Backend;
+    FFPRecordingContext *Device;   // the recording backend and its log
+    FFPRecordingContext *Backend;  // the same object through the interface under test
 
     Fixture() : Device(NULL), Backend(NULL)
     {
-        Device = static_cast<FFPRecordingContext *>(Driver.CreateContext());
-        TestCheck(Device != NULL, "recording device");
-        Backend = new CKDeviceBackend(Device);
+        Device = static_cast<FFPRecordingContext *>(Driver.CreateBackend());
+        TestCheck(Device != NULL, "recording backend");
+        Backend = Device;
         CKBackendInitDesc init;
         init.Width = 64;
         init.Height = 48;
         init.Bpp = 32;
         init.ZBpp = 24;
         init.StencilBpp = 8;
-        TestCheck(Backend->Init(&init) == CK_OK, "backend Init over the recording device");
+        TestCheck(Backend->Init(&init) == CK_OK, "backend Init");
     }
     ~Fixture()
     {
-        delete Backend;
         if (Device)
-            Driver.DestroyContext(Device);
+            Driver.DestroyBackend(Device);
     }
 };
 
@@ -247,31 +245,31 @@ void TestFrame()
     TestCheck(f.Device->Encoder.TextureBindCount == 1, "an unbound slot is not set again");
     TestCheck(f.Device->Encoder.LastState.Lo == state.State.Lo, "the pipeline state is sticky across passes");
 
-    // Blit inside the pass; layers are not supported by the device encoder.
+    // Blit inside the pass; layers are cube faces / slices and are range-checked.
     CKTextureDesc dstDesc = tex;
     dstDesc.Flags |= CKRST_TEXTURE_BLIT_DST | CKRST_TEXTURE_READBACK;
     CKDWORD dst = 0;
     TestCheck(b->CreateTexture(&dstDesc, NULL, &dst) == CK_OK, "blit destination");
     TestCheck(b->Blit(dst, 0, 0, 0, 0, texture, 0, 0, NULL) == CK_OK, "Blit");
-    TestCheck(b->Blit(dst, 0, 1, 0, 0, texture, 0, 0, NULL) == CKERR_NOTIMPLEMENTED, "layer blits are not available on the device adapter");
+    TestCheck(b->Blit(dst, 0, 1, 0, 0, texture, 0, 0, NULL) == CKERR_INVALIDPARAMETER, "a 2D texture has one layer");
 
     // Present closes the frame and fills the stats.
     CKDWORD frame = 0;
     TestCheck(b->Present(CKRST_BACKEND_PRESENT_IMMEDIATE, &frame) == CK_OK, "Present");
-    TestCheck(f.Device->Frames.size() == 1 && f.Device->Frames[0] == CKRST_FRAME_SYNC_IMMEDIATE, "device Frame(IMMEDIATE)");
+    TestCheck(f.Device->Frames.size() == 1 && f.Device->Frames[0] == CKRST_BACKEND_PRESENT_IMMEDIATE, "Present(IMMEDIATE) recorded");
     const CKBackendStats &stats = b->GetStats();
     TestCheck(stats.Frames == 1 && stats.Passes == 2 && stats.Draws == 2 && stats.Blits == 1, "stats of the frame");
     TestCheck(b->IsIdle(), "idle after Present");
-    TestCheck(b->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK && f.Device->Frames.back() == CKRST_FRAME_SYNC_PRESERVE_PRESENT,
-              "PRESERVE maps to the device's preserve-present frame");
+    TestCheck(b->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK && f.Device->Frames.back() == CKRST_BACKEND_PRESENT_PRESERVE,
+              "Present(PRESERVE) recorded");
     TestCheck(b->GetStats().Passes == 0 && b->GetStats().Draws == 0, "an empty frame has no passes");
 
-    // Readback goes through the device (the recording device reports the
-    // layout of a zero-filled image).
+    // Readback: the recording backend reports the layout of a zero-filled
+    // image.
     CKReadbackDesc readback;
     TestCheck(b->ReadTexture(dst, 0, &readback, NULL) == CK_OK && readback.Width == 4 && readback.Height == 4 &&
                   readback.RequiredSize == 4 * 4 * 4,
-              "ReadTexture forwards to the device");
+              "ReadTexture layout");
     TestCheck(b->DestroyObject(dst, CKRST_OBJ_TEXTURE) == CK_OK && b->DestroyObject(texture, CKRST_OBJ_TEXTURE) == CK_OK,
               "cleanup");
 }

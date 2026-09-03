@@ -2,10 +2,10 @@
 //
 // The translation core (CKTranslatedRasterizer / Driver / Context in
 // CKRasterizerLib) is driven exclusively through the public contract in
-// include/CKRasterizer.h. The device below it is the recording device of
+// include/CKRasterizer.h. The backend below it is the recording backend of
 // FFPDiagnosticHarness.h: its log is what the tests inspect (draw order, pass
-// splitting, clear rectangles, targets, presents, screenshots). The built-in
-// NULL device is checked separately for the capability baseline.
+// splitting, clear rectangles, targets, presents, readbacks). The built-in
+// NULL backend is checked separately for the capability baseline.
 
 #include <stdio.h>
 #include <string.h>
@@ -1149,8 +1149,8 @@ void TestPresentRequiresEndScene()
     TestCheck(f.Context->GetOptionsForTests().DisableTextureFiltering == TRUE, "options stored inside scene");
     f.Context->EndScene();
     TestCheck(f.Context->BackToFront(TRUE), "BackToFront after EndScene");
-    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] == CKRST_FRAME_SYNC_VSYNC, "vsync flag recorded");
-    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] != CKRST_FRAME_SYNC_IMMEDIATE, "vsync is not immediate");
+    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] == CKRST_BACKEND_PRESENT_VSYNC, "vsync flag recorded");
+    TestCheck(CountPresents(f) == 1 && f.Device->Frames[0] != CKRST_BACKEND_PRESENT_IMMEDIATE, "vsync is not immediate");
 
     options.RenderScale = 9.0f;
     options.Sharpness = -1.0f;
@@ -1169,7 +1169,7 @@ void TestPresentRequiresEndScene()
     f.Context->BeginScene();
     f.Context->EndScene();
     TestCheck(f.Context->BackToFront(FALSE), "immediate present");
-    TestCheck(CountPresents(f) == 2 && f.Device->Frames[1] == CKRST_FRAME_SYNC_IMMEDIATE, "immediate flag recorded");
+    TestCheck(CountPresents(f) == 2 && f.Device->Frames[1] == CKRST_BACKEND_PRESENT_IMMEDIATE, "immediate flag recorded");
 }
 
 void TestRenderTargets()

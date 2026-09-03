@@ -8,22 +8,17 @@
 #include <math.h>
 #include <string.h>
 
-extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *Rasterizer);
-
 namespace {
 
 void NullRasterizerSupportsHeadlessFFP()
 {
-    CKRasterizerDeviceLibrary *rasterizer = CKNULLRasterizerStart(NULL);
-    TestCheck(rasterizer != NULL && rasterizer->GetDriverCount() == 1,
-              "Null rasterizer must expose its headless driver");
-    CKRasterizerDeviceDriver *driver = rasterizer->GetDriver(0);
-    CKRasterizerDevice *first = driver->CreateContext();
-    CKRasterizerDevice *second = driver->CreateContext();
-    TestCheck(first != NULL && second != NULL, "Null rasterizer must create headless contexts");
-    CKDeviceBackend firstBackend(first);
-    CKDeviceBackend secondBackend(second);
+    CKNullBackendLibrary library;
+    TestCheck(library.Start(NULL) && library.GetDriverCount() == 1,
+              "Null backend library must expose its headless driver");
+    CKRasterizerBackendDriver *driver = library.GetDriver(0);
+    CKRasterizerBackend *first = driver->CreateBackend();
+    CKRasterizerBackend *second = driver->CreateBackend();
+    TestCheck(first != NULL && second != NULL, "Null driver must create headless backends");
     CKBackendInitDesc firstDesc;
     firstDesc.Width = 64;
     firstDesc.Height = 64;
@@ -36,19 +31,16 @@ void NullRasterizerSupportsHeadlessFFP()
     secondDesc.Bpp = 32;
     secondDesc.ZBpp = 16;
     secondDesc.StencilBpp = 0;
-    TestCheck(firstBackend.Init(&firstDesc) == CK_OK && secondBackend.Init(&secondDesc) == CK_OK,
-              "Null rasterizer must allow independent headless contexts");
+    TestCheck(first->Init(&firstDesc) == CK_OK && second->Init(&secondDesc) == CK_OK,
+              "Null backends must allow independent headless contexts");
 
     CKFixedFunctionPipeline ffp;
-    TestCheck(ffp.Init(&firstBackend),
-              "FFP must initialize without shader programs on a headless backend");
+    TestCheck(ffp.Init(first),
+              "FFP must initialize its programs on the headless backend");
     TestCheck(ffp.Shutdown() == CK_OK,
               "Headless FFP shutdown must release its resources cleanly");
-    firstBackend.Shutdown();
-    secondBackend.Shutdown();
-    TestCheck(driver->DestroyContext(first) && driver->DestroyContext(second),
-              "Idle headless contexts must be independently destroyable");
-    CKNULLRasterizerClose(rasterizer);
+    TestCheck(driver->DestroyBackend(first) && driver->DestroyBackend(second),
+              "Idle headless backends must be independently destroyable");
 }
 
 CKDWORD FloatStageState(float value) {
@@ -80,7 +72,7 @@ static const ShaderProfileCase kSamplerLayoutProfiles[] = {
 
 CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
                                                  const FFPDiagnosticContext &context) {
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_SPEC);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_SPEC);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
     if (it == context.Encoder.FloatUniforms.end() ||
@@ -377,7 +369,7 @@ void SingleCubeVolumeLayoutUsesGenericMixedSamplerModule() {
 
     TestCheck(drawn && context.Encoder.SubmitCount == 1,
               "one cube and one volume texture must use the generic mixed sampler module");
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool sawCube = false;
     bool sawVolume = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -472,7 +464,7 @@ void DrawVertexBufferUploadsAlphaPrecision() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
 
@@ -538,7 +530,7 @@ void DrawVertexBufferUploadsFogParams() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
 
@@ -571,8 +563,8 @@ void PositionTFogUsesPositionTShaderKey() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITIONT | CKFF_VF_COLOR0 | CKFF_VF_COLOR1, 1);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
-    const CKDWORD matrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
     TestCheck(context.Encoder.FloatUniforms.find(matrixUniform) == context.Encoder.FloatUniforms.end(),
@@ -630,7 +622,7 @@ void PixelFogOverridesVertexFogMode() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
 
@@ -671,8 +663,8 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD planesUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PLANES);
-    const CKDWORD paramsUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PARAMS);
+    const CKDWORD planesUniform = context.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PLANES);
+    const CKDWORD paramsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator planes =
         context.Encoder.FloatUniforms.find(planesUniform);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
@@ -710,8 +702,8 @@ void DrawVertexBufferSkipsClipUniformsWhenDisabled() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD planesUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PLANES);
-    const CKDWORD paramsUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PARAMS);
+    const CKDWORD planesUniform = context.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PLANES);
+    const CKDWORD paramsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_CLIP_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
         context.Encoder.FloatUniforms.find(paramsUniform);
     TestCheck(context.Encoder.FloatUniforms.find(planesUniform) == context.Encoder.FloatUniforms.end(),
@@ -896,7 +888,7 @@ void StageConstantDoesNotCreateTextureDependency() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    const CKDWORD stageParamsUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const CKDWORD stageParamsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Encoder.FloatUniforms.find(stageParamsUniform);
 
@@ -937,7 +929,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
               "Cubemap texture must mark stage 0 as cube sampler");
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Cubemap draw must bind one texture");
-    TestCheck(context.Encoder.LastTextureUniform == context.Backend.GetSamplerUniformForTests(8 + 0),
+    TestCheck(context.Encoder.LastTextureUniform == context.GetSamplerUniformForTests(8 + 0),
               "Cubemap draw must bind the cube sampler uniform");
     TestCheck(context.Encoder.LastTextureHandle == 77,
               "Cubemap draw must bind the requested texture handle");
@@ -972,7 +964,7 @@ void VolumeTextureBindsFirstVolumeSampler() {
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Volume draw must bind one texture");
     TestCheck(context.Encoder.LastTextureStage == 12 &&
-              context.Encoder.LastTextureUniform == context.Backend.GetSamplerUniformForTests(12 + 0),
+              context.Encoder.LastTextureUniform == context.GetSamplerUniformForTests(12 + 0),
               "The first volume stage must bind slot 12 and s_textureVolume0");
 
     ffp.Shutdown();
@@ -1006,7 +998,7 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
     TestCheck(context.Encoder.TextureBindCount == 1,
               "Volume stage 7 draw must bind one texture");
     TestCheck(context.Encoder.LastTextureStage == 12 &&
-              context.Encoder.LastTextureUniform == context.Backend.GetSamplerUniformForTests(12 + 0),
+              context.Encoder.LastTextureUniform == context.GetSamplerUniformForTests(12 + 0),
               "A volume texture on stage 7 is the first volume stage and binds slot 12 / s_textureVolume0");
 
     ffp.Shutdown();
@@ -1046,7 +1038,7 @@ void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
     TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE &&
                   spec.GetStage(1, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_ADD,
               "Volume + cube draw must keep the texture stage ops in the specialization data");
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool sawVolume = false;
     bool sawCube = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -1102,7 +1094,7 @@ void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_PROFILE pro
     TestCheck(context.CreatedProgramCount == 1,
               "arbitrary sampler placement must not create a dedicated program");
 
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool sawVolume = false;
     bool sawCube = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -1141,7 +1133,7 @@ void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_PROFILE profile) {
 
     TestCheck(context.Encoder.SubmitCount == 1,
               "multiple mixed samplers must draw through the uber shader");
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool found[4] = {};
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
         if (binding.Stage == 8 && binding.Uniform == u.GetSamplerUniformForTests(8 + 0) && binding.Texture == 401)
@@ -1188,7 +1180,7 @@ void FifthCubeStageSamplesAsUnbound() {
               "five cube stages must still submit (approximation, not rejection)");
     TestCheck(context.Encoder.TextureBindCount == 4,
               "only four cube textures fit the fixed sampler layout");
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool found[4] = {};
     bool boundFifth = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -1250,7 +1242,7 @@ void MultipleVolumeTexturesBindEachVolumeSampler() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    const CKDeviceBackend &u = context.Backend;
+    const FFPDiagnosticContext &u = context;
     bool sawStage0 = false;
     bool sawStage2 = false;
     for (const FFPTextureBinding &binding : context.Encoder.TextureBindings) {
@@ -1533,7 +1525,7 @@ void BottomLeftRenderTargetsSampleWithoutFlip() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    const CKDWORD stageParams = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const CKDWORD stageParams = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
         context.Encoder.FloatUniforms.find(stageParams);
     TestCheck(drawn && params != context.Encoder.FloatUniforms.end() &&
@@ -1554,8 +1546,8 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
     FFPDiagnosticContext context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.FFPBackend());
-    const CKDWORD matrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
-    const CKDWORD viewportUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_VIEWPORT);
+    const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
+    const CKDWORD viewportUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VIEWPORT);
 
     // Window 640x480 rendered into a 320x240 scene target, viewport 100,50 200x100.
     ffp.SetTargetExtents(640, 480, 320, 240);
@@ -1643,8 +1635,8 @@ void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     viewport.ViewHeight = 480;
     viewport.ViewZMax = 1.0f;
     ffp.SetViewport(viewport);
-    const CKDWORD matrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
-    const CKDWORD viewportUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_VIEWPORT);
+    const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
+    const CKDWORD viewportUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VIEWPORT);
 
     // Backbuffer: identity transforms and the default counter-clockwise cull.
     ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
@@ -1698,7 +1690,7 @@ void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     topLeftFfp.SetRenderTargetActive(TRUE);
     topLeftFfp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                 CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
-    matrices = topLeftContext.Encoder.FloatUniforms[topLeftContext.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES)];
+    matrices = topLeftContext.Encoder.FloatUniforms[topLeftContext.GetBlockUniformForTests(CKRST_BLOCK_MATRICES)];
     TestCheck(topLeftFfp.IsRenderTargetActive() && !topLeftFfp.RenderTargetOriginFlip() &&
                   matrices.size() >= 16 && matrices[5] == 1.0f &&
                   (topLeftContext.Encoder.LastState.Lo & CKRST_STATE_CULL(3)) == CKRST_STATE_CULL(2),
@@ -1865,7 +1857,7 @@ void UntexturedStageKeepsRuntimeStageParams() {
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
         context.Encoder.FloatUniforms.find(uniform);
     TestCheck(drawn && params != context.Encoder.FloatUniforms.end(),
@@ -2143,7 +2135,7 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_PROJECTED) == 0,
               "point sprite sampling must bypass projected texture coordinates");
-    const CKDWORD stageUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator packedStage =
         context.Encoder.FloatUniforms.find(stageUniform);
     const int coord = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD) * 4;
@@ -2395,7 +2387,7 @@ void ProjectedSamplerStageFourEntersSpecialization() {
 
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
 
-    const CKDWORD stageParamsUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const CKDWORD stageParamsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Encoder.FloatUniforms.find(stageParamsUniform);
 
@@ -2442,7 +2434,7 @@ void DrawUploadsPerStageBumpEnvUniforms() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKDWORD bumpUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
+    const CKDWORD bumpUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator bump =
         context.Encoder.FloatUniforms.find(bumpUniform);
 
@@ -2558,7 +2550,7 @@ void PositionTTextureTransformDoesNotUploadTextureMatrix() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.FFPBackend());
 
-    const CKDWORD texMatrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
+    const CKDWORD texMatrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
     context.Encoder.MatrixUniforms.insert(texMatrixUniform);
 
     VxMatrix texMatrix;
@@ -2583,7 +2575,7 @@ void TextureTransformCountOneUploadsTextureMatrix() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.FFPBackend());
 
-    const CKDWORD texMatrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
+    const CKDWORD texMatrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
     context.Encoder.MatrixUniforms.insert(texMatrixUniform);
 
     VxMatrix texMatrix;
@@ -2786,8 +2778,8 @@ void VertexBlendZeroWeightsUploadsMatrixPalette() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
 
-    const CKDWORD matrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
-    const CKDWORD paletteUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
+    const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
+    const CKDWORD paletteUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
     TestCheck(context.Encoder.UniformCounts[matrixUniform] == 4,
               "Normal vertex blend must keep base matrices separate from matrix palette");
     TestCheck(context.Encoder.UniformCounts[paletteUniform] == CKFF_VERTEX_BLEND_MATRIX_COUNT,
@@ -2811,7 +2803,7 @@ void VertexBlendUploadsWorldMatrixPaletteForClipPlanes() {
     ffp.SetTransform(VXMATRIX_WORLD, world);
     ffp.SetTransform(VXMATRIX_VIEW, view);
 
-    const CKDWORD paletteUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
+    const CKDWORD paletteUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
     context.Encoder.MatrixUniforms.insert(paletteUniform);
 
     VxPlane plane;
@@ -2848,7 +2840,7 @@ void VertexBlendUploadsExplicitMatrixPaletteSlot() {
     palette[1][1] = 4.0f;
     ffp.SetVertexBlendMatrix(1, palette);
 
-    const CKDWORD paletteUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
+    const CKDWORD paletteUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VERTEX_BLEND_MATRICES);
     context.Encoder.MatrixUniforms.insert(paletteUniform);
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
@@ -2915,7 +2907,7 @@ void VertexTweenWithoutStreamsRendersUntweened() {
               "Vertex tween without its second stream must still draw");
     TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN),
               "Vertex tween input failures must report the tween approximation");
-    const CKDWORD drawParams = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD drawParams = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
         context.Encoder.FloatUniforms.find(drawParams);
     TestCheck(params != context.Encoder.FloatUniforms.end() &&
@@ -3013,7 +3005,7 @@ void PositionTVertexBlendDoesNotUploadMatrixPalette() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITIONT | CKFF_VF_BLENDWEIGHT, 1);
 
-    const CKDWORD matrixUniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
+    const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
     TestCheck(context.Encoder.FloatUniforms.find(matrixUniform) == context.Encoder.FloatUniforms.end(),
               "POSITIONT vertex blend must not upload 3D matrix palette");
 
@@ -3062,7 +3054,7 @@ void MaterialSourceUsesDeclaredDPColorStreams() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_COLOR0, 1);
 
-    const CKDWORD uniform = context.Backend.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Encoder.FloatUniforms.find(uniform);
 

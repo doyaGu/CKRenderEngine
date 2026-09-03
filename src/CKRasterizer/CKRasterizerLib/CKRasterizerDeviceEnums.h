@@ -13,35 +13,14 @@
 
 
 /******************************************************************************
-// CKRasterizerDevice::Frame sync handling
 *******************************************************************************/
-typedef enum CKRST_FRAME_SYNC_MODE
-{
-    CKRST_FRAME_SYNC_IMMEDIATE        = 0,
-    CKRST_FRAME_SYNC_VSYNC            = 1,
-    CKRST_FRAME_SYNC_PRESERVE_PRESENT = 2,
-} CKRST_FRAME_SYNC_MODE;
-
-typedef enum CKRST_FRAME_FLAGS
-{
-    CKRST_FRAME_NONE    = 0x00,
-    CKRST_FRAME_CAPTURE = 0x01,
-    CKRST_FRAME_DISCARD = 0x02,
-    CKRST_FRAME_FLUSH   = 0x04,
-} CKRST_FRAME_FLAGS;
-
 // ===========================================================================
 // Constants
 // ===========================================================================
 
 #define CKRST_MAX_VERTEX_STREAMS   4
 #define CKRST_MAX_RENDER_VIEWS     256
-#define CKRST_MAX_ENCODERS         8
-#define CKRST_MAX_TRANSFORMS       1024
-#define CKRST_MAX_COMPUTE_BINDINGS 8
-#define CKRST_INVALID_TRANSFORM    0xFFFFFFFF
 
-#define CKRST_DEVICE_INTERFACE_REVISION 0x00020100u
 
 // ===========================================================================
 // Object Kinds (device-internal objects; the contract kinds are in CKRasterizerEnums.h)
@@ -49,11 +28,8 @@ typedef enum CKRST_FRAME_FLAGS
 
 #define CKRST_OBJ_SHADER          0x00000010
 #define CKRST_OBJ_PROGRAM         0x00000020
-#define CKRST_OBJ_UNIFORM         0x00000040
 #define CKRST_OBJ_FRAMEBUFFER     0x00000080
 #define CKRST_OBJ_VERTEXLAYOUT    0x00000100
-#define CKRST_OBJ_OCCLUSIONQUERY  0x00000200
-#define CKRST_OBJ_INDIRECTBUFFER  0x00000400
 
 // ---------------------------------------------------------------------------
 // Shader Stage and Format
@@ -138,13 +114,6 @@ typedef enum CK_VERTEX_ATTRIB_TYPE {
 // ---------------------------------------------------------------------------
 
 typedef uint16_t CKRenderView;
-
-typedef enum CK_VIEW_MODE {
-    CKRST_VIEWMODE_DEFAULT    = 0,
-    CKRST_VIEWMODE_SEQUENTIAL = 1,
-    CKRST_VIEWMODE_DEPTH_ASC  = 2,
-    CKRST_VIEWMODE_DEPTH_DESC = 3,
-} CK_VIEW_MODE;
 
 // ---------------------------------------------------------------------------
 // Depth Format (for depth/stencil textures)
@@ -247,11 +216,8 @@ inline CKDWORD CKRSTTextureMSAASamples(CKDWORD flags)
 // Vertex Buffer Compute Flags (extensions to CKRST_VBFLAGS)
 // ---------------------------------------------------------------------------
 
-#define CKRST_VB_COMPUTE_READ       0x0100
-#define CKRST_VB_COMPUTE_WRITE      0x0200
-#define CKRST_VB_COMPUTE_READ_WRITE (CKRST_VB_COMPUTE_READ | CKRST_VB_COMPUTE_WRITE)
 
-// Runtime context capabilities. These values are owned by CKRasterizerDeviceLibrary and
+// Backend capabilities (CKRST_DEVCAPS_*). Reported by the backend and
 // must not alias or expose a native backend capability mask.
 typedef uint64_t CKRST_DEVCAPS;
 
@@ -261,19 +227,14 @@ typedef uint64_t CKRST_DEVCAPS;
 #define CKRST_DEVCAPS_FRAMEBUFFER         UINT64_C(0x0000000000000008)
 #define CKRST_DEVCAPS_TRANSIENT_BUFFERS   UINT64_C(0x0000000000000010)
 #define CKRST_DEVCAPS_SCISSOR             UINT64_C(0x0000000000000020)
-#define CKRST_DEVCAPS_INSTANCING          UINT64_C(0x0000000000000040)
 #define CKRST_DEVCAPS_TEXTURE_READBACK    UINT64_C(0x0000000000000080)
 #define CKRST_DEVCAPS_BUFFER_UPDATE       UINT64_C(0x0000000000000100)
 #define CKRST_DEVCAPS_TEXTURE_UPDATE      UINT64_C(0x0000000000000200)
 #define CKRST_DEVCAPS_DEPTH_TEXTURE       UINT64_C(0x0000000000000400)
 #define CKRST_DEVCAPS_BLEND_EQUATION      UINT64_C(0x0000000000000800)
 #define CKRST_DEVCAPS_BLIT                UINT64_C(0x0000000000001000)
-#define CKRST_DEVCAPS_TRANSFORM_CACHE     UINT64_C(0x0000000000002000)
 #define CKRST_DEVCAPS_INDEX32             UINT64_C(0x0000000000004000)
 #define CKRST_DEVCAPS_TEXTURE_COMPARISON  UINT64_C(0x0000000000008000)
-#define CKRST_DEVCAPS_COMPUTE             UINT64_C(0x0000000000010000)
-#define CKRST_DEVCAPS_OCCLUSION_QUERY     UINT64_C(0x0000000000020000)
-#define CKRST_DEVCAPS_DRAW_INDIRECT       UINT64_C(0x0000000000040000)
 #define CKRST_DEVCAPS_TEXTURE_CUBE        UINT64_C(0x0000000000080000)
 #define CKRST_DEVCAPS_TEXTURE_3D          UINT64_C(0x0000000000100000)
 #define CKRST_DEVCAPS_IMAGE_RW            UINT64_C(0x0000000000200000)
