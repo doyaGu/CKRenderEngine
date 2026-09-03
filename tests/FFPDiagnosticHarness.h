@@ -772,7 +772,7 @@ struct FFPTranslatedWorld {
     FFPTranslatedWorld() : Rasterizer(NULL), Driver(NULL), Context(NULL), Device(NULL) {
         FFPRecordingDeviceLibrary *library = new FFPRecordingDeviceLibrary();
         library->Start(NULL);
-        Rasterizer = CKTranslatedRasterizerStart(library, NULL);
+        Rasterizer = CKTranslatedRasterizerStartOverDevice(library, NULL);
         TestCheck(Rasterizer != NULL && Rasterizer->GetDriverCount() == 1, "translated rasterizer over the recording device");
         Driver = Rasterizer ? static_cast<CKTranslatedDriver *>(Rasterizer->GetDriver(0)) : NULL;
     }
@@ -783,7 +783,10 @@ struct FFPTranslatedWorld {
     }
 
     FFPRecordingDriver *DeviceDriver() const {
-        return Driver ? static_cast<FFPRecordingDriver *>(Driver->GetDeviceDriver()) : NULL;
+        if (!Driver)
+            return NULL;
+        CKDeviceBackendDriver *adapter = static_cast<CKDeviceBackendDriver *>(Driver->GetBackendDriver());
+        return static_cast<FFPRecordingDriver *>(adapter->GetDeviceDriver());
     }
 
     CKBOOL CreateContext(int width, int height) {
@@ -794,7 +797,8 @@ struct FFPTranslatedWorld {
             return FALSE;
         if (!Context->Create(NULL, 0, 0, width, height, 32, FALSE, 60, 24, 8))
             return FALSE;
-        Device = static_cast<FFPRecordingContext *>(Context->GetDevice());
+        CKDeviceBackend *adapter = static_cast<CKDeviceBackend *>(Context->GetBackend());
+        Device = adapter ? static_cast<FFPRecordingContext *>(adapter->GetDevice()) : NULL;
         return Device != NULL;
     }
 };

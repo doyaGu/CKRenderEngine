@@ -7,6 +7,7 @@
 // bgfx device is still the v2 class; the native bgfx backend (phase 4.3)
 // replaces it and this file goes away with the device interface.
 
+#include "CKRasterizer.h"
 #include "CKRasterizerBackend.h"
 #include "CKRasterizerDevice.h"
 
@@ -107,5 +108,53 @@ private:
     CKDWORD m_BlockUniforms[CKRST_BLOCK_COUNT];
     CKDWORD m_SamplerUniforms[CKRST_BACKEND_SLOT_COUNT];
 };
+
+// Backend driver over a device driver: caps, modes and formats are copied
+// from the device driver (again on RefreshCaps, the device refines them when
+// a context is created); backends are CKDeviceBackend adapters over the
+// device contexts the device driver creates.
+class CKDeviceBackendDriver : public CKRasterizerBackendDriver {
+public:
+    explicit CKDeviceBackendDriver(CKRasterizerDeviceDriver *Driver, CKDWORD Index);
+
+    CKRasterizerBackend *CreateBackend() override;
+    CKBOOL DestroyBackend(CKRasterizerBackend *Backend) override;
+    void RefreshCaps() override;
+
+    CKRasterizerDeviceDriver *GetDeviceDriver() const { return m_Driver; }
+
+private:
+    CKRasterizerDeviceDriver *m_Driver;
+};
+
+typedef void (*CKDeviceLibraryCloseFunction)(CKRasterizerDeviceLibrary *Device);
+
+// Backend library over a device library. Takes ownership of the device
+// library; `CloseDevice` (may be NULL) is called with it on destruction, NULL
+// means `delete`.
+class CKDeviceBackendLibrary : public CKRasterizerBackendLibrary {
+public:
+    CKDeviceBackendLibrary(CKRasterizerDeviceLibrary *Device, CKDeviceLibraryCloseFunction CloseDevice);
+    ~CKDeviceBackendLibrary() override;
+
+    CKBOOL Start(WIN_HANDLE AppWnd) override;
+    void Close() override;
+    int GetDriverCount() const override { return m_Drivers.Size(); }
+    CKRasterizerBackendDriver *GetDriver(CKDWORD Index) const override;
+    WIN_HANDLE GetMainWindow() const override { return m_Device ? m_Device->m_MainWindow : NULL; }
+
+    CKRasterizerDeviceLibrary *GetDevice() const { return m_Device; }
+
+private:
+    CKRasterizerDeviceLibrary *m_Device;
+    CKDeviceLibraryCloseFunction m_CloseDevice;
+    XArray<CKDeviceBackendDriver *> m_Drivers;
+};
+
+// Translation core over a started device library (bgfx plugin, NULL device,
+// test harness). Returns NULL (and closes the device) when the device has no
+// driver.
+CKRasterizer *CKTranslatedRasterizerStartOverDevice(CKRasterizerDeviceLibrary *Device,
+                                                    CKDeviceLibraryCloseFunction CloseDevice);
 
 #endif // CKDEVICEBACKEND_H

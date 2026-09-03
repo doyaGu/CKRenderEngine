@@ -70,8 +70,17 @@ struct CKBackendStats {
     CKDWORD Blits;                 // Blit() calls in the last frame
     CKDWORD TextureUploads;        // CreateTexture with data + UpdateTexture in the last frame
     CKDWORD BufferUploads;         // CreateBuffer with data + UpdateBuffer in the last frame
+    // Timings of the last frame (0 when the backend has no timer)
+    int64_t CpuTimeFrame;
+    int64_t CpuTimerFreq;
+    int64_t GpuTimeFrame;
+    int64_t GpuTimerFreq;
+    CKDWORD GpuMemoryMax;
+    CKDWORD GpuMemoryUsed;
 
-    CKBackendStats() : Frames(0), Passes(0), Draws(0), Blits(0), TextureUploads(0), BufferUploads(0) {}
+    CKBackendStats()
+        : Frames(0), Passes(0), Draws(0), Blits(0), TextureUploads(0), BufferUploads(0), CpuTimeFrame(0),
+          CpuTimerFreq(0), GpuTimeFrame(0), GpuTimerFreq(0), GpuMemoryMax(0), GpuMemoryUsed(0) {}
 };
 
 // ---------------------------------------------------------------------------
@@ -315,5 +324,44 @@ public:
 const CKBackendConstantBlockDesc &CKBackendConstantBlockInfo(CKBackendConstantBlock Block);
 // Sampler uniform name of a slot (NULL for an invalid slot).
 const char *CKBackendSamplerSlotName(CKDWORD Slot);
+
+// ---------------------------------------------------------------------------
+// Enumeration
+// ---------------------------------------------------------------------------
+
+// One adapter of a backend library: what the engine sees through the v3
+// driver (caps, display modes, texture formats) and the factory of backends.
+// Caps follow the baseline (spec 4.9.2); RefreshCaps() lets a driver lower the
+// numeric limits once a backend exists.
+class CKRasterizerBackendDriver {
+public:
+    CKRasterizerBackendDriver();
+    virtual ~CKRasterizerBackendDriver() {}
+
+    virtual CKRasterizerBackend *CreateBackend() = 0;
+    // Shuts the backend down and frees it; FALSE when it cannot go away yet.
+    virtual CKBOOL DestroyBackend(CKRasterizerBackend *Backend) = 0;
+    virtual void RefreshCaps() {}
+
+    CKBOOL m_Hardware;
+    CKBOOL m_CapsUpToDate;
+    CKDWORD m_DriverIndex;
+    XArray<VxDisplayMode> m_DisplayModes;
+    XClassArray<CKTextureDesc> m_TextureFormats;
+    Vx3DCapsDesc m_3DCaps;
+    Vx2DCapsDesc m_2DCaps;
+    XString m_Desc;
+};
+
+class CKRasterizerBackendLibrary {
+public:
+    virtual ~CKRasterizerBackendLibrary() {}
+
+    virtual CKBOOL Start(WIN_HANDLE AppWnd) = 0;
+    virtual void Close() = 0;
+    virtual int GetDriverCount() const = 0;
+    virtual CKRasterizerBackendDriver *GetDriver(CKDWORD Index) const = 0;
+    virtual WIN_HANDLE GetMainWindow() const = 0;
+};
 
 #endif // CKRASTERIZERBACKEND_H

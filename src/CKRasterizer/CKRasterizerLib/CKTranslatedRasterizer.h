@@ -4,19 +4,15 @@
 // Translation core of the CKRasterizer v3 contract (spec section 5, plan
 // phase 1 step 1.4).
 //
-// A CKTranslatedRasterizer wraps a backend "device library" (the former v2
-// CKRasterizer interface, now CKRasterizerDeviceLibrary) and exposes it to the
-// engine as the D3D7-shaped v3 contract. Every fixed-function state call is
-// mirrored verbatim (so Get* returns exactly what was set) and forwarded to
-// the fixed-function pipeline; draws go through CKFixedFunctionPipeline onto
-// the CKRasterizerBackend; the frame flow opens one backend pass per pass.
-// Phase 4.2: the context drives a CKDeviceBackend adapter over the device;
-// phase 4.3 replaces the adapter with the native bgfx backend.
+// A CKTranslatedRasterizer wraps a CKRasterizerBackendLibrary (bgfx, NULL,
+// ...) and exposes it to the engine as the D3D7-shaped v3 contract. Every
+// fixed-function state call is mirrored verbatim (so Get* returns exactly
+// what was set) and forwarded to the fixed-function pipeline; draws go
+// through CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
+// flow opens one backend pass per pass.
 
 #include "CKRasterizer.h"
-#include "CKRasterizerDevice.h"
 #include "CKRasterizerBackend.h"
-#include "CKDeviceBackend.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKPresentStage.h"
 
@@ -27,7 +23,7 @@ class CKTranslatedRasterizer;
 class CKTranslatedDriver;
 class CKTranslatedContext;
 
-typedef void (*CKTranslatedDeviceCloseFunction)(CKRasterizerDeviceLibrary *Device);
+typedef void (*CKTranslatedLibraryCloseFunction)(CKRasterizerBackendLibrary *Library);
 
 // ===========================================================================
 // CKTranslatedRasterizer
@@ -35,19 +31,19 @@ typedef void (*CKTranslatedDeviceCloseFunction)(CKRasterizerDeviceLibrary *Devic
 
 class CKTranslatedRasterizer : public CKRasterizer {
 public:
-    // Takes ownership of `Device`. `CloseDevice` (may be NULL) is called with
-    // the device when the rasterizer is destroyed; NULL means `delete`.
-    CKTranslatedRasterizer(CKRasterizerDeviceLibrary *Device, CKTranslatedDeviceCloseFunction CloseDevice);
+    // Takes ownership of `Library`. `CloseLibrary` (may be NULL) is called
+    // with the library when the rasterizer is destroyed; NULL means `delete`.
+    CKTranslatedRasterizer(CKRasterizerBackendLibrary *Library, CKTranslatedLibraryCloseFunction CloseLibrary);
     ~CKTranslatedRasterizer() override;
 
     CKBOOL Start(WIN_HANDLE AppWnd) override;
     void Close() override;
 
-    CKRasterizerDeviceLibrary *GetDevice() const { return m_Device; }
+    CKRasterizerBackendLibrary *GetLibrary() const { return m_Library; }
 
 private:
-    CKRasterizerDeviceLibrary *m_Device;
-    CKTranslatedDeviceCloseFunction m_CloseDevice;
+    CKRasterizerBackendLibrary *m_Library;
+    CKTranslatedLibraryCloseFunction m_CloseLibrary;
 };
 
 // ===========================================================================
@@ -56,20 +52,20 @@ private:
 
 class CKTranslatedDriver : public CKRasterizerDriver {
 public:
-    CKTranslatedDriver(CKTranslatedRasterizer *Owner, CKRasterizerDeviceDriver *Device, CKDWORD Index);
+    CKTranslatedDriver(CKTranslatedRasterizer *Owner, CKRasterizerBackendDriver *Backend, CKDWORD Index);
     ~CKTranslatedDriver() override;
 
     CKRasterizerContext *CreateContext() override;
     CKBOOL DestroyContext(CKRasterizerContext *Context) override;
 
-    CKRasterizerDeviceDriver *GetDeviceDriver() const { return m_Device; }
-    // Copies caps, display modes and texture formats from the device driver.
-    // Backends refresh their caps when a context is created, so the context
+    CKRasterizerBackendDriver *GetBackendDriver() const { return m_Backend; }
+    // Copies caps, display modes and texture formats from the backend driver.
+    // Backends refine their caps when a backend is created, so the context
     // calls this again after Create().
-    void SyncCapsFromDevice();
+    void SyncCapsFromBackend();
 
 private:
-    CKRasterizerDeviceDriver *m_Device;
+    CKRasterizerBackendDriver *m_Backend;
 };
 
 // ===========================================================================
@@ -78,7 +74,7 @@ private:
 
 class CKTranslatedContext : public CKRasterizerContext {
 public:
-    CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerDevice *Device);
+    CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerBackend *Backend);
     ~CKTranslatedContext() override;
 
     // --- Lifecycle ---
@@ -153,7 +149,6 @@ public:
     const CKRenderStats *GetStats() override;
 
     // --- Internal access ---
-    CKRasterizerDevice *GetDevice() const { return m_Device; }
     CKRasterizerBackend *GetBackend() const { return m_Backend; }
 
     // --- Test access (the translated tests read the pipeline and the mirror) ---
@@ -285,8 +280,7 @@ private:
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
 
     CKTranslatedDriver *m_TranslatedDriver;
-    CKRasterizerDevice *m_Device;      // window / mode state (transitional, until the backend reports it)
-    CKDeviceBackend *m_Backend;        // owned; the FFP, the present stage and the frame flow talk to it
+    CKRasterizerBackend *m_Backend;    // owned by the backend driver
     CKFixedFunctionPipeline m_FFP;
     CKPresentStage m_Present;
     CKRasterizerOptions m_Options;
@@ -350,14 +344,14 @@ private:
 // Entry points
 // ===========================================================================
 
-// Wraps a started device library. Returns NULL (and closes the device) when
-// the device has no driver.
-CKRasterizer *CKTranslatedRasterizerStart(CKRasterizerDeviceLibrary *Device,
-                                          CKTranslatedDeviceCloseFunction CloseDevice);
+// Wraps a backend library (started or not). Returns NULL (and closes the
+// library) when it has no driver.
+CKRasterizer *CKTranslatedRasterizerStart(CKRasterizerBackendLibrary *Library,
+                                          CKTranslatedLibraryCloseFunction CloseLibrary);
 void CKTranslatedRasterizerClose(CKRasterizer *Rasterizer);
 
-// Translation core on top of the built-in NULL device: the engine's fallback
-// when no rasterizer plugin loads, and the device the contract tests run on.
+// Translation core on top of the built-in NULL backend: the engine's fallback
+// when no rasterizer plugin loads, and the backend the contract tests run on.
 CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd);
 void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer);
 void CKTranslatedNullRasterizerGetInfo(CKRasterizerInfo *Info);

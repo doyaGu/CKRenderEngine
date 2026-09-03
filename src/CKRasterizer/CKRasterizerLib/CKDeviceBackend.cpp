@@ -1,6 +1,8 @@
 #include "CKDeviceBackend.h"
 #include "CKFFShaderABI.h"
+#include "CKTranslatedRasterizer.h"
 
+#include <new>
 #include <string.h>
 
 CKDeviceBackend::CKDeviceBackend(CKRasterizerDevice *device)
@@ -571,6 +573,14 @@ CKERROR CKDeviceBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber
     m_Stats.Blits = m_FrameBlits;
     m_Stats.TextureUploads = m_FrameTextureUploads;
     m_Stats.BufferUploads = m_FrameBufferUploads;
+    if (const CKRasterizerDeviceStats *device = m_Device->GetStats()) {
+        m_Stats.CpuTimeFrame = device->CpuTimeFrame;
+        m_Stats.CpuTimerFreq = device->CpuTimerFreq;
+        m_Stats.GpuTimeFrame = device->GpuTimeEnd - device->GpuTimeBegin;
+        m_Stats.GpuTimerFreq = device->GpuTimerFreq;
+        m_Stats.GpuMemoryMax = device->GpuMemoryMax;
+        m_Stats.GpuMemoryUsed = device->GpuMemoryUsed;
+    }
     m_FramePasses = m_FrameDraws = m_FrameBlits = m_FrameTextureUploads = m_FrameBufferUploads = 0;
     return status;
 }
@@ -591,4 +601,129 @@ CKERROR CKDeviceBackend::SetPaletteColor(CKDWORD Index, CKDWORD RGBA)
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
     return m_Device->SetPaletteColor(Index, RGBA);
+}
+
+// ---------------------------------------------------------------------------
+// Driver / library adapters
+// ---------------------------------------------------------------------------
+
+CKDeviceBackendDriver::CKDeviceBackendDriver(CKRasterizerDeviceDriver *Driver, CKDWORD Index)
+    : m_Driver(Driver)
+{
+    m_DriverIndex = Index;
+    RefreshCaps();
+}
+
+void CKDeviceBackendDriver::RefreshCaps()
+{
+    if (!m_Driver)
+        return;
+    m_Hardware = m_Driver->m_Hardware;
+    m_CapsUpToDate = m_Driver->m_CapsUpToDate;
+    m_DisplayModes = m_Driver->m_DisplayModes;
+    m_TextureFormats = m_Driver->m_TextureFormats;
+    m_3DCaps = m_Driver->m_3DCaps;
+    m_2DCaps = m_Driver->m_2DCaps;
+    m_Desc = m_Driver->m_Desc;
+}
+
+CKRasterizerBackend *CKDeviceBackendDriver::CreateBackend()
+{
+    if (!m_Driver)
+        return NULL;
+    CKRasterizerDevice *device = m_Driver->CreateContext();
+    if (!device)
+        return NULL;
+    CKDeviceBackend *backend = new (std::nothrow) CKDeviceBackend(device);
+    if (!backend) {
+        m_Driver->DestroyContext(device);
+        return NULL;
+    }
+    return backend;
+}
+
+CKBOOL CKDeviceBackendDriver::DestroyBackend(CKRasterizerBackend *Backend)
+{
+    if (!Backend)
+        return FALSE;
+    CKDeviceBackend *adapter = static_cast<CKDeviceBackend *>(Backend);
+    adapter->Shutdown();
+    if (m_Driver && adapter->GetDevice() && !m_Driver->DestroyContext(adapter->GetDevice()))
+        return FALSE;
+    delete adapter;
+    return TRUE;
+}
+
+CKDeviceBackendLibrary::CKDeviceBackendLibrary(CKRasterizerDeviceLibrary *Device,
+                                               CKDeviceLibraryCloseFunction CloseDevice)
+    : m_Device(Device), m_CloseDevice(CloseDevice)
+{
+}
+
+CKDeviceBackendLibrary::~CKDeviceBackendLibrary()
+{
+    Close();
+    if (m_Device) {
+        if (m_CloseDevice)
+            m_CloseDevice(m_Device);
+        else
+            delete m_Device;
+        m_Device = NULL;
+    }
+}
+
+CKBOOL CKDeviceBackendLibrary::Start(WIN_HANDLE AppWnd)
+{
+    if (!m_Device)
+        return FALSE;
+    if (m_Drivers.Size() > 0)
+        return TRUE;
+    // Plugins hand over a started device; the NULL fallback starts here.
+    if (m_Device->GetDriverCount() == 0 && !m_Device->Start(AppWnd))
+        return FALSE;
+    for (int i = 0; i < m_Device->GetDriverCount(); ++i) {
+        CKRasterizerDeviceDriver *deviceDriver = m_Device->GetDriver((CKDWORD)i);
+        if (!deviceDriver)
+            continue;
+        CKDeviceBackendDriver *driver = new (std::nothrow) CKDeviceBackendDriver(deviceDriver, (CKDWORD)m_Drivers.Size());
+        if (!driver)
+            break;
+        m_Drivers.PushBack(driver);
+    }
+    return m_Drivers.Size() > 0 ? TRUE : FALSE;
+}
+
+void CKDeviceBackendLibrary::Close()
+{
+    for (int i = 0; i < m_Drivers.Size(); ++i)
+        delete m_Drivers[i];
+    m_Drivers.Clear();
+    if (m_Device)
+        m_Device->Close();
+}
+
+CKRasterizerBackendDriver *CKDeviceBackendLibrary::GetDriver(CKDWORD Index) const
+{
+    return (int)Index < m_Drivers.Size() ? m_Drivers[(int)Index] : NULL;
+}
+
+static void CKDeviceBackendLibraryClose(CKRasterizerBackendLibrary *Library)
+{
+    delete static_cast<CKDeviceBackendLibrary *>(Library);
+}
+
+CKRasterizer *CKTranslatedRasterizerStartOverDevice(CKRasterizerDeviceLibrary *Device,
+                                                    CKDeviceLibraryCloseFunction CloseDevice)
+{
+    if (!Device)
+        return NULL;
+    CKDeviceBackendLibrary *library = new (std::nothrow) CKDeviceBackendLibrary(Device, CloseDevice);
+    if (!library) {
+        if (CloseDevice)
+            CloseDevice(Device);
+        else
+            delete Device;
+        return NULL;
+    }
+    return CKTranslatedRasterizerStart(library, CKDeviceBackendLibraryClose);
 }

@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKDeviceBackend.h"
 #include "CKTranslatedRasterizer.h"
 
 #include <new>
@@ -69,7 +70,7 @@ static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
     CKRasterizerDeviceLibrary *device = CKBgfxDeviceStart(AppWnd);
     if (!device)
         return NULL;
-    return CKTranslatedRasterizerStart(device, CKBgfxDeviceClose);
+    return CKTranslatedRasterizerStartOverDevice(device, CKBgfxDeviceClose);
 }
 
 static void CKBgfxRasterizerClose(CKRasterizer *rst)

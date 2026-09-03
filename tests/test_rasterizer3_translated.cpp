@@ -99,7 +99,7 @@ void TestLifecycle()
     Fixture f;
     TestCheck(f.Driver->m_Desc == "Recording device", "driver description synced from the device driver");
     TestCheck(f.Driver->m_3DCaps.MaxNumberTextureStage == 8, "3D caps synced from the device driver");
-    TestCheck(f.Driver->GetDeviceDriver() != NULL, "device driver reachable");
+    TestCheck(f.Driver->GetBackendDriver() != NULL, "backend driver reachable");
     TestCheck(f.Context->m_Width == 64 && f.Context->m_Height == 64, "context size from the device");
     TestCheck(f.Context->GetDeviceStatus() == CK_OK, "device status");
     TestCheck(f.Context->IsIdle(), "idle after Create");

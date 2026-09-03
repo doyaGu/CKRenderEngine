@@ -1,7 +1,6 @@
 #include "RCKRenderManager.h"
 
 #include "CKLevel.h"
-#include "CKRasterizerDevice.h"
 #include "CKTranslatedRasterizer.h"
 #include "CKMaterial.h"
 #include "CKParameterManager.h"
@@ -1129,7 +1128,7 @@ void RCKRenderManager::RefreshDriverCaps(int DriverIndex) {
     CKTranslatedDriver *driver = static_cast<CKTranslatedDriver *>(m_Drivers[DriverIndex].RasterizerDriver);
     if (!driver)
         return;
-    driver->SyncCapsFromDevice();
+    driver->SyncCapsFromBackend();
     UpdateDriverDescCaps(&m_Drivers[DriverIndex]);
 }
 

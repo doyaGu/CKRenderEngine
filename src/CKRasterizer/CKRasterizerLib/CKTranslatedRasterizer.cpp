@@ -1,8 +1,10 @@
 #include "CKTranslatedRasterizer.h"
+#include "CKDeviceBackend.h"
 
 #include <new>
 
-// Built-in NULL device (CKRasterizerDeviceLibrary.cpp)
+// Built-in NULL device (CKRasterizerDeviceLibrary.cpp), wrapped by the
+// device adapter until the NULL backend lands (phase 4.4).
 extern CKRasterizerDeviceLibrary *CKNULLRasterizerStart(WIN_HANDLE AppWnd);
 extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *rst);
 
@@ -10,37 +12,36 @@ extern void CKNULLRasterizerClose(CKRasterizerDeviceLibrary *rst);
 // CKTranslatedRasterizer
 // ===========================================================================
 
-CKTranslatedRasterizer::CKTranslatedRasterizer(CKRasterizerDeviceLibrary *Device,
-                                               CKTranslatedDeviceCloseFunction CloseDevice)
-    : m_Device(Device), m_CloseDevice(CloseDevice) {}
+CKTranslatedRasterizer::CKTranslatedRasterizer(CKRasterizerBackendLibrary *Library,
+                                               CKTranslatedLibraryCloseFunction CloseLibrary)
+    : m_Library(Library), m_CloseLibrary(CloseLibrary) {}
 
 CKTranslatedRasterizer::~CKTranslatedRasterizer()
 {
     Close();
-    if (m_Device) {
-        if (m_CloseDevice)
-            m_CloseDevice(m_Device);
+    if (m_Library) {
+        if (m_CloseLibrary)
+            m_CloseLibrary(m_Library);
         else
-            delete m_Device;
-        m_Device = NULL;
+            delete m_Library;
+        m_Library = NULL;
     }
 }
 
 CKBOOL CKTranslatedRasterizer::Start(WIN_HANDLE AppWnd)
 {
     m_MainWindow = AppWnd;
-    if (!m_Device)
+    if (!m_Library)
         return FALSE;
     if (m_Drivers.Size() > 0)
         return TRUE;
-    // Plugins hand over a started device; the NULL fallback starts here.
-    if (m_Device->GetDriverCount() == 0 && !m_Device->Start(AppWnd))
+    if (m_Library->GetDriverCount() == 0 && !m_Library->Start(AppWnd))
         return FALSE;
-    for (int i = 0; i < m_Device->GetDriverCount(); ++i) {
-        CKRasterizerDeviceDriver *deviceDriver = m_Device->GetDriver((CKDWORD)i);
-        if (!deviceDriver)
+    for (int i = 0; i < m_Library->GetDriverCount(); ++i) {
+        CKRasterizerBackendDriver *backendDriver = m_Library->GetDriver((CKDWORD)i);
+        if (!backendDriver)
             continue;
-        CKTranslatedDriver *driver = new (std::nothrow) CKTranslatedDriver(this, deviceDriver, (CKDWORD)m_Drivers.Size());
+        CKTranslatedDriver *driver = new (std::nothrow) CKTranslatedDriver(this, backendDriver, (CKDWORD)m_Drivers.Size());
         if (!driver)
             break;
         m_Drivers.PushBack(driver);
@@ -53,20 +54,20 @@ void CKTranslatedRasterizer::Close()
     for (int i = 0; i < m_Drivers.Size(); ++i)
         delete m_Drivers[i];
     m_Drivers.Clear();
-    if (m_Device)
-        m_Device->Close();
+    if (m_Library)
+        m_Library->Close();
 }
 
 // ===========================================================================
 // CKTranslatedDriver
 // ===========================================================================
 
-CKTranslatedDriver::CKTranslatedDriver(CKTranslatedRasterizer *Owner, CKRasterizerDeviceDriver *Device, CKDWORD Index)
-    : m_Device(Device)
+CKTranslatedDriver::CKTranslatedDriver(CKTranslatedRasterizer *Owner, CKRasterizerBackendDriver *Backend, CKDWORD Index)
+    : m_Backend(Backend)
 {
     m_Owner = Owner;
     m_DriverIndex = Index;
-    SyncCapsFromDevice();
+    SyncCapsFromBackend();
 }
 
 CKTranslatedDriver::~CKTranslatedDriver()
@@ -74,37 +75,38 @@ CKTranslatedDriver::~CKTranslatedDriver()
     while (m_Contexts.Size() > 0) {
         CKRasterizerContext *context = m_Contexts[m_Contexts.Size() - 1];
         if (!DestroyContext(context)) {
-            // The device refused (frame in flight); drop our wrapper anyway so
-            // the driver can go away. The device driver owns its context.
+            // The backend refused (frame in flight); drop our wrapper anyway
+            // so the driver can go away. The backend driver owns the backend.
             m_Contexts.PopBack();
             delete static_cast<CKTranslatedContext *>(context);
         }
     }
 }
 
-void CKTranslatedDriver::SyncCapsFromDevice()
+void CKTranslatedDriver::SyncCapsFromBackend()
 {
-    if (!m_Device)
+    if (!m_Backend)
         return;
-    m_Hardware = m_Device->m_Hardware;
-    m_CapsUpToDate = m_Device->m_CapsUpToDate;
-    m_DisplayModes = m_Device->m_DisplayModes;
-    m_TextureFormats = m_Device->m_TextureFormats;
-    m_3DCaps = m_Device->m_3DCaps;
-    m_2DCaps = m_Device->m_2DCaps;
-    m_Desc = m_Device->m_Desc;
+    m_Backend->RefreshCaps();
+    m_Hardware = m_Backend->m_Hardware;
+    m_CapsUpToDate = m_Backend->m_CapsUpToDate;
+    m_DisplayModes = m_Backend->m_DisplayModes;
+    m_TextureFormats = m_Backend->m_TextureFormats;
+    m_3DCaps = m_Backend->m_3DCaps;
+    m_2DCaps = m_Backend->m_2DCaps;
+    m_Desc = m_Backend->m_Desc;
 }
 
 CKRasterizerContext *CKTranslatedDriver::CreateContext()
 {
-    if (!m_Device)
+    if (!m_Backend)
         return NULL;
-    CKRasterizerDevice *device = m_Device->CreateContext();
-    if (!device)
+    CKRasterizerBackend *backend = m_Backend->CreateBackend();
+    if (!backend)
         return NULL;
-    CKTranslatedContext *context = new (std::nothrow) CKTranslatedContext(this, device);
+    CKTranslatedContext *context = new (std::nothrow) CKTranslatedContext(this, backend);
     if (!context) {
-        m_Device->DestroyContext(device);
+        m_Backend->DestroyBackend(backend);
         return NULL;
     }
     m_Contexts.PushBack(context);
@@ -120,7 +122,7 @@ CKBOOL CKTranslatedDriver::DestroyContext(CKRasterizerContext *Context)
             continue;
         CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(Context);
         translated->BeginShutdown();
-        if (m_Device && !m_Device->DestroyContext(translated->GetDevice()))
+        if (m_Backend && !m_Backend->DestroyBackend(translated->GetBackend()))
             return FALSE;
         m_Contexts.RemoveAt(i);
         delete translated;
@@ -133,21 +135,21 @@ CKBOOL CKTranslatedDriver::DestroyContext(CKRasterizerContext *Context)
 // Entry points
 // ===========================================================================
 
-CKRasterizer *CKTranslatedRasterizerStart(CKRasterizerDeviceLibrary *Device,
-                                          CKTranslatedDeviceCloseFunction CloseDevice)
+CKRasterizer *CKTranslatedRasterizerStart(CKRasterizerBackendLibrary *Library,
+                                          CKTranslatedLibraryCloseFunction CloseLibrary)
 {
-    if (!Device)
+    if (!Library)
         return NULL;
-    CKTranslatedRasterizer *rasterizer = new (std::nothrow) CKTranslatedRasterizer(Device, CloseDevice);
+    CKTranslatedRasterizer *rasterizer = new (std::nothrow) CKTranslatedRasterizer(Library, CloseLibrary);
     if (!rasterizer) {
-        if (CloseDevice)
-            CloseDevice(Device);
+        if (CloseLibrary)
+            CloseLibrary(Library);
         else
-            delete Device;
+            delete Library;
         return NULL;
     }
-    if (!rasterizer->Start(Device->m_MainWindow)) {
-        delete rasterizer; // closes the device too
+    if (!rasterizer->Start(Library->GetMainWindow())) {
+        delete rasterizer; // closes the library too
         return NULL;
     }
     return rasterizer;
@@ -163,7 +165,7 @@ CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd)
     CKRasterizerDeviceLibrary *device = CKNULLRasterizerStart(AppWnd);
     if (!device)
         return NULL;
-    return CKTranslatedRasterizerStart(device, CKNULLRasterizerClose);
+    return CKTranslatedRasterizerStartOverDevice(device, CKNULLRasterizerClose);
 }
 
 void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer)

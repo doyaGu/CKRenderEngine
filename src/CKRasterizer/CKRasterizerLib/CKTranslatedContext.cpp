@@ -25,8 +25,8 @@ CKBOOL SameImageFormat(const VxImageDescEx &a, const VxImageDescEx &b)
 // Construction / lifecycle
 // ===========================================================================
 
-CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerDevice *Device)
-    : m_TranslatedDriver(Driver), m_Device(Device), m_Backend(NULL), m_Created(FALSE), m_ShuttingDown(FALSE),
+CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerBackend *Backend)
+    : m_TranslatedDriver(Driver), m_Backend(Backend), m_Created(FALSE), m_ShuttingDown(FALSE),
       m_InScene(FALSE), m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
       m_FrameTargetDecided(FALSE), m_FrameOpen(FALSE), m_LastDeviceFrame(0), m_NativePresented(FALSE),
       m_FrameNumber(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS), m_TargetWidth(0), m_TargetHeight(0),
@@ -55,17 +55,13 @@ CKTranslatedContext::~CKTranslatedContext()
     for (size_t i = 0; i < m_Readbacks.size(); ++i)
         delete m_Readbacks[i];
     m_Readbacks.clear();
-    delete m_Backend;
-    m_Backend = NULL;
 }
 
 CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
                                    CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp)
 {
-    if (m_Created || !m_Device)
+    if (m_Created || !m_Backend)
         return FALSE;
-    if (!m_Backend)
-        m_Backend = new CKDeviceBackend(m_Device);
     CKBackendInitDesc init;
     init.Window = Window;
     init.PosX = PosX;
@@ -81,18 +77,16 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     if (m_Backend->Init(&init) != CK_OK)
         return FALSE;
 
-    // Window and mode state as the device settled it (the adapter's device;
-    // the native backend reports these itself in phase 4.3).
     m_Window = Window;
-    m_PosX = m_Device->m_PosX;
-    m_PosY = m_Device->m_PosY;
-    m_Width = m_Device->m_Width;
-    m_Height = m_Device->m_Height;
-    m_Bpp = m_Device->m_Bpp;
-    m_ZBpp = m_Device->m_ZBpp;
-    m_StencilBpp = m_Device->m_StencilBpp;
-    m_Fullscreen = m_Device->m_Fullscreen;
-    m_RefreshRate = m_Device->m_RefreshRate;
+    m_PosX = (CKDWORD)PosX;
+    m_PosY = (CKDWORD)PosY;
+    m_Width = (CKDWORD)Width;
+    m_Height = (CKDWORD)Height;
+    m_Bpp = Bpp > 0 ? (CKDWORD)Bpp : 32;
+    m_ZBpp = Zbpp > 0 ? (CKDWORD)Zbpp : 24;
+    m_StencilBpp = StencilBpp > 0 ? (CKDWORD)StencilBpp : 8;
+    m_Fullscreen = Fullscreen;
+    m_RefreshRate = (CKDWORD)RefreshRate;
 
     if (!m_FFP.Init(m_Backend)) {
         m_Backend->Shutdown();
@@ -100,7 +94,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     }
     m_Present.Init(m_Backend);
     if (m_TranslatedDriver)
-        m_TranslatedDriver->SyncCapsFromDevice();
+        m_TranslatedDriver->SyncCapsFromBackend();
 
     m_Created = TRUE;
     m_ShuttingDown = FALSE;
@@ -140,10 +134,10 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
         return FALSE;
     if (m_Backend->Resize(PosX, PosY, Width, Height) != CK_OK)
         return FALSE;
-    m_PosX = m_Device->m_PosX;
-    m_PosY = m_Device->m_PosY;
-    m_Width = m_Device->m_Width;
-    m_Height = m_Device->m_Height;
+    m_PosX = (CKDWORD)PosX;
+    m_PosY = (CKDWORD)PosY;
+    m_Width = (CKDWORD)Width;
+    m_Height = (CKDWORD)Height;
     m_Present.DestroyTargets();
     m_NativePresented = FALSE;
     // The internal targets follow the new size at the next frame (a readback
@@ -1549,16 +1543,14 @@ void CKTranslatedContext::SetDebugMarker(CKSTRING Name)
 
 const CKRenderStats *CKTranslatedContext::GetStats()
 {
-    // Timings and memory come from the device (transitional: the backend
-    // interface reports counts only).
-    const CKRasterizerDeviceStats *device = m_Device && m_Created ? m_Device->GetStats() : NULL;
-    if (device) {
-        m_Stats.CpuTimeFrame = device->CpuTimeFrame;
-        m_Stats.CpuTimerFreq = device->CpuTimerFreq;
-        m_Stats.GpuTimeFrame = device->GpuTimeEnd - device->GpuTimeBegin;
-        m_Stats.GpuTimerFreq = device->GpuTimerFreq;
-        m_Stats.GpuMemoryMax = device->GpuMemoryMax;
-        m_Stats.GpuMemoryUsed = device->GpuMemoryUsed;
+    if (m_Backend && m_Created) {
+        const CKBackendStats &backend = m_Backend->GetStats();
+        m_Stats.CpuTimeFrame = backend.CpuTimeFrame;
+        m_Stats.CpuTimerFreq = backend.CpuTimerFreq;
+        m_Stats.GpuTimeFrame = backend.GpuTimeFrame;
+        m_Stats.GpuTimerFreq = backend.GpuTimerFreq;
+        m_Stats.GpuMemoryMax = backend.GpuMemoryMax;
+        m_Stats.GpuMemoryUsed = backend.GpuMemoryUsed;
     }
     m_Stats.FrameNumber = m_FrameNumber;
     m_Stats.Width = m_Width;

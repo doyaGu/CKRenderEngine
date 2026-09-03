@@ -1,4 +1,6 @@
 #include "CKRasterizerBackend.h"
+
+#include <string.h>
 #include "CKFFShaderABI.h"
 #include "CKFFConstants.h"
 
@@ -50,4 +52,11 @@ const char *CKBackendSamplerSlotName(CKDWORD Slot)
     if (Slot == CKRST_BACKEND_SLOT_PRESENT)
         return "s_sceneColor";
     return NULL;
+}
+
+CKRasterizerBackendDriver::CKRasterizerBackendDriver()
+    : m_Hardware(FALSE), m_CapsUpToDate(FALSE), m_DriverIndex(0)
+{
+    memset(&m_3DCaps, 0, sizeof(m_3DCaps));
+    memset(&m_2DCaps, 0, sizeof(m_2DCaps));
 }
