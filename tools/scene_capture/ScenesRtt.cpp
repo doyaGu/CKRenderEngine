@@ -134,6 +134,9 @@ void DumpCopyPostRender(CKRenderContext *rc, void *)
         return;
     // Paste last frame's source region into the destination region (inside
     // the frame, after the 3D scene): CopyToVideo path.
+    // The original engine's CopyToVideo returns 0 here (checked with the
+    // retail DLLs in every callback position and outside the frame), so the
+    // oracle frame shows no pasted region; ours pastes the dumped pixels.
     rc->CopyToVideo(&g_DumpCopy.Dest, VXBUFFER_BACKBUFFER, g_DumpCopy.Desc);
 }
 
@@ -208,6 +211,6 @@ void DumpCopyPostFrame(SceneContext &sc)
 const SceneDef g_ScenesRtt[] = {
     {"rtt_2d", "TextureRender into a 2D texture shown on a quad", BuildRtt2D, RttPreFrame, NULL, true, 6, 0.97f, NULL},
     {"rtt_cube", "TextureRender into six cube faces sampled with reflection texgen", BuildRttCube, RttPreFrame, NULL, true, 8, 0.95f, NULL},
-    {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL},
+    {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL, 2},
 };
 const int g_ScenesRttCount = (int)(sizeof(g_ScenesRtt) / sizeof(g_ScenesRtt[0]));

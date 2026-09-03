@@ -388,19 +388,19 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
             CompositeScene();
             if (PresentInternalTarget())
                 m_NativePresented = m_InternalTargets;
-            if (m_NativePresented && HasArmedTextureReadbacks())
-                readbackBlitted = BlitNativeTargetForReadback();
         }
+        if ((m_Target || m_NativePresented) && HasArmedTextureReadbacks() && CanReadCurrentTarget())
+            readbackBlitted = BlitForReadback();
         m_Device->EndEncoder(m_Encoder);
         m_Encoder = NULL;
         if (readbackBlitted)
             IssueArmedTextureReadbacks();
     }
     if (HasArmedTextureReadbacks()) {
-        // No frame carried the blit (target frame, or no scene at all):
-        // present the native target once more with the readback blit.
+        // No frame carried the blit (no scene at all): one more frame with
+        // the present and the readback blit.
         CKDWORD frame = 0;
-        if (m_NativePresented && !m_Target && PresentNativeTargetOnly(TRUE, &frame)) {
+        if ((m_Target || m_NativePresented) && CanReadCurrentTarget() && SubmitReadbackFrame(TRUE, TRUE, &frame)) {
             m_LastDeviceFrame = frame;
             IssueArmedTextureReadbacks();
         } else {

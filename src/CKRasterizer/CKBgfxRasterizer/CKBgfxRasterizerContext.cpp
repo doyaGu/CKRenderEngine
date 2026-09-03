@@ -4890,15 +4890,14 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
         m_FrameInProgress = TRUE;
     }
 
+    // A present-sync change needs bgfx::reset. Applying it to the frame being
+    // submitted loses that frame's rendering (the reset recreates the swap
+    // chain and the frame buffers while the frame renders), so the frame is
+    // rendered with the old sync mode and the reset gets an empty frame of its
+    // own right after it.
     const CKBOOL updatePresentSync = SyncMode != CKRST_FRAME_SYNC_PRESERVE_PRESENT;
     const CKBOOL vsync = SyncMode == CKRST_FRAME_SYNC_VSYNC;
-    if (updatePresentSync && vsync != m_VSync)
-    {
-        m_VSync = vsync;
-        m_ResetFlags = CKBgfxBuildResetFlags(vsync, m_AntialiasSamples) |
-                       (m_ResetFlags & BGFX_RESET_CAPTURE);
-        bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
-    }
+    const CKBOOL resetAfterFrame = updatePresentSync && vsync != m_VSync;
 
     CKBOOL captureFrameRequested = FALSE;
     if (m_RendererType == bgfx::RendererType::Vulkan) {
@@ -4974,7 +4973,15 @@ CKERROR CKBgfxRasterizerContext::Frame(CKRST_FRAME_SYNC_MODE SyncMode,
     uint8_t frameFlags = (uint8_t)Flags;
     if (captureFrameRequested)
         frameFlags |= BGFX_FRAME_DEBUG_CAPTURE;
-    const CKDWORD submittedFrame = bgfx::frame(frameFlags);
+    CKDWORD submittedFrame = bgfx::frame(frameFlags);
+    if (resetAfterFrame)
+    {
+        m_VSync = vsync;
+        m_ResetFlags = CKBgfxBuildResetFlags(vsync, m_AntialiasSamples) |
+                       (m_ResetFlags & BGFX_RESET_CAPTURE);
+        bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+        submittedFrame = bgfx::frame();
+    }
     if (FrameNumber)
         *FrameNumber = submittedFrame;
     {

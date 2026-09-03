@@ -59,7 +59,7 @@ void PrintUsage()
            "  --render-engine-dir DIR   directory holding CK2_3D.dll and its rasterizer DLLs\n"
            "  --driver N                render driver index (default 0)\n"
            "  --scene NAME|all          scene to render (default all; see --list-scenes)\n"
-           "  --frames K                frames rendered before the capture (default 3)\n"
+           "  --frames K                frames rendered before the capture (default 1)\n"
            "  --size WxH                render size (default 640x480)\n"
            "  --out DIR                 output directory for <scene>.png (default .)\n"
            "  --caps-json FILE          write the driver's Vx3DCapsDesc / Vx2DCapsDesc as JSON\n"

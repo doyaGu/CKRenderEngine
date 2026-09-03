@@ -57,9 +57,7 @@ public:
     // Scene target of the given size and sample count; reuses the current one
     // when nothing changed. Returns FALSE when the device cannot provide it.
     CKBOOL EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples);
-    // Native target of the given size (single sampled). Also keeps a readback
-    // texture of the same size when the device can blit and read textures
-    // back (render targets cannot be read directly): GetReadbackTexture().
+    // Native target of the given size (single sampled).
     CKBOOL EnsureNativeTarget(CKDWORD width, CKDWORD height);
     void DestroyTargets();
     CKBOOL EnsureResources();
@@ -67,6 +65,10 @@ public:
 
     const CKPresentTarget &SceneTarget() const { return m_Scene; }
     const CKPresentTarget &NativeTarget() const { return m_Native; }
+    // Readback texture (BLIT_DST | READBACK) of the given size, recreated when
+    // the size changes; 0 when the device cannot blit or read textures back.
+    // Render targets cannot be read directly, readbacks blit into this one.
+    CKDWORD AcquireReadbackTexture(CKDWORD width, CKDWORD height);
     CKDWORD GetReadbackTexture() const { return m_ReadbackTexture; }
     const CKPresentResources &GetResourceIds() const { return m_ResourceIds; }
 
@@ -82,7 +84,6 @@ public:
 private:
     CKBOOL CreateTarget(CKPresentTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
     void DestroyTarget(CKPresentTarget &target);
-    void EnsureReadbackTexture(CKDWORD width, CKDWORD height);
     void DestroyReadbackTexture();
     CKERROR Submit(CKRasterizerEncoder *encoder, CKRenderView view, const CKPresentTarget &source,
                    CKBOOL fxaa, float sharpness);
@@ -91,7 +92,9 @@ private:
     CKPresentResources m_ResourceIds;
     CKPresentTarget m_Scene;
     CKPresentTarget m_Native;
-    CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target of the native color
+    CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target for readbacks
+    CKDWORD m_ReadbackWidth;
+    CKDWORD m_ReadbackHeight;
     CKDWORD m_VertexShaderProfile;
 };
 

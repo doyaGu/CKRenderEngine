@@ -31,7 +31,7 @@ const int kTolerance = 24;
 // once it has been presented into every swap-chain buffer (ckre_scene_capture
 // renders 3 frames for the same reason). The phase 3 virtual backbuffer makes
 // a single frame readable; until then every case renders its frame this often.
-const int kPresentRepeats = 3;
+
 
 char g_Failure[512];
 
@@ -253,16 +253,15 @@ void EndFrame(CKRasterizerContext *ctx)
     TestCheck(ctx->BackToFront(FALSE), "BackToFront");
 }
 
-// Renders the same frame kPresentRepeats times and reads the backbuffer.
+// Renders one frame and reads it back (spec 5.8: the readback is the frame
+// just presented, no swap-chain repeats).
 template <class Draw>
 void RenderAndRead(CKRasterizerContext *ctx, CKDWORD clearFlags, const VxMatrix *projection, Draw draw,
                    Pixels &pixels)
 {
-    for (int i = 0; i < kPresentRepeats; ++i) {
-        BeginFrame(ctx, clearFlags, projection);
-        draw();
-        EndFrame(ctx);
-    }
+    BeginFrame(ctx, clearFlags, projection);
+    draw();
+    EndFrame(ctx);
     ReadBackbuffer(ctx, pixels);
 }
 
@@ -826,6 +825,71 @@ void CheckViewport(Backend &b)
     TestCheck(ctx->SetOptions(&defaults), "SetOptions(defaults)");
 }
 
+// The very first frame of a context, engine style: overlay phase, then a
+// present that switches the swap chain to vsync (bgfx::reset). The frame must
+// still be readable right away.
+void CheckFirstFrame(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "first-frame draw");
+    TestCheck(ctx->EndScene(), "first-frame EndScene");
+    TestCheck(ctx->BeginOverlayPhase(), "first-frame BeginOverlayPhase");
+    TestCheck(ctx->BackToFront(TRUE), "first-frame BackToFront (vsync)");
+    Pixels first;
+    ReadBackbuffer(ctx, first);
+    TestCheck(PixelNear(first, kWidth / 2, kHeight / 2, 0, 255, 0),
+              "the first frame (with a present-sync change) reads back its content");
+    TestCheck(PixelNear(first, 2, 2, 0, 0, 0), "the first frame's clear colour reads back");
+}
+
+// Render-target readback (spec 5.8): the bound 2D target texture is read in
+// texture pixels and in the D3D (top-down) layout on every backend.
+void CheckRenderTargetReadback(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = 32;
+    desc.Format.Height = 32;
+    desc.Format.BytesPerLine = 32 * 4;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+    desc.MipMapCount = 1;
+    CKDWORD rt = 0;
+    TestCheck(ctx->CreateTexture(&desc, &rt) && rt != 0, "render target texture");
+    TestCheck(ctx->SetTargetTexture(rt, 32, 32, CKRST_CUBEFACE_XPOS), "SetTargetTexture");
+    CKViewportData full;
+    full.ViewX = 0;
+    full.ViewY = 0;
+    full.ViewWidth = 32;
+    full.ViewHeight = 32;
+    full.ViewZMin = 0.0f;
+    full.ViewZMax = 1.0f;
+    TestCheck(ctx->SetViewport(&full), "target viewport");
+    // Upper half of the target only.
+    const VxVector upper[3] = {VxVector(-1.0f, 0.0f, 0.5f), VxVector(1.0f, 0.0f, 0.5f), VxVector(0.0f, 1.0f, 0.5f)};
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, upper, kGreen), "triangle into the target");
+    }, pixels);
+    TestCheck(pixels.Width == 32 && pixels.Height == 32, "target readback has the texture size");
+    TestCheckf(PixelNear(pixels, 16, 6, 0, 255, 0), "target readback: top of the triangle must be green");
+    TestCheckf(PixelNear(pixels, 16, 26, 0, 0, 0), "target readback: the lower half must stay black (top-down layout)");
+    TestCheck(ctx->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "release target");
+    full.ViewWidth = ctx->m_Width;
+    full.ViewHeight = ctx->m_Height;
+    TestCheck(ctx->SetViewport(&full), "window viewport");
+    TestCheck(ctx->DeleteObject(rt, CKRST_OBJ_TEXTURE), "delete render target");
+    // The window readback still works afterwards.
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "window triangle after the target");
+    }, pixels);
+    TestCheck(pixels.Width == (int)ctx->m_Width && pixels.Height == (int)ctx->m_Height, "window readback size");
+    TestCheckf(PixelNear(pixels, (int)ctx->m_Width / 2, (int)ctx->m_Height * 3 / 5, 0, 255, 0), "window readback after the target");
+}
+
 // ---------------------------------------------------------------------------
 
 void BackendRendersFixedFunctionSemantics()
@@ -846,10 +910,12 @@ void BackendRendersFixedFunctionSemantics()
     Backend backend;
     if (OpenBackend(backend, kWidth, kHeight)) {
         CheckDriverCaps(backend);
+        CheckFirstFrame(backend);
         RunPixelCases(backend.Context, "uber", samples);
         CheckResizeAndReadback(backend);
         CheckPresentation(backend);
         CheckViewport(backend);
+        CheckRenderTargetReadback(backend);
     }
     CloseBackend(backend);
 

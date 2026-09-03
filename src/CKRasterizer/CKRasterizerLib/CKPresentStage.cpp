@@ -88,7 +88,8 @@ float CKPresentStage::ClampSharpness(float sharpness)
 }
 
 CKPresentStage::CKPresentStage()
-    : m_Device(nullptr), m_ReadbackTexture(0), m_VertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
+    : m_Device(nullptr), m_ReadbackTexture(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
+      m_VertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
 CKPresentStage::~CKPresentStage()
 {
@@ -128,11 +129,7 @@ CKBOOL CKPresentStage::EnsureNativeTarget(CKDWORD width, CKDWORD height)
     if (m_Native.IsActive() && m_Native.Width == width && m_Native.Height == height)
         return TRUE;
     DestroyTarget(m_Native);
-    DestroyReadbackTexture();
-    if (!CreateTarget(m_Native, width, height, 0))
-        return FALSE;
-    EnsureReadbackTexture(width, height);
-    return TRUE;
+    return CreateTarget(m_Native, width, height, 0);
 }
 
 void CKPresentStage::DestroyTargets()
@@ -142,13 +139,13 @@ void CKPresentStage::DestroyTargets()
     DestroyReadbackTexture();
 }
 
-// Render targets cannot carry the readback flag; readbacks blit the native
-// color into this plain texture first. Missing when the device has no blit
-// or texture readback (the caller then falls back to the swap chain).
-void CKPresentStage::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
+CKDWORD CKPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height)
 {
-    if (m_ReadbackTexture || !m_Device)
-        return;
+    if (!m_Device || width == 0 || height == 0)
+        return 0;
+    if (m_ReadbackTexture && m_ReadbackWidth == width && m_ReadbackHeight == height)
+        return m_ReadbackTexture;
+    DestroyReadbackTexture();
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
     desc.Format.Width = (int)width;
@@ -157,8 +154,13 @@ void CKPresentStage::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
     desc.Depth = 1;
     desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
                  CKRST_TEXTURE_BLIT_DST | CKRST_TEXTURE_READBACK;
-    if (m_Device->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK)
+    if (m_Device->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK) {
         m_ReadbackTexture = 0;
+        return 0;
+    }
+    m_ReadbackWidth = width;
+    m_ReadbackHeight = height;
+    return m_ReadbackTexture;
 }
 
 void CKPresentStage::DestroyReadbackTexture()
@@ -166,6 +168,7 @@ void CKPresentStage::DestroyReadbackTexture()
     if (m_Device && m_ReadbackTexture)
         m_Device->DeleteObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
     m_ReadbackTexture = 0;
+    m_ReadbackWidth = m_ReadbackHeight = 0;
 }
 
 CKBOOL CKPresentStage::CreateTarget(CKPresentTarget &target, CKDWORD width, CKDWORD height,

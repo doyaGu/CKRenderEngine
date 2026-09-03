@@ -368,7 +368,10 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
     if (sc.MainCamera)
         m_RenderContext->AttachViewpointToCamera(sc.MainCamera);
 
-    const int frames = m_Options.Frames < 1 ? 1 : m_Options.Frames;
+    int frames = m_Options.Frames < 1 ? 1 : m_Options.Frames;
+    if (frames < scene.MinFrames)
+        frames = scene.MinFrames; // e.g. dump_copy pastes the previous frame's dump
+    sc.FrameCount = frames;
     for (int i = 0; i < frames; ++i) {
         sc.FrameIndex = i;
         SDL_PumpEvents();

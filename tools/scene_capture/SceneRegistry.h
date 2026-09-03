@@ -26,6 +26,7 @@ struct SceneDef {
     int Threshold;                          // suggested per-channel oracle threshold (0..255)
     float MinPass;                          // suggested oracle pass ratio (0..1)
     const char *IniOverrides;               // CK2_3D.ini <Render> lines, or NULL (present_* scenes)
+    int MinFrames;                          // frames the scene needs before its capture is meaningful (0 = 1)
 };
 
 int GetSceneCount();

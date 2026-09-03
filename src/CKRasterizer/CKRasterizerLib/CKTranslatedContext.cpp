@@ -7,6 +7,7 @@
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 #include "CKDebugLogger.h"
+#include <stdio.h>
 
 #include <chrono>
 #include <string.h>
@@ -1178,23 +1179,46 @@ CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, 
     return TRUE;
 }
 
-CKBOOL CKTranslatedContext::CanReadNativeTarget() const
-{
-    return !m_Target && m_InternalTargets && m_Present.NativeTarget().IsActive() &&
-           m_Present.GetReadbackTexture() != 0;
-}
-
-CKBOOL CKTranslatedContext::BlitNativeTargetForReadback()
+CKBOOL CKTranslatedContext::CanReadNativeTarget()
 {
     const CKPresentTarget &native = m_Present.NativeTarget();
+    if (m_Target || !m_InternalTargets || !native.IsActive())
+        return FALSE;
+    return m_Present.AcquireReadbackTexture(native.Width, native.Height) != 0;
+}
+
+CKBOOL CKTranslatedContext::CanReadTargetTexture()
+{
+    if (!m_Target)
+        return FALSE;
+    const Resource *resource = FindResource(CKRST_OBJ_TEXTURE, m_Target);
+    if (!resource || (resource->Texture.Flags & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0)
+        return FALSE;
+    return m_Present.AcquireReadbackTexture(m_TargetWidth, m_TargetHeight) != 0;
+}
+
+CKBOOL CKTranslatedContext::CanReadCurrentTarget()
+{
+    return m_Target ? CanReadTargetTexture() : CanReadNativeTarget();
+}
+
+CKBOOL CKTranslatedContext::BlitForReadback()
+{
     const CKDWORD readbackTexture = m_Present.GetReadbackTexture();
-    if (!m_Encoder || !native.IsActive() || !readbackTexture)
+    CKDWORD source = 0;
+    if (m_Target) {
+        source = m_Target;
+    } else if (m_Present.NativeTarget().IsActive()) {
+        source = m_Present.NativeTarget().ColorTexture;
+    }
+    if (!m_Encoder || !source || !readbackTexture)
         return FALSE;
     // Blits run before the draws of their view: a pass after the present pass
-    // copies the finished frame.
-    if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "readback"))
+    // (or after the target's scene passes) copies the finished frame.
+    if (!OpenPass(m_Target ? m_TargetFrameBuffer : 0, m_Target ? CurrentTargetRect() : WindowRect(),
+                  0, 0, 1.0f, 0, "readback"))
         return FALSE;
-    m_Encoder->Blit(m_CurrentView, readbackTexture, 0, 0, 0, native.ColorTexture, 0, NULL);
+    m_Encoder->Blit(m_CurrentView, readbackTexture, 0, 0, 0, source, 0, NULL);
     return m_Encoder->GetStatus() == CK_OK ? TRUE : FALSE;
 }
 
@@ -1219,7 +1243,10 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
     Readback.Height = desc.Height;
     Readback.Pitch = desc.RowPitch;
     Readback.Format = desc.Format;
-    Readback.YFlip = desc.YFlip;
+    // A target texture was rendered in the D3D (top-down) layout already
+    // (spec 5.9): the flip the device reports for framebuffer writes on
+    // bottom-left backends has been done at render time.
+    Readback.YFlip = m_Target ? FALSE : desc.YFlip;
     Readback.ViaTexture = TRUE;
     Readback.Issued = TRUE;
     Readback.AvailableFrame = available;
@@ -1259,7 +1286,7 @@ void CKTranslatedContext::IssueArmedTextureReadbacks()
 }
 
 
-CKBOOL CKTranslatedContext::PresentNativeTargetOnly(CKBOOL BlitForReadback, CKDWORD *FrameNumber)
+CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber)
 {
     if (m_Encoder || !EnsureEncoder())
         return FALSE;
@@ -1267,9 +1294,11 @@ CKBOOL CKTranslatedContext::PresentNativeTargetOnly(CKBOOL BlitForReadback, CKDW
     const CKRenderView currentView = m_CurrentView;
     const CKBOOL passOpen = m_PassOpen;
     const CKDWORD passes = m_FramePasses;
-    CKBOOL ok = PresentInternalTarget();
-    if (ok && BlitForReadback)
-        ok = BlitNativeTargetForReadback();
+    CKBOOL ok = TRUE;
+    if (Present && !m_Target)
+        ok = PresentInternalTarget();
+    if (ok && Blit)
+        ok = BlitForReadback();
     m_Device->EndEncoder(m_Encoder);
     m_Encoder = NULL;
     m_NextView = nextView;
@@ -1308,19 +1337,36 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         VxMutexLock lock(m_ReadbackMutex);
         m_Readbacks.push_back(readback);
     }
-    if (CanReadNativeTarget()) {
+    if (CanReadCurrentTarget()) {
         readback->ViaTexture = TRUE;
         if (m_Encoder)
             return TRUE; // issued at the end of this frame (BackToFront)
         // Between frames: a frame that only re-presents the native target
-        // carries the readback blit; the next BackToFront delivers it.
+        // (or just blits the target texture) carries the readback blit; the
+        // next BackToFront delivers it.
         CKDWORD frame = 0;
-        if (m_NativePresented && PresentNativeTargetOnly(TRUE, &frame)) {
+        if ((m_Target || m_NativePresented) && SubmitReadbackFrame(TRUE, TRUE, &frame)) {
             m_LastDeviceFrame = frame;
             if (IssueTextureReadback(*readback))
                 return TRUE;
         }
         readback->ViaTexture = FALSE;
+    }
+    if (m_Target) {
+        // A cube-face target cannot be read back yet; the swap chain would be
+        // the wrong image.
+        {
+            VxMutexLock lock(m_ReadbackMutex);
+            for (size_t i = 0; i < m_Readbacks.size(); ++i) {
+                if (m_Readbacks[i] == readback) {
+                    m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
+                    break;
+                }
+            }
+        }
+        delete readback;
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        return FALSE;
     }
     if (m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, readback) != CK_OK) {
         VxMutexLock lock(m_ReadbackMutex);
@@ -1437,18 +1483,19 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback.HasRect = TRUE;
     }
     CKBOOL viaTexture = FALSE;
-    if (CanReadNativeTarget() && m_NativePresented) {
-        // Frame 1 re-presents the native target and blits it into the
-        // readback texture, the read is issued in that same frame; the device
-        // delivers the pixels once its frame counter reaches AvailableFrame.
-        // The waiting frames only re-present, so the window keeps its image.
+    if (CanReadCurrentTarget() && (m_Target || m_NativePresented)) {
+        // Frame 1 re-presents the native target (target 0) and blits the
+        // source into the readback texture; the read is issued right after and
+        // the device delivers the pixels once its frame counter reaches
+        // AvailableFrame. The waiting frames only re-present, so the window
+        // keeps its image.
         readback.ViaTexture = TRUE;
         CKDWORD frame = 0;
-        if (PresentNativeTargetOnly(TRUE, &frame)) {
+        if (SubmitReadbackFrame(TRUE, TRUE, &frame)) {
             m_LastDeviceFrame = frame;
             if (IssueTextureReadback(readback)) {
                 for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
-                    if (!PresentNativeTargetOnly(FALSE, &frame))
+                    if (!SubmitReadbackFrame(TRUE, FALSE, &frame))
                         break;
                 }
                 m_LastDeviceFrame = frame;
@@ -1461,6 +1508,10 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         }
         if (!viaTexture)
             readback.ViaTexture = FALSE;
+    }
+    if (!viaTexture && m_Target) {
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE); // cube-face targets: no readback yet
+        return 0;
     }
     if (!viaTexture && m_Device->RequestScreenShot(0, ReadbackCallbackAdapter, &readback) != CK_OK)
         return 0;

@@ -12,7 +12,7 @@ class CKPluginManager;
 struct CaptureOptions {
     std::string RenderEngineDir;
     int Driver = 0;
-    int Frames = 3;
+    int Frames = 1;
     int Width = 640;
     int Height = 480;
     bool NativeWindowHandle = false;

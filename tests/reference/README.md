@@ -50,6 +50,9 @@ render context as the level's main context.
 Capture conditions of the committed set: Ballance retail DLLs
 (`CK2_3D.dll` 2002-10-30, `CKDX8Rasterizer.dll`), NVIDIA GeForce RTX 4090
 "T&L DX8" driver 0, Windows 11, 640x480, 3 frames, captured 2026-09-02.
+Since phase 3 step 3.4 our engine reads the presented frame back through the
+native target, so the tool captures after a single frame by default
+(`--frames 1`; scenes that need more declare `MinFrames`, e.g. `dump_copy`).
 `present_*` scenes have no oracle: they only change CK2_3D.ini presentation
 options of our engine (the tool writes `<scene>.CK2_3D.ini` next to the output
 and points the engine at it through `CKRE_SETTINGS_FILE`).

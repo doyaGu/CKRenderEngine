@@ -269,14 +269,18 @@ private:
     // native color is blitted into the readback texture in a pass after the
     // present pass and read from there. Falls back to the device screenshot
     // when the frame does not render through the internal targets.
-    CKBOOL CanReadNativeTarget() const;
-    CKBOOL BlitNativeTargetForReadback();                 // opens the "readback" pass, needs the encoder
+    // Readback source: the native target (target 0) or the bound 2D target
+    // texture; cube faces cannot be blitted and are rejected.
+    CKBOOL CanReadNativeTarget();
+    CKBOOL CanReadTargetTexture();
+    CKBOOL CanReadCurrentTarget();
+    CKBOOL BlitForReadback();                             // opens the "readback" pass, needs the encoder
     CKBOOL IssueTextureReadback(PendingReadback &Readback); // ReadTexture after the blit of this frame
     CKBOOL HasArmedTextureReadbacks();
     void IssueArmedTextureReadbacks();
-    // Frame without scene content: re-presents the native target (and blits
-    // it for a readback) so the window keeps its image while waiting.
-    CKBOOL PresentNativeTargetOnly(CKBOOL BlitForReadback, CKDWORD *FrameNumber);
+    // Frame without scene content: re-presents the native target so the window
+    // keeps its image while waiting, and/or blits the readback source.
+    CKBOOL SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber);
     void DeliverReadbacks();
     void CancelReadbacks();
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
