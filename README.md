@@ -1,6 +1,6 @@
 # CKRenderEngine
 
-CKRenderEngine implements the Virtools rendering layer used by Ballanced. It contains the `CK2_3D` engine module, scene and render-object implementations, a fixed-function compatibility pipeline, and the bgfx-backed `CKBgfxRasterizer` plugin.
+CKRenderEngine implements the Virtools rendering layer used by Ballanced. It contains the `CK2_3D` engine module (scene and render-object implementations, talking to the D3D7-shaped `CKRasterizer` v3 contract in `include/CKRasterizer.h`), the translation core `CKRasterizerLib` (fixed-function pipeline, virtual backbuffer and present stage over the thin `CKRasterizerBackend` interface, with a NULL backend), and the bgfx-backed `CKBgfxRasterizer` plugin. Design: `docs/spec/2026-09-01-render-engine-redesign-v3.md` in the Ballanced superproject.
 
 ## Support scope
 

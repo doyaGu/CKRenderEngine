@@ -3,7 +3,7 @@
 
 #include "VxMemoryPool.h"
 #include "CKVertexBuffer.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizer.h"
 
 struct RCKVertexBuffer : public CKVertexBuffer {
 public:

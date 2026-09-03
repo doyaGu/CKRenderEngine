@@ -63,17 +63,6 @@ typedef uint32_t CK_SHADER_PROFILE;
 #define CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT    0x00000002u
 
 // ---------------------------------------------------------------------------
-// Uniform Type
-// ---------------------------------------------------------------------------
-
-typedef enum CK_UNIFORM_TYPE {
-    CKRST_UNIFORM_SAMPLER = 0,
-    CKRST_UNIFORM_VEC4    = 1,
-    CKRST_UNIFORM_MAT3    = 2,
-    CKRST_UNIFORM_MAT4    = 3,
-} CK_UNIFORM_TYPE;
-
-// ---------------------------------------------------------------------------
 // Vertex Attributes
 // ---------------------------------------------------------------------------
 

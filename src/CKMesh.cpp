@@ -20,7 +20,6 @@
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 #include "CKRenderFrameCostStats.h"
-#include "CKTransientGeometry.h"
 #include "CKDrawAnnotation.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
@@ -5484,7 +5483,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                         uv[j][1] = 0.0f;
                         memcpy(uv[j], (CKBYTE *)groupData.TexCoordPtr + srcIndex[j] * groupData.TexCoordStride, 8);
                     }
-                    CKTransientGeometry::AdjustTriangleWrapTexcoords(uv, wrapMode);
+                    CKRSTAdjustTriangleWrapTexcoords(uv, wrapMode);
 
                     for (int j = 0; j < 3; ++j) {
                         CKRSTPackVertex(layout, vbData, outVertex, &groupData, srcIndex[j], uv[j]);

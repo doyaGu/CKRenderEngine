@@ -4,7 +4,6 @@
 #include "CKVertexPacking.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
-#include "CKVertexLayoutCache.h"
 
 namespace {
 
@@ -71,7 +70,7 @@ void OffsetDrawPrimitiveData(VxDrawPrimitiveData &data, CKDWORD startVertex, CKD
 CKDWORD ComputeVertexStagingSize(CKRST_DPFLAGS flags) {
     CKDWORD size = (flags & CKRST_DP_TRANSFORM) ? sizeof(VxVector) : sizeof(VxVector4);
     if ((flags & CKRST_DP_TRANSFORM) && (flags & CKRST_DP_WEIGHTMASK))
-        size = CKVertexLayoutCache::DPFlagsToBlendRecordSize(flags);
+        size = CKRSTGetBlendVertexSize(flags);
     if (flags & CKRST_DP_LIGHT)
         size += sizeof(VxVector);
     if (flags & CKRST_DP_TWEEN) {
@@ -94,7 +93,7 @@ CKBOOL AllocateVertexBufferStaging(VxDrawPrimitiveData &data, CKRST_DPFLAGS flag
     data.VertexCount = (int)maxVertexCount;
     if (flags & CKRST_DP_TRANSFORM) {
         data.PositionStride = (flags & CKRST_DP_WEIGHTMASK)
-            ? CKVertexLayoutCache::DPFlagsToBlendRecordSize(flags)
+            ? CKRSTGetBlendVertexSize(flags)
             : sizeof(VxVector);
     } else {
         data.PositionStride = sizeof(VxVector4);

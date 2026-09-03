@@ -1,4 +1,5 @@
 #include "CKVertexLayoutCache.h"
+#include "CKRasterizer.h"
 #include "CKRasterizerBackend.h"
 #include "CKFFConstants.h"
 
@@ -93,10 +94,7 @@ CKDWORD CKVertexLayoutCache::DPFlagsToBlendIndexOffset(CKDWORD dpFlags) {
 }
 
 CKDWORD CKVertexLayoutCache::DPFlagsToBlendRecordSize(CKDWORD dpFlags) {
-    CKDWORD size = DPFlagsToBlendIndexOffset(dpFlags);
-    if (dpFlags & CKRST_DP_MATRIXPAL)
-        size += 4;
-    return size;
+    return CKRSTGetBlendVertexSize(dpFlags);
 }
 
 CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride) {

@@ -9,7 +9,7 @@
 #include "XArray.h"
 #include "XClassArray.h"
 #include "CKTypes.h"
-#include "CKRasterizerDeviceTypes.h"
+#include "CKRasterizerTypes.h"
 #include "CKRenderEngineEnums.h"
 
 typedef CKDWORD CKRST_OBJECTTYPE;

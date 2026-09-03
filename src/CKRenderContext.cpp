@@ -342,14 +342,6 @@ static void LogPresentFrameRateContract(const char *stage, CK_RENDER_FLAGS input
     ++s_PresentFrameLogCount;
 }
 
-void RCKRenderContext::RestoreStereoRenderState(CK3dEntity *rootEntity, const VxMatrix &originalWorldMat) {
-    if (rootEntity) {
-        rootEntity->SetWorldMatrix(originalWorldMat, FALSE);
-    }
-    m_ProjectionMatrix[2][0] = 0.0f;
-    if (m_RasterizerContext) m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-}
-
 void RCKRenderContext::ExecutePreRenderCallbacks() {
     // IDA: CKRenderedScene::Draw at 0x100704ae line 146-158
     // Executes m_PreRenderCallBacks.m_PreCallBacks
@@ -742,94 +734,20 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
 
     CKERROR err = CK_OK;
 
-    // Check for stereo rendering
-    if (FALSE) {
-        // Stereo rendering path
-        VxMatrix originalWorldMat;
-        Vx3DMatrixIdentity(originalWorldMat);
-        CK3dEntity *rootEntity = m_RenderedScene ? m_RenderedScene->m_RootEntity : nullptr;
-        if (rootEntity) {
-            const VxMatrix &wm = rootEntity->GetWorldMatrix();
-            memcpy(&originalWorldMat, &wm, sizeof(VxMatrix));
-        }
+    const bool frameLog = FrameLogEnabled();
+    if (frameLog)
+        CK_LOG("Render", "about to Clear");
+    err = Clear(renderFlags);
+    if (err != CK_OK)
+        return err;
 
-        // Get right vector from world matrix (first row)
-        VxVector rightVec(originalWorldMat[0][0], originalWorldMat[0][1], originalWorldMat[0][2]);
-        rightVec.Normalize();
-
-        // Calculate eye offset
-        float halfFocal = -0.5f * m_FocalLength;
-        VxVector eyeOffset = rightVec * halfFocal;
-
-        VxMatrix leftWorldMat = originalWorldMat;
-        VxMatrix rightWorldMat = originalWorldMat;
-
-        // Offset position for left and right eye
-        leftWorldMat[3][0] -= eyeOffset.x;
-        leftWorldMat[3][1] -= eyeOffset.y;
-        leftWorldMat[3][2] -= eyeOffset.z;
-        rightWorldMat[3][0] += eyeOffset.x;
-        rightWorldMat[3][1] += eyeOffset.y;
-        rightWorldMat[3][2] += eyeOffset.z;
-
-        float projOffset = 2.0f * m_FocalLength * m_NearPlane / m_EyeSeparation;
-
-        // Clear both buffers (stereo not supported in v2)
-        err = Clear(renderFlags);
-        if (err != CK_OK) {
-            RestoreStereoRenderState(rootEntity, originalWorldMat);
-            return err;
-        }
-
-        if (!rootEntity) {
-            RestoreStereoRenderState(rootEntity, originalWorldMat);
-            return CKERR_INVALIDRENDERCONTEXT;
-        }
-
-        // Render right eye
-        rootEntity->SetWorldMatrix(rightWorldMat, FALSE);
-        if (!m_Camera) {
-            UpdateProjection(FALSE);
-            m_ProjectionMatrix[2][0] = -0.5f * m_ProjectionMatrix[0][0] * projOffset;
-            m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-        }
-        err = DrawScene(renderFlags);
-        if (err != CK_OK) {
-            RestoreStereoRenderState(rootEntity, originalWorldMat);
-            return err;
-        }
-
-        // Render left eye
-        rootEntity->SetWorldMatrix(leftWorldMat, FALSE);
-        if (!m_Camera) {
-            m_ProjectionMatrix[2][0] = 0.5f * m_ProjectionMatrix[0][0] * projOffset;
-            m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
-        }
-        err = DrawScene(renderFlags);
-        if (err != CK_OK) {
-            RestoreStereoRenderState(rootEntity, originalWorldMat);
-            return err;
-        }
-
-        // Restore original state
-        RestoreStereoRenderState(rootEntity, originalWorldMat);
-    } else {
-        // Normal rendering (non-stereo)
-        const bool frameLog = FrameLogEnabled();
-        if (frameLog)
-            CK_LOG("Render", "about to Clear");
-        err = Clear(renderFlags);
-        if (err != CK_OK)
-            return err;
-
-        if (frameLog)
-            CK_LOG("Render", "about to DrawScene");
-        err = DrawScene(renderFlags);
-        if (err != CK_OK)
-            return err;
-        if (frameLog)
-            CK_LOG("Render", "DrawScene done");
-    }
+    if (frameLog)
+        CK_LOG("Render", "about to DrawScene");
+    err = DrawScene(renderFlags);
+    if (err != CK_OK)
+        return err;
+    if (frameLog)
+        CK_LOG("Render", "DrawScene done");
 
     // FPS calculation
     ++m_TimeFpsCalc;

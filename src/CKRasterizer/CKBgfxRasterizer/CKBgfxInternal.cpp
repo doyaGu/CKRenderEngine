@@ -266,12 +266,12 @@ const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum 
 
 const char *CKBgfxDebugViewLine0()
 {
-    return "views: 0 clear 1 bg2d 2 first3d 3 opaque";
+    return "passes: sequential per BeginPass (clear, scene, composite,";
 }
 
 const char *CKBgfxDebugViewLine1()
 {
-    return "       4 stencil 5 trans 6 post 7 fg2d";
+    return "        overlay, present, readback); draws carry sticky state";
 }
 
 CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type)
@@ -329,19 +329,6 @@ bool CKBgfxParseRequestedRenderer(bgfx::RendererType::Enum &Renderer)
 
     CKBgfxLogf("Init", "unknown Renderer/Backend='%s'", value);
     return false;
-}
-
-bool CKBgfxTryUniformType(CK_UNIFORM_TYPE type, bgfx::UniformType::Enum &result)
-{
-    switch (type)
-    {
-    case CKRST_UNIFORM_SAMPLER: result = bgfx::UniformType::Sampler; break;
-    case CKRST_UNIFORM_VEC4:    result = bgfx::UniformType::Vec4; break;
-    case CKRST_UNIFORM_MAT3:    result = bgfx::UniformType::Mat3; break;
-    case CKRST_UNIFORM_MAT4:    result = bgfx::UniformType::Mat4; break;
-    default:                    return false;
-    }
-    return true;
 }
 
 bool CKBgfxTryAttrib(CK_VERTEX_ATTRIB attrib, bgfx::Attrib::Enum &result)

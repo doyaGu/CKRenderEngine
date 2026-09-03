@@ -7,6 +7,8 @@
 // not a fixed-function state, a draw, a resource handle or a target / readback
 // operation is an implementation detail of the plugin.
 
+#include <math.h>
+
 #include "VxDefines.h"
 #include "VxMath.h"
 #include "CKError.h"
@@ -434,6 +436,48 @@ inline CKDWORD CKRSTGetVertexLayout(CKDWORD VertexFormat, const CKBYTE *Texcoord
 inline CKDWORD CKRSTGetVertexSize(CKDWORD VertexFormat, const CKBYTE *TexcoordDims)
 {
     return CKRSTGetVertexLayout(VertexFormat, TexcoordDims, NULL);
+}
+
+// ---------------------------------------------------------------------------
+// Vertex staging helpers shared by the engine and the translation core
+// ---------------------------------------------------------------------------
+
+// Bytes of the position record of a blended vertex as the engine stages it
+// for DrawPrimitive: xyz, up to three weights (the pipeline blends three
+// matrices at most), and one dword of palette indices with CKRST_DP_MATRIXPAL.
+inline CKDWORD CKRSTGetBlendVertexSize(CKDWORD VertexFormat)
+{
+    CKDWORD weights = 0;
+    const CKDWORD weightFlags = VertexFormat & CKRST_DP_WEIGHTMASK;
+    if (weightFlags & CKRST_DP_WEIGHTS1) weights = 1;
+    if (weightFlags & CKRST_DP_WEIGHTS2) weights = 2;
+    if (weightFlags & CKRST_DP_WEIGHTS3) weights = 3;
+    if (weightFlags & CKRST_DP_WEIGHTS4) weights = 4;
+    if (weightFlags & CKRST_DP_WEIGHTS5) weights = 5;
+    if (weights > 3)
+        weights = 3;
+    CKDWORD size = 12 + weights * 4;
+    if (VertexFormat & CKRST_DP_MATRIXPAL)
+        size += 4;
+    return size;
+}
+
+// Texture wrapping (VXRENDERSTATE_WRAPn flags VXWRAP_U / VXWRAP_V) on a
+// triangle: moves the u / v of vertices 1 and 2 by whole periods so they lie
+// within half a period of vertex 0, which is what the D3D wrap modes did to
+// the interpolation.
+inline void CKRSTAdjustTriangleWrapTexcoords(float Uv[3][2], CKDWORD WrapMode)
+{
+    const CKDWORD wrapFlags[2] = {VXWRAP_U, VXWRAP_V};
+    for (int component = 0; component < 2; ++component) {
+        if ((WrapMode & wrapFlags[component]) == 0)
+            continue;
+        const float reference = Uv[0][component];
+        for (int vertex = 1; vertex < 3; ++vertex) {
+            const float offset = floorf(reference - Uv[vertex][component] + 0.5f);
+            Uv[vertex][component] += offset;
+        }
+    }
 }
 
 #endif // CKRASTERIZER_H

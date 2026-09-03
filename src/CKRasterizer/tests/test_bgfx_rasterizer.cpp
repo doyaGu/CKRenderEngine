@@ -626,10 +626,10 @@ static void TestDebugOverlayViewMapContract()
 
     const char *line0 = CKBgfxDebugViewLine0();
     const char *line1 = CKBgfxDebugViewLine1();
-    TEST_ASSERT(strcmp(line0, "views: 0 clear 1 bg2d 2 first3d 3 opaque") == 0,
-                "overlay first view line matches render pipeline ordering");
-    TEST_ASSERT(strcmp(line1, "       4 stencil 5 trans 6 post 7 fg2d") == 0,
-                "overlay second view line includes stencil, post, and foreground views");
+    TEST_ASSERT(strcmp(line0, "passes: sequential per BeginPass (clear, scene, composite,") == 0,
+                "overlay first line describes the pass model");
+    TEST_ASSERT(strcmp(line1, "        overlay, present, readback); draws carry sticky state") == 0,
+                "overlay second line describes the pass model");
 }
 
 // ============================================================================

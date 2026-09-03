@@ -1,4 +1,5 @@
 #include "CKTransientGeometry.h"
+#include "CKRasterizer.h"
 #include "CKVertexLayoutCache.h"
 #include "CKFFConstants.h"
 #include "CKRasterizerBackend.h"
@@ -696,16 +697,7 @@ void CKTransientGeometry::InterleaveVertices(
 }
 
 void CKTransientGeometry::AdjustTriangleWrapTexcoords(float uv[3][2], CKDWORD wrapMode) {
-    float texcoords[3][4] = {};
-    for (int vertex = 0; vertex < 3; ++vertex) {
-        texcoords[vertex][0] = uv[vertex][0];
-        texcoords[vertex][1] = uv[vertex][1];
-    }
-    AdjustTriangleWrapTexcoords(texcoords, wrapMode, 2);
-    for (int vertex = 0; vertex < 3; ++vertex) {
-        uv[vertex][0] = texcoords[vertex][0];
-        uv[vertex][1] = texcoords[vertex][1];
-    }
+    CKRSTAdjustTriangleWrapTexcoords(uv, wrapMode);
 }
 
 void CKTransientGeometry::AdjustTriangleWrapTexcoords(float texcoords[3][4],

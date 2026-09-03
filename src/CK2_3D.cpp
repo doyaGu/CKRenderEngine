@@ -149,36 +149,12 @@ void EnumerateRasterizers() {
         XString dir = ps.GetDrive();
         dir << ps.GetDir();
 
-        // Search for DX8 rasterizers
-        CKDirectoryParser dp8(dir.Str(), CKRenderEngineRasterizerMask("DX8"), TRUE);
-        const char *file = dp8.GetNextFile();
+        // Every rasterizer plugin in the render engine directory (*Rasterizer.<ext>).
+        CKDirectoryParser parser(dir.Str(), CKRenderEngineRasterizerMask(""), TRUE);
+        const char *file = parser.GetNextFile();
         while (file != nullptr) {
             RegisterRasterizer(file);
-            file = dp8.GetNextFile();
-        }
-
-        // Search for DX9 rasterizers
-        CKDirectoryParser dp9(dir.Str(), CKRenderEngineRasterizerMask("DX9"), TRUE);
-        file = dp9.GetNextFile();
-        while (file != nullptr) {
-            RegisterRasterizer(file);
-            file = dp9.GetNextFile();
-        }
-
-        // Search for OpenGL rasterizers
-        CKDirectoryParser dpGL(dir.Str(), CKRenderEngineRasterizerMask("GL"), TRUE);
-        file = dpGL.GetNextFile();
-        while (file != nullptr) {
-            RegisterRasterizer(file);
-            file = dpGL.GetNextFile();
-        }
-
-        // Search for bgfx rasterizers
-        CKDirectoryParser dpBgfx(dir.Str(), CKRenderEngineRasterizerMask("Bgfx"), TRUE);
-        file = dpBgfx.GetNextFile();
-        while (file != nullptr) {
-            RegisterRasterizer(file);
-            file = dpBgfx.GetNextFile();
+            file = parser.GetNextFile();
         }
 
         if (g_RasterizersInfo.Size() == 0) {

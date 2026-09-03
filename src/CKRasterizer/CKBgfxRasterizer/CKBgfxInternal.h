@@ -40,7 +40,6 @@ const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum 
 const char *CKBgfxDebugViewLine0();
 const char *CKBgfxDebugViewLine1();
 
-bool CKBgfxTryUniformType(CK_UNIFORM_TYPE Type, bgfx::UniformType::Enum &Result);
 bool CKBgfxTryAttrib(CK_VERTEX_ATTRIB Attrib, bgfx::Attrib::Enum &Result);
 bool CKBgfxTryAttribType(CK_VERTEX_ATTRIB_TYPE Type, bgfx::AttribType::Enum &Result);
 bool CKBgfxTryTextureFormat(VX_PIXELFORMAT Format, bgfx::TextureFormat::Enum &Result);
