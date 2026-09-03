@@ -1,4 +1,7 @@
-#include "CKBgfxRasterizer.h"
+// CKBgfxBackendLibrary / CKBgfxBackendDriver: the single bgfx adapter with
+// its display modes (SDL) and capability baseline (spec 4.9.2).
+
+#include "CKBgfxBackend.h"
 #include "CKBgfxInternal.h"
 #include "CKRasterizerCapsBaseline.h"
 
@@ -49,9 +52,50 @@ static int CompareDisplayModes(const void *lhs, const void *rhs)
     return 0;
 }
 
-CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
+// ===========================================================================
+// CKBgfxBackendLibrary
+// ===========================================================================
+
+CKBgfxBackendLibrary::CKBgfxBackendLibrary() : m_MainWindow(NULL) {}
+
+CKBgfxBackendLibrary::~CKBgfxBackendLibrary()
 {
-    m_Owner = owner;
+    Close();
+}
+
+CKBOOL CKBgfxBackendLibrary::Start(WIN_HANDLE AppWnd)
+{
+    if (m_Drivers.Size() > 0)
+        return TRUE;
+
+    m_MainWindow = AppWnd;
+    auto *driver = new (std::nothrow) CKBgfxBackendDriver(this);
+    if (!driver)
+        return FALSE;
+
+    m_Drivers.PushBack(driver);
+    return TRUE;
+}
+
+void CKBgfxBackendLibrary::Close()
+{
+    for (int i = 0; i < m_Drivers.Size(); ++i)
+        delete m_Drivers[i];
+    m_Drivers.Clear();
+}
+
+CKRasterizerBackendDriver *CKBgfxBackendLibrary::GetDriver(CKDWORD Index) const
+{
+    return (int)Index < m_Drivers.Size() ? m_Drivers[(int)Index] : NULL;
+}
+
+// ===========================================================================
+// CKBgfxBackendDriver
+// ===========================================================================
+
+CKBgfxBackendDriver::CKBgfxBackendDriver(CKBgfxBackendLibrary *owner)
+    : m_Owner(owner)
+{
     m_Hardware = TRUE;
     m_CapsUpToDate = FALSE;
     m_DriverIndex = 0;
@@ -102,7 +146,7 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     // tests/reference/caps-baseline.json. Engine and building blocks branch on
     // these bits (fog modes, HardwareLevel, clamp edge alpha, clip planes), so
     // the bit fields are reported verbatim; only numeric limits are lowered to
-    // what the backend really supports once a context exists.
+    // what the backend really supports once a backend exists.
     memset(&m_3DCaps, 0, sizeof(m_3DCaps));
     memset(&m_2DCaps, 0, sizeof(m_2DCaps));
     if (!CKRSTGetCapsBaseline(&m_3DCaps, &m_2DCaps)) {
@@ -155,58 +199,41 @@ CKBgfxRasterizerDriver::CKBgfxRasterizerDriver(CKBgfxRasterizer *owner)
     m_CapsUpToDate = FALSE;
 }
 
-CKBgfxRasterizerDriver::~CKBgfxRasterizerDriver()
+CKBgfxBackendDriver::~CKBgfxBackendDriver()
 {
-    for (int i = 0; i < m_Contexts.Size(); ++i) {
-        CKBgfxRasterizerContext *context =
-            static_cast<CKBgfxRasterizerContext *>(m_Contexts[i]);
-        context->BeginForcedShutdown();
-        context->EndCurrentThreadEncoders();
-        if (!context->IsIdle())
-            CKBgfxLogf("Shutdown", "waiting for active encoder threads");
-        const Uint64 waitStart = SDL_GetTicks();
-        while (!context->IsIdle() &&
-               SDL_GetTicks() - waitStart < 30000u)
-            SDL_Delay(1);
-        if (!context->IsIdle()) {
-            CKBgfxLogf("Shutdown",
-                       "timed out waiting for active encoders; preserving disabled context");
-            continue;
-        }
-        delete m_Contexts[i];
+    for (int i = 0; i < m_Backends.Size(); ++i) {
+        m_Backends[i]->Shutdown();
+        delete m_Backends[i];
     }
-    m_Contexts.Clear();
+    m_Backends.Clear();
 }
 
-CKRasterizerDevice *CKBgfxRasterizerDriver::CreateContext()
+CKRasterizerBackend *CKBgfxBackendDriver::CreateBackend()
 {
-    if (m_Contexts.Size() != 0) {
-        CKBgfxLogf("Init", "multiple bgfx rasterizer contexts are unsupported");
+    if (m_Backends.Size() != 0) {
+        CKBgfxLogf("Init", "multiple bgfx backends are unsupported");
         return NULL;
     }
-    auto *ctx = new (std::nothrow) CKBgfxRasterizerContext(this);
-    if (!ctx)
+    auto *backend = new (std::nothrow) CKBgfxBackend(this);
+    if (!backend)
         return NULL;
 
-    m_Contexts.PushBack(ctx);
-    return ctx;
+    m_Backends.PushBack(backend);
+    return backend;
 }
 
-CKBOOL CKBgfxRasterizerDriver::DestroyContext(CKRasterizerDevice *Context)
+CKBOOL CKBgfxBackendDriver::DestroyBackend(CKRasterizerBackend *Backend)
 {
-    if (!Context)
+    if (!Backend)
         return FALSE;
 
-    for (int i = 0; i < m_Contexts.Size(); ++i)
+    for (int i = 0; i < m_Backends.Size(); ++i)
     {
-        if (m_Contexts[i] == Context)
+        if (m_Backends[i] == Backend)
         {
-            CKBgfxRasterizerContext *bgfxContext =
-                static_cast<CKBgfxRasterizerContext *>(Context);
-            if (!bgfxContext->TryBeginShutdown())
-                return FALSE;
-            delete m_Contexts[i];
-            m_Contexts.RemoveAt(i);
+            m_Backends[i]->Shutdown();
+            delete m_Backends[i];
+            m_Backends.RemoveAt(i);
             return TRUE;
         }
     }

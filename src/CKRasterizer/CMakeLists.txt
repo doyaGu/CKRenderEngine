@@ -3,20 +3,20 @@ add_subdirectory(CKRasterizerLib)
 # NULL implementation of the v3 contract (phase 0 stub, replaced in step 1.4)
 
 set(CKBGFX_RASTERIZER_SOURCES
+        CKBgfxRasterizer/CKBgfxBackend.cpp
+        CKBgfxRasterizer/CKBgfxBackendDriver.cpp
         CKBgfxRasterizer/CKBgfxCallback.cpp
         CKBgfxRasterizer/CKBgfxConfig.cpp
         CKBgfxRasterizer/CKBgfxDrawMapTrace.cpp
         CKBgfxRasterizer/CKBgfxInternal.cpp
         CKBgfxRasterizer/CKBgfxRasterizer.cpp
-        CKBgfxRasterizer/CKBgfxRasterizerDriver.cpp
-        CKBgfxRasterizer/CKBgfxRasterizerContext.cpp
 )
 
 set(CKBGFX_RASTERIZER_HEADERS
+        CKBgfxRasterizer/CKBgfxBackend.h
         CKBgfxRasterizer/CKBgfxConfig.h
         CKBgfxRasterizer/CKBgfxDrawMapTrace.h
         CKBgfxRasterizer/CKBgfxInternal.h
-        CKBgfxRasterizer/CKBgfxRasterizer.h
 )
 
 set(CKBGFX_RASTERIZER_CONFIG

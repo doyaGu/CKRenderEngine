@@ -1094,7 +1094,7 @@ void TextureBindingMaskIgnoresInactiveStages() {
 
 void BgfxTransientAllocationsPreflightAvailability() {
     const std::string contents = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizerContext.cpp");
+        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CKBgfxBackend.cpp");
     TestCheck(!contents.empty(),
               "bgfx rasterizer context source must be readable");
 
@@ -1106,22 +1106,16 @@ void BgfxTransientAllocationsPreflightAvailability() {
     };
     const Contract contracts[] = {
         {
-            "CKBOOL CKBgfxRasterizerContext::AllocTransientVertexBuffer",
+            "CKBOOL CKBgfxBackend::AllocTransientVertices",
             "bgfx::getAvailTransientVertexBuffer",
             "bgfx::allocTransientVertexBuffer",
             "RecordTransientAllocMiss(\"vertex\"",
         },
         {
-            "CKBOOL CKBgfxRasterizerContext::AllocTransientIndexBuffer",
+            "CKBOOL CKBgfxBackend::AllocTransientIndices",
             "bgfx::getAvailTransientIndexBuffer",
             "bgfx::allocTransientIndexBuffer",
             "RecordTransientAllocMiss(\"index\"",
-        },
-        {
-            "CKBOOL CKBgfxRasterizerContext::AllocTransientInstanceBuffer",
-            "bgfx::getAvailInstanceDataBuffer",
-            "bgfx::allocInstanceDataBuffer",
-            "RecordTransientAllocMiss(\"instance\"",
         },
     };
 

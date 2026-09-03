@@ -1,4 +1,4 @@
-#include "CKBgfxRasterizer.h"
+#include "CKBgfxBackend.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
 #include "VxWindowFunctions.h"
@@ -238,104 +238,11 @@ void CKBgfxCallback::screenShot(const char *_filePath, uint32_t _width, uint32_t
                                 uint32_t _pitch, bgfx::TextureFormat::Enum _format,
                                 const void *_data, uint32_t _size, bool _yflip)
 {
-    if (!m_Context)
-        return;
-
-    CKBgfxScreenShotRequest request = {};
-    bool foundRequest = false;
-    {
-        VxMutexLock lock(m_Context->m_ScreenShotMutex);
-        for (int i = 0; i < m_Context->m_PendingScreenShots.Size(); ++i) {
-            if (_filePath &&
-                m_Context->m_PendingScreenShots[i].Path.Compare(_filePath) == 0) {
-                request = m_Context->m_PendingScreenShots[i];
-                m_Context->m_PendingScreenShots.RemoveAt(i);
-                foundRequest = true;
-                break;
-            }
-        }
-    }
-    if (foundRequest && request.Callback) {
-        VX_PIXELFORMAT format = UNKNOWN_PF;
-        CKBgfxTryPixelFormat(_format, format);
-        request.Callback(
-            request.UserData, request.FrameBuffer,
-            (CKDWORD)_width, (CKDWORD)_height, (CKDWORD)_pitch,
-            format, _data, (CKDWORD)_size, _yflip ? TRUE : FALSE);
-        return;
-    }
-
+    (void)_format;
     if (_filePath && strstr(_filePath, ".bmp") != NULL) {
         bool ok = WriteBmp32(_filePath, _width, _height, _pitch, _data, _yflip);
         CKBgfxLogf("Capture", "saved path=%s ok=%d size=%ux%u pitch=%u bytes=%u yflip=%d",
                    _filePath, ok ? 1 : 0, (unsigned)_width, (unsigned)_height,
                    (unsigned)_pitch, (unsigned)_size, _yflip ? 1 : 0);
-    }
-}
-
-void CKBgfxCallback::captureBegin(uint32_t _width, uint32_t _height,
-                                  uint32_t _pitch,
-                                  bgfx::TextureFormat::Enum _format,
-                                  bool _yflip)
-{
-    if (!m_Context)
-        return;
-    VxMutexLock lock(m_Context->m_ScreenShotMutex);
-    m_Context->m_CaptureWidth = (CKDWORD)_width;
-    m_Context->m_CaptureHeight = (CKDWORD)_height;
-    m_Context->m_CapturePitch = (CKDWORD)_pitch;
-    m_Context->m_CaptureFormat = _format;
-    m_Context->m_CaptureYFlip = _yflip ? TRUE : FALSE;
-}
-
-void CKBgfxCallback::captureEnd()
-{
-    if (!m_Context)
-        return;
-    VxMutexLock lock(m_Context->m_ScreenShotMutex);
-    m_Context->m_CaptureWidth = 0;
-    m_Context->m_CaptureHeight = 0;
-    m_Context->m_CapturePitch = 0;
-    m_Context->m_CaptureFormat = bgfx::TextureFormat::Count;
-    m_Context->m_CaptureYFlip = FALSE;
-}
-
-void CKBgfxCallback::captureFrame(const void *_data, uint32_t _size)
-{
-    if (!m_Context || !_data || _size == 0)
-        return;
-
-    XClassArray<CKBgfxScreenShotRequest> completed;
-    CKDWORD width = 0;
-    CKDWORD height = 0;
-    CKDWORD pitch = 0;
-    bgfx::TextureFormat::Enum nativeFormat = bgfx::TextureFormat::Count;
-    CKBOOL yFlip = FALSE;
-    {
-        VxMutexLock lock(m_Context->m_ScreenShotMutex);
-        width = m_Context->m_CaptureWidth;
-        height = m_Context->m_CaptureHeight;
-        pitch = m_Context->m_CapturePitch;
-        nativeFormat = m_Context->m_CaptureFormat;
-        yFlip = m_Context->m_CaptureYFlip;
-        for (int i = m_Context->m_PendingScreenShots.Size() - 1; i >= 0; --i) {
-            if (!m_Context->m_PendingScreenShots[i].UseCaptureFrame)
-                continue;
-            CKBgfxScreenShotRequest request = {};
-            request = m_Context->m_PendingScreenShots[i];
-            m_Context->m_PendingScreenShots.RemoveAt(i);
-            completed.PushBack(request);
-        }
-    }
-
-    VX_PIXELFORMAT format = UNKNOWN_PF;
-    CKBgfxTryPixelFormat(nativeFormat, format);
-    for (int i = 0; i < completed.Size(); ++i) {
-        CKBgfxScreenShotRequest &request = completed[i];
-        if (request.Callback) {
-            request.Callback(request.UserData, request.FrameBuffer,
-                             width, height, pitch, format,
-                             _data, (CKDWORD)_size, yFlip);
-        }
     }
 }

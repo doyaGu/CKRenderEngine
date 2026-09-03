@@ -1,11 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <thread>
-#include <vector>
-#include <atomic>
 
-#include "CKBgfxRasterizer.h"
+#include "CKBgfxBackend.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "VxWindowFunctions.h"
@@ -33,7 +30,7 @@ static int g_FailCount = 0;
 
 #define TEST_SECTION(name) printf("\n[%s]\n", name)
 
-static bool HasDisplayMode(CKRasterizerDeviceDriver *driver, int width, int height, int bpp, int refreshRate)
+static bool HasDisplayMode(CKRasterizerBackendDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &mode = driver->m_DisplayModes[i];
@@ -48,7 +45,7 @@ static bool HasDisplayMode(CKRasterizerDeviceDriver *driver, int width, int heig
     return false;
 }
 
-static int CountDisplayMode(CKRasterizerDeviceDriver *driver, int width, int height, int bpp, int refreshRate)
+static int CountDisplayMode(CKRasterizerBackendDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     int count = 0;
     for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
@@ -63,7 +60,7 @@ static int CountDisplayMode(CKRasterizerDeviceDriver *driver, int width, int hei
     return count;
 }
 
-static bool DisplayModesAreSorted(CKRasterizerDeviceDriver *driver)
+static bool DisplayModesAreSorted(CKRasterizerBackendDriver *driver)
 {
     for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &prev = driver->m_DisplayModes[i - 1];
@@ -195,130 +192,7 @@ static void TestFillModeTopology()
 // ============================================================================
 // Test 2: Atomic encoder slot acquisition (thread safety)
 // ============================================================================
-
-static void TestEncoderSlotAtomic()
-{
-    TEST_SECTION("Atomic Encoder Slot Acquisition");
-
-    // Simulate the CAS pattern used by BeginEncoder
-    static const int NUM_SLOTS = CKRST_MAX_ENCODERS;
-    std::atomic<CKBOOL> slots[NUM_SLOTS];
-    for (int i = 0; i < NUM_SLOTS; ++i)
-        slots[i].store(FALSE, std::memory_order_relaxed);
-
-    static const int NUM_THREADS = 16;
-    std::atomic<int> acquired{0};
-    std::atomic<int> collisions{0};
-    std::atomic<bool> go{false};
-
-    auto worker = [&]() {
-        while (!go.load(std::memory_order_acquire)) {}
-
-        for (int i = 0; i < NUM_SLOTS; ++i)
-        {
-            CKBOOL expected = FALSE;
-            if (slots[i].compare_exchange_strong(
-                    expected, TRUE,
-                    std::memory_order_acq_rel, std::memory_order_relaxed))
-            {
-                acquired.fetch_add(1, std::memory_order_relaxed);
-                return;
-            }
-        }
-        collisions.fetch_add(1, std::memory_order_relaxed);
-    };
-
-    std::vector<std::thread> threads;
-    for (int t = 0; t < NUM_THREADS; ++t)
-        threads.emplace_back(worker);
-
-    go.store(true, std::memory_order_release);
-
-    for (auto &t : threads)
-        t.join();
-
-    int totalAcquired = acquired.load();
-    int totalCollisions = collisions.load();
-
-    TEST_ASSERT(totalAcquired + totalCollisions == NUM_THREADS,
-                "all threads completed (acquired + rejected = total)");
-    TEST_ASSERT(totalAcquired <= NUM_SLOTS,
-                "no more slots acquired than available");
-    TEST_ASSERT(totalCollisions == NUM_THREADS - NUM_SLOTS || totalAcquired == NUM_SLOTS,
-                "exactly NUM_SLOTS threads acquired when threads > slots");
-
-    // Verify no slot was double-acquired
-    int activeCount = 0;
-    for (int i = 0; i < NUM_SLOTS; ++i)
-        if (slots[i].load()) activeCount++;
-    TEST_ASSERT(activeCount == totalAcquired, "no double-acquisition of any slot");
-
-    printf("  (threads=%d, slots=%d, acquired=%d, rejected=%d)\n",
-           NUM_THREADS, NUM_SLOTS, totalAcquired, totalCollisions);
-}
-
-// ============================================================================
 // Test 3: Atomic transient buffer counter (thread safety)
-// ============================================================================
-
-static void TestTransientCounterAtomic()
-{
-    TEST_SECTION("Atomic Transient Buffer Counter");
-
-    static const CKDWORD MAX_POOL = 256;
-    std::atomic<CKDWORD> counter{0};
-
-    static const int NUM_THREADS = 32;
-    static const int ALLOCS_PER_THREAD = 20;
-    std::atomic<int> successCount{0};
-    std::atomic<int> failCount{0};
-    std::atomic<bool> go{false};
-
-    auto worker = [&]() {
-        while (!go.load(std::memory_order_acquire)) {}
-
-        for (int i = 0; i < ALLOCS_PER_THREAD; ++i)
-        {
-            CKDWORD slot = counter.fetch_add(1, std::memory_order_acq_rel);
-            if (slot >= MAX_POOL)
-            {
-                counter.fetch_sub(1, std::memory_order_relaxed);
-                failCount.fetch_add(1, std::memory_order_relaxed);
-            }
-            else
-            {
-                successCount.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
-    };
-
-    std::vector<std::thread> threads;
-    for (int t = 0; t < NUM_THREADS; ++t)
-        threads.emplace_back(worker);
-
-    go.store(true, std::memory_order_release);
-
-    for (auto &t : threads)
-        t.join();
-
-    int totalSuccess = successCount.load();
-    int totalFail = failCount.load();
-    CKDWORD finalCounter = counter.load();
-
-    TEST_ASSERT(totalSuccess + totalFail == NUM_THREADS * ALLOCS_PER_THREAD,
-                "all alloc attempts accounted for");
-    TEST_ASSERT((CKDWORD)totalSuccess <= MAX_POOL,
-                "never exceeded max pool size");
-    TEST_ASSERT(finalCounter == (CKDWORD)totalSuccess,
-                "final counter matches successful allocations");
-    TEST_ASSERT(finalCounter <= MAX_POOL,
-                "final counter within pool bounds");
-
-    printf("  (threads=%d, allocs_each=%d, total_attempted=%d, success=%d, rejected=%d, final=%u)\n",
-           NUM_THREADS, ALLOCS_PER_THREAD, NUM_THREADS * ALLOCS_PER_THREAD,
-           totalSuccess, totalFail, (unsigned)finalCounter);
-}
-
 // ============================================================================
 // Test 4: CKDrawStateBuilder bit layout correctness
 // ============================================================================
@@ -643,18 +517,18 @@ static void TestOpenGLAutoMipPolicy()
 
 static void TestBgfxRasterizerLifecycle()
 {
-    TEST_SECTION("CKBgfxRasterizer Start/Close Lifecycle");
+    TEST_SECTION("CKBgfxBackendLibrary Start/Close Lifecycle");
 
-    CKBgfxRasterizer rasterizer;
-    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "new rasterizer has no drivers");
-    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "start succeeds without creating a context");
-    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "start creates one bgfx driver");
-    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "repeated start is idempotent");
-    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "repeated start does not add another driver");
+    CKBgfxBackendLibrary library;
+    TEST_ASSERT(library.GetDriverCount() == 0, "new library has no drivers");
+    TEST_ASSERT(library.Start(NULL) == TRUE, "start succeeds without creating a backend");
+    TEST_ASSERT(library.GetDriverCount() == 1, "start creates one bgfx driver");
+    TEST_ASSERT(library.Start(NULL) == TRUE, "repeated start is idempotent");
+    TEST_ASSERT(library.GetDriverCount() == 1, "repeated start does not add another driver");
 
-    CKRasterizerDeviceDriver *driver = rasterizer.GetDriver(0);
+    CKRasterizerBackendDriver *driver = library.GetDriver(0);
     TEST_ASSERT(driver != NULL, "driver exists after start");
-    TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to rasterizer");
+    TEST_ASSERT(static_cast<CKBgfxBackendDriver *>(driver)->GetOwner() == &library, "driver owner points to the library");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
     TEST_ASSERT(driver->m_DisplayModes.Size() > 0,
                 "bgfx driver exposes real modes or a minimal fallback list");
@@ -664,84 +538,17 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(!HasDisplayMode(driver, 800, 600, 16, 60),
                 "bgfx driver does not fabricate legacy 16-bit display modes");
     TEST_ASSERT(driver->m_CapsUpToDate == FALSE,
-                "bgfx legacy caps remain provisional until a context initializes bgfx");
+                "bgfx legacy caps remain provisional until a backend initializes bgfx");
+    TEST_ASSERT(library.GetDriver(1) == NULL, "out-of-range driver index yields NULL");
 
-    rasterizer.Close();
-    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "close removes driver");
-    rasterizer.Close();
-    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "repeated close is safe");
+    library.Close();
+    TEST_ASSERT(library.GetDriverCount() == 0, "close removes driver");
+    library.Close();
+    TEST_ASSERT(library.GetDriverCount() == 0, "repeated close is safe");
 }
 
 // ============================================================================
 // Test 6: Stress test - multi-threaded slot acquisition with release/reuse
-// ============================================================================
-
-static void TestEncoderSlotReuse()
-{
-    TEST_SECTION("Encoder Slot Reuse Under Contention");
-
-    static const int NUM_SLOTS = CKRST_MAX_ENCODERS;
-    std::atomic<CKBOOL> slots[NUM_SLOTS];
-    for (int i = 0; i < NUM_SLOTS; ++i)
-        slots[i].store(FALSE, std::memory_order_relaxed);
-
-    static const int NUM_THREADS = 8;
-    static const int ITERATIONS = 1000;
-    std::atomic<int> totalAcquired{0};
-    std::atomic<bool> go{false};
-
-    auto worker = [&]() {
-        while (!go.load(std::memory_order_acquire)) {}
-
-        for (int iter = 0; iter < ITERATIONS; ++iter)
-        {
-            int acquired = -1;
-            for (int i = 0; i < NUM_SLOTS; ++i)
-            {
-                CKBOOL expected = FALSE;
-                if (slots[i].compare_exchange_strong(
-                        expected, TRUE,
-                        std::memory_order_acq_rel, std::memory_order_relaxed))
-                {
-                    acquired = i;
-                    break;
-                }
-            }
-
-            if (acquired >= 0)
-            {
-                totalAcquired.fetch_add(1, std::memory_order_relaxed);
-                // Simulate some work
-                for (volatile int x = 0; x < 10; ++x) {}
-                // Release
-                slots[acquired].store(FALSE, std::memory_order_release);
-            }
-        }
-    };
-
-    std::vector<std::thread> threads;
-    for (int t = 0; t < NUM_THREADS; ++t)
-        threads.emplace_back(worker);
-
-    go.store(true, std::memory_order_release);
-
-    for (auto &t : threads)
-        t.join();
-
-    int total = totalAcquired.load();
-    TEST_ASSERT(total > 0, "some acquisitions succeeded");
-    TEST_ASSERT(total <= NUM_THREADS * ITERATIONS, "no more than max possible acquisitions");
-
-    // All slots should be released
-    int finalActive = 0;
-    for (int i = 0; i < NUM_SLOTS; ++i)
-        if (slots[i].load()) finalActive++;
-    TEST_ASSERT(finalActive == 0, "all slots released after completion");
-
-    printf("  (threads=%d, iterations_each=%d, total_acquired=%d)\n",
-           NUM_THREADS, ITERATIONS, total);
-}
-
 // ============================================================================
 // Test 7: DrawMap trace contract helpers
 // ============================================================================
@@ -826,108 +633,7 @@ static void TestDebugOverlayViewMapContract()
 }
 
 // ============================================================================
-// Test 9: Invalid submit contract
-// ============================================================================
-
-static void TestInvalidProgramSubmitIsRejected()
-{
-    TEST_SECTION("Invalid Program Submit Contract");
-
-    CKBgfxRasterizerContext context(NULL);
-    context.SetDebug(CKRST_DEBUG_DRAWMAP |
-                     CKRST_DEBUG_DRAWMAP_SUBMITS |
-                     CKRST_DEBUG_DRAWMAP_MARKERS);
-
-    CKBgfxEncoder encoder;
-    encoder.m_Context = &context;
-    encoder.m_Status = CK_OK;
-    encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
-    encoder.m_Active.store(TRUE, std::memory_order_release);
-    strncpy(encoder.m_LastMarker, "invalid-program", sizeof(encoder.m_LastMarker) - 1);
-    encoder.m_LastMarker[sizeof(encoder.m_LastMarker) - 1] = '\0';
-
-    const CKDWORD before = context.GetInvalidSubmitCountForTests();
-    encoder.Submit(3, 0x1234, 0, CKRST_DISCARD_ALL);
-
-    TEST_ASSERT(context.GetInvalidSubmitCountForTests() == before + 1,
-                "invalid program submit increments the contract counter");
-    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDPARAMETER,
-                "invalid program submit sets sticky encoder status");
-    TEST_ASSERT(encoder.m_LastMarker[0] == '\0',
-                "invalid submit consumes the pending marker instead of leaking it to the next draw");
-}
-
-static void TestDiscardRejectsInactiveEncoder()
-{
-    TEST_SECTION("Discard Requires an Active Encoder");
-
-    CKBgfxRasterizerContext context(NULL);
-    CKBgfxEncoder encoder;
-    encoder.m_Context = &context;
-    encoder.m_Status = CK_OK;
-    encoder.m_FrameStatus = CK_OK;
-    encoder.m_Active.store(FALSE, std::memory_order_release);
-
-    encoder.Discard(CKRST_DISCARD_ALL);
-
-    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDOPERATION,
-                "discard rejects an inactive encoder instead of silently succeeding");
-
-    encoder.m_Status = CK_OK;
-    encoder.m_FrameStatus = CK_OK;
-    encoder.m_OwnerThread = VxThread::GetCurrentVxThreadId();
-    encoder.m_Active.store(TRUE, std::memory_order_release);
-    std::thread wrongThread([&encoder]() {
-        encoder.Discard(CKRST_DISCARD_ALL);
-    });
-    wrongThread.join();
-
-    TEST_ASSERT(encoder.GetStatus() == CKERR_INVALIDOPERATION,
-                "discard rejects calls from a thread that does not own the encoder");
-    encoder.m_Active.store(FALSE, std::memory_order_release);
-}
-
-// ============================================================================
 // Test 10: Uniform reflection handle contract
-// ============================================================================
-
-static void TestUniformReflectionUsesSlotHandles()
-{
-    TEST_SECTION("Uniform Reflection Slot Handle Contract");
-
-    CKBgfxRasterizerContext context(NULL);
-
-    // CK slot 5 wraps bgfx uniform idx 42; slot and idx deliberately differ so
-    // any raw-idx passthrough is caught.
-    context.InjectUniformRecordForTests(5, 42, CKRST_UNIFORM_MAT4, 8, "u_ffMatrices");
-    const CKDWORD uniformHandle = (1u << 16) | 5u;
-
-    TEST_ASSERT(context.FindUniformSlotByHandleForTests(42) == uniformHandle,
-                "bgfx uniform idx resolves back to its CK slot handle");
-    TEST_ASSERT(context.FindUniformSlotByHandleForTests(999) == 0,
-                "unknown bgfx uniform idx maps to invalid handle 0");
-
-    CKUniformInfo info;
-    context.GetUniformInfo(uniformHandle, &info);
-    TEST_ASSERT(strcmp(info.Name, "u_ffMatrices") == 0,
-                "GetUniformInfo takes the CK slot handle and returns the record name");
-    TEST_ASSERT(info.Type == CKRST_UNIFORM_MAT4,
-                "GetUniformInfo returns the CK uniform type from the record");
-    TEST_ASSERT(info.Count == 8,
-                "GetUniformInfo returns the array count from the record");
-
-    // The raw bgfx idx (42) is not a CK slot; it must not resolve to a record.
-    CKUniformInfo rawInfo;
-    context.GetUniformInfo(42, &rawInfo);
-    TEST_ASSERT(rawInfo.Name[0] == '\0' && rawInfo.Count == 0,
-                "raw bgfx idx is not accepted as a CK slot handle");
-
-    CKUniformInfo invalidInfo;
-    context.GetUniformInfo(0, &invalidInfo);
-    TEST_ASSERT(invalidInfo.Name[0] == '\0' && invalidInfo.Count == 0,
-                "invalid handle 0 yields an empty info instead of touching bgfx");
-}
-
 // ============================================================================
 // Test 11: Exact pixel-format mapping
 // ============================================================================
@@ -1065,16 +771,10 @@ int main()
     TestBgfxStateBackendConventions();
     TestSamplerFilterAndAddressConventions();
     TestOpenGLAutoMipPolicy();
-    TestEncoderSlotAtomic();
-    TestTransientCounterAtomic();
     TestBgfxRasterizerLifecycle();
-    TestEncoderSlotReuse();
     TestDrawMapTraceContractHelpers();
     TestPersistentCacheCallback();
     TestDebugOverlayViewMapContract();
-    TestInvalidProgramSubmitIsRejected();
-    TestDiscardRejectsInactiveEncoder();
-    TestUniformReflectionUsesSlotHandles();
     TestExactPixelFormatMapping();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
