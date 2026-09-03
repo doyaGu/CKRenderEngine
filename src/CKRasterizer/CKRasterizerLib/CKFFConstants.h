@@ -41,38 +41,4 @@ struct CKFFMaterialData {
     float Padding[3];
 };
 
-// ============================================================================
-// Vertex shader constants - uploaded via SetUniform per draw
-// ============================================================================
-
-struct CKFFVertexConstants {
-    VxMatrix WorldView;
-    VxMatrix ViewProj;
-    VxMatrix World;
-    VxMatrix NormalMatrix;
-    VxMatrix TexMatrix[CKFF_MAX_TEXTURE_STAGES];
-
-    CKFFLightData Lights[CKFF_MAX_LIGHTS];
-    float GlobalAmbient[4];
-    float LightCount[4]; // x=count, yzw=padding
-
-    CKFFMaterialData Material;
-
-    float FogParams[4];   // x=start, y=end, z=density, w=mode
-    float Viewport[4];    // x=scaleX, y=scaleY, z=offsetX, w=offsetY
-};
-
-// ============================================================================
-// Fragment shader constants - uploaded via SetUniform per draw
-// ============================================================================
-
-struct CKFFFragmentConstants {
-    float TextureFactor[4]; // RGBA [0..1]
-    float FogColor[4];      // RGBA [0..1]
-    float AlphaParams[4];   // x=alphaRef [0..1], y=alphaFunc, z=0, w=0
-    float BumpEnvMat[4];    // m00, m01, m10, m11
-    float BumpEnvLum[4];    // x=scale, y=offset, z=0, w=0
-};
-
-
 #endif // CKFFCONSTANTS_H

@@ -999,7 +999,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
                    (m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 ? 1u : 0u,
                    CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_SUBMITS),
                    CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_RESOURCES),
-                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_VIEWS),
+                   CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_PASSES),
                    CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_MARKERS),
                    CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_FRAME),
                    CKBgfxDrawMapChannelEnabled(m_DebugFlags, CKRST_DEBUG_DRAWMAP_SUMMARY),
@@ -2818,7 +2818,7 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
     if ((m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 && Desc->Name) {
         bgfx::setViewName((bgfx::ViewId)view, Desc->Name);
         CKBgfxCopyDebugText(m_DebugViewName[view], sizeof(m_DebugViewName[view]), (CKSTRING)Desc->Name);
-        if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_VIEWS))
+        if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_PASSES))
             CKBgfxLogf("ViewMap", "frame=%u view=%u name=%s target=%u rect=%d,%d-%d,%d clear=0x%X",
                        m_DebugFrameId, (unsigned)view, m_DebugViewName[view], Desc->RenderTarget,
                        rect.left, rect.top, rect.right, rect.bottom, clearFlags);

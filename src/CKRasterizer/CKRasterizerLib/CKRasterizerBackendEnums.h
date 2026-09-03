@@ -40,7 +40,6 @@
 typedef enum CK_SHADER_STAGE {
     CKRST_SHADER_VERTEX  = 0,
     CKRST_SHADER_PIXEL   = 1,
-    CKRST_SHADER_COMPUTE = 2,
 } CK_SHADER_STAGE;
 
 typedef uint32_t CK_SHADER_FORMAT;
@@ -199,11 +198,6 @@ inline CKDWORD CKRSTTextureMSAASamples(CKDWORD flags)
     return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Vertex Buffer Compute Flags (extensions to CKRST_VBFLAGS)
-// ---------------------------------------------------------------------------
-
-
 // Backend capabilities (CKRST_DEVCAPS_*). Reported by the backend and
 // must not alias or expose a native backend capability mask.
 typedef uint64_t CKRST_DEVCAPS;
@@ -329,23 +323,12 @@ struct CKDrawState {
 #define CKRST_STATE_DEFAULT_MID \
     (CKRST_STATE_PT(VX_TRIANGLELIST))
 
-#define CKRST_STATE_BLEND_ALPHA_LO \
-    (CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | \
-     CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL) | CKRST_STATE_CULL(2) | \
-     CKRST_STATE_BLEND(VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA))
-
-#define CKRST_STATE_BLEND_ADD_LO \
-    (CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | \
-     CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL) | \
-     CKRST_STATE_BLEND(VXBLEND_ONE, VXBLEND_ONE))
-
 // ---------------------------------------------------------------------------
 // Debug Flags (backend-only bits; the shared ones are in CKRasterizerEnums.h)
 // ---------------------------------------------------------------------------
 
 #define CKRST_DEBUG_TEXT       0x00000008
 #define CKRST_DEBUG_PROFILER   0x00000010
-#define CKRST_DEBUG_DRAWMAP_VIEWS     0x00000100
 
 // ===========================================================================
 // CKDrawStateBuilder

@@ -1380,7 +1380,7 @@ void RCKRenderContext::ApplyRenderOptions() {
     const CKDWORD drawMapMask = CKRST_DEBUG_DRAWMAP |
                                 CKRST_DEBUG_DRAWMAP_SUBMITS |
                                 CKRST_DEBUG_DRAWMAP_RESOURCES |
-                                CKRST_DEBUG_DRAWMAP_VIEWS |
+                                CKRST_DEBUG_DRAWMAP_PASSES |
                                 CKRST_DEBUG_DRAWMAP_MARKERS |
                                 CKRST_DEBUG_DRAWMAP_FRAME |
                                 CKRST_DEBUG_DRAWMAP_SUMMARY;
@@ -1394,7 +1394,7 @@ void RCKRenderContext::ApplyRenderOptions() {
     if (drawMap.Resources)
         debugFlags |= CKRST_DEBUG_DRAWMAP_RESOURCES;
     if (drawMap.Views)
-        debugFlags |= CKRST_DEBUG_DRAWMAP_VIEWS;
+        debugFlags |= CKRST_DEBUG_DRAWMAP_PASSES;
     if (drawMap.Markers)
         debugFlags |= CKRST_DEBUG_DRAWMAP_MARKERS;
     if (drawMap.Frame)

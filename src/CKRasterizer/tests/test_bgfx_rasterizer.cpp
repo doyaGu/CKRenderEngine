@@ -45,21 +45,6 @@ static bool HasDisplayMode(CKRasterizerBackendDriver *driver, int width, int hei
     return false;
 }
 
-static int CountDisplayMode(CKRasterizerBackendDriver *driver, int width, int height, int bpp, int refreshRate)
-{
-    int count = 0;
-    for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
-        const VxDisplayMode &mode = driver->m_DisplayModes[i];
-        if (mode.Width == width &&
-            mode.Height == height &&
-            mode.Bpp == bpp &&
-            mode.RefreshRate == refreshRate) {
-            ++count;
-        }
-    }
-    return count;
-}
-
 static bool DisplayModesAreSorted(CKRasterizerBackendDriver *driver)
 {
     for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {

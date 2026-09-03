@@ -79,9 +79,7 @@ enum CKFFTexcoordGenerationMode {
 
 enum CKFFCoverage {
     CKFF_COVERAGE_EXACT = 0,
-    CKFF_COVERAGE_APPROXIMATE = 1,
-    CKFF_COVERAGE_FALLBACK = 2,
-    CKFF_COVERAGE_UNTESTED = 3
+    CKFF_COVERAGE_UNTESTED = 1
 };
 
 enum CKFFShaderSemantic {

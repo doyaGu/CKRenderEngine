@@ -286,40 +286,6 @@ static int SnapPMVertexCount(int target, int maxVertices, int morphStep) {
     return snapped;
 }
 
-static void FilterTriangleList(const CKWORD *indices, int indexCount, int vertexLimit, XArray<CKWORD> &out) {
-    out.Clear();
-    if (!indices || indexCount <= 0 || vertexLimit <= 0)
-        return;
-
-    out.Reserve(indexCount);
-    for (int i = 0; i + 2 < indexCount; i += 3) {
-        CKWORD a = indices[i];
-        CKWORD b = indices[i + 1];
-        CKWORD c = indices[i + 2];
-        if (a < vertexLimit && b < vertexLimit && c < vertexLimit) {
-            out.PushBack(a);
-            out.PushBack(b);
-            out.PushBack(c);
-        }
-    }
-}
-
-static void FilterLineList(const CKWORD *indices, int indexCount, int vertexLimit, XArray<CKWORD> &out) {
-    out.Clear();
-    if (!indices || indexCount <= 0 || vertexLimit <= 0)
-        return;
-
-    out.Reserve(indexCount);
-    for (int i = 0; i + 1 < indexCount; i += 2) {
-        CKWORD a = indices[i];
-        CKWORD b = indices[i + 1];
-        if (a < vertexLimit && b < vertexLimit) {
-            out.PushBack(a);
-            out.PushBack(b);
-        }
-    }
-}
-
 static int ClampPMVertexCount(RCKMesh *mesh, int target) {
     if (!mesh)
         return 0;

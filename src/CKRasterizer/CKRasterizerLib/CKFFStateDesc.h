@@ -423,29 +423,6 @@ struct CKFFStateDesc {
     }
 };
 
-// ============================================================================
-// Texture stage argument encoding for fragment state description
-// ============================================================================
-
-enum CKFFTexArg : uint32_t {
-    CKFF_TA_DIFFUSE  = 0,
-    CKFF_TA_CURRENT  = 1,
-    CKFF_TA_TEXTURE  = 2,
-    CKFF_TA_TFACTOR  = 3,
-    CKFF_TA_SPECULAR = 4,
-    CKFF_TA_TEMP     = 5,
-    CKFF_TA_CONSTANT = 6,
-};
-
-// Texture generation modes for vertex state description
-enum CKFFTexGen : uint32_t {
-    CKFF_TG_PASSTHRU        = 0,
-    CKFF_TG_CAMERANORMAL    = 1,
-    CKFF_TG_CAMERAPOSITION  = 2,
-    CKFF_TG_REFLECTION      = 3,
-    CKFF_TG_SPHEREMAP       = 4,
-};
-
 // Material source modes
 enum CKFFMaterialSource : uint32_t {
     CKFF_MS_MATERIAL = 0,

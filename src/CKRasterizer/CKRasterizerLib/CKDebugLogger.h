@@ -46,15 +46,11 @@ private:
     CRITICAL_SECTION m_CriticalSection;
 };
 
-#define CK_LOG_RAW(msg)                  do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().Log(msg); } while (0)
-#define CK_LOG_RAW_FMT(fmt, ...)         do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().Logf(fmt, __VA_ARGS__); } while (0)
 #define CK_LOG(category, msg)            do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().LogTagged(category, msg); } while (0)
 #define CK_LOG_FMT(category, fmt, ...)   do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().LogTaggedf(category, fmt, __VA_ARGS__); } while (0)
 
 #else
 
-#define CK_LOG_RAW(msg)                  ((void)0)
-#define CK_LOG_RAW_FMT(fmt, ...)         ((void)0)
 #define CK_LOG(category, msg)            ((void)0)
 #define CK_LOG_FMT(category, fmt, ...)   ((void)0)
 
