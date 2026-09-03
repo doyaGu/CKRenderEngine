@@ -2716,7 +2716,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
             return FALSE;
 
         RCKTexture *target = static_cast<RCKTexture *>(texture);
-        if (!target->EnsureRenderTarget(this, FALSE))
+        if (!target->EnsureRenderTarget(this))
             return FALSE;
         // Depth buffer and framebuffer belong to the rasterizer (spec 4.8).
         if (!m_RasterizerContext->SetTargetTexture(target->GetRstTextureIndex(),

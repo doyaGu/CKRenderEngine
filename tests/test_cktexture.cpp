@@ -365,7 +365,7 @@ void EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat() {
     TestCheck(texture.UseMipmap(3), "UseMipmap(3) failed");
     texture.SetDesiredVideoFormat(_16_RGB565);
 
-    TestCheck(texture.EnsureRenderTarget(world.renderContext, FALSE),
+    TestCheck(texture.EnsureRenderTarget(world.renderContext),
               "EnsureRenderTarget should create a render target texture");
     TestCheck(texture.GetMipmapCount() == 3,
               "render target creation must not overwrite the requested mipmap count");

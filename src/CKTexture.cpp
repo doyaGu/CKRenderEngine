@@ -732,7 +732,7 @@ int RCKTexture::GetRstTextureIndex() {
     return m_ObjectIndex;
 }
 
-CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
+CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev) {
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(Dev);
     if (!dev || !dev->m_RasterizerContext || !dev->m_RasterizerDriver)
         return FALSE;
@@ -742,9 +742,9 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev, CKBOOL ReadBack) {
         return FALSE;
     const CKBOOL isCubeTarget = IsCubeMap() && GetSlotCount() == 6 && GetWidth() == GetHeight();
 
-    // Readback happens through the render context (RequestReadback); it is
-    // not a texture property in the v3 contract.
-    (void)ReadBack;
+    // Readbacks go through the render context (DumpToMemory / RequestReadback
+    // read the presented frame or the bound target); they are not a texture
+    // property in the v3 contract.
     const CKDWORD requiredFlags = CKRST_TEXTURE_RENDERTARGET |
                                   (isCubeTarget ? CKRST_TEXTURE_CUBEMAP : 0);
     if (m_InVideoMemory &&
