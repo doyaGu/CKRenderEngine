@@ -32,7 +32,7 @@ set(CKRASTERIZER_LIB_SOURCES
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
         CKTransientGeometry.cpp
-        CKPostprocessPass.cpp
+        CKPresentStage.cpp
         CKRenderSettings.cpp
 
         CKTranslatedRasterizer.cpp
@@ -76,7 +76,7 @@ set(CKRASTERIZER_LIB_HEADERS
         CKDrawStateCache.h
         CKVertexLayoutCache.h
         CKTransientGeometry.h
-        CKPostprocessPass.h
+        CKPresentStage.h
         CKRenderSettings.h
         CKTranslatedRasterizer.h
         CKRenderPerfClock.h

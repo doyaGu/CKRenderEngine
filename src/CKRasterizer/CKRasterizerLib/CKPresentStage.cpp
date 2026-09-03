@@ -1,4 +1,4 @@
-#include "CKPostprocessPass.h"
+#include "CKPresentStage.h"
 #include "CKRasterizerDevice.h"
 
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
@@ -19,7 +19,7 @@
 
 namespace {
 
-struct CKPostprocessShaderBlobSet {
+struct CKPresentShaderBlobSet {
     CK_SHADER_PROFILE Profile;
     const unsigned char *VS;
     unsigned int VSSize;
@@ -27,7 +27,7 @@ struct CKPostprocessShaderBlobSet {
     unsigned int FSSize;
 };
 
-const CKPostprocessShaderBlobSet g_PostprocessShaderBlobSets[] = {
+const CKPresentShaderBlobSet g_PresentShaderBlobSets[] = {
     {CKRST_SHADER_PROFILE_DX11, s_dx11_vs_postprocess, sizeof(s_dx11_vs_postprocess),
      s_dx11_fs_postprocess, sizeof(s_dx11_fs_postprocess)},
     {CKRST_SHADER_PROFILE_DX12, s_dx12_vs_postprocess, sizeof(s_dx12_vs_postprocess),
@@ -42,9 +42,9 @@ const CKPostprocessShaderBlobSet g_PostprocessShaderBlobSets[] = {
      s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
 };
 
-const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE profile)
+const CKPresentShaderBlobSet *FindPresentShaderBlobSet(CK_SHADER_PROFILE profile)
 {
-    for (const CKPostprocessShaderBlobSet &set : g_PostprocessShaderBlobSets) {
+    for (const CKPresentShaderBlobSet &set : g_PresentShaderBlobSets) {
         if (set.Profile == profile)
             return &set;
     }
@@ -53,7 +53,7 @@ const CKPostprocessShaderBlobSet *FindPostprocessShaderBlobSet(CK_SHADER_PROFILE
 
 } // namespace
 
-CKDWORD CKPostprocessPass::ScaledDimension(CKDWORD value, float scale, CKDWORD maximum)
+CKDWORD CKPresentStage::ScaledDimension(CKDWORD value, float scale, CKDWORD maximum)
 {
     if (maximum == 0)
         return 0;
@@ -67,7 +67,7 @@ CKDWORD CKPostprocessPass::ScaledDimension(CKDWORD value, float scale, CKDWORD m
     return (CKDWORD)(scaled + 0.5f);
 }
 
-float CKPostprocessPass::ClampRenderScale(float scale)
+float CKPresentStage::ClampRenderScale(float scale)
 {
     if (!(scale > 0.0f) || !isfinite(scale))
         return 1.0f;
@@ -78,7 +78,7 @@ float CKPostprocessPass::ClampRenderScale(float scale)
     return scale;
 }
 
-float CKPostprocessPass::ClampSharpness(float sharpness)
+float CKPresentStage::ClampSharpness(float sharpness)
 {
     if (!(sharpness > 0.0f) || !isfinite(sharpness))
         return 0.0f;
@@ -87,29 +87,29 @@ float CKPostprocessPass::ClampSharpness(float sharpness)
     return sharpness;
 }
 
-CKPostprocessPass::CKPostprocessPass()
-    : m_Device(nullptr), m_ReadbackTexture(0), m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
+CKPresentStage::CKPresentStage()
+    : m_Device(nullptr), m_ReadbackTexture(0), m_VertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
-CKPostprocessPass::~CKPostprocessPass()
+CKPresentStage::~CKPresentStage()
 {
     Shutdown();
 }
 
-void CKPostprocessPass::Init(CKRasterizerDevice *device)
+void CKPresentStage::Init(CKRasterizerDevice *device)
 {
     Shutdown();
     m_Device = device;
 }
 
-void CKPostprocessPass::Shutdown()
+void CKPresentStage::Shutdown()
 {
     DestroyTargets();
     DestroyResources();
     m_Device = nullptr;
-    m_ResourceIds = CKPostprocessResourceIds();
+    m_ResourceIds = CKPresentResources();
 }
 
-CKBOOL CKPostprocessPass::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples)
+CKBOOL CKPresentStage::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples)
 {
     if (!m_Device || width == 0 || height == 0)
         return FALSE;
@@ -121,7 +121,7 @@ CKBOOL CKPostprocessPass::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWO
     return CreateTarget(m_Scene, width, height, samples);
 }
 
-CKBOOL CKPostprocessPass::EnsureNativeTarget(CKDWORD width, CKDWORD height)
+CKBOOL CKPresentStage::EnsureNativeTarget(CKDWORD width, CKDWORD height)
 {
     if (!m_Device || width == 0 || height == 0)
         return FALSE;
@@ -135,7 +135,7 @@ CKBOOL CKPostprocessPass::EnsureNativeTarget(CKDWORD width, CKDWORD height)
     return TRUE;
 }
 
-void CKPostprocessPass::DestroyTargets()
+void CKPresentStage::DestroyTargets()
 {
     DestroyTarget(m_Scene);
     DestroyTarget(m_Native);
@@ -145,7 +145,7 @@ void CKPostprocessPass::DestroyTargets()
 // Render targets cannot carry the readback flag; readbacks blit the native
 // color into this plain texture first. Missing when the device has no blit
 // or texture readback (the caller then falls back to the swap chain).
-void CKPostprocessPass::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
+void CKPresentStage::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
 {
     if (m_ReadbackTexture || !m_Device)
         return;
@@ -161,17 +161,17 @@ void CKPostprocessPass::EnsureReadbackTexture(CKDWORD width, CKDWORD height)
         m_ReadbackTexture = 0;
 }
 
-void CKPostprocessPass::DestroyReadbackTexture()
+void CKPresentStage::DestroyReadbackTexture()
 {
     if (m_Device && m_ReadbackTexture)
         m_Device->DeleteObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
     m_ReadbackTexture = 0;
 }
 
-CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height,
+CKBOOL CKPresentStage::CreateTarget(CKPresentTarget &target, CKDWORD width, CKDWORD height,
                                        CKDWORD samples)
 {
-    target = CKPostprocessTarget();
+    target = CKPresentTarget();
     const CKDWORD msaaFlag = CKRSTTextureMSAAFlag(samples);
     if (samples > 1 && msaaFlag == 0)
         return FALSE;
@@ -219,7 +219,7 @@ CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD widt
     if (m_Device->CreateFrameBuffer(&fbDesc, &target.FrameBuffer) != CK_OK) {
         m_Device->DeleteObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
         m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
-        target = CKPostprocessTarget();
+        target = CKPresentTarget();
         return FALSE;
     }
 
@@ -229,7 +229,7 @@ CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD widt
     return TRUE;
 }
 
-void CKPostprocessPass::DestroyTarget(CKPostprocessTarget &target)
+void CKPresentStage::DestroyTarget(CKPresentTarget &target)
 {
     if (m_Device) {
         if (target.FrameBuffer)
@@ -239,10 +239,10 @@ void CKPostprocessPass::DestroyTarget(CKPostprocessTarget &target)
         if (target.ColorTexture)
             m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
     }
-    target = CKPostprocessTarget();
+    target = CKPresentTarget();
 }
 
-CKBOOL CKPostprocessPass::EnsureResources()
+CKBOOL CKPresentStage::EnsureResources()
 {
     if (!m_Device || !m_Device->m_Driver)
         return FALSE;
@@ -251,18 +251,18 @@ CKBOOL CKPostprocessPass::EnsureResources()
         return FALSE;
     if (target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
         return FALSE;
-    if (m_PostVertexShaderProfile == target.ShaderProfile &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostProgram, CKRST_OBJ_PROGRAM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostVertexShader, CKRST_OBJ_SHADER) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostPixelShader, CKRST_OBJ_SHADER) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostSamplerUniform, CKRST_OBJ_UNIFORM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostParamsUniform, CKRST_OBJ_UNIFORM) &&
-        m_Device->IsObjectAlive(m_ResourceIds.PostVertexLayout, CKRST_OBJ_VERTEXLAYOUT))
+    if (m_VertexShaderProfile == target.ShaderProfile &&
+        m_Device->IsObjectAlive(m_ResourceIds.Program, CKRST_OBJ_PROGRAM) &&
+        m_Device->IsObjectAlive(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER) &&
+        m_Device->IsObjectAlive(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER) &&
+        m_Device->IsObjectAlive(m_ResourceIds.SamplerUniform, CKRST_OBJ_UNIFORM) &&
+        m_Device->IsObjectAlive(m_ResourceIds.ParamsUniform, CKRST_OBJ_UNIFORM) &&
+        m_Device->IsObjectAlive(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT))
         return TRUE;
 
     DestroyResources();
 
-    const CKPostprocessShaderBlobSet *blobs = FindPostprocessShaderBlobSet(target.ShaderProfile);
+    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(target.ShaderProfile);
     if (!blobs)
         return FALSE;
 
@@ -270,7 +270,7 @@ CKBOOL CKPostprocessPass::EnsureResources()
     uniformDesc.Name = (CKSTRING)"s_sceneColor";
     uniformDesc.Type = CKRST_UNIFORM_SAMPLER;
     uniformDesc.Count = 1;
-    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.PostSamplerUniform) != CK_OK) {
+    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.SamplerUniform) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -278,7 +278,7 @@ CKBOOL CKPostprocessPass::EnsureResources()
     uniformDesc.Name = (CKSTRING)"u_postParams";
     uniformDesc.Type = CKRST_UNIFORM_VEC4;
     uniformDesc.Count = 1;
-    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.PostParamsUniform) != CK_OK) {
+    if (m_Device->CreateUniform(&uniformDesc, &m_ResourceIds.ParamsUniform) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -290,7 +290,7 @@ CKBOOL CKPostprocessPass::EnsureResources()
     shaderDesc.Stage = CKRST_SHADER_VERTEX;
     shaderDesc.Code = blobs->VS;
     shaderDesc.CodeSize = blobs->VSSize;
-    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.PostVertexShader) != CK_OK) {
+    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.VertexShader) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -298,16 +298,16 @@ CKBOOL CKPostprocessPass::EnsureResources()
     shaderDesc.Stage = CKRST_SHADER_PIXEL;
     shaderDesc.Code = blobs->FS;
     shaderDesc.CodeSize = blobs->FSSize;
-    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.PostPixelShader) != CK_OK) {
+    if (m_Device->CreateShader(&shaderDesc, &m_ResourceIds.PixelShader) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
 
     CKProgramDesc programDesc;
-    programDesc.VertexShader = m_ResourceIds.PostVertexShader;
-    programDesc.PixelShader = m_ResourceIds.PostPixelShader;
+    programDesc.VertexShader = m_ResourceIds.VertexShader;
+    programDesc.PixelShader = m_ResourceIds.PixelShader;
     programDesc.ConsumeShaders = FALSE;
-    if (m_Device->CreateProgram(&programDesc, &m_ResourceIds.PostProgram) != CK_OK) {
+    if (m_Device->CreateProgram(&programDesc, &m_ResourceIds.Program) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -331,68 +331,68 @@ CKBOOL CKPostprocessPass::EnsureResources()
     layoutDesc.Elements = elements;
     layoutDesc.ElementCount = 2;
     layoutDesc.Stride = 20;
-    if (m_Device->CreateVertexLayout(&layoutDesc, &m_ResourceIds.PostVertexLayout) != CK_OK) {
+    if (m_Device->CreateVertexLayout(&layoutDesc, &m_ResourceIds.VertexLayout) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
 
-    m_PostVertexShaderProfile = target.ShaderProfile;
+    m_VertexShaderProfile = target.ShaderProfile;
     return TRUE;
 }
 
-void CKPostprocessPass::DestroyResources()
+void CKPresentStage::DestroyResources()
 {
     if (m_Device) {
-        if (m_ResourceIds.PostProgram)
-            m_Device->DeleteObject(m_ResourceIds.PostProgram, CKRST_OBJ_PROGRAM);
-        if (m_ResourceIds.PostVertexShader)
-            m_Device->DeleteObject(m_ResourceIds.PostVertexShader, CKRST_OBJ_SHADER);
-        if (m_ResourceIds.PostPixelShader)
-            m_Device->DeleteObject(m_ResourceIds.PostPixelShader, CKRST_OBJ_SHADER);
-        if (m_ResourceIds.PostSamplerUniform)
-            m_Device->DeleteObject(m_ResourceIds.PostSamplerUniform, CKRST_OBJ_UNIFORM);
-        if (m_ResourceIds.PostParamsUniform)
-            m_Device->DeleteObject(m_ResourceIds.PostParamsUniform, CKRST_OBJ_UNIFORM);
-        if (m_ResourceIds.PostVertexLayout)
-            m_Device->DeleteObject(m_ResourceIds.PostVertexLayout, CKRST_OBJ_VERTEXLAYOUT);
+        if (m_ResourceIds.Program)
+            m_Device->DeleteObject(m_ResourceIds.Program, CKRST_OBJ_PROGRAM);
+        if (m_ResourceIds.VertexShader)
+            m_Device->DeleteObject(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER);
+        if (m_ResourceIds.PixelShader)
+            m_Device->DeleteObject(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER);
+        if (m_ResourceIds.SamplerUniform)
+            m_Device->DeleteObject(m_ResourceIds.SamplerUniform, CKRST_OBJ_UNIFORM);
+        if (m_ResourceIds.ParamsUniform)
+            m_Device->DeleteObject(m_ResourceIds.ParamsUniform, CKRST_OBJ_UNIFORM);
+        if (m_ResourceIds.VertexLayout)
+            m_Device->DeleteObject(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT);
     }
-    m_ResourceIds.PostProgram = 0;
-    m_ResourceIds.PostVertexShader = 0;
-    m_ResourceIds.PostPixelShader = 0;
-    m_ResourceIds.PostSamplerUniform = 0;
-    m_ResourceIds.PostParamsUniform = 0;
-    m_ResourceIds.PostVertexLayout = 0;
-    m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
+    m_ResourceIds.Program = 0;
+    m_ResourceIds.VertexShader = 0;
+    m_ResourceIds.PixelShader = 0;
+    m_ResourceIds.SamplerUniform = 0;
+    m_ResourceIds.ParamsUniform = 0;
+    m_ResourceIds.VertexLayout = 0;
+    m_VertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
 }
 
-CKERROR CKPostprocessPass::SubmitResolve(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa,
+CKERROR CKPresentStage::SubmitResolve(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa,
                                          float sharpness)
 {
     return Submit(encoder, view, m_Scene, fxaa, sharpness);
 }
 
-CKERROR CKPostprocessPass::SubmitBlit(CKRasterizerEncoder *encoder, CKRenderView view)
+CKERROR CKPresentStage::SubmitBlit(CKRasterizerEncoder *encoder, CKRenderView view)
 {
     return Submit(encoder, view, m_Native, FALSE, 0.0f);
 }
 
-CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
-                                  const CKPostprocessTarget &source, CKBOOL fxaa, float sharpness)
+CKERROR CKPresentStage::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
+                                  const CKPresentTarget &source, CKBOOL fxaa, float sharpness)
 {
     if (!m_Device || !encoder || !source.IsActive() || !EnsureResources())
         return CKERR_NOTIMPLEMENTED;
 
-    struct PostVertex {
+    struct PresentVertex {
         float X, Y, Z;
         float U, V;
     };
 
     CKTransientVertexBuffer tvb;
     memset(&tvb, 0, sizeof(tvb));
-    if (!m_Device->AllocTransientVertexBuffer(&tvb, 3, m_ResourceIds.PostVertexLayout))
+    if (!m_Device->AllocTransientVertexBuffer(&tvb, 3, m_ResourceIds.VertexLayout))
         return CKERR_OUTOFMEMORY;
 
-    PostVertex *vertices = (PostVertex *)tvb.Data;
+    PresentVertex *vertices = (PresentVertex *)tvb.Data;
     CKRasterizerTargetDesc target;
     const CKBOOL originBottomLeft =
         m_Device->GetTargetDesc(&target) == CK_OK && target.OriginBottomLeft;
@@ -430,8 +430,8 @@ CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView vie
     encoder->SetScissor(nullptr);
     encoder->SetPointSize(1.0f);
     encoder->SetTransientVertexBuffer(0, &tvb);
-    encoder->SetTexture(0, m_ResourceIds.PostSamplerUniform, source.ColorTexture, &sampler);
-    encoder->SetUniform(m_ResourceIds.PostParamsUniform, params, 1);
-    encoder->Submit(view, m_ResourceIds.PostProgram, 0, CKRST_DISCARD_ALL);
+    encoder->SetTexture(0, m_ResourceIds.SamplerUniform, source.ColorTexture, &sampler);
+    encoder->SetUniform(m_ResourceIds.ParamsUniform, params, 1);
+    encoder->Submit(view, m_ResourceIds.Program, 0, CKRST_DISCARD_ALL);
     return encoder->GetStatus();
 }

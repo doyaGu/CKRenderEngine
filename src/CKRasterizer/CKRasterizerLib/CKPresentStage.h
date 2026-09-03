@@ -1,5 +1,5 @@
-#ifndef CKPOSTPROCESSPASS_H
-#define CKPOSTPROCESSPASS_H
+#ifndef CKPRESENTSTAGE_H
+#define CKPRESENTSTAGE_H
 
 #include "VxMath.h"
 #include "CKTypes.h"
@@ -9,7 +9,7 @@ class CKRasterizerDevice;
 class CKRasterizerEncoder;
 
 // One internal render target: color + depth-stencil + framebuffer.
-struct CKPostprocessTarget {
+struct CKPresentTarget {
     CKDWORD ColorTexture;
     CKDWORD DepthTexture;
     CKDWORD FrameBuffer;
@@ -17,36 +17,38 @@ struct CKPostprocessTarget {
     CKDWORD Height;
     CKDWORD Samples;      // 0 = single sampled
 
-    CKPostprocessTarget()
+    CKPresentTarget()
         : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0) {}
     CKBOOL IsActive() const { return FrameBuffer != 0; }
 };
 
-// Device handles of the fullscreen resolve / blit program.
-struct CKPostprocessResourceIds {
-    CKDWORD PostVertexShader;
-    CKDWORD PostPixelShader;
-    CKDWORD PostProgram;
-    CKDWORD PostSamplerUniform;
-    CKDWORD PostParamsUniform;
-    CKDWORD PostVertexLayout;
+// Device handles of the fullscreen resolve / blit program (shaders
+// vs_postprocess / fs_postprocess).
+struct CKPresentResources {
+    CKDWORD VertexShader;
+    CKDWORD PixelShader;
+    CKDWORD Program;
+    CKDWORD SamplerUniform;
+    CKDWORD ParamsUniform;
+    CKDWORD VertexLayout;
 
-    CKPostprocessResourceIds()
-        : PostVertexShader(0), PostPixelShader(0), PostProgram(0),
-          PostSamplerUniform(0), PostParamsUniform(0), PostVertexLayout(0) {}
+    CKPresentResources()
+        : VertexShader(0), PixelShader(0), Program(0),
+          SamplerUniform(0), ParamsUniform(0), VertexLayout(0) {}
 };
 
-// Virtual backbuffer (spec 4.4): the scene renders into the *scene target*
-// (window size x RenderScale, MSAA), the composite resolves it (scale, FXAA,
-// sharpen) into the *native target* (window size, single sampled, readable),
-// the overlay draws on the native target and the frame ends with a plain blit
-// of the native target to the swap chain. Driven by the translated context's
+// Presentation stage of the virtual backbuffer (spec 4.4): the scene renders
+// into the *scene target* (window size x RenderScale, MSAA), the resolve
+// draws it (scale, FXAA, sharpen) into the *native target* (window size,
+// single sampled), the overlay draws on the native target and the frame ends
+// with a plain blit of the native target to the swap chain. Readbacks blit the
+// native target into the readback texture. Driven by the translated context's
 // frame flow; it does not own any view, the caller decides which view each
 // fullscreen draw goes to.
-class CKPostprocessPass {
+class CKPresentStage {
 public:
-    CKPostprocessPass();
-    ~CKPostprocessPass();
+    CKPresentStage();
+    ~CKPresentStage();
 
     void Init(CKRasterizerDevice *device);
     // Releases every device object. Safe to call twice.
@@ -63,10 +65,10 @@ public:
     CKBOOL EnsureResources();
     void DestroyResources();
 
-    const CKPostprocessTarget &SceneTarget() const { return m_Scene; }
-    const CKPostprocessTarget &NativeTarget() const { return m_Native; }
+    const CKPresentTarget &SceneTarget() const { return m_Scene; }
+    const CKPresentTarget &NativeTarget() const { return m_Native; }
     CKDWORD GetReadbackTexture() const { return m_ReadbackTexture; }
-    const CKPostprocessResourceIds &GetResourceIds() const { return m_ResourceIds; }
+    const CKPresentResources &GetResourceIds() const { return m_ResourceIds; }
 
     // Draws the scene color as a fullscreen triangle into `view` (the resolve).
     CKERROR SubmitResolve(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa, float sharpness);
@@ -78,19 +80,19 @@ public:
     static float ClampSharpness(float sharpness);
 
 private:
-    CKBOOL CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
-    void DestroyTarget(CKPostprocessTarget &target);
+    CKBOOL CreateTarget(CKPresentTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
+    void DestroyTarget(CKPresentTarget &target);
     void EnsureReadbackTexture(CKDWORD width, CKDWORD height);
     void DestroyReadbackTexture();
-    CKERROR Submit(CKRasterizerEncoder *encoder, CKRenderView view, const CKPostprocessTarget &source,
+    CKERROR Submit(CKRasterizerEncoder *encoder, CKRenderView view, const CKPresentTarget &source,
                    CKBOOL fxaa, float sharpness);
 
     CKRasterizerDevice *m_Device;
-    CKPostprocessResourceIds m_ResourceIds;
-    CKPostprocessTarget m_Scene;
-    CKPostprocessTarget m_Native;
+    CKPresentResources m_ResourceIds;
+    CKPresentTarget m_Scene;
+    CKPresentTarget m_Native;
     CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target of the native color
-    CKDWORD m_PostVertexShaderProfile;
+    CKDWORD m_VertexShaderProfile;
 };
 
-#endif // CKPOSTPROCESSPASS_H
+#endif // CKPRESENTSTAGE_H

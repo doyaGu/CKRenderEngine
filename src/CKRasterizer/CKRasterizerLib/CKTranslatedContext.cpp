@@ -94,7 +94,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
         m_Device->BeginShutdown();
         return FALSE;
     }
-    m_Postprocess.Init(m_Device);
+    m_Present.Init(m_Device);
     if (m_TranslatedDriver)
         m_TranslatedDriver->SyncCapsFromDevice();
 
@@ -141,7 +141,7 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_PosY = m_Device->m_PosY;
     m_Width = m_Device->m_Width;
     m_Height = m_Device->m_Height;
-    m_Postprocess.DestroyTargets();
+    m_Present.DestroyTargets();
     m_NativePresented = FALSE;
     // The viewport follows the window like on creation; the engine sets its
     // own viewport again after a resize anyway.
@@ -165,8 +165,8 @@ CKBOOL CKTranslatedContext::SetOptions(const CKRasterizerOptions *Options)
     // (PrepareFrameTarget).
     m_Options = *Options;
     m_Options.Size = sizeof(CKRasterizerOptions);
-    m_Options.RenderScale = CKPostprocessPass::ClampRenderScale(m_Options.RenderScale);
-    m_Options.Sharpness = CKPostprocessPass::ClampSharpness(m_Options.Sharpness);
+    m_Options.RenderScale = CKPresentStage::ClampRenderScale(m_Options.RenderScale);
+    m_Options.Sharpness = CKPresentStage::ClampSharpness(m_Options.Sharpness);
     if (m_Options.MSAASamples <= 1)
         m_Options.MSAASamples = 0;
     if (m_Created && !m_ShuttingDown)
@@ -243,7 +243,7 @@ CKBOOL CKTranslatedContext::BeginShutdown()
         m_CopyTexture = 0;
         m_CopyWidth = m_CopyHeight = 0;
     }
-    m_Postprocess.Shutdown();
+    m_Present.Shutdown();
     if (m_FFP.PrepareShutdown() != CK_OK)
         return FALSE;
     if (m_Device->BeginShutdown() != CK_OK)
@@ -1180,14 +1180,14 @@ CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, 
 
 CKBOOL CKTranslatedContext::CanReadNativeTarget() const
 {
-    return !m_Target && m_InternalTargets && m_Postprocess.NativeTarget().IsActive() &&
-           m_Postprocess.GetReadbackTexture() != 0;
+    return !m_Target && m_InternalTargets && m_Present.NativeTarget().IsActive() &&
+           m_Present.GetReadbackTexture() != 0;
 }
 
 CKBOOL CKTranslatedContext::BlitNativeTargetForReadback()
 {
-    const CKPostprocessTarget &native = m_Postprocess.NativeTarget();
-    const CKDWORD readbackTexture = m_Postprocess.GetReadbackTexture();
+    const CKPresentTarget &native = m_Present.NativeTarget();
+    const CKDWORD readbackTexture = m_Present.GetReadbackTexture();
     if (!m_Encoder || !native.IsActive() || !readbackTexture)
         return FALSE;
     // Blits run before the draws of their view: a pass after the present pass
@@ -1200,7 +1200,7 @@ CKBOOL CKTranslatedContext::BlitNativeTargetForReadback()
 
 CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
 {
-    const CKDWORD readbackTexture = m_Postprocess.GetReadbackTexture();
+    const CKDWORD readbackTexture = m_Present.GetReadbackTexture();
     if (!readbackTexture)
         return FALSE;
     CKReadbackDesc desc;

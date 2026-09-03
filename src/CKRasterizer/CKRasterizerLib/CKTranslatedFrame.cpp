@@ -53,8 +53,8 @@ CKRECT CKTranslatedContext::CurrentTargetRect() const
         rect.right = (int)m_TargetWidth;
         rect.bottom = (int)m_TargetHeight;
     } else if (m_InternalTargets) {
-        rect.right = (int)m_Postprocess.SceneTarget().Width;
-        rect.bottom = (int)m_Postprocess.SceneTarget().Height;
+        rect.right = (int)m_Present.SceneTarget().Width;
+        rect.bottom = (int)m_Present.SceneTarget().Height;
     } else {
         rect.right = (int)m_Width;
         rect.bottom = (int)m_Height;
@@ -110,12 +110,12 @@ CKDWORD CKTranslatedContext::CurrentSceneFrameBuffer() const
 {
     if (m_Target)
         return m_TargetFrameBuffer;
-    return m_InternalTargets ? m_Postprocess.SceneTarget().FrameBuffer : 0;
+    return m_InternalTargets ? m_Present.SceneTarget().FrameBuffer : 0;
 }
 
 CKDWORD CKTranslatedContext::OverlayFrameBuffer() const
 {
-    return m_InternalTargets ? m_Postprocess.NativeTarget().FrameBuffer : 0;
+    return m_InternalTargets ? m_Present.NativeTarget().FrameBuffer : 0;
 }
 
 // Frame buffer / rect the next implicit or clear pass goes to: the native
@@ -148,24 +148,24 @@ void CKTranslatedContext::PrepareFrameTarget()
     CKRasterizerDeviceCapsDesc caps;
     if (m_Device->GetCaps(&caps) != CK_OK || caps.MaxTextureSize == 0)
         return;
-    const CKDWORD width = CKPostprocessPass::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
-    const CKDWORD height = CKPostprocessPass::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
-    CKBOOL sceneReady = m_Postprocess.EnsureSceneTarget(width, height, m_Options.MSAASamples);
+    const CKDWORD width = CKPresentStage::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
+    const CKDWORD height = CKPresentStage::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
+    CKBOOL sceneReady = m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
     if (!sceneReady && m_Options.MSAASamples > 1) {
         // The device has no multisampled targets: render single sampled.
         Diag(CKRST_DIAG_APPROX_MSAA);
-        sceneReady = m_Postprocess.EnsureSceneTarget(width, height, 0);
+        sceneReady = m_Present.EnsureSceneTarget(width, height, 0);
     }
     const CKDWORD nativeWidth = m_Width < caps.MaxTextureSize ? m_Width : caps.MaxTextureSize;
     const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
-    const CKDWORD nativeBefore = m_Postprocess.NativeTarget().ColorTexture;
-    if (sceneReady && m_Postprocess.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Postprocess.EnsureResources())
+    const CKDWORD nativeBefore = m_Present.NativeTarget().ColorTexture;
+    if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources())
         m_InternalTargets = TRUE;
     else
-        m_Postprocess.DestroyTargets();
-    if (m_Postprocess.NativeTarget().ColorTexture != nativeBefore)
+        m_Present.DestroyTargets();
+    if (m_Present.NativeTarget().ColorTexture != nativeBefore)
         m_NativePresented = FALSE;
-    m_FFP.SetMultisampledTarget(m_InternalTargets && m_Postprocess.SceneTarget().Samples > 0);
+    m_FFP.SetMultisampledTarget(m_InternalTargets && m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
 }
 
@@ -219,7 +219,7 @@ CKBOOL CKTranslatedContext::CompositeScene()
         return TRUE;
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "composite"))
         return FALSE;
-    if (m_Postprocess.SubmitResolve(m_Encoder, m_CurrentView, m_Options.FXAA, m_Options.Sharpness) != CK_OK)
+    if (m_Present.SubmitResolve(m_Encoder, m_CurrentView, m_Options.FXAA, m_Options.Sharpness) != CK_OK)
         return FALSE;
     m_Composited = TRUE;
     return TRUE;
@@ -233,7 +233,7 @@ CKBOOL CKTranslatedContext::PresentInternalTarget()
         return TRUE;
     if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "present"))
         return FALSE;
-    return m_Postprocess.SubmitBlit(m_Encoder, m_CurrentView) == CK_OK ? TRUE : FALSE;
+    return m_Present.SubmitBlit(m_Encoder, m_CurrentView) == CK_OK ? TRUE : FALSE;
 }
 
 void CKTranslatedContext::ReleaseFrameScratch()

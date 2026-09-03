@@ -14,7 +14,7 @@
 #include "CKRasterizer.h"
 #include "CKRasterizerDevice.h"
 #include "CKFixedFunctionPipeline.h"
-#include "CKPostprocessPass.h"
+#include "CKPresentStage.h"
 
 #include <unordered_map>
 #include <vector>
@@ -284,7 +284,7 @@ private:
     CKTranslatedDriver *m_TranslatedDriver;
     CKRasterizerDevice *m_Device;
     CKFixedFunctionPipeline m_FFP;
-    CKPostprocessPass m_Postprocess;
+    CKPresentStage m_Present;
     CKRasterizerOptions m_Options;
 
     // Verbatim state mirror (spec 4.10)
