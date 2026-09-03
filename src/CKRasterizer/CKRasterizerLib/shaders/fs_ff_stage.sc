@@ -107,9 +107,6 @@ vec4 getSampleCoord(vec4 coord, int transformFlags)
     if ((transformFlags & 0x100) != 0) {
         coord /= abs(coord.w) < 0.0001 ? (coord.w < 0.0 ? -0.0001 : 0.0001) : coord.w;
     }
-    if ((transformFlags & 0x1000) != 0) {
-        coord.y = 1.0 - coord.y;
-    }
     return coord;
 }
 

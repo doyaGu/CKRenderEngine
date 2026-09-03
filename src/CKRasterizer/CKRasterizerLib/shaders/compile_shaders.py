@@ -20,8 +20,8 @@ from pathlib import Path
 
 # Bump both whenever the C++ uniform / sampler ABI changes; the runtime refuses
 # generated blobs whose stamp does not match CKFFShaderABI.h.
-SHADER_ABI_VERSION = 4
-SHADER_INTERFACE_HASH = 0x2B9E5D14
+SHADER_ABI_VERSION = 5
+SHADER_INTERFACE_HASH = 0x61C4F0A9
 
 
 SHADERS = [

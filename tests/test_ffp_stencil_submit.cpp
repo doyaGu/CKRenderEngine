@@ -1494,7 +1494,7 @@ void AlphaBumpOpApproximatesToSelectArg1() {
     ffp.Shutdown();
 }
 
-void BottomLeftCubeRenderTargetSamplesWithDiagnostic() {
+void BottomLeftRenderTargetsSampleWithoutFlip() {
     FFPDiagnosticDriver driver(CKRST_SHADER_PROFILE_GLSL,
                                CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
@@ -1506,15 +1506,100 @@ void BottomLeftCubeRenderTargetSamplesWithDiagnostic() {
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
                           CKRST_TEXTURE_CUBEMAP);
 
-    const CKBOOL drawn = ffp.DrawVertexBuffer(
+    CKBOOL drawn = ffp.DrawVertexBuffer(
         &context.Encoder, 1, VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn && context.Encoder.SubmitCount == 1,
-              "Bottom-left cube render targets must draw");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_RENDER_TARGET_ORIGIN),
-              "Sampling a cube render target on a bottom-left backend reports the origin approximation");
+    TestCheck(drawn && context.Encoder.SubmitCount == 1 && ffp.GetLastDrawApproximationMask() == 0,
+              "Cube render targets sample exactly on bottom-left backends (rendered top-down)");
+
+    ffp.SetTexture(0, 78, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET);
+    drawn = ffp.DrawVertexBuffer(
+        &context.Encoder, 1, VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKDWORD stageParams = ffp.GetShaderCache().GetUniforms().u_stageParams;
+    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
+        context.Encoder.FloatUniforms.find(stageParams);
+    TestCheck(drawn && params != context.Encoder.FloatUniforms.end() &&
+                  ((CKDWORD)params->second[CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD) * 4 + 1] & 0x1000u) == 0,
+              "2D render targets carry no sampling flip flag: the flip happens when rendering into them");
     ffp.Shutdown();
+}
+
+void RenderTargetOriginFlipsProjectionViewportAndWinding() {
+    FFPDiagnosticDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
+                                   CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
+                                   CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
+    FFPDiagnosticContext context(&bottomLeft);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(&context);
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 640;
+    viewport.ViewHeight = 480;
+    viewport.ViewZMax = 1.0f;
+    ffp.SetViewport(viewport);
+    const CKDWORD matrixUniform = ffp.GetShaderCache().GetUniforms().u_ffMatrices;
+    const CKDWORD viewportUniform = ffp.GetShaderCache().GetUniforms().u_viewport;
+
+    // Backbuffer: identity transforms and the default counter-clockwise cull.
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    std::vector<float> matrices = context.Encoder.FloatUniforms[matrixUniform];
+    TestCheck(matrices.size() >= 16 && matrices[0] == 1.0f && matrices[5] == 1.0f && matrices[10] == 1.0f,
+              "backbuffer draws keep the projection as set");
+    const CKDWORD backbufferCull = context.Encoder.LastState.Lo & CKRST_STATE_CULL(3);
+    TestCheck(backbufferCull == CKRST_STATE_CULL(2), "default cull mode is counter-clockwise");
+
+    // Render target on a bottom-left backend: Y flipped, winding mirrored.
+    ffp.SetRenderTargetActive(TRUE);
+    TestCheck(ffp.IsRenderTargetActive() && ffp.RenderTargetOriginFlip(),
+              "a bound render target flips the origin on bottom-left backends");
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    matrices = context.Encoder.FloatUniforms[matrixUniform];
+    TestCheck(matrices.size() >= 16 && matrices[0] == 1.0f && matrices[5] == -1.0f &&
+                  matrices[10] == 1.0f && matrices[15] == 1.0f,
+              "render-target draws negate the clip-space Y of the projection");
+    TestCheck((context.Encoder.LastState.Lo & CKRST_STATE_CULL(3)) == CKRST_STATE_CULL(1),
+              "render-target draws mirror the front-face winding");
+    ffp.SetRenderState(VXRENDERSTATE_INVERSEWINDING, TRUE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    TestCheck((context.Encoder.LastState.Lo & CKRST_STATE_CULL(3)) == CKRST_STATE_CULL(2),
+              "INVERSEWINDING combines with the origin flip");
+    ffp.SetRenderState(VXRENDERSTATE_INVERSEWINDING, FALSE);
+
+    // Pre-transformed vertices: the screen-to-clip Y mapping mirrors too.
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+    std::vector<float> vp = context.Encoder.FloatUniforms[viewportUniform];
+    TestCheck(vp.size() >= 4 && vp[1] > 0.0f && vp[3] == -1.0f,
+              "POSITIONT draws into a render target use the mirrored viewport mapping");
+
+    ffp.SetRenderTargetActive(FALSE);
+    ffp.DrawVertexBuffer(&context.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                         CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
+    vp = context.Encoder.FloatUniforms[viewportUniform];
+    TestCheck(!ffp.RenderTargetOriginFlip() && vp.size() >= 4 && vp[1] < 0.0f && vp[3] == 1.0f &&
+                  (context.Encoder.LastState.Lo & CKRST_STATE_CULL(3)) == CKRST_STATE_CULL(2),
+              "releasing the render target restores the backbuffer mapping and winding");
+    ffp.Shutdown();
+
+    // Top-left backends never flip.
+    FFPDiagnosticDriver topLeft;
+    FFPDiagnosticContext topLeftContext(&topLeft);
+    CKFixedFunctionPipeline topLeftFfp;
+    topLeftFfp.Init(&topLeftContext);
+    topLeftFfp.SetRenderTargetActive(TRUE);
+    topLeftFfp.DrawVertexBuffer(&topLeftContext.Encoder, 1, VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
+    matrices = topLeftContext.Encoder.FloatUniforms[topLeftFfp.GetShaderCache().GetUniforms().u_ffMatrices];
+    TestCheck(topLeftFfp.IsRenderTargetActive() && !topLeftFfp.RenderTargetOriginFlip() &&
+                  matrices.size() >= 16 && matrices[5] == 1.0f &&
+                  (topLeftContext.Encoder.LastState.Lo & CKRST_STATE_CULL(3)) == CKRST_STATE_CULL(2),
+              "top-left backends render into targets without any flip");
+    topLeftFfp.Shutdown();
 }
 
 void BorderColorUsesStableBgfxPaletteSlots() {
@@ -2925,8 +3010,10 @@ int main() {
               &UnknownTextureOpRejectsDraw);
     tests.Run("Alpha bump op approximates to SELECTARG1",
               &AlphaBumpOpApproximatesToSelectArg1);
-    tests.Run("Bottom-left cube render target samples with diagnostic",
-              &BottomLeftCubeRenderTargetSamplesWithDiagnostic);
+    tests.Run("Bottom-left render targets sample without flip",
+              &BottomLeftRenderTargetsSampleWithoutFlip);
+    tests.Run("Render target origin flips projection, viewport and winding",
+              &RenderTargetOriginFlipsProjectionViewportAndWinding);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
     tests.Run("DrawVertexBuffer sets flat shade specialization",

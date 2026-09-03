@@ -165,7 +165,7 @@ void StageParamsPackThroughABIIndices() {
     textures[2] = 77;
 
     CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
-    CKFFPackStageParams(stages, textures, textureFlags, 3, 0, params);
+    CKFFPackStageParams(stages, textures, textureFlags, 3, params);
 
     const float *coord = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_COORD)];
     const float *constant = params.Values[CKFFStageParamIndex(2, CKFF_STAGE_PARAM_CONSTANT)];
@@ -199,47 +199,6 @@ void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
               "Both 3D and POSITIONT shaders must convert D3D clip depth for desktop OpenGL");
 }
 
-void RenderTargetFlipFlagFollowsBackendOrigin() {
-    CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
-    CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {};
-    CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
-    CKFFStageParamsUniform params;
-
-    stages[0][CKRST_TSS_OP] = CKRST_TOP_SELECTARG1;
-    stages[0][CKRST_TSS_ARG1] = CKRST_TA_TEXTURE;
-    textures[0] = 77;
-    textureFlags[0] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET;
-
-    CKFFPackStageParams(stages, textures, textureFlags, 1, 0, params);
-    const CKDWORD topLeftFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
-    TestCheck((topLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
-              "Top-left backends must sample render targets without a V flip");
-
-    CKFFPackStageParams(stages, textures, textureFlags, 1,
-                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
-    const CKDWORD bottomLeftFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
-    TestCheck((bottomLeftFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) != 0,
-              "Bottom-left backends must flip 2D render-target sampling in V");
-
-    textureFlags[0] = CKRST_TEXTURE_VALID;
-    CKFFPackStageParams(stages, textures, textureFlags, 1,
-                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
-    const CKDWORD regularTextureFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
-    TestCheck((regularTextureFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
-              "Bottom-left backends must not flip ordinary texture assets");
-
-    textureFlags[0] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
-                      CKRST_TEXTURE_CUBEMAP;
-    CKFFPackStageParams(stages, textures, textureFlags, 1,
-                        CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT, params);
-    const CKDWORD cubeFlags = (CKDWORD)params.Values[
-        CKFFStageParamIndex(0, CKFF_STAGE_PARAM_COORD)][1];
-    TestCheck((cubeFlags & CKFF_TTF_RENDER_TARGET_FLIP_V) == 0,
-              "Cube render targets must not receive an invalid 2D V flip");
-}
 
 void MirrorOnceAddressModesPackIntoStageParams() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
@@ -264,7 +223,7 @@ void MirrorOnceAddressModesPackIntoStageParams() {
     textures[5] = 12;
 
     CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
-    CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params);
+    CKFFPackStageParams(stages, textures, textureFlags, 6, params);
 
     const float *stage1 = params.Values[CKFFStageParamIndex(1, CKFF_STAGE_PARAM_COORD)];
     const CKDWORD stage1Flags = (CKDWORD)stage1[1];
@@ -985,7 +944,7 @@ void SamplerSlotOverflowSamplesAsUnbound() {
         textureFlags[stage] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP;
     }
     CKFFStageParamsUniform params;
-    CKFFPackStageParams(stages, textures, textureFlags, 6, 0, params, NULL, key.SamplerSlotOverflowMask);
+    CKFFPackStageParams(stages, textures, textureFlags, 6, params, NULL, key.SamplerSlotOverflowMask);
     TestCheck(params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD)][2] == 1.0f &&
                   params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD)][2] == 0.0f &&
                   params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COORD)][2] == 1.0f,
@@ -1198,8 +1157,6 @@ int main() {
               &ShaderSourcesDeclarePortableFlatAndClipSpaceContracts);
     tests.Run("Stage params pack through ABI indices",
               &StageParamsPackThroughABIIndices);
-    tests.Run("Render-target flip flag follows backend origin",
-              &RenderTargetFlipFlagFollowsBackendOrigin);
     tests.Run("MIRRORONCE address modes pack into stage params",
               &MirrorOnceAddressModesPackIntoStageParams);
     tests.Run("MIRRORONCE sampler desc falls back to clamp",

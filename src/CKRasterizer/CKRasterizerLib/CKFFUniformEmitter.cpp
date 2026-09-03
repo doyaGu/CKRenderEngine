@@ -9,6 +9,12 @@
 
 #include <string.h>
 
+CKBOOL CKFFUniformEmitter::RenderTargetOriginFlip() const
+{
+    return m_State.RenderTargetActive &&
+           (m_ShaderCache.GetTargetFlags() & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
+}
+
 static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs)
 {
     return (CKDWORD)((vs.Bits >> 35) & 3u);
@@ -152,6 +158,16 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
         }
     }
     Vx3DMultiplyMatrix4(viewProj, m_State.Projection, m_State.View);
+    if (RenderTargetOriginFlip()) {
+        // Render upside down into the target so its memory matches the D3D
+        // layout on bottom-left-origin backends (spec 5.9, RTT origin).
+        VxMatrix flip;
+        Vx3DMatrixIdentity(flip);
+        flip[1][1] = -1.0f;
+        VxMatrix flipped;
+        Vx3DMultiplyMatrix4(flipped, flip, viewProj);
+        viewProj = flipped;
+    }
     Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_State.World);
     VxMatrix matrices[4];
     matrices[0] = vertexBlend ? viewProj : modelViewProj;
@@ -204,13 +220,20 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
              CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
     }
 
-    if (context->PositionT)
-        Emit(sink, u.u_viewport, m_State.Viewport, 1, 1, FALSE);
+    if (context->PositionT) {
+        float viewport[4];
+        memcpy(viewport, m_State.Viewport, sizeof(viewport));
+        if (RenderTargetOriginFlip()) {
+            // Pre-transformed vertices: mirror the screen-to-clip Y mapping.
+            viewport[1] = -viewport[1];
+            viewport[3] = -viewport[3];
+        }
+        Emit(sink, u.u_viewport, viewport, 1, 1, FALSE);
+    }
 
-    const CKDWORD targetFlags = m_ShaderCache.GetTargetFlags();
     CKFFStageParamsUniform stageParams;
     CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
-                        context->ActiveTextureCount, targetFlags, stageParams,
+                        context->ActiveTextureCount, stageParams,
                         m_State.StageStateSetMasks,
                         context->ShaderKey.FS.SamplerSlotOverflowMask);
     if (context->ShaderKey.VS.GetPointSprite()) {
@@ -226,7 +249,6 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             const CKDWORD samplingFlags =
                 (CKDWORD)coord[1] &
                 (CKFF_TTF_MIRRORONCE_MASK |
-                 CKFF_TTF_RENDER_TARGET_FLIP_V |
                  CKFF_TTF_BUMP_UNORM);
             coord[1] = (float)samplingFlags;
         }

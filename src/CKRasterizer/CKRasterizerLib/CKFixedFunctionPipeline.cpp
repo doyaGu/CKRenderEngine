@@ -283,7 +283,6 @@ const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code)
     case CKRST_DIAG_APPROX_STAGEBLEND: return "stage-blend";
     case CKRST_DIAG_APPROX_COMPAREFUNC_FILTER: return "filtered-depth-compare";
     case CKRST_DIAG_APPROX_SAMPLER_SLOTS: return "sampler-slots";
-    case CKRST_DIAG_APPROX_RENDER_TARGET_ORIGIN: return "render-target-origin";
     default: return "none";
     }
 }
@@ -440,8 +439,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
     const CKBOOL perspectiveTexture =
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0;
-    const CKBOOL originBottomLeft =
-        (m_ShaderCache.GetTargetFlags() & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
     CKDWORD previousColorOp = 0;
     CKDWORD previousAlphaOp = 0;
     for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
@@ -545,12 +542,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                 RecordDrawApproximation(CKRST_DIAG_APPROX_MIRROR_ONCE);
             if (!perspectiveTexture)
                 RecordDrawApproximation(CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF);
-            if (originBottomLeft &&
-                (m_State.TextureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
-                (m_State.TextureFlags[stage] &
-                    (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0) {
-                RecordDrawApproximation(CKRST_DIAG_APPROX_RENDER_TARGET_ORIGIN);
-            }
             if ((m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
                 m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE &&
                 (sampler.MinFilter != CKRST_FILTER_NEAREST ||

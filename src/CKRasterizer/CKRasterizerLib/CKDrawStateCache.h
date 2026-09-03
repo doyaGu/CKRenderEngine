@@ -25,6 +25,11 @@ public:
     void SetColorWriteMask(CKDWORD mask);
     CKDWORD GetColorWriteMask() const;
 
+    // Mirrors the front-face winding (render-target origin flip); combined
+    // with VXRENDERSTATE_INVERSEWINDING when building the cull state.
+    void SetWindingFlip(CKBOOL flip);
+    CKBOOL GetWindingFlip() const { return m_WindingFlip; }
+
     CKDrawState BuildDrawState(VXPRIMITIVETYPE topology);
     CKDWORD GetBuildCacheHits() const { return m_BuildCacheHits; }
     CKDWORD GetBuildRebuilds() const { return m_BuildRebuilds; }
@@ -38,6 +43,7 @@ private:
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;
     CKDWORD m_ColorWriteMask;
+    CKBOOL m_WindingFlip;
     CKDWORD m_BuildCacheHits;
     CKDWORD m_BuildRebuilds;
 

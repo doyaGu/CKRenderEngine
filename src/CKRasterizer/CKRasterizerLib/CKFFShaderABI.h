@@ -8,8 +8,8 @@
 // Internal fixed-function shader ABI. These values define the C++ uniform
 // packing contract consumed by the checked-in bgfx shader sources.
 
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 4u;
-static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x2B9E5D14u;
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 5u;
+static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;
 
 // VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
 // depth of the draw towards the viewer by this fraction of the depth range

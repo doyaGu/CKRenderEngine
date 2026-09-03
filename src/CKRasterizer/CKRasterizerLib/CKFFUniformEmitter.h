@@ -42,6 +42,7 @@ private:
     void EmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context);
     void EmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
     void EmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
+    CKBOOL RenderTargetOriginFlip() const;
 
     CKFFStateStore &m_State;
     const CKDrawStateCache &m_DrawState;

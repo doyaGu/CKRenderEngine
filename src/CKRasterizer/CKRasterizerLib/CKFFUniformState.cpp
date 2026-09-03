@@ -89,7 +89,6 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
                          const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],
                          int activeTextureCount,
-                         CKDWORD shaderTargetFlags,
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks,
                          CKDWORD samplerSlotOverflowMask) {
@@ -110,12 +109,6 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
             ? (stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
                CKFFResolveMirrorOnceAddressMask(stageStates[stage]))
             : 0;
-        if (hasTexture && textureFlags &&
-            (shaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0 &&
-            (textureFlags[stage] & CKRST_TEXTURE_RENDERTARGET) != 0 &&
-            (textureFlags[stage] & (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) == 0) {
-            textureTransformFlags |= CKFF_TTF_RENDER_TARGET_FLIP_V;
-        }
         if (hasTexture && textureFlags &&
             (textureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) != 0) {
             textureTransformFlags |= CKFF_TTF_BUMP_UNORM;

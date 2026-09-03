@@ -315,7 +315,6 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_APPROX_STAGEBLEND,
     CKRST_DIAG_APPROX_COMPAREFUNC_FILTER,   // shader depth compare sampled with a filtering sampler
     CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // more than four cube or volume stages: the extra stages sample as unbound
-    CKRST_DIAG_APPROX_RENDER_TARGET_ORIGIN, // cube / volume render target sampled on a bottom-left-origin backend
 
     CKRST_DIAG_COUNT
 } CKRST_DIAGNOSTIC;

@@ -14,6 +14,10 @@ struct CKFFStateStore {
     VxMatrix VertexBlendMatrices[CKFF_VERTEX_BLEND_MATRIX_COUNT];
     CKBOOL VertexBlendMatrixSet[CKFF_VERTEX_BLEND_MATRIX_COUNT];
     CKBOOL VertexBlendPaletteOverflow;
+    // A render-target texture is bound. On bottom-left-origin backends the
+    // pipeline then renders upside down so the texture memory matches the
+    // D3D layout (spec 5.9, RTT origin) and sampling needs no flip.
+    CKBOOL RenderTargetActive;
 
     CKFFMaterialData Material;
     CKFFLightData Lights[CKFF_MAX_LIGHTS];

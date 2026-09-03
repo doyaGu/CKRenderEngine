@@ -38,6 +38,7 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
 CKDrawStateCache::CKDrawStateCache()
     : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA),
       m_BuildCacheHits(0), m_BuildRebuilds(0) {
+    m_WindingFlip = FALSE;
     m_CachedState = {0, 0, 0};
     SetDefaults();
 }
@@ -92,6 +93,14 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_STENCILWRITEMASK] = 0xFF;
     m_ColorWriteMask = CKRST_STATE_WRITE_RGBA;
     m_DirtyMask = 0xFFFFFFFF;
+}
+
+void CKDrawStateCache::SetWindingFlip(CKBOOL flip) {
+    flip = flip ? TRUE : FALSE;
+    if (m_WindingFlip == flip)
+        return;
+    m_WindingFlip = flip;
+    m_DirtyMask |= CKFF_DIRTY_RASTER;
 }
 
 void CKDrawStateCache::Reset() {
@@ -195,7 +204,7 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Cull
     CKDWORD cullMode = m_States[VXRENDERSTATE_CULLMODE];
-    if (m_States[VXRENDERSTATE_INVERSEWINDING]) {
+    if ((m_States[VXRENDERSTATE_INVERSEWINDING] != 0) != (m_WindingFlip != FALSE)) {
         if (cullMode == VXCULL_CW)
             cullMode = VXCULL_CCW;
         else if (cullMode == VXCULL_CCW)

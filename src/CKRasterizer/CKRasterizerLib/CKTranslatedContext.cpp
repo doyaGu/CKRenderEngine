@@ -988,6 +988,7 @@ void CKTranslatedContext::ReleaseTarget()
     m_TargetFace = CKRST_CUBEFACE_XPOS;
     m_TargetWidth = 0;
     m_TargetHeight = 0;
+    m_FFP.SetRenderTargetActive(FALSE);
 }
 
 void CKTranslatedContext::UpdateAlphaTestPrecision()
@@ -1076,6 +1077,7 @@ CKBOOL CKTranslatedContext::SetTargetTexture(CKDWORD Texture, int Width, int Hei
     m_TargetFrameBuffer = frameBuffer;
     m_TargetDepthTexture = depthTexture;
     m_Postprocess.DestroySceneFrameBuffer();
+    m_FFP.SetRenderTargetActive(TRUE);
     UpdateAlphaTestPrecision();
     return TRUE;
 }

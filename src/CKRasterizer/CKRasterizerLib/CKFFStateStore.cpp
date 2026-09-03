@@ -32,6 +32,7 @@ void CKFFStateStore::Reset()
         VertexBlendMatrixSet[i] = FALSE;
     }
     VertexBlendPaletteOverflow = FALSE;
+    RenderTargetActive = FALSE;
 
     memset(&Material, 0, sizeof(Material));
     Material.Diffuse[0] = 1.0f;

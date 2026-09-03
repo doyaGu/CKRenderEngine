@@ -93,6 +93,12 @@ public:
     void SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags);
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
+    // Render-target binding (spec 5.9 RTT origin): on bottom-left-origin
+    // backends draws into a texture flip the projection and the winding so
+    // the texture memory ends up in the D3D (top-down) layout.
+    void SetRenderTargetActive(CKBOOL active);
+    CKBOOL IsRenderTargetActive() const { return m_State.RenderTargetActive; }
+    CKBOOL RenderTargetOriginFlip() const;
     void SetUserClipPlane(int index, const VxPlane &plane);
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;

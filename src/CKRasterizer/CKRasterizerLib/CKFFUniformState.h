@@ -40,7 +40,6 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
                          const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],
                          int activeTextureCount,
-                         CKDWORD shaderTargetFlags,
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks = NULL,
                          CKDWORD samplerSlotOverflowMask = 0);

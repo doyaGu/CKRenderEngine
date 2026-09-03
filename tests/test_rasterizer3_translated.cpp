@@ -359,6 +359,7 @@ void TestRenderTargets()
     TestCheck(!f.Context->SetTargetTexture(target, 32, 32, CKRST_CUBEFACE_XPOS), "size mismatch rejected");
     TestCheck(f.Context->SetTargetTexture(target, 64, 64, CKRST_CUBEFACE_XPOS), "SetTargetTexture");
     TestCheck(f.Context->GetTargetForTests() == target, "target recorded");
+    TestCheck(f.FFP->IsRenderTargetActive(), "pipeline told about the bound target");
 
     TestCheck(!f.Context->BeginOverlayPhase(), "overlay phase refused while a texture is the target");
     TestCheck(Diag(f.Context, CKRST_DIAG_OVERLAY_ON_TARGET) == 1, "OVERLAY_ON_TARGET counted");
@@ -368,6 +369,7 @@ void TestRenderTargets()
     TestCheck(f.Context->EndScene() && f.Context->BackToFront(FALSE), "present the target frame");
     TestCheck(f.Context->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "back to the backbuffer");
     TestCheck(f.Context->GetTargetForTests() == 0, "target cleared");
+    TestCheck(!f.FFP->IsRenderTargetActive(), "pipeline told about the released target");
 
     TestCheck(f.Context->SetTargetTexture(target, 64, 64, CKRST_CUBEFACE_XPOS), "target again");
     TestCheck(f.Context->DeleteObject(target, CKRST_OBJ_TEXTURE), "deleting the target texture");

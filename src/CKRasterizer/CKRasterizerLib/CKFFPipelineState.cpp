@@ -261,6 +261,20 @@ CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTUREST
     return m_State.StageStates[stage][(int)type];
 }
 
+void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
+    active = active ? TRUE : FALSE;
+    if (m_State.RenderTargetActive == active)
+        return;
+    m_State.RenderTargetActive = active;
+    m_DrawStateCache.SetWindingFlip(RenderTargetOriginFlip());
+    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+}
+
+CKBOOL CKFixedFunctionPipeline::RenderTargetOriginFlip() const {
+    return m_State.RenderTargetActive &&
+           (m_ShaderCache.GetTargetFlags() & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
+}
+
 void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     CK_FRAME_COST_ADD_VIEWPORT_SET();
 
