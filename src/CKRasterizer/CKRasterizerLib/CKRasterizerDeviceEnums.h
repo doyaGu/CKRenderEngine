@@ -210,10 +210,38 @@ typedef enum CK_DISCARD_FLAGS {
 // Texture Flags (v2 extensions to CKRST_TEXTUREFLAGS)
 // ---------------------------------------------------------------------------
 
+#define CKRST_TEXTURE_MSAA_X2         0x00800000
+#define CKRST_TEXTURE_MSAA_X4         0x01000000
 #define CKRST_TEXTURE_BLIT_DST        0x02000000
 #define CKRST_TEXTURE_COMPUTE_WRITE   0x04000000
+#define CKRST_TEXTURE_MSAA_X8         0x08000000
 #define CKRST_TEXTURE_DEPTHSTENCIL    0x20000000
 #define CKRST_TEXTURE_READBACK        0x40000000
+#define CKRST_TEXTURE_MSAA_X16        0x80000000
+#define CKRST_TEXTURE_MSAA_MASK       (CKRST_TEXTURE_MSAA_X2 | CKRST_TEXTURE_MSAA_X4 | \
+                                       CKRST_TEXTURE_MSAA_X8 | CKRST_TEXTURE_MSAA_X16)
+
+// Multisampled render targets (color textures created with RENDERTARGET and
+// depth textures): one of the MSAA_Xn flags selects the sample count. The
+// device resolves the samples when the texture is sampled; multisampled
+// textures cannot be read back or blitted directly.
+inline CKDWORD CKRSTTextureMSAAFlag(CKDWORD samples)
+{
+    if (samples >= 16) return CKRST_TEXTURE_MSAA_X16;
+    if (samples >= 8)  return CKRST_TEXTURE_MSAA_X8;
+    if (samples >= 4)  return CKRST_TEXTURE_MSAA_X4;
+    if (samples >= 2)  return CKRST_TEXTURE_MSAA_X2;
+    return 0;
+}
+
+inline CKDWORD CKRSTTextureMSAASamples(CKDWORD flags)
+{
+    if (flags & CKRST_TEXTURE_MSAA_X16) return 16;
+    if (flags & CKRST_TEXTURE_MSAA_X8)  return 8;
+    if (flags & CKRST_TEXTURE_MSAA_X4)  return 4;
+    if (flags & CKRST_TEXTURE_MSAA_X2)  return 2;
+    return 0;
+}
 
 // ---------------------------------------------------------------------------
 // Vertex Buffer Compute Flags (extensions to CKRST_VBFLAGS)

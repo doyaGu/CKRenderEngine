@@ -47,7 +47,8 @@ Capture conditions of the committed set: Ballance retail DLLs
 (`CK2_3D.dll` 2002-10-30, `CKDX8Rasterizer.dll`), NVIDIA GeForce RTX 4090
 "T&L DX8" driver 0, Windows 11, 640x480, 3 frames, captured 2026-09-02.
 `present_*` scenes have no oracle: they only change CK2_3D.ini presentation
-options of our engine.
+options of our engine (the tool writes `<scene>.CK2_3D.ini` next to the output
+and points the engine at it through `CKRE_SETTINGS_FILE`).
 
 ## Comparing our engine
 

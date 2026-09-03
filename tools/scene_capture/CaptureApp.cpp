@@ -7,6 +7,9 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "CKAll.h"
 #include "CKPluginManager.h"
@@ -168,8 +171,18 @@ int CaptureApp::FindRenderEngine(CKPluginManager *pm, std::string &dllPath) cons
 bool CaptureApp::InitEngine(const CaptureOptions &options)
 {
     if (!options.SettingsIni.empty()) {
-        // Consumed by CK2_3D (CKRenderSettings) when it loads CK2_3D.ini.
+        // Consumed by CK2_3D (CKRenderSettings, getenv) when it loads
+        // CK2_3D.ini. The engine DLL has its own C runtime, which copies the
+        // process environment block when the DLL loads: set the variable on
+        // the process (SetEnvironmentVariable), not only in SDL's runtime.
+#ifdef _WIN32
+        // Both: the Win32 block feeds C runtimes initialised later (static
+        // CRT in a DLL), _putenv_s updates the shared UCRT copy getenv reads.
+        SetEnvironmentVariableA("CKRE_SETTINGS_FILE", options.SettingsIni.c_str());
+        _putenv_s("CKRE_SETTINGS_FILE", options.SettingsIni.c_str());
+#else
         SDL_setenv_unsafe("CKRE_SETTINGS_FILE", options.SettingsIni.c_str(), 1);
+#endif
     }
 
     if (CKStartUp() != CK_OK) {

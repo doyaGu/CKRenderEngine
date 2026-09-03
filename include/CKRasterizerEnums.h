@@ -316,6 +316,9 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_APPROX_COMPAREFUNC_FILTER,   // shader depth compare sampled with a filtering sampler
     CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // more than four cube or volume stages: the extra stages sample as unbound
 
+    // Presentation (spec 4.4)
+    CKRST_DIAG_APPROX_MSAA,                 // no multisampled targets on this device: the scene rendered single sampled
+
     CKRST_DIAG_COUNT
 } CKRST_DIAGNOSTIC;
 

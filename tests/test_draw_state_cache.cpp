@@ -123,6 +123,20 @@ void AntialiasStateMapsToMsaa() {
     const CKDrawState disabled = cache.BuildDrawState(VX_TRIANGLELIST);
     TestCheck((disabled.Lo & CKRST_STATE_MSAA) == 0,
               "Disabling legacy antialias state must clear rasterizer MSAA");
+
+    // A multisampled scene target multisamples every draw regardless of the
+    // legacy state (OpenGL needs the rasterizer state for MSAA targets).
+    const CKDWORD rebuildsBeforeTarget = cache.GetBuildRebuilds();
+    cache.SetMultisampledTarget(TRUE);
+    const CKDrawState target = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((target.Lo & CKRST_STATE_MSAA) != 0,
+              "A multisampled target must enable rasterizer MSAA without the antialias state");
+    TestCheck(cache.GetBuildRebuilds() == rebuildsBeforeTarget + 1,
+              "Changing the multisampled target must invalidate cached draw state");
+    cache.SetMultisampledTarget(FALSE);
+    const CKDrawState plainTarget = cache.BuildDrawState(VX_TRIANGLELIST);
+    TestCheck((plainTarget.Lo & CKRST_STATE_MSAA) == 0,
+              "Leaving the multisampled target must clear rasterizer MSAA");
 }
 
 void DisabledDepthBufferCannotWriteDepth() {

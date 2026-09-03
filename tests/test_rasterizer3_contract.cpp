@@ -101,6 +101,17 @@ int CountPasses(const Fixture &f)
     return (int)f.Device->Encoder.Touches.size();
 }
 
+// Passes that draw into the swap chain (frame buffer 0) within the recorded
+// frames. Views restart per frame, so this only reads right for one frame.
+int CountBackbufferPasses(const Fixture &f)
+{
+    int count = 0;
+    for (size_t i = 0; i < f.Device->Encoder.Touches.size(); ++i)
+        if (f.Device->ViewTarget(f.Device->Encoder.Touches[i]) == 0)
+            ++count;
+    return count;
+}
+
 int CountPresents(const Fixture &f)
 {
     return (int)f.Device->Frames.size();
@@ -1003,24 +1014,30 @@ void TestDrawOrderAndMarkers()
     TestCheck(f.Context->BackToFront(FALSE), "BackToFront");
 
     const std::vector<FFPSubmitRecord> &draws = f.Device->Encoder.Submits;
-    TestCheck(draws.size() == 6, "six draws recorded");
+    // Six scene draws, then the resolve (scene -> native target) and the
+    // present blit (native target -> swap chain).
+    TestCheck(draws.size() == 8, "six draws + resolve + present recorded");
     for (size_t i = 0; i < draws.size() && i < 5; ++i) {
         char expected[16];
         sprintf(expected, "draw%d", (int)i);
         TestCheck(draws[i].Marker == expected, "draw order matches call order");
         TestCheck(draws[i].View == draws[0].View, "all scene draws in one pass");
     }
-    if (draws.size() == 6) {
+    if (draws.size() == 8) {
         TestCheck(draws[5].Marker.Length() == 0, "marker consumed by one draw");
         TestCheck(draws[5].View == draws[0].View, "post-EndScene draw stays in the scene pass");
+        TestCheck(draws[0].Target != 0, "scene draws go to the scene target");
+        TestCheck(draws[6].Target != 0 && draws[6].Target != draws[0].Target, "resolve draws into the native target");
+        TestCheck(draws[7].Target == 0, "present draws into the swap chain");
     }
-    TestCheck(CountPasses(f) == 2, "clear pass + scene pass");
+    TestCheck(CountPasses(f) == 4, "clear pass + scene pass + resolve + present");
+    TestCheck(CountBackbufferPasses(f) == 1, "only the present pass touches the swap chain");
     TestCheck(CountPresents(f) == 1, "one present");
     TestCheck(f.Context->GetStats()->FrameNumber == 1, "frame counted");
     TestCheck(f.Context->GetStats()->DrawCalls == 6, "stats draw calls");
     TestCheck(f.Context->GetStats()->Primitives == 6, "stats primitives");
     TestCheck(f.Context->GetStats()->Clears == 1, "stats clears");
-    TestCheck(f.Context->GetStats()->Passes == 2, "stats passes");
+    TestCheck(f.Context->GetStats()->Passes == 4, "stats passes");
     TestCheck(f.Context->IsIdle(), "idle after present");
 }
 
@@ -1077,8 +1094,8 @@ void TestMidSceneStencilClearSplitsPass()
         TestCheck(stencilClear->Flags == CKRST_CTXCLEAR_STENCIL && stencilClear->Stencil == 0x7,
                   "stencil-only clear recorded with its value");
     }
-    TestCheck(CountPasses(f) == 4, "four passes: clear, scene, stencil clear, scene");
-    TestCheck(f.Context->GetStats()->Passes == 4, "stats passes");
+    TestCheck(CountPasses(f) == 6, "six passes: clear, scene, stencil clear, scene, resolve, present");
+    TestCheck(f.Context->GetStats()->Passes == 6, "stats passes");
     TestCheck(f.Context->GetStats()->Clears == 2, "stats clears");
     TestCheck(f.Context->IsInSceneForTests() == FALSE, "scene closed");
 }
@@ -1097,11 +1114,17 @@ void TestOverlayPhase()
     const FFPSubmitRecord *scene = FindDraw(f, 0);
     const FFPSubmitRecord *overlay = FindDraw(f, 1);
     TestCheck(scene && overlay, "overlay events");
-    if (scene && overlay) {
+    const FFPSubmitRecord *present = FindDraw(f, 3);
+    TestCheck(present && FindDraw(f, 4) == NULL, "scene draw, resolve, overlay draw, present");
+    if (scene && overlay && present) {
         TestCheck(scene->View < overlay->View, "overlay draws in a later pass");
-        TestCheck(scene->Target == 0 && overlay->Target == 0, "both passes draw to the backbuffer");
+        TestCheck(scene->Target != 0, "the scene draws into the scene target");
+        TestCheck(overlay->Target != 0 && overlay->Target != scene->Target, "the overlay draws into the native target");
+        TestCheck(overlay->Rect.right == 640 && overlay->Rect.bottom == 480, "overlay pass at window size");
+        TestCheck(present->Target == 0, "the present blit draws into the swap chain");
     }
-    TestCheck(CountPasses(f) == 2, "scene and overlay passes (default options composite nothing)");
+    TestCheck(CountPasses(f) == 4, "scene, resolve, overlay and present passes");
+    TestCheck(CountBackbufferPasses(f) == 1, "only the present pass touches the swap chain");
     // Overlay phase resets with the frame.
     f.Context->BeginScene();
     f.Context->EndScene();
@@ -1202,13 +1225,16 @@ void TestRenderTargets()
     const FFPSubmitRecord *d2 = FindDraw(f, 2);
     TestCheck(d0 && d1 && d2, "three draws");
     if (d0 && d1 && d2) {
-        TestCheck(d0->Target == rt && d1->Target == cubeRt && d2->Target == 0, "draw targets recorded");
+        TestCheck(d0->Target == rt && d1->Target == cubeRt, "draw targets recorded");
+        TestCheck(d2->Target != 0 && d2->Target != rt && d2->Target != cubeRt,
+                  "the backbuffer scene draws into the internal scene target");
         TestCheck(d0->View < d1->View && d1->View < d2->View, "target change starts a new pass");
         TestCheck(d0->Rect.right == 128 && d0->Rect.bottom == 64, "size 0 means texture size");
         TestCheck(d1->Rect.right == 32 && d1->Rect.bottom == 32, "cube face pass uses the face size");
         TestCheck(d2->Rect.right == 640 && d2->Rect.bottom == 480, "backbuffer pass uses the window size");
     }
-    TestCheck(CountPasses(f) == 4, "clear + three scene passes");
+    TestCheck(CountPasses(f) == 6, "clear + three scene passes + resolve + present");
+    TestCheck(CountBackbufferPasses(f) == 1, "only the present pass touches the swap chain");
 
     // Deleting the current target falls back to the backbuffer.
     TestCheck(f.Context->SetTargetTexture(rt, 0, 0, CKRST_CUBEFACE_XPOS), "target again");

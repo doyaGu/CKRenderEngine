@@ -51,9 +51,9 @@ CKRECT CKTranslatedContext::CurrentTargetRect() const
     if (m_Target) {
         rect.right = (int)m_TargetWidth;
         rect.bottom = (int)m_TargetHeight;
-    } else if (m_SceneFrameBufferUsed) {
-        rect.right = (int)m_Postprocess.GetSceneWidth();
-        rect.bottom = (int)m_Postprocess.GetSceneHeight();
+    } else if (m_InternalTargets) {
+        rect.right = (int)m_Postprocess.SceneTarget().Width;
+        rect.bottom = (int)m_Postprocess.SceneTarget().Height;
     } else {
         rect.right = (int)m_Width;
         rect.bottom = (int)m_Height;
@@ -65,37 +65,59 @@ CKDWORD CKTranslatedContext::CurrentSceneFrameBuffer() const
 {
     if (m_Target)
         return m_TargetFrameBuffer;
-    return m_SceneFrameBufferUsed ? m_Postprocess.GetSceneFrameBuffer() : 0;
+    return m_InternalTargets ? m_Postprocess.SceneTarget().FrameBuffer : 0;
+}
+
+CKDWORD CKTranslatedContext::OverlayFrameBuffer() const
+{
+    return m_InternalTargets ? m_Postprocess.NativeTarget().FrameBuffer : 0;
+}
+
+// Frame buffer / rect the next implicit or clear pass goes to: the native
+// target during the overlay phase, the scene target (or the user target)
+// otherwise.
+CKDWORD CKTranslatedContext::CurrentPassFrameBuffer() const
+{
+    return m_OverlayPhase ? OverlayFrameBuffer() : CurrentSceneFrameBuffer();
+}
+
+CKRECT CKTranslatedContext::CurrentPassRect() const
+{
+    return m_OverlayPhase ? WindowRect() : CurrentTargetRect();
 }
 
 // Decides once per frame whether the scene renders into the scaled scene
 // framebuffer (RenderScale / FXAA / Sharpness) or straight into the target.
+// Prepares the internal targets once per frame: the scene target (window size
+// x RenderScale, MSAA) receives every pass that does not go to a user target,
+// its resolve lands on the native target and the frame finally blits the
+// native target to the swap chain. Falls back to drawing straight into the
+// swap chain when the device cannot provide the targets.
 void CKTranslatedContext::PrepareFrameTarget()
 {
     if (m_FrameTargetDecided)
         return;
     m_FrameTargetDecided = TRUE;
-    m_SceneFrameBufferUsed = FALSE;
+    m_InternalTargets = FALSE;
     m_Composited = FALSE;
-    if (m_Target)
-        return;
-    const CKBOOL wantsSceneFrameBuffer =
-        m_Options.FXAA || m_Options.Sharpness > 0.001f ||
-        m_Options.RenderScale < 0.999f || m_Options.RenderScale > 1.001f;
-    if (!wantsSceneFrameBuffer) {
-        if (m_Postprocess.IsSceneFrameBufferActive())
-            m_Postprocess.DestroySceneFrameBuffer();
-        return;
-    }
     CKRasterizerDeviceCapsDesc caps;
     if (m_Device->GetCaps(&caps) != CK_OK || caps.MaxTextureSize == 0)
         return;
     const CKDWORD width = CKPostprocessPass::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD height = CKPostprocessPass::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
-    if (m_Postprocess.EnsureSceneFrameBuffer(width, height) && m_Postprocess.EnsureResources())
-        m_SceneFrameBufferUsed = TRUE;
+    CKBOOL sceneReady = m_Postprocess.EnsureSceneTarget(width, height, m_Options.MSAASamples);
+    if (!sceneReady && m_Options.MSAASamples > 1) {
+        // The device has no multisampled targets: render single sampled.
+        Diag(CKRST_DIAG_APPROX_MSAA);
+        sceneReady = m_Postprocess.EnsureSceneTarget(width, height, 0);
+    }
+    const CKDWORD nativeWidth = m_Width < caps.MaxTextureSize ? m_Width : caps.MaxTextureSize;
+    const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
+    if (sceneReady && m_Postprocess.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Postprocess.EnsureResources())
+        m_InternalTargets = TRUE;
     else
-        m_Postprocess.DestroySceneFrameBuffer();
+        m_Postprocess.DestroyTargets();
+    m_FFP.SetMultisampledTarget(m_InternalTargets && m_Postprocess.SceneTarget().Samples > 0);
 }
 
 CKBOOL CKTranslatedContext::EnsureEncoder()
@@ -138,19 +160,31 @@ CKBOOL CKTranslatedContext::EnsureDrawPass()
     PrepareFrameTarget();
     if (m_PassOpen)
         return TRUE;
-    return OpenPass(CurrentSceneFrameBuffer(), CurrentTargetRect(), 0, 0, 1.0f, 0, "implicit");
+    return OpenPass(CurrentPassFrameBuffer(), CurrentPassRect(), 0, 0, 1.0f, 0, "implicit");
 }
 
+// Resolve: scene target -> native target (RenderScale / MSAA / FXAA / Sharpness).
 CKBOOL CKTranslatedContext::CompositeScene()
 {
-    if (!m_SceneFrameBufferUsed || m_Composited)
+    if (!m_InternalTargets || m_Composited)
         return TRUE;
-    if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "composite"))
+    if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "composite"))
         return FALSE;
-    if (m_Postprocess.Submit(m_Encoder, m_CurrentView, m_Options.FXAA, m_Options.Sharpness) != CK_OK)
+    if (m_Postprocess.SubmitResolve(m_Encoder, m_CurrentView, m_Options.FXAA, m_Options.Sharpness) != CK_OK)
         return FALSE;
     m_Composited = TRUE;
     return TRUE;
+}
+
+// Present: native target -> swap chain, the only pass that touches frame
+// buffer 0 in a frame that renders through the internal targets.
+CKBOOL CKTranslatedContext::PresentInternalTarget()
+{
+    if (!m_InternalTargets)
+        return TRUE;
+    if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "present"))
+        return FALSE;
+    return m_Postprocess.SubmitBlit(m_Encoder, m_CurrentView) == CK_OK ? TRUE : FALSE;
 }
 
 void CKTranslatedContext::ReleaseFrameScratch()
@@ -173,8 +207,6 @@ void CKTranslatedContext::FinishFrame()
     m_FrameTargetDecided = FALSE;
     ++m_FrameNumber;
     m_FFP.SetFrameNumber(m_FrameNumber);
-    if (m_AppliedMSAA != m_Options.MSAASamples)
-        ApplyOptions();
 
     m_Stats.DrawCalls = m_FrameDrawCalls;
     m_Stats.Primitives = m_FramePrimitives;
@@ -205,14 +237,14 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
 
     // RectCount == 0 clears the current viewport (D3D7 semantics); otherwise
     // every rectangle gets a clear pass of its own.
-    const CKRECT target = CurrentTargetRect();
+    const CKRECT target = CurrentPassRect();
     CKRECT viewportRect;
     viewportRect.left = (int)m_Viewport.ViewX;
     viewportRect.top = (int)m_Viewport.ViewY;
     viewportRect.right = (int)(m_Viewport.ViewX + m_Viewport.ViewWidth);
     viewportRect.bottom = (int)(m_Viewport.ViewY + m_Viewport.ViewHeight);
     const int count = RectCount > 0 ? RectCount : 1;
-    const CKDWORD frameBuffer = CurrentSceneFrameBuffer();
+    const CKDWORD frameBuffer = CurrentPassFrameBuffer();
     CKBOOL cleared = FALSE;
     for (int i = 0; i < count; ++i) {
         CKRECT rect = RectCount > 0 ? Rects[i] : viewportRect;
@@ -284,7 +316,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
     PrepareFrameTarget();
     if (!CompositeScene())
         return FALSE;
-    if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "overlay"))
+    if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "overlay"))
         return FALSE;
     m_OverlayPhase = TRUE;
     return TRUE;
@@ -299,8 +331,10 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         return FALSE;
     }
     if (m_Encoder) {
-        if (!m_Target)
+        if (!m_Target) {
             CompositeScene();
+            PresentInternalTarget();
+        }
         m_Device->EndEncoder(m_Encoder);
         m_Encoder = NULL;
     }

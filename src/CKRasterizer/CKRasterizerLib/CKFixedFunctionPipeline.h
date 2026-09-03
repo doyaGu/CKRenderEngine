@@ -99,6 +99,9 @@ public:
     void SetRenderTargetActive(CKBOOL active);
     CKBOOL IsRenderTargetActive() const { return m_State.RenderTargetActive; }
     CKBOOL RenderTargetOriginFlip() const;
+    // The frame renders into a multisampled scene target (spec 4.4).
+    void SetMultisampledTarget(CKBOOL multisampled) { m_DrawStateCache.SetMultisampledTarget(multisampled); }
+    CKBOOL IsMultisampledTarget() const { return m_DrawStateCache.GetMultisampledTarget(); }
     void SetUserClipPlane(int index, const VxPlane &plane);
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;

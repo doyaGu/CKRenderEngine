@@ -41,11 +41,11 @@ CKDWORD NowMilliseconds()
 
 CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerDevice *Device)
     : m_TranslatedDriver(Driver), m_Device(Device), m_Created(FALSE), m_ShuttingDown(FALSE), m_InScene(FALSE),
-      m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_SceneFrameBufferUsed(FALSE), m_Composited(FALSE),
+      m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
       m_FrameTargetDecided(FALSE), m_Encoder(NULL), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0),
       m_FrameNumber(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS), m_TargetWidth(0), m_TargetHeight(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
-      m_AppliedMSAA(0), m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
+      m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0), m_LayoutMismatchLogged(FALSE)
 {
     m_Driver = Driver;
@@ -140,7 +140,7 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_PosY = m_Device->m_PosY;
     m_Width = m_Device->m_Width;
     m_Height = m_Device->m_Height;
-    m_Postprocess.DestroySceneFrameBuffer();
+    m_Postprocess.DestroyTargets();
     return TRUE;
 }
 
@@ -151,7 +151,8 @@ CKBOOL CKTranslatedContext::SetOptions(const CKRasterizerOptions *Options)
         return FALSE;
     }
     // Accepted at any time (render callbacks may change the options inside
-    // the scene); the MSAA change waits for the frame boundary (FinishFrame).
+    // the scene); the internal targets follow the options at the next frame
+    // (PrepareFrameTarget).
     m_Options = *Options;
     m_Options.Size = sizeof(CKRasterizerOptions);
     m_Options.RenderScale = CKPostprocessPass::ClampRenderScale(m_Options.RenderScale);
@@ -168,10 +169,6 @@ void CKTranslatedContext::ApplyOptions()
     m_FFP.SetRenderOptions(m_Options.DisableTextureFiltering, m_Options.DisableMipmaps,
                            m_Options.ForceAnisotropicFiltering);
     m_Device->SetDebug(m_Options.DebugFlags);
-    if (!m_Encoder && m_AppliedMSAA != m_Options.MSAASamples) {
-        if (m_Device->SetAntialias(m_Options.MSAASamples) == CK_OK)
-            m_AppliedMSAA = m_Options.MSAASamples;
-    }
 }
 
 CKBOOL CKTranslatedContext::GetCaps(CKRasterizerCapsDesc *Caps) const
@@ -1076,7 +1073,6 @@ CKBOOL CKTranslatedContext::SetTargetTexture(CKDWORD Texture, int Width, int Hei
     m_TargetHeight = (CKDWORD)textureHeight;
     m_TargetFrameBuffer = frameBuffer;
     m_TargetDepthTexture = depthTexture;
-    m_Postprocess.DestroySceneFrameBuffer();
     m_FFP.SetRenderTargetActive(TRUE);
     UpdateAlphaTestPrecision();
     return TRUE;

@@ -39,6 +39,7 @@ CKDrawStateCache::CKDrawStateCache()
     : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA),
       m_BuildCacheHits(0), m_BuildRebuilds(0) {
     m_WindingFlip = FALSE;
+    m_MultisampledTarget = FALSE;
     m_CachedState = {0, 0, 0};
     SetDefaults();
 }
@@ -100,6 +101,14 @@ void CKDrawStateCache::SetWindingFlip(CKBOOL flip) {
     if (m_WindingFlip == flip)
         return;
     m_WindingFlip = flip;
+    m_DirtyMask |= CKFF_DIRTY_RASTER;
+}
+
+void CKDrawStateCache::SetMultisampledTarget(CKBOOL multisampled) {
+    multisampled = multisampled ? TRUE : FALSE;
+    if (m_MultisampledTarget == multisampled)
+        return;
+    m_MultisampledTarget = multisampled;
     m_DirtyMask |= CKFF_DIRTY_RASTER;
 }
 
@@ -214,7 +223,7 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     // Fill mode
     lo |= CKRST_STATE_FILLMODE(RemapFillMode(m_States[VXRENDERSTATE_FILLMODE]));
-    if (m_States[VXRENDERSTATE_ANTIALIAS])
+    if (m_States[VXRENDERSTATE_ANTIALIAS] || m_MultisampledTarget)
         lo |= CKRST_STATE_MSAA;
 
     // Blend

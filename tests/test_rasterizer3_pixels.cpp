@@ -717,6 +717,72 @@ void CheckResizeAndReadback(Backend &b)
     TestCheck(ctx->IsIdle(), "idle after the readbacks");
 }
 
+// Pixels on the frame that are neither the background nor the flat green of
+// the triangle: a multisampled scene target blends the diagonal edge.
+int CountBlendedGreenPixels(const Pixels &pixels)
+{
+    int count = 0;
+    for (int y = 0; y < pixels.Height; ++y) {
+        for (int x = 0; x < pixels.Width; ++x) {
+            CKBYTE bgra[4];
+            GetPixel(pixels, x, y, bgra);
+            if (bgra[1] > 24 && bgra[1] < 232 && bgra[2] < 24 && bgra[0] < 24)
+                ++count;
+        }
+    }
+    return count;
+}
+
+// Presentation options (spec 4.4): the scene renders into the internal scene
+// target (MSAA, RenderScale) and the readback still delivers window-size
+// pixels of the presented frame.
+void CheckPresentation(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    // Hypotenuse from the bottom-left to the top-right corner.
+    const VxVector diagonal[3] = {VxVector(-0.9f, -0.9f, 0.5f), VxVector(0.9f, -0.9f, 0.5f), VxVector(0.9f, 0.9f, 0.5f)};
+
+    Pixels plain;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, diagonal, kGreen), "diagonal triangle");
+    }, plain);
+    const int plainBlended = CountBlendedGreenPixels(plain);
+    TestCheckf(PixelNear(plain, 40, 80, 0, 255, 0), "inside of the diagonal triangle must be green");
+
+    CKRasterizerOptions options;
+    options.MSAASamples = 4;
+    TestCheck(ctx->SetOptions(&options), "SetOptions(MSAA 4)");
+    Pixels msaa;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, diagonal, kGreen), "diagonal triangle (MSAA)");
+    }, msaa);
+    const int msaaBlended = CountBlendedGreenPixels(msaa);
+    const CKDWORD msaaApproximated = ctx->GetStats()->Diagnostics[CKRST_DIAG_APPROX_MSAA];
+    TestCheckf(msaa.Width == plain.Width && msaa.Height == plain.Height, "MSAA readback keeps the window size");
+    TestCheckf(PixelNear(msaa, 40, 80, 0, 255, 0), "inside of the MSAA triangle must be green");
+    TestCheckf(msaaApproximated != 0 || msaaBlended >= plainBlended + 16,
+               "MSAA 4 must blend the diagonal edge (plain=%d msaa=%d approximated=%u)",
+               plainBlended, msaaBlended, (unsigned)msaaApproximated);
+    printf("  msaa: blended pixels plain=%d msaa=%d approximated=%u\n", plainBlended, msaaBlended,
+           (unsigned)msaaApproximated);
+
+    options.MSAASamples = 0;
+    options.RenderScale = 0.5f;
+    TestCheck(ctx->SetOptions(&options), "SetOptions(RenderScale 0.5)");
+    Pixels scaled;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, diagonal, kGreen), "diagonal triangle (RenderScale 0.5)");
+    }, scaled);
+    TestCheckf(scaled.Width == plain.Width && scaled.Height == plain.Height, "scaled readback keeps the window size");
+    TestCheckf(PixelNear(scaled, 40, 80, 0, 255, 0), "inside of the scaled triangle must be green");
+    TestCheckf(PixelNear(scaled, 8, 16, 0, 0, 0), "outside of the scaled triangle must stay black");
+
+    CKRasterizerOptions defaults;
+    TestCheck(ctx->SetOptions(&defaults), "SetOptions(defaults)");
+    TestCheck(ctx->IsIdle(), "idle after the presentation checks");
+}
+
 // ---------------------------------------------------------------------------
 
 void BackendRendersFixedFunctionSemantics()
@@ -739,6 +805,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckDriverCaps(backend);
         RunPixelCases(backend.Context, "uber", samples);
         CheckResizeAndReadback(backend);
+        CheckPresentation(backend);
     }
     CloseBackend(backend);
 

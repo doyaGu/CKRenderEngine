@@ -175,11 +175,26 @@ static CKBYTE *CKBgfxCreateGeneratedMipMap(const VxImageDescEx &src, VxImageDesc
     return (CKBYTE *)dst.Image;
 }
 
+static uint64_t CKBgfxTextureMSAAFlags(CKDWORD flags)
+{
+    switch (CKRSTTextureMSAASamples(flags)) {
+    case 16: return BGFX_TEXTURE_RT_MSAA_X16;
+    case 8:  return BGFX_TEXTURE_RT_MSAA_X8;
+    case 4:  return BGFX_TEXTURE_RT_MSAA_X4;
+    case 2:  return BGFX_TEXTURE_RT_MSAA_X2;
+    default: return 0;
+    }
+}
+
 static uint64_t CKBgfxTextureFlagsFromDescFlags(CKDWORD flags)
 {
     uint64_t texFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE;
-    if (flags & CKRST_TEXTURE_RENDERTARGET)
+    if (flags & CKRST_TEXTURE_RENDERTARGET) {
         texFlags |= BGFX_TEXTURE_RT;
+        const uint64_t msaa = CKBgfxTextureMSAAFlags(flags);
+        if (msaa)
+            texFlags = (texFlags & ~(uint64_t)BGFX_TEXTURE_RT) | msaa;
+    }
     if (flags & CKRST_TEXTURE_READBACK)
         texFlags |= BGFX_TEXTURE_READ_BACK;
     if (flags & CKRST_TEXTURE_BLIT_DST)
@@ -3700,6 +3715,15 @@ CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *De
     bool hasMips = Desc->MipMapCount > 1;
 
     uint64_t texFlags = BGFX_TEXTURE_RT;
+    const uint64_t msaa = CKBgfxTextureMSAAFlags(Desc->Flags);
+    if (msaa) {
+        // Multisampled depth is only ever written by the pass that owns it.
+        texFlags = msaa | BGFX_TEXTURE_RT_WRITE_ONLY;
+        if (hasMips)
+            return CKERR_INVALIDPARAMETER;
+    }
+    if (!bgfx::isTextureValid(0, false, 1, fmt, texFlags))
+        return CKERR_NOTIMPLEMENTED;
     bgfx::TextureHandle handle = bgfx::createTexture2D(
         w, h, hasMips, 1, fmt, texFlags, NULL);
     if (!bgfx::isValid(handle))

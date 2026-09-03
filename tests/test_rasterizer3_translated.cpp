@@ -338,7 +338,8 @@ void TestFrameFlowAndDraws()
     const CKRenderStats *stats = f.Context->GetStats();
     TestCheck(stats->FrameNumber == 1, "frame counter");
     TestCheck(stats->DrawCalls == 4 && stats->Primitives == 2 + 2 + 2 + 1, "draw and primitive counters");
-    TestCheck(stats->Passes == 4 && stats->Clears == 2, "pass and clear counters (clear, scene, stencil clear, scene)");
+    TestCheck(stats->Passes == 6 && stats->Clears == 2,
+              "pass and clear counters (clear, scene, stencil clear, scene, resolve, present)");
     TestCheck(f.Context->IsIdle(), "idle after present");
 
     // The next frame starts again at view 0 and does not leak scratch buffers.
@@ -383,9 +384,12 @@ void TestOverlayPhase()
     TestCheck(!f.Context->BeginOverlayPhase(), "overlay inside the scene rejected");
     TestCheck(f.Context->EndScene(), "EndScene");
     const CKDWORD passes = f.Context->GetPassCountForTests();
+    const CKDWORD submitsBefore = f.Device->Encoder.SubmitCount;
     TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
-    TestCheck(f.Context->GetPassCountForTests() == passes + 1, "overlay opens one pass at native resolution");
+    TestCheck(f.Context->GetPassCountForTests() == passes + 2, "overlay opens the resolve pass and the overlay pass");
+    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present");
+    TestCheck(f.Device->Encoder.SubmitCount == submitsBefore + 2, "present blit submitted");
 
     CKRasterizerOptions options;
     options.RenderScale = 0.5f;
@@ -394,9 +398,9 @@ void TestOverlayPhase()
     const CKDWORD scaledPasses = f.Context->GetPassCountForTests();
     const CKDWORD submits = f.Device->Encoder.SubmitCount;
     TestCheck(f.Context->BeginOverlayPhase(), "overlay after a scaled scene");
-    // composite pass + overlay pass, and the composite is a device submit
-    TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 2, "composite and overlay passes");
-    TestCheck(f.Device->Encoder.SubmitCount == submits + 1, "composite submitted");
+    // resolve pass + overlay pass, and the resolve is a device submit
+    TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 2, "resolve and overlay passes");
+    TestCheck(f.Device->Encoder.SubmitCount == submits + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present scaled frame");
 }
 

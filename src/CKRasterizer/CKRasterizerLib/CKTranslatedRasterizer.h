@@ -228,7 +228,11 @@ private:
     CKRECT CurrentTargetRect() const;
     CKRECT WindowRect() const;
     CKDWORD CurrentSceneFrameBuffer() const;
+    CKDWORD OverlayFrameBuffer() const;
+    CKDWORD CurrentPassFrameBuffer() const;
+    CKRECT CurrentPassRect() const;
     CKBOOL CompositeScene();
+    CKBOOL PresentInternalTarget();
     void FinishFrame();
     void ApplyOptions();
     void ResetStateMirror();
@@ -275,7 +279,7 @@ private:
     CKBOOL m_InScene;
     CKBOOL m_OverlayPhase;
     CKBOOL m_PassOpen;
-    CKBOOL m_SceneFrameBufferUsed;
+    CKBOOL m_InternalTargets;     // frame renders through the scene / native targets
     CKBOOL m_Composited;
     CKBOOL m_FrameTargetDecided;
     CKRasterizerEncoder *m_Encoder;
@@ -299,7 +303,6 @@ private:
     CKDWORD m_CopyTexture;
     CKDWORD m_CopyWidth;
     CKDWORD m_CopyHeight;
-    CKDWORD m_AppliedMSAA;
 
     // Readback
     VxMutex m_ReadbackMutex;

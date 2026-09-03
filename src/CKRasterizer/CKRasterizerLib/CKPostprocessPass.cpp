@@ -88,8 +88,7 @@ float CKPostprocessPass::ClampSharpness(float sharpness)
 }
 
 CKPostprocessPass::CKPostprocessPass()
-    : m_Device(nullptr), m_SceneFrameBufferActive(FALSE), m_SceneWidth(0), m_SceneHeight(0),
-      m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
+    : m_Device(nullptr), m_PostVertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
 CKPostprocessPass::~CKPostprocessPass()
 {
@@ -104,20 +103,50 @@ void CKPostprocessPass::Init(CKRasterizerDevice *device)
 
 void CKPostprocessPass::Shutdown()
 {
-    DestroySceneFrameBuffer();
+    DestroyTargets();
     DestroyResources();
     m_Device = nullptr;
     m_ResourceIds = CKPostprocessResourceIds();
 }
 
-CKBOOL CKPostprocessPass::EnsureSceneFrameBuffer(CKDWORD width, CKDWORD height)
+CKBOOL CKPostprocessPass::EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples)
 {
     if (!m_Device || width == 0 || height == 0)
         return FALSE;
-    if (m_SceneFrameBufferActive && m_SceneWidth == width && m_SceneHeight == height)
+    if (samples <= 1)
+        samples = 0;
+    if (m_Scene.IsActive() && m_Scene.Width == width && m_Scene.Height == height && m_Scene.Samples == samples)
         return TRUE;
+    DestroyTarget(m_Scene);
+    return CreateTarget(m_Scene, width, height, samples, FALSE);
+}
 
-    DestroySceneFrameBuffer();
+CKBOOL CKPostprocessPass::EnsureNativeTarget(CKDWORD width, CKDWORD height)
+{
+    if (!m_Device || width == 0 || height == 0)
+        return FALSE;
+    if (m_Native.IsActive() && m_Native.Width == width && m_Native.Height == height)
+        return TRUE;
+    DestroyTarget(m_Native);
+    // Readable when the device can read textures back; plain otherwise (the
+    // swap chain screenshot path then stays the readback source).
+    return CreateTarget(m_Native, width, height, 0, TRUE) ||
+           CreateTarget(m_Native, width, height, 0, FALSE);
+}
+
+void CKPostprocessPass::DestroyTargets()
+{
+    DestroyTarget(m_Scene);
+    DestroyTarget(m_Native);
+}
+
+CKBOOL CKPostprocessPass::CreateTarget(CKPostprocessTarget &target, CKDWORD width, CKDWORD height,
+                                       CKDWORD samples, CKBOOL readable)
+{
+    target = CKPostprocessTarget();
+    const CKDWORD msaaFlag = CKRSTTextureMSAAFlag(samples);
+    if (samples > 1 && msaaFlag == 0)
+        return FALSE;
 
     CKTextureDesc colorDesc;
     VxPixelFormat2ImageDesc(_32_ARGB8888, colorDesc.Format);
@@ -126,73 +155,65 @@ CKBOOL CKPostprocessPass::EnsureSceneFrameBuffer(CKDWORD width, CKDWORD height)
     colorDesc.MipMapCount = 1;
     colorDesc.Depth = 1;
     colorDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
-                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
-    if (m_Device->CreateTexture(&colorDesc, nullptr, &m_ResourceIds.SceneColorTexture) != CK_OK)
+                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET | msaaFlag |
+                      (readable ? CKRST_TEXTURE_READBACK : 0);
+    if (m_Device->CreateTexture(&colorDesc, nullptr, &target.ColorTexture) != CK_OK)
         return FALSE;
 
     CKDepthTextureDesc depthDesc = {};
-    depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
+    depthDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL | msaaFlag;
     depthDesc.Width = width;
     depthDesc.Height = height;
     depthDesc.MipMapCount = 1;
-    depthDesc.DepthFormat = CKRST_DEPTHFMT_D24S8;
-    CKERROR depthErr = m_Device->CreateDepthTexture(&depthDesc, &m_ResourceIds.SceneDepthTexture);
-    if (depthErr != CK_OK) {
-        depthDesc.DepthFormat = CKRST_DEPTHFMT_D24;
-        depthErr = m_Device->CreateDepthTexture(&depthDesc, &m_ResourceIds.SceneDepthTexture);
+    static const CK_DEPTH_FORMAT kDepthFormats[] = {CKRST_DEPTHFMT_D24S8, CKRST_DEPTHFMT_D24, CKRST_DEPTHFMT_D16};
+    CKERROR depthErr = CKERR_NOTIMPLEMENTED;
+    for (size_t i = 0; i < sizeof(kDepthFormats) / sizeof(kDepthFormats[0]) && depthErr != CK_OK; ++i) {
+        depthDesc.DepthFormat = kDepthFormats[i];
+        depthErr = m_Device->CreateDepthTexture(&depthDesc, &target.DepthTexture);
     }
     if (depthErr != CK_OK) {
-        depthDesc.DepthFormat = CKRST_DEPTHFMT_D16;
-        depthErr = m_Device->CreateDepthTexture(&depthDesc, &m_ResourceIds.SceneDepthTexture);
-    }
-    if (depthErr != CK_OK) {
-        m_Device->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
-        m_ResourceIds.SceneColorTexture = 0;
+        m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
+        target.ColorTexture = 0;
         return FALSE;
     }
 
     CKFrameBufferAttachmentDesc colorAttachment;
-    colorAttachment.Texture = m_ResourceIds.SceneColorTexture;
+    colorAttachment.Texture = target.ColorTexture;
     colorAttachment.Mip = 0;
     colorAttachment.Layer = 0;
 
     CKFrameBufferDesc fbDesc;
     fbDesc.Color = &colorAttachment;
     fbDesc.ColorCount = 1;
-    fbDesc.DepthStencil.Texture = m_ResourceIds.SceneDepthTexture;
+    fbDesc.DepthStencil.Texture = target.DepthTexture;
     fbDesc.DepthStencil.Mip = 0;
     fbDesc.DepthStencil.Layer = 0;
 
-    if (m_Device->CreateFrameBuffer(&fbDesc, &m_ResourceIds.SceneFrameBuffer) != CK_OK) {
-        m_Device->DeleteObject(m_ResourceIds.SceneDepthTexture, CKRST_OBJ_TEXTURE);
-        m_Device->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
-        m_ResourceIds.SceneDepthTexture = 0;
-        m_ResourceIds.SceneColorTexture = 0;
+    if (m_Device->CreateFrameBuffer(&fbDesc, &target.FrameBuffer) != CK_OK) {
+        m_Device->DeleteObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
+        m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
+        target = CKPostprocessTarget();
         return FALSE;
     }
 
-    m_SceneWidth = width;
-    m_SceneHeight = height;
-    m_SceneFrameBufferActive = TRUE;
+    target.Width = width;
+    target.Height = height;
+    target.Samples = samples;
+    target.Readable = readable;
     return TRUE;
 }
 
-void CKPostprocessPass::DestroySceneFrameBuffer()
+void CKPostprocessPass::DestroyTarget(CKPostprocessTarget &target)
 {
     if (m_Device) {
-        if (m_ResourceIds.SceneFrameBuffer)
-            m_Device->DeleteObject(m_ResourceIds.SceneFrameBuffer, CKRST_OBJ_FRAMEBUFFER);
-        if (m_ResourceIds.SceneDepthTexture)
-            m_Device->DeleteObject(m_ResourceIds.SceneDepthTexture, CKRST_OBJ_TEXTURE);
-        if (m_ResourceIds.SceneColorTexture)
-            m_Device->DeleteObject(m_ResourceIds.SceneColorTexture, CKRST_OBJ_TEXTURE);
+        if (target.FrameBuffer)
+            m_Device->DeleteObject(target.FrameBuffer, CKRST_OBJ_FRAMEBUFFER);
+        if (target.DepthTexture)
+            m_Device->DeleteObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
+        if (target.ColorTexture)
+            m_Device->DeleteObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
     }
-    m_ResourceIds.SceneFrameBuffer = 0;
-    m_ResourceIds.SceneDepthTexture = 0;
-    m_ResourceIds.SceneColorTexture = 0;
-    m_SceneFrameBufferActive = FALSE;
-    m_SceneWidth = 0;
-    m_SceneHeight = 0;
+    target = CKPostprocessTarget();
 }
 
 CKBOOL CKPostprocessPass::EnsureResources()
@@ -318,9 +339,21 @@ void CKPostprocessPass::DestroyResources()
     m_PostVertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
 }
 
-CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa, float sharpness)
+CKERROR CKPostprocessPass::SubmitResolve(CKRasterizerEncoder *encoder, CKRenderView view, CKBOOL fxaa,
+                                         float sharpness)
 {
-    if (!m_Device || !encoder || !m_SceneFrameBufferActive || !EnsureResources())
+    return Submit(encoder, view, m_Scene, fxaa, sharpness);
+}
+
+CKERROR CKPostprocessPass::SubmitBlit(CKRasterizerEncoder *encoder, CKRenderView view)
+{
+    return Submit(encoder, view, m_Native, FALSE, 0.0f);
+}
+
+CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView view,
+                                  const CKPostprocessTarget &source, CKBOOL fxaa, float sharpness)
+{
+    if (!m_Device || !encoder || !source.IsActive() || !EnsureResources())
         return CKERR_NOTIMPLEMENTED;
 
     struct PostVertex {
@@ -354,8 +387,8 @@ CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView vie
     sampler.CompareFunc = CKRST_COMPARE_NONE;
 
     const float params[4] = {
-        m_SceneWidth > 0 ? 1.0f / (float)m_SceneWidth : 1.0f,
-        m_SceneHeight > 0 ? 1.0f / (float)m_SceneHeight : 1.0f,
+        source.Width > 0 ? 1.0f / (float)source.Width : 1.0f,
+        source.Height > 0 ? 1.0f / (float)source.Height : 1.0f,
         fxaa ? 1.0f : 0.0f,
         sharpness
     };
@@ -371,7 +404,7 @@ CKERROR CKPostprocessPass::Submit(CKRasterizerEncoder *encoder, CKRenderView vie
     encoder->SetScissor(nullptr);
     encoder->SetPointSize(1.0f);
     encoder->SetTransientVertexBuffer(0, &tvb);
-    encoder->SetTexture(0, m_ResourceIds.PostSamplerUniform, m_ResourceIds.SceneColorTexture, &sampler);
+    encoder->SetTexture(0, m_ResourceIds.PostSamplerUniform, source.ColorTexture, &sampler);
     encoder->SetUniform(m_ResourceIds.PostParamsUniform, params, 1);
     encoder->Submit(view, m_ResourceIds.PostProgram, 0, CKRST_DISCARD_ALL);
     return encoder->GetStatus();

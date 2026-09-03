@@ -84,13 +84,13 @@ bool BuildSpritesText(SceneContext &sc)
 } // namespace
 
 static const char *const kPresentRenderScale =
-    "<CK2_3D>\n    RenderScale = 0.5\n";
+    "<CK2_3D>\n    RenderScale = 0.5\n</CK2_3D>\n";
 static const char *const kPresentFxaa =
-    "<CK2_3D>\n    FXAA = 1\n";
+    "<CK2_3D>\n    FXAA = 1\n</CK2_3D>\n";
 static const char *const kPresentSharpness =
-    "<CK2_3D>\n    Sharpness = 1.0\n";
+    "<CK2_3D>\n    Sharpness = 1.0\n</CK2_3D>\n";
 static const char *const kPresentMsaa =
-    "<CK2_3D>\n    Antialias = 4\n";
+    "<CK2_3D>\n    Antialias = 4\n</CK2_3D>\n";
 
 const SceneDef g_Scenes2D[] = {
     {"sprites_text", "Background + foreground 2D entities, a sprite and sprite text over a lit box", BuildSpritesText, NULL, NULL, true, 4, 0.97f, NULL},
