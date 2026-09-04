@@ -276,6 +276,10 @@ void SetEffectInitializesAndReleasesParameters() {
     CKParameter *texGenParameter = material.GetEffectParameter();
     TestCheck(texGenParameter != nullptr,
               "setting an effect with a parameter type must create a parameter");
+    CKDWORD texGenMode = VXEFFECT_TGNONE;
+    TestCheck(texGenParameter && texGenParameter->GetValue(&texGenMode, TRUE) == CK_OK &&
+                  texGenMode == VXEFFECT_TGREFLECT,
+              "TexGen effect parameters must initialize to Reflect");
 
     VxEffectDescription callbackOnlyEffect;
     callbackOnlyEffect.Summary = "CallbackOnly";
@@ -333,6 +337,27 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
 void CubeTexGenPreservesThreeCoordinates() {
     MaterialTestWorld world;
     RCKMaterial material(world.context, "CubeTexGen");
+
+    TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGREFLECT, nullptr, 0) != 0,
+              "reflection TexGen setup must succeed");
+    CKDWORD texcoordIndex = 0;
+    CKDWORD flags = CKRST_TTF_NONE;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
+                  0, CKRST_TSS_TEXCOORDINDEX, &texcoordIndex) &&
+                  CKRSTTexcoordIndex(texcoordIndex) == 0 &&
+                  CKRSTTexcoordGeneration(texcoordIndex) == CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR,
+              "reflection TexGen must select the camera-space reflection vector");
+    TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
+                  0, CKRST_TSS_TEXTURETRANSFORMFLAGS, &flags) && flags == CKRST_TTF_COUNT2,
+              "two-dimensional reflection TexGen must output two coordinates");
+    VxMatrix textureMatrix;
+    Vx3DMatrixIdentity(textureMatrix);
+    TestCheck(world.renderContext->m_RasterizerContext->GetTransformMatrix(VXMATRIX_TEXTURE0, textureMatrix) &&
+                  textureMatrix[0][0] == 0.4f && textureMatrix[1][1] == -0.4f &&
+                  textureMatrix[2][2] == 0.4f && textureMatrix[3][0] == 0.5f &&
+                  textureMatrix[3][1] == 0.5f,
+              "reflection TexGen must install the D3D8-compatible 2D mapping matrix");
+
     const VX_EFFECTTEXGEN effects[] = {
         VXEFFECT_TGCUBEMAP_REFLECT,
         VXEFFECT_TGCUBEMAP_NORMALS,
@@ -351,7 +376,7 @@ void CubeTexGenPreservesThreeCoordinates() {
 
     TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGPLANAR, nullptr, 0) != 0,
               "planar TexGen setup must succeed");
-    CKDWORD flags = CKRST_TTF_NONE;
+    flags = CKRST_TTF_NONE;
     TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
                   0, CKRST_TSS_TEXTURETRANSFORMFLAGS, &flags) && flags == CKRST_TTF_COUNT2,
               "planar TexGen remains two-dimensional");

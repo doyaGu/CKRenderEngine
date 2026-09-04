@@ -197,6 +197,9 @@ void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
     TestCheck(vs3d.find("position.z = position.z * 2.0 - position.w") != std::string::npos &&
                   vsPositionT.find("position.z = position.z * 2.0 - position.w") != std::string::npos,
               "Both 3D and POSITIONT shaders must convert D3D clip depth for desktop OpenGL");
+    TestCheck(vsPositionT.find("(a_position.x + 0.5) * u_viewport.x") != std::string::npos &&
+                  vsPositionT.find("(a_position.y + 0.5) * u_viewport.y") != std::string::npos,
+              "POSITIONT vertices must apply the legacy half-pixel center exactly once");
 }
 
 

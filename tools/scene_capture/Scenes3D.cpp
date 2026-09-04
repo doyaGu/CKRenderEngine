@@ -23,6 +23,17 @@ void BuildKeyLights(SceneContext &sc)
     SceneCreateLight(sc, "spot", VX_LIGHTSPOT, VxColor(0.3f, 0.4f, 1.0f, 1.0f), VxVector(-4.0f, 8.0f, 2.0f), VxVector(0.0f, -1.0f, 0.0f), 20.0f);
 }
 
+bool SetReflectionTexgen(CKMaterial *material)
+{
+    if (!material)
+        return false;
+
+    material->SetEffect(VXEFFECT_TEXGEN);
+    CKParameter *parameter = material->GetEffectParameter();
+    const CKDWORD mode = VXEFFECT_TGREFLECT;
+    return parameter && parameter->SetValue(&mode, sizeof(mode)) == CK_OK;
+}
+
 // --- opaque_lit ---------------------------------------------------------------
 
 bool BuildOpaqueLit(SceneContext &sc)
@@ -209,11 +220,13 @@ bool BuildTexgenEnvmap(SceneContext &sc)
     CKMaterial *envMat = SceneCreateMaterial(sc, "envmat", VxColor(0.9f, 0.9f, 0.9f, 1.0f), env);
     envMat->SetSpecular(VxColor(1.0f, 1.0f, 1.0f, 1.0f));
     envMat->SetPower(24.0f);
-    envMat->SetEffect(VXEFFECT_TEXGEN); // defaults to the reflection generator
+    if (!SetReflectionTexgen(envMat))
+        return false;
     SceneCreateEntity(sc, "mirrorball", SceneCreateSphereMesh(sc, "mirrorball", 2.5f, 24, 32, envMat), VxVector(0.0f, 2.5f, 0.0f));
 
     CKMaterial *envBox = SceneCreateMaterial(sc, "envbox", VxColor(1.0f, 1.0f, 1.0f, 1.0f), env);
-    envBox->SetEffect(VXEFFECT_TEXGEN);
+    if (!SetReflectionTexgen(envBox))
+        return false;
     SceneCreateEntity(sc, "mirrorbox", SceneCreateBoxMesh(sc, "mirrorbox", VxVector(2.5f, 2.5f, 2.5f), envBox), VxVector(-5.0f, 1.25f, 2.0f));
 
     CKMaterial *plain = SceneCreateMaterial(sc, "plain", VxColor(0.7f, 0.2f, 0.6f, 1.0f));

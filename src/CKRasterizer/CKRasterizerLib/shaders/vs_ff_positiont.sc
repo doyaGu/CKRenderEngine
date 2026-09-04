@@ -69,8 +69,10 @@ void main()
 {
     float rhw = a_position.w == 0.0 ? 1.0 : a_position.w;
     float clipW = 1.0 / rhw;
-    float clipX = a_position.x * u_viewport.x + u_viewport.z;
-    float clipY = a_position.y * u_viewport.y + u_viewport.w;
+    // D3D8 POSITIONT coordinates name integer pixel centers; modern backends
+    // rasterize at half-integer centers. Apply the compatibility offset here.
+    float clipX = (a_position.x + 0.5) * u_viewport.x + u_viewport.z;
+    float clipY = (a_position.y + 0.5) * u_viewport.y + u_viewport.w;
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
     vec4 worldClipPos = vec4(a_position.xyz, 1.0);
     v_fogPos = gl_Position;
