@@ -2337,25 +2337,28 @@ CKERROR CKBgfxBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
         if (Desc->Stride == 0 || (Desc->Size % Desc->Stride) != 0)
             return CKERR_INVALIDPARAMETER;
         err = CreateVertexBufferRecord(Desc->Stride, Desc->Size / Desc->Stride, Desc->Layout, Desc->InitialData, Out);
-    } else {
+    } else if (Desc->Kind == CKRST_BACKEND_BUFFER_INDEX) {
         const CKDWORD indexSize = Desc->Index32 ? 4 : 2;
         if ((Desc->Size % indexSize) != 0)
             return CKERR_INVALIDPARAMETER;
         err = CreateIndexBufferRecord(Desc->Size / indexSize, Desc->Index32, Desc->InitialData, Out);
+    } else {
+        return CKERR_INVALIDPARAMETER;
     }
     if (err == CK_OK && Desc->InitialData)
         ++m_FrameBufferUploads;
     return err;
 }
 
-CKERROR CKBgfxBackend::UpdateBuffer(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data)
+CKERROR CKBgfxBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+                                    CKDWORD Size, const void *Data)
 {
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
     CKERROR err;
-    if (IsSlotAlive(m_VertexBuffers, Buffer, m_ResourceTableMutex))
+    if (Kind == CKRST_BACKEND_BUFFER_VERTEX)
         err = UpdateVertexBufferRecord(Buffer, Offset, Size, Data);
-    else if (IsSlotAlive(m_IndexBuffers, Buffer, m_ResourceTableMutex))
+    else if (Kind == CKRST_BACKEND_BUFFER_INDEX)
         err = UpdateIndexBufferRecord(Buffer, Offset, Size, Data);
     else
         return CKERR_INVALIDPARAMETER;
@@ -2787,17 +2790,11 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
         frameBuffer = rec->Handle;
     }
 
+    if (m_NextView >= m_CapsDesc.MaxRenderViews)
+        return CKERR_OUTOFMEMORY;
+    const bgfx::ViewId view = (bgfx::ViewId)m_NextView++;
+    const CKDWORD clearFlags = Desc->ClearFlags;
     m_FrameInProgress = TRUE;
-    bgfx::ViewId view;
-    CKDWORD clearFlags = Desc->ClearFlags;
-    if (m_NextView < m_CapsDesc.MaxRenderViews) {
-        view = (bgfx::ViewId)m_NextView++;
-    } else {
-        // Out of views: keep drawing into the last pass; a clear would apply
-        // to the whole pass, so it is dropped.
-        view = m_CurrentView;
-        clearFlags = 0;
-    }
 
     bgfx::setViewMode((bgfx::ViewId)view, bgfx::ViewMode::Sequential);
     bgfx::setViewFrameBuffer((bgfx::ViewId)view, frameBuffer);
@@ -3304,7 +3301,7 @@ CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
     bgfx::blit(m_CurrentView,
                dst->Handle, (uint8_t)DstMip, (uint16_t)DstX, (uint16_t)DstY, (uint16_t)DstLayer,
                src->Handle, (uint8_t)SrcMip, (uint16_t)srcX, (uint16_t)srcY, (uint16_t)SrcLayer,
-               (uint16_t)copiedWidth, (uint16_t)copiedHeight, 1);
+               (uint16_t)actualCopiedWidth, (uint16_t)actualCopiedHeight, 1);
     ++m_FrameBlits;
     return CK_OK;
 }
@@ -3612,4 +3609,3 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
         CKBgfxDrawMapTraceSubmit(&submitTrace);
     }
 }
-

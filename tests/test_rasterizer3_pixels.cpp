@@ -8,6 +8,8 @@
 // CKBGFX_RENDERER_BACKEND (default opengl).
 
 #include "CKRasterizer.h"
+#include "CKBgfxBackend.h"
+#include "CKTranslatedRasterizer.h"
 #include "TestTriangleMultiset.h"
 
 #include <SDL3/SDL.h>
@@ -883,6 +885,53 @@ void CheckRenderTargetReadback(Backend &b)
     TestCheckf(PixelNear(pixels, (int)ctx->m_Width / 2, (int)ctx->m_Height * 3 / 5, 0, 255, 0), "window readback after the target");
 }
 
+void CheckTypedPersistentBufferUpdates(Backend &b)
+{
+    CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
+    CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
+    float vertices[9] = {0.0f};
+    CKWORD indices[3] = {0, 1, 2};
+
+    CKBackendBufferDesc vbDesc;
+    vbDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+    vbDesc.Size = sizeof(vertices);
+    vbDesc.Stride = sizeof(float) * 3;
+    vbDesc.Dynamic = TRUE;
+    CKDWORD vb = 0;
+    TestCheck(backend->CreateBuffer(&vbDesc, &vb) == CK_OK && vb != 0,
+              "real backend creates a persistent vertex buffer");
+
+    CKBackendBufferDesc ibDesc;
+    ibDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+    ibDesc.Size = sizeof(indices);
+    ibDesc.Dynamic = TRUE;
+    CKDWORD ib = 0;
+    TestCheck(backend->CreateBuffer(&ibDesc, &ib) == CK_OK && ib != 0,
+              "real backend creates a persistent index buffer");
+    TestCheck(vb == ib, "vertex and index handle namespaces reproduce the numeric collision");
+    TestCheck(backend->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, ib, 0, sizeof(indices), indices) == CK_OK,
+              "typed index update does not resolve through the vertex namespace");
+    TestCheck(backend->UpdateBuffer(CKRST_BACKEND_BUFFER_VERTEX, vb, 0, sizeof(vertices), vertices) == CK_OK,
+              "typed vertex update resolves through the vertex namespace");
+    TestCheck(backend->DestroyObject(ib, CKRST_OBJ_INDEXBUFFER) == CK_OK,
+              "destroy persistent index buffer");
+    TestCheck(backend->DestroyObject(vb, CKRST_OBJ_VERTEXBUFFER) == CK_OK,
+              "destroy persistent vertex buffer");
+}
+
+void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
+{
+    CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
+    CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
+    backend->ExhaustViewsForTests();
+    CKBackendPassDesc pass;
+    pass.Rect.right = kWidth;
+    pass.Rect.bottom = kHeight;
+    TestCheck(backend->BeginPass(&pass) == CKERR_OUTOFMEMORY,
+              "view exhaustion must reject the new pass");
+    TestCheck(backend->IsIdle(), "rejected pass must not leave a frame in progress");
+}
+
 // ---------------------------------------------------------------------------
 
 void BackendRendersFixedFunctionSemantics()
@@ -909,6 +958,8 @@ void BackendRendersFixedFunctionSemantics()
         CheckPresentation(backend);
         CheckViewport(backend);
         CheckRenderTargetReadback(backend);
+        CheckTypedPersistentBufferUpdates(backend);
+        CheckViewExhaustionFailsWithoutOpeningAFrame(backend);
     }
     CloseBackend(backend);
 

@@ -88,6 +88,7 @@ struct FFPBackendLog {
     CKERROR StateError = CK_OK;
     CKERROR UniformError = CK_OK;
     CKERROR DrawError = CK_OK;
+    CKDWORD DrawErrorAt = 0;          // 0 = every draw, otherwise one-based draw number
     std::vector<FFPTextureBinding> TextureBindings;
     std::vector<CKBYTE> LastVertexBytes;   // transient geometry of the last draw
     std::vector<CKBYTE> LastIndexBytes;
@@ -112,6 +113,9 @@ public:
         m_3DCaps.MaxTextureHeight = 4096;
     }
 
+    CKBOOL ForceDestroyBusy = FALSE;
+    CKBOOL DestroyBackend(CKRasterizerBackend *backend) override;
+
 protected:
     CKNullBackend *NewBackend() override;
 };
@@ -124,6 +128,7 @@ public:
     CKBOOL FailCreateProgram = FALSE;
     CKBOOL FailCreateTexture = FALSE;
     CKBOOL FailUpdateTexture = FALSE;
+    CKBOOL ForceNotIdle = FALSE;
     CKERROR FrameResult = CK_OK;
     CKERROR DeviceStatus = CK_OK;
     CKDWORD TransientVertexCapacity = 0xFFFFFFFFu;
@@ -194,7 +199,7 @@ public:
         }
         return this;
     }
-    CKBOOL IsIdle() const override { return TRUE; }
+    CKBOOL IsIdle() const override { return ForceNotIdle ? FALSE : TRUE; }
 
     // --- Recording overrides
     CKERROR GetDeviceStatus() const override {
@@ -385,6 +390,19 @@ inline CKNullBackend *FFPRecordingDriver::NewBackend()
     return new FFPRecordingBackend(this);
 }
 
+inline CKBOOL FFPRecordingDriver::DestroyBackend(CKRasterizerBackend *backend)
+{
+    if (!ForceDestroyBusy)
+        return CKNullBackendDriver::DestroyBackend(backend);
+    FFPRecordingBackend *recording = static_cast<FFPRecordingBackend *>(backend);
+    const CKBOOL wasForcedBusy = recording->ForceNotIdle;
+    recording->ForceNotIdle = FALSE;
+    const CKBOOL result = CKNullBackendDriver::DestroyBackend(backend);
+    if (!result)
+        recording->ForceNotIdle = wasForcedBusy;
+    return result;
+}
+
 // Records the sticky state and the slot bindings the draw carries, then the
 // draw itself; the failure knobs refuse the draw before (StateError) or after
 // (DrawError) recording it.
@@ -475,7 +493,7 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
     Log.Draws.push_back(record);
     Log.LastProgram = draw->Program;
     ++Log.DrawCount;
-    if (Log.DrawError != CK_OK) {
+    if (Log.DrawError != CK_OK && (Log.DrawErrorAt == 0 || Log.DrawCount == Log.DrawErrorAt)) {
         ++Log.DiscardCount;
         Log.LastDiscardFlags = CKRST_DISCARD_ALL;
         return Log.DrawError;

@@ -330,6 +330,33 @@ void CustomEffectTextureMatrixSurvivesMaterialSetup() {
               "SKIPTEXMAT callback transform flags must survive material texture setup");
 }
 
+void CubeTexGenPreservesThreeCoordinates() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "CubeTexGen");
+    const VX_EFFECTTEXGEN effects[] = {
+        VXEFFECT_TGCUBEMAP_REFLECT,
+        VXEFFECT_TGCUBEMAP_NORMALS,
+        VXEFFECT_TGCUBEMAP_SKYMAP,
+        VXEFFECT_TGCUBEMAP_POSITIONS,
+    };
+
+    for (size_t i = 0; i < sizeof(effects) / sizeof(effects[0]); ++i) {
+        TestCheck(material.TexGenEffect(world.renderContext, effects[i], nullptr, 0) != 0,
+                  "cubemap TexGen setup must succeed");
+        CKDWORD flags = CKRST_TTF_NONE;
+        TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
+                      0, CKRST_TSS_TEXTURETRANSFORMFLAGS, &flags) && flags == CKRST_TTF_COUNT3,
+                  "cubemap TexGen must preserve its three-dimensional direction");
+    }
+
+    TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGPLANAR, nullptr, 0) != 0,
+              "planar TexGen setup must succeed");
+    CKDWORD flags = CKRST_TTF_NONE;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTextureStageState(
+                  0, CKRST_TSS_TEXTURETRANSFORMFLAGS, &flags) && flags == CKRST_TTF_COUNT2,
+              "planar TexGen remains two-dimensional");
+}
+
 void ZWriteChangesInvalidateTransparencyClassification() {
     CKContext context(nullptr, 0, 0);
     RCKMaterial material(&context, "ZWriteTransparency");
@@ -378,6 +405,8 @@ int main() {
               &CustomEffectCallbackRunsWhenMaterialIsCurrent);
     tests.Run("Custom effect texture matrix survives material setup",
               &CustomEffectTextureMatrixSurvivesMaterialSetup);
+    tests.Run("Cubemap TexGen preserves three coordinates",
+              &CubeTexGenPreservesThreeCoordinates);
     tests.Run("ZWrite changes invalidate transparency classification",
               &ZWriteChangesInvalidateTransparencyClassification);
 

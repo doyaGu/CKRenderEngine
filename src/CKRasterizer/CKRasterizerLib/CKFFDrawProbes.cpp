@@ -3,6 +3,7 @@
 #include "CKDebugLogger.h"
 #include "CKDrawStateCache.h"
 #include "CKFFDebug.h"
+#include "CKFFDrawTypes.h"
 
 #include <string.h>
 

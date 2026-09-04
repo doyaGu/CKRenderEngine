@@ -362,13 +362,18 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
+    CKBOOL frameSucceeded = TRUE;
     if (m_FrameOpen) {
         if (!m_Target) {
-            CompositeScene();
-            if (PresentInternalTarget())
+            if (!CompositeScene()) {
+                frameSucceeded = FALSE;
+            } else if (PresentInternalTarget()) {
                 m_NativePresented = m_InternalTargets;
+            } else {
+                frameSucceeded = FALSE;
+            }
         }
-        if (HasArmedTextureReadbacks() && CanReadCurrentTarget() && BlitForReadback())
+        if (frameSucceeded && HasArmedTextureReadbacks() && CanReadCurrentTarget() && BlitForReadback())
             IssueArmedTextureReadbacks();
     }
     if (HasArmedTextureReadbacks()) {
@@ -391,7 +396,7 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         m_LastDeviceFrame = frameNumber;
     FinishFrame();
     DeliverReadbacks();
-    return status == CK_OK ? TRUE : FALSE;
+    return frameSucceeded && status == CK_OK ? TRUE : FALSE;
 }
 
 // ===========================================================================

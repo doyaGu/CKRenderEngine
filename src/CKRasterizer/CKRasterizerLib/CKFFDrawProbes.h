@@ -85,7 +85,7 @@ private:
 
 class CKFFDrawProbes {
 public:
-    CKFFDrawProbes() : Stats(), Config(), m_PreviousShaderCacheStats() {}
+    CKFFDrawProbes() : Stats(), Config() {}
 
     bool StatsEnabled() const { return Config.StatsEnabled || Config.UniformHistEnabled; }
     bool TimingEnabled() const { return Config.StatsEnabled; }

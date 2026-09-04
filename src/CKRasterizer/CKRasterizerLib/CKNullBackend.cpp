@@ -360,13 +360,15 @@ CKERROR CKNullBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
         object.Type = CKRST_OBJ_VERTEXBUFFER;
         object.Stride = Desc->Stride;
         object.Layout = Desc->Layout;
-    } else {
+    } else if (Desc->Kind == CKRST_BACKEND_BUFFER_INDEX) {
         const CKDWORD indexSize = Desc->Index32 ? 4 : 2;
         if ((Desc->Size % indexSize) != 0)
             return CKERR_INVALIDPARAMETER;
         object.Type = CKRST_OBJ_INDEXBUFFER;
         object.Stride = indexSize;
         object.Index32 = Desc->Index32;
+    } else {
+        return CKERR_INVALIDPARAMETER;
     }
     object.Size = Desc->Size;
     *Out = AllocateHandle(object);
@@ -375,12 +377,17 @@ CKERROR CKNullBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
     return CK_OK;
 }
 
-CKERROR CKNullBackend::UpdateBuffer(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data)
+CKERROR CKNullBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+                                    CKDWORD Size, const void *Data)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
+    if (Kind != CKRST_BACKEND_BUFFER_VERTEX && Kind != CKRST_BACKEND_BUFFER_INDEX)
+        return CKERR_INVALIDPARAMETER;
     const CKNullObject *object = FindObject(Buffer);
-    if (!object || (object->Type != CKRST_OBJ_VERTEXBUFFER && object->Type != CKRST_OBJ_INDEXBUFFER) || !Data ||
+    const CKDWORD expectedType = Kind == CKRST_BACKEND_BUFFER_VERTEX
+        ? CKRST_OBJ_VERTEXBUFFER : CKRST_OBJ_INDEXBUFFER;
+    if (!object || object->Type != expectedType || !Data ||
         Size == 0 || Offset > object->Size || Size > object->Size - Offset)
         return CKERR_INVALIDPARAMETER;
     ++m_FrameBufferUploads;

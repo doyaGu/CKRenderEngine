@@ -892,7 +892,8 @@ CKBOOL CKTranslatedContext::UnlockVertexBuffer(CKDWORD VB)
         resource->Scratch.resize(deviceBytes);
     CKTransientGeometry::InterleaveVertices(resource->Scratch.data(), resource->DeviceStride, count,
                                             resource->FormatFlags, &dp, dims);
-    if (m_Backend->UpdateBuffer(VB, start * resource->DeviceStride, (CKDWORD)deviceBytes,
+    if (m_Backend->UpdateBuffer(CKRST_BACKEND_BUFFER_VERTEX, VB,
+                                start * resource->DeviceStride, (CKDWORD)deviceBytes,
                                 resource->Scratch.data()) != CK_OK)
         return FALSE;
     ++m_FrameBufferUploads;
@@ -934,7 +935,8 @@ CKBOOL CKTranslatedContext::UnlockIndexBuffer(CKDWORD IB)
         return FALSE;
     }
     resource->Locked = FALSE;
-    if (m_Backend->UpdateBuffer(IB, resource->LockStart * 2, resource->LockCount * 2,
+    if (m_Backend->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, IB,
+                                resource->LockStart * 2, resource->LockCount * 2,
                                 resource->Shadow.data() + (size_t)resource->LockStart * 2) != CK_OK)
         return FALSE;
     ++m_FrameBufferUploads;

@@ -146,8 +146,16 @@ void TestResources()
     ibDesc.Dynamic = TRUE;
     CKDWORD ib = 0;
     TestCheck(b->CreateBuffer(&ibDesc, &ib) == CK_OK && ib != 0, "index buffer");
-    TestCheck(b->UpdateBuffer(ib, 0, sizeof(indices), indices) == CK_OK, "index buffer update");
-    TestCheck(b->UpdateBuffer(0xDEAD, 0, 4, indices) != CK_OK, "unknown buffer update rejected");
+    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, ib, 0, sizeof(indices), indices) == CK_OK,
+              "index buffer update");
+    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_VERTEX, ib, 0, sizeof(indices), indices) != CK_OK,
+              "buffer kind mismatch rejected");
+    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, 0xDEAD, 0, 4, indices) != CK_OK,
+              "unknown buffer update rejected");
+    ibDesc.Kind = (CKBackendBufferKind)99;
+    bad = 0;
+    TestCheck(b->CreateBuffer(&ibDesc, &bad) == CKERR_INVALIDPARAMETER && bad == 0,
+              "unknown buffer kind rejected");
 
     TestCheck(b->DestroyObject(rt, CKRST_OBJ_RENDERTARGET) == CK_OK && !b->IsObjectAlive(rt, CKRST_OBJ_RENDERTARGET),
               "render target destroyed");

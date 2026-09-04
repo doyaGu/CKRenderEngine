@@ -88,6 +88,7 @@ endif ()
 if (CKRE_BUILD_STATIC)
     add_library(CKBgfxRasterizerStatic STATIC ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG})
     list(APPEND _ckre_bgfx_targets CKBgfxRasterizerStatic)
+    target_compile_definitions(CKBgfxRasterizerStatic PRIVATE CK_LIB=1)
 
     set_target_properties(CKBgfxRasterizerStatic PROPERTIES
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

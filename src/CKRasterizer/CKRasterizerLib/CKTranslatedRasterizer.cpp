@@ -116,7 +116,8 @@ CKBOOL CKTranslatedDriver::DestroyContext(CKRasterizerContext *Context)
         if (m_Contexts[i] != Context)
             continue;
         CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(Context);
-        translated->BeginShutdown();
+        if (!translated->BeginShutdown())
+            return FALSE;
         if (m_Backend && !m_Backend->DestroyBackend(translated->GetBackend()))
             return FALSE;
         m_Contexts.RemoveAt(i);

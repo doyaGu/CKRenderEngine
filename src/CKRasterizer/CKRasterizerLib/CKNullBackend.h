@@ -125,7 +125,8 @@ public:
     CKERROR CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out) override;
-    CKERROR UpdateBuffer(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data) override;
+    CKERROR UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+                         CKDWORD Size, const void *Data) override;
     CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, CKDWORD *Out) override;

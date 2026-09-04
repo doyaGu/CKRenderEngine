@@ -277,7 +277,10 @@ public:
     virtual CKERROR CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out) = 0;
     virtual CKERROR CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out) = 0;
     virtual CKERROR CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out) = 0;
-    virtual CKERROR UpdateBuffer(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data) = 0;
+    // Buffer handles are scoped by kind: a vertex buffer and an index buffer
+    // may legally have the same numeric handle.
+    virtual CKERROR UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+                                 CKDWORD Size, const void *Data) = 0;
     virtual CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out) = 0;
     virtual CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out) = 0;
     virtual CKERROR CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, CKDWORD *Out) = 0;

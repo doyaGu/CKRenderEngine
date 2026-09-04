@@ -233,7 +233,8 @@ public:
     CKERROR CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out) override;
-    CKERROR UpdateBuffer(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data) override;
+    CKERROR UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+                         CKDWORD Size, const void *Data) override;
     CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, CKDWORD *Out) override;
@@ -266,6 +267,7 @@ public:
     void InjectFatalForTests() { LatchFatalError(CKERR_INVALIDRENDERCONTEXT); }
     CKDWORD GetInvalidSubmitCountForTests() const { return m_DebugInvalidSubmitCount.load(std::memory_order_relaxed); }
     CKDWORD GetTransientAllocMissCountForTests() const { return m_DebugTransientAllocMissCount.load(std::memory_order_relaxed); }
+    void ExhaustViewsForTests() { m_NextView = m_CapsDesc.MaxRenderViews; }
 #endif
 
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);

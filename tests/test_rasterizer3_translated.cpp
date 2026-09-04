@@ -473,6 +473,41 @@ void TestShutdown()
     TestCheck(f.Driver->m_Contexts.Size() == 0, "context removed from the driver");
 }
 
+void TestPresentFailurePropagation()
+{
+    Fixture f;
+    TestCheck(f.Context->BeginScene() && f.Context->EndScene(), "frame for composite failure");
+    f.Backend->Log.DrawError = CKERR_INVALIDOPERATION;
+    f.Backend->Log.DrawErrorAt = f.Backend->Log.DrawCount + 1;
+    TestCheck(!f.Context->BackToFront(FALSE), "composite failure reaches BackToFront");
+
+    f.Backend->Log.DrawError = CK_OK;
+    f.Backend->Log.DrawErrorAt = 0;
+    TestCheck(f.Context->BeginScene() && f.Context->EndScene(), "frame for present-blit failure");
+    f.Backend->Log.DrawError = CKERR_INVALIDOPERATION;
+    f.Backend->Log.DrawErrorAt = f.Backend->Log.DrawCount + 2;
+    TestCheck(!f.Context->BackToFront(FALSE), "internal present failure reaches BackToFront");
+    f.Backend->Log.DrawError = CK_OK;
+    f.Backend->Log.DrawErrorAt = 0;
+}
+
+void TestDestroyContextPreservesFailedShutdown()
+{
+    Fixture f;
+    f.Backend->ForceNotIdle = TRUE;
+    f.World.BackendDriver()->ForceDestroyBusy = TRUE;
+    TestCheck(!f.Driver->DestroyContext(f.Context), "DestroyContext rejects a failed shutdown");
+    TestCheck(f.Driver->m_Contexts.Size() == 1 && f.Context->GetDeviceStatus() == CK_OK,
+              "failed shutdown keeps the context and backend alive");
+
+    f.Backend->ForceNotIdle = FALSE;
+    f.World.BackendDriver()->ForceDestroyBusy = FALSE;
+    TestCheck(f.Driver->DestroyContext(f.Context), "DestroyContext succeeds after the backend becomes idle");
+    f.Context = NULL;
+    f.World.Context = NULL;
+    f.World.Backend = NULL;
+}
+
 } // namespace
 
 int main()
@@ -488,6 +523,8 @@ int main()
     framework.Run("render targets", TestRenderTargets);
     framework.Run("overlay phase", TestOverlayPhase);
     framework.Run("RenderScale coordinates", TestRenderScaleCoordinates);
+    framework.Run("present failures propagate", TestPresentFailurePropagation);
+    framework.Run("failed shutdown preserves context", TestDestroyContextPreservesFailedShutdown);
     framework.Run("shutdown", TestShutdown);
     return framework.ExitCode();
 }

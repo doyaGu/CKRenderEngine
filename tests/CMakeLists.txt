@@ -100,6 +100,18 @@ if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
         TIMEOUT 900
         SKIP_REGULAR_EXPRESSION "SKIPPED"
     )
+
+    add_test(NAME scene_capture_multiframe
+        COMMAND "${CMAKE_COMMAND}"
+            -DTOOL=$<TARGET_FILE:ckre_scene_capture>
+            -DENGINE_DIR=$<TARGET_FILE_DIR:CK2_3D>
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture_multiframe
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_multiframe.cmake
+    )
+    set_tests_properties(scene_capture_multiframe PROPERTIES
+        TIMEOUT 900
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
+    )
 endif ()
 
 ckre_add_test(nvstripifier_tests
@@ -156,7 +168,14 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_add_rasterizer3_test(rasterizer3_pixel_tests
         test_rasterizer3_pixels.cpp
     )
-    target_link_libraries(rasterizer3_pixel_tests PRIVATE CKBgfxRasterizerStatic SDL3::SDL3)
+    target_compile_definitions(rasterizer3_pixel_tests PRIVATE CKRE_ENABLE_TEST_ACCESS=1)
+    target_link_libraries(rasterizer3_pixel_tests PRIVATE
+        CKBgfxRasterizerStatic
+        SDL3::SDL3
+        bgfx
+        bimg
+        bx
+    )
 endif ()
 
 ckre_add_test(rasterizer_backend_tests

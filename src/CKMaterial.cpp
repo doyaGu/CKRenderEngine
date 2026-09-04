@@ -1640,25 +1640,29 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
         break;
     case VXEFFECT_TGCUBEMAP_REFLECT:
         generation = CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR;
-        transformFlags = CKRST_TTF_COUNT2;
+        transformFlags = CKRST_TTF_COUNT3;
         break;
-    case VXEFFECT_TGCHROME:
     case VXEFFECT_TGCUBEMAP_NORMALS:
         generation = CKRST_TEXGEN_CAMERASPACENORMAL;
-        transformFlags = CKRST_TTF_COUNT2;
-        if (texGen == VXEFFECT_TGCHROME) {
-            texMatrix[0][0] = 0.4f;
-            texMatrix[1][1] = -0.4f;
-            texMatrix[2][2] = 0.4f;
-            texMatrix[3][0] = 0.5f;
-            texMatrix[3][1] = 0.5f;
-            texMatrix[3][2] = 0.0f;
-            texMatrix[3][3] = 1.0f;
-        }
+        transformFlags = CKRST_TTF_COUNT3;
         break;
-    case VXEFFECT_TGPLANAR:
+    case VXEFFECT_TGCHROME:
+        generation = CKRST_TEXGEN_CAMERASPACENORMAL;
+        transformFlags = CKRST_TTF_COUNT2;
+        texMatrix[0][0] = 0.4f;
+        texMatrix[1][1] = -0.4f;
+        texMatrix[2][2] = 0.4f;
+        texMatrix[3][0] = 0.5f;
+        texMatrix[3][1] = 0.5f;
+        texMatrix[3][2] = 0.0f;
+        texMatrix[3][3] = 1.0f;
+        break;
     case VXEFFECT_TGCUBEMAP_SKYMAP:
     case VXEFFECT_TGCUBEMAP_POSITIONS:
+        generation = CKRST_TEXGEN_CAMERASPACEPOSITION;
+        transformFlags = CKRST_TTF_COUNT3;
+        break;
+    case VXEFFECT_TGPLANAR:
         generation = CKRST_TEXGEN_CAMERASPACEPOSITION;
         transformFlags = CKRST_TTF_COUNT2;
         break;

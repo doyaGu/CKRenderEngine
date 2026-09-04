@@ -231,6 +231,8 @@ CKBOOL CKBgfxBackendDriver::DestroyBackend(CKRasterizerBackend *Backend)
     {
         if (m_Backends[i] == Backend)
         {
+            if (!m_Backends[i]->IsIdle())
+                return FALSE;
             m_Backends[i]->Shutdown();
             delete m_Backends[i];
             m_Backends.RemoveAt(i);
