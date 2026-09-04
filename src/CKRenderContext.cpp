@@ -40,12 +40,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <vector>
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
 enum CKRenderContextReadbackPurpose {
-    CK_READBACK_FILE = 0,
-    CK_READBACK_TEXTURE,
+    CK_READBACK_TEXTURE = 0,
     CK_READBACK_SPRITE,
 };
 
@@ -58,7 +58,6 @@ struct CKRenderContextReadback {
 
     RCKRenderContext *Owner;
     CKRenderContextReadbackPurpose Purpose;
-    XString FileName;
     CK_ID Target;
     VxRect Destination;
     CKBOOL HasDestination;
@@ -2501,15 +2500,18 @@ CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBU
     if (buffer != VXBUFFER_BACKBUFFER)
         return CKERR_NOTIMPLEMENTED;
 
-    CKRenderContextReadback *request = new CKRenderContextReadback(this, CK_READBACK_FILE);
-    request->FileName = filename;
-    CKRECT region;
-    const CKRECT *regionPtr = VxRectToRegion(rect, region);
-    if (!m_RasterizerContext->RequestReadback(regionPtr, buffer, &RCKRenderContext::ReadbackCallback, request)) {
-        delete request;
+    VxImageDescEx image = {};
+    image.Size = sizeof(image);
+    const int imageSize = DumpToMemory(rect, buffer, image);
+    if (imageSize <= 0)
         return CKERR_INVALIDOPERATION;
-    }
-    return CK_OK;
+
+    std::vector<CKBYTE> pixels((size_t)imageSize);
+    image.Image = pixels.data();
+    if (DumpToMemory(rect, buffer, image) <= 0)
+        return CKERR_INVALIDOPERATION;
+
+    return CKSaveBitmap(filename, image) ? CK_OK : CKERR_INVALIDOPERATION;
 }
 
 CKBOOL RCKRenderContext::QueueTextureCopy(RCKTexture *texture,
@@ -2566,24 +2568,16 @@ void RCKRenderContext::ReadbackCallback(void *user, const CKRECT *rect, VXBUFFER
     if (!request)
         return;
     RCKRenderContext *owner = request->Owner;
-    if (success && image && image->Image && owner && !owner->m_DeviceDestroying) {
-        if (request->Purpose == CK_READBACK_FILE) {
-            VxImageDescEx copy = *image;
-            if (!CKSaveBitmap((CKSTRING) request->FileName.CStr(), copy)) {
-                CK_LOG_FMT("Capture", "failed to save screenshot path=%s",
-                           request->FileName.CStr());
-            }
-        } else if (owner->m_Context) {
-            CKObject *object = owner->m_Context->GetObject(request->Target);
-            const VxRect *destination = request->HasDestination ? &request->Destination : nullptr;
-            if (request->Purpose == CK_READBACK_TEXTURE && object &&
-                CKIsChildClassOf(object, CKCID_TEXTURE)) {
-                static_cast<RCKTexture *>(object)->ApplyContextCopy(owner, *image, destination,
-                                                                    request->CubeMapFace);
-            } else if (request->Purpose == CK_READBACK_SPRITE && object &&
-                       CKIsChildClassOf(object, CKCID_SPRITE)) {
-                static_cast<RCKSprite *>(object)->ApplyContextCopy(owner, *image, destination);
-            }
+    if (success && image && image->Image && owner && !owner->m_DeviceDestroying && owner->m_Context) {
+        CKObject *object = owner->m_Context->GetObject(request->Target);
+        const VxRect *destination = request->HasDestination ? &request->Destination : nullptr;
+        if (request->Purpose == CK_READBACK_TEXTURE && object &&
+            CKIsChildClassOf(object, CKCID_TEXTURE)) {
+            static_cast<RCKTexture *>(object)->ApplyContextCopy(owner, *image, destination,
+                                                                request->CubeMapFace);
+        } else if (request->Purpose == CK_READBACK_SPRITE && object &&
+                   CKIsChildClassOf(object, CKCID_SPRITE)) {
+            static_cast<RCKSprite *>(object)->ApplyContextCopy(owner, *image, destination);
         }
     }
     delete request;
