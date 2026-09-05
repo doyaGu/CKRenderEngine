@@ -1,9 +1,9 @@
 # SDL_gpu rasterizer
 
 `CKSdlGpuRasterizer` and `CKSdlGpuRasterizerStatic` implement the public
-rasterizer v3 interface through `CKTranslatedRasterizer`. They replace the
-temporary support library. The translation core owns fixed-function state,
-geometry preparation, shader selection, scene targets and overlay ordering.
+rasterizer v3 interface through `CKTranslatedRasterizer`. The translation core
+owns fixed-function state, geometry preparation, shader selection, scene targets
+and overlay ordering.
 This backend owns SDL resources, native pipelines, command encoding, fences
 and presentation. Descriptor v2 and public resource slots are unchanged.
 
@@ -69,6 +69,5 @@ Run the native and public-contract tests on the interactive desktop with
 `--visible`, `CKRE_GPU_TEST_INTERACTIVE_START=1`, and `CKRE_GPU_TEST_HOLD=1`.
 Bring the test window to the foreground and press Enter, inspect and record
 the final window, then close it normally. Run GPU tests serially. A skipped
-CTest gate is not a GPU pass. Current original-DX8 comparisons and remaining
-acceptance work are recorded in `tests/reference/KNOWN_DIFFERENCES.md` and
-`tests/reference/SDL_GPU_ACCEPTANCE.md`.
+CTest gate is not a GPU pass. See the [reference index](../../../tests/reference/README.md)
+for original-DX8 comparisons and dated acceptance records.
