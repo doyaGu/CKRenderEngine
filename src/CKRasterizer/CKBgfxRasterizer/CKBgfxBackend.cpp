@@ -1,4 +1,5 @@
 #include "CKBgfxBackend.h"
+#include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "CKRasterizerValidation.h"
@@ -462,135 +463,6 @@ static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscre
     }
 }
 
-// ===========================================================================
-// Helper: allocate a backend-local wrapper slot. Slot zero stays invalid.
-// ===========================================================================
-
-static const CKDWORD CKBGFX_RESOURCE_SLOT_MASK = 0xffffu;
-
-static CKDWORD EncodeResourceHandle(CKDWORD slot, CKWORD generation)
-{
-    return ((CKDWORD)generation << 16) | slot;
-}
-
-static CKDWORD ResourceHandleSlot(CKDWORD handle)
-{
-    return handle & CKBGFX_RESOURCE_SLOT_MASK;
-}
-
-static CKWORD ResourceHandleGeneration(CKDWORD handle)
-{
-    return (CKWORD)(handle >> 16);
-}
-
-template <typename T>
-static CKDWORD AllocateSlot(XArray<CKBgfxResourceSlot<T> > &arr,
-                            CKDWORD maxHandles,
-                            VxMutex &tableMutex)
-{
-    VxMutexLock lock(tableMutex);
-    if (arr.Size() == 0)
-        arr.PushBack(CKBgfxResourceSlot<T>());
-    for (int i = 1; i < arr.Size(); ++i) {
-        CKBgfxResourceSlot<T> &slot = arr[i];
-        if (!slot.Record && !slot.Retired) {
-            if (slot.Generation == 0xffffu) {
-                slot.Retired = TRUE;
-                continue;
-            }
-            ++slot.Generation;
-            return EncodeResourceHandle((CKDWORD)i, slot.Generation);
-        }
-    }
-    const CKDWORD handleLimit = maxHandles != 0
-        ? XMin(maxHandles, CKBGFX_RESOURCE_SLOT_MASK)
-        : CKBGFX_RESOURCE_SLOT_MASK;
-    if ((CKDWORD)(arr.Size() - 1) >= handleLimit)
-        return 0;
-    CKBgfxResourceSlot<T> slot;
-    slot.Generation = 1;
-    arr.PushBack(slot);
-    return EncodeResourceHandle((CKDWORD)(arr.Size() - 1), slot.Generation);
-}
-
-template <typename T>
-static T *GetSlot(XArray<CKBgfxResourceSlot<T> > &arr, CKDWORD handle,
-                  VxMutex &tableMutex)
-{
-    VxMutexLock lock(tableMutex);
-    const CKDWORD index = ResourceHandleSlot(handle);
-    if (index == 0 || (int)index >= arr.Size())
-        return NULL;
-    CKBgfxResourceSlot<T> &slot = arr[index];
-    return slot.Generation == ResourceHandleGeneration(handle)
-        ? slot.Record : NULL;
-}
-
-template <typename T>
-static CKBOOL StoreSlot(XArray<CKBgfxResourceSlot<T> > &arr,
-                        CKDWORD handle, T *record,
-                        VxMutex &tableMutex)
-{
-    VxMutexLock lock(tableMutex);
-    const CKDWORD index = ResourceHandleSlot(handle);
-    if (!record || index == 0 || (int)index >= arr.Size())
-        return FALSE;
-    CKBgfxResourceSlot<T> &slot = arr[index];
-    if (slot.Record || slot.Generation != ResourceHandleGeneration(handle))
-        return FALSE;
-    slot.Record = record;
-    return TRUE;
-}
-
-template <typename T>
-static T *TakeSlot(XArray<CKBgfxResourceSlot<T> > &arr, CKDWORD handle,
-                   VxMutex &tableMutex)
-{
-    VxMutexLock lock(tableMutex);
-    const CKDWORD index = ResourceHandleSlot(handle);
-    if (index == 0 || (int)index >= arr.Size())
-        return NULL;
-    CKBgfxResourceSlot<T> &slot = arr[index];
-    if (slot.Generation != ResourceHandleGeneration(handle))
-        return NULL;
-    T *record = slot.Record;
-    slot.Record = NULL;
-    return record;
-}
-
-template <typename T>
-static CKBOOL IsSlotAlive(const XArray<CKBgfxResourceSlot<T> > &arr,
-                          CKDWORD handle, VxMutex &tableMutex)
-{
-    VxMutexLock lock(tableMutex);
-    const CKDWORD index = ResourceHandleSlot(handle);
-    if (index == 0 || (int)index >= arr.Size())
-        return FALSE;
-    const CKBgfxResourceSlot<T> &slot = arr[index];
-    return slot.Record && slot.Generation == ResourceHandleGeneration(handle)
-        ? TRUE : FALSE;
-}
-
-template <typename RecordT>
-static void DestroyRecord(RecordT *rec)
-{
-    if (rec)
-    {
-        if (bgfx::isValid(rec->Handle))
-            bgfx::destroy(rec->Handle);
-        delete rec;
-    }
-}
-
-template <typename RecordT>
-static void DestroyAllRecords(XArray<CKBgfxResourceSlot<RecordT> > &arr)
-{
-    for (int i = 0; i < arr.Size(); ++i) {
-        DestroyRecord(arr[i].Record);
-        arr[i].Record = NULL;
-    }
-}
-
 static CKBgfxTextureOrientation CKBgfxMergeOrientation(
     CKBgfxTextureOrientation Current,
     CKBgfxTextureOrientation Incoming,
@@ -664,6 +536,7 @@ CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
       m_DrawMapSubmitActive(FALSE), m_DrawMapMarkerCaptureActive(FALSE),
       m_DebugBgfxFlags(0), m_DebugOverlay(FALSE), m_DebugLogPresentSync(FALSE),
       m_DebugLogTextureBindings(FALSE), m_DebugLogTextures(FALSE), m_DebugLogUniforms(FALSE),
+      m_Resources(new CKBgfxResources()),
       m_TransientVBCount(0), m_TransientIBCount(0)
 {
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
@@ -694,6 +567,8 @@ CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
 CKBgfxBackend::~CKBgfxBackend()
 {
     Shutdown();
+    delete m_Resources;
+    m_Resources = NULL;
 }
 
 void CKBgfxBackend::RecordTextureWrite(
@@ -1133,13 +1008,7 @@ void CKBgfxBackend::ReleaseBgfx()
         m_DefaultWhiteTexture = BGFX_INVALID_HANDLE;
     }
     DestroyUniforms();
-    DestroyAllRecords(m_FrameBuffers);
-    DestroyAllRecords(m_Textures);
-    DestroyAllRecords(m_Programs);
-    DestroyAllRecords(m_Shaders);
-    DestroyAllRecords(m_VertexLayouts);
-    DestroyAllRecords(m_VertexBuffers);
-    DestroyAllRecords(m_IndexBuffers);
+    m_Resources->DestroyAll();
     bgfx::shutdown();
     m_BgfxInitialized = FALSE;
     m_Created = FALSE;
@@ -1274,31 +1143,31 @@ void CKBgfxBackend::DrawDebugOverlay()
 
 CKBgfxShaderRecord *CKBgfxBackend::GetShader(CKDWORD Handle)
 {
-    return GetSlot(m_Shaders, Handle, m_ResourceTableMutex);
+    return m_Resources->Shaders.Get(Handle);
 }
 CKBgfxProgramRecord *CKBgfxBackend::GetProgram(CKDWORD Handle)
 {
-    return GetSlot(m_Programs, Handle, m_ResourceTableMutex);
+    return m_Resources->Programs.Get(Handle);
 }
 CKBgfxVertexLayoutRecord *CKBgfxBackend::GetVertexLayout(CKDWORD Handle)
 {
-    return GetSlot(m_VertexLayouts, Handle, m_ResourceTableMutex);
+    return m_Resources->VertexLayouts.Get(Handle);
 }
 CKBgfxVertexBufferRecord *CKBgfxBackend::GetVertexBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_VertexBuffers, Handle, m_ResourceTableMutex);
+    return m_Resources->VertexBuffers.Get(Handle);
 }
 CKBgfxIndexBufferRecord *CKBgfxBackend::GetIndexBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_IndexBuffers, Handle, m_ResourceTableMutex);
+    return m_Resources->IndexBuffers.Get(Handle);
 }
 CKBgfxTextureRecord *CKBgfxBackend::GetTexture(CKDWORD Handle)
 {
-    return GetSlot(m_Textures, Handle, m_ResourceTableMutex);
+    return m_Resources->Textures.Get(Handle);
 }
 CKBgfxFrameBufferRecord *CKBgfxBackend::GetFrameBuffer(CKDWORD Handle)
 {
-    return GetSlot(m_FrameBuffers, Handle, m_ResourceTableMutex);
+    return m_Resources->FrameBuffers.Get(Handle);
 }
 void CKBgfxBackend::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
                                               const CKBgfxTextureRecord *Record)
@@ -1601,13 +1470,6 @@ CKERROR CKBgfxBackend::CreateTexture(const CKTextureDesc *Desc,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD texture = AllocateSlot(m_Textures, m_CapsDesc.MaxTextures,
-                                          m_ResourceTableMutex);
-    if (texture == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxTextureRecord();
     rec->Handle = handle;
     rec->Flags = Desc->Flags;
@@ -1641,14 +1503,14 @@ CKERROR CKBgfxBackend::CreateTexture(const CKTextureDesc *Desc,
                                : (CKDWORD)w * sourceBytes);
                     CKBYTE *converted = (CKBYTE *)VxMalloc(baseInfo.storageSize);
                     if (!converted) {
-                        DestroyRecord(rec);
+                        CKBgfxDestroyRecord(rec);
                         return CKERR_OUTOFMEMORY;
                     }
                     if (!CKBgfxConvertBumpLuminancePixels(
                             pf, Data->Image, sourcePitch, w, h,
                             converted, (CKDWORD)w * 4u)) {
                         VxFree(converted);
-                        DestroyRecord(rec);
+                        CKBgfxDestroyRecord(rec);
                         return CKERR_INVALIDPARAMETER;
                     }
                     baseMem = bgfx::copy(converted, baseInfo.storageSize);
@@ -1665,9 +1527,11 @@ CKERROR CKBgfxBackend::CreateTexture(const CKTextureDesc *Desc,
         }
     }
 
-    if (!StoreSlot(m_Textures, texture, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD texture = m_Resources->Textures.Insert(
+        rec, m_CapsDesc.MaxTextures);
+    if (texture == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     TraceTextureMap((CKSTRING)"create", texture, rec);
 
@@ -1753,16 +1617,11 @@ CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
     rec->Handle = handle;
     rec->Stage = Desc->Stage;
 
-    const CKDWORD shader = AllocateSlot(m_Shaders, m_CapsDesc.MaxShaders,
-                                         m_ResourceTableMutex);
+    const CKDWORD shader = m_Resources->Shaders.Insert(
+        rec, m_CapsDesc.MaxShaders);
     if (shader == 0) {
-        bgfx::destroy(handle);
-        delete rec;
+        CKBgfxDestroyRecord(rec);
         return CKERR_OUTOFMEMORY;
-    }
-    if (!StoreSlot(m_Shaders, shader, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
     }
     *OutShader = shader;
 
@@ -1870,21 +1729,15 @@ CKERROR CKBgfxBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD layout = AllocateSlot(m_VertexLayouts,
-                                         m_CapsDesc.MaxVertexLayouts,
-                                         m_ResourceTableMutex);
-    if (layout == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxVertexLayoutRecord();
     rec->Handle = handle;
     rec->Layout = bgfxLayout;
 
-    if (!StoreSlot(m_VertexLayouts, layout, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD layout = m_Resources->VertexLayouts.Insert(
+        rec, m_CapsDesc.MaxVertexLayouts);
+    if (layout == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *OutLayout = layout;
 
@@ -1903,13 +1756,9 @@ CKERROR CKBgfxBackend::CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, 
     CKBgfxShaderRecord *ps = GetShader(PixelShader);
     if (!vs || !ps || vs->Stage != CKRST_SHADER_VERTEX || ps->Stage != CKRST_SHADER_PIXEL) {
         CKBgfxLogf("CreateProgram", "missing shaders vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d",
-                   vs, VertexShader, ps, PixelShader, m_Shaders.Size());
+                   vs, VertexShader, ps, PixelShader, m_Resources->Shaders.SlotCount());
         return CKERR_INVALIDPARAMETER;
     }
-
-    const CKDWORD program = AllocateSlot(m_Programs, m_CapsDesc.MaxPrograms, m_ResourceTableMutex);
-    if (program == 0)
-        return CKERR_OUTOFMEMORY;
 
     bgfx::ProgramHandle handle = bgfx::createProgram(vs->Handle, ps->Handle, false);
     if (!bgfx::isValid(handle)) {
@@ -1923,9 +1772,11 @@ CKERROR CKBgfxBackend::CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, 
     rec->VertexShader = VertexShader;
     rec->PixelShader = PixelShader;
 
-    if (!StoreSlot(m_Programs, program, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD program = m_Resources->Programs.Insert(
+        rec, m_CapsDesc.MaxPrograms);
+    if (program == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *Out = program;
     TraceProgramMap((CKSTRING)"create", program, rec);
@@ -2002,21 +1853,15 @@ CKERROR CKBgfxBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc,
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD frameBuffer = AllocateSlot(m_FrameBuffers,
-                                              m_CapsDesc.MaxFrameBuffers,
-                                              m_ResourceTableMutex);
-    if (frameBuffer == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxFrameBufferRecord();
     rec->Handle = handle;
     rec->Desc = *Desc;
 
-    if (!StoreSlot(m_FrameBuffers, frameBuffer, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD frameBuffer = m_Resources->FrameBuffers.Insert(
+        rec, m_CapsDesc.MaxFrameBuffers);
+    if (frameBuffer == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *Out = frameBuffer;
     return CK_OK;
@@ -2065,13 +1910,6 @@ CKERROR CKBgfxBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWOR
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD texture = AllocateSlot(m_Textures, m_CapsDesc.MaxTextures,
-                                          m_ResourceTableMutex);
-    if (texture == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxTextureRecord();
     rec->Handle = handle;
     rec->Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL | msaaDescFlag;
@@ -2084,9 +1922,11 @@ CKERROR CKBgfxBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWOR
     rec->Format = fmt;
     rec->BitsPerPixel = 0;
 
-    if (!StoreSlot(m_Textures, texture, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD texture = m_Resources->Textures.Insert(
+        rec, m_CapsDesc.MaxTextures);
+    if (texture == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *Out = texture;
     TraceTextureMap((CKSTRING)"create", texture, rec);
@@ -2097,16 +1937,7 @@ CKBOOL CKBgfxBackend::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
 {
     if (!m_BgfxInitialized || !m_Created || Object == 0)
         return FALSE;
-    switch (Type) {
-    case CKRST_OBJ_TEXTURE:        return IsSlotAlive(m_Textures, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_VERTEXBUFFER:   return IsSlotAlive(m_VertexBuffers, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_INDEXBUFFER:    return IsSlotAlive(m_IndexBuffers, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_SHADER:         return IsSlotAlive(m_Shaders, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_PROGRAM:        return IsSlotAlive(m_Programs, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_VERTEXLAYOUT:   return IsSlotAlive(m_VertexLayouts, Object, m_ResourceTableMutex);
-    case CKRST_OBJ_FRAMEBUFFER:    return IsSlotAlive(m_FrameBuffers, Object, m_ResourceTableMutex);
-    default:                       return FALSE;
-    }
+    return m_Resources->IsAlive(Object, Type);
 }
 
 // bgfx defers the destruction to the end of the frame, so objects may go
@@ -2119,56 +1950,56 @@ CKERROR CKBgfxBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
         return CKERR_INVALIDPARAMETER;
     switch (Type) {
     case CKRST_OBJ_TEXTURE: {
-        CKBgfxTextureRecord *rec = TakeSlot(m_Textures, Object, m_ResourceTableMutex);
+        CKBgfxTextureRecord *rec = m_Resources->Textures.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
         TraceTextureMap((CKSTRING)"delete", Object, rec);
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_VERTEXBUFFER: {
-        CKBgfxVertexBufferRecord *rec = TakeSlot(m_VertexBuffers, Object, m_ResourceTableMutex);
+        CKBgfxVertexBufferRecord *rec = m_Resources->VertexBuffers.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
         TraceBufferMap((CKSTRING)"delete", (CKSTRING)"vb", Object, rec->Handle.idx, rec->Layout, rec->VertexSize, 0, 0, 0);
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_INDEXBUFFER: {
-        CKBgfxIndexBufferRecord *rec = TakeSlot(m_IndexBuffers, Object, m_ResourceTableMutex);
+        CKBgfxIndexBufferRecord *rec = m_Resources->IndexBuffers.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
         TraceBufferMap((CKSTRING)"delete", (CKSTRING)"ib", Object, rec->Handle.idx, 0, rec->Index32 ? 4u : 2u, 0, rec->Index32 ? 1u : 0u, 0);
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_SHADER: {
-        CKBgfxShaderRecord *rec = TakeSlot(m_Shaders, Object, m_ResourceTableMutex);
+        CKBgfxShaderRecord *rec = m_Resources->Shaders.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_PROGRAM: {
-        CKBgfxProgramRecord *rec = TakeSlot(m_Programs, Object, m_ResourceTableMutex);
+        CKBgfxProgramRecord *rec = m_Resources->Programs.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
         TraceProgramMap((CKSTRING)"delete", Object, rec);
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_VERTEXLAYOUT: {
-        CKBgfxVertexLayoutRecord *rec = TakeSlot(m_VertexLayouts, Object, m_ResourceTableMutex);
+        CKBgfxVertexLayoutRecord *rec = m_Resources->VertexLayouts.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     case CKRST_OBJ_FRAMEBUFFER: {
-        CKBgfxFrameBufferRecord *rec = TakeSlot(m_FrameBuffers, Object, m_ResourceTableMutex);
+        CKBgfxFrameBufferRecord *rec = m_Resources->FrameBuffers.Remove(Object);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
-        DestroyRecord(rec);
+        CKBgfxDestroyRecord(rec);
         return CK_OK;
     }
     default:
@@ -2243,14 +2074,6 @@ CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD Vert
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD buffer = AllocateSlot(m_VertexBuffers,
-                                         m_CapsDesc.MaxDynamicVertexBuffers,
-                                         m_ResourceTableMutex);
-    if (buffer == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxVertexBufferRecord();
     rec->Handle = handle;
     rec->Layout = Layout;
@@ -2258,9 +2081,11 @@ CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD Vert
     rec->VertexCount = VertexCount;
     rec->Size = totalSize;
 
-    if (!StoreSlot(m_VertexBuffers, buffer, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD buffer = m_Resources->VertexBuffers.Insert(
+        rec, m_CapsDesc.MaxDynamicVertexBuffers);
+    if (buffer == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *OutBuffer = buffer;
     TraceBufferMap((CKSTRING)"create", (CKSTRING)"vb", buffer, rec->Handle.idx,
@@ -2299,23 +2124,17 @@ CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index3
     if (!bgfx::isValid(handle))
         return CKERR_OUTOFMEMORY;
 
-    const CKDWORD buffer = AllocateSlot(m_IndexBuffers,
-                                         m_CapsDesc.MaxDynamicIndexBuffers,
-                                         m_ResourceTableMutex);
-    if (buffer == 0) {
-        bgfx::destroy(handle);
-        return CKERR_OUTOFMEMORY;
-    }
-
     auto *rec = new CKBgfxIndexBufferRecord();
     rec->Handle = handle;
     rec->Index32 = Index32;
     rec->IndexCount = IndexCount;
     rec->Size = totalSize;
 
-    if (!StoreSlot(m_IndexBuffers, buffer, rec, m_ResourceTableMutex)) {
-        DestroyRecord(rec);
-        return CKERR_INVALIDOPERATION;
+    const CKDWORD buffer = m_Resources->IndexBuffers.Insert(
+        rec, m_CapsDesc.MaxDynamicIndexBuffers);
+    if (buffer == 0) {
+        CKBgfxDestroyRecord(rec);
+        return CKERR_OUTOFMEMORY;
     }
     *OutBuffer = buffer;
     TraceBufferMap((CKSTRING)"create", (CKSTRING)"ib", buffer, rec->Handle.idx,

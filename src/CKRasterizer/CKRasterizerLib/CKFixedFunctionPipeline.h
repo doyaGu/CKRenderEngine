@@ -15,7 +15,6 @@
 #include "CKFFConstants.h"
 #include "CKFFDrawTypes.h"
 #include "CKRasterizerEnums.h"
-#include "CKFFDrawPreparer.h"
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
@@ -23,10 +22,6 @@
 #include "CKDrawStateCache.h"
 #include "CKVertexLayoutCache.h"
 #include "CKTransientGeometry.h"
-
-#ifndef CKRE_ENABLE_TEST_ACCESS
-#define CKRE_ENABLE_TEST_ACCESS 0
-#endif
 
 struct CKLightData;
 
@@ -148,28 +143,18 @@ public:
         return (CKDWORD)code < CKRST_DIAG_COUNT ? m_DrawApproximationCounts[code] : 0;
     }
 
-    // === Subsystem access ===
-    CKVertexLayoutCache &GetVertexLayoutCache() { return m_VertexLayoutCache; }
-    CKFFShaderCache &GetShaderCache() { return m_ShaderCache; }
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    CKFFDrawProbes &GetProbes() { return m_Probes; }
-#endif
+    // Resolves a backend vertex layout without exposing the cache itself.
+    CKDWORD ResolveVertexLayout(CKDWORD formatFlags) { return m_VertexLayoutCache.GetLayout(formatFlags); }
 
     // === Matrix access ===
     const VxMatrix &GetWorldMatrix() const { return m_State.World; }
     const VxMatrix &GetViewMatrix() const { return m_State.View; }
     const VxMatrix &GetProjectionMatrix() const { return m_State.Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKFFFrameStats &GetFrameStats() const { return m_Probes.Stats; }
-#else
-    const CKFFFrameStats &GetFrameStats() const;
-#endif
 
 private:
-#if CKRE_ENABLE_TEST_ACCESS
     friend struct CKFFPipelineTestAccess;
-#endif
 
     // Static uniforms are uploaded with every draw, so only program-affecting
     // changes have to invalidate anything.
@@ -197,17 +182,17 @@ private:
     CKVertexLayoutCache m_VertexLayoutCache;
     CKTransientGeometry m_TransientGeometry;
     CKDWORD m_FrameNumber;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDebugState m_DebugState;
-#endif
     CKFFStateStore m_State;
 
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes m_Probes;
-#endif
-    CKFFDrawPreparer m_DrawPreparer;
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
+    CKBOOL m_VertexBufferProgramCacheValid;
+    CKDWORD m_VertexBufferProgramCacheDPFlags;
+    CKDWORD m_VertexBufferProgramCacheFormatFlags;
+    CKDWORD m_VertexBufferProgramCacheActiveTextureCount;
+    CKFFProgramPreparation m_VertexBufferProgramCache;
     CKFFDrawRejectReason m_LastDrawRejectReason;
     CKBOOL m_FrameDrawRejected;
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
@@ -220,6 +205,15 @@ private:
     // Internal methods
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
     void MarkPreparedProgramDirty();
+    CKFFProgramPrepareStatus PrepareProgram(CKFFProgramPreparation *preparation,
+                                            CKDWORD dpFlags,
+                                            CKDWORD activeTextureCount,
+                                            CKDWORD formatFlags = 0,
+                                            const CKBYTE *texcoordComponentCounts = nullptr,
+                                            CKBOOL pointSprite = FALSE);
+    CKFFProgramPrepareStatus PrepareVertexBufferProgram(CKFFProgramPreparation *preparation,
+                                                        CKDWORD dpFlags,
+                                                        CKDWORD formatFlags);
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags);

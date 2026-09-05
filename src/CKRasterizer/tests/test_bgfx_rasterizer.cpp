@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "CKBgfxBackend.h"
+#include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "VxWindowFunctions.h"
@@ -735,6 +736,45 @@ static void TestExactPixelFormatMapping()
 // Main
 // ============================================================================
 
+static void TestGenerationCheckedResourceTable()
+{
+    TEST_SECTION("Generation-checked Resource Table");
+
+    VxMutex mutex;
+    CKBgfxResourceTable<CKBgfxShaderRecord> table(mutex);
+    CKBgfxShaderRecord *firstRecord = new CKBgfxShaderRecord();
+    firstRecord->Handle = BGFX_INVALID_HANDLE;
+    firstRecord->Stage = CKRST_SHADER_VERTEX;
+    const CKDWORD first = table.Insert(firstRecord, 1);
+    TEST_ASSERT(first != 0, "insertion atomically owns a slot and its record");
+    TEST_ASSERT(table.IsAlive(first) && table.Get(first) == firstRecord,
+                "the current generation resolves to its record");
+
+    CKBgfxShaderRecord *removed = table.Remove(first);
+    TEST_ASSERT(removed == firstRecord && !table.IsAlive(first) && table.Get(first) == NULL,
+                "removal invalidates the old handle immediately");
+    CKBgfxDestroyRecord(removed);
+
+    CKBgfxShaderRecord *secondRecord = new CKBgfxShaderRecord();
+    secondRecord->Handle = BGFX_INVALID_HANDLE;
+    secondRecord->Stage = CKRST_SHADER_PIXEL;
+    const CKDWORD second = table.Insert(secondRecord, 1);
+    TEST_ASSERT(second != 0 && second != first &&
+                    (second & 0xffffu) == (first & 0xffffu),
+                "slot reuse advances the generation");
+    TEST_ASSERT(table.Get(first) == NULL && table.Get(second) == secondRecord,
+                "only the current generation resolves after slot reuse");
+    CKBgfxShaderRecord *overflowRecord = new CKBgfxShaderRecord();
+    overflowRecord->Handle = BGFX_INVALID_HANDLE;
+    overflowRecord->Stage = CKRST_SHADER_VERTEX;
+    TEST_ASSERT(table.Insert(overflowRecord, 1) == 0,
+                "the live-slot limit rejects a concurrent second insertion");
+    CKBgfxDestroyRecord(overflowRecord);
+    table.DestroyAll();
+    TEST_ASSERT(!table.IsAlive(second),
+                "bulk destruction clears every live slot");
+}
+
 int main()
 {
     printf("=== CKBgfxRasterizer Unit Tests ===\n");
@@ -753,6 +793,7 @@ int main()
     TestPersistentCacheCallback();
     TestDebugOverlayViewMapContract();
     TestExactPixelFormatMapping();
+    TestGenerationCheckedResourceTable();
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n",
            g_PassCount, g_FailCount, g_TestCount);

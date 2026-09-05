@@ -2,6 +2,7 @@ function(ckre_configure_test_target TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CKRE_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
@@ -59,7 +60,10 @@ endfunction()
 # FFPRecordingHarness.h. They do not link the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
-    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
+    )
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
     )
@@ -168,7 +172,9 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_add_rasterizer3_test(rasterizer3_pixel_tests
         test_rasterizer3_pixels.cpp
     )
-    target_compile_definitions(rasterizer3_pixel_tests PRIVATE CKRE_ENABLE_TEST_ACCESS=1)
+    target_include_directories(rasterizer3_pixel_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer
+    )
     target_link_libraries(rasterizer3_pixel_tests PRIVATE
         CKBgfxRasterizerStatic
         SDL3::SDL3

@@ -54,8 +54,6 @@
 #define VIRTOOLS_RENDERENGIEN_GUID CKGUID(0xAABCF63, 0)
 
 extern void SetProcessorSpecific_FunctionsPtr();
-extern CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd);
-extern void CKTranslatedNullRasterizerClose(CKRasterizer *rst);
 
 INSTANCE_HANDLE g_DllHandle = nullptr;
 CKBOOL g_EnumerationDone = FALSE;

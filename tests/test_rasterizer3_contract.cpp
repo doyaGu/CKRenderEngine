@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "CKRasterizerCapsBaseline.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
@@ -1110,8 +1110,11 @@ void TestOverlayPhase()
     f.Context->EndScene();
     TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
     TestCheck(!f.Context->BeginOverlayPhase(), "second overlay phase in a frame rejected");
+    TestCheck(!f.Context->BeginScene(), "scene cannot restart after overlay began");
+    TestCheck(f.Context->IsOverlayPhaseForTests(), "rejected scene keeps overlay phase active");
     DrawTriangle(f.Context);
     f.Context->BackToFront(FALSE);
+    TestCheck(!f.Context->IsOverlayPhaseForTests(), "present resets overlay phase");
     const FFPDrawRecord *scene = FindDraw(f, 0);
     const FFPDrawRecord *overlay = FindDraw(f, 1);
     TestCheck(scene && overlay, "overlay events");

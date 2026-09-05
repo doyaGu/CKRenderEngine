@@ -64,8 +64,6 @@ struct CKFFFrameStats {
     CKBOOL HasLastWorldMatrix;
 };
 
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-
 struct CKFFDiagnosticConfig {
     bool StatsEnabled;
     bool UniformHistEnabled;
@@ -114,6 +112,8 @@ public:
 
 private:
 };
+
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
 
 #define CKFF_SCOPE_TIME(probes, field) \
     CKFFScopeTimer _ckff_t_##field((probes).TimerSlot(&CKFFFrameStats::field), (probes).TimingEnabled())

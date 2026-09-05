@@ -1,7 +1,5 @@
 # CKRasterizer - rasterizer core and bgfx implementation
 add_subdirectory(CKRasterizerLib)
-# NULL implementation of the v3 contract (phase 0 stub, replaced in step 1.4)
-
 set(CKBGFX_RASTERIZER_SOURCES
         CKBgfxRasterizer/CKBgfxBackend.cpp
         CKBgfxRasterizer/CKBgfxBackendDriver.cpp
@@ -14,6 +12,7 @@ set(CKBGFX_RASTERIZER_SOURCES
 
 set(CKBGFX_RASTERIZER_HEADERS
         CKBgfxRasterizer/CKBgfxBackend.h
+        CKBgfxRasterizer/CKBgfxResources.h
         CKBgfxRasterizer/CKBgfxConfig.h
         CKBgfxRasterizer/CKBgfxDrawMapTrace.h
         CKBgfxRasterizer/CKBgfxInternal.h
@@ -105,12 +104,12 @@ foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
 
     target_include_directories(${_ckre_bgfx_target}
             PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer>
             $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
             PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
     )
 
     target_link_libraries(${_ckre_bgfx_target}
@@ -131,6 +130,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_executable(test_null_rasterizer tests/test_null_rasterizer.cpp)
     target_include_directories(test_null_rasterizer PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
             ${CKRE_INCLUDE_DIR}
     )
     target_link_libraries(test_null_rasterizer PRIVATE
@@ -148,9 +148,9 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     target_include_directories(test_bgfx_rasterizer PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
             ${CKRE_INCLUDE_DIR}
     )
-    target_compile_definitions(test_bgfx_rasterizer PRIVATE CKRE_ENABLE_TEST_ACCESS=1)
     if (TARGET CKBgfxRasterizerStatic)
         target_link_libraries(test_bgfx_rasterizer PRIVATE
                 CKBgfxRasterizerStatic

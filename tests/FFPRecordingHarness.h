@@ -7,13 +7,20 @@
 // traffic) and a few failure knobs.
 
 #include "CKNullBackend.h"
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "TestTriangleMultiset.h"
 
 #include <string.h>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+
+struct CKFFPipelineTestAccess {
+    static CKDWORD CachedProgramCount(const CKFixedFunctionPipeline &pipeline)
+    {
+        return pipeline.m_ShaderCache.CachedProgramCount();
+    }
+};
 
 struct FFPTextureBinding {
     CKDWORD Stage;        // backend slot

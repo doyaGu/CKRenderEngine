@@ -2,7 +2,7 @@
 // render targets, readback and statistics. The frame flow and the draws live
 // in CKTranslatedFrame.cpp.
 
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "CKFFUniformState.h"
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
@@ -27,9 +27,8 @@ CKBOOL SameImageFormat(const VxImageDescEx &a, const VxImageDescEx &b)
 
 CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerBackend *Backend)
     : m_TranslatedDriver(Driver), m_Backend(Backend), m_Created(FALSE), m_ShuttingDown(FALSE),
-      m_InScene(FALSE), m_OverlayPhase(FALSE), m_PassOpen(FALSE), m_InternalTargets(FALSE), m_Composited(FALSE),
-      m_FrameTargetDecided(FALSE), m_FrameOpen(FALSE), m_LastDeviceFrame(0), m_NativePresented(FALSE),
-      m_FrameNumber(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS), m_TargetWidth(0), m_TargetHeight(0),
+      m_FrameNumber(0), m_LastDeviceFrame(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS),
+      m_TargetWidth(0), m_TargetHeight(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
       m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0), m_LayoutMismatchLogged(FALSE)
@@ -100,7 +99,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_ShuttingDown = FALSE;
     memset(&m_Stats, 0, sizeof(m_Stats));
     m_FrameNumber = 0;
-    m_FrameOpen = FALSE;
+    m_Frame.Reset();
 
     ResetStateMirror();
 
@@ -130,7 +129,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
 
 CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CKDWORD Flags)
 {
-    if (!m_Created || m_ShuttingDown || m_FrameOpen || Flags != 0)
+    if (!m_Created || m_ShuttingDown || m_Frame.Open || Flags != 0)
         return FALSE;
     if (m_Backend->Resize(PosX, PosY, Width, Height) != CK_OK)
         return FALSE;
@@ -139,11 +138,11 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_Width = (CKDWORD)Width;
     m_Height = (CKDWORD)Height;
     m_Present.DestroyTargets();
-    m_NativePresented = FALSE;
+    m_Frame.NativePresented = FALSE;
     // The internal targets follow the new size at the next frame (a readback
     // between frames may have decided the previous ones already).
-    m_InternalTargets = FALSE;
-    m_FrameTargetDecided = FALSE;
+    m_Frame.InternalTargets = FALSE;
+    m_Frame.TargetDecided = FALSE;
     // The viewport follows the window like on creation; the engine sets its
     // own viewport again after a resize anyway.
     m_Viewport.ViewX = 0;
@@ -173,8 +172,8 @@ CKBOOL CKTranslatedContext::SetOptions(const CKRasterizerOptions *Options)
     if (m_Created && !m_ShuttingDown) {
         // Between frames the next frame decides its targets again (a readback
         // may have prepared them with the previous options).
-        if (!m_FrameOpen)
-            m_FrameTargetDecided = FALSE;
+        if (!m_Frame.Open)
+            m_Frame.TargetDecided = FALSE;
         ApplyOptions();
     }
     return TRUE;
@@ -231,16 +230,14 @@ CKBOOL CKTranslatedContext::BeginShutdown()
 {
     if (!m_Created || m_ShuttingDown)
         return TRUE;
-    if (m_FrameOpen) {
+    if (m_Frame.Open) {
         // An open frame (scene without BackToFront) ends without presenting.
         CKDWORD frame = 0;
         if (m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK)
             m_LastDeviceFrame = frame;
-        m_FrameOpen = FALSE;
+        m_Frame.Open = FALSE;
     }
-    m_InScene = FALSE;
-    m_PassOpen = FALSE;
-    m_OverlayPhase = FALSE;
+    m_Frame.Reset();
     ReleaseFrameScratch();
     CancelReadbacks();
     ReleaseTarget();
@@ -261,7 +258,7 @@ CKBOOL CKTranslatedContext::BeginShutdown()
 
 CKBOOL CKTranslatedContext::IsIdle() const
 {
-    if (m_FrameOpen)
+    if (m_Frame.Open)
         return FALSE;
     return !m_Backend || m_Backend->IsIdle();
 }
@@ -721,7 +718,7 @@ CKBOOL CKTranslatedContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, c
     }
     resource.FormatFlags = formatFlags;
     resource.DeviceStride = CKVertexLayoutCache::ComputeStride(formatFlags);
-    resource.DeviceLayout = m_FFP.GetVertexLayoutCache().GetLayout(formatFlags);
+    resource.DeviceLayout = m_FFP.ResolveVertexLayout(formatFlags);
     if (resource.DeviceLayout == 0 || resource.DeviceStride == 0) {
         if (!m_LayoutMismatchLogged) {
             m_LayoutMismatchLogged = TRUE;
@@ -1032,7 +1029,7 @@ CKBOOL CKTranslatedContext::SetTargetTexture(CKDWORD Texture, int Width, int Hei
 {
     if (!m_Created || m_ShuttingDown)
         return FALSE;
-    if (m_InScene) {
+    if (m_Frame.IsSceneActive() || m_Frame.IsOverlayActive()) {
         Diag(CKRST_DIAG_INVALID_TARGET);
         return FALSE;
     }
@@ -1170,7 +1167,7 @@ CKBOOL CKTranslatedContext::CanReadNativeTarget()
 {
     PrepareFrameTarget();
     const CKPresentTarget &native = m_Present.NativeTarget();
-    if (m_Target || !m_InternalTargets || !native.IsActive())
+    if (m_Target || !m_Frame.InternalTargets || !native.IsActive())
         return FALSE;
     return m_Present.AcquireReadbackTexture(native.Width, native.Height) != 0;
 }
@@ -1277,9 +1274,9 @@ void CKTranslatedContext::FailArmedTextureReadbacks()
 
 CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber)
 {
-    if (m_FrameOpen)
+    if (m_Frame.Open)
         return FALSE;
-    const CKBOOL passOpen = m_PassOpen;
+    const CKBOOL passOpen = m_Frame.PassOpen;
     const CKDWORD passes = m_FramePasses;
     CKBOOL ok = TRUE;
     if (Present && !m_Target)
@@ -1288,8 +1285,8 @@ CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKD
         ok = BlitForReadback();
     CKDWORD frame = 0;
     const CKERROR status = m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame);
-    m_FrameOpen = FALSE;
-    m_PassOpen = passOpen;
+    m_Frame.Open = FALSE;
+    m_Frame.PassOpen = passOpen;
     m_FramePasses = passes;
     if (FrameNumber)
         *FrameNumber = frame;
@@ -1325,13 +1322,13 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback->HasRect = TRUE;
     }
     m_Readbacks.push_back(readback);
-    if (m_FrameOpen)
+    if (m_Frame.Open)
         return TRUE; // issued at the end of this frame (BackToFront)
     // Between frames: a frame that only re-presents the native target (or
     // just blits the target texture) carries the readback blit; the next
     // BackToFront delivers it.
     CKDWORD frame = 0;
-    if (SubmitReadbackFrame(m_NativePresented, TRUE, &frame)) {
+    if (SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame)) {
         m_LastDeviceFrame = frame;
         if (IssueTextureReadback(*readback))
             return TRUE;
@@ -1399,7 +1396,7 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;
     }
-    if (m_InScene || m_FrameOpen) {
+    if (m_Frame.IsSceneActive() || m_Frame.Open) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return 0;
     }
@@ -1425,13 +1422,13 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
     // reaches AvailableFrame. The waiting frames only re-present, so the
     // window keeps its image.
     CKDWORD frame = 0;
-    if (!SubmitReadbackFrame(m_NativePresented, TRUE, &frame))
+    if (!SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame))
         return 0;
     m_LastDeviceFrame = frame;
     if (!IssueTextureReadback(readback))
         return 0;
     for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
-        if (!SubmitReadbackFrame(m_NativePresented, FALSE, &frame))
+        if (!SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &frame))
             break;
     }
     m_LastDeviceFrame = frame;
@@ -1471,7 +1468,7 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    if (m_InScene || m_FrameOpen) {
+    if (m_Frame.IsSceneActive() || m_Frame.Open) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }

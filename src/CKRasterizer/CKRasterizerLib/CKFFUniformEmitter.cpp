@@ -88,22 +88,14 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->PixelFogMode = context->FogEnabled ? context->ShaderKey.FS.PixelFogMode : 0;
 }
 
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
 CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
                                        const CKDrawStateCache &drawState,
                                        CKFFShaderCache &shaderCache,
                                        CKFFDrawProbes &probes)
-#else
-CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
-                                       const CKDrawStateCache &drawState,
-                                       CKFFShaderCache &shaderCache)
-#endif
     : m_State(state),
       m_DrawState(drawState),
-      m_ShaderCache(shaderCache)
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-      , m_Probes(probes)
-#endif
+      m_ShaderCache(shaderCache),
+      m_Probes(probes)
 {
 }
 

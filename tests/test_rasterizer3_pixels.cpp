@@ -9,7 +9,7 @@
 
 #include "CKRasterizer.h"
 #include "CKBgfxBackend.h"
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "TestTriangleMultiset.h"
 
 #include <SDL3/SDL.h>
@@ -21,6 +21,13 @@
 
 // bgfx plugin entry (CK_LIB build of CKBgfxRasterizer).
 extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
+
+struct CKBgfxBackendTestAccess {
+    static void ExhaustViews(CKBgfxBackend &backend)
+    {
+        backend.m_NextView = backend.m_CapsDesc.MaxRenderViews;
+    }
+};
 
 namespace {
 
@@ -923,7 +930,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 {
     CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
     CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
-    backend->ExhaustViewsForTests();
+    CKBgfxBackendTestAccess::ExhaustViews(*backend);
     CKBackendPassDesc pass;
     pass.Rect.right = kWidth;
     pass.Rect.bottom = kHeight;

@@ -60,19 +60,12 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
 }
 
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
 CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
                                      CKFFShaderCache &shaderCache,
                                      CKFFDrawProbes &probes)
-#else
-CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
-                                     CKFFShaderCache &shaderCache)
-#endif
     : m_State(state),
       m_ShaderCache(shaderCache),
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
       m_Probes(probes),
-#endif
       m_SamplerOverrides(),
       m_BoundSlotMask(0)
 {

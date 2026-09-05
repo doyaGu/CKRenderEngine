@@ -1,7 +1,8 @@
 #include "RCKRenderManager.h"
 
-#include "CKLevel.h"
 #include "CKTranslatedRasterizer.h"
+
+#include "CKLevel.h"
 #include "CKMaterial.h"
 #include "CKParameterManager.h"
 #include "CKRenderSettings.h"
@@ -1125,10 +1126,12 @@ CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
 void RCKRenderManager::RefreshDriverCaps(int DriverIndex) {
     if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
         return;
-    CKTranslatedDriver *driver = static_cast<CKTranslatedDriver *>(m_Drivers[DriverIndex].RasterizerDriver);
+    CKRasterizerDriver *driver = m_Drivers[DriverIndex].RasterizerDriver;
     if (!driver)
         return;
-    driver->SyncCapsFromBackend();
+    // Context creation refreshes the backend limits before this method is
+    // called. Keep the engine on the v3 driver interface instead of reaching
+    // into the translation-core implementation.
     UpdateDriverDescCaps(&m_Drivers[DriverIndex]);
 }
 

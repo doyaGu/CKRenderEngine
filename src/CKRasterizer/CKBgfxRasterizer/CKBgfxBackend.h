@@ -33,6 +33,16 @@ struct CKBgfxDrawMapTextureBinding {
 class CKBgfxBackend;
 class CKBgfxBackendDriver;
 class CKBgfxBackendLibrary;
+class CKBgfxResources;
+struct CKBgfxBackendTestAccess;
+struct CKBgfxShaderRecord;
+struct CKBgfxProgramRecord;
+struct CKBgfxVertexLayoutRecord;
+struct CKBgfxVertexBufferRecord;
+struct CKBgfxIndexBufferRecord;
+struct CKBgfxTextureRecord;
+struct CKBgfxFrameBufferRecord;
+enum CKBgfxTextureOrientation : int;
 
 // ===========================================================================
 // bgfx Callback Implementation
@@ -64,108 +74,6 @@ public:
 private:
     CKBgfxBackend *m_Context;
     VxMutex m_CacheMutex;
-};
-
-// ===========================================================================
-// Internal resource records
-// ===========================================================================
-
-struct CKBgfxShaderRecord {
-    bgfx::ShaderHandle Handle;
-    CK_SHADER_STAGE Stage;
-};
-
-struct CKBgfxProgramRecord {
-    bgfx::ProgramHandle Handle;
-    CKDWORD VertexShader;
-    CKDWORD PixelShader;
-};
-
-struct CKBgfxVertexLayoutRecord {
-    bgfx::VertexLayoutHandle Handle;
-    bgfx::VertexLayout Layout;
-};
-
-struct CKBgfxVertexBufferRecord {
-    bgfx::DynamicVertexBufferHandle Handle;
-    CKDWORD Layout;
-    CKDWORD VertexSize;
-    CKDWORD VertexCount;
-    CKDWORD Size;
-};
-
-struct CKBgfxIndexBufferRecord {
-    bgfx::DynamicIndexBufferHandle Handle;
-    CKBOOL Index32;
-    CKDWORD IndexCount;
-    CKDWORD Size;
-};
-
-enum CKBgfxTextureOrientation {
-    CKBGFX_ORIENTATION_UNKNOWN = 0,
-    CKBGFX_ORIENTATION_TOP_LEFT,
-    CKBGFX_ORIENTATION_BOTTOM_LEFT,
-    CKBGFX_ORIENTATION_MIXED,
-};
-
-static const CKDWORD CKBGFX_MAX_TRACKED_MIPS = 32;
-static const CKDWORD CKBGFX_MAX_FRAMEBUFFER_ATTACHMENTS = 2;
-
-struct CKBgfxTextureRecord {
-    CKBgfxTextureRecord()
-        : Handle(BGFX_INVALID_HANDLE), SamplerBaseHandle(BGFX_INVALID_HANDLE),
-          Flags(0), Width(0), Height(0), Depth(1),
-          IsDepth(FALSE), RequestedAutoMips(FALSE), MipCount(1),
-          Format(bgfx::TextureFormat::Count), PixelFormat(UNKNOWN_PF), BitsPerPixel(0),
-          SamplerBaseValid(FALSE),
-          AutoMipBaseValid(FALSE)
-    {
-        memset(ReadbackOrientation, CKBGFX_ORIENTATION_UNKNOWN,
-               sizeof(ReadbackOrientation));
-    }
-
-    ~CKBgfxTextureRecord()
-    {
-        if (bgfx::isValid(SamplerBaseHandle)) {
-            bgfx::destroy(SamplerBaseHandle);
-            SamplerBaseHandle = BGFX_INVALID_HANDLE;
-        }
-        delete[] AutoMipBaseDesc.Image;
-        AutoMipBaseDesc.Image = NULL;
-    }
-
-    bgfx::TextureHandle Handle;
-    bgfx::TextureHandle SamplerBaseHandle;
-    CKDWORD Flags;
-    CKDWORD Width;
-    CKDWORD Height;
-    CKDWORD Depth;
-    CKBOOL IsDepth;
-    CKBOOL RequestedAutoMips;
-    CKDWORD MipCount;
-    bgfx::TextureFormat::Enum Format;
-    VX_PIXELFORMAT PixelFormat;
-    CKDWORD BitsPerPixel;
-    CKBOOL SamplerBaseValid;
-    VxImageDescEx AutoMipBaseDesc;
-    CKBOOL AutoMipBaseValid;
-    CKBYTE ReadbackOrientation[CKBGFX_MAX_TRACKED_MIPS];
-};
-
-// A render target: one colour attachment (2D or a cube face / volume slice)
-// plus an optional depth-stencil texture.
-struct CKBgfxFrameBufferRecord {
-    bgfx::FrameBufferHandle Handle;
-    CKBackendRenderTargetDesc Desc;
-};
-
-template <typename T>
-struct CKBgfxResourceSlot {
-    CKBgfxResourceSlot() : Record(NULL), Generation(0), Retired(FALSE) {}
-
-    T *Record;
-    CKWORD Generation;
-    CKBOOL Retired;
 };
 
 // ===========================================================================
@@ -262,14 +170,6 @@ public:
     CKERROR SetPaletteColor(CKDWORD Index, CKDWORD RGBA) override;
     const CKBackendStats &GetStats() const override { return m_Stats; }
 
-#ifdef CKRE_ENABLE_TEST_ACCESS
-    CKDWORD GetFatalCountForTests() const { return m_DebugFatalCount.load(std::memory_order_relaxed); }
-    void InjectFatalForTests() { LatchFatalError(CKERR_INVALIDRENDERCONTEXT); }
-    CKDWORD GetInvalidSubmitCountForTests() const { return m_DebugInvalidSubmitCount.load(std::memory_order_relaxed); }
-    CKDWORD GetTransientAllocMissCountForTests() const { return m_DebugTransientAllocMissCount.load(std::memory_order_relaxed); }
-    void ExhaustViewsForTests() { m_NextView = m_CapsDesc.MaxRenderViews; }
-#endif
-
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);
     CKBgfxProgramRecord *GetProgram(CKDWORD Handle);
     CKBgfxVertexLayoutRecord *GetVertexLayout(CKDWORD Handle);
@@ -279,6 +179,8 @@ public:
     CKBgfxFrameBufferRecord *GetFrameBuffer(CKDWORD Handle);
 
 private:
+    friend struct CKBgfxBackendTestAccess;
+
     struct SlotBinding {
         CKDWORD Texture;
         CKSamplerDesc Sampler;
@@ -415,14 +317,7 @@ private:
     CKBOOL m_DebugLogUniforms;
 
     // Resources
-    XArray<CKBgfxResourceSlot<CKBgfxShaderRecord> > m_Shaders;
-    XArray<CKBgfxResourceSlot<CKBgfxProgramRecord> > m_Programs;
-    XArray<CKBgfxResourceSlot<CKBgfxVertexLayoutRecord> > m_VertexLayouts;
-    XArray<CKBgfxResourceSlot<CKBgfxVertexBufferRecord> > m_VertexBuffers;
-    XArray<CKBgfxResourceSlot<CKBgfxIndexBufferRecord> > m_IndexBuffers;
-    XArray<CKBgfxResourceSlot<CKBgfxTextureRecord> > m_Textures;
-    XArray<CKBgfxResourceSlot<CKBgfxFrameBufferRecord> > m_FrameBuffers;
-    mutable VxMutex m_ResourceTableMutex;
+    CKBgfxResources *m_Resources;
     VxMutex m_ResourceStateMutex;
 
     // Transient geometry of the current frame

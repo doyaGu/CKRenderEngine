@@ -155,6 +155,9 @@ endif ()
 # Function to configure common target settings
 function(ckre_configure_target TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
+    target_include_directories(${TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizer/CKRasterizerLib
+    )
 
     target_include_directories(${TARGET_NAME}
             PUBLIC
@@ -184,8 +187,7 @@ function(ckre_configure_target TARGET_NAME)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
 
-    # PUBLIC: tests and tools that link CK2_3DStatic include translation-core headers.
-    target_link_libraries(${TARGET_NAME} PUBLIC CKRasterizerLib)
+    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
 
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
     target_link_libraries(${TARGET_NAME} PRIVATE SDL3::SDL3)

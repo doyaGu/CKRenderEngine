@@ -1927,7 +1927,7 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
     const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
     TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
               "State variants of one vertex layout must share one backend program");
-    TestCheck(ffp.GetShaderCache().CachedProgramCount() == 1,
+    TestCheck(CKFFPipelineTestAccess::CachedProgramCount(ffp) == 1,
               "The shader cache must hold one program per created vertex variant");
     TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
               "The shared program must receive the current-draw specialization data");
@@ -1941,7 +1941,7 @@ void ProgramFamilyHasFourVertexVariants() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend());
 
-    TestCheck(context.CreatedProgramCount == 0 && ffp.GetShaderCache().CachedProgramCount() == 0,
+    TestCheck(context.CreatedProgramCount == 0 && CKFFPipelineTestAccess::CachedProgramCount(ffp) == 0,
               "Programs are created on first use");
 
     ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
@@ -1961,7 +1961,7 @@ void ProgramFamilyHasFourVertexVariants() {
     ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                          CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
     TestCheck(context.CreatedProgramCount == 4 &&
-                  ffp.GetShaderCache().CachedProgramCount() == CKFF_PROGRAM_VARIANT_COUNT,
+                  CKFFPipelineTestAccess::CachedProgramCount(ffp) == CKFF_PROGRAM_VARIANT_COUNT,
               "User clip planes add the two clip-distance vertex variants");
 
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);

@@ -11,7 +11,7 @@
 #include "RCKRenderManager.h"
 #include "RCKMaterial.h"
 #include "RCKTexture.h"
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 

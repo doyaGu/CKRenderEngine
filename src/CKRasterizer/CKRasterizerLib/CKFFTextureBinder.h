@@ -12,14 +12,9 @@ class CKRasterizerBackend;
 
 class CKFFTextureBinder {
 public:
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFTextureBinder(const CKFFStateStore &state,
                       CKFFShaderCache &shaderCache,
                       CKFFDrawProbes &probes);
-#else
-    CKFFTextureBinder(const CKFFStateStore &state,
-                      CKFFShaderCache &shaderCache);
-#endif
 
     void SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso);
     void ResetProgramBindings();
@@ -38,9 +33,7 @@ private:
     CKFFShaderCache &m_ShaderCache;
     XHashTable<CKBOOL, CKDWORD> m_InitializedPrograms;
     CKDWORD m_BoundSlotMask;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     CKFFDrawProbes &m_Probes;
-#endif
     CKFFSamplerOverrides m_SamplerOverrides;
 };
 

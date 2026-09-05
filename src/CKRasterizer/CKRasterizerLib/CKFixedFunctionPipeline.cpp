@@ -6,6 +6,7 @@
 #include "CKRenderSettings.h"
 #include "CKRenderPerfClock.h"
 #include "CKRenderFrameCostStats.h"
+#include "CKFFStateResolver.h"
 
 #include <math.h>
 #include <string.h>
@@ -13,16 +14,14 @@
 
 CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Backend(nullptr),
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-      m_DrawPreparer(m_State, m_DrawStateCache, m_ShaderCache, m_Probes),
+      m_FrameNumber(0),
       m_TextureBinder(m_State, m_ShaderCache, m_Probes),
       m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache, m_Probes),
-#else
-      m_DrawPreparer(m_State, m_DrawStateCache, m_ShaderCache),
-      m_TextureBinder(m_State, m_ShaderCache),
-      m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache),
-#endif
-      m_FrameNumber(0), m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
+      m_VertexBufferProgramCacheValid(FALSE),
+      m_VertexBufferProgramCacheDPFlags(0),
+      m_VertexBufferProgramCacheFormatFlags(0),
+      m_VertexBufferProgramCacheActiveTextureCount(0),
+      m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_LastDrawApproximationMask(0),
       m_FrameDrawRejected(FALSE),
       m_BorderPaletteCount(0), m_BorderPaletteFrameSerial((CKDWORD)-1) {
@@ -36,17 +35,11 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     m_Probes.Config.StatsInterval = settings.Interval;
 #endif
     m_State.Reset();
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
     memset(&m_Probes.Stats, 0, sizeof(m_Probes.Stats));
-#endif
+    CKFFInitPreparedState(&m_VertexBufferProgramCache.PreparedState);
+    CKFFInitProgramContext(&m_VertexBufferProgramCache.ProgramContext,
+                           CKFFShaderKey(), CKFFProgramBinding());
 }
-
-#if !CKRE_ENABLE_FFP_DIAGNOSTICS
-const CKFFFrameStats &CKFixedFunctionPipeline::GetFrameStats() const {
-    static const CKFFFrameStats s_EmptyStats = {};
-    return s_EmptyStats;
-}
-#endif
 
 CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
@@ -598,7 +591,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
 
 void CKFixedFunctionPipeline::MarkPreparedProgramDirty()
 {
-    m_DrawPreparer.InvalidateVertexBufferProgramCache();
+    m_VertexBufferProgramCacheValid = FALSE;
 }
 
 void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
@@ -680,6 +673,70 @@ void CKFixedFunctionPipeline::BeginDebugFrame() {
 // Drawing
 // ============================================================================
 
+CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
+    CKFFProgramPreparation *preparation,
+    CKDWORD dpFlags,
+    CKDWORD activeTextureCount,
+    CKDWORD formatFlags,
+    const CKBYTE *texcoordComponentCounts,
+    CKBOOL pointSprite)
+{
+    if (!preparation)
+        return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
+
+    {
+        CKFF_SCOPE_TIME(m_Probes, StateUs);
+        CKFFStateResolver::BuildPreparedState(
+            m_State, m_DrawStateCache, &preparation->PreparedState,
+            dpFlags, activeTextureCount, formatFlags,
+            texcoordComponentCounts, pointSprite);
+    }
+
+    const CKFFShaderKey shaderKey =
+        CKFFBuildShaderKeyFromPreparedState(&preparation->PreparedState);
+    CKFFProgramBinding programBinding;
+    {
+        CKFF_SCOPE_TIME(m_Probes, ProgramUs);
+        programBinding = m_ShaderCache.GetProgram(shaderKey);
+    }
+    CKFFInitProgramContext(
+        &preparation->ProgramContext, shaderKey, programBinding);
+    return preparation->ProgramContext.Program != 0
+        ? CKFF_PROGRAM_PREPARE_OK
+        : CKFF_PROGRAM_PREPARE_PROGRAM_MISSING;
+}
+
+CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
+    CKFFProgramPreparation *preparation,
+    CKDWORD dpFlags,
+    CKDWORD formatFlags)
+{
+    if (!preparation)
+        return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
+
+    const CKDWORD activeTextureCount =
+        (CKDWORD)CKFFResolveActiveTextureStageCount(
+            m_State.TextureHandles, m_State.StageStates);
+    if (m_VertexBufferProgramCacheValid &&
+        m_VertexBufferProgramCacheDPFlags == dpFlags &&
+        m_VertexBufferProgramCacheFormatFlags == formatFlags &&
+        m_VertexBufferProgramCacheActiveTextureCount == activeTextureCount) {
+        *preparation = m_VertexBufferProgramCache;
+        return CKFF_PROGRAM_PREPARE_OK;
+    }
+
+    const CKFFProgramPrepareStatus status = PrepareProgram(
+        preparation, dpFlags, activeTextureCount, formatFlags);
+    if (status == CKFF_PROGRAM_PREPARE_OK) {
+        m_VertexBufferProgramCacheDPFlags = dpFlags;
+        m_VertexBufferProgramCacheFormatFlags = formatFlags;
+        m_VertexBufferProgramCacheActiveTextureCount = activeTextureCount;
+        m_VertexBufferProgramCache = *preparation;
+        m_VertexBufferProgramCacheValid = TRUE;
+    }
+    return status;
+}
+
 CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
     VxDrawPrimitiveData *data)
@@ -748,7 +805,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     CKFFProgramPreparation programPreparation;
-    const CKFFProgramPrepareStatus prepareStatus = m_DrawPreparer.PrepareProgram(
+    const CKFFProgramPrepareStatus prepareStatus = PrepareProgram(
         &programPreparation, data->Flags, activeTextureCount, formatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
     if (prepareStatus != CKFF_PROGRAM_PREPARE_OK) {
@@ -884,7 +941,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
     }
     CKFFProgramPreparation preparation;
     const CKFFProgramPrepareStatus prepareStatus =
-        m_DrawPreparer.PrepareVertexBufferProgram(
+        PrepareVertexBufferProgram(
             &preparation, dpFlags, formatFlags);
     if (prepareStatus != CKFF_PROGRAM_PREPARE_OK) {
         if (prepareStatus == CKFF_PROGRAM_PREPARE_PROGRAM_MISSING)
@@ -1120,4 +1177,3 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
     return CKFFComputeDepthKey(m_State, m_DrawStateCache);
 }
-

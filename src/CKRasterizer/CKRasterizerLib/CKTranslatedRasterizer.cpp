@@ -1,4 +1,4 @@
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "CKNullBackend.h"
 
 #include <new>

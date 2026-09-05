@@ -8,12 +8,12 @@
 set(CKRASTERIZER_LIB_SOURCES
         CKRasterizerCapsBaseline.cpp
 
+        CKFFDebug.cpp
         CKFixedFunctionPipeline.cpp
         CKFFPipelineState.cpp
         CKFFPipelineGuards.cpp
         CKFFDrawProbes.cpp
         CKFFDrawTypes.cpp
-        CKFFDrawPreparer.cpp
         CKFFStateStore.cpp
         CKFFStateResolver.cpp
         CKFFTextureBinder.cpp
@@ -66,7 +66,6 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFShaderCache.h
         CKFFConstants.h
         CKFFDrawTypes.h
-        CKFFDrawPreparer.h
         CKFFStateStore.h
         CKFFStateResolver.h
         CKFFTextureBinder.h
@@ -78,6 +77,7 @@ set(CKRASTERIZER_LIB_HEADERS
         CKPresentStage.h
         CKRenderSettings.h
         CKTranslatedRasterizer.h
+        CKTranslatedRasterizerInternal.h
         CKRenderPerfClock.h
         CKRenderFrameCostStats.h
 )
@@ -94,22 +94,18 @@ if (CKRE_ENABLE_FRAME_COST_STATS)
     list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderFrameCostStats.cpp)
 endif ()
 
-if (CKRE_ENABLE_FFP_DIAGNOSTICS)
-    list(APPEND CKRASTERIZER_LIB_SOURCES CKFFDebug.cpp)
-endif ()
-
 add_library(CKRasterizerLib STATIC ${CKRASTERIZER_LIB_SOURCES} ${CKRASTERIZER_LIB_HEADERS})
 target_compile_features(CKRasterizerLib PRIVATE cxx_std_20)
-# The diagnostic macros change class layouts (e.g. CKFixedFunctionPipeline under
-# CKRE_ENABLE_FFP_DIAGNOSTICS). They must be PUBLIC here so every consumer of
-# the translation core sees the same definitions (ODR).
-ckre_apply_diagnostic_definitions(CKRasterizerLib PUBLIC)
+# Diagnostics affect translation-core implementation only; the public
+# CKRasterizer v3 contract and all internal class layouts stay unchanged.
+ckre_apply_diagnostic_definitions(CKRasterizerLib PRIVATE)
 
 target_include_directories(CKRasterizerLib
         PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 set(_ckre_rasterizer_ck2_dep CK2)

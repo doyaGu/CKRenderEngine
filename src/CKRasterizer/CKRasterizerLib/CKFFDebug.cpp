@@ -459,4 +459,31 @@ const char *CKFFDebugState::PrimitiveName(VXPRIMITIVETYPE type) const {
     }
 }
 
+#else
+
+const CKFFDebugConfig &CKFFDebugConfig::Get() {
+    static const CKFFDebugConfig value = {};
+    return value;
+}
+
+CKFFDebugState::CKFFDebugState()
+    : m_DrawLogCount(0),
+      m_Real3DDrawLogCount(0),
+      m_Real3DViewLogCount(0),
+      m_PositionTDrawLogCount(0),
+      m_Opaque3DDrawSerial(0),
+      m_Transparent3DDrawSerial(0),
+      m_3DContractLogCount(0) {
+}
+
+void CKFFDebugState::BeginFrame() {}
+bool CKFFDebugState::AnyLoggingEnabled() const { return false; }
+int CKFFDebugState::NextDrawSerial() { return -1; }
+void CKFFDebugState::LogDrawPrimitiveHeader(const CKFFDrawDebugInfo &) {}
+void CKFFDebugState::LogDrawPrimitivePrepareFailed() {}
+void CKFFDebugState::LogDrawPrimitiveProgramMissing() {}
+void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &) {}
+void CKFFDebugState::LogDrawVertexBufferHeader(const CKFFDrawDebugInfo &) {}
+void CKFFDebugState::LogDrawVertexBufferDetails(const CKFFDrawDebugInfo &) {}
+
 #endif // CKRE_ENABLE_FFP_DIAGNOSTICS

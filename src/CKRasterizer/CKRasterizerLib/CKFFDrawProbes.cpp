@@ -183,4 +183,16 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
     memset(&Stats, 0, sizeof(Stats));
     Stats.FrameIndex = nextFrame;
 }
+
+#else
+
+void CKFFDrawProbes::OnTransientGeometry(CKDWORD, CKDWORD) {}
+void CKFFDrawProbes::OnProgram(CKDWORD) {}
+void CKFFDrawProbes::OnWorldMatrix(const VxMatrix &) {}
+void CKFFDrawProbes::OnDrawState(const CKDrawState &) {}
+void CKFFDrawProbes::OnTextureSet(CKDWORD, const CKDWORD *) {}
+void CKFFDrawProbes::OnVertexBuffers(CKDWORD, CKDWORD, CKDWORD) {}
+void CKFFDrawProbes::OnUniform(CKBackendConstantBlock, CKDWORD) {}
+void CKFFDrawProbes::LogAndReset(CKDrawStateCache &) {}
+
 #endif

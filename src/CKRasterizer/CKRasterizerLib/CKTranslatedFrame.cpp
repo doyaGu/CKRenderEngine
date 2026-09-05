@@ -1,7 +1,7 @@
 // CKTranslatedContext: frame flow (one backend pass per pass), draws and the
-// backbuffer upload. See CKTranslatedRasterizer.h.
+// backbuffer upload. See CKTranslatedRasterizerInternal.h.
 
-#include "CKTranslatedRasterizer.h"
+#include "CKTranslatedRasterizerInternal.h"
 #include "CKDebugLogger.h"
 
 #include <math.h>
@@ -52,7 +52,7 @@ CKRECT CKTranslatedContext::CurrentTargetRect() const
     if (m_Target) {
         rect.right = (int)m_TargetWidth;
         rect.bottom = (int)m_TargetHeight;
-    } else if (m_InternalTargets) {
+    } else if (m_Frame.InternalTargets) {
         rect.right = (int)m_Present.SceneTarget().Width;
         rect.bottom = (int)m_Present.SceneTarget().Height;
     } else {
@@ -110,12 +110,12 @@ CKDWORD CKTranslatedContext::CurrentSceneFrameBuffer() const
 {
     if (m_Target)
         return m_TargetFrameBuffer;
-    return m_InternalTargets ? m_Present.SceneTarget().FrameBuffer : 0;
+    return m_Frame.InternalTargets ? m_Present.SceneTarget().FrameBuffer : 0;
 }
 
 CKDWORD CKTranslatedContext::OverlayFrameBuffer() const
 {
-    return m_InternalTargets ? m_Present.NativeTarget().FrameBuffer : 0;
+    return m_Frame.InternalTargets ? m_Present.NativeTarget().FrameBuffer : 0;
 }
 
 // Frame buffer / rect the next implicit or clear pass goes to: the native
@@ -123,12 +123,12 @@ CKDWORD CKTranslatedContext::OverlayFrameBuffer() const
 // otherwise.
 CKDWORD CKTranslatedContext::CurrentPassFrameBuffer() const
 {
-    return m_OverlayPhase ? OverlayFrameBuffer() : CurrentSceneFrameBuffer();
+    return m_Frame.IsOverlayActive() ? OverlayFrameBuffer() : CurrentSceneFrameBuffer();
 }
 
 CKRECT CKTranslatedContext::CurrentPassRect() const
 {
-    return m_OverlayPhase ? WindowRect() : CurrentTargetRect();
+    return m_Frame.IsOverlayActive() ? WindowRect() : CurrentTargetRect();
 }
 
 // Decides once per frame whether the scene renders into the scaled scene
@@ -140,11 +140,11 @@ CKRECT CKTranslatedContext::CurrentPassRect() const
 // swap chain when the backend cannot provide the targets.
 void CKTranslatedContext::PrepareFrameTarget()
 {
-    if (m_FrameTargetDecided)
+    if (m_Frame.TargetDecided)
         return;
-    m_FrameTargetDecided = TRUE;
-    m_InternalTargets = FALSE;
-    m_Composited = FALSE;
+    m_Frame.TargetDecided = TRUE;
+    m_Frame.InternalTargets = FALSE;
+    m_Frame.Composited = FALSE;
     const CKBackendCaps &caps = m_Backend->GetCaps();
     if (caps.MaxTextureSize == 0)
         return;
@@ -160,12 +160,12 @@ void CKTranslatedContext::PrepareFrameTarget()
     const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
     const CKDWORD nativeBefore = m_Present.NativeTarget().ColorTexture;
     if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources())
-        m_InternalTargets = TRUE;
+        m_Frame.InternalTargets = TRUE;
     else
         m_Present.DestroyTargets();
     if (m_Present.NativeTarget().ColorTexture != nativeBefore)
-        m_NativePresented = FALSE;
-    m_FFP.SetMultisampledTarget(m_InternalTargets && m_Present.SceneTarget().Samples > 0);
+        m_Frame.NativePresented = FALSE;
+    m_FFP.SetMultisampledTarget(m_Frame.InternalTargets && m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
 }
 
@@ -182,8 +182,8 @@ CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, C
     pass.Name = Name;
     if (m_Backend->BeginPass(&pass) != CK_OK)
         return FALSE;
-    m_FrameOpen = TRUE;
-    m_PassOpen = TRUE;
+    m_Frame.Open = TRUE;
+    m_Frame.PassOpen = TRUE;
     ++m_FramePasses;
     return TRUE;
 }
@@ -191,7 +191,7 @@ CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, C
 CKBOOL CKTranslatedContext::EnsureDrawPass()
 {
     PrepareFrameTarget();
-    if (m_PassOpen)
+    if (m_Frame.PassOpen)
         return TRUE;
     return OpenPass(CurrentPassFrameBuffer(), CurrentPassRect(), 0, 0, 1.0f, 0, "implicit");
 }
@@ -199,13 +199,13 @@ CKBOOL CKTranslatedContext::EnsureDrawPass()
 // Resolve: scene target -> native target (RenderScale / MSAA / FXAA / Sharpness).
 CKBOOL CKTranslatedContext::CompositeScene()
 {
-    if (!m_InternalTargets || m_Composited)
+    if (!m_Frame.InternalTargets || m_Frame.Composited)
         return TRUE;
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "composite"))
         return FALSE;
     if (m_Present.SubmitResolve(m_Options.FXAA, m_Options.Sharpness) != CK_OK)
         return FALSE;
-    m_Composited = TRUE;
+    m_Frame.Composited = TRUE;
     return TRUE;
 }
 
@@ -213,7 +213,7 @@ CKBOOL CKTranslatedContext::CompositeScene()
 // buffer 0 in a frame that renders through the internal targets.
 CKBOOL CKTranslatedContext::PresentInternalTarget()
 {
-    if (!m_InternalTargets)
+    if (!m_Frame.InternalTargets)
         return TRUE;
     if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "present"))
         return FALSE;
@@ -230,10 +230,7 @@ void CKTranslatedContext::ReleaseFrameScratch()
 void CKTranslatedContext::FinishFrame()
 {
     ReleaseFrameScratch();
-    m_PassOpen = FALSE;
-    m_OverlayPhase = FALSE;
-    m_Composited = FALSE;
-    m_FrameTargetDecided = FALSE;
+    m_Frame.FinishFrame();
     UpdateTargetExtents();
     ++m_FrameNumber;
     m_FFP.SetFrameNumber(m_FrameNumber);
@@ -290,7 +287,7 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
         ++m_FrameClears;
         cleared = TRUE;
     }
-    if (cleared && m_InScene) {
+    if (cleared && m_Frame.IsSceneActive()) {
         // Mid-scene clear: the following draws need a pass of their own so
         // the clear stays at the call position.
         if (!OpenPass(frameBuffer, CurrentPassRect(), 0, 0, 1.0f, 0, "scene"))
@@ -303,7 +300,7 @@ CKBOOL CKTranslatedContext::BeginScene()
 {
     if (!m_Created || m_ShuttingDown)
         return FALSE;
-    if (m_InScene) {
+    if (m_Frame.IsSceneActive() || m_Frame.IsOverlayActive()) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
@@ -316,7 +313,7 @@ CKBOOL CKTranslatedContext::BeginScene()
     m_FFP.BeginDebugFrame();
     if (!OpenPass(CurrentSceneFrameBuffer(), CurrentTargetRect(), 0, 0, 1.0f, 0, "scene"))
         return FALSE;
-    m_InScene = TRUE;
+    m_Frame.Phase = CKTRANSLATED_FRAME_SCENE;
     return TRUE;
 }
 
@@ -324,11 +321,11 @@ CKBOOL CKTranslatedContext::EndScene()
 {
     if (!m_Created || m_ShuttingDown)
         return FALSE;
-    if (!m_InScene) {
+    if (!m_Frame.IsSceneActive()) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
-    m_InScene = FALSE;
+    m_Frame.Phase = CKTRANSLATED_FRAME_IDLE;
     return TRUE;
 }
 
@@ -340,7 +337,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
         Diag(CKRST_DIAG_OVERLAY_ON_TARGET);
         return FALSE;
     }
-    if (m_InScene || m_OverlayPhase) {
+    if (m_Frame.IsSceneActive() || m_Frame.IsOverlayActive()) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
@@ -349,7 +346,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
         return FALSE;
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "overlay"))
         return FALSE;
-    m_OverlayPhase = TRUE;
+    m_Frame.Phase = CKTRANSLATED_FRAME_OVERLAY;
     UpdateTargetExtents();
     return TRUE;
 }
@@ -358,17 +355,17 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
 {
     if (!m_Created || m_ShuttingDown)
         return FALSE;
-    if (m_InScene) {
+    if (m_Frame.IsSceneActive()) {
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
     CKBOOL frameSucceeded = TRUE;
-    if (m_FrameOpen) {
+    if (m_Frame.Open) {
         if (!m_Target) {
             if (!CompositeScene()) {
                 frameSucceeded = FALSE;
             } else if (PresentInternalTarget()) {
-                m_NativePresented = m_InternalTargets;
+                m_Frame.NativePresented = m_Frame.InternalTargets;
             } else {
                 frameSucceeded = FALSE;
             }
@@ -380,7 +377,7 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         // No frame carried the blit (no scene at all): one more frame with
         // the present and the readback blit.
         CKDWORD frame = 0;
-        if (!m_FrameOpen && CanReadCurrentTarget() && SubmitReadbackFrame(m_NativePresented, TRUE, &frame)) {
+        if (!m_Frame.Open && CanReadCurrentTarget() && SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame)) {
             m_LastDeviceFrame = frame;
             IssueArmedTextureReadbacks();
         } else {
@@ -391,7 +388,7 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
                                       : (VSync ? CKRST_BACKEND_PRESENT_VSYNC : CKRST_BACKEND_PRESENT_IMMEDIATE);
     CKDWORD frameNumber = 0;
     const CKERROR status = m_Backend->Present(mode, &frameNumber);
-    m_FrameOpen = FALSE;
+    m_Frame.Open = FALSE;
     if (status == CK_OK)
         m_LastDeviceFrame = frameNumber;
     FinishFrame();
