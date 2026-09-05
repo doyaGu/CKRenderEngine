@@ -134,11 +134,17 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
         }
         if (!bytes || desc->StartIndex > available || desc->IndexCount > available - desc->StartIndex) return CKERR_INVALIDPARAMETER;
         const unsigned size = draw.Index32 ? 4 : 2;
-        for (unsigned i = 0; i < desc->IndexCount; ++i) {
-            unsigned index = 0;
-            std::memcpy(&index, bytes + size_t(desc->StartIndex + i) * size, size);
-            if (index >= desc->VertexCount) return CKERR_INVALIDPARAMETER;
-        }
+        // Dispatch once by element width so each unaligned-safe read has a
+        // compile-time size, instead of a variable-size memcpy per index.
+        auto validIndices = [&](auto index) {
+            const CKBYTE *first = bytes + size_t(desc->StartIndex) * sizeof(index);
+            for (unsigned i = 0; i < desc->IndexCount; ++i) {
+                std::memcpy(&index, first + size_t(i) * sizeof(index), sizeof(index));
+                if (index >= desc->VertexCount) return false;
+            }
+            return true;
+        };
+        if (!(draw.Index32 ? validIndices(CKDWORD(0)) : validIndices(CKWORD(0)))) return CKERR_INVALIDPARAMETER;
         if (!draw.IB) indices = {bytes + size_t(desc->StartIndex) * size, size_t(desc->IndexCount) * size};
     }
     draw.Desc.TransientVertices = nullptr; draw.Desc.Stream1Transient = nullptr; draw.Desc.TransientIndices = nullptr;

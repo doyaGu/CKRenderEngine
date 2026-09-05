@@ -256,6 +256,46 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     state.ScissorEnabled = FALSE; backend.SetPipelineState(&state);
     std::puts("SDL_gpu transient snapshots: position, UV and index mutations between deferred draws passed");
 
+    // Both index widths validate only the requested subrange, including its
+    // last element. Persistent updates and transient writes must be rechecked.
+    for (bool wide : {false, true}) for (bool persistent : {false, true}) {
+        CKBackendTransientVertices boundsVertices, boundsUv;
+        CKBackendTransientIndices unusedIndex, boundsIndex;
+        if (!allocate(boundsVertices, boundsUv, unusedIndex) ||
+            !backend.AllocTransientIndices(5, wide ? TRUE : FALSE, &boundsIndex)) return false;
+        const unsigned indexSize = wide ? 4 : 2;
+        auto writeIndex = [&](unsigned offset, CKDWORD value) {
+            std::memcpy(static_cast<CKBYTE *>(boundsIndex.Data) + offset * indexSize, &value, indexSize);
+        };
+        writeIndex(0, 65535); writeIndex(1, 0); writeIndex(2, 1); writeIndex(3, 2); writeIndex(4, 65535);
+        CKDWORD indexBuffer = 0;
+        if (persistent) {
+            CKBackendBufferDesc buffer;
+            buffer.Kind = CKRST_BACKEND_BUFFER_INDEX; buffer.Size = 5 * indexSize;
+            buffer.Index32 = wide ? TRUE : FALSE; buffer.Dynamic = TRUE; buffer.InitialData = boundsIndex.Data;
+            if (backend.CreateBuffer(&buffer, &indexBuffer) != CK_OK) return false;
+        }
+        CKBackendDraw boundsDraw = draw;
+        boundsDraw.TransientVertices = &boundsVertices; boundsDraw.Stream1Transient = &boundsUv;
+        boundsDraw.TransientIndices = persistent ? nullptr : &boundsIndex;
+        boundsDraw.IndexBuffer = indexBuffer; boundsDraw.StartIndex = 1;
+        if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&boundsDraw) != CK_OK) return false;
+        for (CKDWORD invalid : {CKDWORD(3), CKDWORD(wide ? 0x10000 : 0xffff)}) {
+            writeIndex(3, invalid);
+            if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
+                indexSize, static_cast<CKBYTE *>(boundsIndex.Data) + 3 * indexSize) != CK_OK) return false;
+            if (!rejected(boundsDraw, "out-of-range final index")) return false;
+        }
+        writeIndex(3, 2);
+        if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
+            indexSize, static_cast<CKBYTE *>(boundsIndex.Data) + 3 * indexSize) != CK_OK) return false;
+        if (backend.Draw(&boundsDraw) != CK_OK || backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
+            backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK ||
+            !CheckReadback(backend, ticket, std::vector<CKDWORD>(16, 0xffffffff), 0, "validated index subrange")) return false;
+        if (indexBuffer) backend.DestroyObject(indexBuffer, CKRST_OBJ_INDEXBUFFER);
+    }
+    std::puts("SDL_gpu index bounds: 16/32-bit transient/persistent ranges and modified final indices passed");
+
     pass.ClearFlags = 0;
     if (backend.BeginPass(&pass) != CK_OK || !rejected(draw, "previous frame before reallocation")) return false;
     CKBackendTransientVertices currentVertices, currentUv;
