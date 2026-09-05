@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check whether a PE DLL's imports are satisfied by a set of provider DLLs.
 
-Used to answer the phase-0 oracle question: can the original Virtools
-CK2_3D.dll / CKDX8Rasterizer.dll bind against the Ballanced CK2.dll and
-VxMath.dll? Pure Python PE parsing, works for any architecture.
+Checks whether the original Virtools CK2_3D.dll / CKDX8Rasterizer.dll
+can bind against the Ballanced CK2.dll and
+VxMath.dll. Pure Python PE parsing, works for any architecture.
 
 Usage:
     check_dll_imports.py <dll-to-check> <provider.dll> [<provider.dll> ...]

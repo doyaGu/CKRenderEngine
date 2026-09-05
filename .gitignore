@@ -12,7 +12,7 @@ _deps
 build/
 install/
 
-# Phase-0 reference material that must stay local
+# Local reference captures and original runtime files
 oracle/
 !tests/reference/frames/oracle/
 tests/reference/frames/local/

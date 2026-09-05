@@ -23,7 +23,7 @@
     {
       "name": "renderengine-bgfx-runtime-msvc-win32",
       "displayName": "RenderEngine bgfx Runtime (MSVC Win32)",
-      "description": "Build the v2 bgfx rasterizer runtime using shared libraries.",
+      "description": "Build the v3 bgfx rasterizer runtime using shared libraries.",
       "inherits": "msvc-win32-base",
       "cacheVariables": {
         "CKRE_BUILD_SHARED": "ON",
@@ -36,7 +36,7 @@
     {
       "name": "renderengine-bgfx-runtime-msvc-x64",
       "displayName": "RenderEngine bgfx Runtime (MSVC x64)",
-      "description": "Build the x64 v2 bgfx rasterizer runtime using shared libraries.",
+      "description": "Build the x64 v3 bgfx rasterizer runtime using shared libraries.",
       "inherits": "msvc-x64-base",
       "cacheVariables": {
         "CKRE_BUILD_SHARED": "ON",
@@ -49,7 +49,7 @@
     {
       "name": "renderengine-bgfx-static-msvc-win32",
       "displayName": "RenderEngine bgfx Static (MSVC Win32)",
-      "description": "Build static RenderEngine and v2 bgfx rasterizer libraries.",
+      "description": "Build static RenderEngine and v3 bgfx rasterizer libraries.",
       "inherits": "msvc-win32-base",
       "cacheVariables": {
         "CKRE_BUILD_SHARED": "OFF",
@@ -62,7 +62,7 @@
     {
       "name": "renderengine-bgfx-static-msvc-x64",
       "displayName": "RenderEngine bgfx Static (MSVC x64)",
-      "description": "Build x64 static RenderEngine and v2 bgfx rasterizer libraries.",
+      "description": "Build x64 static RenderEngine and v3 bgfx rasterizer libraries.",
       "inherits": "msvc-x64-base",
       "cacheVariables": {
         "CKRE_BUILD_SHARED": "OFF",

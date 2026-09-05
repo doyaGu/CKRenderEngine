@@ -1,4 +1,4 @@
-# ckre_scene_capture - reference frame / capability capture tool (phase 0).
+# ckre_scene_capture - reference frame / capability capture tool.
 #
 # Boots CK2 the way the Player does, loads a render engine DLL from a
 # directory given on the command line, renders procedural scenes built with
@@ -7,11 +7,11 @@
 #
 # Two build modes:
 #   * as part of CKRenderEngine (add_subdirectory): links the Ballanced CK2 /
-#     VxMath and drives our CK2_3D.dll + CKBgfxRasterizer.dll;
+#     VxMath and drives CK2_3D with the selected rasterizer provider;
 #   * standalone against the Virtools SDK 2.1 (cmake -S tools/scene_capture
 #     -A Win32 -DVIRTOOLS_SDK_PATH=...): links the original CK2.lib /
 #     VxMath.lib import libraries so the same binary drives the original
-#     CK2.dll + CK2_3D.dll + CKDX8Rasterizer.dll - the phase-0 oracle. The
+#     CK2.dll + CK2_3D.dll + CKDX8Rasterizer.dll - the visual oracle. The
 #     original DLLs cannot bind to the Ballanced CK2.dll (74 + 55 missing
 #     exports, see tools/check_dll_imports.py), hence the second mode.
 

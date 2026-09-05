@@ -89,7 +89,7 @@ if (MSVC)
         endif ()
     endforeach ()
 
-    # The vendored bgfx sources are UTF-8.  Declare only the source encoding so
+    # The upstream bgfx sources are UTF-8.  Declare only the source encoding so
     # local non-English Windows code pages do not emit C4819 or alter parsing;
     # leave the execution character set unchanged for legacy runtime strings.
     foreach (_ckre_utf8_target bx bimg bimg_decode bgfx)
@@ -101,7 +101,7 @@ if (MSVC)
     if (TARGET bimg_encode)
         # nvtt combines historical Windows-1252 and UTF-8 sources.  Do not
         # force a single source charset; limit encoding diagnostics to this
-        # vendored encoder target instead.
+        # upstream encoder target instead.
         target_compile_options(bimg_encode PRIVATE /wd4819 /wd4828)
     endif ()
 
