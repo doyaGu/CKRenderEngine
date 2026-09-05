@@ -3,7 +3,13 @@
 #include <string.h>
 
 #include "VxMath.h"
-#include "lodepng.h"
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 namespace {
 
@@ -94,10 +100,9 @@ bool WritePng(const std::string &path, const RgbaImage &image, std::string &erro
         error = "invalid image";
         return false;
     }
-    const unsigned rc = lodepng_encode32_file(path.c_str(), image.Pixels.data(),
-                                              (unsigned)image.Width, (unsigned)image.Height);
-    if (rc != 0) {
-        error = std::string("lodepng: ") + lodepng_error_text(rc);
+    if (!stbi_write_png(path.c_str(), image.Width, image.Height, 4,
+                        image.Pixels.data(), image.Width * 4)) {
+        error = "could not write PNG: " + path;
         return false;
     }
     return true;
@@ -105,17 +110,17 @@ bool WritePng(const std::string &path, const RgbaImage &image, std::string &erro
 
 bool ReadPng(const std::string &path, RgbaImage &image, std::string &error)
 {
-    unsigned char *pixels = NULL;
-    unsigned w = 0, h = 0;
-    const unsigned rc = lodepng_decode32_file(&pixels, &w, &h, path.c_str());
-    if (rc != 0) {
-        error = std::string("lodepng: ") + lodepng_error_text(rc);
+    int w = 0, h = 0, channels = 0;
+    unsigned char *pixels = stbi_load(path.c_str(), &w, &h, &channels, 4);
+    if (!pixels) {
+        const char *reason = stbi_failure_reason();
+        error = std::string("could not read PNG: ") + (reason ? reason : path.c_str());
         return false;
     }
     image.Width = (int)w;
     image.Height = (int)h;
     image.Pixels.assign(pixels, pixels + (size_t)w * h * 4);
-    free(pixels);
+    stbi_image_free(pixels);
     return true;
 }
 

@@ -58,7 +58,22 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     endfunction()
 endif ()
 
-set(_ckre_lodepng_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../deps/bgfx/bimg/3rdparty/lodepng")
+# PNG I/O uses VxMath's public header-only stb dependency, never bimg sources.
+if(TARGET VxMath::stb)
+    set(_ckre_png_dep VxMath::stb)
+else()
+    # The original SDK-only capture tool does not build VxMath. Accept an
+    # independently supplied stb installation in that mode.
+    find_path(CKRE_SCENE_CAPTURE_STB_DIR stb_image.h
+        HINTS "${STB_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../../VxMath/deps/stb"
+        PATH_SUFFIXES stb)
+    if(NOT CKRE_SCENE_CAPTURE_STB_DIR OR NOT EXISTS "${CKRE_SCENE_CAPTURE_STB_DIR}/stb_image_write.h")
+        message(FATAL_ERROR "Scene capture needs stb headers; set CKRE_SCENE_CAPTURE_STB_DIR")
+    endif()
+    add_library(ckre_scene_capture_stb INTERFACE)
+    target_include_directories(ckre_scene_capture_stb INTERFACE "${CKRE_SCENE_CAPTURE_STB_DIR}")
+    set(_ckre_png_dep ckre_scene_capture_stb)
+endif()
 
 add_executable(ckre_scene_capture
         main.cpp
@@ -74,20 +89,11 @@ add_executable(ckre_scene_capture
         Scenes2D.cpp
         ScenesRtt.cpp
         ScenesStencil.cpp
-        "${_ckre_lodepng_dir}/lodepng.cpp"
 )
 target_compile_features(ckre_scene_capture PRIVATE cxx_std_20)
 target_include_directories(ckre_scene_capture PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${_ckre_lodepng_dir}
 )
-set_source_files_properties("${_ckre_lodepng_dir}/lodepng.cpp" PROPERTIES
-        COMPILE_DEFINITIONS "LODEPNG_NO_COMPILE_ANCILLARY_CHUNKS"
-)
-if (MSVC)
-    # lodepng: size_t -> unsigned short narrowing in its own code.
-    set_source_files_properties("${_ckre_lodepng_dir}/lodepng.cpp" PROPERTIES COMPILE_OPTIONS "/wd4267")
-endif ()
 
 if (_ckre_scene_capture_standalone)
     target_compile_definitions(ckre_scene_capture PRIVATE CKRE_SCENE_CAPTURE_VIRTOOLS_SDK=1)
@@ -102,6 +108,7 @@ else ()
 endif ()
 
 target_link_libraries(ckre_scene_capture PRIVATE
+        ${_ckre_png_dep}
         ${_ckre_tool_ck2_dep}
         ${_ckre_tool_vxmath_dep}
         SDL3::SDL3

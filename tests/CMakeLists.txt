@@ -66,6 +66,14 @@ add_test(NAME BackendProgramTests COMMAND $<TARGET_FILE:test_backend_program>)
 set_tests_properties(BackendProgramTests PROPERTIES TIMEOUT 60)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
+    add_executable(scene_capture_image_tests test_scene_capture_image.cpp ../tools/scene_capture/ImageIO.cpp)
+    target_include_directories(scene_capture_image_tests PRIVATE ../tools/scene_capture)
+    target_link_libraries(scene_capture_image_tests PRIVATE VxMath VxMath::stb)
+    target_compile_features(scene_capture_image_tests PRIVATE cxx_std_17)
+    ckre_copy_runtime_dependencies(scene_capture_image_tests)
+    add_test(NAME SceneCaptureImageIO COMMAND scene_capture_image_tests)
+endif()
 if (Python3_Interpreter_FOUND)
     add_test(NAME RasterizerLayerBoundaries
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_rasterizer_boundaries.py
