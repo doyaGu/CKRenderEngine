@@ -2,6 +2,9 @@
 #define CKRE_SCENE_CAPTURE_SCENEREGISTRY_H
 
 #include "CKAll.h"
+#include <string>
+
+struct RgbaImage;
 
 // State shared between the capture loop and a scene. One scene runs per
 // process, so scene files may keep static state that Build() resets.
@@ -14,6 +17,7 @@ struct SceneContext {
     int FrameCount = 0;   // total frames rendered before the capture
     CKCamera *MainCamera = NULL; // set by Build(); restored after RTT passes
     bool Verbose = false;
+    std::string Error; // callback failures must fail capture, even if Render succeeds
 };
 
 struct SceneDef {
@@ -27,6 +31,7 @@ struct SceneDef {
     float MinPass;                          // suggested oracle pass ratio (0..1)
     const char *IniOverrides;               // CK2_3D.ini <Render> lines, or NULL (present_* scenes)
     int MinFrames;                          // frames the scene needs before its capture is meaningful (0 = 1)
+    bool (*ValidateImage)(SceneContext &sc, const RgbaImage &image) = NULL; // optional functional pixel assertions
 };
 
 int GetSceneCount();

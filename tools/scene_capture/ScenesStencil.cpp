@@ -158,10 +158,39 @@ bool BuildStencilWriteMask(SceneContext &sc)
     return sc.MainCamera != NULL;
 }
 
+void ClearSubViewportCallback(CKRenderContext *rc, void *argument)
+{
+    SceneContext &sc = *static_cast<SceneContext *>(argument);
+    VxRect original;
+    rc->GetViewRect(original);
+    VxRect smaller(sc.Width * 0.25f, sc.Height * 0.25f,
+                   sc.Width * 0.75f, sc.Height * 0.75f);
+    CKMaterial *background = rc->GetBackgroundMaterial();
+    if (!background) {
+        sc.Error = "clear_subviewport: missing background material";
+        return;
+    }
+    const VxColor color = background->GetDiffuse();
+    background->SetDiffuse(VxColor(0.0f, 1.0f, 0.0f, 1.0f));
+    rc->SetViewRect(smaller);
+    if (rc->Clear(CK_RENDER_CLEARBACK, 0) != CK_OK)
+        sc.Error = "clear_subviewport: Clear failed";
+    rc->SetViewRect(original);
+    background->SetDiffuse(color);
+}
+
+bool BuildClearSubViewport(SceneContext &sc)
+{
+    BuildStencilWorld(sc);
+    sc.RenderContext->AddPostRenderCallBack(ClearSubViewportCallback, &sc, FALSE, TRUE);
+    return sc.MainCamera != NULL;
+}
+
 } // namespace
 
 const SceneDef g_ScenesStencil[] = {
     {"stencil_clear_midframe", "ShadowStencil pattern: stencil tag, Clear(STENCIL) mid-frame, tag, darken where != 0", BuildStencilClearMidframe, NULL, NULL, true, 4, 0.98f, NULL},
     {"stencil_write_mask", "PlanarShadow pattern: per-bit stencil write masks (1 << bit)", BuildStencilWriteMask, NULL, NULL, true, 4, 0.98f, NULL},
+    {"clear_subviewport", "Clear color after SetViewRect to the center quarter of the target", BuildClearSubViewport, NULL, NULL, true, 4, 0.98f, NULL},
 };
 const int g_ScenesStencilCount = (int)(sizeof(g_ScenesStencil) / sizeof(g_ScenesStencil[0]));

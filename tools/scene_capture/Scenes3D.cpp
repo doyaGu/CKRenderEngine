@@ -126,7 +126,7 @@ bool BuildAlphaBlend(SceneContext &sc)
 
 // --- material_channels --------------------------------------------------------
 
-bool BuildMaterialChannels(SceneContext &sc)
+bool BuildMaterialChannelsImpl(SceneContext &sc, bool modulate, bool additive)
 {
     SceneSetBackgroundColor(sc, 0xFF283038);
     SceneSetAmbient(sc, 0xFF808080);
@@ -156,6 +156,8 @@ bool BuildMaterialChannels(SceneContext &sc)
         mesh->SetChannelDestBlend(c1, VXBLEND_SRCCOLOR);
         mesh->SetChannelSourceBlend(c2, VXBLEND_ONE);
         mesh->SetChannelDestBlend(c2, VXBLEND_ONE);
+        mesh->ActivateChannel(c1, modulate);
+        mesh->ActivateChannel(c2, additive);
         // Give the channels their own UV mapping so the layers are visibly distinct.
         const int vertexCount = mesh->GetVertexCount();
         for (int i = 0; i < vertexCount; ++i) {
@@ -169,6 +171,10 @@ bool BuildMaterialChannels(SceneContext &sc)
     SceneCreateEntity(sc, "channelsphere", sphere, VxVector(3.5f, 2.5f, -1.0f));
     return sc.MainCamera != NULL;
 }
+
+bool BuildMaterialChannels(SceneContext &sc) { return BuildMaterialChannelsImpl(sc, true, true); }
+bool BuildMaterialModulate(SceneContext &sc) { return BuildMaterialChannelsImpl(sc, true, false); }
+bool BuildMaterialAdditive(SceneContext &sc) { return BuildMaterialChannelsImpl(sc, false, true); }
 
 // --- fog_* ----------------------------------------------------------------------
 
@@ -241,6 +247,8 @@ const SceneDef g_Scenes3D[] = {
     {"cutout", "Alpha-tested cutout quad in front of an opaque box", BuildCutout, NULL, NULL, true, 4, 0.98f, NULL},
     {"alpha_blend", "SRCALPHA, additive and modulate blended quads over a floor", BuildAlphaBlend, NULL, NULL, true, 4, 0.98f, NULL},
     {"material_channels", "Mesh channels with ZERO/SRCCOLOR and ONE/ONE blends (STAGEBLEND)", BuildMaterialChannels, NULL, NULL, true, 4, 0.98f, NULL},
+    {"material_modulate", "Isolated modulate mesh channel over the base material", BuildMaterialModulate, NULL, NULL, true, 4, 0.98f, NULL},
+    {"material_additive", "Isolated additive mesh channel over the base material", BuildMaterialAdditive, NULL, NULL, true, 4, 0.98f, NULL},
     {"fog_linear", "Receding boxes with linear fog", BuildFogLinear, NULL, NULL, true, 6, 0.97f, NULL},
     {"fog_exp", "Receding boxes with exponential fog", BuildFogExp, NULL, NULL, true, 6, 0.97f, NULL},
     {"fog_exp2", "Receding boxes with squared exponential fog", BuildFogExp2, NULL, NULL, true, 6, 0.97f, NULL},

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "SceneUtil.h"
+#include "ImageIO.h"
 
 namespace {
 
@@ -18,7 +19,7 @@ struct RttState {
 };
 RttState g_Rtt;
 
-void BuildRttWorld(SceneContext &sc, bool cube)
+bool BuildRttWorld(SceneContext &sc, bool cube)
 {
     g_Rtt = RttState();
     g_Rtt.Cube = cube;
@@ -44,24 +45,34 @@ void BuildRttWorld(SceneContext &sc, bool cube)
     // Render target texture.
     g_Rtt.Target = static_cast<CKTexture *>(sc.Context->CreateObject(CKCID_TEXTURE, (CKSTRING)"rtt", CK_OBJECTCREATION_NONAMECHECK));
     const int size = cube ? 128 : 256;
-    g_Rtt.Target->Create(size, size, 32, 0);
+    if (!g_Rtt.Target || !g_Rtt.Target->Create(size, size, 32, 0))
+        return false;
     if (cube) {
         g_Rtt.Target->SetSlotCount(6);
-        for (int face = 1; face < 6; ++face)
-            g_Rtt.Target->Create(size, size, 32, face);
+        for (int face = 1; face < 6; ++face) {
+            if (!g_Rtt.Target->Create(size, size, 32, face))
+                return false;
+        }
         g_Rtt.Target->SetCubeMap(TRUE);
     }
     g_Rtt.Target->SetDesiredVideoFormat(_32_ARGB8888);
 
     // RTT camera at the origin; per-face orientation set in PreFrame.
-    g_Rtt.RttCamera = SceneCreateCamera(sc, "rttcamera", VxVector(0.0f, 0.0f, 0.0f), VxVector(0.0f, 0.0f, 8.0f), cube ? 90.0f : 60.0f, 0.5f, 100.0f);
+    // Keep the display geometry at x=100 outside the capture frustum. A far
+    // plane of 100 intersects the reflective sphere on +X and samples the
+    // attachment while writing it; that feedback has no portable oracle.
+    g_Rtt.RttCamera = SceneCreateCamera(sc, "rttcamera", VxVector(0.0f, 0.0f, 0.0f), VxVector(0.0f, 0.0f, 8.0f), cube ? 90.0f : 60.0f, 0.5f, cube ? 50.0f : 100.0f);
+    if (!g_Rtt.RttCamera)
+        return false;
     if (cube)
         g_Rtt.RttCamera->SetAspectRatio(size, size);
+    return true;
 }
 
 bool BuildRtt2D(SceneContext &sc)
 {
-    BuildRttWorld(sc, false);
+    if (!BuildRttWorld(sc, false))
+        return false;
     // Main view: a screen sitting far away from the RTT world showing the texture.
     CKMaterial *screenMat = SceneCreateMaterial(sc, "screen", VxColor(1.0f, 1.0f, 1.0f, 1.0f), g_Rtt.Target);
     screenMat->SetTextureAddressMode(VXTEXTURE_ADDRESSCLAMP);
@@ -75,11 +86,27 @@ bool BuildRtt2D(SceneContext &sc)
 
 bool BuildRttCube(SceneContext &sc)
 {
-    BuildRttWorld(sc, true);
+    if (!BuildRttWorld(sc, true))
+        return false;
     // Main view: a reflective sphere far away sampling the cube map.
     CKMaterial *mirror = SceneCreateMaterial(sc, "cubemirror", VxColor(1.0f, 1.0f, 1.0f, 1.0f), g_Rtt.Target);
     mirror->SetEmissive(VxColor(0.2f, 0.2f, 0.2f, 1.0f));
     mirror->SetEffect(VXEFFECT_TEXGEN);
+    CKParameter *parameter = mirror->GetEffectParameter();
+    if (sc.Verbose) {
+        CKDWORD mode = ~0u;
+        if (parameter)
+            parameter->GetValue(&mode);
+        printf("rtt_cube: default texgen=%u\n", (unsigned)mode);
+    }
+    // The original SDK defaults this parameter to NONE; our engine defaults
+    // to 2D REFLECT. Explicitly select the same 3-coordinate cube reflection
+    // mode on both stacks so this scene actually validates cube RTT.
+    const CKDWORD mode = VXEFFECT_TGCUBEMAP_REFLECT;
+    if (!parameter || parameter->SetValue(&mode, sizeof(mode)) != CK_OK)
+        return false;
+    if (sc.Verbose)
+        printf("rtt_cube: selected texgen=%u\n", (unsigned)mode);
     SceneCreateEntity(sc, "cubesphere", SceneCreateSphereMesh(sc, "cubesphere", 3.0f, 24, 32, mirror), VxVector(100.0f, 0.0f, 0.0f));
     SceneCreateLight(sc, "sun2", VX_LIGHTDIREC, VxColor(1.0f, 1.0f, 1.0f, 1.0f), VxVector(100.0f, 10.0f, -5.0f), VxVector(0.0f, -1.0f, 0.5f), 100.0f);
     sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(100.0f, 2.0f, -10.0f), VxVector(100.0f, 0.0f, 0.0f), 50.0f);
@@ -88,8 +115,10 @@ bool BuildRttCube(SceneContext &sc)
 
 void RttPreFrame(SceneContext &sc)
 {
-    if (!g_Rtt.Target || !g_Rtt.RttCamera)
+    if (!g_Rtt.Target || !g_Rtt.RttCamera) {
+        sc.Error = "RTT target or camera is missing";
         return;
+    }
     CKRenderContext *rc = sc.RenderContext;
     const CK_RENDER_FLAGS flags = (CK_RENDER_FLAGS)(CK_RENDER_DEFAULTSETTINGS & ~CK_RENDER_DOBACKTOFRONT);
     rc->AttachViewpointToCamera(g_Rtt.RttCamera);
@@ -97,9 +126,19 @@ void RttPreFrame(SceneContext &sc)
         VxVector target(0.0f, 0.0f, 8.0f);
         g_Rtt.RttCamera->LookAt(&target);
         if (rc->SetRenderTarget(g_Rtt.Target, 0)) {
-            rc->Render(flags);
-            rc->SetRenderTarget(NULL, 0);
-        }
+            if (rc->Render(flags) != CK_OK)
+                sc.Error = "rtt_2d: rendering the target failed";
+            if (sc.Verbose && sc.FrameIndex == 0) {
+                VxRect view;
+                rc->GetViewRect(view);
+                const VxMatrix &projection = rc->GetProjectionTransformationMatrix();
+                printf("rtt_2d: view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
+                       view.left, view.top, view.right, view.bottom, projection[0][0], projection[1][1]);
+            }
+            if (!rc->SetRenderTarget(NULL, 0))
+                sc.Error = "rtt_2d: releasing the target failed";
+        } else
+            sc.Error = "rtt_2d: binding the target failed";
     } else {
         // D3D cube face conventions: +X -X +Y -Y +Z -Z with matching up vectors.
         const VxVector dirs[6] = {VxVector(1, 0, 0), VxVector(-1, 0, 0), VxVector(0, 1, 0), VxVector(0, -1, 0), VxVector(0, 0, 1), VxVector(0, 0, -1)};
@@ -109,9 +148,21 @@ void RttPreFrame(SceneContext &sc)
             g_Rtt.RttCamera->SetPosition(&origin);
             g_Rtt.RttCamera->SetOrientation(&dirs[face], &ups[face]);
             if (rc->SetRenderTarget(g_Rtt.Target, face)) {
-                rc->Render(flags);
-                rc->SetRenderTarget(NULL, 0);
-            }
+                if (rc->Render(flags) != CK_OK)
+                    sc.Error = "rtt_cube: rendering face " + std::to_string(face) + " failed";
+                if (sc.Verbose && sc.FrameIndex == 0) {
+                    VxRect view;
+                    rc->GetViewRect(view);
+                    const VxMatrix &projection = rc->GetProjectionTransformationMatrix();
+                    printf("rtt_cube face=%d: view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
+                           face, view.left, view.top, view.right, view.bottom, projection[0][0], projection[1][1]);
+                }
+                if (!rc->SetRenderTarget(NULL, 0))
+                    sc.Error = "rtt_cube: releasing face " + std::to_string(face) + " failed";
+            } else
+                sc.Error = "rtt_cube: binding face " + std::to_string(face) + " failed";
+            if (!sc.Error.empty())
+                break;
         }
     }
     rc->AttachViewpointToCamera(sc.MainCamera);
@@ -206,11 +257,41 @@ void DumpCopyPostFrame(SceneContext &sc)
     g_DumpCopy.Valid = true;
 }
 
+bool ValidateDumpCopy(SceneContext &sc, const RgbaImage &image)
+{
+#ifdef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+    // Capture the unmodified DX8 result, including its unsupported paste.
+    // This is a visual reference, not the required CopyToVideo behavior.
+    return true;
+#else
+    RgbaImage source;
+    if (!g_DumpCopy.Valid || !ConvertVxImageToRgba(g_DumpCopy.Desc, source, sc.Error)) {
+        sc.Error = "dump_copy: no valid source readback for the final paste";
+        return false;
+    }
+    const int left = (int)g_DumpCopy.Dest.left;
+    const int top = (int)g_DumpCopy.Dest.top;
+    if (!image.Valid() || left < 0 || top < 0 || left + source.Width > image.Width || top + source.Height > image.Height) {
+        sc.Error = "dump_copy: destination lies outside the captured frame";
+        return false;
+    }
+    for (int y = 0; y < source.Height; ++y)
+        for (int x = 0; x < source.Width; ++x)
+            for (int channel = 0; channel < 3; ++channel)
+                if (source.Row(y)[x * 4 + channel] != image.Row(top + y)[(left + x) * 4 + channel]) {
+                    sc.Error = "dump_copy: pasted RGB differs from the source at " + std::to_string(x) + "," + std::to_string(y);
+                    return false;
+                }
+    printf("dump_copy: all %d pasted pixels match the previous source readback exactly\n", source.Width * source.Height);
+    return true;
+#endif
+}
+
 } // namespace
 
 const SceneDef g_ScenesRtt[] = {
     {"rtt_2d", "TextureRender into a 2D texture shown on a quad", BuildRtt2D, RttPreFrame, NULL, true, 6, 0.97f, NULL},
     {"rtt_cube", "TextureRender into six cube faces sampled with reflection texgen", BuildRttCube, RttPreFrame, NULL, true, 8, 0.95f, NULL},
-    {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL, 2},
+    {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL, 2, ValidateDumpCopy},
 };
 const int g_ScenesRttCount = (int)(sizeof(g_ScenesRtt) / sizeof(g_ScenesRtt[0]));

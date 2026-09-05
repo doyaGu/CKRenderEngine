@@ -56,6 +56,8 @@ bool BuildSpritesText(SceneContext &sc)
     CKSprite *sprite = static_cast<CKSprite *>(sc.Context->CreateObject(CKCID_SPRITE, (CKSTRING)"sprite", CK_OBJECTCREATION_NONAMECHECK));
     if (!sprite || !sprite->Create(96, 96, 32, 0))
         return false;
+    // Compare a specified format rather than each engine's sprite default.
+    sprite->SetDesiredVideoFormat(_32_ARGB8888);
     FillSpritePixels(sprite, 96, 96);
     sprite->SetTransparent(TRUE);
     sprite->SetTransparentColor(0x00000000);
@@ -69,6 +71,7 @@ bool BuildSpritesText(SceneContext &sc)
     CKSpriteText *text = static_cast<CKSpriteText *>(sc.Context->CreateObject(CKCID_SPRITETEXT, (CKSTRING)"text", CK_OBJECTCREATION_NONAMECHECK));
     if (!text || !text->Create(400, 48, 32, 0))
         return false;
+    text->SetDesiredVideoFormat(_32_ARGB8888);
     text->SetFont((CKSTRING)"Arial", 24, 700, FALSE, FALSE);
     text->SetTextColor(0xFFFFFFFF);
     text->SetBackgroundColor(0x00000000);
