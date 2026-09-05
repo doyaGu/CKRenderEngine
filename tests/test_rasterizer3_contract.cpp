@@ -202,6 +202,35 @@ void TestLifecycle()
     TestCheck(f.Driver->m_Contexts.Size() == 1, "second context removed from the driver");
 }
 
+void TestResizeFlags()
+{
+    Fixture f;
+    TestCheck(f.Context->Resize(5, 6, 800, 600, 0), "initial resize");
+    TestCheck(f.Context->Resize(-100, -200, 1280, 720, VX_RESIZE_NOMOVE), "resize without moving");
+    TestCheck(f.Context->m_PosX == 5 && f.Context->m_PosY == 6 &&
+              f.Context->m_Width == 1280 && f.Context->m_Height == 720,
+              "NOMOVE ignores position and updates extent");
+    CKViewportData viewport = f.Context->GetViewportForTests();
+    TestCheck(viewport.ViewWidth == 1280 && viewport.ViewHeight == 720,
+              "viewport follows the new extent");
+    viewport.ViewX = 10;
+    viewport.ViewWidth = 100;
+    TestCheck(f.Context->SetViewport(&viewport), "set custom viewport");
+    TestCheck(f.Context->Resize(7, 8, -1, 0, VX_RESIZE_NOSIZE), "move without resizing");
+    TestCheck(f.Context->m_PosX == 7 && f.Context->m_PosY == 8 && f.Context->m_Width == 1280 &&
+              f.Context->m_Height == 720, "NOSIZE ignores invalid size arguments");
+    viewport = f.Context->GetViewportForTests();
+    TestCheck(viewport.ViewX == 10 && viewport.ViewWidth == 100,
+              "move preserves a custom viewport");
+    TestCheck(f.Context->Resize(-1, -1, -1, -1, VX_RESIZE_NOMOVE | VX_RESIZE_NOSIZE), "combined flags are a no-op");
+    TestCheck(!f.Context->Resize(9, 10, 0, 10, 0), "zero extent rejected");
+    TestCheck(!f.Context->Resize(9, 10, 32, 32, 4), "unknown flags rejected");
+    f.Backend->FailResize = TRUE;
+    TestCheck(!f.Context->Resize(9, 10, 320, 240, 0), "backend failure propagated");
+    TestCheck(f.Context->m_PosX == 7 && f.Context->m_PosY == 8 && f.Context->m_Width == 1280 &&
+              f.Context->m_Height == 720, "failed resize preserves context dimensions");
+}
+
 // The built-in NULL backend (engine fallback when no plugin loads) must report
 // the capability baseline like any driver.
 void TestNullBackendDriverCaps()
@@ -703,6 +732,32 @@ void TestTextures()
     TestCheck(!f.Context->GetTextureDesc(tex, &desc), "old handle still invalid after reuse");
 }
 
+void TestVolumeSliceUploads()
+{
+    Fixture f;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 4;
+    desc.Format.BytesPerLine = 16;
+    desc.Depth = 8;
+    desc.MipMapCount = 3;
+    desc.Flags = CKRST_TEXTURE_VOLUMEMAP | CKRST_TEXTURE_RGB;
+    CKDWORD texture = 0, color = 0xff123456;
+    TestCheck(f.Context->CreateTexture(&desc, &texture), "create volume texture");
+    VxImageDescEx image = desc.Format;
+    image.Width = image.Height = 1;
+    image.BytesPerLine = 4;
+    image.Image = reinterpret_cast<CKBYTE *>(&color);
+    TestCheck(f.Context->LoadTexture(texture, image, 0, (CKRST_CUBEFACE)7, NULL), "upload last base slice beyond cube-face range");
+    TestCheck(f.Backend->LastUpdateFace == 7, "volume slice forwarded to backend");
+    TestCheck(f.Context->LoadTexture(texture, image, 1, (CKRST_CUBEFACE)3, NULL), "upload last mip-1 slice");
+    TestCheck(f.Backend->LastUpdateMip == 1 && f.Backend->LastUpdateFace == 3, "mip and slice forwarded");
+    TestCheck(!f.Context->LoadTexture(texture, image, 0, (CKRST_CUBEFACE)8, NULL), "reject base slice past depth");
+    TestCheck(!f.Context->LoadTexture(texture, image, 1, (CKRST_CUBEFACE)4, NULL), "mip depth shrinks");
+    TestCheck(!f.Context->LoadTexture(texture, image, 2, (CKRST_CUBEFACE)-1, NULL), "reject negative slice");
+    TestCheck(!f.Context->LoadTexture(texture, image, 32, CKRST_CUBEFACE_XPOS, NULL), "reject invalid mip before shifting");
+}
+
 void TestBuffers()
 {
     Fixture f;
@@ -926,7 +981,7 @@ void TestApproximationsKeepDrawing()
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
     }
 
-    // Overflowing the sixteen border colours reuses a palette slot.
+    // The public contract does not impose a backend-specific palette limit.
     {
         Fixture f;
         CKRasterizerContext *ctx = f.Context;
@@ -943,7 +998,7 @@ void TestApproximationsKeepDrawing()
         }
         TestCheck(ctx->EndScene(), "EndScene");
         TestCheck(CountDraws(f) == 17, "seventeen border colour draws submitted");
-        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_BORDER_COLOR) == 1, "the seventeenth colour counts one approximation");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_BORDER_COLOR) == 0, "the core preserves the seventeenth color without quantization");
     }
 
     // A fifth cube stage samples as unbound.
@@ -1152,8 +1207,8 @@ void TestPresentRequiresEndScene()
     TestCheck(f.Context->GetOptionsForTests().DisableTextureFiltering == TRUE, "options stored inside scene");
     f.Context->EndScene();
     TestCheck(f.Context->BackToFront(TRUE), "BackToFront after EndScene");
-    TestCheck(CountPresents(f) == 1 && f.Backend->Frames[0] == CKRST_BACKEND_PRESENT_VSYNC, "vsync flag recorded");
-    TestCheck(CountPresents(f) == 1 && f.Backend->Frames[0] != CKRST_BACKEND_PRESENT_IMMEDIATE, "vsync is not immediate");
+    TestCheck(CountPresents(f) == 1 && f.Backend->Frames[0] == CKRST_BACKEND_SYNC_VSYNC, "vsync flag recorded");
+    TestCheck(CountPresents(f) == 1 && f.Backend->Frames[0] != CKRST_BACKEND_SYNC_IMMEDIATE, "vsync is not immediate");
 
     options.RenderScale = 9.0f;
     options.Sharpness = -1.0f;
@@ -1172,7 +1227,7 @@ void TestPresentRequiresEndScene()
     f.Context->BeginScene();
     f.Context->EndScene();
     TestCheck(f.Context->BackToFront(FALSE), "immediate present");
-    TestCheck(CountPresents(f) == 2 && f.Backend->Frames[1] == CKRST_BACKEND_PRESENT_IMMEDIATE, "immediate flag recorded");
+    TestCheck(CountPresents(f) == 2 && f.Backend->Frames[1] == CKRST_BACKEND_SYNC_IMMEDIATE, "immediate flag recorded");
 }
 
 void TestRenderTargets()
@@ -1246,6 +1301,30 @@ void TestRenderTargets()
     TestCheck(f.Context->GetTargetForTests() == 0, "target reset after delete");
 }
 
+void TestRequiredIntermediateTargetFailure()
+{
+    {
+        FFPTranslatedWorld world;
+        auto *context = static_cast<CKTranslatedContext *>(world.Driver->CreateContext());
+        TestCheck(context != NULL, "context allocated for required-target test");
+        auto *backend = static_cast<FFPRecordingBackend *>(context->GetBackend());
+        backend->RequireIntermediateTarget = TRUE;
+        backend->FailCreateTexture = TRUE;
+        TestCheck(!context->Create(NULL, 0, 0, 64, 64, 32, FALSE, 0, 24, 8),
+                  "context creation fails when mandatory intermediate target cannot be created");
+        TestCheck(backend->Log.Draws.empty(), "failed context never draws directly to swapchain");
+    }
+    {
+        Fixture f;
+        f.Backend->RequireIntermediateTarget = TRUE;
+        f.Backend->FailCreateTexture = TRUE;
+        TestCheck(!f.Context->Clear(CKRST_CTXCLEAR_COLOR, 0, 1, 0, 0, NULL),
+                  "frame fails when mandatory intermediate target cannot be created");
+        TestCheck(f.Backend->PassClears.empty() && f.Backend->Log.Draws.empty(),
+                  "failed target creation cannot silently open a swapchain pass");
+    }
+}
+
 void TestReadbackAndCopies()
 {
     Fixture f;
@@ -1316,13 +1395,106 @@ void TestReadbackAndCopies()
         }
     };
     int calls = 0;
+    TestCheck(f.Context->BeginScene(), "begin scene for ordered readback");
+    DrawTriangle(f.Context);
+    const CKDWORD readsBefore = f.Backend->ReadTextureCount;
     TestCheck(f.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, Capture::Callback, &calls), "RequestReadback");
+    TestCheck(f.Backend->ReadTextureCount == readsBefore + 1,
+              "readback is encoded at the request, before subsequent draws");
     TestCheck(calls == 0, "readback not delivered before the present");
+    DrawTriangle(f.Context);
+    TestCheck(f.Context->EndScene(), "end scene after ordered readback");
     f.Context->BackToFront(FALSE);
     TestCheck(calls == 1, "readback callback delivered by the next present");
     TestCheck(!f.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, NULL, NULL), "NULL callback rejected");
     TestCheck(!f.Context->RequestReadback(&badRect, VXBUFFER_BACKBUFFER, Capture::Callback, &calls), "rect outside target rejected");
     TestCheck(!f.Context->RequestReadback(NULL, VXBUFFER_ZBUFFER, Capture::Callback, &calls), "depth readback rejected");
+}
+
+void TestScaledCopyKeepsScene()
+{
+    Fixture f;
+    const CKDWORD texture = CreateTexture2D(f.Context, 64, 64, 0, 0);
+    TestCheck(f.Context->BeginScene(), "begin scaled copy scene");
+    DrawTriangle(f.Context);
+    const CKDWORD target = f.Backend->Log.Draws.back().Target;
+    const CKDWORD reads = f.Backend->ReadTextureCount;
+    const CKDWORD uploads = f.Backend->UpdatedTextureCount;
+    const CKDWORD frame = f.Backend->FrameSerial;
+    VxRect source(11, 17, 30, 30), destination(5, 7, 28, 30);
+    TestCheck(f.Context->CopyToTexture(texture, &source, &destination, CKRST_CUBEFACE_XPOS),
+              "non-integral scaled copy within a scene");
+    DrawTriangle(f.Context);
+    TestCheck(f.Backend->Log.Draws.back().Target == target, "draw after scaling restores the scene target");
+    TestCheck(f.Backend->ReadTextureCount == reads && f.Backend->UpdatedTextureCount == uploads &&
+              f.Backend->FrameSerial == frame, "in-frame scaling never reads back, uploads or submits");
+
+    f.Backend->FailCreateTexture = TRUE;
+    TestCheck(!f.Context->CopyToTexture(texture, &source, &destination, CKRST_CUBEFACE_XPOS),
+              "scratch allocation failure is reported");
+    f.Backend->FailCreateTexture = FALSE;
+    DrawTriangle(f.Context);
+    TestCheck(f.Backend->Log.Draws.back().Target == target, "failed scaling also restores the scene target");
+    TestCheck(f.Context->EndScene(), "scaling preserves the logical scene");
+    TestCheck(f.Context->BackToFront(FALSE), "present after successful and failed copies");
+}
+
+void TestShutdownRejectsReadbackCallbackWork()
+{
+    Fixture f;
+    struct Capture {
+        CKTranslatedContext *Context;
+        int Calls = 0;
+        CKBOOL Cancelled = FALSE;
+        CKBOOL AcceptedReadback = FALSE;
+        CKBOOL AcceptedScene = FALSE;
+
+        static void Callback(void *user, const CKRECT *, VXBUFFER_TYPE,
+                             const VxImageDescEx *image, CKBOOL ok)
+        {
+            auto &capture = *static_cast<Capture *>(user);
+            ++capture.Calls;
+            capture.Cancelled = !ok && !image;
+            if (capture.Calls == 1) {
+                capture.AcceptedReadback = capture.Context->RequestReadback(
+                    NULL, VXBUFFER_BACKBUFFER, Callback, user);
+                capture.AcceptedScene = capture.Context->BeginScene();
+            }
+        }
+    } capture = {f.Context};
+    TestCheck(f.Context->BeginScene(), "begin scene with pending readback at shutdown");
+    DrawTriangle(f.Context);
+    TestCheck(f.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, Capture::Callback, &capture),
+              "request readback before shutdown");
+    TestCheck(f.Context->BeginShutdown(), "shutdown completes despite callback requesting new work");
+    TestCheck(capture.Calls == 1 && capture.Cancelled, "pending readback is cancelled exactly once");
+    TestCheck(!capture.AcceptedReadback && !capture.AcceptedScene,
+              "shutdown callback cannot start another readback or scene");
+    TestCheck(f.Context->IsIdle(), "callback leaves shutdown backend idle");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0,
+              "callback leaves no live resources after shutdown");
+}
+
+void TestShutdownAfterDeviceFailure()
+{
+    Fixture f;
+    const CKDWORD texture = CreateTexture2D(f.Context, 8, 8, 0, 0);
+    TestCheck(f.Context->BeginScene(), "begin scene before device failure");
+    DrawTriangle(f.Context);
+    // A failed native submission can leave a pass or draw batch outstanding.
+    // It cannot become idle by submitting more commands to the failed device.
+    f.Backend->DeviceStatus = CKERR_INVALIDOPERATION;
+    f.Backend->FrameResult = CKERR_INVALIDOPERATION;
+    f.Backend->ForceNotIdle = TRUE;
+    TestCheck(f.Context->BeginShutdown(), "device failure still permits context teardown");
+    TestCheck(f.Context->IsIdle(), "device teardown abandons the failed native batch");
+    CKTextureDesc desc;
+    TestCheck(!f.Context->GetTextureDesc(texture, &desc), "failed device resources are released");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0, "no resources after failed device shutdown");
+    TestCheck(f.Context->BeginShutdown(), "failed device shutdown is idempotent");
+    TestCheck(f.Driver->DestroyContext(f.Context), "failed device context can be removed from its driver");
+    f.Context = NULL;
+    TestCheck(f.Driver->m_Contexts.Size() == 0, "failed context removed from driver");
 }
 
 void TestShutdown()
@@ -1348,6 +1520,7 @@ int main()
 {
     TestFramework framework;
     framework.Run("lifecycle", TestLifecycle);
+    framework.Run("resize flags", TestResizeFlags);
     framework.Run("NULL backend driver caps", TestNullBackendDriverCaps);
     framework.Run("caps lowering helper", TestLowerCapsHelper);
     framework.Run("render state defaults", TestRenderStateDefaults);
@@ -1359,6 +1532,7 @@ int main()
     framework.Run("texcoord index helpers", TestTexcoordIndexHelpers);
     framework.Run("canonical vertex layout", TestVertexLayout);
     framework.Run("textures", TestTextures);
+    framework.Run("volume slice uploads", TestVolumeSliceUploads);
     framework.Run("buffers", TestBuffers);
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
     framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
@@ -1368,7 +1542,11 @@ int main()
     framework.Run("overlay phase", TestOverlayPhase);
     framework.Run("present requires EndScene", TestPresentRequiresEndScene);
     framework.Run("render targets", TestRenderTargets);
+    framework.Run("mandatory intermediate target failure", TestRequiredIntermediateTargetFailure);
     framework.Run("readback and copies", TestReadbackAndCopies);
+    framework.Run("scaled copy keeps scene", TestScaledCopyKeepsScene);
+    framework.Run("shutdown rejects readback callback work", TestShutdownRejectsReadbackCallbackWork);
+    framework.Run("shutdown after device failure", TestShutdownAfterDeviceFailure);
     framework.Run("shutdown", TestShutdown);
     return framework.ExitCode();
 }

@@ -10,7 +10,7 @@
 // redesign-v3.md, section 4).
 //
 // The backend interface of the translation core
-// (src/CKRasterizer/CKRasterizerLib/CKRasterizerBackend.h) includes this header for the
+// (src/CKRasterizer/CKRasterizerBackend/CKRasterizerBackend.h) includes this header for the
 // enumerations both layers share.
 
 #include <stdint.h>
@@ -105,7 +105,7 @@ typedef enum CKRST_TEXTUREFLAGS {
 
 // MipMapCount convention (spec 4.5): 0 or 1 = no mips; N = the engine
 // uploads N levels itself; CKRST_MIPMAP_GENERATE = upload level 0 only and
-// let the rasterizer build the full chain with a CPU box filter.
+// let the rasterizer build the full filtered chain.
 #define CKRST_MIPMAP_GENERATE ((CKDWORD)-1)
 
 // ===========================================================================

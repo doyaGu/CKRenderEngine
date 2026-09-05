@@ -10,6 +10,108 @@
 
 namespace {
 
+void FixedFunctionProgramDeclaresItsShaderInterface()
+{
+    TestCheck(strcmp(CKFFConstantBlockInfo(CKRST_BLOCK_MATRICES).Name, "u_ffMatrices") == 0 &&
+                  CKFFConstantBlockInfo(CKRST_BLOCK_MATRICES).Mat4 &&
+                  CKFFConstantBlockInfo(CKRST_BLOCK_MATRICES).Count == CKFF_MATRIX_VEC4_COUNT,
+              "matrix shader ABI belongs to the fixed-function layer");
+    TestCheck(CKFFConstantBlockInfo(CKRST_BLOCK_SPEC).Count == CKFF_SPEC_UNIFORM_VEC4_COUNT &&
+                  !CKFFConstantBlockInfo(CKRST_BLOCK_SPEC).Mat4 &&
+                  CKFFConstantBlockInfo(CKRST_BLOCK_COUNT).Name == NULL,
+              "specialization block and invalid logical slot");
+    TestCheck(strcmp(CKFFSamplerSlotName(0), "s_texture0") == 0 &&
+                  strcmp(CKFFSamplerSlotName(CKFF_CUBE_SAMPLER_SLOT_BASE), "s_textureCube0") == 0 &&
+                  strcmp(CKFFSamplerSlotName(CKFF_VOLUME_SAMPLER_SLOT_BASE + 3), "s_textureVolume3") == 0 &&
+                  strcmp(CKFFSamplerSlotName(CKFF_SLOT_PRESENT), "s_sceneColor") == 0 &&
+                  CKFFSamplerSlotName(CKFF_SLOT_COUNT) == NULL,
+              "shader sampler names belong to the fixed-function interface");
+
+    const CK_SHADER_FORMAT formats[] = {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_FORMAT_SPIRV};
+    for (CK_SHADER_FORMAT format : formats) {
+        const CKBackendProgramDesc program = CKFFBuildProgramInterface(1, 2, format);
+        CKShaderDesc vertex, pixel;
+        vertex.Format = pixel.Format = format;
+        vertex.Profile = pixel.Profile = format == CKRST_SHADER_FORMAT_DXIL ?
+            CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
+        pixel.Stage = CKRST_SHADER_PIXEL;
+        vertex.UniformBufferCount = pixel.UniformBufferCount = 1;
+        pixel.SamplerCount = 16;
+        TestCheck(CKValidateBackendProgram(program, vertex, pixel) == CK_OK,
+                  "FFP native declarations satisfy generic backend validation");
+        TestCheck(program.UniformBuffers.size() == 2 &&
+                      program.UniformBuffers[0].Size == 3744 && program.UniformBuffers[1].Size == 3744 &&
+                      program.UniformBuffers[0].SharedData == 0 && program.UniformBuffers[1].SharedData == 0,
+                  "both shader stages bind a single shared 3744-byte snapshot");
+        TestCheck(program.Uniforms.size() == CKRST_BLOCK_COUNT * 2 &&
+                      program.Uniforms[CKRST_BLOCK_PRESENT_PARAMS].Offset == 3216 &&
+                      program.Samplers.size() == 16,
+                  "native packing retains the offline shader ABI without recompilation");
+        TestCheck(program.Samplers[0].Dimension == CKBACKEND_TEXTURE_2D &&
+                      program.Samplers[8].Dimension == CKBACKEND_TEXTURE_CUBE &&
+                      program.Samplers[12].Dimension == CKBACKEND_TEXTURE_3D &&
+                      program.Samplers[15].BorderColorOffset == 3232 + 15 * 16 &&
+                      program.Samplers[15].SamplerStateOffset == 3488 + 15 * 16,
+                  "sampler dimensions and border metadata are declared explicitly");
+        TestCheck(program.VertexInputs.size() == 16 && program.VertexInputs[6].Integer &&
+                      program.VertexInputs[6].DefaultValue[3] == 0 &&
+                      program.VertexInputs[4].DefaultValue[0] == 0x3f800000u &&
+                      program.VertexInputs[4].DefaultValue[3] == 0x3f800000u &&
+                      program.VertexInputs[8].Attribute == CKRST_ATTRIB_TEXCOORD0 &&
+                      program.VertexInputs[8].DefaultValue[0] == 0 &&
+                      program.VertexInputs[8].DefaultValue[3] == 0x3f800000u,
+                  "missing FFP vertex streams keep shader-family defaults");
+
+        const CKBackendProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
+        vertex.UniformBufferCount = 0;
+        pixel.SamplerCount = 1;
+        TestCheck(CKValidateBackendProgram(present, vertex, pixel) == CK_OK &&
+                      present.UniformBuffers.size() == 1 &&
+                      present.UniformBuffers[0].Stage == CKRST_SHADER_PIXEL &&
+                      present.Uniforms.size() == 1 && present.Uniforms[0].Offset == 3216 &&
+                      present.Samplers[0].Slot == CKFF_SLOT_PRESENT && present.Samplers[0].NativeSlot == 0 &&
+                      present.VertexInputs.size() == 2 && present.VertexInputs[1].Location == 8,
+                  "presentation declares one native sampler independently of its logical slot");
+    }
+
+    const CKBackendProgramDesc named = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_BGFX);
+    CKShaderDesc vertex, pixel;
+    vertex.Format = pixel.Format = CKRST_SHADER_FORMAT_BGFX;
+    vertex.Profile = pixel.Profile = CKRST_SHADER_PROFILE_DX11;
+    pixel.Stage = CKRST_SHADER_PIXEL;
+    TestCheck(CKValidateBackendProgram(named, vertex, pixel) == CK_OK && named.UniformBuffers.empty() &&
+                  named.Uniforms[CKRST_BLOCK_MATRICES].Name == "u_ffMatrices" &&
+                  named.Samplers[15].MetadataBufferSlot == ~0u,
+              "named-uniform artifacts need no invented buffer or border layout");
+}
+
+void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
+{
+    FFPRecordingDriver driver;
+    FFPRecordingBackend backend(&driver);
+    CKBackendShaderSet shaders = backend.ShaderSet();
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(backend.StartedBackend(), shaders), "shader cache accepts explicit catalog");
+    shaders = CKBackendShaderSet();
+    CKFFShaderKey key;
+    const CKDWORD first = cache.GetProgram(key).Program;
+    TestCheck(first != 0 && backend.CreatedProgramCount == 1 &&
+                  backend.LastProgramInterface.Samplers.size() == 16,
+              "lazy creation uses its retained descriptor catalog and explicit interface");
+    for (unsigned draw = 0; draw < 1000; ++draw)
+        TestCheck(cache.GetProgram(key).Program == first, "cached program handle is stable");
+    TestCheck(backend.CreatedProgramCount == 1 && backend.CreatedShaderCount == 2,
+              "cached draws do not rebuild programs or resource declarations");
+
+    const float params[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    const CKERROR pushed = CKFFPushConstants(&backend, CKRST_BLOCK_VIEWPORT, params, 1);
+    const auto &bytes = backend.GetConstants(CKRST_BLOCK_VIEWPORT);
+    TestCheck(pushed == CK_OK && bytes.size() == sizeof(params) &&
+                  memcmp(bytes.data(), params, sizeof(params)) == 0,
+              "FFP converts one vec4 into sixteen backend bytes");
+    cache.Shutdown();
+}
+
 void NullRasterizerSupportsHeadlessFFP()
 {
     CKNullBackendLibrary library;
@@ -35,7 +137,9 @@ void NullRasterizerSupportsHeadlessFFP()
               "Null backends must allow independent headless contexts");
 
     CKFixedFunctionPipeline ffp;
-    TestCheck(ffp.Init(first),
+    CKBackendShaderSet shaders;
+    TestCheck(driver->GetShaderSet(first->GetCaps(), shaders), "Null rasterizer shader catalog");
+    TestCheck(ffp.Init(first, shaders),
               "FFP must initialize its programs on the headless backend");
     TestCheck(ffp.Shutdown() == CK_OK,
               "Headless FFP shutdown must release its resources cleanly");
@@ -49,7 +153,7 @@ void MissingShaderPayloadFamilyFailsInitialization()
                               CKRST_SHADER_FORMAT_SPIRV);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    TestCheck(!ffp.Init(context.StartedBackend()),
+    TestCheck(!ffp.Init(context.StartedBackend(), context.ShaderSet()),
               "FFP must not pass bgfx containers to a raw SPIR-V backend");
     TestCheck(context.CreatedShaderCount == 0,
               "missing payload family fails before backend shader creation");
@@ -97,7 +201,7 @@ void DrawVertexBufferApproximatesStencilWriteMasks() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
@@ -146,7 +250,7 @@ void DrawVertexBufferSubmitsRepresentableStencilMasks() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
@@ -177,7 +281,7 @@ void DrawVertexBufferPropagatesBackendFailure() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     context.Log.DrawError = CKERR_INVALIDPARAMETER;
 
     const CKBOOL drawn = ffp.DrawVertexBuffer(
@@ -191,9 +295,8 @@ void DrawVertexBufferPropagatesBackendFailure() {
               "The failing backend submit must be attempted exactly once");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BACKEND_ERROR,
               "A backend draw failure must report the backend-error reason");
-    TestCheck(context.Log.DiscardCount == 1 &&
-                  context.Log.LastDiscardFlags == CKRST_DISCARD_ALL,
-              "A failed draw must discard all pending backend state");
+    TestCheck(context.Log.DiscardCount == 1,
+              "The backend must report the rejected draw exactly once");
 
     context.Log.DrawError = CK_OK;
     TestCheck(ffp.DrawVertexBuffer(
@@ -224,7 +327,7 @@ void IgnoredRenderStatesReportDiagnostics() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     CKBOOL allDrawn = TRUE;
     CKBOOL allReported = TRUE;
@@ -260,7 +363,7 @@ void InvalidStateValuesRejectBeforeBackendEncoding() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, 99);
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
@@ -295,7 +398,7 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);
 
     ffp.SetTextureStageState(
@@ -369,7 +472,7 @@ void SingleCubeVolumeLayoutUsesGenericMixedSamplerModule() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
     ffp.SetTexture(1, 102, CKRST_TEXTURE_VALID);
     ffp.SetTexture(2, 103, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
@@ -403,7 +506,7 @@ void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     context.Log.StateError = CKERR_INVALIDPARAMETER;
 
     const CKBOOL drawn = ffp.DrawVertexBuffer(
@@ -433,7 +536,7 @@ void DrawVertexBufferStopsUniformUploadsAfterFailure() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     context.Log.UniformError = CKERR_INVALIDPARAMETER;
 
     const CKBOOL drawn = ffp.DrawVertexBuffer(
@@ -465,7 +568,7 @@ void DrawVertexBufferUploadsAlphaPrecision() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_ALPHAFUNC, VXCMP_GREATER);
@@ -499,7 +602,7 @@ void DrawVertexBufferSetsFlatShadeSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
@@ -526,7 +629,7 @@ void DrawVertexBufferUploadsFogParams() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     const float fogStart = 10.0f;
     const float fogEnd = 30.0f;
@@ -566,7 +669,7 @@ void PositionTFogUsesPositionTShaderKey() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_LINEAR);
@@ -593,7 +696,7 @@ void RangeFogChangesSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_LINEAR);
@@ -622,7 +725,7 @@ void PixelFogOverridesVertexFogMode() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_FOGVERTEXMODE, VXFOG_EXP);
@@ -659,7 +762,7 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxPlane plane1;
     plane1.m_Normal = VxVector(1.0f, 2.0f, 3.0f);
@@ -702,7 +805,7 @@ void DrawVertexBufferSkipsClipUniformsWhenDisabled() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxPlane plane;
     plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
@@ -730,7 +833,7 @@ void ClipPlanesUseDedicatedVertexShaderVariant() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
@@ -759,7 +862,7 @@ void ResultArgTempPreservesEveryActiveStage() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -786,7 +889,7 @@ void Modulate4XStaysInTextureStageSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE4X);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -808,7 +911,7 @@ void PremodulateStaysInTextureStageSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_PREMODULATE);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -832,7 +935,7 @@ void TextureArgModifiersStayInSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT);
@@ -859,7 +962,7 @@ void NullTextureStagePreservesSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 0);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -887,7 +990,7 @@ void StageConstantDoesNotCreateTextureDependency() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 0);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -924,7 +1027,7 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -953,7 +1056,7 @@ void VolumeTextureBindsFirstVolumeSampler() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 91, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
@@ -986,7 +1089,7 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     for (CKDWORD stage = 0; stage < 7; ++stage) {
         ffp.SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -1020,7 +1123,7 @@ void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
     FFPRecordingDriver driver(profile);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 201, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
@@ -1076,7 +1179,7 @@ void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_PROFILE pro
     FFPRecordingDriver driver(profile);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 211, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
@@ -1132,7 +1235,7 @@ void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_PROFILE profile) {
     FFPRecordingDriver driver(profile);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 401, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
     ffp.SetTexture(1, 402, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
@@ -1173,7 +1276,7 @@ void FifthCubeStageSamplesAsUnbound() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     for (CKDWORD stage = 0; stage < 5; ++stage) {
         ffp.SetTexture(stage, 501 + stage, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
@@ -1230,7 +1333,7 @@ void MultipleVolumeTexturesBindEachVolumeSampler() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 301, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -1275,7 +1378,7 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -1315,7 +1418,7 @@ void FilteredDepthTextureCompareApproximates() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
@@ -1342,7 +1445,7 @@ void AffineTextureCoordinatesAreIgnoredWithDiagnostic() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
@@ -1363,7 +1466,7 @@ void InactiveUnsupportedStateDoesNotRejectDraw() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0Fu);
@@ -1390,7 +1493,7 @@ void DisabledTextureStageIgnoresLaterUnsupportedState() {
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_DISABLE);
     ffp.SetTextureStageState(1, CKRST_TSS_OP, 0x7fffffffu);
@@ -1414,7 +1517,7 @@ void BoundUnusedTextureDoesNotRequireAffineInterpolation() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -1438,7 +1541,7 @@ void TextureStageSnapshotPreservesExplicitZeroArgument() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
     ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
@@ -1466,7 +1569,7 @@ void UnknownTextureOpRejectsDraw() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTextureStageState(0, CKRST_TSS_OP, 0x7fffffffu);
 
     const CKBOOL drawn = ffp.DrawVertexBuffer(
@@ -1484,7 +1587,7 @@ void AlphaBumpOpApproximatesToSelectArg1() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
@@ -1519,7 +1622,7 @@ void BottomLeftRenderTargetsSampleWithoutFlip() {
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RENDERTARGET |
@@ -1557,7 +1660,7 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     const CKDWORD matrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES);
     const CKDWORD viewportUniform = context.GetBlockUniformForTests(CKRST_BLOCK_VIEWPORT);
 
@@ -1583,9 +1686,10 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
     std::vector<float> matrices = context.Log.FloatUniforms[matrixUniform];
     TestCheck(matrices.size() >= 16 && NearlyEqual(matrices[0], 200.0f / 640.0f) &&
-                  NearlyEqual(matrices[5], 100.0f / 480.0f) && NearlyEqual(matrices[12], -0.375f) &&
-                  NearlyEqual(matrices[13], 1.0f - 200.0f / 480.0f) && matrices[10] == 1.0f && matrices[15] == 1.0f,
-              "3D draws carry the viewport remap in the projection");
+                  NearlyEqual(matrices[5], 100.0f / 480.0f) &&
+                  NearlyEqual(matrices[12], 401.0f / 640.0f - 1.0f) &&
+                  NearlyEqual(matrices[13], 1.0f - 201.0f / 480.0f) && matrices[10] == 1.0f && matrices[15] == 1.0f,
+              "3D draws carry the viewport remap and legacy pixel center in the projection");
     TestCheck(context.Log.ScissorEnabled && context.Log.LastScissor.left == 50 &&
                   context.Log.LastScissor.right == 150 && context.Log.LastScissor.bottom == 75,
               "3D draws set the viewport scissor");
@@ -1621,7 +1725,7 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
                                    CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend rttContext(&bottomLeft);
     CKFixedFunctionPipeline rtt;
-    rtt.Init(rttContext.StartedBackend());
+    rtt.Init(rttContext.StartedBackend(), rttContext.ShaderSet());
     rtt.SetRenderTargetActive(TRUE);
     rtt.SetTargetExtents(128, 64, 128, 64);
     CKViewportData topHalf = {};
@@ -1635,13 +1739,39 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
     rtt.Shutdown();
 }
 
+void TransformedVerticesUseLegacyPixelCenters() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()), "pixel-center pipeline initialization");
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 64;
+    viewport.ViewHeight = 32;
+    viewport.ViewZMax = 1.0f;
+    ffp.SetViewport(viewport);
+    ffp.SetTargetExtents(64, 32, 64, 32);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1),
+              "pixel-center transformed draw");
+    const std::vector<float> &matrix = context.Log.FloatUniforms[
+        context.GetBlockUniformForTests(CKRST_BLOCK_MATRICES)];
+    // With identity transforms, clip origin names legacy pixel (32,16).
+    // Its modern raster position must be (32.5,16.5), the same sample as
+    // a POSITIONT vertex naming that integer pixel center.
+    TestCheck(matrix.size() >= 16 &&
+                  fabsf((matrix[12] + 1.0f) * 32.0f - 32.5f) < 0.00001f &&
+                  fabsf((1.0f - matrix[13]) * 16.0f - 16.5f) < 0.00001f,
+              "3D projection must preserve the D3D8 integer pixel-center convention");
+    ffp.Shutdown();
+}
+
 void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     FFPRecordingDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
                                    CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                    CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&bottomLeft);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
     CKViewportData viewport = {};
     viewport.ViewWidth = 640;
     viewport.ViewHeight = 480;
@@ -1698,7 +1828,7 @@ void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     FFPRecordingDriver topLeft;
     FFPRecordingBackend topLeftContext(&topLeft);
     CKFixedFunctionPipeline topLeftFfp;
-    topLeftFfp.Init(topLeftContext.StartedBackend());
+    topLeftFfp.Init(topLeftContext.StartedBackend(), topLeftContext.ShaderSet());
     topLeftFfp.SetRenderTargetActive(TRUE);
     topLeftFfp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                 CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
@@ -1710,11 +1840,11 @@ void RenderTargetOriginFlipsProjectionViewportAndWinding() {
     topLeftFfp.Shutdown();
 }
 
-void BorderColorUsesStableBgfxPaletteSlots() {
+void BorderColorReachesBackendUnmodified() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
@@ -1735,88 +1865,30 @@ void BorderColorUsesStableBgfxPaletteSlots() {
 
     TestCheck(first && second,
               "A representable border color must submit normally");
-    TestCheck(context.PaletteSetCount == 1,
-              "Repeated border colors must reuse one stable palette slot");
-    TestCheck(context.PaletteColors[0] == 0x40201080u,
-              "Virtools ARGB border color must convert to bgfx RRGGBBAA");
-    TestCheck(context.Log.LastTextureSampler.BorderColor == 0,
-              "The backend sampler must receive the allocated palette index");
+    TestCheck(context.Log.LastTextureSampler.BorderColor == 0x80402010u,
+              "The backend receives the original ARGB color, independent of its palette model");
 
     ffp.Shutdown();
 }
 
-void BorderPaletteOverflowReusesNearestColor() {
+void BorderColorsAreNotQuantizedByTranslation() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
-
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()), "FFP initialization");
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
-
-    CKBOOL firstSixteenSucceeded = TRUE;
-    for (CKDWORD i = 0; i < 16; ++i) {
-        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | (i * 0x10u));
-        firstSixteenSucceeded = firstSixteenSucceeded && ffp.DrawVertexBuffer(
-            VX_TRIANGLELIST,
-            1, 0, 0, 3, 0, 0,
-            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    for (CKDWORD i = 0; i < 32; ++i) {
+        const CKDWORD color = 0x80402000u | i;
+        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, color);
+        TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                      CKRST_DP_CL_V, CKRST_DP_CL_V, 1), "Border color draw succeeds");
+        TestCheck(context.Log.LastTextureSampler.BorderColor == color &&
+                      ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 0,
+                  "The core preserves more than sixteen distinct border colors");
     }
-    TestCheck(firstSixteenSucceeded && context.PaletteSetCount == 16 &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 0,
-              "All sixteen bgfx border palette slots must be usable");
-
-    // Closest to slot 5 (blue 0x50): 0x52.
-    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000052u);
-    const CKBOOL overflow = ffp.DrawVertexBuffer(
-        VX_TRIANGLELIST,
-        1, 0, 0, 3, 0, 0,
-        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-
-    TestCheck(overflow && context.Log.DrawCount == 17 && context.PaletteSetCount == 16,
-              "A seventeenth border color must draw without a new palette entry");
-    TestCheck(context.Log.LastTextureSampler.BorderColor == 5,
-              "The seventeenth border color must reuse the nearest palette slot");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BORDER_COLOR) &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 1,
-              "Border palette overflow must report its approximation");
-
-    ffp.Shutdown();
-}
-
-void BorderPaletteSlotsAreReusedAcrossFrames() {
-    FFPRecordingDriver driver;
-    FFPRecordingBackend context(&driver);
-    CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
-
-    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
-    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
-
-    CKBOOL firstFrameSucceeded = TRUE;
-    for (CKDWORD i = 0; i < 16; ++i) {
-        ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000000u | i);
-        firstFrameSucceeded = firstFrameSucceeded && ffp.DrawVertexBuffer(
-            VX_TRIANGLELIST,
-            1, 0, 0, 3, 0, 0,
-            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    }
-    ffp.SetFrameNumber(ffp.GetFrameNumber() + 1);
-    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF000010u);
-    const CKBOOL nextFrame = ffp.DrawVertexBuffer(
-        VX_TRIANGLELIST,
-        1, 0, 0, 3, 0, 0,
-        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-
-    TestCheck(firstFrameSucceeded && nextFrame,
-              "Border palette slots must be reusable after the rasterizer advances a frame");
-    TestCheck(context.PaletteSetCount == 17 &&
-                  context.Log.LastTextureSampler.BorderColor == 0,
-              "The next frame must allocate its first border color from palette slot zero");
     ffp.Shutdown();
 }
 
@@ -1824,7 +1896,7 @@ void UnusedBorderTexturesDoNotConsumePaletteSlots() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -1856,7 +1928,7 @@ void UntexturedStageKeepsRuntimeStageParams() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CONSTANT);
@@ -1893,7 +1965,7 @@ void PremodulateImplicitTextureDependencyBindsNextStage() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_PREMODULATE);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -1923,7 +1995,7 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_GOURAUD);
     const CKBOOL gouraud = ffp.DrawVertexBuffer(
@@ -1951,7 +2023,7 @@ void ProgramFamilyHasFourVertexVariants() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     TestCheck(context.CreatedProgramCount == 0 && CKFFPipelineTestAccess::CachedProgramCount(ffp) == 0,
               "Programs are created on first use");
@@ -1994,7 +2066,7 @@ void LegacyStageBlendZeroTerminatesStaleMultitextureState() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[4] = {
         VxVector(-1.0f, -1.0f, 0.0f),
@@ -2054,7 +2126,7 @@ void LegacyTextureMapBlendClearsExplicitStageOps() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {
         VxVector(-1.0f, -1.0f, 0.0f),
@@ -2105,7 +2177,7 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector position(0.0f, 0.0f, 0.0f);
     Vx2DVector uv(0.25f, 0.75f);
@@ -2178,7 +2250,7 @@ void PointSizeExpandsWithoutSpriteTexcoordReplacement() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector position(0.0f, 0.0f, 0.0f);
     Vx2DVector uv(0.25f, 0.75f);
@@ -2218,7 +2290,7 @@ void PersistentPointBuffersApproximateUnsupportedModesAndClampSize() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(4.0f));
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
@@ -2263,7 +2335,7 @@ void WrappedLineStripSubmitsAsLineList() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {
         VxVector(0.0f, 0.0f, 0.0f),
@@ -2305,7 +2377,7 @@ void PointSpriteUsesPerVertexPointSize() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     struct PointVertex {
         float x, y, z;
@@ -2353,7 +2425,7 @@ void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -2380,7 +2452,7 @@ void ProjectedSamplerStageFourEntersSpecialization() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -2418,7 +2490,7 @@ void DrawUploadsPerStageBumpEnvUniforms() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
     ffp.SetTexture(1, 101);
@@ -2471,7 +2543,7 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         FFPRecordingDriver driver;
         FFPRecordingBackend context(&driver);
         CKFixedFunctionPipeline ffp;
-        ffp.Init(context.StartedBackend());
+        ffp.Init(context.StartedBackend(), context.ShaderSet());
         ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID);
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
@@ -2488,7 +2560,7 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         FFPRecordingDriver driver;
         FFPRecordingBackend context(&driver);
         CKFixedFunctionPipeline ffp;
-        ffp.Init(context.StartedBackend());
+        ffp.Init(context.StartedBackend(), context.ShaderSet());
         ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
@@ -2505,7 +2577,7 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         FFPRecordingDriver driver;
         FFPRecordingBackend context(&driver);
         CKFixedFunctionPipeline ffp;
-        ffp.Init(context.StartedBackend());
+        ffp.Init(context.StartedBackend(), context.ShaderSet());
         ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID |
                               CKRST_TEXTURE_BUMPDUDV |
                               CKRST_TEXTURE_BUMPLUMINANCE);
@@ -2525,7 +2597,7 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         FFPRecordingDriver driver;
         FFPRecordingBackend context(&driver);
         CKFixedFunctionPipeline ffp;
-        ffp.Init(context.StartedBackend());
+        ffp.Init(context.StartedBackend(), context.ShaderSet());
         ffp.SetTexture(0, 100, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPDUDV);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
@@ -2560,12 +2632,12 @@ void PositionTTextureTransformDoesNotUploadTextureMatrix() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     const CKDWORD texMatrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
 
     VxMatrix texMatrix;
-    texMatrix.Identity();
+    texMatrix.SetIdentity();
     texMatrix[0][0] = 2.0f;
     ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix);
     ffp.SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
@@ -2584,12 +2656,12 @@ void TextureTransformCountOneUploadsTextureMatrix() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     const CKDWORD texMatrixUniform = context.GetBlockUniformForTests(CKRST_BLOCK_TEX_MATRICES);
 
     VxMatrix texMatrix;
-    texMatrix.Identity();
+    texMatrix.SetIdentity();
     texMatrix[3][0] = 0.25f;
     ffp.SetTransform(VXMATRIX_TEXTURE0, texMatrix);
     ffp.SetTexcoordComponentCount(0, 1);
@@ -2619,7 +2691,7 @@ void LegacyTexcoordComponentCountReadsOnlyXY() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {};
     float texcoords[3][4] = {
@@ -2656,7 +2728,7 @@ void PipelineTexcoordComponentCountPreservesSourceZW() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {};
     float texcoords[3][4] = {
@@ -2694,7 +2766,7 @@ void InvalidTexcoordComponentCountFallsBackToLegacyXY() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {};
     float texcoords[3][4] = {
@@ -2743,7 +2815,7 @@ void SimpleDrawPrimitiveDataUsesLegacyTexcoordPath() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {};
     float texcoords[3][4] = {
@@ -2781,7 +2853,7 @@ void VertexBlendZeroWeightsUploadsMatrixPalette() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_0WEIGHTS);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
@@ -2794,6 +2866,11 @@ void VertexBlendZeroWeightsUploadsMatrixPalette() {
               "Normal vertex blend must keep base matrices separate from matrix palette");
     TestCheck(context.Log.UniformCounts[paletteUniform] == CKFF_VERTEX_BLEND_MATRIX_COUNT,
               "Normal vertex blend must upload the dedicated matrix palette uniform");
+    const std::vector<float> &palette = context.Log.FloatUniforms[paletteUniform];
+    for (int matrix = 1; matrix < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++matrix)
+        for (int element = 0; element < 16; ++element)
+            TestCheck(palette[matrix * 16 + element] == (element % 5 == 0 ? 1.0f : 0.0f),
+                      "unset vertex blend matrices must upload identity, not uninitialized storage");
 
     ffp.Shutdown();
 }
@@ -2802,13 +2879,13 @@ void VertexBlendUploadsWorldMatrixPaletteForClipPlanes() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxMatrix world;
-    world.Identity();
+    world.SetIdentity();
     world[0][0] = 2.0f;
     VxMatrix view;
-    view.Identity();
+    view.SetIdentity();
     view[0][0] = 3.0f;
     ffp.SetTransform(VXMATRIX_WORLD, world);
     ffp.SetTransform(VXMATRIX_VIEW, view);
@@ -2842,10 +2919,10 @@ void VertexBlendUploadsExplicitMatrixPaletteSlot() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxMatrix palette;
-    palette.Identity();
+    palette.SetIdentity();
     palette[1][1] = 4.0f;
     ffp.SetVertexBlendMatrix(1, palette);
 
@@ -2872,7 +2949,7 @@ void VertexBlendWeightFlagsCreateWeightLayout() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     struct Vertex {
         float Position[3];
@@ -2900,7 +2977,7 @@ void VertexTweenWithoutStreamsRendersUntweened() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     VxVector positions[3] = {};
     VxDrawPrimitiveData data = {};
@@ -2930,7 +3007,7 @@ void IndexedVertexBlendRequiresIndexLayout() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     struct Vertex {
         float Position[3];
@@ -2960,7 +3037,7 @@ void IndexedVertexBlendClampsPaletteOverflow() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     struct Vertex {
         float Position[3];
@@ -2991,7 +3068,7 @@ void IndexedVertexBlendClampsPaletteOverflow() {
               "in-range indices draw without approximation");
 
     VxMatrix matrix;
-    matrix.Identity();
+    matrix.SetIdentity();
     TestCheck(ffp.SetVertexBlendMatrix(CKFF_VERTEX_BLEND_MATRIX_COUNT, matrix) == FALSE,
               "setting a matrix outside the supported palette must fail");
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST,
@@ -3006,7 +3083,7 @@ void PositionTVertexBlendDoesNotUploadMatrixPalette() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
@@ -3024,7 +3101,7 @@ void LocalViewerDoesNotSplitShaderWhenLightingDisabled() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_LOCALVIEWER, FALSE);
@@ -3053,7 +3130,7 @@ void MaterialSourceUsesDeclaredDPColorStreams() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
-    ffp.Init(context.StartedBackend());
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
 
     ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_COLORVERTEX, TRUE);
@@ -3080,6 +3157,9 @@ void MaterialSourceUsesDeclaredDPColorStreams() {
 
 int main() {
     TestFramework tests;
+    tests.Run("FFP declares generic program resources", &FixedFunctionProgramDeclaresItsShaderInterface);
+    tests.Run("Shader catalog and program metadata stay outside cached draws",
+              &ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss);
     tests.Run("Null rasterizer supports headless FFP",
               &NullRasterizerSupportsHeadlessFFP);
     tests.Run("Missing shader payload family fails initialization",
@@ -3120,6 +3200,8 @@ int main() {
               &BottomLeftRenderTargetsSampleWithoutFlip);
     tests.Run("Render target origin flips projection, viewport and winding",
               &RenderTargetOriginFlipsProjectionViewportAndWinding);
+    tests.Run("Transformed vertices use legacy pixel centers",
+              &TransformedVerticesUseLegacyPixelCenters);
     tests.Run("Viewport mapping remaps clip space and scissors",
               &ViewportMappingRemapsClipSpaceAndScissors);
     tests.Run("DrawVertexBuffer uploads alpha precision",
@@ -3172,12 +3254,10 @@ int main() {
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
     tests.Run("Filtered depth texture compare approximates",
               &FilteredDepthTextureCompareApproximates);
-    tests.Run("Border color uses stable bgfx palette slots",
-              &BorderColorUsesStableBgfxPaletteSlots);
-    tests.Run("Border palette overflow reuses nearest color",
-              &BorderPaletteOverflowReusesNearestColor);
-    tests.Run("Border palette slots are reused across frames",
-              &BorderPaletteSlotsAreReusedAcrossFrames);
+    tests.Run("Border color reaches backend unmodified",
+              &BorderColorReachesBackendUnmodified);
+    tests.Run("Translation preserves distinct border colors",
+              &BorderColorsAreNotQuantizedByTranslation);
     tests.Run("Unused border textures do not consume palette slots",
               &UnusedBorderTexturesDoNotConsumePaletteSlots);
     tests.Run("Untextured stage keeps runtime stage params",

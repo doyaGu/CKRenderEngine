@@ -1,14 +1,12 @@
-# CKRasterizerLib - translation core shared by the rasterizer plugins:
-#   * backend interface (CKRasterizerBackend.h) with its NULL implementation
-#   * fixed-function pipeline translation (CKFF*, CKFixedFunctionPipeline,
-#     draw-state / vertex-layout caches, transient geometry, postprocess pass)
-#   * render settings / debug logger / frame-cost stats it depends on
-#   * bgfx fixed-function shaders (shaders/, generated headers checked in):
-#     one program family (vs_ff_3d[_clip], vs_ff_positiont[_clip], fs_ff_stage)
+# Fixed-function translation, presentation, and rasterizer/plugin composition.
+# Generic device contracts and shared diagnostics are separate dependencies.
 set(CKRASTERIZER_LIB_SOURCES
         CKRasterizerCapsBaseline.cpp
 
         CKFFDebug.cpp
+        CKFFShaderInterface.cpp
+        CKRasterizerPlugin.cpp
+        CKNullRasterizer.cpp
         CKFixedFunctionPipeline.cpp
         CKFFPipelineState.cpp
         CKFFPipelineGuards.cpp
@@ -23,15 +21,11 @@ set(CKRASTERIZER_LIB_SOURCES
         CKFFShaderKey.cpp
         CKFFSpecializationInfo.cpp
         CKFFShaderCache.cpp
-        CKDrawAnnotation.cpp
-        CKDrawAnnotationParser.cpp
         CKDrawStateCache.cpp
         CKVertexLayoutCache.cpp
         CKTransientGeometry.cpp
         CKPresentStage.cpp
-        CKRenderSettings.cpp
-        CKRasterizerBackend.cpp
-        CKNullBackend.cpp
+        CKBackendDisplayCaps.cpp
 
         CKTranslatedRasterizer.cpp
         CKTranslatedContext.cpp
@@ -39,20 +33,17 @@ set(CKRASTERIZER_LIB_SOURCES
 )
 
 set(CKRASTERIZER_LIB_HEADERS
-        CKRasterizerValidation.h
         CKRasterizerCapsBaseline.h
         CKRasterizerCapsBaseline.generated.h
-        CKRasterizerBackendEnums.h
-        CKRasterizerBackendTypes.h
-        CKRasterizerBackend.h
-        CKNullBackend.h
+        CKBuiltinShaders.h
+        CKFFShaderInterface.h
+        CKRasterizerPlugin.h
+        CKNullRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
 
         CKFixedFunctionPipeline.h
-        CKRenderConfig.h
-        CKDebugLogger.h
         CKFFDebug.h
         CKFFDrawProbes.h
         CKFFStageState.h
@@ -70,29 +61,13 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFStateResolver.h
         CKFFTextureBinder.h
         CKFFUniformEmitter.h
-        CKDrawAnnotation.h
         CKDrawStateCache.h
         CKVertexLayoutCache.h
         CKTransientGeometry.h
         CKPresentStage.h
-        CKRenderSettings.h
         CKTranslatedRasterizer.h
         CKTranslatedRasterizerInternal.h
-        CKRenderPerfClock.h
-        CKRenderFrameCostStats.h
 )
-
-if (CKRE_ENABLE_DEBUG_LOGGER)
-    list(APPEND CKRASTERIZER_LIB_SOURCES CKDebugLogger.cpp)
-endif ()
-
-if (CKRE_ENABLE_RENDER_STATS)
-    list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderPerfClock.cpp)
-endif ()
-
-if (CKRE_ENABLE_FRAME_COST_STATS)
-    list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderFrameCostStats.cpp)
-endif ()
 
 add_library(CKRasterizerLib STATIC ${CKRASTERIZER_LIB_SOURCES} ${CKRASTERIZER_LIB_HEADERS})
 target_compile_features(CKRasterizerLib PRIVATE cxx_std_20)
@@ -119,6 +94,8 @@ if (CKRE_BUILD_STATIC AND TARGET VxMathStatic)
 endif ()
 
 target_link_libraries(CKRasterizerLib PUBLIC
+        CKRasterizerBackend
+        CKRenderSupport
         ${_ckre_rasterizer_ck2_dep}
         ${_ckre_rasterizer_vxmath_dep}
 )
@@ -164,7 +141,6 @@ if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND
             DEPENDS "${CKRE_SHADER_STAMP}"
             SOURCES ${CKRE_SHADER_SOURCES}
     )
-    add_dependencies(CKRasterizerLib CK2_3D_shaders)
 elseif (CKRE_GENERATE_SHADERS)
     message(WARNING "CK2_3D_shaders target disabled: Python3 or bgfx shaderc target not available")
 else ()

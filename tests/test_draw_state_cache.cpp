@@ -55,17 +55,20 @@ void BlendOperationIsEncodedInDrawState() {
               "Blend operation must be encoded in the draw state");
 }
 
-void DrawStateBuilderExpandsBothSourceAlphaBlendModes() {
-    CKDrawStateBuilder builder;
-    CKDrawState state = builder.Blend(VXBLEND_BOTHSRCALPHA, VXBLEND_ZERO).Build();
+void FixedFunctionStateExpandsBothSourceAlphaBlendModes() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    cache.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_BOTHSRCALPHA);
+    cache.SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_ZERO);
+    CKDrawState state = cache.BuildDrawState(VX_TRIANGLELIST);
 
     TestCheck(BlendSrc(state.Lo) == VXBLEND_SRCALPHA,
               "BOTHSRCALPHA source must expand to SRCALPHA");
     TestCheck(BlendDst(state.Lo) == VXBLEND_INVSRCALPHA,
               "BOTHSRCALPHA destination must expand to INVSRCALPHA");
 
-    CKDrawStateBuilder inverseBuilder;
-    state = inverseBuilder.Blend(VXBLEND_BOTHINVSRCALPHA, VXBLEND_ZERO).Build();
+    cache.SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_BOTHINVSRCALPHA);
+    state = cache.BuildDrawState(VX_TRIANGLELIST);
 
     TestCheck(BlendSrc(state.Lo) == VXBLEND_INVSRCALPHA,
               "BOTHINVSRCALPHA source must expand to INVSRCALPHA");
@@ -73,21 +76,21 @@ void DrawStateBuilderExpandsBothSourceAlphaBlendModes() {
               "BOTHINVSRCALPHA destination must expand to SRCALPHA");
 }
 
-void DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes() {
+void DrawStateBuilderKeepsResolvedSeparateBlendFactors() {
     CKDrawStateBuilder builder;
     CKDrawState state = builder
-        .BlendSeparate(VXBLEND_BOTHSRCALPHA, VXBLEND_ZERO,
-                       VXBLEND_BOTHINVSRCALPHA, VXBLEND_ZERO)
+        .BlendSeparate(VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA,
+                       VXBLEND_INVSRCALPHA, VXBLEND_SRCALPHA)
         .Build();
 
     TestCheck(BlendSrc(state.Lo) == VXBLEND_SRCALPHA,
-              "Separate color BOTHSRCALPHA source must expand to SRCALPHA");
+              "Resolved color source factor must remain SRCALPHA");
     TestCheck(BlendDst(state.Lo) == VXBLEND_INVSRCALPHA,
-              "Separate color BOTHSRCALPHA destination must expand to INVSRCALPHA");
+              "Resolved color destination factor must remain INVSRCALPHA");
     TestCheck(BlendSrcAlpha(state.Lo) == VXBLEND_INVSRCALPHA,
-              "Separate alpha BOTHINVSRCALPHA source must expand to INVSRCALPHA");
+              "Resolved alpha source factor must remain INVSRCALPHA");
     TestCheck(BlendDstAlpha(state.Lo) == VXBLEND_SRCALPHA,
-              "Separate alpha BOTHINVSRCALPHA destination must expand to SRCALPHA");
+              "Resolved alpha destination factor must remain SRCALPHA");
 }
 
 void StencilWriteMaskInvalidatesCachedDrawState() {
@@ -159,10 +162,10 @@ int main() {
               &BlendStateKeepsExplicitSourceColorDestination);
     tests.Run("Blend operation is encoded in draw state",
               &BlendOperationIsEncodedInDrawState);
-    tests.Run("Draw state builder expands both-source-alpha blend modes",
-              &DrawStateBuilderExpandsBothSourceAlphaBlendModes);
-    tests.Run("Draw state builder expands separate both-source-alpha blend modes",
-              &DrawStateBuilderExpandsSeparateBothSourceAlphaBlendModes);
+    tests.Run("Fixed-function state expands both-source-alpha blend modes",
+              &FixedFunctionStateExpandsBothSourceAlphaBlendModes);
+    tests.Run("Draw state builder keeps resolved separate blend factors",
+              &DrawStateBuilderKeepsResolvedSeparateBlendFactors);
     tests.Run("Stencil write mask invalidates cached draw state",
               &StencilWriteMaskInvalidatesCachedDrawState);
     tests.Run("Antialias state maps to MSAA",

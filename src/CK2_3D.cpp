@@ -13,7 +13,7 @@
 
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
-#include "CKTranslatedRasterizer.h"
+#include "CKRasterizerRegistration.h"
 #include "CKException.h"
 #include "VxWindowFunctions.h"
 
@@ -146,8 +146,7 @@ static void RegisterStaticRasterizer(CKRST_GETINFO getInfoFunc, const char *name
 
 static void RegisterNullRasterizer() {
     CKRasterizerInfo info;
-    info.StartFct = CKTranslatedNullRasterizerStart;
-    info.CloseFct = CKTranslatedNullRasterizerClose;
+    CKNullRasterizerGetInfo(&info);
     info.DllInstance = nullptr;
     info.DllName = "";
     info.Desc = "NULL Rasterizer";
@@ -157,6 +156,10 @@ static void RegisterNullRasterizer() {
 
 void EnumerateRasterizers() {
     if (!g_EnumerationDone) {
+#if defined(CKRE_STATIC_SDL_GPU_RASTERIZER)
+        extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
+        RegisterStaticRasterizer(CKSdlGpuRasterizerGetInfo, "CKSdlGpuRasterizer");
+#endif
 #if defined(CKRE_STATIC_BGFX_RASTERIZER)
         extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
         RegisterStaticRasterizer(CKBgfxRasterizerGetInfo, "CKBgfxRasterizer");

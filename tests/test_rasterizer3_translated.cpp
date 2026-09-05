@@ -491,6 +491,28 @@ void TestPresentFailurePropagation()
     f.Backend->Log.DrawErrorAt = 0;
 }
 
+void TestRasterizerOwnsShaderSelectionAndCatalogFailure()
+{
+    FFPTranslatedWorld world;
+    FFPRecordingDriver *provider = world.BackendDriver();
+    provider->FailShaderCatalog = TRUE;
+    TestCheck(!world.CreateContext(64, 64) && world.Context &&
+                  world.Context->GetDeviceStatus() != CK_OK,
+              "missing rasterizer artifacts fail creation and roll the device back");
+    TestCheck(provider->ShaderTargetQueries == 1 && provider->ShaderCatalogQueries == 1,
+              "the rasterizer supplies device targets then resolves a catalog");
+
+    provider->FailShaderCatalog = FALSE;
+    TestCheck(world.Context->Create(NULL, 0, 0, 64, 64, 32, FALSE, 60, 24, 8),
+              "the same context can retry after its catalog becomes available");
+    TestCheck(provider->ShaderTargetQueries == 2 && provider->ShaderCatalogQueries == 2,
+              "retry supplies a fresh shader selection exactly once");
+    TestCheck(world.Context->BeginScene() && world.Context->EndScene() && world.Context->BackToFront(FALSE),
+              "the retained catalog supports lazy presentation shader creation");
+    TestCheck(provider->ShaderTargetQueries == 2 && provider->ShaderCatalogQueries == 2,
+              "frame submission and lazy program creation never rediscover artifacts");
+}
+
 void TestDestroyContextPreservesFailedShutdown()
 {
     Fixture f;
@@ -524,6 +546,7 @@ int main()
     framework.Run("overlay phase", TestOverlayPhase);
     framework.Run("RenderScale coordinates", TestRenderScaleCoordinates);
     framework.Run("present failures propagate", TestPresentFailurePropagation);
+    framework.Run("rasterizer owns shader selection and catalog failures", TestRasterizerOwnsShaderSelectionAndCatalogFailure);
     framework.Run("failed shutdown preserves context", TestDestroyContextPreservesFailedShutdown);
     framework.Run("shutdown", TestShutdown);
     return framework.ExitCode();

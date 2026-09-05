@@ -12,12 +12,32 @@
 struct CKBgfxShaderRecord {
     bgfx::ShaderHandle Handle;
     CK_SHADER_STAGE Stage;
+    CKShaderDesc Desc;
 };
 
 struct CKBgfxProgramRecord {
-    bgfx::ProgramHandle Handle;
-    CKDWORD VertexShader;
-    CKDWORD PixelShader;
+    struct UniformBinding {
+        CKDWORD Slot;
+        CKDWORD Count;
+        bgfx::UniformHandle Handle;
+    };
+    struct SamplerBinding {
+        CKBackendSamplerBinding Desc;
+        bgfx::UniformHandle Handle;
+        std::shared_ptr<bgfx::TextureHandle> DefaultTexture;
+    };
+    bgfx::ProgramHandle Handle = BGFX_INVALID_HANDLE;
+    CKDWORD VertexShader = 0;
+    CKDWORD PixelShader = 0;
+    CKBackendProgramDesc Interface;
+    std::vector<UniformBinding> Uniforms;
+    std::vector<SamplerBinding> Samplers;
+
+    ~CKBgfxProgramRecord()
+    {
+        for (const auto &uniform : Uniforms) if (bgfx::isValid(uniform.Handle)) bgfx::destroy(uniform.Handle);
+        for (const auto &sampler : Samplers) if (bgfx::isValid(sampler.Handle)) bgfx::destroy(sampler.Handle);
+    }
 };
 
 struct CKBgfxVertexLayoutRecord {
@@ -28,6 +48,8 @@ struct CKBgfxVertexLayoutRecord {
 struct CKBgfxVertexBufferRecord {
     bgfx::DynamicVertexBufferHandle Handle;
     CKDWORD Layout;
+    bgfx::VertexLayout NativeLayout;
+    std::vector<CKBYTE> Shadow;
     CKDWORD VertexSize;
     CKDWORD VertexCount;
     CKDWORD Size;
@@ -35,6 +57,7 @@ struct CKBgfxVertexBufferRecord {
 
 struct CKBgfxIndexBufferRecord {
     bgfx::DynamicIndexBufferHandle Handle;
+    std::vector<CKBYTE> Shadow;
     CKBOOL Index32;
     CKDWORD IndexCount;
     CKDWORD Size;

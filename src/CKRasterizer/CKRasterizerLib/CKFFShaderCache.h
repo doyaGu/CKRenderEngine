@@ -1,6 +1,7 @@
 #ifndef CKFFSHADERCACHE_H
 #define CKFFSHADERCACHE_H
 
+#include "CKBuiltinShaders.h"
 #include "CKFFShaderKey.h"
 #include "CKFFShaderABI.h"
 #include "CKFFConstants.h"
@@ -66,7 +67,7 @@ public:
     CKFFShaderCache();
     ~CKFFShaderCache();
 
-    bool Init(CKRasterizerBackend *backend);
+    bool Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders);
     void Shutdown();
 
     // Select the fixed-function program for the given FFP shader key and
@@ -95,7 +96,7 @@ public:
 private:
     CKRasterizerBackend *m_Backend;
     CKRasterizerTargetDesc m_Target;
-    const void *m_BlobSet;
+    CKBackendShaderSet m_Shaders;
     CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT];
     CKDWORD m_VertexShaders[CKFF_PROGRAM_VARIANT_COUNT];
     CKDWORD m_PixelShader;

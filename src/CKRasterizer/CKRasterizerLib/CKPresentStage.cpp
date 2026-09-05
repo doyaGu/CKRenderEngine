@@ -1,58 +1,7 @@
 #include "CKPresentStage.h"
 
-#include "shaders/generated/dx11/vs_postprocess.bin.h"
-#include "shaders/generated/dx11/fs_postprocess.bin.h"
-#include "shaders/generated/dx12/vs_postprocess.bin.h"
-#include "shaders/generated/dx12/fs_postprocess.bin.h"
-#include "shaders/generated/spirv/vs_postprocess.bin.h"
-#include "shaders/generated/spirv/fs_postprocess.bin.h"
-#include "shaders/generated/glsl/vs_postprocess.bin.h"
-#include "shaders/generated/glsl/fs_postprocess.bin.h"
-#include "shaders/generated/essl/vs_postprocess.bin.h"
-#include "shaders/generated/essl/fs_postprocess.bin.h"
-#include "shaders/generated/metal/vs_postprocess.bin.h"
-#include "shaders/generated/metal/fs_postprocess.bin.h"
-
 #include <math.h>
 #include <string.h>
-
-namespace {
-
-struct CKPresentShaderBlobSet {
-    CK_SHADER_FORMAT Format;
-    CK_SHADER_PROFILE Profile;
-    const unsigned char *VS;
-    unsigned int VSSize;
-    const unsigned char *FS;
-    unsigned int FSSize;
-};
-
-const CKPresentShaderBlobSet g_PresentShaderBlobSets[] = {
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11, s_dx11_vs_postprocess, sizeof(s_dx11_vs_postprocess),
-     s_dx11_fs_postprocess, sizeof(s_dx11_fs_postprocess)},
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX12, s_dx12_vs_postprocess, sizeof(s_dx12_vs_postprocess),
-     s_dx12_fs_postprocess, sizeof(s_dx12_fs_postprocess)},
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_SPIRV, s_spirv_vs_postprocess, sizeof(s_spirv_vs_postprocess),
-     s_spirv_fs_postprocess, sizeof(s_spirv_fs_postprocess)},
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_GLSL, s_glsl_vs_postprocess, sizeof(s_glsl_vs_postprocess),
-     s_glsl_fs_postprocess, sizeof(s_glsl_fs_postprocess)},
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_ESSL, s_essl_vs_postprocess, sizeof(s_essl_vs_postprocess),
-     s_essl_fs_postprocess, sizeof(s_essl_fs_postprocess)},
-    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_MSL, s_metal_vs_postprocess, sizeof(s_metal_vs_postprocess),
-     s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
-};
-
-const CKPresentShaderBlobSet *FindPresentShaderBlobSet(CK_SHADER_FORMAT format,
-                                                       CK_SHADER_PROFILE profile)
-{
-    for (const CKPresentShaderBlobSet &set : g_PresentShaderBlobSets) {
-        if (set.Format == format && set.Profile == profile)
-            return &set;
-    }
-    return nullptr;
-}
-
-} // namespace
 
 CKDWORD CKPresentStage::ScaledDimension(CKDWORD value, float scale, CKDWORD maximum)
 {
@@ -98,10 +47,11 @@ CKPresentStage::~CKPresentStage()
     Shutdown();
 }
 
-void CKPresentStage::Init(CKRasterizerBackend *backend)
+void CKPresentStage::Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders)
 {
     Shutdown();
     m_Backend = backend;
+    m_Shaders = shaders;
 }
 
 void CKPresentStage::Shutdown()
@@ -109,6 +59,7 @@ void CKPresentStage::Shutdown()
     DestroyTargets();
     DestroyResources();
     m_Backend = nullptr;
+    m_Shaders = CKBackendShaderSet();
     m_ResourceIds = CKPresentResources();
 }
 
@@ -255,32 +206,17 @@ CKBOOL CKPresentStage::EnsureResources()
 
     DestroyResources();
 
-    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(caps.ShaderFormat,
-                                                                   caps.ShaderProfile);
-    if (!blobs)
+    if (!m_Shaders.Matches(caps.ShaderFormat, caps.ShaderProfile))
         return FALSE;
-
-    CKShaderDesc shaderDesc;
-    shaderDesc.Format = caps.ShaderFormat;
-    shaderDesc.Profile = caps.ShaderProfile;
-
-    shaderDesc.Stage = CKRST_SHADER_VERTEX;
-    shaderDesc.Code = blobs->VS;
-    shaderDesc.CodeSize = blobs->VSSize;
-    if (m_Backend->CreateShader(&shaderDesc, &m_ResourceIds.VertexShader) != CK_OK) {
+    if (m_Backend->CreateShader(&m_Shaders.Shaders[CKRST_SHADER_PRESENT_VERTEX], &m_ResourceIds.VertexShader) != CK_OK ||
+        m_Backend->CreateShader(&m_Shaders.Shaders[CKRST_SHADER_PRESENT_FRAGMENT], &m_ResourceIds.PixelShader) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
 
-    shaderDesc.Stage = CKRST_SHADER_PIXEL;
-    shaderDesc.Code = blobs->FS;
-    shaderDesc.CodeSize = blobs->FSSize;
-    if (m_Backend->CreateShader(&shaderDesc, &m_ResourceIds.PixelShader) != CK_OK) {
-        DestroyResources();
-        return FALSE;
-    }
-
-    if (m_Backend->CreateProgram(m_ResourceIds.VertexShader, m_ResourceIds.PixelShader, &m_ResourceIds.Program) != CK_OK) {
+    const CKBackendProgramDesc program = CKFFBuildProgramInterface(
+        m_ResourceIds.VertexShader, m_ResourceIds.PixelShader, caps.ShaderFormat, TRUE);
+    if (m_Backend->CreateProgram(&program, &m_ResourceIds.Program) != CK_OK) {
         DestroyResources();
         return FALSE;
     }
@@ -343,7 +279,20 @@ CKERROR CKPresentStage::SubmitBlit()
 
 CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float sharpness)
 {
-    if (!m_Backend || !source.IsActive() || !EnsureResources())
+    if (!source.IsActive())
+        return CKERR_INVALIDPARAMETER;
+    return SubmitTexture(source.ColorTexture, source.Width, source.Height, TRUE, fxaa, sharpness);
+}
+
+CKERROR CKPresentStage::SubmitCopy(CKDWORD texture, CKDWORD width, CKDWORD height)
+{
+    return SubmitTexture(texture, width, height, FALSE, FALSE, 0.0f);
+}
+
+CKERROR CKPresentStage::SubmitTexture(CKDWORD texture, CKDWORD width, CKDWORD height,
+                                     CKBOOL linear, CKBOOL fxaa, float sharpness)
+{
+    if (!m_Backend || !texture || !width || !height || !EnsureResources())
         return CKERR_NOTIMPLEMENTED;
 
     struct PresentVertex {
@@ -365,8 +314,8 @@ CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float
 
     CKSamplerDesc sampler;
     memset(&sampler, 0, sizeof(sampler));
-    sampler.MinFilter = CKRST_FILTER_LINEAR;
-    sampler.MagFilter = CKRST_FILTER_LINEAR;
+    sampler.MinFilter = linear ? CKRST_FILTER_LINEAR : CKRST_FILTER_NEAREST;
+    sampler.MagFilter = sampler.MinFilter;
     sampler.MipFilter = CKRST_FILTER_NONE;
     sampler.AddressU = CKRST_ADDRESS_CLAMP;
     sampler.AddressV = CKRST_ADDRESS_CLAMP;
@@ -374,8 +323,8 @@ CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float
     sampler.CompareFunc = CKRST_COMPARE_NONE;
 
     const float params[4] = {
-        source.Width > 0 ? 1.0f / (float)source.Width : 1.0f,
-        source.Height > 0 ? 1.0f / (float)source.Height : 1.0f,
+        1.0f / (float)width,
+        1.0f / (float)height,
         fxaa ? 1.0f : 0.0f,
         sharpness
     };
@@ -386,10 +335,12 @@ CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float
         .Cull(VXCULL_NONE)
         .Build();
     m_Backend->SetPipelineState(&state);
-    m_Backend->BindTexture(CKRST_BACKEND_SLOT_PRESENT, source.ColorTexture, &sampler);
-    const CKERROR pushed = m_Backend->PushConstants(CKRST_BLOCK_PRESENT_PARAMS, params, 1);
-    if (pushed != CK_OK)
+    m_Backend->BindTexture(CKFF_SLOT_PRESENT, texture, &sampler);
+    const CKERROR pushed = CKFFPushConstants(m_Backend, CKRST_BLOCK_PRESENT_PARAMS, params, 1);
+    if (pushed != CK_OK) {
+        m_Backend->BindTexture(CKFF_SLOT_PRESENT, 0, NULL);
         return pushed;
+    }
 
     CKBackendDraw draw;
     draw.Program = m_ResourceIds.Program;
@@ -398,6 +349,6 @@ CKERROR CKPresentStage::Submit(const CKPresentTarget &source, CKBOOL fxaa, float
     draw.VertexCount = 3;
     const CKERROR drawn = m_Backend->Draw(&draw);
     // The present sampler is only used by these fullscreen draws.
-    m_Backend->BindTexture(CKRST_BACKEND_SLOT_PRESENT, 0, NULL);
+    m_Backend->BindTexture(CKFF_SLOT_PRESENT, 0, NULL);
     return drawn;
 }

@@ -99,7 +99,7 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
 {
 }
 
-CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKBackendConstantBlock block,
+CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKFFConstantBlock block,
                                 const void *data, CKDWORD count,
                                 CKDWORD vec4Count, CKBOOL objectUniform)
 {
@@ -142,14 +142,19 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
         }
     }
     Vx3DMultiplyMatrix4(viewProj, m_State.Projection, m_State.View);
-    if (!m_State.ViewportRemapIdentity) {
-        // Viewport emulation (spec 4.4): viewport-relative clip -> target clip.
+    {
+        // D3D8 samples at integer pixel centers. Match the half-pixel shift
+        // already applied to POSITIONT vertices, then map the viewport into
+        // the target. Applying it in clip space preserves perspective w and
+        // keeps transformed meshes aligned with screen-space geometry.
         VxMatrix remap;
         Vx3DMatrixIdentity(remap);
         remap[0][0] = m_State.ViewportRemap[0];
         remap[1][1] = m_State.ViewportRemap[1];
-        remap[3][0] = m_State.ViewportRemap[2];
-        remap[3][1] = m_State.ViewportRemap[3];
+        remap[3][0] = m_State.ViewportRemap[2] +
+            0.5f * m_State.Viewport[0] * m_State.ViewportRemap[0];
+        remap[3][1] = m_State.ViewportRemap[3] +
+            0.5f * m_State.Viewport[1] * m_State.ViewportRemap[1];
         VxMatrix remapped;
         Vx3DMultiplyMatrix4(remapped, remap, viewProj);
         viewProj = remapped;
@@ -174,7 +179,7 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
     }
     if (vertexBlend) {
         VxMatrix identity;
-        identity.Identity();
+        identity.SetIdentity();
         VxMatrix palette[CKFF_VERTEX_BLEND_MATRIX_COUNT];
         for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {
             if (m_State.VertexBlendMatrixSet[i])
@@ -357,12 +362,12 @@ CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKRasterizerBackend *backend,
     return sink.Failed ? FALSE : TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadUniform(CKRasterizerBackend *backend, CKBackendConstantBlock block,
+CKBOOL CKFFUniformEmitter::UploadUniform(CKRasterizerBackend *backend, CKFFConstantBlock block,
                                          const void *data, CKDWORD vec4Count)
 {
     if (!backend)
         return FALSE;
-    if (backend->PushConstants(block, data, vec4Count) != CK_OK)
+    if (CKFFPushConstants(backend, block, data, vec4Count) != CK_OK)
         return FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_Probes.OnUniform(block, vec4Count);

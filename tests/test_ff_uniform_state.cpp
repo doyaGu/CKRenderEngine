@@ -826,10 +826,11 @@ void FragmentShaderDeclaresTheFixedSamplerLayout() {
               "Vertex shaders keep the clip-distance variant switch");
 }
 
+#ifdef CKRE_TEST_BGFX_ARTIFACTS
 void ShaderCodegenCompilesOneProgramFamily() {
     const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/compile_shaders.py");
     const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/CMakeLists.txt");
-    const std::string abi = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKRasterizerLib/shaders/generated/CKFFShaderABI.generated.h");
+    const std::string abi = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/generated/CKFFShaderABI.generated.h");
     TestCheck(!script.empty() && !cmake.empty() && !abi.empty(),
               "Shader codegen script, CMake list and generated ABI stamp must be readable");
 
@@ -874,6 +875,8 @@ void ShaderCodegenCompilesOneProgramFamily() {
                   cmake.find("SOURCES ${CKRE_SHADER_SOURCES}") != std::string::npos,
               "Shader generation must depend on CKRE_SHADER_SOURCES");
 }
+
+#endif
 
 void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     CKFFFSStateDesc desc;
@@ -1095,6 +1098,7 @@ void TextureBindingMaskIgnoresInactiveStages() {
               "Texture binding mask must not split disabled stage keys");
 }
 
+#ifdef CKRE_TEST_BGFX_ARTIFACTS
 void BgfxTransientAllocationsPreflightAvailability() {
     const std::string contents = ReadTextFile(
         "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CKBgfxBackend.cpp");
@@ -1139,6 +1143,8 @@ void BgfxTransientAllocationsPreflightAvailability() {
                   "transient allocation must record capacity misses before attempting allocation");
     }
 }
+
+#endif
 
 } // namespace
 
@@ -1208,8 +1214,10 @@ int main() {
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
     tests.Run("Fragment shader declares the fixed sampler layout",
               &FragmentShaderDeclaresTheFixedSamplerLayout);
+#ifdef CKRE_TEST_BGFX_ARTIFACTS
     tests.Run("Shader codegen compiles one program family",
               &ShaderCodegenCompilesOneProgramFamily);
+#endif
     tests.Run("Sampler ordinal counts only sampling stages of the same type",
               &SamplerOrdinalCountsOnlySamplingStagesOfTheSameType);
     tests.Run("Sampler slot overflow samples as unbound",
@@ -1230,7 +1238,9 @@ int main() {
               &PremodulateAddsImplicitNextStageTextureDependency);
     tests.Run("Texture binding mask ignores inactive stages",
               &TextureBindingMaskIgnoresInactiveStages);
+#ifdef CKRE_TEST_BGFX_ARTIFACTS
     tests.Run("bgfx transient allocations preflight availability",
               &BgfxTransientAllocationsPreflightAvailability);
+#endif
     return tests.ExitCode();
 }

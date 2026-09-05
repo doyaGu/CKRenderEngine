@@ -3,12 +3,15 @@
 
 // bgfx implementation of CKRasterizerBackend (spec 5.10). One backend per
 // bgfx instance: passes are sequential bgfx views, draws carry the sticky
-// pipeline state and slot bindings, constant blocks are one bgfx uniform
-// each, Present() is bgfx::frame(). Everything runs on the API thread.
+// pipeline state and slot bindings. Program metadata owns named uniforms;
+// submission maps to bgfx::frame(). Everything runs on the API thread.
 
 #include "CKRasterizerBackend.h"
+#include "CKBackendProgram.h"
+#include "CKBgfxBorderPalette.h"
 
 #include <atomic>
+#include <map>
 #include <string.h>
 #include <bgfx/bgfx.h>
 
@@ -31,8 +34,6 @@ struct CKBgfxDrawMapTextureBinding {
 };
 
 class CKBgfxBackend;
-class CKBgfxBackendDriver;
-class CKBgfxBackendLibrary;
 class CKBgfxResources;
 struct CKBgfxBackendTestAccess;
 struct CKBgfxShaderRecord;
@@ -77,52 +78,13 @@ private:
 };
 
 // ===========================================================================
-// CKBgfxBackendLibrary / CKBgfxBackendDriver
-// ===========================================================================
-
-class CKBgfxBackendLibrary : public CKRasterizerBackendLibrary {
-public:
-    CKBgfxBackendLibrary();
-    ~CKBgfxBackendLibrary() override;
-
-    CKBOOL Start(WIN_HANDLE AppWnd) override;
-    void Close() override;
-    int GetDriverCount() const override { return m_Drivers.Size(); }
-    CKRasterizerBackendDriver *GetDriver(CKDWORD Index) const override;
-    WIN_HANDLE GetMainWindow() const override { return m_MainWindow; }
-
-private:
-    WIN_HANDLE m_MainWindow;
-    XArray<CKBgfxBackendDriver *> m_Drivers;
-};
-
-// The single bgfx adapter: display modes from SDL, caps from the baseline
-// (spec 4.9.2) lowered to the bgfx limits once a backend is initialised.
-class CKBgfxBackendDriver : public CKRasterizerBackendDriver {
-public:
-    explicit CKBgfxBackendDriver(CKBgfxBackendLibrary *owner);
-    ~CKBgfxBackendDriver() override;
-
-    CKRasterizerBackend *CreateBackend() override;
-    CKBOOL DestroyBackend(CKRasterizerBackend *Backend) override;
-
-    CKBgfxBackendLibrary *GetOwner() const { return m_Owner; }
-    int GetBackendCount() const { return m_Backends.Size(); }
-
-private:
-    CKBgfxBackendLibrary *m_Owner;
-    XArray<CKBgfxBackend *> m_Backends;
-};
-
-// ===========================================================================
 // CKBgfxBackend
 // ===========================================================================
 
 class CKBgfxBackend : public CKRasterizerBackend {
     friend class CKBgfxCallback;
-    friend class CKBgfxBackendDriver;
 public:
-    explicit CKBgfxBackend(CKBgfxBackendDriver *driver);
+    CKBgfxBackend();
     ~CKBgfxBackend() override;
 
     // --- Device
@@ -145,7 +107,7 @@ public:
                          CKDWORD Size, const void *Data) override;
     CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out) override;
     CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out) override;
-    CKERROR CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, CKDWORD *Out) override;
+    CKERROR CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out) override;
     CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const override;
     CKERROR DestroyObject(CKDWORD Object, CKDWORD Type) override;
     void SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name) override;
@@ -154,21 +116,24 @@ public:
     CKERROR BeginPass(const CKBackendPassDesc *Desc) override;
     void SetPipelineState(const CKBackendPipelineState *State) override;
     void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) override;
-    CKERROR PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count) override;
+    CKERROR PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize) override;
     void SetMarker(const char *Name) override;
     CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) override;
     CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) override;
     CKERROR Draw(const CKBackendDraw *Draw) override;
     CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                  CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect) override;
-    CKERROR Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber) override;
+    CKERROR Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber) override;
 
     // --- Readback
-    CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKDWORD *AvailableFrame) override;
+    CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket) override;
 
     // --- Misc
-    CKERROR SetPaletteColor(CKDWORD Index, CKDWORD RGBA) override;
+    uint64_t GetDrawApproximationMask() const override { return m_DrawApproximations; }
     const CKBackendStats &GetStats() const override { return m_Stats; }
+    const CKBackendDeviceLimits &GetDeviceLimits() const { return m_CapsDesc; }
+    const char *GetRendererName() const { return m_RendererName; }
+    CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format, CKTextureFormatCaps *Caps) const;
 
     CKBgfxShaderRecord *GetShader(CKDWORD Handle);
     CKBgfxProgramRecord *GetProgram(CKDWORD Handle);
@@ -185,7 +150,6 @@ private:
         CKDWORD Texture;
         CKSamplerDesc Sampler;
         CKBOOL HasSampler;
-        CKBOOL PendingZero;   // explicit zero binding requested for the next draw
     };
 
     static const int MAX_TRANSIENT_VB = 256;
@@ -197,15 +161,16 @@ private:
     }
     CKBOOL IsReady() const { return m_BgfxInitialized && m_Created && IsApiThread() ? TRUE : FALSE; }
     void LatchFatalError(CKERROR Error);
-    CKBOOL CreateUniforms();
-    void DestroyUniforms();
     void ReleaseBgfx();
-    CKERROR GetTextureFormatCaps(VX_PIXELFORMAT Format, CKTextureFormatCaps *Caps) const;
+    CKRECT WindowPixelRect(const CKRECT &rect) const;
     CKERROR BuildFrameBufferAttachments(const CKBackendRenderTargetDesc *Desc, bgfx::Attachment *Attachments,
                                         CKDWORD Capacity, CKDWORD &AttachmentCount);
     CKERROR CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD VertexCount, CKDWORD Layout,
                                      const void *Data, CKDWORD *OutBuffer);
     CKERROR CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index32, const void *Data, CKDWORD *OutBuffer);
+    CKERROR UploadTextureOrdered(bgfx::TextureHandle Texture, bgfx::TextureFormat::Enum Format,
+                                 CKDWORD Mip, CKDWORD X, CKDWORD Y, CKDWORD Layer, CKDWORD Width, CKDWORD Height,
+                                 const bgfx::Memory *Data, CKBOOL Cube = FALSE, CKBOOL Volume = FALSE);
     CKERROR UpdateVertexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data);
     CKERROR UpdateIndexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data);
 
@@ -213,7 +178,9 @@ private:
     CKERROR DrawFailed(CKERROR Error, const char *Operation);
     CKERROR ApplyPipelineState();
     CKERROR BindGeometry(const CKBackendDraw *Draw);
-    CKERROR BindTextureSlot(CKDWORD Stage, CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler);
+    std::shared_ptr<bgfx::TextureHandle> GetDefaultTexture(const CKBackendSamplerBinding &Binding);
+    CKERROR BindTextureSlot(const CKBackendSamplerBinding &Binding, bgfx::UniformHandle Uniform,
+                            bgfx::TextureHandle DefaultTexture, CKDWORD Texture, const CKSamplerDesc *Sampler);
     void ResetDebugBindings();
     void TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth);
 
@@ -232,7 +199,6 @@ private:
     void RecordTextureBlit(CKBgfxTextureRecord *Destination, CKDWORD DestinationMip,
                            const CKBgfxTextureRecord *Source, CKDWORD SourceMip, CKBOOL FullOverwrite);
 
-    CKBgfxBackendDriver *m_Driver;
     CKBOOL m_BgfxInitialized;
     CKBOOL m_Created;
     WIN_HANDLE m_Window;
@@ -240,17 +206,25 @@ private:
     int m_PosY;
     CKDWORD m_Width;
     CKDWORD m_Height;
+    CKDWORD m_DrawableWidth;
+    CKDWORD m_DrawableHeight;
     CKBOOL m_Fullscreen;
     const char *m_RendererName;
     bgfx::RendererType::Enum m_RendererType;
+    struct Readback : CKBackendReadback {
+        CKDWORD AvailableFrame = 0;
+        bgfx::TextureHandle Snapshot = BGFX_INVALID_HANDLE;
+    };
+    std::vector<std::shared_ptr<Readback>> m_Readbacks;
+    CKBgfxBorderPalette m_BorderPalette;
+    uint64_t m_DrawApproximations = 0;
     CKBackendCaps m_Caps;
     CKBackendStats m_Stats;
     CKBackendDeviceLimits m_CapsDesc;   // bgfx limits and CKRST_DEVCAPS_* features
     uint64_t m_NativeSupported;
     uint32_t m_NativeFormatCaps[bgfx::TextureFormat::Count];
-    bgfx::TextureHandle m_DefaultWhiteTexture;
-    bgfx::UniformHandle m_BlockUniforms[CKRST_BLOCK_COUNT];
-    bgfx::UniformHandle m_SamplerUniforms[CKRST_BACKEND_SLOT_COUNT];
+    std::vector<CKBYTE> m_ConstantData[CKBACKEND_MAX_CONSTANT_SLOTS];
+    std::map<uint64_t, std::weak_ptr<bgfx::TextureHandle>> m_DefaultTextures;
     CKBOOL m_VSync;
     uint32_t m_ResetFlags;
     CKBgfxCallback m_BgfxCallback;
@@ -261,6 +235,8 @@ private:
     // Frame
     CKBOOL m_FrameInProgress;        // a pass was begun since the last Present
     CKBOOL m_PassOpen;
+    CKBackendPassDesc m_LogicalPass;
+    bool m_DrawPassNeedsResume = false;
     bgfx::ViewId m_CurrentView;
     CKDWORD m_NextView;
     CKDWORD m_LastFrameViewCount;
@@ -272,22 +248,20 @@ private:
 
     // Draw state
     CKBackendPipelineState m_State;
-    SlotBinding m_Slots[CKRST_BACKEND_SLOT_COUNT];
+    SlotBinding m_Slots[CKBACKEND_MAX_TEXTURE_SLOTS];
     CKDrawState m_CachedDrawState;
     uint64_t m_CachedBgfxState;
     CKDWORD m_PointSize;
     CKDWORD m_CurrentLayout;
     char m_LastMarker[512];
     CKBgfxDrawMapVertexBinding m_DebugVertexBindings[CKRST_MAX_VERTEX_STREAMS];
-    CKBgfxDrawMapTextureBinding m_DebugTextureBindings[CKRST_MAX_TEXTURE_STAGES];
+    CKBgfxDrawMapTextureBinding m_DebugTextureBindings[CKBACKEND_MAX_TEXTURE_SLOTS];
     CKDWORD m_DebugVertexBindingMask;
     CKDWORD m_DebugTextureBindingMask;
     CKDWORD m_DebugIndexBuffer;
     CKDWORD m_DebugIndexStart;
     CKDWORD m_DebugIndexCount;
     CKDWORD m_DebugIndexHandle;
-    CKDWORD m_DebugSpecializationHash;
-    CKBOOL m_DebugSpecializationValid;
     CKDWORD m_DrawErrorLogCount;
 
     // Debug

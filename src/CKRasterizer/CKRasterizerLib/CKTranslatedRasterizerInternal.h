@@ -3,15 +3,15 @@
 
 // Translation core of the CKRasterizer v3 contract (spec section 5).
 //
-// A CKTranslatedRasterizer wraps a CKRasterizerBackendLibrary (bgfx, NULL,
-// ...) and exposes it to the engine as the D3D7-shaped v3 contract. Every
+// A CKTranslatedRasterizer composes a plugin's device factory and shader
+// catalog and exposes them to the engine as the D3D7-shaped v3 contract. Every
 // fixed-function state call is mirrored verbatim (so Get* returns exactly
 // what was set) and forwarded to the fixed-function pipeline; draws go
 // through CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
-// flow opens one backend pass per pass.
+// flow selects logical targets; the backend owns native pass boundaries.
 
 #include "CKTranslatedRasterizer.h"
-#include "CKRasterizerBackend.h"
+#include "CKRasterizerPlugin.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKPresentStage.h"
 
@@ -225,10 +225,8 @@ private:
         }
     };
 
-    // Texture readback of the current target (spec 5.8): armed by
-    // RequestReadback, issued at the end of the frame after the readback blit
-    // (Issued), the backend fills Data once its frame counter reaches
-    // AvailableFrame.
+    // Snapshot of the current target at RequestReadback, completed by an
+    // owned backend ticket and delivered at a frame boundary.
     struct PendingReadback {
         CKReadbackCallback Callback;
         void *User;
@@ -243,13 +241,12 @@ private:
         VX_PIXELFORMAT Format;
         CKBOOL YFlip;
         std::vector<CKBYTE> Data;
-        CKBOOL Issued;
-        CKDWORD AvailableFrame;
+        CKBackendReadbackTicket Ticket;
 
         PendingReadback()
             : Callback(NULL), User(NULL), HasRect(FALSE), Buffer(VXBUFFER_BACKBUFFER), Done(FALSE),
               Success(FALSE), Width(0), Height(0), Pitch(0), Format(UNKNOWN_PF), YFlip(FALSE),
-              Issued(FALSE), AvailableFrame(0) {
+              Ticket() {
             Rect.left = Rect.top = Rect.right = Rect.bottom = 0;
         }
     };
@@ -262,7 +259,7 @@ private:
     void RecordDrawApproximations();
 
     // Frame flow
-    void PrepareFrameTarget();
+    CKBOOL PrepareFrameTarget();
     CKBOOL OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
                     float Z, CKDWORD Stencil, const char *Name);
     CKBOOL EnsureDrawPass();
@@ -295,25 +292,21 @@ private:
 
     // Readback helpers
     CKBOOL BuildReadbackImage(const PendingReadback &Readback, VxImageDescEx &Desc, std::vector<CKBYTE> &Pixels) const;
-    // Readback (spec 5.8). The swap chain is never read: the source is
-    // blitted into the readback texture in a pass after the present pass (or
-    // after the target's scene passes) and read from there. Readback source:
-    // the native target (target 0) or the bound 2D target texture; cube faces
-    // cannot be blitted and are rejected, as is a frame that does not render
-    // through the internal targets.
+    // The swapchain is never read. Capture the current scene/overlay or bound
+    // 2D target at the call position; backend tickets retain their own storage.
     CKBOOL CanReadNativeTarget();
     CKBOOL CanReadTargetTexture();
     CKBOOL CanReadCurrentTarget();
-    CKBOOL BlitForReadback();                             // opens the "readback" pass
-    CKBOOL IssueTextureReadback(PendingReadback &Readback); // ReadTexture after the blit of this frame
-    CKBOOL HasArmedTextureReadbacks();
-    void IssueArmedTextureReadbacks();
-    void FailArmedTextureReadbacks();
+    CKBOOL ResolveCopySource();
+    CKBOOL BlitForReadback();
+    CKBOOL IssueTextureReadback(PendingReadback &Readback);
+    CKBOOL CaptureReadback(PendingReadback &Readback);
     // Frame without scene content: re-presents the native target so the window
     // keeps its image while waiting, and/or blits the readback source.
     CKBOOL SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber);
     void DeliverReadbacks();
     void CancelReadbacks();
+    CKBOOL CompleteReadback(PendingReadback &Readback, CKBOOL Wait);
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
 
     CKTranslatedDriver *m_TranslatedDriver;

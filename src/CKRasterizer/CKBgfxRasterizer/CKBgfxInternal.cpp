@@ -555,17 +555,9 @@ CKDWORD CKBgfxResolveImagePitch(CKDWORD width, CKDWORD height,
     if (pitchOrImageSize < rowBytes)
         return rowBytes;
 
-    // VxImageDescEx aliases BytesPerLine and TotalImageSize. Some legacy
-    // upload paths fill the uncompressed total size into the same field.
-    const uint64_t tightImageSize = (uint64_t)rowBytes * (uint64_t)height;
-    if (height > 1 &&
-        (uint64_t)pitchOrImageSize >= tightImageSize &&
-        (pitchOrImageSize % height) == 0) {
-        const CKDWORD candidatePitch = pitchOrImageSize / height;
-        if (candidatePitch >= rowBytes)
-            return candidatePitch;
-    }
-
+    // This helper handles uncompressed data, so the union member is always
+    // BytesPerLine. Inferring a total image size corrupts heavily padded rows.
+    (void)height;
     return pitchOrImageSize;
 }
 
@@ -647,6 +639,11 @@ CKBOOL CKBgfxTrySamplerFlags(const CKSamplerDesc *s, uint32_t &flags)
         return FALSE;
     if (!s)
         return TRUE;
+
+    // The backend resolves the public ARGB border color to a native palette
+    // index before calling this mapping function.
+    if (s->BorderColor > 0x0f)
+        return FALSE;
 
     switch (s->MinFilter)
     {

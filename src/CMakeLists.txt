@@ -27,6 +27,7 @@ set(CKRE_PUBLIC_HEADERS
 
         ${CKRE_INCLUDE_DIR}/CKRasterizer.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
+        ${CKRE_INCLUDE_DIR}/CKRasterizerResourceTypes.h
         ${CKRE_INCLUDE_DIR}/CKRasterizerTypes.h
 
         ${CKRE_INCLUDE_DIR}/MeshAdjacency.h
@@ -89,6 +90,7 @@ set(CKRE_SOURCES
         CKRenderManager.cpp
         CKRenderContext.cpp
         CKCallbacksContainer.cpp
+        CKDrawAnnotation.cpp
 
         CKMaterial.cpp
         CKTexture.cpp
@@ -145,15 +147,9 @@ if (CKRE_ENABLE_RENDER_STATS)
     list(APPEND CKRE_SOURCES CKRenderPerfStats.cpp)
 endif ()
 
-# Add the translation core and the requested concrete backend targets.
-if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
+# Add the dependency layers before their plugin compositions.
+if (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
     add_subdirectory(CKRasterizer)
-elseif (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
-    add_subdirectory(CKRasterizer/CKRasterizerLib)
-endif ()
-
-if (CKRE_BUILD_SDL_GPU_SUPPORT AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
-    add_subdirectory(CKRasterizer/CKSdlGpuRasterizer)
 endif ()
 
 # Function to configure common target settings
@@ -242,6 +238,11 @@ if (CKRE_BUILD_STATIC)
     if (TARGET CKBgfxRasterizerStatic)
         target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_BGFX_RASTERIZER=1)
         target_link_libraries(CK2_3DStatic PRIVATE $<BUILD_INTERFACE:CKBgfxRasterizerStatic>)
+    endif ()
+
+    if (TARGET CKSdlGpuRasterizerStatic)
+        target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_SDL_GPU_RASTERIZER=1)
+        target_link_libraries(CK2_3DStatic PRIVATE $<BUILD_INTERFACE:CKSdlGpuRasterizerStatic>)
     endif ()
 
     # Static library specific settings

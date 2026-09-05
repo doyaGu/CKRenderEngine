@@ -1,6 +1,6 @@
 // rasterizer3_pixel_tests: the fixed-function semantics only a real backend
 // can prove, driven exclusively through the CKRasterizer v3 contract on the
-// bgfx plugin (hidden SDL window). Pixels come back through
+// selected plugin in a visible SDL window. Pixels come back through
 // CopyToMemoryBuffer, so the readback path is part of the gate.
 //
 // Gated by CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 (or the older
@@ -8,7 +8,9 @@
 // CKBGFX_RENDERER_BACKEND (default opengl).
 
 #include "CKRasterizer.h"
+#ifndef CKRE_PIXEL_SDL_GPU
 #include "CKBgfxBackend.h"
+#endif
 #include "CKTranslatedRasterizerInternal.h"
 #include "TestTriangleMultiset.h"
 
@@ -19,15 +21,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-// bgfx plugin entry (CK_LIB build of CKBgfxRasterizer).
+// Static plugin entry; both executables run the same public contract cases.
+#ifdef CKRE_PIXEL_SDL_GPU
+extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
+#else
 extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
 
 struct CKBgfxBackendTestAccess {
-    static void ExhaustViews(CKBgfxBackend &backend)
+    static CKRECT WindowViewRect(const CKBgfxBackend &backend)
     {
-        backend.m_NextView = backend.m_CapsDesc.MaxRenderViews;
+        CKRECT rect = {};
+        for (CKDWORD view = 0; view < backend.m_LastFrameViewCount; ++view)
+            if (!backend.m_ViewFrameBuffer[view]) rect = backend.m_ViewRect[view];
+        return rect;
+    }
+    static CKDWORD ExchangeNextView(CKBgfxBackend &backend, CKDWORD next = UINT32_MAX)
+    {
+        const CKDWORD previous = backend.m_NextView;
+        backend.m_NextView = next == UINT32_MAX ? backend.m_CapsDesc.MaxRenderViews : next;
+        return previous;
     }
 };
+#endif
 
 namespace {
 
@@ -93,18 +108,24 @@ struct Backend {
 
 CKBOOL OpenBackend(Backend &b, int width, int height)
 {
-    b.Window = SDL_CreateWindow("rasterizer3-pixels", width, height, SDL_WINDOW_HIDDEN);
-    TestCheckf(b.Window != NULL, "SDL hidden window creation failed: %s", SDL_GetError());
+    b.Window = SDL_CreateWindow("rasterizer3-pixels", 640, 480, SDL_WINDOW_RESIZABLE);
+    TestCheckf(b.Window != NULL, "SDL visible window creation failed: %s", SDL_GetError());
     if (!b.Window)
         return FALSE;
+    SDL_ShowWindow(b.Window);
+    SDL_RaiseWindow(b.Window);
+#ifdef CKRE_PIXEL_SDL_GPU
+    CKSdlGpuRasterizerGetInfo(&b.Info);
+#else
     CKBgfxRasterizerGetInfo(&b.Info);
+#endif
     TestCheck(b.Info.InterfaceRevision == CKRST_INTERFACE_REVISION, "plugin reports the v3 revision");
     TestCheck(b.Info.StartFct != NULL && b.Info.CloseFct != NULL, "plugin entry points");
     b.Rasterizer = b.Info.StartFct((WIN_HANDLE)b.Window);
-    TestCheck(b.Rasterizer != NULL, "bgfx rasterizer must start");
+    TestCheck(b.Rasterizer != NULL, "rasterizer must start");
     if (!b.Rasterizer)
         return FALSE;
-    TestCheck(b.Rasterizer->GetDriverCount() > 0, "bgfx rasterizer exposes a driver");
+    TestCheck(b.Rasterizer->GetDriverCount() > 0, "rasterizer exposes a driver");
     b.Driver = b.Rasterizer->GetDriver(0);
     TestCheck(b.Driver != NULL, "driver 0");
     if (!b.Driver)
@@ -643,6 +664,536 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     DestroyTextures(ctx, textures);
 }
 
+// Ordered updates and copies must preserve the values sampled by earlier draws.
+void CheckOrderedTextureUpdates(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    Textures textures;
+    CreateTextures(ctx, textures);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    const VxVector covering[3] = {VxVector(-1,-1,0.5f), VxVector(3,-1,0.5f), VxVector(-1,3,0.5f)};
+    float uv[3][4] = {{0.25f,0.5f,0,0}, {0.25f,0.5f,0,0}, {0.25f,0.5f,0,0}};
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 20; viewport.ViewHeight = 64; viewport.ViewZMax = 1;
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->SetViewport(&viewport), "first update viewport");
+        TestCheck(DrawTexturedTriangle(ctx, covering, kWhite, uv), "sample before update");
+        CKDWORD blue = 0xff0000ff;
+        VxImageDescEx patch;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, patch);
+        patch.Width = patch.Height = 1; patch.BytesPerLine = 4;
+        patch.Image = reinterpret_cast<CKBYTE *>(&blue);
+        CKRECT region = {0, 0, 1, 1};
+        TestCheck(ctx->LoadTexture(textures.Transform, patch, 0, CKRST_CUBEFACE_XPOS, &region), "patch first texel after draw");
+        viewport.ViewX = 20;
+        TestCheck(ctx->SetViewport(&viewport), "second update viewport");
+        TestCheck(DrawTexturedTriangle(ctx, covering, kWhite, uv), "sample updated texel");
+        viewport.ViewX = 40;
+        TestCheck(ctx->SetViewport(&viewport), "third update viewport");
+        for (auto &coord : uv) coord[0] = 0.75f;
+        TestCheck(DrawTexturedTriangle(ctx, covering, kWhite, uv), "sample preserved texel");
+        viewport.ViewX = 0; viewport.ViewWidth = 64;
+        TestCheck(ctx->SetViewport(&viewport), "restore update viewport");
+    }, pixels);
+    for (int x : {10,30,50}) {
+        CKBYTE bgra[4]; GetPixel(pixels, x, 32, bgra);
+        printf("  update region x=%d RGB=%u,%u,%u\n", x, unsigned(bgra[2]), unsigned(bgra[1]), unsigned(bgra[0]));
+    }
+    TestCheck(PixelNear(pixels, 10, 32, 255, 0, 0), "draw before update retains red");
+    TestCheck(PixelNear(pixels, 30, 32, 0, 0, 255), "draw after update sees blue");
+    TestCheck(PixelNear(pixels, 50, 32, 0, 255, 0), "partial texture update preserves green texel");
+    DestroyTextures(ctx, textures);
+    SetDiffuseState(ctx);
+    printf("  ordered texture patch: old red / new blue / preserved green\n");
+}
+
+void CheckPaddedTextureUpload(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 2;
+    desc.Format.BytesPerLine = 16; // A valid row pitch, even when >= packed image size.
+    desc.MipMapCount = 1;
+    desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    CKDWORD texture = 0;
+    TestCheck(ctx->CreateTexture(&desc, &texture), "create padded source texture");
+    CKDWORD source[] = {0xffff0000, 0xff00ff00, 0xffffff00, 0xffffff00,
+                        0xff0000ff, 0xffffffff, 0xffffff00, 0xffffff00};
+    VxImageDescEx image = desc.Format;
+    image.Image = reinterpret_cast<CKBYTE *>(source);
+    TestCheck(ctx->LoadTexture(texture, image, 0, CKRST_CUBEFACE_XPOS, nullptr), "upload padded rows");
+    ctx->SetTexture(texture, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    float uv[3][4] = {{0.25f,0.75f,0,0}, {0.25f,0.75f,0,0}, {0.25f,0.75f,0,0}};
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv), "sample second padded row");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 255, "uncompressed BytesPerLine must remain a row pitch");
+    ctx->SetTexture(0, 0);
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete padded texture");
+    SetDiffuseState(ctx);
+    printf("  padded image rows preserve the declared pitch: passed\n");
+}
+
+void CheckOrderedBufferUpdates(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    struct Vertex { float X, Y, Z; CKDWORD Color; };
+    Vertex vertices[6] = {{-1,-1,0.5f,0xffff0000}, {3,-1,0.5f,0xffff0000}, {-1,3,0.5f,0xffff0000},
+                          {-1,-1,0.5f,0xff00ff00}, {3,-1,0.5f,0xff00ff00}, {-1,3,0.5f,0xff00ff00}};
+    CKVertexBufferDesc desc;
+    desc.m_VertexFormat = CKRST_DP_TR_VC; desc.m_MaxVertexCount = 6;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&desc, vertices, &vb), "persistent vertex buffer");
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 20; viewport.ViewHeight = 64; viewport.ViewZMax = 1;
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->SetViewport(&viewport), "first buffer viewport");
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0), "VB draw before patch");
+        auto *patch = static_cast<Vertex *>(ctx->LockVertexBuffer(vb, 0, 3, CKRST_LOCK_DEFAULT));
+        TestCheck(patch != NULL, "lock first half of VB");
+        for (int i = 0; i < 3; ++i) patch[i].Color = 0xff0000ff;
+        TestCheck(ctx->UnlockVertexBuffer(vb), "upload partial VB");
+        viewport.ViewX = 20;
+        TestCheck(ctx->SetViewport(&viewport), "second buffer viewport");
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0), "VB draw after patch");
+        viewport.ViewX = 40;
+        TestCheck(ctx->SetViewport(&viewport), "third buffer viewport");
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 3, 3, NULL, 0), "VB draw preserves untouched half and vertex offset");
+        viewport.ViewX = 0; viewport.ViewWidth = 64;
+        TestCheck(ctx->SetViewport(&viewport), "restore buffer viewport");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 255, 0, 0), "VB old version remains red");
+    TestCheck(PixelNear(pixels, 30, 32, 0, 0, 255), "VB patched version becomes blue");
+    TestCheck(PixelNear(pixels, 50, 32, 0, 255, 0), "VB untouched vertices remain green");
+    CKWORD indices[6] = {0,1,2,0,1,2};
+    CKIndexBufferDesc indexDesc;
+    indexDesc.m_MaxIndexCount = 6;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&indexDesc, indices, &ib), "persistent index buffer");
+    viewport.ViewWidth = 20;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->SetViewport(&viewport), "first index viewport");
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3), "IB draw before patch");
+        auto *patch = static_cast<CKWORD *>(ctx->LockIndexBuffer(ib, 0, 3, CKRST_LOCK_DEFAULT));
+        TestCheck(patch != NULL, "lock first half of IB");
+        patch[0] = 3; patch[1] = 4; patch[2] = 5;
+        TestCheck(ctx->UnlockIndexBuffer(ib), "upload partial IB");
+        viewport.ViewX = 20;
+        TestCheck(ctx->SetViewport(&viewport), "second index viewport");
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 0, 3), "IB draw after patch");
+        viewport.ViewX = 40;
+        TestCheck(ctx->SetViewport(&viewport), "third index viewport");
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 6, 3, 3), "IB draw preserves untouched half and index offset");
+        TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete IB referenced by pending draws");
+        TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB referenced by pending draws");
+        CKDWORD replacement = 0;
+        TestCheck(ctx->CreateIndexBuffer(&indexDesc, indices, &replacement), "reuse IB slot before submission");
+        TestCheck(ctx->DeleteObject(replacement, CKRST_OBJ_INDEXBUFFER), "delete replacement IB");
+        viewport.ViewX = 0; viewport.ViewWidth = 64;
+        TestCheck(ctx->SetViewport(&viewport), "restore index viewport");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 0, 255), "IB old version selects blue vertices");
+    TestCheck(PixelNear(pixels, 30, 32, 0, 255, 0), "IB new version selects green vertices");
+    TestCheck(PixelNear(pixels, 50, 32, 0, 0, 255), "IB untouched indices retain blue after handle deletion");
+    printf("  ordered VB/IB patches, offsets and pending deletion: passed\n");
+}
+
+void CheckBorderFiltering(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    Textures textures;
+    CreateTextures(ctx, textures);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff0000ff);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    float uv[3][4] = {{0,0.5f,0,0},{0,0.5f,0,0},{0,0.5f,0,0}};
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv), "sample border footprint");
+    }, pixels);
+    ExpectCenter(pixels, 128, 0, 128, "bilinear edge blends red texel and blue border equally");
+    for (auto &coord : uv) coord[0] = -1;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv), "sample outside border");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 255, "outside border keeps actual blue color");
+    DestroyTextures(ctx, textures);
+    SetDiffuseState(ctx);
+    printf("  border filtering: edge purple / outside blue\n");
+}
+
+void CheckCopyAndRectClear(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 64;
+    desc.Format.BytesPerLine = 256; desc.MipMapCount = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    CKDWORD texture = 0;
+    TestCheck(ctx->CreateTexture(&desc, &texture), "copy destination texture");
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "draw before copy");
+    TestCheck(ctx->CopyToTexture(texture, NULL, NULL, CKRST_CUBEFACE_XPOS), "copy prior draw into texture");
+    TestCheck(ctx->Clear(CKRST_CTXCLEAR_COLOR, 0xffff0000, 1, 0, 0, NULL), "clear after copy");
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTexture(texture, 0);
+    float uv[3][4] = {{0.5f,0.5f,0,0},{0.5f,0.5f,0,0},{0.5f,0.5f,0,0}};
+    TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv), "sample copied draw");
+    EndFrame(ctx);
+    Pixels pixels;
+    ReadBackbuffer(ctx, pixels);
+    ExpectCenter(pixels, 0, 255, 0, "draw-copy-sample sees copied green draw");
+    TestCheck(PixelNear(pixels, 2, 2, 255, 0, 0), "clear after copy survives outside draw");
+    SetDiffuseState(ctx);
+    CKRECT rect = {16,16,48,48};
+    for (unsigned samples : {0u,4u}) {
+        CKRasterizerOptions options;
+        options.MSAASamples = samples;
+        TestCheck(ctx->SetOptions(&options), "rectangle clear sample count");
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+        const VxVector cover[3] = {VxVector(-1,-1,0.5f), VxVector(3,-1,0.5f), VxVector(-1,3,0.5f)};
+        TestCheck(DrawColorTriangle(ctx, cover, kBlue), "draw before rectangle clear");
+        TestCheck(ctx->Clear(CKRST_CTXCLEAR_COLOR, 0xffff0000, 0, 0, 1, &rect), "rectangular color clear");
+        EndFrame(ctx);
+        ReadBackbuffer(ctx, pixels);
+        ExpectCenter(pixels, 255, 0, 0, "rectangle cleared red");
+        TestCheck(PixelNear(pixels, 8, 32, 0, 0, 255), "split render pass preserves outside blue");
+    }
+    CKRasterizerOptions defaults;
+    TestCheck(ctx->SetOptions(&defaults), "restore options after rectangular clear");
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete copied texture");
+    printf("  ordered copy and rectangular clear: passed single-sample and MSAA\n");
+}
+
+void CheckLayeredTextureUpdates(Backend &b)
+{
+    auto *ctx = b.Context;
+    for (bool volume : {false, true}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 4;
+        desc.Format.BytesPerLine = 16;
+        desc.Depth = volume ? 8 : 1;
+        desc.MipMapCount = 1;
+        desc.Flags = CKRST_TEXTURE_RGB | (volume ? CKRST_TEXTURE_VOLUMEMAP : CKRST_TEXTURE_CUBEMAP);
+        CKDWORD texture = 0, source[16];
+        TestCheck(ctx->CreateTexture(&desc, &texture), "create layered texture");
+        VxImageDescEx image = desc.Format;
+        image.Image = reinterpret_cast<CKBYTE *>(source);
+        for (unsigned layer = 0; layer < (volume ? 8u : 6u); ++layer) {
+            for (auto &pixel : source) pixel = layer ? 0xff00ff00 : 0xffff0000;
+            TestCheck(ctx->LoadTexture(texture, image, 0, (CKRST_CUBEFACE)layer, NULL), "upload cube face / volume slice");
+        }
+        SetDiffuseState(ctx);
+        ctx->SetTexture(texture, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+        ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
+        auto drawSample = [&](int column, bool lastLayer, float coordinate) {
+            VxMatrix transform;
+            transform.SetIdentity();
+            transform[3][0] = volume ? coordinate : (lastLayer ? 0.0f : 1.0f);
+            transform[3][1] = volume ? coordinate : 0.0f;
+            transform[3][2] = volume ? (lastLayer ? 7.5f / 8.0f : 0.5f / 8.0f) : (lastLayer ? -1.0f : 0.0f);
+            ctx->SetTransformMatrix(VXMATRIX_TEXTURE(0), transform);
+            VxVector positions[3] = {VxVector(-1,-1,0.5f), VxVector(-0.4f,-1,0.5f), VxVector(-0.7f,1,0.5f)};
+            for (auto &position : positions) position.x += float(column) * 0.64f;
+            float coords[3][4] = {};
+            TestCheck(DrawTexturedTriangle(ctx, positions, kWhite, coords), "sample layered texture");
+        };
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+        drawSample(0, false, 0.625f); // old version: red, including the future patch
+        CKDWORD blue = 0xff0000ff;
+        VxImageDescEx patch = image;
+        patch.Width = patch.Height = 1; patch.BytesPerLine = 4;
+        patch.Image = reinterpret_cast<CKBYTE *>(&blue);
+        CKRECT region = {2,2,3,3}; // cube +X direction (1,0,0) selects the central texel
+        TestCheck(ctx->LoadTexture(texture, patch, 0, CKRST_CUBEFACE_XPOS, &region), "patch first layer after sampling");
+        drawSample(1, false, 0.625f);
+        drawSample(2, true, 0.625f); // last face/slice survives version replacement
+        EndFrame(ctx);
+        Pixels pixels;
+        ReadBackbuffer(ctx, pixels);
+        TestCheckf(PixelNear(pixels, 10, 32, 255, 0, 0), "%s old layer version retained", volume ? "volume" : "cube");
+        TestCheckf(PixelNear(pixels, 30, 32, 0, 0, 255), "%s patch visible to subsequent draw", volume ? "volume" : "cube");
+        TestCheckf(PixelNear(pixels, 51, 32, 0, 255, 0), "%s last layer preserved", volume ? "volume" : "cube");
+        ctx->SetTexture(0, 0);
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete layered texture");
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+    }
+    printf("  ordered cube-face and eight-slice volume patches preserve other layers: passed\n");
+}
+
+void CheckMipPreservation(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 4;
+    desc.Flags = CKRST_TEXTURE_RGB;
+    desc.MipMapCount = 3;
+    CKDWORD texture = 0, source[16];
+    TestCheck(ctx->CreateTexture(&desc, &texture), "create explicit mip chain");
+    const CKDWORD colors[] = {0xffff0000, 0xff00ff00, 0xff0000ff};
+    for (unsigned mip = 0; mip < 3; ++mip) {
+        for (auto &pixel : source) pixel = colors[mip];
+        VxImageDescEx image = desc.Format;
+        image.Width = image.Height = 4 >> mip;
+        image.BytesPerLine = image.Width * 4;
+        image.Image = reinterpret_cast<CKBYTE *>(source);
+        TestCheck(ctx->LoadTexture(texture, image, mip, CKRST_CUBEFACE_XPOS, NULL), "upload distinct mip colors");
+    }
+    SetDiffuseState(ctx);
+    ctx->SetTexture(texture, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    auto drawSample = [&](int column, int mip) {
+        VxVector positions[3] = {VxVector(-1,-1,0.5f), VxVector(-0.4f,-1,0.5f), VxVector(-0.7f,1,0.5f)};
+        for (auto &position : positions) position.x += float(column) * 0.64f;
+        float coords[3][4] = {};
+        if (mip) {
+            coords[1][0] = mip == 1 ? 8.0f : 64.0f;
+            coords[2][1] = mip == 1 ? 16.0f : 64.0f;
+        } else {
+            for (auto &coord : coords) coord[0] = coord[1] = 0.625f;
+        }
+        TestCheck(DrawTexturedTriangle(ctx, positions, kWhite, coords), "sample selected mip footprint");
+    };
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    drawSample(0, 2);
+    CKDWORD white = 0xffffffff;
+    VxImageDescEx patch = desc.Format;
+    patch.Width = patch.Height = 1; patch.BytesPerLine = 4;
+    patch.Image = reinterpret_cast<CKBYTE *>(&white);
+    CKRECT region = {2,2,3,3};
+    TestCheck(ctx->LoadTexture(texture, patch, 0, CKRST_CUBEFACE_XPOS, &region), "patch base after mip draw");
+    drawSample(1, 1);
+    drawSample(2, 0);
+    EndFrame(ctx);
+    Pixels pixels;
+    ReadBackbuffer(ctx, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 0, 255), "queued draw retains old mip 2");
+    TestCheck(PixelNear(pixels, 30, 32, 0, 255, 0), "base patch preserves mip 1 on new version");
+    TestCheck(PixelNear(pixels, 51, 32, 255, 255, 255), "new base-level patch visible");
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    drawSample(0, 2);
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 0, 255), "base patch preserves mip 2 across submission");
+    ctx->SetTexture(0, 0);
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete mip chain");
+    printf("  partial base update preserves explicit mip levels and queued samples: passed\n");
+}
+
+void CheckMemoryCopyPixelIdentity(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKDWORD source[19 * 13];
+    for (unsigned i = 0; i < 19 * 13; ++i)
+        source[i] = 0xff000000u | ((i * 73u & 255u) << 16) | ((i * 37u & 255u) << 8) | (i * 19u & 255u);
+    VxImageDescEx image;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, image);
+    image.Width = 19;
+    image.Height = 13;
+    image.BytesPerLine = 19 * 4;
+    image.Image = reinterpret_cast<CKBYTE *>(source);
+    const CKRECT rect = {17, 19, 36, 32};
+    const VxVector cover[3] = {VxVector(-1,-1,0.5f), VxVector(3,-1,0.5f), VxVector(-1,3,0.5f)};
+    for (bool inheritedState : {false, true}) {
+        SetDiffuseState(ctx);
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+        TestCheck(DrawColorTriangle(ctx, cover, kBlue), "background before memory copy");
+        if (inheritedState) {
+            ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+            ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_NEVER);
+            ctx->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0);
+            ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+            ctx->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX, 1);
+            ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT2);
+            VxMatrix transform;
+            transform.SetIdentity();
+            transform[3][0] = 0.75f;
+            ctx->SetTransformMatrix(VXMATRIX_TEXTURE(0), transform);
+        }
+        TestCheck(ctx->CopyFromMemoryBuffer(&rect, VXBUFFER_BACKBUFFER, image) == sizeof(source), "copy exact image");
+        if (inheritedState)
+            TestCheck(DrawColorTriangle(ctx, cover, kRed), "original rejecting draw state restored after copy");
+        EndFrame(ctx);
+        Pixels pixels;
+        ReadBackbuffer(ctx, pixels);
+        for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+            const CKDWORD expected = x >= 17 && x < 36 && y >= 19 && y < 32 ? source[(y - 19) * 19 + x - 17] : 0xff0000ff;
+            CKBYTE actual[4];
+            GetPixel(pixels, x, y, actual);
+            TestCheckf(actual[0] == (expected & 255) && actual[1] == ((expected >> 8) & 255) &&
+                       actual[2] == ((expected >> 16) & 255),
+                       "memory copy pixel (%d,%d), inherited=%d: expected %06x, got %02x%02x%02x",
+                       x, y, inheritedState, expected & 0xffffff, actual[2], actual[1], actual[0]);
+        }
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+        ctx->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, CKRST_COLORWRITE_ALL);
+        ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+    }
+    printf("  exact memory copy, pixel placement and state isolation: passed\n");
+}
+
+void CheckScaledTextureCopies(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKDWORD source[19 * 13], initial[64 * 64];
+    for (unsigned i = 0; i < 19 * 13; ++i)
+        source[i] = 0xff000000u | ((i * 73u & 255u) << 16) | ((i * 37u & 255u) << 8) | (i * 19u & 255u);
+    for (auto &pixel : initial) pixel = 0xff00ffff;
+    VxImageDescEx image;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, image);
+    image.Width = 19; image.Height = 13; image.BytesPerLine = 19 * 4;
+    image.Image = reinterpret_cast<CKBYTE *>(source);
+    const CKRECT uploadRect = {17, 19, 36, 32};
+    const VxRect sourceRect(17, 19, 36, 32);
+    const VxRect destinations[] = {VxRect(3, 5, 26, 28), VxRect(37, 42, 48, 49)};
+    const VxVector cover[3] = {VxVector(-1,-1,0.5f), VxVector(3,-1,0.5f), VxVector(-1,3,0.5f)};
+
+    for (unsigned samples : {0u, 4u}) for (bool inFrame : {true, false}) {
+        CKRasterizerOptions options;
+        options.MSAASamples = samples;
+        TestCheck(ctx->SetOptions(&options), "scaled copy sample count");
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 64;
+        desc.Format.BytesPerLine = 256; desc.MipMapCount = 1;
+        desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+        CKDWORD texture = 0;
+        TestCheck(ctx->CreateTexture(&desc, &texture), "scaled copy destination");
+        auto contents = desc.Format;
+        contents.Image = reinterpret_cast<CKBYTE *>(initial);
+        TestCheck(ctx->LoadTexture(texture, contents, 0, CKRST_CUBEFACE_XPOS, NULL), "initialize preserved destination");
+        SetDiffuseState(ctx);
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+        TestCheck(DrawColorTriangle(ctx, cover, kBlue), "draw before scaled copy");
+        TestCheck(ctx->CopyFromMemoryBuffer(&uploadRect, VXBUFFER_BACKBUFFER, image) == sizeof(source), "upload scaled copy pattern");
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_NEVER);
+        ctx->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0);
+        ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+        if (!inFrame) EndFrame(ctx);
+        for (const auto &destination : destinations)
+            TestCheck(ctx->CopyToTexture(texture, &sourceRect, &destination, CKRST_CUBEFACE_XPOS),
+                      "enlarge / shrink a cropped source into a partial destination");
+        if (inFrame) {
+            TestCheck(DrawColorTriangle(ctx, cover, kRed), "copy restores the rejecting draw state");
+            EndFrame(ctx);
+        }
+        Pixels pixels;
+        ReadBackbuffer(ctx, pixels);
+        TestCheck(PixelNear(pixels, 5, 5, 0, 0, 255), "copy does not redirect subsequent draws or alter the source");
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+        ctx->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, CKRST_COLORWRITE_ALL);
+        ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+        TestCheck(ctx->SetTargetTexture(texture, 0, 0, CKRST_CUBEFACE_XPOS), "read scaled destination");
+        ReadBackbuffer(ctx, pixels);
+        for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+            CKDWORD expected = 0xff00ffff;
+            for (const auto &rect : destinations) {
+                const int left = (int)rect.left, top = (int)rect.top;
+                const int width = (int)(rect.right - rect.left), height = (int)(rect.bottom - rect.top);
+                if (x >= left && x < left + width && y >= top && y < top + height) {
+                    const int sx = ((x - left) * 2 + 1) * 19 / (width * 2);
+                    const int sy = ((y - top) * 2 + 1) * 13 / (height * 2);
+                    expected = source[sy * 19 + sx];
+                }
+            }
+            CKBYTE actual[4];
+            GetPixel(pixels, x, y, actual);
+            TestCheckf(actual[0] == (expected & 255) && actual[1] == ((expected >> 8) & 255) &&
+                       actual[2] == ((expected >> 16) & 255),
+                       "scaled copy pixel (%d,%d), MSAA=%u inFrame=%d: expected %06x, got %02x%02x%02x",
+                       x, y, samples, inFrame, expected & 0xffffff, actual[2], actual[1], actual[0]);
+        }
+        TestCheck(ctx->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "restore window after scaled copy");
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete scaled destination");
+    }
+    CKRasterizerOptions defaults;
+    TestCheck(ctx->SetOptions(&defaults), "restore options after scaling");
+    SetDiffuseState(ctx);
+    printf("  exact cropped scaling, enlargement / shrink, untouched regions and state: passed in/out of frame, MSAA 0/4\n");
+}
+
+void CheckIndependentAttachmentClears(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKRECT rect = {16,16,48,48};
+    const VxVector nearCover[3] = {VxVector(-1,-1,0.25f), VxVector(3,-1,0.25f), VxVector(-1,3,0.25f)};
+    const VxVector farCover[3] = {VxVector(-1,-1,0.5f), VxVector(3,-1,0.5f), VxVector(-1,3,0.5f)};
+    for (unsigned samples : {0u,4u}) {
+        CKRasterizerOptions options;
+        options.MSAASamples = samples;
+        TestCheck(ctx->SetOptions(&options), "attachment clear sample count");
+        SetDiffuseState(ctx);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+        ctx->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESS);
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+        TestCheck(DrawColorTriangle(ctx, nearCover, kBlue), "initialize color and near depth");
+        TestCheck(ctx->Clear(CKRST_CTXCLEAR_DEPTH, 0xff00ff00, 0.75f, 9, 1, &rect), "rectangular depth-only clear");
+        TestCheck(DrawColorTriangle(ctx, farCover, kRed), "depth test after depth-only clear");
+        EndFrame(ctx);
+        Pixels pixels;
+        ReadBackbuffer(ctx, pixels);
+        ExpectCenter(pixels, 255, 0, 0, "depth clear admits the farther draw inside");
+        TestCheck(PixelNear(pixels, 8, 32, 0, 0, 255), "depth clear preserves outside color and depth");
+
+        SetDiffuseState(ctx);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 7);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILMASK, 255);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 255);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+        TestCheck(DrawColorTriangle(ctx, nearCover, kBlue), "initialize color and stencil");
+        TestCheck(ctx->Clear(CKRST_CTXCLEAR_STENCIL, 0xff00ff00, 0, 3, 1, &rect), "rectangular stencil-only clear");
+        ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 3);
+        ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_KEEP);
+        TestCheck(DrawColorTriangle(ctx, farCover, kRed), "stencil test after stencil-only clear");
+        EndFrame(ctx);
+        ReadBackbuffer(ctx, pixels);
+        ExpectCenter(pixels, 255, 0, 0, "stencil clear admits the draw inside");
+        TestCheck(PixelNear(pixels, 8, 32, 0, 0, 255), "stencil clear preserves outside color and stencil");
+        ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+    }
+    CKRasterizerOptions defaults;
+    TestCheck(ctx->SetOptions(&defaults), "restore options after attachment clears");
+    SetDiffuseState(ctx);
+    printf("  independent rectangular depth/stencil clears: passed single-sample and MSAA\n");
+}
+
 // ---------------------------------------------------------------------------
 // Caps, resize and asynchronous readback
 // ---------------------------------------------------------------------------
@@ -671,6 +1222,7 @@ struct ReadbackCapture {
     int Width;
     int Height;
     CKBOOL Success;
+    Pixels Image;
     ReadbackCapture() : Calls(0), Width(0), Height(0), Success(FALSE) {}
     static void Callback(void *user, const CKRECT *, VXBUFFER_TYPE, const VxImageDescEx *image, CKBOOL ok)
     {
@@ -680,15 +1232,72 @@ struct ReadbackCapture {
         if (image) {
             capture->Width = image->Width;
             capture->Height = image->Height;
+            capture->Image.Width = image->Width;
+            capture->Image.Height = image->Height;
+            capture->Image.Data.Resize(image->Width * image->Height * 4);
+            for (int row = 0; row < image->Height; ++row)
+                memcpy(capture->Image.Data.Begin() + row * image->Width * 4,
+                       image->Image + row * image->BytesPerLine, image->Width * 4);
         }
     }
 };
 
+void CheckOrderedReadbacks(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    ReadbackCapture red, blue;
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed), "draw before first snapshot");
+    TestCheck(ctx->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &red), "first snapshot");
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kBlue), "draw between snapshots");
+    CKRECT crop = {28, 28, 36, 36};
+    TestCheck(ctx->RequestReadback(&crop, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &blue), "second cropped snapshot");
+    TestCheck(red.Calls == 0 && blue.Calls == 0, "callbacks are deferred to a frame boundary");
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "draw after snapshots");
+    EndFrame(ctx);
+    Pixels finalImage;
+    ReadBackbuffer(ctx, finalImage);
+    ExpectCenter(finalImage, 0, 255, 0, "later draws retain the scene attachment");
+    const Uint64 deadline = SDL_GetTicks() + 5000;
+    while ((red.Calls == 0 || blue.Calls == 0) && SDL_GetTicks() < deadline) {
+        TestCheck(ctx->BackToFront(FALSE), "submit pending snapshots");
+        SDL_PumpEvents();
+        SDL_Delay(1);
+    }
+    TestCheck(red.Calls == 1 && red.Success, "first snapshot completes once");
+    TestCheck(blue.Calls == 1 && blue.Success && blue.Width == 8 && blue.Height == 8,
+              "second snapshot completes once with its crop");
+    ExpectCenter(red.Image, 255, 0, 0, "first snapshot retains earlier draw");
+    TestCheck(PixelNear(blue.Image, 4, 4, 0, 0, 255), "second snapshot retains intermediate draw");
+}
+
+void CheckReadbackShutdown(Backend &b)
+{
+    ReadbackCapture capture;
+    BeginFrame(b.Context, CKRST_CTXCLEAR_COLOR);
+    TestCheck(DrawColorTriangle(b.Context, kCenterTriangle, kGreen), "draw before shutdown snapshot");
+    TestCheck(b.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &capture),
+              "readback before shutdown");
+    TestCheck(b.Context->BeginShutdown(), "shutdown with an unsubmitted readback");
+    TestCheck(capture.Calls == 1 && !capture.Success, "shutdown cancels the consumer exactly once");
+    TestCheck(b.Context->BeginShutdown() && capture.Calls == 1, "repeated shutdown does not repeat the callback");
+}
+
 void CheckResizeAndReadback(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
-    TestCheck(SDL_SetWindowSize(b.Window, 48, 96) && SDL_SyncWindow(b.Window), "portrait window resize");
-    TestCheck(ctx->Resize(0, 0, 48, 96, 0), "portrait context resize");
+    SetDiffuseState(ctx);
+    Pixels beforeResize;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "draw before pending resize");
+    }, beforeResize);
+    ReadbackCapture pendingResize;
+    TestCheck(ctx->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &pendingResize),
+              "queue readback immediately before target destruction");
+    TestCheck(pendingResize.Calls == 0, "resize starts with an outstanding callback");
+    TestCheck(SDL_SetWindowSize(b.Window, 320, 640) && SDL_SyncWindow(b.Window), "portrait window resize");
+    TestCheck(ctx->Resize(0, 0, 48, 96, VX_RESIZE_NOMOVE), "portrait context resize with Player flags");
     TestCheck(ctx->m_Width == 48 && ctx->m_Height == 96, "resized context size");
 
     SetDiffuseState(ctx);
@@ -715,7 +1324,18 @@ void CheckResizeAndReadback(Backend &b)
     }, pixels);
     TestCheck(pixels.Width == 48 && pixels.Height == 96, "synchronous readback follows the new size");
     TestCheckf(PixelNear(pixels, 24, 48, 0, 255, 0), "portrait frame centre must be green");
+#ifndef CKRE_PIXEL_SDL_GPU
+    auto *native = static_cast<CKBgfxBackend *>(static_cast<CKTranslatedContext *>(ctx)->GetBackend());
+    const CKRECT presented = CKBgfxBackendTestAccess::WindowViewRect(*native);
+    int drawableWidth = 0, drawableHeight = 0;
+    TestCheck(SDL_GetWindowSizeInPixels(b.Window, &drawableWidth, &drawableHeight), "query actual drawable size");
+    TestCheck(presented.left == 0 && presented.top == 0 && presented.right == drawableWidth && presented.bottom == drawableHeight,
+              "bgfx presents the logical image across the whole drawable window");
+#endif
     TestCheck(ctx->IsIdle(), "idle after the readbacks");
+    TestCheck(pendingResize.Calls == 1 && pendingResize.Success && pendingResize.Width == 64 && pendingResize.Height == 64,
+              "outstanding readback retains its old dimensions across resize");
+    ExpectCenter(pendingResize.Image, 0, 255, 0, "outstanding readback retains pixels across resize");
 }
 
 // Pixels on the frame that are neither the background nor the flat green of
@@ -751,6 +1371,9 @@ void CheckPresentation(Backend &b)
     const int plainBlended = CountBlendedGreenPixels(plain);
     TestCheckf(PixelNear(plain, 40, 80, 0, 255, 0), "inside of the diagonal triangle must be green");
 
+    CKRasterizerCapsDesc available;
+    TestCheck(ctx->GetCaps(&available), "MSAA capabilities");
+    printf("  reported max samples: %u\n", unsigned(available.MaxMSAASamples));
     CKRasterizerOptions options;
     options.MSAASamples = 4;
     TestCheck(ctx->SetOptions(&options), "SetOptions(MSAA 4)");
@@ -762,6 +1385,9 @@ void CheckPresentation(Backend &b)
     const CKDWORD msaaApproximated = ctx->GetStats()->Diagnostics[CKRST_DIAG_APPROX_MSAA];
     TestCheckf(msaa.Width == plain.Width && msaa.Height == plain.Height, "MSAA readback keeps the window size");
     TestCheckf(PixelNear(msaa, 40, 80, 0, 255, 0), "inside of the MSAA triangle must be green");
+#ifdef CKRE_PIXEL_SDL_GPU
+    TestCheckf(msaaApproximated == 0, "SDL MSAA 4 must be implemented (reported max=%u)", unsigned(available.MaxMSAASamples));
+#endif
     TestCheckf(msaaApproximated != 0 || msaaBlended >= plainBlended + 16,
                "MSAA 4 must blend the diagonal edge (plain=%d msaa=%d approximated=%u)",
                plainBlended, msaaBlended, (unsigned)msaaApproximated);
@@ -895,7 +1521,7 @@ void CheckRenderTargetReadback(Backend &b)
 void CheckTypedPersistentBufferUpdates(Backend &b)
 {
     CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
-    CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
+    CKRasterizerBackend *backend = translated->GetBackend();
     float vertices[9] = {0.0f};
     CKWORD indices[3] = {0, 1, 2};
 
@@ -926,23 +1552,32 @@ void CheckTypedPersistentBufferUpdates(Backend &b)
               "destroy persistent vertex buffer");
 }
 
+
+#ifndef CKRE_PIXEL_SDL_GPU
 void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 {
     CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
     CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
-    CKBgfxBackendTestAccess::ExhaustViews(*backend);
+    const CKDWORD previousView = CKBgfxBackendTestAccess::ExchangeNextView(*backend);
     CKBackendPassDesc pass;
     pass.Rect.right = kWidth;
     pass.Rect.bottom = kHeight;
     TestCheck(backend->BeginPass(&pass) == CKERR_OUTOFMEMORY,
               "view exhaustion must reject the new pass");
     TestCheck(backend->IsIdle(), "rejected pass must not leave a frame in progress");
+    CKBgfxBackendTestAccess::ExchangeNextView(*backend, previousView);
 }
+
+#endif
 
 // ---------------------------------------------------------------------------
 
 void BackendRendersFixedFunctionSemantics()
 {
+#ifdef CKRE_PIXEL_SDL_GPU
+    const char *requestedBackend = GetEnvValue("CKRE_SDL_GPU_DRIVER");
+    if (!requestedBackend) requestedBackend = "direct3d12";
+#else
     const char *requestedBackend = GetEnvValue("CKRE_RUNTIME_BACKEND");
     if (!requestedBackend)
         requestedBackend = GetEnvValue("CKRE_BGFX_RUNTIME_BACKEND");
@@ -951,6 +1586,7 @@ void BackendRendersFixedFunctionSemantics()
     if (!requestedBackend)
         requestedBackend = "opengl";
     SetEnvValue("CKBGFX_RENDERER_BACKEND", requestedBackend);
+    #endif
     printf("  backend: %s\n", requestedBackend);
 
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
@@ -958,15 +1594,57 @@ void BackendRendersFixedFunctionSemantics()
     Samples samples;
     Backend backend;
     if (OpenBackend(backend, kWidth, kHeight)) {
+        if (EnvFlagEnabled("CKRE_GPU_TEST_INTERACTIVE_START")) {
+            SDL_SetWindowTitle(backend.Window, "rasterizer3-pixels - press Enter to start");
+            std::puts("  waiting for foreground Enter before GPU cases");
+            std::fflush(stdout);
+            bool start = false;
+            const Uint64 deadline = SDL_GetTicks() + 120000;
+            while (!start && SDL_GetTicks() < deadline) {
+                SDL_Event event;
+                while (SDL_PollEvent(&event))
+                    if (event.type == SDL_EVENT_KEY_DOWN && event.key.windowID == SDL_GetWindowID(backend.Window) &&
+                        event.key.key == SDLK_RETURN && (SDL_GetWindowFlags(backend.Window) & SDL_WINDOW_INPUT_FOCUS))
+                        start = true;
+                SDL_Delay(10);
+            }
+            TestCheck(start, "foreground start was not received");
+            SDL_SetWindowTitle(backend.Window, "rasterizer3-pixels");
+        }
         CheckDriverCaps(backend);
         CheckFirstFrame(backend);
+        CheckTypedPersistentBufferUpdates(backend);
         RunPixelCases(backend.Context, "uber", samples);
+        CheckOrderedTextureUpdates(backend);
+        CheckPaddedTextureUpload(backend);
+        CheckOrderedBufferUpdates(backend);
+        CheckBorderFiltering(backend);
+        CheckCopyAndRectClear(backend);
+        CheckLayeredTextureUpdates(backend);
+        CheckMipPreservation(backend);
+        CheckMemoryCopyPixelIdentity(backend);
+        CheckScaledTextureCopies(backend);
+        CheckIndependentAttachmentClears(backend);
+        CheckOrderedReadbacks(backend);
         CheckResizeAndReadback(backend);
         CheckPresentation(backend);
         CheckViewport(backend);
         CheckRenderTargetReadback(backend);
-        CheckTypedPersistentBufferUpdates(backend);
+#ifndef CKRE_PIXEL_SDL_GPU
         CheckViewExhaustionFailsWithoutOpeningAFrame(backend);
+#endif
+        fflush(stdout);
+        if (EnvFlagEnabled("CKRE_GPU_TEST_HOLD")) {
+            // Preserve a visible final frame for desktop evidence, still pumping events.
+            const Uint64 end = SDL_GetTicks() + 120000;
+            bool quit = false;
+            while (!quit && SDL_GetTicks() < end) {
+                SDL_Event event;
+                while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) quit = true;
+                SDL_Delay(16);
+            }
+        }
+        CheckReadbackShutdown(backend);
     }
     CloseBackend(backend);
 
@@ -976,15 +1654,16 @@ void BackendRendersFixedFunctionSemantics()
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
-    if (!EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS") && !EnvFlagEnabled("CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS")) {
+    const bool visible = argc > 1 && strcmp(argv[1], "--visible") == 0;
+    if (!visible && !EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS") && !EnvFlagEnabled("CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS")) {
         printf("SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
-        return 0;
+        return 77;
     }
 
     TestFramework tests;
-    tests.Run("bgfx backend renders the fixed-function semantics through the v3 contract",
+    tests.Run("backend renders the fixed-function semantics through the v3 contract",
               &BackendRendersFixedFunctionSemantics);
     return tests.ExitCode();
 }

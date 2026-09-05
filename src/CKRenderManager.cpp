@@ -1,6 +1,6 @@
 #include "RCKRenderManager.h"
 
-#include "CKTranslatedRasterizer.h"
+#include "CKRasterizerRegistration.h"
 
 #include "CKLevel.h"
 #include "CKMaterial.h"
@@ -190,11 +190,10 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     }
 
     if (!hasSoftwareDriver) {
-        CKRasterizer *fallback = CKTranslatedNullRasterizerStart(mainWindow);
+        CKRasterizerInfo info;
+        CKNullRasterizerGetInfo(&info);
+        CKRasterizer *fallback = info.StartFct(mainWindow);
         if (fallback && fallback->GetDriverCount() > 0) {
-            CKRasterizerInfo info;
-            info.StartFct = CKTranslatedNullRasterizerStart;
-            info.CloseFct = CKTranslatedNullRasterizerClose;
             info.DllInstance = nullptr;
             info.DllName = "";
             info.Desc = "NULL Rasterizer";
@@ -203,7 +202,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
             m_Rasterizers.PushBack(fallback);
             m_DriverCount += fallback->GetDriverCount();
         } else if (fallback) {
-            CKTranslatedNullRasterizerClose(fallback);
+            info.CloseFct(fallback);
         }
     }
 

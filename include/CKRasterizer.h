@@ -186,6 +186,8 @@ public:
     // Handles are allocated by the rasterizer; 0 is never a valid handle and a
     // deleted handle MAY be reused.
     virtual CKBOOL CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle) = 0;
+    // Face selects a cube face, or the Z slice at MipLevel for a volume
+    // texture (cast the slice index to CKRST_CUBEFACE); it is zero for 2D.
     virtual CKBOOL LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
                                CKRST_CUBEFACE Face, const CKRECT *Region) = 0;
     virtual CKBOOL GetTextureDesc(CKDWORD Texture, CKTextureDesc *Desc) const = 0;
@@ -202,6 +204,8 @@ public:
     // --- Targets, readback, copies (spec 4.8) ---
     // Texture == 0 selects the virtual backbuffer. Only outside a scene.
     virtual CKBOOL SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face) = 0;
+    // Captures the contents at this call. Different rectangle sizes use point
+    // sampling at destination pixel centers; pixels outside Dst are preserved.
     virtual CKBOOL CopyToTexture(CKDWORD Texture, const VxRect *Src, const VxRect *Dst, CKRST_CUBEFACE Face) = 0;
     // Synchronous, outside a scene; returns the number of bytes written and
     // 0 on failure. The image is at native (window) resolution (spec 4.4).
@@ -210,6 +214,8 @@ public:
     // without copying anything.
     virtual int CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, VxImageDescEx &Image) = 0;
     virtual int CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, const VxImageDescEx &Image) = 0;
+    // Captures the contents at this call, including during a scene. The callback
+    // is delivered at a frame boundary after completion, or fails on shutdown.
     virtual CKBOOL RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer,
                                    CKReadbackCallback Callback, void *User) = 0;
 

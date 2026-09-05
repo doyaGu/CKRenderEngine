@@ -26,6 +26,7 @@ function(ckre_configure_test_target TARGET_NAME)
 
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
+        CKRasterizerLib
         ${_ckre_test_rasterizer_deps}
         ${_ckre_test_ck2_dep}
         ${_ckre_test_vxmath_dep}
@@ -54,6 +55,23 @@ function(ckre_add_benchmark TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
 endfunction()
+
+# The generic program contract can be built and tested without the FFP library.
+add_executable(test_backend_program test_backend_program.cpp)
+target_link_libraries(test_backend_program PRIVATE CKRasterizerBackend)
+set_target_properties(test_backend_program PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
+ckre_copy_runtime_dependencies(test_backend_program)
+add_test(NAME BackendProgramTests COMMAND $<TARGET_FILE:test_backend_program>)
+set_tests_properties(BackendProgramTests PROPERTIES TIMEOUT 60)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if (Python3_Interpreter_FOUND)
+    add_test(NAME RasterizerLayerBoundaries
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_rasterizer_boundaries.py
+                --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    set_tests_properties(RasterizerLayerBoundaries PROPERTIES TIMEOUT 60)
+endif ()
 
 # Tests of the CKRasterizer v3 contract: the translation core (CKRasterizerLib)
 # driven through the public contract only, over the recording device of
@@ -161,6 +179,9 @@ ckre_add_test(draw_state_cache_tests
 ckre_add_test(ff_uniform_state_tests
     test_ff_uniform_state.cpp
 )
+if (TARGET CKBgfxRasterizerStatic)
+    target_compile_definitions(ff_uniform_state_tests PRIVATE CKRE_TEST_BGFX_ARTIFACTS=1)
+endif ()
 
 ckre_add_test(ffp_contract_exhaustive_tests
     test_ffp_contract_exhaustive.cpp
@@ -182,6 +203,16 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
         bimg
         bx
     )
+endif ()
+
+if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
+    ckre_add_rasterizer3_test(sdl_gpu_ffp_pixel_tests test_rasterizer3_pixels.cpp)
+    target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)
+    target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
+    set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
+endif ()
+if (TARGET rasterizer3_pixel_tests)
+    set_tests_properties(rasterizer3_pixel_tests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
 endif ()
 
 ckre_add_test(rasterizer_backend_tests
@@ -208,10 +239,14 @@ ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )
 
-if (TARGET CKBgfxRasterizerStatic)
+if (TARGET CK2_3DStatic)
     ckre_add_test(static_rasterizer_registration_tests
         test_static_rasterizer_registration.cpp
     )
+    target_compile_definitions(static_rasterizer_registration_tests PRIVATE
+        CKRE_EXPECT_BGFX=$<BOOL:$<TARGET_EXISTS:CKBgfxRasterizerStatic>>
+        CKRE_EXPECT_SDL_GPU=$<BOOL:$<TARGET_EXISTS:CKSdlGpuRasterizerStatic>>)
+
 endif ()
 
 if (CKRE_ENABLE_FRAME_COST_STATS)

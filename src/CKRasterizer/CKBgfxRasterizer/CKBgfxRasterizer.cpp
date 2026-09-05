@@ -1,7 +1,7 @@
 // Plugin entry points: the engine sees the v3 contract, implemented by the
 // translation core over the bgfx backend library.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizer.h"
 #include "CKTranslatedRasterizer.h"
 
 #include <new>

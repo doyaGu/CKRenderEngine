@@ -324,7 +324,7 @@ def main() -> int:
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    generated_dir = script_dir / "generated"
+    generated_dir = script_dir.parent.parent / "CKBgfxRasterizer" / "shaders" / "generated"
     spec_layout = write_spec_layout_shader(script_dir)
     print(f"Wrote {spec_layout.name} from {SPEC_LAYOUT_DEF}")
     if args.command == "gen-spec-layout":

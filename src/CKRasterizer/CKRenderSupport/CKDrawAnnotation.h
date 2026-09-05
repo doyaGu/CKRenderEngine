@@ -1,8 +1,7 @@
 #ifndef CKDRAWANNOTATION_H
 #define CKDRAWANNOTATION_H
 
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKTypes.h"
 
 #define CKDRAW_ANNOTATION_NAME_SIZE 96
 #define CKDRAW_ANNOTATION_PATH_SIZE 32

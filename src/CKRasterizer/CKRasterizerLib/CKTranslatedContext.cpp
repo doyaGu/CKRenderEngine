@@ -19,6 +19,52 @@ CKBOOL SameImageFormat(const VxImageDescEx &a, const VxImageDescEx &b)
            a.BlueMask == b.BlueMask && a.AlphaMask == b.AlphaMask;
 }
 
+// The input snapshot also isolates cube faces and crops from the sampling
+// footprint. The output target lets ordinary (non-RT) textures receive a
+// scaled copy without changing their usage or discarding untouched pixels.
+// Backends retain native resources referenced by queued commands after these
+// temporary handles are released.
+struct TextureCopyScratch {
+    CKRasterizerBackend *Backend;
+    CKDWORD Source = 0;
+    CKDWORD Output = 0;
+    CKDWORD Target = 0;
+
+    explicit TextureCopyScratch(CKRasterizerBackend *backend) : Backend(backend) {}
+    ~TextureCopyScratch()
+    {
+        if (Target) Backend->DestroyObject(Target, CKRST_OBJ_RENDERTARGET);
+        if (Output) Backend->DestroyObject(Output, CKRST_OBJ_TEXTURE);
+        if (Source) Backend->DestroyObject(Source, CKRST_OBJ_TEXTURE);
+    }
+    TextureCopyScratch(const TextureCopyScratch &) = delete;
+    TextureCopyScratch &operator=(const TextureCopyScratch &) = delete;
+
+    CKBOOL Create(const VxImageDescEx &sourceFormat, const VxImageDescEx &outputFormat,
+                  int sourceWidth, int sourceHeight, int outputWidth, int outputHeight)
+    {
+        CKTextureDesc desc;
+        desc.Format = sourceFormat;
+        desc.Format.Image = NULL;
+        desc.Format.Width = sourceWidth;
+        desc.Format.Height = sourceHeight;
+        desc.Format.BytesPerLine = 0;
+        desc.Depth = desc.MipMapCount = 1;
+        desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_BLIT_DST;
+        if (Backend->CreateTexture(&desc, NULL, &Source) != CK_OK) return FALSE;
+        desc.Format = outputFormat;
+        desc.Format.Image = NULL;
+        desc.Format.Width = outputWidth;
+        desc.Format.Height = outputHeight;
+        desc.Format.BytesPerLine = 0;
+        desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+        if (Backend->CreateTexture(&desc, NULL, &Output) != CK_OK) return FALSE;
+        CKBackendRenderTargetDesc target;
+        target.ColorTexture = Output;
+        return Backend->CreateRenderTarget(&target, &Target) == CK_OK;
+    }
+};
+
 } // namespace
 
 // ===========================================================================
@@ -59,7 +105,7 @@ CKTranslatedContext::~CKTranslatedContext()
 CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
                                    CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp)
 {
-    if (m_Created || !m_Backend)
+    if (m_Created || !m_Backend || !m_TranslatedDriver)
         return FALSE;
     CKBackendInitDesc init;
     init.Window = Window;
@@ -73,6 +119,10 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     init.Fullscreen = Fullscreen;
     init.RefreshRate = RefreshRate;
     init.DebugFlags = m_Options.DebugFlags;
+    CKRasterizerBackendDriver *provider = m_TranslatedDriver->GetBackendDriver();
+    if (!provider)
+        return FALSE;
+    provider->GetShaderTargets(init.ShaderTargets);
     if (m_Backend->Init(&init) != CK_OK)
         return FALSE;
 
@@ -87,11 +137,12 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_Fullscreen = Fullscreen;
     m_RefreshRate = (CKDWORD)RefreshRate;
 
-    if (!m_FFP.Init(m_Backend)) {
+    CKBackendShaderSet shaders;
+    if (!provider->GetShaderSet(m_Backend->GetCaps(), shaders) || !m_FFP.Init(m_Backend, shaders)) {
         m_Backend->Shutdown();
         return FALSE;
     }
-    m_Present.Init(m_Backend);
+    m_Present.Init(m_Backend, shaders);
     if (m_TranslatedDriver)
         m_TranslatedDriver->SyncCapsFromBackend();
 
@@ -124,17 +175,37 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
 
     ApplyOptions();
     UpdateAlphaTestPrecision();
+    if (m_Backend->GetCaps().RequiresIntermediateTarget && !PrepareFrameTarget()) {
+        BeginShutdown();
+        m_Created = FALSE;
+        return FALSE;
+    }
     return TRUE;
 }
 
 CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CKDWORD Flags)
 {
-    if (!m_Created || m_ShuttingDown || m_Frame.Open || Flags != 0)
+    if (!m_Created || m_ShuttingDown || m_Frame.Open || (Flags & ~(VX_RESIZE_NOMOVE | VX_RESIZE_NOSIZE)))
         return FALSE;
+    if (Flags & VX_RESIZE_NOMOVE) {
+        PosX = (int)m_PosX;
+        PosY = (int)m_PosY;
+    }
+    if (Flags & VX_RESIZE_NOSIZE) {
+        Width = (int)m_Width;
+        Height = (int)m_Height;
+    }
+    if (Width <= 0 || Height <= 0)
+        return FALSE;
+    const bool sizeChanged = Width != (int)m_Width || Height != (int)m_Height;
+    if (!sizeChanged && PosX == (int)m_PosX && PosY == (int)m_PosY)
+        return TRUE;
     if (m_Backend->Resize(PosX, PosY, Width, Height) != CK_OK)
         return FALSE;
     m_PosX = (CKDWORD)PosX;
     m_PosY = (CKDWORD)PosY;
+    if (!sizeChanged)
+        return TRUE;
     m_Width = (CKDWORD)Width;
     m_Height = (CKDWORD)Height;
     m_Present.DestroyTargets();
@@ -230,10 +301,13 @@ CKBOOL CKTranslatedContext::BeginShutdown()
 {
     if (!m_Created || m_ShuttingDown)
         return TRUE;
+    // Cancellation invokes user callbacks. Reject new work before any callback
+    // can enqueue another readback or open a scene during resource teardown.
+    m_ShuttingDown = TRUE;
     if (m_Frame.Open) {
         // An open frame (scene without BackToFront) ends without presenting.
         CKDWORD frame = 0;
-        if (m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK)
+        if (m_Backend->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_UNCHANGED, FALSE), &frame) == CK_OK)
             m_LastDeviceFrame = frame;
         m_Frame.Open = FALSE;
     }
@@ -247,12 +321,22 @@ CKBOOL CKTranslatedContext::BeginShutdown()
         m_CopyWidth = m_CopyHeight = 0;
     }
     m_Present.Shutdown();
-    if (m_FFP.PrepareShutdown() != CK_OK)
+    if (m_FFP.PrepareShutdown() != CK_OK) {
+        if (m_Backend->GetDeviceStatus() == CK_OK) {
+            m_ShuttingDown = FALSE;
+            return FALSE;
+        }
+        // A failed device cannot finish its queued pass through Submit. Its
+        // shutdown abandons native work and releases tickets before the FFP
+        // caches discard their now-invalid logical handles.
+        m_Backend->Shutdown();
+    }
+    if (m_FFP.Shutdown() != CK_OK) {
+        m_ShuttingDown = FALSE;
         return FALSE;
-    m_FFP.Shutdown();
+    }
     m_Backend->Shutdown();
     m_Resources.clear();
-    m_ShuttingDown = TRUE;
     return TRUE;
 }
 
@@ -647,8 +731,14 @@ CKBOOL CKTranslatedContext::LoadTexture(CKDWORD Texture, const VxImageDescEx &Im
         return FALSE;
     }
     const CKBOOL cube = (resource->Texture.Flags & CKRST_TEXTURE_CUBEMAP) != 0;
-    if (!Image.Image || Image.Width <= 0 || Image.Height <= 0 || MipLevel < 0 ||
-        (CKDWORD)Face >= CKRST_CUBEFACE_COUNT || (!cube && Face != CKRST_CUBEFACE_XPOS)) {
+    if (!Image.Image || Image.Width <= 0 || Image.Height <= 0 || MipLevel < 0 || MipLevel >= 32) {
+        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
+        return FALSE;
+    }
+    const CKBOOL volume = (resource->Texture.Flags & CKRST_TEXTURE_VOLUMEMAP) != 0;
+    const CKDWORD layers = cube ? CKRST_CUBEFACE_COUNT :
+        (volume ? XMax((CKDWORD)1, resource->Texture.Depth >> MipLevel) : 1);
+    if ((CKDWORD)Face >= layers) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
@@ -1165,7 +1255,7 @@ CKBOOL CKTranslatedContext::BuildReadbackImage(const PendingReadback &Readback, 
 
 CKBOOL CKTranslatedContext::CanReadNativeTarget()
 {
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
     const CKPresentTarget &native = m_Present.NativeTarget();
     if (m_Target || !m_Frame.InternalTargets || !native.IsActive())
         return FALSE;
@@ -1198,11 +1288,6 @@ CKBOOL CKTranslatedContext::BlitForReadback()
     }
     if (!source || !readbackTexture)
         return FALSE;
-    // Blits run before the draws of their pass: a pass after the present pass
-    // (or after the target's scene passes) copies the finished frame.
-    if (!OpenPass(m_Target ? m_TargetFrameBuffer : 0, m_Target ? CurrentTargetRect() : WindowRect(),
-                  0, 0, 1.0f, 0, "readback"))
-        return FALSE;
     return m_Backend->Blit(readbackTexture, 0, 0, 0, 0, source, 0, 0, NULL) == CK_OK ? TRUE : FALSE;
 }
 
@@ -1215,11 +1300,7 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
     if (m_Backend->ReadTexture(readbackTexture, 0, &desc, NULL) != CK_OK || desc.RequiredSize == 0 ||
         desc.Width == 0 || desc.Height == 0 || desc.Format == UNKNOWN_PF)
         return FALSE;
-    Readback.Data.assign(desc.RequiredSize, 0);
-    desc.Data = Readback.Data.data();
-    desc.Capacity = desc.RequiredSize;
-    CKDWORD available = 0;
-    if (m_Backend->ReadTexture(readbackTexture, 0, &desc, &available) != CK_OK) {
+    if (m_Backend->ReadTexture(readbackTexture, 0, &desc, &Readback.Ticket) != CK_OK) {
         Readback.Data.clear();
         return FALSE;
     }
@@ -1231,45 +1312,30 @@ CKBOOL CKTranslatedContext::IssueTextureReadback(PendingReadback &Readback)
     // (spec 5.9): the flip the backend reports for framebuffer writes on
     // bottom-left backends has been done at render time.
     Readback.YFlip = m_Target ? FALSE : desc.YFlip;
-    Readback.Issued = TRUE;
-    Readback.AvailableFrame = available;
     return TRUE;
 }
 
-CKBOOL CKTranslatedContext::HasArmedTextureReadbacks()
+// Resolve a snapshot without ending the logical scene or consuming the resolve
+// that will later compose its remaining draws and the overlay.
+CKBOOL CKTranslatedContext::ResolveCopySource()
 {
-    for (size_t i = 0; i < m_Readbacks.size(); ++i)
-        if (!m_Readbacks[i]->Issued)
-            return TRUE;
-    return FALSE;
+    if (m_Target || !m_Frame.Open || m_Frame.Composited)
+        return TRUE;
+    return m_Frame.InternalTargets &&
+           OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1, 0, "snapshot-resolve") &&
+           m_Present.SubmitResolve(m_Options.FXAA, m_Options.Sharpness) == CK_OK;
 }
 
-// End of frame, after the readback blit: issues every armed readback; the
-// ones the backend refuses fail.
-void CKTranslatedContext::IssueArmedTextureReadbacks()
+CKBOOL CKTranslatedContext::CaptureReadback(PendingReadback &Readback)
 {
-    for (size_t i = 0; i < m_Readbacks.size(); ++i) {
-        PendingReadback *pending = m_Readbacks[i];
-        if (pending->Issued || IssueTextureReadback(*pending))
-            continue;
-        pending->Issued = TRUE;
-        pending->Done = TRUE;
-        pending->Success = FALSE;
-    }
-}
-
-// No frame can carry the blit (no internal targets, cube-face target): the
-// armed readbacks fail at the next delivery.
-void CKTranslatedContext::FailArmedTextureReadbacks()
-{
-    for (size_t i = 0; i < m_Readbacks.size(); ++i) {
-        PendingReadback *pending = m_Readbacks[i];
-        if (pending->Issued)
-            continue;
-        pending->Issued = TRUE;
-        pending->Done = TRUE;
-        pending->Success = FALSE;
-    }
+    const CKBOOL resume = m_Frame.Open;
+    const CKDWORD target = CurrentPassFrameBuffer();
+    const CKRECT rect = CurrentPassRect();
+    const CKBOOL captured = ResolveCopySource() && BlitForReadback() && IssueTextureReadback(Readback);
+    // Restore even after a failed snapshot: the next draw must use the logical
+    // scene's attachment, viewport and LOAD semantics.
+    const CKBOOL restored = !resume || OpenPass(target, rect, 0, 0, 1, 0, "snapshot-resume");
+    return captured && restored;
 }
 
 CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKDWORD *FrameNumber)
@@ -1284,7 +1350,7 @@ CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKD
     if (ok && Blit)
         ok = BlitForReadback();
     CKDWORD frame = 0;
-    const CKERROR status = m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame);
+    const CKERROR status = m_Backend->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_UNCHANGED, Present && !m_Target), &frame);
     m_Frame.Open = FALSE;
     m_Frame.PassOpen = passOpen;
     m_FramePasses = passes;
@@ -1321,20 +1387,45 @@ CKBOOL CKTranslatedContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback->Rect = *Rect;
         readback->HasRect = TRUE;
     }
-    m_Readbacks.push_back(readback);
-    if (m_Frame.Open)
-        return TRUE; // issued at the end of this frame (BackToFront)
-    // Between frames: a frame that only re-presents the native target (or
-    // just blits the target texture) carries the readback blit; the next
-    // BackToFront delivers it.
-    CKDWORD frame = 0;
-    if (SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame)) {
-        m_LastDeviceFrame = frame;
-        if (IssueTextureReadback(*readback))
-            return TRUE;
+    if (!CaptureReadback(*readback)) {
+        delete readback;
+        return FALSE;
     }
-    m_Readbacks.pop_back();
-    delete readback;
+    if (!m_Frame.Open) {
+        // Submit resource work between frames while preserving the last
+        // presented image. Callback delivery remains at a frame boundary.
+        CKDWORD frame = 0;
+        if (!SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &frame)) {
+            delete readback;
+            return FALSE;
+        }
+        m_LastDeviceFrame = frame;
+    }
+    m_Readbacks.push_back(readback);
+    return TRUE;
+}
+
+CKBOOL CKTranslatedContext::CompleteReadback(PendingReadback &readback, CKBOOL wait)
+{
+    for (;;) {
+        const CKBackendReadbackState state = m_Backend->PollReadback(readback.Ticket, wait);
+        if (state == CKRST_READBACK_READY) {
+            readback.Data = std::move(readback.Ticket->Data);
+            readback.Ticket.reset();
+            readback.Success = readback.Done = TRUE;
+            return TRUE;
+        }
+        if (state == CKRST_READBACK_FAILED) break;
+        if (!wait) return FALSE;
+        if (state == CKRST_READBACK_NEEDS_SUBMIT) {
+            CKDWORD submission = 0;
+            if (!SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &submission)) break;
+            m_LastDeviceFrame = submission;
+        }
+    }
+    readback.Ticket.reset();
+    readback.Success = FALSE;
+    readback.Done = TRUE;
     return FALSE;
 }
 
@@ -1343,10 +1434,8 @@ void CKTranslatedContext::DeliverReadbacks()
     std::vector<PendingReadback *> ready;
     for (size_t i = 0; i < m_Readbacks.size();) {
         PendingReadback *pending = m_Readbacks[i];
-        if (pending->Issued && !pending->Done && m_LastDeviceFrame >= pending->AvailableFrame) {
-            pending->Success = TRUE;
-            pending->Done = TRUE;
-        }
+        if (!pending->Done)
+            CompleteReadback(*pending, FALSE);
         if (pending->Done) {
             ready.push_back(pending);
             m_Readbacks.erase(m_Readbacks.begin() + (ptrdiff_t)i);
@@ -1371,17 +1460,9 @@ void CKTranslatedContext::CancelReadbacks()
         PendingReadback *pending = m_Readbacks[i];
         if (pending->Done)
             continue;
-        if (pending->Issued) {
-            // An issued readback writes into the buffer until AvailableFrame:
-            // run the frames rather than free the memory under it.
-            CKDWORD frame = m_LastDeviceFrame;
-            for (int guard = 0; guard < 8 && frame < pending->AvailableFrame; ++guard) {
-                if (m_Backend->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) != CK_OK)
-                    break;
-            }
-            m_LastDeviceFrame = frame;
-        }
-        pending->Issued = TRUE;
+        // The backend retains its storage until completion; cancellation
+        // only drops this consumer, so no wait or caller-memory write remains.
+        pending->Ticket.reset();
         pending->Done = TRUE;
         pending->Success = FALSE;
     }
@@ -1416,26 +1497,12 @@ int CKTranslatedContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Bu
         readback.Rect = *Rect;
         readback.HasRect = TRUE;
     }
-    // Frame 1 re-presents the native target (target 0, once it holds a frame)
-    // and blits the source into the readback texture; the read is issued
-    // right after and the backend delivers the pixels once its frame counter
-    // reaches AvailableFrame. The waiting frames only re-present, so the
-    // window keeps its image.
     CKDWORD frame = 0;
-    if (!SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame))
+    if (!CaptureReadback(readback) || !SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &frame))
         return 0;
     m_LastDeviceFrame = frame;
-    if (!IssueTextureReadback(readback))
+    if (!CompleteReadback(readback, TRUE))
         return 0;
-    for (int guard = 0; guard < 8 && frame < readback.AvailableFrame; ++guard) {
-        if (!SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &frame))
-            break;
-    }
-    m_LastDeviceFrame = frame;
-    if (frame < readback.AvailableFrame)
-        return 0;
-    readback.Success = TRUE;
-    readback.Done = TRUE;
 
     VxImageDescEx captured;
     std::vector<CKBYTE> pixels;
@@ -1468,10 +1535,6 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    if (m_Frame.IsSceneActive() || m_Frame.Open) {
-        Diag(CKRST_DIAG_REJECT_SCENE_STATE);
-        return FALSE;
-    }
 
     const CKRECT target = LogicalTargetRect();
     CKRECT srcRect = target;
@@ -1501,6 +1564,40 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
         return FALSE;
     }
 
+    if (m_Frame.Open) {
+        const CKDWORD source = m_Target ? m_Target : m_Present.NativeTarget().ColorTexture;
+        if (!source || source == Texture) {
+            Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
+            return FALSE;
+        }
+        const CKDWORD resumeTarget = CurrentPassFrameBuffer();
+        const CKRECT resumeRect = CurrentPassRect();
+        CKBOOL copied = FALSE;
+        if (ResolveCopySource()) {
+            const int sw = srcRect.right - srcRect.left, sh = srcRect.bottom - srcRect.top;
+            const int dw = dstRect.right - dstRect.left, dh = dstRect.bottom - dstRect.top;
+            if (sw == dw && sh == dh) {
+                copied = m_Backend->Blit(Texture, 0, Face, dstRect.left, dstRect.top,
+                                         source, 0, m_Target ? m_TargetFace : 0, &srcRect) == CK_OK;
+            } else {
+                VxImageDescEx sourceFormat;
+                if (m_Target) sourceFormat = FindResource(CKRST_OBJ_TEXTURE, m_Target)->Texture.Format;
+                else VxPixelFormat2ImageDesc(_32_ARGB8888, sourceFormat);
+                TextureCopyScratch scratch(m_Backend);
+                const CKRECT outputRect = {0, 0, dw, dh};
+                copied = scratch.Create(sourceFormat, resource->Texture.Format, sw, sh, dw, dh) &&
+                    m_Backend->Blit(scratch.Source, 0, 0, 0, 0, source, 0,
+                                    m_Target ? m_TargetFace : 0, &srcRect) == CK_OK &&
+                    OpenPass(scratch.Target, outputRect, 0, 0, 1, 0, "copy-scale") &&
+                    m_Present.SubmitCopy(scratch.Source, sw, sh) == CK_OK &&
+                    m_Backend->Blit(Texture, 0, Face, dstRect.left, dstRect.top,
+                                    scratch.Output, 0, 0, &outputRect) == CK_OK;
+            }
+        }
+        const CKBOOL resumed = OpenPass(resumeTarget, resumeRect, 0, 0, 1, 0, "copy-resume");
+        return copied && resumed;
+    }
+
     VxImageDescEx image;
     const int size = CopyToMemoryBuffer(&srcRect, VXBUFFER_BACKBUFFER, image);
     if (size <= 0)
@@ -1513,14 +1610,15 @@ CKBOOL CKTranslatedContext::CopyToTexture(CKDWORD Texture, const VxRect *Src, co
     const int dstWidth = dstRect.right - dstRect.left;
     const int dstHeight = dstRect.bottom - dstRect.top;
     if (dstWidth != image.Width || dstHeight != image.Height) {
-        // Nearest-neighbour resample into the destination rectangle.
+        // Match the GPU point sampler: map destination pixel centers to
+        // source texels, for both enlarging and shrinking rectangles.
         std::vector<CKBYTE> scaled((size_t)dstWidth * dstHeight * 4);
         for (int y = 0; y < dstHeight; ++y) {
-            const int sy = (int)((int64_t)y * image.Height / dstHeight);
+            const int sy = (int)(((int64_t)y * 2 + 1) * image.Height / ((int64_t)dstHeight * 2));
             const CKDWORD *srcRow = (const CKDWORD *)(pixels.data() + (size_t)sy * image.BytesPerLine);
             CKDWORD *dstRow = (CKDWORD *)(scaled.data() + (size_t)y * dstWidth * 4);
             for (int x = 0; x < dstWidth; ++x)
-                dstRow[x] = srcRow[(int)((int64_t)x * image.Width / dstWidth)];
+                dstRow[x] = srcRow[(int)(((int64_t)x * 2 + 1) * image.Width / ((int64_t)dstWidth * 2))];
         }
         pixels.swap(scaled);
         image.Width = dstWidth;

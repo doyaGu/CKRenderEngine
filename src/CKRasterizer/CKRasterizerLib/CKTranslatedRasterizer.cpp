@@ -1,5 +1,6 @@
 #include "CKTranslatedRasterizerInternal.h"
-#include "CKNullBackend.h"
+#include "CKNullRasterizer.h"
+#include "CKRasterizerRegistration.h"
 
 #include <new>
 
@@ -183,4 +184,9 @@ void CKTranslatedNullRasterizerGetInfo(CKRasterizerInfo *Info)
     Info->StartFct = CKTranslatedNullRasterizerStart;
     Info->CloseFct = CKTranslatedNullRasterizerClose;
     Info->InterfaceRevision = CKRST_INTERFACE_REVISION;
+}
+
+void CKNullRasterizerGetInfo(CKRasterizerInfo *Info)
+{
+    CKTranslatedNullRasterizerGetInfo(Info);
 }

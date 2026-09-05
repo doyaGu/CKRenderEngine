@@ -89,7 +89,7 @@ void CKFFDrawProbes::OnVertexBuffers(CKDWORD vb, CKDWORD ib, CKDWORD vertexLayou
     Stats.HasLastIndexBuffer = TRUE;
 }
 
-void CKFFDrawProbes::OnUniform(CKBackendConstantBlock block, CKDWORD count)
+void CKFFDrawProbes::OnUniform(CKFFConstantBlock block, CKDWORD count)
 {
     if (StatsEnabled()) {
         ++Stats.UniformSets;
@@ -171,7 +171,7 @@ void CKFFDrawProbes::LogAndReset(CKDrawStateCache &drawStateCache)
                            "frame=%u uniform=%u name=%s sets=%u vec4=%u",
                            Stats.FrameIndex,
                            slot,
-                           slot >= 1 ? CKFFUniformDebugName((CKBackendConstantBlock)(slot - 1)) : "unknown",
+                           slot >= 1 ? CKFFUniformDebugName((CKFFConstantBlock)(slot - 1)) : "unknown",
                            Stats.UniformHandleSets[slot],
                            Stats.UniformHandleVec4s[slot]);
             }
@@ -192,7 +192,7 @@ void CKFFDrawProbes::OnWorldMatrix(const VxMatrix &) {}
 void CKFFDrawProbes::OnDrawState(const CKDrawState &) {}
 void CKFFDrawProbes::OnTextureSet(CKDWORD, const CKDWORD *) {}
 void CKFFDrawProbes::OnVertexBuffers(CKDWORD, CKDWORD, CKDWORD) {}
-void CKFFDrawProbes::OnUniform(CKBackendConstantBlock, CKDWORD) {}
+void CKFFDrawProbes::OnUniform(CKFFConstantBlock, CKDWORD) {}
 void CKFFDrawProbes::LogAndReset(CKDrawStateCache &) {}
 
 #endif

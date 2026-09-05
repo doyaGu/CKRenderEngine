@@ -2,10 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizer.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
+#include "CKRasterizerValidation.h"
 #include "VxWindowFunctions.h"
 
 // Pull in bgfx defines for PT mask constants
@@ -418,6 +419,11 @@ static void TestBgfxStateBackendConventions()
                 "separate blend factors produce bgfx blend state");
     TEST_ASSERT((state & BGFX_STATE_BLEND_EQUATION_MASK) != 0,
                 "separate blend equations produce bgfx equation state");
+    for (const VXBLEND_MODE combined : {VXBLEND_BOTHSRCALPHA, VXBLEND_BOTHINVSRCALPHA}) {
+        const CKDrawState unresolved = CKDrawStateBuilder().Blend(combined, VXBLEND_ZERO).Build();
+        TEST_ASSERT(CKBgfxTryState(unresolved, state) == CKERR_INVALIDPARAMETER,
+                    "native state requires the rasterizer to resolve combined legacy blend modes");
+    }
 }
 
 static void TestSamplerFilterAndAddressConventions()
@@ -444,6 +450,17 @@ static void TestSamplerFilterAndAddressConventions()
                 "U/V/W address modes map independently");
     TEST_ASSERT((flags & BGFX_SAMPLER_BORDER_COLOR_MASK) == BGFX_SAMPLER_BORDER_COLOR(3),
                 "border color index is preserved in sampler flags");
+    sampler.BorderColor = 0x80402010u;
+    TEST_ASSERT(CKRasterizerValidateSampler(&sampler) == CK_OK,
+                "the generic sampler accepts an actual ARGB border color");
+    TEST_ASSERT(!CKBgfxTrySamplerFlags(&sampler, flags),
+                "native sampler encoding requires an allocated palette index");
+    sampler.BorderColor = 15;
+    TEST_ASSERT(CKBgfxTrySamplerFlags(&sampler, flags),
+                "all sixteen native palette entries are valid");
+    sampler.BorderColor = 16;
+    TEST_ASSERT(!CKBgfxTrySamplerFlags(&sampler, flags),
+                "native palette indices beyond fifteen are rejected");
 }
 
 static void TestOpenGLAutoMipPolicy()
@@ -478,10 +495,10 @@ static void TestOpenGLAutoMipPolicy()
                 "zero pitch falls back to tight rows");
     TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 20) == 20,
                 "explicit padded pitch is preserved");
-    TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 64) == 16,
-                "uncompressed total image size is normalized back to row pitch");
-    TEST_ASSERT(CKBgfxResolveImagePitch(4, 2, 32, 128) == 64,
-                "region total image size recovers the original source pitch");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 4, 32, 64) == 64,
+                "pitch equal to packed image size is still a row pitch");
+    TEST_ASSERT(CKBgfxResolveImagePitch(4, 2, 32, 128) == 128,
+                "large padded row pitch must not be divided by height");
 
     TEST_ASSERT(CKBgfxResolveAutoMipUpdateAction(TRUE, 1, TRUE, TRUE) == CKBGFX_AUTOMIP_UPDATE_PROMOTE,
                 "full auto-mip update promotes base texture to a complete mip chain");
@@ -522,6 +539,25 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(driver->m_CapsUpToDate == FALSE,
                 "bgfx legacy caps remain provisional until a backend initializes bgfx");
     TEST_ASSERT(library.GetDriver(1) == NULL, "out-of-range driver index yields NULL");
+
+    std::vector<CKBackendShaderTarget> shaderTargets;
+    driver->GetShaderTargets(shaderTargets);
+    TEST_ASSERT(shaderTargets.size() == 6, "rasterizer advertises six complete bgfx artifact profiles");
+    for (const auto &target : shaderTargets) {
+        CKBackendCaps caps;
+        caps.ShaderFormat = target.Format;
+        caps.ShaderProfile = target.Profile;
+        CKBackendShaderSet shaders;
+        TEST_ASSERT(target.Format == CKRST_SHADER_FORMAT_BGFX && driver->GetShaderSet(caps, shaders) &&
+                        shaders.Matches(target.Format, target.Profile),
+                    "every advertised profile resolves a complete rasterizer shader catalog");
+    }
+    CKBackendCaps foreignTarget;
+    foreignTarget.ShaderFormat = CKRST_SHADER_FORMAT_DXIL;
+    foreignTarget.ShaderProfile = CKRST_SHADER_PROFILE_DX12;
+    CKBackendShaderSet foreignShaders;
+    TEST_ASSERT(!driver->GetShaderSet(foreignTarget, foreignShaders) && !foreignShaders.Shaders[0].Code,
+                "bgfx rasterizer never offers containers as native DXIL artifacts");
 
     library.Close();
     TEST_ASSERT(library.GetDriverCount() == 0, "close removes driver");
@@ -775,10 +811,55 @@ static void TestGenerationCheckedResourceTable()
                 "bulk destruction clears every live slot");
 }
 
+void TestBorderPaletteLifetime() {
+    CKBgfxBorderPalette palette;
+    for (CKDWORD i = 0; i < 16; ++i) {
+        const auto entry = palette.Resolve(0xff000000u | (i * 16));
+        TEST_ASSERT(entry.Index == i && entry.Added && !entry.Approximated,
+                    "Sixteen exact colors remain stable within a submission");
+    }
+    const auto repeated = palette.Resolve(0xff000050u);
+    TEST_ASSERT(repeated.Index == 5 && !repeated.Added && !repeated.Approximated,
+                "An existing color reuses its entry");
+    const auto overflow = palette.Resolve(0xff000052u);
+    TEST_ASSERT(overflow.Index == 5 && !overflow.Added && overflow.Approximated,
+                "Overflow reuses the nearest entry and reports approximation");
+    palette.Reset();
+    const auto next = palette.Resolve(0x80402010u);
+    TEST_ASSERT(next.Index == 0 && next.Added && !next.Approximated,
+                "A submitted frame releases the palette entries");
+}
+
+static void TestRejectedShaderTargets()
+{
+    TEST_SECTION("Shader Target Selection Before Device Creation");
+    const CKBackendShaderTarget targets[] = {
+        {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12},
+        {CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX11},
+        {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV},
+        {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_UNKNOWN},
+    };
+    CKBgfxBackend backend;
+    CKBackendInitDesc init;
+    init.Width = init.Height = 16;
+    for (const auto &target : targets) {
+        init.ShaderTargets.assign(1, target);
+        TEST_ASSERT(backend.Init(&init) == CKERR_NOTIMPLEMENTED,
+                    "incompatible shader containers and profiles are rejected before native initialization");
+        TEST_ASSERT(backend.GetDeviceStatus() != CK_OK,
+                    "a rejected shader target does not create a device");
+    }
+    init.ShaderTargets.assign(targets, targets + sizeof(targets) / sizeof(targets[0]));
+    TEST_ASSERT(backend.Init(&init) == CKERR_NOTIMPLEMENTED,
+                "a nonempty target list with no compatible pair is rejected as a whole");
+}
+
 int main()
 {
     printf("=== CKBgfxRasterizer Unit Tests ===\n");
 
+    TestBorderPaletteLifetime();
+    TestRejectedShaderTargets();
     TestFillModeTopology();
     TestDrawStateBuilderLayout();
     TestBgfxStencilWriteMaskEncoding();

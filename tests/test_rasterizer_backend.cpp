@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "CKFFShaderABI.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -65,7 +64,20 @@ CKDWORD MakeProgram(CKRasterizerBackend *b)
     TestCheck(b->CreateShader(&shader, &vs) == CK_OK && vs != 0, "vertex shader");
     shader.Stage = CKRST_SHADER_PIXEL;
     TestCheck(b->CreateShader(&shader, &fs) == CK_OK && fs != 0, "pixel shader");
-    TestCheck(b->CreateProgram(vs, fs, &program) == CK_OK && program != 0, "program");
+    CKBackendProgramDesc desc;
+    desc.VertexShader = vs;
+    desc.PixelShader = fs;
+    CKBackendUniformBinding uniform;
+    uniform.Slot = 27;
+    uniform.Name = "u_customData";
+    uniform.Count = 2;
+    uniform.Stage = CKRST_SHADER_PIXEL;
+    desc.Uniforms.push_back(uniform);
+    CKBackendSamplerBinding sampler;
+    sampler.Slot = 2;
+    sampler.Name = "s_customImage";
+    desc.Samplers.push_back(sampler);
+    TestCheck(b->CreateProgram(&desc, &program) == CK_OK && program != 0, "program");
     return program;
 }
 
@@ -97,26 +109,8 @@ void TestCapsAndTables()
                   shaderDefaults.UniformBufferCount == 0,
               "shader resource layout defaults to empty");
 
-    // The constant block table is the shader ABI.
-    TestCheck(strcmp(CKBackendConstantBlockInfo(CKRST_BLOCK_MATRICES).Name, "u_ffMatrices") == 0 &&
-                  CKBackendConstantBlockInfo(CKRST_BLOCK_MATRICES).Mat4 &&
-                  CKBackendConstantBlockInfo(CKRST_BLOCK_MATRICES).Count == CKFF_MATRIX_VEC4_COUNT,
-              "matrices block");
-    TestCheck(CKBackendConstantBlockInfo(CKRST_BLOCK_SPEC).Count == CKFF_SPEC_UNIFORM_VEC4_COUNT &&
-                  !CKBackendConstantBlockInfo(CKRST_BLOCK_SPEC).Mat4,
-              "spec block");
-    TestCheck(CKBackendConstantBlockInfo(CKRST_BLOCK_COUNT).Name == NULL, "invalid block");
-    for (int block = 0; block < CKRST_BLOCK_COUNT; ++block) {
-        TestCheck(CKBackendConstantBlockInfo((CKBackendConstantBlock)block).Name != NULL &&
-                      f.Backend->GetBlockUniformForTests((CKBackendConstantBlock)block) != 0,
-                  "every block has a name and a uniform");
-    }
-    TestCheck(strcmp(CKBackendSamplerSlotName(0), "s_texture0") == 0 &&
-                  strcmp(CKBackendSamplerSlotName(CKFF_CUBE_SAMPLER_SLOT_BASE), "s_textureCube0") == 0 &&
-                  strcmp(CKBackendSamplerSlotName(CKFF_VOLUME_SAMPLER_SLOT_BASE + 3), "s_textureVolume3") == 0 &&
-                  strcmp(CKBackendSamplerSlotName(CKRST_BACKEND_SLOT_PRESENT), "s_sceneColor") == 0 &&
-                  CKBackendSamplerSlotName(CKRST_BACKEND_SLOT_COUNT) == NULL,
-              "sampler slot names follow the fixed layout");
+    TestCheck(caps.MaxTextureBindings == CKBACKEND_MAX_TEXTURE_SLOTS,
+              "generic logical texture capacity is independent of a shader family");
 }
 
 void TestResources()
@@ -239,8 +233,8 @@ void TestFrame()
     memset(&sampler, 0, sizeof(sampler));
     sampler.MinFilter = CKRST_FILTER_LINEAR;
     b->BindTexture(2, texture, &sampler);
-    float block[CKFF_SPEC_UNIFORM_VEC4_COUNT * 4] = {0};
-    b->PushConstants(CKRST_BLOCK_SPEC, block, CKFF_SPEC_UNIFORM_VEC4_COUNT);
+    float block[8] = {0};
+    TestCheck(b->PushConstants(27, block, sizeof(block)) == CK_OK, "push arbitrary logical byte slot");
     b->SetMarker("first");
     TestCheck(b->Draw(&draw) == CK_OK, "Draw");
     TestCheck(f.Backend->Log.Draws.size() == 1 && f.Backend->Log.Draws[0].Program == program &&
@@ -254,10 +248,10 @@ void TestFrame()
                   f.Backend->Log.LastTextureHandle == texture &&
                   f.Backend->Log.LastTextureUniform == f.Backend->GetSamplerUniformForTests(2),
               "bound textures are set on their slot through the slot's sampler uniform");
-    const CKDWORD specUniform = f.Backend->GetBlockUniformForTests(CKRST_BLOCK_SPEC);
-    TestCheck(f.Backend->Log.FloatUniforms.count(specUniform) == 1 &&
-                  f.Backend->Log.FloatUniforms[specUniform].size() == CKFF_SPEC_UNIFORM_VEC4_COUNT * 4,
-              "PushConstants uploads the block through its uniform");
+    const CKDWORD dataUniform = f.Backend->GetBlockUniformForTests(27);
+    TestCheck(f.Backend->Log.FloatUniforms.count(dataUniform) == 1 &&
+                  f.Backend->Log.FloatUniforms[dataUniform].size() == 8,
+              "PushConstants carries bytes through the declared logical slot");
 
     // Pass 2 follows pass 1 (passes are sequential); the state stays sticky.
     pass.ClearFlags = 0;
@@ -276,17 +270,19 @@ void TestFrame()
     CKDWORD dst = 0;
     TestCheck(b->CreateTexture(&dstDesc, NULL, &dst) == CK_OK, "blit destination");
     TestCheck(b->Blit(dst, 0, 0, 0, 0, texture, 0, 0, NULL) == CK_OK, "Blit");
+    TestCheck(b->Blit(texture, 0, 0, 0, 0, dst, 0, 0, NULL) == CK_OK,
+              "ordinary textures accept copies without the internal BLIT_DST flag");
     TestCheck(b->Blit(dst, 0, 1, 0, 0, texture, 0, 0, NULL) == CKERR_INVALIDPARAMETER, "a 2D texture has one layer");
 
     // Present closes the frame and fills the stats.
     CKDWORD frame = 0;
-    TestCheck(b->Present(CKRST_BACKEND_PRESENT_IMMEDIATE, &frame) == CK_OK, "Present");
-    TestCheck(f.Backend->Frames.size() == 1 && f.Backend->Frames[0] == CKRST_BACKEND_PRESENT_IMMEDIATE, "Present(IMMEDIATE) recorded");
+    TestCheck(b->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_IMMEDIATE, TRUE), &frame) == CK_OK, "Present");
+    TestCheck(f.Backend->Frames.size() == 1 && f.Backend->Frames[0] == CKRST_BACKEND_SYNC_IMMEDIATE, "Present(IMMEDIATE) recorded");
     const CKBackendStats &stats = b->GetStats();
-    TestCheck(stats.Frames == 1 && stats.Passes == 2 && stats.Draws == 2 && stats.Blits == 1, "stats of the frame");
+    TestCheck(stats.Frames == 1 && stats.Passes == 2 && stats.Draws == 2 && stats.Blits == 2, "stats of the frame");
     TestCheck(b->IsIdle(), "idle after Present");
-    TestCheck(b->Present(CKRST_BACKEND_PRESENT_PRESERVE, &frame) == CK_OK && f.Backend->Frames.back() == CKRST_BACKEND_PRESENT_PRESERVE,
-              "Present(PRESERVE) recorded");
+    TestCheck(b->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_UNCHANGED, FALSE), &frame) == CK_OK && f.Backend->Frames.back() == CKRST_BACKEND_SYNC_UNCHANGED,
+              "resource submission retains the presentation sync mode");
     TestCheck(b->GetStats().Passes == 0 && b->GetStats().Draws == 0, "an empty frame has no passes");
 
     // Readback: the recording backend reports the layout of a zero-filled

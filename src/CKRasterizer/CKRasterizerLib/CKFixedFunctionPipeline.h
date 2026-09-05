@@ -51,7 +51,7 @@ public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 
-    bool Init(CKRasterizerBackend *backend);
+    bool Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders);
     CKERROR PrepareShutdown();
     CKERROR Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
@@ -198,9 +198,6 @@ private:
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
     uint64_t m_LastDrawApproximationMask;
     CKDWORD m_DrawApproximationCounts[CKRST_DIAG_COUNT];
-    CKDWORD m_BorderPaletteColors[16];
-    CKDWORD m_BorderPaletteCount;
-    CKDWORD m_BorderPaletteFrameSerial;
 
     // Internal methods
     void OnFixedFunctionStateChanged(CKDWORD changeMask);
@@ -221,7 +218,6 @@ private:
     void RecordDrawApproximation(CKRST_DIAGNOSTIC code);
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
     CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
-    CKDWORD NearestBorderPaletteSlot(CKDWORD argb) const;
     CKBOOL SubmitPrepared(const CKFFDrawSubmission &submission);
     void BindTextures(CKDWORD program, const CKFFTextureBindingSet *bindingSet);
     void LogAndResetFrameStats();

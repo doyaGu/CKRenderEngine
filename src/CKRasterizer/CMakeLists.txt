@@ -1,203 +1,30 @@
-# CKRasterizer - rasterizer core and bgfx implementation
+# Dependency direction: plugin composition -> FFP -> generic backend -> API.
+set(_ckre_rasterizer_ck2_dep CK2)
+if (CKRE_BUILD_STATIC AND TARGET CK2Static)
+    set(_ckre_rasterizer_ck2_dep CK2Static)
+endif ()
+set(_ckre_rasterizer_vxmath_dep VxMath)
+if (CKRE_BUILD_STATIC AND TARGET VxMathStatic)
+    set(_ckre_rasterizer_vxmath_dep VxMathStatic)
+endif ()
+
+add_subdirectory(CKRenderSupport)
+add_subdirectory(CKRasterizerBackend)
 add_subdirectory(CKRasterizerLib)
-set(CKBGFX_RASTERIZER_SOURCES
-        CKBgfxRasterizer/CKBgfxBackend.cpp
-        CKBgfxRasterizer/CKBgfxBackendDriver.cpp
-        CKBgfxRasterizer/CKBgfxCallback.cpp
-        CKBgfxRasterizer/CKBgfxConfig.cpp
-        CKBgfxRasterizer/CKBgfxDrawMapTrace.cpp
-        CKBgfxRasterizer/CKBgfxInternal.cpp
-        CKBgfxRasterizer/CKBgfxRasterizer.cpp
-)
-
-set(CKBGFX_RASTERIZER_HEADERS
-        CKBgfxRasterizer/CKBgfxBackend.h
-        CKBgfxRasterizer/CKBgfxResources.h
-        CKBgfxRasterizer/CKBgfxConfig.h
-        CKBgfxRasterizer/CKBgfxDrawMapTrace.h
-        CKBgfxRasterizer/CKBgfxInternal.h
-)
-
-set(CKBGFX_RASTERIZER_CONFIG
-        ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer/CKBgfxRasterizer.ini
-)
-
-function(ckre_apply_apple_gcc_bgfx_compiler TARGET_NAME)
-    if (NOT TARGET ${TARGET_NAME})
-        return()
-    endif ()
-
-    set_target_properties(${TARGET_NAME} PROPERTIES
-            CXX_COMPILER_LAUNCHER "/bin/sh;${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer/CKBgfxAppleClangLauncher.sh"
-    )
-    target_link_libraries(${TARGET_NAME} PUBLIC c++)
-endfunction()
-
-if (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    ckre_apply_apple_gcc_bgfx_compiler(bx)
-    ckre_apply_apple_gcc_bgfx_compiler(bimg)
-    ckre_apply_apple_gcc_bgfx_compiler(bgfx)
+if (CKRE_BUILD_BGFX_RASTERIZER)
+    add_subdirectory(CKBgfxRasterizer)
+endif ()
+if (CKRE_BUILD_SDL_GPU_RASTERIZER)
+    add_subdirectory(CKSdlGpuRasterizer)
 endif ()
 
-set(_ckre_bgfx_targets)
-
-function(ckre_configure_rasterizer_version_resource OUT_VAR TARGET_NAME FILE_DESCRIPTION ORIGINAL_FILENAME)
-    set(CKRE_RC_TARGET "${TARGET_NAME}")
-    set(CKRE_RC_DESCRIPTION "${FILE_DESCRIPTION}")
-    set(CKRE_RC_ORIGINAL_FILENAME "${ORIGINAL_FILENAME}")
-    set(_ckre_version_resource "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}Version.generated.rc")
-
-    configure_file(
-            "${PROJECT_SOURCE_DIR}/src/Version.rc.in"
-            "${_ckre_version_resource}"
-            @ONLY
-    )
-
-    set(${OUT_VAR} "${_ckre_version_resource}" PARENT_SCOPE)
-endfunction()
-
-if (CKRE_BUILD_SHARED)
-    set(_ckbgfx_version_resource)
-    if (WIN32)
-        ckre_configure_rasterizer_version_resource(_ckbgfx_version_resource CKBgfxRasterizer "bgfx Rasterizer" "CKBgfxRasterizer.dll")
-    endif ()
-
-    add_library(CKBgfxRasterizer SHARED ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG} ${_ckbgfx_version_resource})
-    list(APPEND _ckre_bgfx_targets CKBgfxRasterizer)
-
-    if (MSVC)
-        target_link_options(CKBgfxRasterizer PRIVATE /WHOLEARCHIVE:$<TARGET_FILE:bgfx>)
-    endif ()
-
-    set_target_properties(CKBgfxRasterizer PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            FOLDER "Rasterizer"
-    )
-
-    add_custom_command(TARGET CKBgfxRasterizer POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CKBGFX_RASTERIZER_CONFIG}"
-            "$<TARGET_FILE_DIR:CKBgfxRasterizer>/CKBgfxRasterizer.ini"
-            VERBATIM
-    )
-endif ()
-
-if (CKRE_BUILD_STATIC)
-    add_library(CKBgfxRasterizerStatic STATIC ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS} ${CKBGFX_RASTERIZER_CONFIG})
-    list(APPEND _ckre_bgfx_targets CKBgfxRasterizerStatic)
-    target_compile_definitions(CKBgfxRasterizerStatic PRIVATE CK_LIB=1)
-
-    set_target_properties(CKBgfxRasterizerStatic PROPERTIES
-            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-            FOLDER "Rasterizer"
-    )
-
-    if (NOT TARGET CKBgfxRasterizer)
-        add_library(CKBgfxRasterizer ALIAS CKBgfxRasterizerStatic)
-    endif ()
-endif ()
-
-foreach (_ckre_bgfx_target IN LISTS _ckre_bgfx_targets)
-    target_compile_features(${_ckre_bgfx_target} PRIVATE cxx_std_20)
-
-    target_include_directories(${_ckre_bgfx_target}
-            PUBLIC
-            $<BUILD_INTERFACE:${CKRE_INCLUDE_DIR}>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-            PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
-            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
-    )
-
-    target_link_libraries(${_ckre_bgfx_target}
-            PRIVATE
-            CKRasterizerLib
-            bgfx
-            bimg
-            bx
-    )
-    target_link_libraries(${_ckre_bgfx_target} PRIVATE SDL3::SDL3)
-    if (CMAKE_DL_LIBS)
-        target_link_libraries(${_ckre_bgfx_target} PRIVATE ${CMAKE_DL_LIBS})
-    endif ()
-endforeach ()
-
-# Tests
 if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_executable(test_null_rasterizer tests/test_null_rasterizer.cpp)
-    target_include_directories(test_null_rasterizer PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
-            ${CKRE_INCLUDE_DIR}
-    )
-    target_link_libraries(test_null_rasterizer PRIVATE
-            CKRasterizerLib
-    )
+    target_include_directories(test_null_rasterizer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib)
+    target_link_libraries(test_null_rasterizer PRIVATE CKRasterizerLib)
     set_target_properties(test_null_rasterizer PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-            FOLDER "Tests"
-    )
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
     ckre_copy_runtime_dependencies(test_null_rasterizer)
     add_test(NAME NullRasterizerTests COMMAND $<TARGET_FILE:test_null_rasterizer>)
     set_tests_properties(NullRasterizerTests PROPERTIES TIMEOUT 60)
-
-    add_executable(test_bgfx_rasterizer tests/test_bgfx_rasterizer.cpp)
-    target_include_directories(test_bgfx_rasterizer PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer
-            ${CMAKE_CURRENT_SOURCE_DIR}/CKRasterizerLib
-            ${CKRE_INCLUDE_DIR}
-    )
-    if (TARGET CKBgfxRasterizerStatic)
-        target_link_libraries(test_bgfx_rasterizer PRIVATE
-                CKBgfxRasterizerStatic
-                CKRasterizerLib
-                bgfx
-                bimg
-                bx
-        )
-    else ()
-        target_sources(test_bgfx_rasterizer PRIVATE ${CKBGFX_RASTERIZER_SOURCES} ${CKBGFX_RASTERIZER_HEADERS})
-        target_link_libraries(test_bgfx_rasterizer PRIVATE
-                CKRasterizerLib
-                CK2
-                VxMath
-                bgfx
-                bimg
-                bx
-        )
-    endif ()
-    set_target_properties(test_bgfx_rasterizer PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-            FOLDER "Tests"
-    )
-    ckre_copy_runtime_dependencies(test_bgfx_rasterizer)
-    add_test(NAME BgfxRasterizerTests COMMAND $<TARGET_FILE:test_bgfx_rasterizer>)
-    set_tests_properties(BgfxRasterizerTests PROPERTIES TIMEOUT 60)
-endif ()
-
-# Installation
-if (CKRE_INSTALL)
-    if (CKRE_BUILD_SHARED AND TARGET CKBgfxRasterizer)
-        install(TARGETS CKBgfxRasterizer
-                EXPORT CKRenderEngineTargets
-                RUNTIME DESTINATION RenderEngines COMPONENT Runtime
-                LIBRARY DESTINATION RenderEngines COMPONENT Runtime
-                ARCHIVE DESTINATION lib COMPONENT Development
-        )
-
-        install(FILES ${CKBGFX_RASTERIZER_CONFIG}
-                DESTINATION RenderEngines
-                COMPONENT Runtime
-        )
-    endif ()
-
-    if (TARGET CKBgfxRasterizerStatic)
-        install(TARGETS CKBgfxRasterizerStatic
-                ARCHIVE DESTINATION lib COMPONENT Development
-        )
-    endif ()
 endif ()

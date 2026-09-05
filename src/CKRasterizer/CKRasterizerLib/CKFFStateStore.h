@@ -3,6 +3,7 @@
 
 #include "VxMath.h"
 #include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
 

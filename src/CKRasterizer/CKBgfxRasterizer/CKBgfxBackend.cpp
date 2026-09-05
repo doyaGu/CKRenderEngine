@@ -3,13 +3,13 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "CKRasterizerValidation.h"
-#include "CKRasterizerCapsBaseline.h"
 #include "CKDrawAnnotation.h"
 
 #include <SDL3/SDL.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <string.h>
+#include <functional>
 
 static_assert(BGFX_API_VERSION == 153, "Review CKBgfxRasterizer mappings before updating bgfx");
 
@@ -168,7 +168,9 @@ static uint64_t CKBgfxTextureMSAAFlags(CKDWORD flags)
 
 static uint64_t CKBgfxTextureFlagsFromDescFlags(CKDWORD flags)
 {
-    uint64_t texFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE;
+    // All color textures may receive an ordered copy, including an upload
+    // occurring between draws. This flag does not change their logical usage.
+    uint64_t texFlags = BGFX_TEXTURE_BLIT_DST | BGFX_SAMPLER_NONE;
     if (flags & CKRST_TEXTURE_RENDERTARGET) {
         texFlags |= BGFX_TEXTURE_RT;
         const uint64_t msaa = CKBgfxTextureMSAAFlags(flags);
@@ -256,7 +258,7 @@ static bool CKBgfxEnsureSamplerBaseHandle(CKBgfxTextureRecord *rec)
 
     bgfx::TextureHandle handle = bgfx::createTexture2D(
         (uint16_t)rec->Width, (uint16_t)rec->Height, false, 1,
-        rec->Format, BGFX_TEXTURE_NONE, NULL);
+        rec->Format, BGFX_TEXTURE_BLIT_DST, NULL);
     if (!bgfx::isValid(handle))
         return false;
 
@@ -368,7 +370,8 @@ static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
 }
 
 static CKBOOL CKBgfxUpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
-                                           const VxImageDescEx *data)
+                                           const VxImageDescEx *data,
+    const std::function<CKERROR(CKDWORD, CKDWORD, CKDWORD, const bgfx::Memory *)> &upload)
 {
     if (!rec || rec->MipCount <= 1)
         return TRUE;
@@ -395,7 +398,10 @@ static CKBOOL CKBgfxUpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
             ? (CKDWORD)mipDesc.BytesPerLine
             : (CKDWORD)mipW * mipBpp / 8;
         const bgfx::Memory *mipMem = bgfx::copy(mipDesc.Image, mipRowBytes * mipH);
-        bgfx::updateTexture2D(rec->Handle, 0, (uint8_t)level, 0, 0, mipW, mipH, mipMem);
+        if (upload(level, mipW, mipH, mipMem) != CK_OK) {
+            complete = FALSE;
+            break;
+        }
         previous = mipDesc;
     }
     delete[] previousGenerated;
@@ -447,17 +453,16 @@ static bool CKBgfxFillSDLPlatformData(WIN_HANDLE Window, bgfx::PlatformData &pla
 #endif
 }
 
-static void CKBgfxResolveFullscreenWindowSize(WIN_HANDLE Window, CKBOOL Fullscreen,
-                                              int &width, int &height)
+static void CKBgfxResolveDrawableSize(WIN_HANDLE Window, int &width, int &height)
 {
-    if (!Fullscreen || !Window)
+    if (!Window)
         return;
 
     SDL_Window *window = static_cast<SDL_Window *>(Window);
     int windowW = 0;
     int windowH = 0;
-    SDL_GetWindowSize(window, &windowW, &windowH);
-    if (windowW > 0 && windowH > 0) {
+    SDL_GetWindowSizeInPixels(window, &windowW, &windowH);
+    if (windowW > 0 && windowH > 0 && windowW <= UINT16_MAX && windowH <= UINT16_MAX) {
         width = windowW;
         height = windowH;
     }
@@ -514,11 +519,11 @@ static CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
 // CKBgfxBackend
 // ===========================================================================
 
-CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
-    : m_Driver(driver), m_BgfxInitialized(FALSE), m_Created(FALSE), m_Window(NULL), m_PosX(0), m_PosY(0),
-      m_Width(0), m_Height(0), m_Fullscreen(FALSE), m_RendererName("Unknown"),
+CKBgfxBackend::CKBgfxBackend()
+    : m_BgfxInitialized(FALSE), m_Created(FALSE), m_Window(NULL), m_PosX(0), m_PosY(0),
+      m_Width(0), m_Height(0), m_DrawableWidth(0), m_DrawableHeight(0),
+      m_Fullscreen(FALSE), m_RendererName("Unknown"),
       m_RendererType(bgfx::RendererType::Count), m_NativeSupported(0),
-      m_DefaultWhiteTexture(BGFX_INVALID_HANDLE),
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE), m_ApiThreadId(0),
       m_ShuttingDown{FALSE}, m_FatalError{CK_OK},
       m_FrameInProgress(FALSE), m_PassOpen(FALSE), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0),
@@ -526,7 +531,7 @@ CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
       m_CachedDrawState(), m_CachedBgfxState(0), m_PointSize(0), m_CurrentLayout(0),
       m_DebugVertexBindingMask(0), m_DebugTextureBindingMask(0),
       m_DebugIndexBuffer(0), m_DebugIndexStart(0), m_DebugIndexCount(0), m_DebugIndexHandle(0),
-      m_DebugSpecializationHash(0), m_DebugSpecializationValid(FALSE), m_DrawErrorLogCount(0),
+      m_DrawErrorLogCount(0),
       m_DebugFrameId(0), m_DebugSubmitSerial{0}, m_DebugMissingAnnotationCount{0},
       m_DebugMarkerOverwriteCount{0}, m_DebugMarkerStaleCount{0},
       m_DebugInvalidSubmitCount{0}, m_DebugFatalCount{0},
@@ -544,10 +549,6 @@ CKBgfxBackend::CKBgfxBackend(CKBgfxBackendDriver *driver)
     memset(m_DebugVertexBindings, 0, sizeof(m_DebugVertexBindings));
     memset(m_DebugTextureBindings, 0, sizeof(m_DebugTextureBindings));
     m_LastMarker[0] = '\0';
-    for (int i = 0; i < CKRST_BLOCK_COUNT; ++i)
-        m_BlockUniforms[i] = BGFX_INVALID_HANDLE;
-    for (int i = 0; i < CKRST_BACKEND_SLOT_COUNT; ++i)
-        m_SamplerUniforms[i] = BGFX_INVALID_HANDLE;
     m_BgfxCallback.SetContext(this);
     for (int i = 0; i < CKRST_MAX_PASSES; ++i) {
         m_DebugViewSubmitSerial[i].store(0, std::memory_order_relaxed);
@@ -646,12 +647,31 @@ void CKBgfxBackend::RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw)
 // Device
 // ---------------------------------------------------------------------------
 
+static bool CKBgfxAllowsShaderTarget(const CKBackendInitDesc &Desc, CK_SHADER_PROFILE Profile)
+{
+    if (Profile == CKRST_SHADER_PROFILE_UNKNOWN)
+        return false;
+    if (Desc.ShaderTargets.empty())
+        return true;
+    for (const auto &target : Desc.ShaderTargets)
+        if (target.Format == CKRST_SHADER_FORMAT_BGFX && target.Profile == Profile)
+            return true;
+    return false;
+}
+
 CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
     if (m_BgfxInitialized || m_Created)
         return CKERR_INVALIDOPERATION;
+    bool targetAllowed = Desc->ShaderTargets.empty();
+    for (int renderer = 0; !targetAllowed && renderer < (int)bgfx::RendererType::Count; ++renderer)
+        targetAllowed = CKBgfxAllowsShaderTarget(*Desc, CKBgfxShaderProfile((bgfx::RendererType::Enum)renderer));
+    if (!targetAllowed) {
+        CKBgfxLogf("Init", "InitDesc.ShaderTargets contains no supported BGFX format/profile pair");
+        return CKERR_NOTIMPLEMENTED;
+    }
     m_FatalError.store(CK_OK, std::memory_order_release);
     m_ShuttingDown.store(FALSE, std::memory_order_release);
     if (!CKBgfxClaimActiveContext(this)) {
@@ -689,20 +709,23 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         return CKERR_INVALIDPARAMETER;
     }
 
-    CKBgfxResolveFullscreenWindowSize(Window, m_Fullscreen, Width, Height);
-
-    if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff) {
-        CKBgfxReleaseActiveContext(this);
-        return CKERR_INVALIDPARAMETER;
-    }
-
     m_Width = (CKDWORD)Width;
     m_Height = (CKDWORD)Height;
+    CKBgfxResolveDrawableSize(Window, Width, Height);
+    m_DrawableWidth = (CKDWORD)Width;
+    m_DrawableHeight = (CKDWORD)Height;
 
     bgfx::RendererType::Enum requestedRenderer = bgfx::RendererType::Count;
     if (!CKBgfxParseRequestedRenderer(requestedRenderer)) {
         CKBgfxReleaseActiveContext(this);
         return CKERR_INVALIDPARAMETER;
+    }
+    if (requestedRenderer != bgfx::RendererType::Count &&
+        !CKBgfxAllowsShaderTarget(*Desc, CKBgfxShaderProfile(requestedRenderer))) {
+        CKBgfxLogf("Init", "requested renderer %s has no matching target in InitDesc.ShaderTargets",
+                   CKBgfxRendererTypeName(requestedRenderer));
+        CKBgfxReleaseActiveContext(this);
+        return CKERR_NOTIMPLEMENTED;
     }
 
     bgfx::Init init;
@@ -745,19 +768,17 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     }
     m_RendererType = actualRenderer;
     m_RendererName = CKBgfxRendererTypeName(actualRenderer);
-    if (CKBgfxShaderProfile(actualRenderer) == CKRST_SHADER_PROFILE_UNKNOWN) {
-        CKBgfxLogf("Init", "renderer %s is unsupported: no shader profile is built",
-                   CKBgfxRendererTypeName(actualRenderer));
-        bgfx::shutdown();
-        m_BgfxInitialized = FALSE;
-        m_RendererType = bgfx::RendererType::Count;
-        CKBgfxReleaseActiveContext(this);
+    const CK_SHADER_PROFILE shaderProfile = CKBgfxShaderProfile(actualRenderer);
+    if (!CKBgfxAllowsShaderTarget(*Desc, shaderProfile)) {
+        CKBgfxLogf("Init", "renderer %s target BGFX/%s is unsupported or absent from InitDesc.ShaderTargets",
+                   CKBgfxRendererTypeName(actualRenderer), CKBgfxShaderProfileName(shaderProfile));
+        ReleaseBgfx();
         return CKERR_NOTIMPLEMENTED;
     }
     const bgfx::Caps *caps = bgfx::getCaps();
     m_Caps = CKBackendCaps();
     m_Caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
-    m_Caps.ShaderProfile = CKBgfxShaderProfile(actualRenderer);
+    m_Caps.ShaderProfile = shaderProfile;
     m_Caps.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
     m_Caps.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
     m_CapsDesc = CKBackendDeviceLimits();
@@ -781,8 +802,6 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         m_CapsDesc.MaxPrograms = limits.maxPrograms;
         m_CapsDesc.MaxShaders = limits.maxShaders;
         m_CapsDesc.MaxTextures = limits.maxTextures;
-        m_CapsDesc.MaxTextureStages = XMin((CKDWORD)limits.maxTextureSamplers,
-                                           (CKDWORD)CKRST_MAX_TEXTURE_STAGES);
         m_CapsDesc.MaxTextureBindings = limits.maxTextureSamplers;
         m_CapsDesc.MaxVertexLayouts = limits.maxVertexLayouts;
         m_CapsDesc.MaxVertexStreams = XMin((CKDWORD)limits.maxVertexStreams,
@@ -841,9 +860,6 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     m_Caps.MaxTextureBindings = m_CapsDesc.MaxTextureBindings;
     m_Caps.MaxPasses = m_CapsDesc.MaxRenderViews;
     m_Caps.MaxMSAASamples = 16;   // MSAA targets are created on demand (CKRST_TEXTURE_MSAA_Xn)
-    if (m_Driver) {
-        m_Driver->m_Desc.Format("bgfx %s Driver", m_RendererName);
-    }
 
     CKBgfxLogf("Init", "renderer requested=%s actual=%s",
                CKBgfxRendererTypeName(requestedRenderer), m_RendererName);
@@ -868,7 +884,6 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         names[sizeof(names) - 1] = '\0';
         CKBgfxLogf("Init", "supported renderers=%s", names);
     }
-    const CK_SHADER_PROFILE shaderProfile = m_Caps.ShaderProfile;
     if ((m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 || CKBgfxLogEnabled("Config", false)) {
         CKBgfxLogf("DrawMap",
                    "enabled=%u submits=%u resources=%u views=%u markers=%u frame=%u summary=%u renderer=%s profile=%s",
@@ -901,16 +916,6 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
                1u,
                CKBgfxIsOpenGLRenderer() ? 1u : 0u);
 
-    const uint32_t whitePixel = 0xffffffffu;
-    const bgfx::Memory *whiteMem = bgfx::copy(&whitePixel, sizeof(whitePixel));
-    m_DefaultWhiteTexture = bgfx::createTexture2D(
-        1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, whiteMem);
-    if (!bgfx::isValid(m_DefaultWhiteTexture) || !CreateUniforms()) {
-        CKBgfxLogf("Init", "failed to create the default texture or the constant block uniforms");
-        ReleaseBgfx();
-        return CKERR_OUTOFMEMORY;
-    }
-
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
     bgfx::setViewClear(0,
                         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH | BGFX_CLEAR_STENCIL,
@@ -921,82 +926,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
 
     m_Created = TRUE;
 
-    if (m_Driver) {
-        // Spec 4.9.2: the baseline bit fields stay as reported by the driver;
-        // only numeric limits may be lowered to the real backend limits.
-        Vx3DCapsDesc limits;
-        memset(&limits, 0, sizeof(limits));
-        limits.MaxTextureWidth = m_CapsDesc.MaxTextureSize;
-        limits.MaxTextureHeight = m_CapsDesc.MaxTextureSize;
-        limits.MaxTextureRatio = m_CapsDesc.MaxTextureSize;
-        limits.MaxNumberTextureStage = m_CapsDesc.MaxTextureStages;
-        limits.MaxNumberBlendStage = m_CapsDesc.MaxTextureStages;
-        CKRSTLowerCapsToLimits(&m_Driver->m_3DCaps, &limits);
-
-        m_Driver->m_TextureFormats.Clear();
-        for (int format = _32_ARGB8888; format <= _32_X8L8V8U8; ++format) {
-            CKTextureFormatCaps formatCaps;
-            if (GetTextureFormatCaps((VX_PIXELFORMAT)format, &formatCaps) != CK_OK ||
-                (formatCaps.Caps & CKRST_FORMAT_CAPS_TEXTURE_2D) == 0)
-                continue;
-            CKTextureDesc textureDesc;
-            textureDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
-            switch ((VX_PIXELFORMAT)format) {
-            case _32_ARGB8888:
-            case _16_ARGB1555:
-            case _16_ARGB4444:
-            case _32_ABGR8888:
-            case _32_RGBA8888:
-            case _32_BGRA8888:
-            case _16_ABGR1555:
-            case _16_ABGR4444:
-            case _DXT1:
-            case _DXT3:
-            case _DXT5:
-                textureDesc.Flags |= CKRST_TEXTURE_ALPHA;
-                break;
-            default:
-                break;
-            }
-            VxPixelFormat2ImageDesc((VX_PIXELFORMAT)format, textureDesc.Format);
-            m_Driver->m_TextureFormats.PushBack(textureDesc);
-        }
-        m_Driver->m_CapsUpToDate = TRUE;
-    }
-
     return CK_OK;
-}
-
-CKBOOL CKBgfxBackend::CreateUniforms()
-{
-    for (int block = 0; block < CKRST_BLOCK_COUNT; ++block) {
-        const CKBackendConstantBlockDesc &info = CKBackendConstantBlockInfo((CKBackendConstantBlock)block);
-        m_BlockUniforms[block] = bgfx::createUniform(
-            info.Name, info.Mat4 ? bgfx::UniformType::Mat4 : bgfx::UniformType::Vec4,
-            (uint16_t)(info.Count > 0 ? info.Count : 1));
-        if (!bgfx::isValid(m_BlockUniforms[block]))
-            return FALSE;
-    }
-    for (CKDWORD slot = 0; slot < CKRST_BACKEND_SLOT_COUNT; ++slot) {
-        m_SamplerUniforms[slot] = bgfx::createUniform(CKBackendSamplerSlotName(slot), bgfx::UniformType::Sampler, 1);
-        if (!bgfx::isValid(m_SamplerUniforms[slot]))
-            return FALSE;
-    }
-    return TRUE;
-}
-
-void CKBgfxBackend::DestroyUniforms()
-{
-    for (int block = 0; block < CKRST_BLOCK_COUNT; ++block) {
-        if (bgfx::isValid(m_BlockUniforms[block]))
-            bgfx::destroy(m_BlockUniforms[block]);
-        m_BlockUniforms[block] = BGFX_INVALID_HANDLE;
-    }
-    for (CKDWORD slot = 0; slot < CKRST_BACKEND_SLOT_COUNT; ++slot) {
-        if (bgfx::isValid(m_SamplerUniforms[slot]))
-            bgfx::destroy(m_SamplerUniforms[slot]);
-        m_SamplerUniforms[slot] = BGFX_INVALID_HANDLE;
-    }
 }
 
 // Releases every bgfx object and shuts bgfx down.
@@ -1004,13 +934,17 @@ void CKBgfxBackend::ReleaseBgfx()
 {
     if (!m_BgfxInitialized)
         return;
-    if (bgfx::isValid(m_DefaultWhiteTexture)) {
-        bgfx::destroy(m_DefaultWhiteTexture);
-        m_DefaultWhiteTexture = BGFX_INVALID_HANDLE;
-    }
-    DestroyUniforms();
+    for (auto &constants : m_ConstantData) constants.clear();
+    memset(m_Slots, 0, sizeof(m_Slots));
     m_Resources->DestroyAll();
+    m_DefaultTextures.clear();
+    for (auto &ticket : m_Readbacks) {
+        if (bgfx::isValid(ticket->Snapshot)) bgfx::destroy(ticket->Snapshot);
+        ticket->Snapshot = BGFX_INVALID_HANDLE;
+    }
     bgfx::shutdown();
+    for (auto &ticket : m_Readbacks) ticket->Error = CKERR_INVALIDOPERATION;
+    m_Readbacks.clear();
     m_BgfxInitialized = FALSE;
     m_Created = FALSE;
     m_RendererType = bgfx::RendererType::Count;
@@ -1040,14 +974,13 @@ CKERROR CKBgfxBackend::Resize(int PosX, int PosY, int Width, int Height)
         return CKERR_INVALIDPARAMETER;
     if (m_FrameInProgress)
         return CKERR_INVALIDOPERATION;
-    CKBgfxResolveFullscreenWindowSize(m_Window, m_Fullscreen, Width, Height);
-    if (Width <= 0 || Height <= 0 || Width > 0xffff || Height > 0xffff)
-        return CKERR_INVALIDPARAMETER;
-
     m_PosX = PosX;
     m_PosY = PosY;
     m_Width = (CKDWORD)Width;
     m_Height = (CKDWORD)Height;
+    CKBgfxResolveDrawableSize(m_Window, Width, Height);
+    m_DrawableWidth = (CKDWORD)Width;
+    m_DrawableHeight = (CKDWORD)Height;
 
     bgfx::reset((uint32_t)Width, (uint32_t)Height, m_ResetFlags);
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
@@ -1058,6 +991,22 @@ CKERROR CKBgfxBackend::Resize(int PosX, int PosY, int Width, int Height)
 CKBOOL CKBgfxBackend::IsIdle() const
 {
     return !m_FrameInProgress ? TRUE : FALSE;
+}
+
+CKRECT CKBgfxBackend::WindowPixelRect(const CKRECT &rect) const
+{
+    // FFP and readbacks stay in logical pixels. Only window attachments use
+    // drawable pixels, including high-DPI windows and scaled client targets.
+    const auto scale = [](int value, CKDWORD drawable, CKDWORD logical, bool upper) {
+        const int64_t pixels = ((int64_t)value * drawable + (upper ? logical - 1 : 0)) / logical;
+        return (int)XMin(pixels, (int64_t)UINT16_MAX + 1);
+    };
+    CKRECT pixels;
+    pixels.left = scale(rect.left, m_DrawableWidth, m_Width, false);
+    pixels.top = scale(rect.top, m_DrawableHeight, m_Height, false);
+    pixels.right = scale(rect.right, m_DrawableWidth, m_Width, true);
+    pixels.bottom = scale(rect.bottom, m_DrawableHeight, m_Height, true);
+    return pixels;
 }
 
 CKERROR CKBgfxBackend::GetDeviceStatus() const
@@ -1617,6 +1566,7 @@ CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
     auto *rec = new CKBgfxShaderRecord();
     rec->Handle = handle;
     rec->Stage = Desc->Stage;
+    rec->Desc = *Desc;
 
     const CKDWORD shader = m_Resources->Shaders.Insert(
         rec, m_CapsDesc.MaxShaders);
@@ -1745,20 +1695,52 @@ CKERROR CKBgfxBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, CKDWORD *Out)
+CKERROR CKBgfxBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
     *Out = 0;
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
+    if (!Desc)
+        return CKERR_INVALIDPARAMETER;
 
+    const CKDWORD VertexShader = Desc->VertexShader;
+    const CKDWORD PixelShader = Desc->PixelShader;
     CKBgfxShaderRecord *vs = GetShader(VertexShader);
     CKBgfxShaderRecord *ps = GetShader(PixelShader);
     if (!vs || !ps || vs->Stage != CKRST_SHADER_VERTEX || ps->Stage != CKRST_SHADER_PIXEL) {
         CKBgfxLogf("CreateProgram", "missing shaders vs=%p(h=%u) ps=%p(h=%u) shadersSize=%d",
                    vs, VertexShader, ps, PixelShader, m_Resources->Shaders.SlotCount());
         return CKERR_INVALIDPARAMETER;
+    }
+
+    const CKERROR validation = CKValidateBackendProgram(*Desc, vs->Desc, ps->Desc);
+    if (validation != CK_OK) return validation;
+    // bgfx names and texture units are shared between stages. Compile their
+    // declarations once; a draw never reflects or searches resource names.
+    std::map<std::string, const CKBackendUniformBinding *> uniforms;
+    std::map<std::string, const CKBackendSamplerBinding *> samplers;
+    std::map<CKDWORD, const CKBackendSamplerBinding *> textureUnits;
+    for (const auto &binding : Desc->Uniforms) {
+        if (binding.Name.empty()) return CKERR_INVALIDPARAMETER;
+        const auto entry = uniforms.emplace(binding.Name, &binding);
+        if (!entry.second && (entry.first->second->Slot != binding.Slot ||
+            entry.first->second->Type != binding.Type || entry.first->second->Count != binding.Count))
+            return CKERR_INVALIDPARAMETER;
+    }
+    for (const auto &binding : Desc->Samplers) {
+        if (binding.Name.empty() || uniforms.count(binding.Name) ||
+            binding.NativeSlot >= m_CapsDesc.MaxTextureBindings) return CKERR_INVALIDPARAMETER;
+        const auto named = samplers.emplace(binding.Name, &binding);
+        const auto unit = textureUnits.emplace(binding.NativeSlot, &binding);
+        auto sameBinding = [&](const CKBackendSamplerBinding &previous) {
+            return previous.Name == binding.Name && previous.NativeSlot == binding.NativeSlot &&
+                previous.Slot == binding.Slot && previous.Dimension == binding.Dimension &&
+                previous.DefaultColor == binding.DefaultColor;
+        };
+        if ((!named.second && !sameBinding(*named.first->second)) ||
+            (!unit.second && !sameBinding(*unit.first->second))) return CKERR_INVALIDPARAMETER;
     }
 
     bgfx::ProgramHandle handle = bgfx::createProgram(vs->Handle, ps->Handle, false);
@@ -1772,6 +1754,27 @@ CKERROR CKBgfxBackend::CreateProgram(CKDWORD VertexShader, CKDWORD PixelShader, 
     rec->Handle = handle;
     rec->VertexShader = VertexShader;
     rec->PixelShader = PixelShader;
+    rec->Interface = *Desc;
+    rec->Uniforms.reserve(uniforms.size());
+    rec->Samplers.reserve(samplers.size());
+    for (const auto &entry : uniforms) {
+        const auto &binding = *entry.second;
+        auto uniform = bgfx::createUniform(binding.Name.c_str(),
+            binding.Type == CKBACKEND_UNIFORM_MAT4 ? bgfx::UniformType::Mat4 : bgfx::UniformType::Vec4,
+            (uint16_t)binding.Count);
+        if (!bgfx::isValid(uniform)) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
+        rec->Uniforms.push_back({binding.Slot, binding.Count, uniform});
+        auto &constants = m_ConstantData[binding.Slot];
+        if (constants.size() < binding.Size()) constants.resize(binding.Size());
+    }
+    for (const auto &entry : samplers) {
+        const auto &binding = *entry.second;
+        const auto texture = GetDefaultTexture(binding);
+        if (!texture) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
+        const auto uniform = bgfx::createUniform(binding.Name.c_str(), bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(uniform)) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
+        rec->Samplers.push_back({binding, uniform, texture});
+    }
 
     const CKDWORD program = m_Resources->Programs.Insert(
         rec, m_CapsDesc.MaxPrograms);
@@ -2078,6 +2081,9 @@ CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD Vert
     auto *rec = new CKBgfxVertexBufferRecord();
     rec->Handle = handle;
     rec->Layout = Layout;
+    rec->NativeLayout = layout;
+    rec->Shadow.resize(totalSize);
+    if (Data) memcpy(rec->Shadow.data(), Data, totalSize);
     rec->VertexSize = VertexSize;
     rec->VertexCount = VertexCount;
     rec->Size = totalSize;
@@ -2128,6 +2134,8 @@ CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index3
     auto *rec = new CKBgfxIndexBufferRecord();
     rec->Handle = handle;
     rec->Index32 = Index32;
+    rec->Shadow.resize(totalSize);
+    if (Data) memcpy(rec->Shadow.data(), Data, totalSize);
     rec->IndexCount = IndexCount;
     rec->Size = totalSize;
 
@@ -2203,9 +2211,17 @@ CKERROR CKBgfxBackend::UpdateVertexBufferRecord(CKDWORD Buffer, CKDWORD Offset, 
     if (Offset % rec->VertexSize != 0 || Size % rec->VertexSize != 0 ||
         Offset > rec->Size || Size > rec->Size - Offset)
         return CKERR_INVALIDPARAMETER;
-    CKDWORD startVertex = Offset / rec->VertexSize;
-    const bgfx::Memory *mem = bgfx::copy(Data, Size);
-    bgfx::update(rec->Handle, startVertex, mem);
+    memcpy(rec->Shadow.data() + Offset, Data, Size);
+    if (m_FrameInProgress) {
+        const auto replacement = bgfx::createDynamicVertexBuffer(
+            bgfx::copy(rec->Shadow.data(), rec->Size), rec->NativeLayout, BGFX_BUFFER_ALLOW_RESIZE);
+        if (!bgfx::isValid(replacement)) return CKERR_OUTOFMEMORY;
+        // bgfx retains the old native resource until encoded draws have finished.
+        bgfx::destroy(rec->Handle);
+        rec->Handle = replacement;
+    } else {
+        bgfx::update(rec->Handle, Offset / rec->VertexSize, bgfx::copy(Data, Size));
+    }
 
     return CK_OK;
 }
@@ -2224,12 +2240,66 @@ CKERROR CKBgfxBackend::UpdateIndexBufferRecord(CKDWORD Buffer, CKDWORD Offset, C
     if (Offset % indexSize != 0 || Size % indexSize != 0 ||
         Offset > rec->Size || Size > rec->Size - Offset)
         return CKERR_INVALIDPARAMETER;
-    CKDWORD startIndex = (indexSize > 0) ? Offset / indexSize : 0;
-    const bgfx::Memory *mem = bgfx::copy(Data, Size);
-    bgfx::update(rec->Handle, startIndex, mem);
+    memcpy(rec->Shadow.data() + Offset, Data, Size);
+    if (m_FrameInProgress) {
+        const auto replacement = bgfx::createDynamicIndexBuffer(bgfx::copy(rec->Shadow.data(), rec->Size),
+            BGFX_BUFFER_ALLOW_RESIZE | (rec->Index32 ? BGFX_BUFFER_INDEX32 : 0));
+        if (!bgfx::isValid(replacement)) return CKERR_OUTOFMEMORY;
+        bgfx::destroy(rec->Handle);
+        rec->Handle = replacement;
+    } else {
+        bgfx::update(rec->Handle, Offset / indexSize, bgfx::copy(Data, Size));
+    }
 
     return CK_OK;
 }
+CKERROR CKBgfxBackend::UploadTextureOrdered(bgfx::TextureHandle texture, bgfx::TextureFormat::Enum format,
+    CKDWORD mip, CKDWORD x, CKDWORD y, CKDWORD layer, CKDWORD width, CKDWORD height,
+    const bgfx::Memory *data, CKBOOL cube, CKBOOL volume)
+{
+    if (!m_FrameInProgress) {
+        if (cube) bgfx::updateTextureCube(texture, 0, (uint8_t)layer, (uint8_t)mip,
+                                         (uint16_t)x, (uint16_t)y, (uint16_t)width, (uint16_t)height, data);
+        else if (volume) bgfx::updateTexture3D(texture, (uint8_t)mip, (uint16_t)x, (uint16_t)y,
+                                              (uint16_t)layer, (uint16_t)width, (uint16_t)height, 1, data);
+        else bgfx::updateTexture2D(texture, 0, (uint8_t)mip, (uint16_t)x, (uint16_t)y,
+                                   (uint16_t)width, (uint16_t)height, data);
+        return CK_OK;
+    }
+    // bgfx uploads run before all views. Upload into a unique staging texture,
+    // then copy in its own sequential view at this call's position.
+    bgfx::TextureHandle staging;
+    if (cube) {
+        staging = bgfx::createTextureCube((uint16_t)XMax(width, height), false, 1, format);
+        if (!bgfx::isValid(staging)) {
+            // bgfx owns upload memory after an update call, including a
+            // zero-sized update, which consumes it without touching a handle.
+            bgfx::updateTextureCube(texture, 0, 0, 0, 0, 0, 0, 0, data);
+            return CKERR_OUTOFMEMORY;
+        }
+        bgfx::updateTextureCube(staging, 0, 0, 0, 0, 0, (uint16_t)width, (uint16_t)height, data);
+    } else if (volume) {
+        staging = bgfx::createTexture3D((uint16_t)width, (uint16_t)height, 1, false, format, 0, data);
+    } else {
+        staging = bgfx::createTexture2D((uint16_t)width, (uint16_t)height, false, 1, format, 0, data);
+    }
+    if (!bgfx::isValid(staging)) return CKERR_OUTOFMEMORY;
+    if (m_NextView >= m_CapsDesc.MaxRenderViews || !(m_Caps.Features & CKRST_DEVCAPS_BLIT)) {
+        bgfx::destroy(staging);
+        return CKERR_OUTOFMEMORY;
+    }
+    const bgfx::ViewId view = (bgfx::ViewId)m_NextView++;
+    bgfx::resetView(view);
+    bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+    bgfx::setViewName(view, "ordered-upload");
+    bgfx::blit(view, texture, (uint8_t)mip, (uint16_t)x, (uint16_t)y, (uint16_t)layer,
+               staging, 0, 0, 0, 0, (uint16_t)width, (uint16_t)height, 1);
+    bgfx::destroy(staging);
+    m_DrawPassNeedsResume = m_PassOpen != FALSE;
+    ++m_FrameBlits;
+    return CK_OK;
+}
+
 CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                                 CKDWORD Face, const CKRECT *Region,
                                                 const VxImageDescEx *Data)
@@ -2413,22 +2483,20 @@ CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     }
 
     ++m_FrameTextureUploads;
-    if (isCube)
-        bgfx::updateTextureCube(rec->Handle, 0, (uint8_t)Face, (uint8_t)Mip, x, y, w, h, mem);
-    else if (isVolume)
-        bgfx::updateTexture3D(rec->Handle, (uint8_t)Mip, x, y, (uint16_t)Face, w, h, 1, mem);
-    else
-        bgfx::updateTexture2D(rec->Handle, (uint16_t)Face, (uint8_t)Mip, x, y, w, h, mem);
+    const CKERROR upload = UploadTextureOrdered(rec->Handle, rec->Format, Mip, x, y, Face, w, h, mem, isCube, isVolume);
 
     if (Face == 0 && !isCube && !isVolume)
         RecordTextureWrite(rec, Mip, CKBGFX_ORIENTATION_TOP_LEFT,
                            fullMipUpdate ? TRUE : FALSE);
 
     if (samplerBaseMem) {
-        bgfx::updateTexture2D(rec->SamplerBaseHandle, 0, 0, x, y, w, h, samplerBaseMem);
+        const CKERROR baseUpload = UploadTextureOrdered(rec->SamplerBaseHandle, rec->Format, 0, x, y, 0, w, h, samplerBaseMem);
+        if (baseUpload != CK_OK) return baseUpload;
         if (fullMipUpdate)
             rec->SamplerBaseValid = TRUE;
     }
+
+    if (upload != CK_OK) return upload;
 
     if (rec->RequestedAutoMips &&
         Mip == 0 &&
@@ -2441,7 +2509,10 @@ CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         if (fullBase2DUpdate && !cacheValid)
             return CKERR_OUTOFMEMORY;
         if (cacheValid) {
-            if (!CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc)) {
+            if (!CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc,
+                [&](CKDWORD level, CKDWORD mw, CKDWORD mh, const bgfx::Memory *bytes) {
+                    return UploadTextureOrdered(rec->Handle, rec->Format, level, 0, 0, 0, mw, mh, bytes);
+                })) {
                 if (m_DebugLogTextures)
                     CKBgfxLogf("UpdateTexture",
                                "id=%u failed to generate complete auto-mip chain",
@@ -2489,14 +2560,12 @@ static bool CKBgfxGetReadbackLayout(const CKBgfxTextureRecord *Record,
 }
 CKERROR CKBgfxBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip,
                                               CKReadbackDesc *Readback,
-                                              CKDWORD *AvailableFrame)
+                                              CKBackendReadbackTicket *Ticket)
 {
     if (!m_BgfxInitialized || !m_Created ||
         VxThread::GetCurrentVxThreadId() != m_ApiThreadId)
         return CKERR_INVALIDOPERATION;
     if (!Readback || Readback->Size < sizeof(CKReadbackDesc))
-        return CKERR_INVALIDPARAMETER;
-    if (Readback->Data && !AvailableFrame)
         return CKERR_INVALIDPARAMETER;
     CKBgfxTextureRecord *rec = GetTexture(Texture);
     if (!rec)
@@ -2540,21 +2609,29 @@ CKERROR CKBgfxBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip,
     Readback->Height = height;
     Readback->Format = rec->PixelFormat;
     Readback->YFlip = flipRows;
-    if (!data)
+    if (!Ticket)
         return CK_OK;
-    if (capacity < requiredSize)
-        return CKERR_INVALIDPARAMETER;
-
-    *AvailableFrame = bgfx::readTexture(rec->Handle, data, 0, (uint8_t)Mip);
-    return CK_OK;
-}
-CKERROR CKBgfxBackend::SetPaletteColor(CKDWORD Index, CKDWORD RGBA)
-{
-    if (!m_BgfxInitialized || !IsApiThread())
-        return CKERR_INVALIDOPERATION;
-    if (Index >= 16)
-        return CKERR_INVALIDPARAMETER;
-    bgfx::setPaletteColor((uint8_t)Index, RGBA);
+    if (!(m_Caps.Features & CKRST_DEVCAPS_BLIT)) return CKERR_NOTIMPLEMENTED;
+    if (m_NextView >= m_CapsDesc.MaxRenderViews) return CKERR_OUTOFMEMORY;
+    auto pending = std::make_shared<CKBgfxBackend::Readback>();
+    pending->Data.resize(requiredSize);
+    // bgfx reads textures at the end of a submission. Preserve this call's
+    // contents in a unique texture so later blits cannot change the snapshot.
+    pending->Snapshot = bgfx::createTexture2D((uint16_t)width, (uint16_t)height, false, 1,
+        rec->Format, BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
+    if (!bgfx::isValid(pending->Snapshot)) return CKERR_OUTOFMEMORY;
+    const bgfx::ViewId view = (bgfx::ViewId)m_NextView++;
+    bgfx::resetView(view);
+    bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
+    bgfx::setViewName(view, "readback-snapshot");
+    bgfx::blit(view, pending->Snapshot, 0, 0, 0, 0, rec->Handle, (uint8_t)Mip, 0, 0, 0,
+               (uint16_t)width, (uint16_t)height, 1);
+    m_DrawPassNeedsResume = m_PassOpen != FALSE;
+    m_FrameInProgress = TRUE;
+    ++m_FrameBlits;
+    pending->AvailableFrame = bgfx::readTexture(pending->Snapshot, pending->Data.data());
+    m_Readbacks.push_back(pending);
+    *Ticket = pending;
     return CK_OK;
 }
 void CKBgfxBackend::SetDebugFlags(CKDWORD Flags)
@@ -2595,9 +2672,12 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
     const CKERROR status = GetDeviceStatus();
     if (status != CK_OK)
         return status;
-    const CKRECT &rect = Desc->Rect;
+    CKRECT rect = Desc->Rect;
     if (rect.left < 0 || rect.top < 0 || rect.right <= rect.left || rect.bottom <= rect.top ||
         rect.right > UINT16_MAX || rect.bottom > UINT16_MAX)
+        return CKERR_INVALIDPARAMETER;
+    if (!Desc->RenderTarget) rect = WindowPixelRect(rect);
+    if (rect.right > UINT16_MAX || rect.bottom > UINT16_MAX)
         return CKERR_INVALIDPARAMETER;
     if ((Desc->ClearFlags & ~(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL)) != 0 ||
         Desc->ClearStencil > 0xff || !(Desc->ClearZ >= 0.0f && Desc->ClearZ <= 1.0f))
@@ -2648,6 +2728,9 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
         m_ViewClearRecorded[view] = FALSE;
     }
     RecordViewColorWrite(view, FALSE);
+    m_LogicalPass = *Desc;
+    m_LogicalPass.Name = nullptr;
+    m_DrawPassNeedsResume = false;
     bgfx::touch((bgfx::ViewId)view);
 
     m_CurrentView = view;
@@ -2664,48 +2747,30 @@ void CKBgfxBackend::SetPipelineState(const CKBackendPipelineState *State)
 
 void CKBgfxBackend::BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler)
 {
-    if (Slot >= CKRST_BACKEND_SLOT_COUNT)
+    if (Slot >= CKBACKEND_MAX_TEXTURE_SLOTS)
         return;
     SlotBinding &slot = m_Slots[Slot];
-    if (Texture == 0) {
-        // bgfx forgets its bindings after every submit, so clearing a bound
-        // slot costs nothing; an explicit zero binding on an empty slot is the
-        // sampler-unit assignment GLSL programs need.
-        slot.PendingZero = slot.Texture == 0 ? TRUE : FALSE;
-        slot.Texture = 0;
-        slot.HasSampler = FALSE;
-        return;
-    }
     slot.Texture = Texture;
-    slot.PendingZero = FALSE;
     slot.HasSampler = Sampler != NULL;
     if (Sampler)
         slot.Sampler = *Sampler;
 }
 
-CKERROR CKBgfxBackend::PushConstants(CKBackendConstantBlock Block, const void *Data, CKDWORD Vec4Count)
+CKERROR CKBgfxBackend::PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize)
 {
-    if ((int)Block < 0 || (int)Block >= CKRST_BLOCK_COUNT || !Data || Vec4Count == 0)
+    if (Slot >= CKBACKEND_MAX_CONSTANT_SLOTS || !Data || ByteSize == 0 ||
+        ByteSize > CKBACKEND_MAX_UNIFORM_BYTES)
         return CKERR_INVALIDPARAMETER;
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
-    const CKBackendConstantBlockDesc &info = CKBackendConstantBlockInfo(Block);
-    const CKDWORD count = info.Mat4 ? Vec4Count / 4 : Vec4Count;
-    if (count == 0 || count > info.Count || !bgfx::isValid(m_BlockUniforms[Block]))
-        return DrawFailed(CKERR_INVALIDPARAMETER, "PushConstants");
     static int s_uniformLogCount = 0;
     if (m_DebugLogUniforms && s_uniformLogCount < 256) {
-        const float *f = static_cast<const float *>(Data);
-        CKBgfxLogf("PushConstants",
-                   "block=%s handle=%u count=%u first=(%.3f %.3f %.3f %.3f)",
-                   info.Name, m_BlockUniforms[Block].idx, count, f[0], f[1], f[2], f[3]);
+        CKBgfxLogf("PushConstants", "slot=%u bytes=%u", Slot, ByteSize);
         ++s_uniformLogCount;
     }
-    bgfx::setUniform(m_BlockUniforms[Block], Data, (uint16_t)count);
-    if (m_DrawMapSubmitActive && Block == CKRST_BLOCK_SPEC) {
-        m_DebugSpecializationHash = SampleBytesChecksum(Data, Vec4Count * 4u * (CKDWORD)sizeof(float));
-        m_DebugSpecializationValid = TRUE;
-    }
+    auto &constants = m_ConstantData[Slot];
+    if (constants.size() < ByteSize) constants.resize(ByteSize);
+    memcpy(constants.data(), Data, ByteSize);
     return CK_OK;
 }
 
@@ -2844,7 +2909,10 @@ CKERROR CKBgfxBackend::ApplyPipelineState()
     ApplyStencil(m_State.State, stencilRef, stencilReadMask, stencilWriteMask);
 
     if (m_State.ScissorEnabled) {
-        const CKRECT &rect = m_State.Scissor;
+        if (m_State.Scissor.left < 0 || m_State.Scissor.top < 0 ||
+            m_State.Scissor.right < m_State.Scissor.left || m_State.Scissor.bottom < m_State.Scissor.top)
+            return CKERR_INVALIDPARAMETER;
+        const CKRECT rect = m_LogicalPass.RenderTarget ? m_State.Scissor : WindowPixelRect(m_State.Scissor);
         if (rect.left < 0 || rect.top < 0 ||
             rect.right < rect.left || rect.bottom < rect.top ||
             rect.left > 0xffff || rect.top > 0xffff ||
@@ -2950,9 +3018,49 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::BindTextureSlot(CKDWORD Stage, CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler)
+std::shared_ptr<bgfx::TextureHandle> CKBgfxBackend::GetDefaultTexture(const CKBackendSamplerBinding &Binding)
+{
+    const uint64_t key = (uint64_t(Binding.Dimension) << 32) | Binding.DefaultColor;
+    const auto found = m_DefaultTextures.find(key);
+    if (found != m_DefaultTextures.end()) {
+        const auto texture = found->second.lock();
+        if (texture) return texture;
+    }
+    // Programs own these leases. Reap expired keys only on a creation miss,
+    // keeping arbitrary historical default colors out of the device cache.
+    for (auto it = m_DefaultTextures.begin(); it != m_DefaultTextures.end();) {
+        if (it->second.expired()) it = m_DefaultTextures.erase(it);
+        else ++it;
+    }
+    auto texture = std::shared_ptr<bgfx::TextureHandle>(
+        new bgfx::TextureHandle{bgfx::kInvalidHandle}, [](bgfx::TextureHandle *handle) {
+            if (bgfx::isValid(*handle)) bgfx::destroy(*handle);
+            delete handle;
+        });
+    const uint32_t pixels[6] = {Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor,
+                               Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor};
+    const auto *data = bgfx::copy(pixels, Binding.Dimension == CKBACKEND_TEXTURE_CUBE ? sizeof(pixels) : sizeof(pixels[0]));
+    switch (Binding.Dimension) {
+    case CKBACKEND_TEXTURE_2D:
+        *texture = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, data);
+        break;
+    case CKBACKEND_TEXTURE_CUBE:
+        *texture = bgfx::createTextureCube(1, false, 1, bgfx::TextureFormat::BGRA8, 0, data);
+        break;
+    case CKBACKEND_TEXTURE_3D:
+        *texture = bgfx::createTexture3D(1, 1, 1, false, bgfx::TextureFormat::BGRA8, 0, data);
+        break;
+    }
+    if (!bgfx::isValid(*texture)) return {};
+    m_DefaultTextures.emplace(key, texture);
+    return texture;
+}
+
+CKERROR CKBgfxBackend::BindTextureSlot(const CKBackendSamplerBinding &Binding, bgfx::UniformHandle Uniform,
+                                      bgfx::TextureHandle DefaultTexture, CKDWORD Texture, const CKSamplerDesc *Sampler)
 {
     static int s_SetTextureLogCount = 0;
+    const CKDWORD Stage = Binding.NativeSlot, Slot = Binding.Slot;
     if (Stage >= m_CapsDesc.MaxTextureBindings)
         return CKERR_INVALIDPARAMETER;
     CKBgfxTextureRecord *texRec = GetTexture(Texture);
@@ -2960,8 +3068,28 @@ CKERROR CKBgfxBackend::BindTextureSlot(CKDWORD Stage, CKDWORD Slot, CKDWORD Text
         return CKERR_INVALIDPARAMETER;
     if (texRec && (texRec->Flags & CKRST_TEXTURE_READBACK) != 0)
         return CKERR_NOTIMPLEMENTED;
+    if (texRec) {
+        const auto dimension = (texRec->Flags & CKRST_TEXTURE_CUBEMAP) ? CKBACKEND_TEXTURE_CUBE :
+            ((texRec->Flags & CKRST_TEXTURE_VOLUMEMAP) && texRec->Depth > 1 ? CKBACKEND_TEXTURE_3D : CKBACKEND_TEXTURE_2D);
+        if (dimension != Binding.Dimension) return CKERR_INVALIDPARAMETER;
+    }
+    CKSamplerDesc nativeSampler;
+    if (Sampler) {
+        nativeSampler = *Sampler;
+        nativeSampler.BorderColor = 0;
+        if (Sampler->AddressU == CKRST_ADDRESS_BORDER || Sampler->AddressV == CKRST_ADDRESS_BORDER ||
+            Sampler->AddressW == CKRST_ADDRESS_BORDER) {
+            const auto entry = m_BorderPalette.Resolve(Sampler->BorderColor);
+            nativeSampler.BorderColor = entry.Index;
+            if (entry.Added) {
+                const CKDWORD argb = Sampler->BorderColor;
+                bgfx::setPaletteColor((uint8_t)entry.Index, (argb << 8) | (argb >> 24));
+            }
+            if (entry.Approximated) m_DrawApproximations |= 1ull << CKRST_DIAG_APPROX_BORDER_COLOR;
+        }
+    }
     uint32_t flags = BGFX_SAMPLER_NONE;
-    if (!CKBgfxTrySamplerFlags(Sampler, flags))
+    if (!CKBgfxTrySamplerFlags(Sampler ? &nativeSampler : nullptr, flags))
         return CKERR_INVALIDPARAMETER;
     if (Sampler && Sampler->CompareFunc != CKRST_COMPARE_NONE) {
         if (!texRec ||
@@ -2970,7 +3098,7 @@ CKERROR CKBgfxBackend::BindTextureSlot(CKDWORD Stage, CKDWORD Slot, CKDWORD Text
              CKRST_FORMAT_CAPS_TEXTURE_COMPARE) == 0)
             return CKERR_NOTIMPLEMENTED;
     }
-    bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : m_DefaultWhiteTexture;
+    bgfx::TextureHandle textureHandle = texRec ? texRec->Handle : DefaultTexture;
     bool usingSamplerBase = false;
     if (texRec && !CKBgfxSamplerWantsMipMaps(Sampler) && texRec->MipCount > 1) {
         if (!texRec->SamplerBaseValid || !bgfx::isValid(texRec->SamplerBaseHandle))
@@ -2992,20 +3120,22 @@ CKERROR CKBgfxBackend::BindTextureSlot(CKDWORD Stage, CKDWORD Slot, CKDWORD Text
     }
     if (!bgfx::isValid(textureHandle))
         return CKERR_INVALIDPARAMETER;
-    bgfx::setTexture((uint8_t)Stage, m_SamplerUniforms[Slot], textureHandle, flags);
+    bgfx::setTexture((uint8_t)Stage, Uniform, textureHandle, flags);
 
-    if (m_DrawMapSubmitActive && Stage < CKRST_MAX_TEXTURE_STAGES) {
-        m_DebugTextureBindings[Stage].Texture = Texture;
-        m_DebugTextureBindings[Stage].Uniform = Slot;
-        m_DebugTextureBindings[Stage].BgfxHandle = textureHandle.idx;
-        m_DebugTextureBindings[Stage].SamplerFlags = flags;
-        m_DebugTextureBindingMask |= (1u << Stage);
+    if (m_DrawMapSubmitActive && Slot < CKBACKEND_MAX_TEXTURE_SLOTS) {
+        m_DebugTextureBindings[Slot].Texture = Texture;
+        m_DebugTextureBindings[Slot].Uniform = Slot;
+        m_DebugTextureBindings[Slot].BgfxHandle = textureHandle.idx;
+        m_DebugTextureBindings[Slot].SamplerFlags = flags;
+        m_DebugTextureBindingMask |= (1u << Slot);
     }
     return CK_OK;
 }
 
 void CKBgfxBackend::ResetDebugBindings()
 {
+    if (!m_DrawMapSubmitActive)
+        return;
     memset(m_DebugVertexBindings, 0, sizeof(m_DebugVertexBindings));
     m_DebugVertexBindingMask = 0;
     m_DebugIndexBuffer = 0;
@@ -3014,12 +3144,18 @@ void CKBgfxBackend::ResetDebugBindings()
     m_DebugIndexHandle = 0;
     memset(m_DebugTextureBindings, 0, sizeof(m_DebugTextureBindings));
     m_DebugTextureBindingMask = 0;
-    m_DebugSpecializationHash = 0;
-    m_DebugSpecializationValid = FALSE;
 }
 
 CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
 {
+    m_DrawApproximations = 0;
+    if (m_DrawPassNeedsResume) {
+        CKBackendPassDesc resume = m_LogicalPass;
+        resume.ClearFlags = 0;
+        resume.Name = "resume";
+        const CKERROR status = BeginPass(&resume);
+        if (status != CK_OK) return status;
+    }
     if (!Draw || !Draw->Program)
         return CKERR_INVALIDPARAMETER;
     if (!IsReady() || !m_PassOpen)
@@ -3037,31 +3173,28 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     CKERROR err = ApplyPipelineState();
     if (err != CK_OK)
         return DrawFailed(err, "Draw.state");
-    err = BindGeometry(Draw);
+    if (rec->Interface.VertexInputs.empty()) {
+        if (!Draw->VertexCount || Draw->StartVertex || Draw->IndexCount || Draw->IndexBuffer || Draw->TransientIndices)
+            return DrawFailed(CKERR_INVALIDPARAMETER, "Draw.procedural");
+        bgfx::setVertexCount(Draw->VertexCount);
+        m_CurrentLayout = 0;
+        err = CK_OK;
+    } else err = BindGeometry(Draw);
     if (err != CK_OK)
         return DrawFailed(err, "Draw.geometry");
 
-    // bgfx offers CKFF_SAMPLER_SLOT_COUNT texture stages; the present
-    // sampler (slot 16) shares stage 0 with fixed-function slot 0, which a
-    // present draw never samples.
-    const CKBOOL presentBound = m_Slots[CKRST_BACKEND_SLOT_PRESENT].Texture != 0;
-    for (CKDWORD slot = 0; slot < CKRST_BACKEND_SLOT_COUNT; ++slot) {
-        SlotBinding &binding = m_Slots[slot];
-        if (slot == 0 && presentBound)
-            continue;
-        const CKDWORD stage = slot == CKRST_BACKEND_SLOT_PRESENT ? 0 : slot;
-        if (binding.PendingZero) {
-            binding.PendingZero = FALSE;
-            err = BindTextureSlot(stage, slot, 0, NULL);
-        } else if (binding.Texture) {
-            err = BindTextureSlot(stage, slot, binding.Texture, binding.HasSampler ? &binding.Sampler : NULL);
-        } else {
-            continue;
-        }
+    for (const auto &sampler : rec->Samplers) {
+        const SlotBinding &binding = m_Slots[sampler.Desc.Slot];
+        err = BindTextureSlot(sampler.Desc, sampler.Handle, *sampler.DefaultTexture,
+            binding.Texture, binding.HasSampler ? &binding.Sampler : NULL);
         if (err != CK_OK)
             return DrawFailed(err, "Draw.texture");
     }
 
+    // Program creation compiles names, counts and slot mappings. Keep the
+    // per-draw path allocation-free while restoring bgfx encoder state.
+    for (const auto &uniform : rec->Uniforms)
+        bgfx::setUniform(uniform.Handle, m_ConstantData[uniform.Slot].data(), (uint16_t)uniform.Count);
     if (m_DrawMapSubmitActive)
         TraceSubmit(Draw->Program, rec->Handle, Draw->SortKey);
     RecordViewColorWrite(m_CurrentView, TRUE);
@@ -3076,7 +3209,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
 CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                             CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect)
 {
-    if (!IsReady() || !m_PassOpen)
+    if (!IsReady())
         return CKERR_INVALIDOPERATION;
     const CKERROR status = GetDeviceStatus();
     if (status != CK_OK)
@@ -3103,7 +3236,7 @@ CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
                      (CKDWORD)SrcRect->bottom > srcHeight)))
         return CKERR_INVALIDPARAMETER;
     if ((m_CapsDesc.Features & CKRST_DEVCAPS_BLIT) == 0 ||
-        (dst->Flags & CKRST_TEXTURE_BLIT_DST) == 0 ||
+        dst->IsDepth || src->IsDepth ||
         dst->Format != src->Format)
         return CKERR_NOTIMPLEMENTED;
 
@@ -3116,9 +3249,15 @@ CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
     const CKBOOL fullDestination =
         DstX == 0 && DstY == 0 &&
         actualCopiedWidth == dstWidth && actualCopiedHeight == dstHeight;
-    RecordViewColorWrite(m_CurrentView, FALSE);
+    if (m_NextView >= m_CapsDesc.MaxRenderViews) return CKERR_OUTOFMEMORY;
+    const bgfx::ViewId copyView = (bgfx::ViewId)m_NextView++;
+    bgfx::resetView(copyView);
+    bgfx::setViewMode(copyView, bgfx::ViewMode::Sequential);
+    bgfx::setViewName(copyView, "copy");
+    m_FrameInProgress = TRUE;
+    m_DrawPassNeedsResume = m_PassOpen != FALSE;
     RecordTextureBlit(dst, DstMip, src, SrcMip, fullDestination);
-    bgfx::blit(m_CurrentView,
+    bgfx::blit(copyView,
                dst->Handle, (uint8_t)DstMip, (uint16_t)DstX, (uint16_t)DstY, (uint16_t)DstLayer,
                src->Handle, (uint8_t)SrcMip, (uint16_t)srcX, (uint16_t)srcY, (uint16_t)SrcLayer,
                (uint16_t)actualCopiedWidth, (uint16_t)actualCopiedHeight, 1);
@@ -3126,8 +3265,9 @@ CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
+CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
 {
+    const CKBackendPresentSync Mode = Desc.Sync;
     if (FrameNumber)
         *FrameNumber = 0;
     if (!IsReady())
@@ -3135,8 +3275,8 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
     const CKERROR fatalError = GetDeviceStatus();
     if (fatalError != CK_OK)
         return fatalError;
-    if (Mode != CKRST_BACKEND_PRESENT_IMMEDIATE && Mode != CKRST_BACKEND_PRESENT_VSYNC &&
-        Mode != CKRST_BACKEND_PRESENT_PRESERVE)
+    if (Mode != CKRST_BACKEND_SYNC_IMMEDIATE && Mode != CKRST_BACKEND_SYNC_VSYNC &&
+        Mode != CKRST_BACKEND_SYNC_UNCHANGED)
         return CKERR_INVALIDPARAMETER;
 
     // A present-sync change needs bgfx::reset. Applying it to the frame being
@@ -3144,8 +3284,8 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
     // chain and the frame buffers while the frame renders), so the frame is
     // rendered with the old sync mode and the reset gets an empty frame of its
     // own right after it.
-    const CKBOOL updatePresentSync = Mode != CKRST_BACKEND_PRESENT_PRESERVE;
-    const CKBOOL vsync = Mode == CKRST_BACKEND_PRESENT_VSYNC;
+    const CKBOOL updatePresentSync = Mode != CKRST_BACKEND_SYNC_UNCHANGED;
+    const CKBOOL vsync = Mode == CKRST_BACKEND_SYNC_VSYNC;
     const CKBOOL resetAfterFrame = updatePresentSync && vsync != m_VSync;
 
     static int s_PresentSyncLogCount = 0;
@@ -3202,12 +3342,21 @@ CKERROR CKBgfxBackend::Present(CKBackendPresentMode Mode, CKDWORD *FrameNumber)
     }
 
     CKDWORD submittedFrame = bgfx::frame();
+    m_BorderPalette.Reset();
     if (resetAfterFrame)
     {
         m_VSync = vsync;
         m_ResetFlags = CKBgfxBuildResetFlags(vsync, 0);
-        bgfx::reset((uint32_t)m_Width, (uint32_t)m_Height, m_ResetFlags);
+        bgfx::reset((uint32_t)m_DrawableWidth, (uint32_t)m_DrawableHeight, m_ResetFlags);
         submittedFrame = bgfx::frame();
+    }
+    for (auto it = m_Readbacks.begin(); it != m_Readbacks.end();) {
+        if ((int32_t)(submittedFrame - (*it)->AvailableFrame) >= 0) {
+            (*it)->Complete = TRUE;
+            bgfx::destroy((*it)->Snapshot);
+            (*it)->Snapshot = BGFX_INVALID_HANDLE;
+            it = m_Readbacks.erase(it);
+        } else ++it;
     }
     if (FrameNumber)
         *FrameNumber = submittedFrame;
@@ -3285,7 +3434,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
     CKDWORD stencilHash = CKBgfxHashStencil(m_State.StencilRef, m_State.StencilReadMask, m_State.StencilWriteMask);
     CKDWORD programHash = CKBgfxHashProgram(programRecord);
     uint64_t finalState = m_CachedBgfxState;
-    char texFields[512];
+    char texFields[CKBACKEND_MAX_TEXTURE_SLOTS * 64];
     CKDWORD texOffset = 0;
     char vbFields[256];
     CKDWORD vbOffset = 0;
@@ -3293,7 +3442,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
         finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
 
     texFields[0] = '\0';
-    for (CKDWORD i = 0; i < CKRST_MAX_TEXTURE_STAGES; ++i) {
+    for (CKDWORD i = 0; i < CKBACKEND_MAX_TEXTURE_SLOTS; ++i) {
         if ((m_DebugTextureBindingMask & (1u << i)) == 0)
             continue;
         if (!CKBgfxDrawMapAppendTextureBinding(texFields, sizeof(texFields),
@@ -3388,10 +3537,9 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
         submitTrace.Program = Program;
         submitTrace.BgfxProgram = bgfx::isValid(ProgramHandle) ? ProgramHandle.idx : 0xffff;
         submitTrace.ProgramHash = programHash;
-        submitTrace.SpecHash = m_DebugSpecializationValid
-            ? m_DebugSpecializationHash : 0;
         submitTrace.ShaderProfile = (CKSTRING)CKBgfxShaderProfileName(m_Caps.ShaderProfile);
         submitTrace.StateHash = stateHash;
+        submitTrace.SpecHash = 0;
         submitTrace.BgfxStateLo = (CKDWORD)(finalState & 0xffffffffu);
         submitTrace.BgfxStateHi = (CKDWORD)(finalState >> 32);
         submitTrace.StencilHash = stencilHash;

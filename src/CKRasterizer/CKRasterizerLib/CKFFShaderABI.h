@@ -5,8 +5,9 @@
 #include "CKFFShaderKey.h"
 #include "CKFFSpecializationInfo.h"
 
-// Internal fixed-function shader ABI. These values define the C++ uniform
-// packing contract consumed by the checked-in bgfx shader sources.
+// Internal fixed-function shader ABI. These values define the logical C++
+// data consumed by the shared shader calculations. CKFFShaderInterface maps
+// it to named uniforms or native stage buffers for each artifact family.
 
 static const CKDWORD CKFF_SHADER_ABI_VERSION = 5u;
 static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;

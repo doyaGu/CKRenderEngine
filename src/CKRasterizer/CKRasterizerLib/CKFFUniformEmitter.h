@@ -28,9 +28,9 @@ private:
     CKBOOL UploadStaticUniforms(CKRasterizerBackend *backend,
                                 const CKFFProgramContext *programContext,
                                 CKDWORD activeTextureCount);
-    CKBOOL UploadUniform(CKRasterizerBackend *backend, CKBackendConstantBlock block, const void *data,
+    CKBOOL UploadUniform(CKRasterizerBackend *backend, CKFFConstantBlock block, const void *data,
                          CKDWORD vec4Count);
-    CKBOOL Emit(CKFFUniformSink *sink, CKBackendConstantBlock block, const void *data,
+    CKBOOL Emit(CKFFUniformSink *sink, CKFFConstantBlock block, const void *data,
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
     void EmitPayloads(CKFFUniformSink *sink,
                       const CKFFProgramContext *programContext,

@@ -138,16 +138,17 @@ CKRECT CKTranslatedContext::CurrentPassRect() const
 // its resolve lands on the native target and the frame finally blits the
 // native target to the swap chain. Falls back to drawing straight into the
 // swap chain when the backend cannot provide the targets.
-void CKTranslatedContext::PrepareFrameTarget()
+CKBOOL CKTranslatedContext::PrepareFrameTarget()
 {
+    const bool required = m_Backend->GetCaps().RequiresIntermediateTarget && !m_Target;
     if (m_Frame.TargetDecided)
-        return;
+        return !required || m_Frame.InternalTargets;
     m_Frame.TargetDecided = TRUE;
     m_Frame.InternalTargets = FALSE;
     m_Frame.Composited = FALSE;
     const CKBackendCaps &caps = m_Backend->GetCaps();
     if (caps.MaxTextureSize == 0)
-        return;
+        return !required;
     const CKDWORD width = CKPresentStage::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD height = CKPresentStage::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
     CKBOOL sceneReady = m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
@@ -167,6 +168,7 @@ void CKTranslatedContext::PrepareFrameTarget()
         m_Frame.NativePresented = FALSE;
     m_FFP.SetMultisampledTarget(m_Frame.InternalTargets && m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
+    return !required || m_Frame.InternalTargets;
 }
 
 CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
@@ -190,7 +192,7 @@ CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, C
 
 CKBOOL CKTranslatedContext::EnsureDrawPass()
 {
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
     if (m_Frame.PassOpen)
         return TRUE;
     return OpenPass(CurrentPassFrameBuffer(), CurrentPassRect(), 0, 0, 1.0f, 0, "implicit");
@@ -260,7 +262,7 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
 
     // RectCount == 0 clears the current viewport (D3D7 semantics); otherwise
     // every rectangle gets a clear pass of its own. Rectangles are engine
@@ -309,7 +311,7 @@ CKBOOL CKTranslatedContext::BeginScene()
         return FALSE;
     }
     DeliverReadbacks();
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
     m_FFP.BeginDebugFrame();
     if (!OpenPass(CurrentSceneFrameBuffer(), CurrentTargetRect(), 0, 0, 1.0f, 0, "scene"))
         return FALSE;
@@ -341,7 +343,7 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return FALSE;
     }
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
     if (!CompositeScene())
         return FALSE;
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "overlay"))
@@ -370,24 +372,11 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
                 frameSucceeded = FALSE;
             }
         }
-        if (frameSucceeded && HasArmedTextureReadbacks() && CanReadCurrentTarget() && BlitForReadback())
-            IssueArmedTextureReadbacks();
     }
-    if (HasArmedTextureReadbacks()) {
-        // No frame carried the blit (no scene at all): one more frame with
-        // the present and the readback blit.
-        CKDWORD frame = 0;
-        if (!m_Frame.Open && CanReadCurrentTarget() && SubmitReadbackFrame(m_Frame.NativePresented, TRUE, &frame)) {
-            m_LastDeviceFrame = frame;
-            IssueArmedTextureReadbacks();
-        } else {
-            FailArmedTextureReadbacks();
-        }
-    }
-    const CKBackendPresentMode mode = m_Target ? CKRST_BACKEND_PRESENT_PRESERVE
-                                      : (VSync ? CKRST_BACKEND_PRESENT_VSYNC : CKRST_BACKEND_PRESENT_IMMEDIATE);
+    const CKBackendPresentSync mode = m_Target ? CKRST_BACKEND_SYNC_UNCHANGED
+                                      : (VSync ? CKRST_BACKEND_SYNC_VSYNC : CKRST_BACKEND_SYNC_IMMEDIATE);
     CKDWORD frameNumber = 0;
-    const CKERROR status = m_Backend->Present(mode, &frameNumber);
+    const CKERROR status = m_Backend->Submit(CKBackendSubmitDesc(mode, !m_Target), &frameNumber);
     m_Frame.Open = FALSE;
     if (status == CK_OK)
         m_LastDeviceFrame = frameNumber;
@@ -591,7 +580,7 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;
     }
-    PrepareFrameTarget();
+    if (!PrepareFrameTarget()) return FALSE;
     const CKRECT target = LogicalTargetRect();
     CKRECT rect = Rect ? *Rect : target;
     if (rect.left < 0) rect.left = 0;
@@ -651,6 +640,9 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
 
     CKFFStateGuard guard(m_FFP);
     m_FFP.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    m_FFP.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    m_FFP.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
+    m_FFP.SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
     m_FFP.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
     m_FFP.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
     m_FFP.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
@@ -681,7 +673,11 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
     float positions[4][4];
     CKDWORD colors[4];
     float uvs[4][2];
-    const float x0 = (float)rect.left, y0 = (float)rect.top, x1 = (float)rect.right, y1 = (float)rect.bottom;
+    // POSITIONT follows the legacy integer pixel-center convention. Put quad
+    // edges half a pixel before those centers, so point sampling lands in the
+    // middle of each source texel rather than on unstable texel boundaries.
+    const float x0 = (float)rect.left - 0.5f, y0 = (float)rect.top - 0.5f;
+    const float x1 = (float)rect.right - 0.5f, y1 = (float)rect.bottom - 0.5f;
     const float coords[8] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
     const float xs[4] = {x0, x1, x1, x0};
     const float ys[4] = {y0, y0, y1, y1};

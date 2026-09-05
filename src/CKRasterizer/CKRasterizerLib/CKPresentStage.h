@@ -5,6 +5,8 @@
 #include "CKTypes.h"
 #include "CKRasterizerBackendEnums.h"
 #include "CKRasterizerBackend.h"
+#include "CKBuiltinShaders.h"
+#include "CKFFShaderInterface.h"
 
 // One internal render target: color + depth-stencil + backend render target.
 struct CKPresentTarget {
@@ -22,7 +24,7 @@ struct CKPresentTarget {
 
 // Backend handles of the fullscreen resolve / blit program (shaders
 // vs_postprocess / fs_postprocess). The source is sampled through
-// CKRST_BACKEND_SLOT_PRESENT, the parameters go to CKRST_BLOCK_PRESENT_PARAMS.
+// CKFF_SLOT_PRESENT, the parameters go to CKRST_BLOCK_PRESENT_PARAMS.
 struct CKPresentResources {
     CKDWORD VertexShader;
     CKDWORD PixelShader;
@@ -46,7 +48,7 @@ public:
     CKPresentStage();
     ~CKPresentStage();
 
-    void Init(CKRasterizerBackend *backend);
+    void Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders);
     // Releases every backend object. Safe to call twice.
     void Shutdown();
 
@@ -72,6 +74,9 @@ public:
     CKERROR SubmitResolve(CKBOOL fxaa, float sharpness);
     // Draws the native color as a fullscreen triangle into the current pass (the blit).
     CKERROR SubmitBlit();
+    // Point-samples a 2D snapshot into the current pass, without postprocessing.
+    // Destination pixel centers select source texels, including when scaled.
+    CKERROR SubmitCopy(CKDWORD texture, CKDWORD width, CKDWORD height);
 
     static CKDWORD ScaledDimension(CKDWORD value, float scale, CKDWORD maximum);
     static float ClampRenderScale(float scale);
@@ -82,8 +87,11 @@ private:
     void DestroyTarget(CKPresentTarget &target);
     void DestroyReadbackTexture();
     CKERROR Submit(const CKPresentTarget &source, CKBOOL fxaa, float sharpness);
+    CKERROR SubmitTexture(CKDWORD texture, CKDWORD width, CKDWORD height,
+                          CKBOOL linear, CKBOOL fxaa, float sharpness);
 
     CKRasterizerBackend *m_Backend;
+    CKBackendShaderSet m_Shaders;
     CKPresentResources m_ResourceIds;
     CKPresentTarget m_Scene;
     CKPresentTarget m_Native;

@@ -14,6 +14,7 @@ install/
 
 # Phase-0 reference material that must stay local
 oracle/
+!tests/reference/frames/oracle/
 tests/reference/frames/local/
 tools/scene_capture/build*/
 tests/reference/frames/golden/local-*/

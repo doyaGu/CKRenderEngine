@@ -23,11 +23,9 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_VertexBufferProgramCacheActiveTextureCount(0),
       m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_LastDrawApproximationMask(0),
-      m_FrameDrawRejected(FALSE),
-      m_BorderPaletteCount(0), m_BorderPaletteFrameSerial((CKDWORD)-1) {
+      m_FrameDrawRejected(FALSE) {
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
-    memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const CKRenderFFPStatsConfig &settings = CKRenderDiagnosticsSettings().FFPStats;
     m_Probes.Config.StatsEnabled = settings.Enabled;
@@ -45,7 +43,7 @@ CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
     Shutdown();
 }
 
-bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend) {
+bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders) {
     if (Shutdown() != CK_OK)
         return false;
     m_Backend = backend;
@@ -54,9 +52,6 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend) {
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
     m_FrameDrawRejected = FALSE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
-    m_BorderPaletteCount = 0;
-    m_BorderPaletteFrameSerial = (CKDWORD)-1;
-    memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
     if (!backend)
         return false;
     const CKBackendCaps &caps = backend->GetCaps();
@@ -70,7 +65,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend) {
         Shutdown();
         return false;
     }
-    if (shaderBackend && !m_ShaderCache.Init(backend)) {
+    if (shaderBackend && !m_ShaderCache.Init(backend, shaders)) {
         Shutdown();
         return false;
     }
@@ -302,6 +297,10 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
     const CKDWORD writeMask =
         m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
     *forceKeepOps = FALSE;
+    if (m_Backend && (m_Backend->GetCaps().Features & CKRST_DEVCAPS_STENCIL_WRITE_MASK)) {
+        *effectiveWriteMask = writeMask;
+        return FALSE;
+    }
     // The backend only knows "write nothing" or "write every bit".
     *effectiveWriteMask = writeMask == 0x00u ? 0x00u : 0xffu;
     if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILENABLE))
@@ -315,26 +314,6 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
     if (writeMask == 0x00u)
         *forceKeepOps = TRUE;
     return TRUE;
-}
-
-CKDWORD CKFixedFunctionPipeline::NearestBorderPaletteSlot(CKDWORD argb) const
-{
-    CKDWORD best = 0;
-    CKDWORD bestDistance = 0xFFFFFFFFu;
-    for (CKDWORD slot = 0; slot < m_BorderPaletteCount; ++slot) {
-        const CKDWORD other = m_BorderPaletteColors[slot];
-        CKDWORD distance = 0;
-        for (CKDWORD shift = 0; shift < 32; shift += 8) {
-            const int a = (int)((argb >> shift) & 0xffu);
-            const int b = (int)((other >> shift) & 0xffu);
-            distance += (CKDWORD)((a - b) * (a - b));
-        }
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            best = slot;
-        }
-    }
-    return best;
 }
 
 static float CKFFClampVertexBufferPointSize(float size)
@@ -606,12 +585,6 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
 {
     if (!bindingSet || !m_Backend)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    const CKDWORD frameSerial = m_FrameNumber;
-    if (m_BorderPaletteFrameSerial != frameSerial) {
-        m_BorderPaletteFrameSerial = frameSerial;
-        m_BorderPaletteCount = 0;
-        memset(m_BorderPaletteColors, 0, sizeof(m_BorderPaletteColors));
-    }
     CKDWORD sampledTextureMask = 0;
     CKDWORD stageCount = activeTextureCount;
     if (stageCount > CKFF_MAX_TEXTURE_STAGES)
@@ -624,40 +597,6 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
     bindingSet->ActiveStageCount = stageCount;
     if (shaderKey.FS.SamplerSlotOverflowMask != 0)
         RecordDrawApproximation(CKRST_DIAG_APPROX_SAMPLER_SLOTS);
-    for (CKDWORD i = 0; i < bindingSet->ActiveTextureCount; ++i) {
-        CKSamplerDesc &sampler = bindingSet->Bindings[i].Sampler;
-        if (sampler.AddressU != CKRST_ADDRESS_BORDER &&
-            sampler.AddressV != CKRST_ADDRESS_BORDER &&
-            sampler.AddressW != CKRST_ADDRESS_BORDER) {
-            continue;
-        }
-
-        const CKDWORD argb = sampler.BorderColor;
-        CKDWORD slot = 0;
-        for (; slot < m_BorderPaletteCount; ++slot) {
-            if (m_BorderPaletteColors[slot] == argb)
-                break;
-        }
-        if (slot == m_BorderPaletteCount) {
-            if (m_BorderPaletteCount >= 16) {
-                // bgfx has 16 palette entries per frame: reuse the nearest
-                // colour (spec appendix D).
-                slot = NearestBorderPaletteSlot(argb);
-                RecordDrawApproximation(CKRST_DIAG_APPROX_BORDER_COLOR);
-            } else {
-                m_BorderPaletteColors[slot] = argb;
-                ++m_BorderPaletteCount;
-                const CKDWORD rgba = ((argb >> 16) & 0xffu) << 24 |
-                                     ((argb >> 8) & 0xffu) << 16 |
-                                     (argb & 0xffu) << 8 |
-                                     ((argb >> 24) & 0xffu);
-                m_Backend->SetPaletteColor(slot, rgba);
-            }
-        }
-        sampler.BorderColor = slot;
-    }
-    bindingSet->Hash = CKFFHashTextureBindingSet(
-        bindingSet->ActiveTextureCount, bindingSet->Bindings);
     return TRUE;
 }
 
@@ -1042,6 +981,10 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
         CKFF_SCOPE_TIME(m_Probes, SubmitUs);
         if (m_Backend->Draw(&draw) != CK_OK)
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
+        const uint64_t backendApproximations = m_Backend->GetDrawApproximationMask();
+        for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i)
+            if (backendApproximations & (1ull << i))
+                RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {

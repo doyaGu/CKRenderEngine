@@ -13,16 +13,16 @@
 
 struct VxDrawPrimitiveData;
 
-#include "CKRasterizerBackend.h"
+#include "CKFFShaderInterface.h"
 
-inline const char *CKFFUniformDebugName(CKBackendConstantBlock block)
+inline const char *CKFFUniformDebugName(CKFFConstantBlock block)
 {
-    const char *name = CKBackendConstantBlockInfo(block).Name;
+    const char *name = CKFFConstantBlockInfo(block).Name;
     return name ? name : "unknown";
 }
 
 // Histogram slot of a constant block (0 = none).
-inline CKDWORD CKFFUniformDebugSlot(CKBackendConstantBlock block)
+inline CKDWORD CKFFUniformDebugSlot(CKFFConstantBlock block)
 {
     return (int)block >= 0 && (int)block < CKRST_BLOCK_COUNT ? (CKDWORD)block + 1 : 0;
 }
