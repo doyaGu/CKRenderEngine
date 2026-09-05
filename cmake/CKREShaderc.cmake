@@ -110,10 +110,13 @@ function(ckre_prepare_shaderc)
     endif ()
 
     ExternalProject_Add(CKREHostShaderc
-            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/bgfx"
+            SOURCE_DIR "${CKRE_BGFX_CMAKE_SOURCE_DIR}"
             BINARY_DIR "${_ckre_host_shaderc_build_dir}"
             ${_ckre_host_shaderc_generator_args}
             CMAKE_ARGS
+                    "-DBGFX_DIR:PATH=${BGFX_DIR}"
+                    "-DBX_DIR:PATH=${BX_DIR}"
+                    "-DBIMG_DIR:PATH=${BIMG_DIR}"
                     -DBGFX_BUILD_TOOLS=ON
                     -DBGFX_BUILD_TOOLS_BIN2C=OFF
                     -DBGFX_BUILD_TOOLS_GEOMETRY=OFF

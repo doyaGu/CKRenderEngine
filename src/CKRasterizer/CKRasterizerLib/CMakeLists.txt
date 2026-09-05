@@ -131,6 +131,7 @@ if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
                     --shaderc "${CKRE_SHADERC_COMMAND}"
+                    --bgfx-source "${BGFX_DIR}"
             COMMAND "${CMAKE_COMMAND}" -E touch "${CKRE_SHADER_STAMP}"
             DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders

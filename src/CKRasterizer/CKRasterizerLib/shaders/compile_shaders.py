@@ -84,9 +84,7 @@ def find_shaderc(explicit: str | None) -> Path:
     )
 
 
-def include_dirs(script_dir: Path) -> list[Path]:
-    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
-    bgfx_root = renderengine_root / "deps" / "bgfx" / "bgfx"
+def include_dirs(script_dir: Path, bgfx_root: Path) -> list[Path]:
     return [
         script_dir,
         bgfx_root / "src",
@@ -95,7 +93,7 @@ def include_dirs(script_dir: Path) -> list[Path]:
 
 
 def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, object],
-                backend: dict[str, str], output: Path) -> None:
+                backend: dict[str, str], output: Path, bgfx_root: Path) -> None:
     cmd = [
         str(shaderc),
         "-f", str(script_dir / shader["source"]),
@@ -110,7 +108,7 @@ def run_shaderc(shaderc: Path, script_dir: Path, shader: dict[str, object],
         compile_defines.append("CKFF_NDC_MINUS_ONE_TO_ONE=1")
     if compile_defines:
         cmd.extend(["--define", ";".join(compile_defines)])
-    for inc in include_dirs(script_dir):
+    for inc in include_dirs(script_dir, bgfx_root):
         cmd.extend(["-i", str(inc)])
 
     ensure_dxc_runtime(script_dir, shaderc)
@@ -152,8 +150,6 @@ def shaderc_runtime_dirs(script_dir: Path, shaderc: Path) -> list[Path]:
                 dirs.append(candidate.parent)
                 break
 
-    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
-    dirs.append(renderengine_root / "deps" / "bgfx" / "bgfx" / "tools" / "bin" / "windows")
     return dirs
 
 
@@ -318,6 +314,7 @@ def main() -> int:
     parser.add_argument("command", nargs="?", choices=["compile", "gen-spec-layout"], default="compile",
                         help="compile (default): regenerate ff_spec_layout.sh and every shader blob; "
                              "gen-spec-layout: only regenerate ff_spec_layout.sh from CKFFSpecLayout.def.")
+    parser.add_argument("--bgfx-source", type=Path, help="Unmodified bgfx source directory populated by CMake.")
     parser.add_argument("--shaderc", help="Path to bgfx shaderc executable.")
     parser.add_argument("--backend", choices=[b["name"] for b in BACKENDS],
                         action="append", help="Backend to compile. May be repeated.")
@@ -330,6 +327,8 @@ def main() -> int:
     if args.command == "gen-spec-layout":
         return 0
 
+    if not args.bgfx_source or not (args.bgfx_source / "src" / "bgfx_shader.sh").is_file():
+        parser.error("compile requires --bgfx-source pointing to the fetched bgfx source directory")
     shaderc = find_shaderc(args.shaderc)
     selected = [b for b in BACKENDS if not args.backend or b["name"] in args.backend]
 
@@ -340,7 +339,7 @@ def main() -> int:
             for shader in SHADERS:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
-                run_shaderc(shaderc, script_dir, shader, backend, bin_path)
+                run_shaderc(shaderc, script_dir, shader, backend, bin_path, args.bgfx_source)
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())

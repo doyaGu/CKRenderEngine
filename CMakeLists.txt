@@ -34,19 +34,17 @@ endif ()
 # =============================================================================
 # Project options
 # =============================================================================
-set(_ckre_generate_shaders_default ON)
-if (NOT WIN32)
-    set(_ckre_generate_shaders_default OFF)
-endif ()
-
 option(CKRE_BUILD_SHARED "Build shared library" ON)
 option(CKRE_BUILD_STATIC "Build static library" OFF)
-option(CKRE_BUILD_BGFX_RASTERIZER "Build bgfx rasterizer plugin targets" ON)
+option(CKRE_BUILD_BGFX_RASTERIZER "Fetch and build the optional bgfx rasterizer" OFF)
 option(CKRE_BUILD_SDL_GPU_RASTERIZER "Build SDL_gpu rasterizer plugin targets" ON)
 set(CKRE_BGFX_OPENGLES_VERSION "" CACHE STRING
     "Build bgfx with the requested OpenGL ES renderer version instead of its platform defaults")
 set_property(CACHE CKRE_BGFX_OPENGLES_VERSION PROPERTY STRINGS "" 20 30 31 32)
-option(CKRE_GENERATE_SHADERS "Regenerate CK2_3D bgfx fixed-function shader headers at build time" ${_ckre_generate_shaders_default})
+option(CKRE_GENERATE_SHADERS "Regenerate bgfx fixed-function shader headers (requires the bgfx rasterizer)" OFF)
+if(CKRE_GENERATE_SHADERS AND NOT CKRE_BUILD_BGFX_RASTERIZER)
+    message(FATAL_ERROR "CKRE_GENERATE_SHADERS requires CKRE_BUILD_BGFX_RASTERIZER=ON; SDL uses its own offline artifacts")
+endif()
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_TOOLS "Build ckre_scene_capture (needs CKRE_BUILD_SHARED)" ${CKRE_BUILD_TESTS})
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
@@ -277,6 +275,8 @@ endif ()
 # =============================================================================
 # Build library
 # =============================================================================
+include(CKREBgfx)
+ckre_fetch_bgfx_sources()
 ckre_prepare_shaderc()
 add_subdirectory(deps)
 ckre_resolve_shaderc()

@@ -1,6 +1,6 @@
 # CKRenderEngine
 
-CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `CK2_3D` engine module, a translation core that turns the engine's Direct3D 7 style calls into GPU work, and the bgfx-backed `CKBgfxRasterizer` plugin.
+CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `CK2_3D` engine module, a translation core that turns the engine's Direct3D 7 style calls into GPU work, the default `CKSdlGpuRasterizer` plugin, and the optional `CKBgfxRasterizer` plugin.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ Build presets follow `renderengine-bgfx-<mode>-<arch>-release`.
 
 ## Standalone manual build
 
-A manual CMake build can be used on other CMake-supported hosts. From a Ballanced `Source/RenderEngine` checkout, sibling CK2 and VxMath projects and the nested bgfx dependencies are discovered locally.
+A manual CMake build can be used on other CMake-supported hosts. From a Ballanced `Source/RenderEngine` checkout, sibling CK2 and VxMath projects are discovered locally. bgfx is fetched only when explicitly enabled.
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -66,9 +66,33 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Requirements include CMake 3.16+, SDL3, a C++ toolchain, initialized recursive submodules, and CK2/VxMath from sibling projects, installed packages, or a configured Virtools SDK fallback.
+Requirements include CMake 3.16+ (3.20+ with bgfx), SDL3, a C++ toolchain, and CK2/VxMath from sibling projects, installed packages, or a configured Virtools SDK fallback.
 
 Checked-in generated shader headers are used by the Ballanced presets. Set `CKRE_GENERATE_SHADERS=ON` only when intentionally regenerating them with Python and a host-compatible bgfx `shaderc`.
+
+## Optional bgfx dependency
+
+`CKRE_BUILD_BGFX_RASTERIZER` defaults to `OFF`. SDL-only and NULL builds do not
+fetch or build bgfx, bx, bimg, or bgfx.cmake. bgfx is no longer a Git submodule.
+Enable it explicitly for either dynamic or static builds:
+
+```powershell
+cmake -S . -B build -DCKRE_BUILD_BGFX_RASTERIZER=ON
+```
+
+`cmake/CKREBgfx.cmake` pins upstream archive revisions and SHA-256 hashes.
+CMake populates them under the build directory's `_deps`, without source patches.
+Existing CMake caches retain their explicit option values. The named bgfx presets
+also enable the option explicitly. Disable `CKRE_GENERATE_SHADERS` when disabling bgfx.
+For offline enabled builds, prepopulate CMake's FetchContent cache or provide its
+`FETCHCONTENT_SOURCE_DIR_CKRE_BGFX_CMAKE`, `FETCHCONTENT_SOURCE_DIR_CKRE_BGFX`,
+`FETCHCONTENT_SOURCE_DIR_CKRE_BX` and `FETCHCONTENT_SOURCE_DIR_CKRE_BIMG` overrides.
+
+The adapter owns the D3D11 rectangular-clear program and preserves independent
+color/depth/stencil write masks through public bgfx APIs. Full attachment clears
+retain the native fast path. Its offline shader generator takes explicit
+`--shaderc` and `--bgfx-source` paths; runtime does not invoke a compiler.
+Scene capture uses stb headers independently of bgfx/bimg.
 
 ## Versioning
 

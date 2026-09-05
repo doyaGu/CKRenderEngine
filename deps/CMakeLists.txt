@@ -1,11 +1,11 @@
 # RenderEngine third-party dependencies
 
-if (NOT CKRE_BUILD_BGFX_RASTERIZER AND NOT CKRE_GENERATE_SHADERS)
+if (NOT CKRE_BUILD_BGFX_RASTERIZER)
     message(STATUS "[CKRenderEngine] bgfx dependency disabled")
     return()
 endif ()
 
-# bgfx is the default rasterizer backend. Build target-architecture bgfx tools
+# Build target-architecture tools for the optional bgfx backend
 # only when CK2_3D can run them on this host. Cross builds use CKREHostShaderc.
 set(BGFX_BUILD_TOOLS ${CKRE_BUILD_TARGET_SHADERC} CACHE BOOL "" FORCE)
 set(BGFX_BUILD_TOOLS_BIN2C OFF CACHE BOOL "" FORCE)
@@ -34,15 +34,15 @@ if (NOT TARGET bgfx)
                 "${CMAKE_CXX_FLAGS}")
     endif ()
 
-    add_subdirectory(bgfx)
+    add_subdirectory("${CKRE_BGFX_CMAKE_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/bgfx")
 
     if (MSVC)
         set(CMAKE_CXX_FLAGS "${_ckre_saved_cxx_flags}")
     endif ()
 endif ()
 
-# bimg's decoder includes miniz.c directly from image_decode.cpp.  The bundled
-# bgfx CMake wrapper also adds miniz.c as a separate source, which produces a
+# bimg's decoder includes miniz.c directly from image_decode.cpp. The upstream
+# CMake wrapper also adds miniz.c as a separate source, which produces a
 # duplicate implementation in bimg_decode and LNK4006 for every exported miniz
 # symbol on MSVC.
 if (TARGET bimg_decode)

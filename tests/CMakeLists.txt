@@ -66,6 +66,8 @@ add_test(NAME BackendProgramTests COMMAND $<TARGET_FILE:test_backend_program>)
 set_tests_properties(BackendProgramTests PROPERTIES TIMEOUT 60)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+add_test(NAME BgfxDependencyDisabled
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/check_bgfx_disabled.cmake)
 if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     add_executable(scene_capture_image_tests test_scene_capture_image.cpp ../tools/scene_capture/ImageIO.cpp)
     target_include_directories(scene_capture_image_tests PRIVATE ../tools/scene_capture)
