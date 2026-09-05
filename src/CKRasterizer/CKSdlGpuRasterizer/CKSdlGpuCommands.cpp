@@ -197,7 +197,9 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         // A minimized window has no swapchain image. Resource work still submits.
         if (!Swapchain) { Draws.clear(); UniformArena.clear(); Pass.ClearFlags = 0; return CK_OK; }
     }
-    std::vector<CKBYTE> vertexData, indexData;
+    auto &vertexData = BatchVertices;
+    auto &indexData = BatchIndices;
+    vertexData.clear(); indexData.clear();
     auto append = [](std::vector<CKBYTE> &dst, const std::vector<CKBYTE> &src, unsigned &offset) {
         dst.resize((dst.size() + 3) & ~size_t(3));
         offset = unsigned(dst.size()); dst.insert(dst.end(), src.begin(), src.end());
@@ -207,15 +209,8 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         if (!draw.Vertices1.empty()) append(vertexData, draw.Vertices1, draw.VertexOffset1);
         if (!draw.Indices.empty()) append(indexData, draw.Indices, draw.IndexOffset);
     }
-    auto upload = [&](const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage) {
-        if (data.empty()) return std::shared_ptr<SDL_GPUBuffer>();
-        SDL_GPUBufferCreateInfo info = {usage, unsigned(data.size()), 0};
-        auto buffer = CKSdlGpuOwn(Device, SDL_CreateGPUBuffer(Device, &info), SDL_ReleaseGPUBuffer);
-        if (!buffer) { Fail("CreateGPUBuffer.batch"); return buffer; }
-        if (UploadBuffer(buffer.get(), data.data(), info.size, false) != CK_OK) buffer.reset();
-        return buffer;
-    };
-    auto batchVB = upload(vertexData, SDL_GPU_BUFFERUSAGE_VERTEX), batchIB = upload(indexData, SDL_GPU_BUFFERUSAGE_INDEX);
+    auto batchVB = UploadGeometry(vertexData, SDL_GPU_BUFFERUSAGE_VERTEX);
+    auto batchIB = UploadGeometry(indexData, SDL_GPU_BUFFERUSAGE_INDEX);
     if (Error != CK_OK) return Error;
     const unsigned width = Target ? std::max(1u, Target->Color->Info.width >> Target->Desc.ColorMip) : SwapWidth;
     const unsigned height = Target ? std::max(1u, Target->Color->Info.height >> Target->Desc.ColorMip) : SwapHeight;
@@ -421,7 +416,8 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
         m->Commands = nullptr; m->Swapchain = nullptr;
         if (!fence) return m->Fail("SubmitGPUCommandBufferAndAcquireFence");
         for (auto &ticket : m->Readbacks) if (!ticket->Fence) ticket->Fence = fence;
-        m->Submissions.push_back(std::move(fence));
+        m->Submissions.push_back({std::move(fence), std::move(m->PendingGeometry)});
+        m->PendingGeometry.clear();
     }
     m->PassOpen = false; m->Target.reset(); m->Pass = CKBackendPassDesc();
     m->TransientVertices.clear(); m->TransientIndices.clear();
@@ -430,7 +426,7 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
     if (number) *number = m->Submission;
     m->Collect();
     if (m->Submissions.size() > 3) {
-        SDL_GPUFence *oldest = m->Submissions.front().get();
+        SDL_GPUFence *oldest = m->Submissions.front().Fence.get();
         if (!SDL_WaitForGPUFences(m->Device, true, &oldest, 1)) return m->Fail("WaitForGPUFences.inflight");
         m->Collect();
     }

@@ -120,6 +120,19 @@ struct CKSdlGpuDraw {
     bool Index32 = false;
     std::string Marker;
 };
+// A batch owns both sides of its upload until the submission fence completes.
+// Reuse never cycles or overwrites storage referenced by an earlier batch.
+struct CKSdlGpuGeometryBuffer {
+    std::shared_ptr<SDL_GPUBuffer> Buffer;
+    std::shared_ptr<SDL_GPUTransferBuffer> Transfer;
+    unsigned Capacity = 0;
+    SDL_GPUBufferUsageFlags Usage = 0;
+};
+struct CKSdlGpuSubmission {
+    std::shared_ptr<SDL_GPUFence> Fence;
+    std::vector<std::shared_ptr<CKSdlGpuGeometryBuffer>> Geometry;
+};
+
 struct CKSdlGpuReadback : CKBackendReadback {
     std::shared_ptr<SDL_GPUTransferBuffer> Transfer;
     std::shared_ptr<SDL_GPUFence> Fence;
@@ -169,7 +182,10 @@ struct CKSdlGpuDevice {
     std::shared_ptr<CKSdlGpuProgram> VolumeMipProgram;
     std::map<std::pair<unsigned, CKDWORD>, std::weak_ptr<CKSdlGpuTexture>> DefaultTextures;
     std::vector<std::shared_ptr<CKSdlGpuReadback>> Readbacks;
-    std::deque<std::shared_ptr<SDL_GPUFence>> Submissions;
+    std::deque<CKSdlGpuSubmission> Submissions;
+    std::vector<std::shared_ptr<CKSdlGpuGeometryBuffer>> PendingGeometry, FreeGeometry;
+    size_t FreeGeometryBytes = 0;
+    std::vector<CKBYTE> BatchVertices, BatchIndices;
     std::map<std::array<unsigned, 7>, std::shared_ptr<SDL_GPUSampler>> Samplers;
     CKSdlGpuTable<CKSdlGpuTexture> Textures;
     CKSdlGpuTable<CKSdlGpuBuffer> VertexBuffers, IndexBuffers;
@@ -182,6 +198,7 @@ struct CKSdlGpuDevice {
     CKERROR Fail(const char *operation);
     bool EnsureCommands();
     CKERROR Flush(bool presentWindow = true);
+    std::shared_ptr<SDL_GPUBuffer> UploadGeometry(const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage);
     CKERROR UploadBuffer(SDL_GPUBuffer *buffer, const void *data, unsigned size, bool cycle);
     CKERROR UploadTexture(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
                           const CKRECT *region, const VxImageDescEx &data);

@@ -32,6 +32,56 @@ unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip)
                                                      : texture.Info.layer_count_or_depth;
 }
 
+std::shared_ptr<SDL_GPUBuffer> CKSdlGpuDevice::UploadGeometry(
+    const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage)
+{
+    if (data.empty()) return {};
+    if (data.size() > std::numeric_limits<unsigned>::max()) {
+        SDL_SetError("Transient geometry exceeds the native buffer size limit");
+        Fail("UploadGeometry.size"); return {};
+    }
+    const unsigned size = unsigned(data.size());
+    auto best = FreeGeometry.end();
+    for (auto it = FreeGeometry.begin(); it != FreeGeometry.end(); ++it) {
+        if ((*it)->Usage == usage && (*it)->Capacity >= size &&
+            (best == FreeGeometry.end() || (*it)->Capacity < (*best)->Capacity)) best = it;
+    }
+    std::shared_ptr<CKSdlGpuGeometryBuffer> page;
+    if (best != FreeGeometry.end()) {
+        page = std::move(*best);
+        FreeGeometryBytes -= size_t(page->Capacity) * 2;
+        FreeGeometry.erase(best);
+    } else {
+        page = std::make_shared<CKSdlGpuGeometryBuffer>();
+        // Capacity buckets absorb small frame-to-frame geometry variations.
+        uint64_t capacity = 65536;
+        while (capacity < size) capacity *= 2;
+        page->Capacity = capacity <= std::numeric_limits<unsigned>::max() ? unsigned(capacity) : size;
+        page->Usage = usage;
+        SDL_GPUBufferCreateInfo bufferInfo = {usage, page->Capacity, 0};
+        page->Buffer = CKSdlGpuOwn(Device, SDL_CreateGPUBuffer(Device, &bufferInfo), SDL_ReleaseGPUBuffer);
+        if (!page->Buffer) { Fail("CreateGPUBuffer.batch"); return {}; }
+        SDL_GPUTransferBufferCreateInfo transferInfo = {SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, page->Capacity, 0};
+        page->Transfer = CKSdlGpuOwn(Device, SDL_CreateGPUTransferBuffer(Device, &transferInfo), SDL_ReleaseGPUTransferBuffer);
+        if (!page->Transfer) { Fail("CreateGPUTransferBuffer.batch"); return {}; }
+    }
+    // Pending pages are ineligible for reuse even across multiple Flush calls
+    // in the same command buffer. Submit attaches the completion fence.
+    PendingGeometry.push_back(page);
+    void *mapped = SDL_MapGPUTransferBuffer(Device, page->Transfer.get(), false);
+    if (!mapped) { Fail("MapGPUTransferBuffer.batch"); return {}; }
+    std::memcpy(mapped, data.data(), size);
+    SDL_UnmapGPUTransferBuffer(Device, page->Transfer.get());
+    auto *copy = SDL_BeginGPUCopyPass(Commands);
+    if (!copy) { Fail("BeginGPUCopyPass.batch"); return {}; }
+    SDL_GPUTransferBufferLocation source = {page->Transfer.get(), 0};
+    SDL_GPUBufferRegion destination = {page->Buffer.get(), 0, size};
+    SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+    SDL_EndGPUCopyPass(copy);
+    ++FrameStats.BufferUploads;
+    return page->Buffer;
+}
+
 CKERROR CKSdlGpuDevice::UploadBuffer(SDL_GPUBuffer *buffer, const void *data, unsigned size, bool cycle)
 {
     if (!EnsureCommands()) return Error;

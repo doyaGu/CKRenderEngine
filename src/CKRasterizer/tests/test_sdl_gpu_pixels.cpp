@@ -120,10 +120,12 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     const float texcoords[6] = {0, 1, 2, 1, 0, -1};
     const CKWORD indices[3] = {0, 1, 2};
     auto allocate = [&](CKBackendTransientVertices &vertices, CKBackendTransientVertices &uv,
-                        CKBackendTransientIndices &index) {
-        if (!backend.AllocTransientVertices(3, positionLayout, &vertices) ||
-            !backend.AllocTransientVertices(3, texcoordLayout, &uv) ||
+                        CKBackendTransientIndices &index, unsigned vertexCount = 3) {
+        if (!backend.AllocTransientVertices(vertexCount, positionLayout, &vertices) ||
+            !backend.AllocTransientVertices(vertexCount, texcoordLayout, &uv) ||
             !backend.AllocTransientIndices(3, FALSE, &index)) return false;
+        std::memset(vertices.Data, 0, vertexCount * 12);
+        std::memset(uv.Data, 0, vertexCount * 8);
         std::memcpy(vertices.Data, positions, sizeof(positions));
         std::memcpy(uv.Data, texcoords, sizeof(texcoords));
         std::memcpy(index.Data, indices, sizeof(indices));
@@ -171,6 +173,42 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
         backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK ||
         !CheckReadback(backend, ticket, std::vector<CKDWORD>(16, 0xffffffff), 0, "two-stream transient draw")) return false;
+
+    // Distinct geometry in several batches of one submission and in many
+    // in-flight submissions must survive staging-buffer reuse. Defer every
+    // readback wait until all batches have been encoded and submitted.
+    struct GeometryCapture { CKBackendReadbackTicket Ticket; CKDWORD Color; };
+    std::vector<GeometryCapture> geometryCaptures;
+    for (unsigned frame = 0; frame < 12; ++frame) {
+        for (unsigned batch = 0; batch < 3; ++batch) {
+            CKBackendTransientVertices pooledVertices, pooledUv;
+            CKBackendTransientIndices pooledIndex;
+            const unsigned vertexCount = frame % 3 == 1 ? 8192 : 3;
+            if (!allocate(pooledVertices, pooledUv, pooledIndex, vertexCount)) return false;
+            const bool visible = (frame + batch) % 2 == 0;
+            if (!visible) {
+                auto *positions = static_cast<float *>(pooledVertices.Data);
+                for (unsigned vertex = 0; vertex < 3; ++vertex) positions[vertex * 3] += 10;
+            }
+            CKBackendDraw pooledDraw = draw;
+            pooledDraw.VertexCount = vertexCount;
+            pooledDraw.TransientVertices = &pooledVertices;
+            pooledDraw.Stream1Transient = &pooledUv;
+            pooledDraw.TransientIndices = &pooledIndex;
+            pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
+            pass.ClearColor = 0xff223344;
+            GeometryCapture capture;
+            capture.Color = visible ? 0xffffffff : pass.ClearColor;
+            if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&pooledDraw) != CK_OK ||
+                backend.ReadTexture(output, 0, &read, &capture.Ticket) != CK_OK) return false;
+            geometryCaptures.push_back(std::move(capture));
+        }
+        if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+    }
+    for (const auto &capture : geometryCaptures)
+        if (!CheckReadback(backend, capture.Ticket, std::vector<CKDWORD>(16, capture.Color), 0,
+                           "fence-retired transient batch")) return false;
+    std::puts("SDL_gpu transient reuse: 36 ordered batches across 12 submissions passed");
 
     pass.ClearFlags = 0;
     if (backend.BeginPass(&pass) != CK_OK || !rejected(draw, "previous frame before reallocation")) return false;

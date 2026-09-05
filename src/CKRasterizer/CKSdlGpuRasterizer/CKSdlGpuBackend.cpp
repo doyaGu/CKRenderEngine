@@ -170,7 +170,18 @@ void CKSdlGpuDevice::Collect()
         ticket->Complete = TRUE;
         it = Readbacks.erase(it);
     }
-    while (!Submissions.empty() && SDL_QueryGPUFence(Device, Submissions.front().get())) Submissions.pop_front();
+    while (!Submissions.empty() && SDL_QueryGPUFence(Device, Submissions.front().Fence.get())) {
+        for (auto &page : Submissions.front().Geometry) {
+            // Bound idle retention after unusually large frames. Active pages
+            // remain owned by their submission irrespective of this cache cap.
+            const uint64_t bytes = uint64_t(page->Capacity) * 2;
+            if (bytes <= 16u * 1024u * 1024u - FreeGeometryBytes) {
+                FreeGeometryBytes += size_t(bytes);
+                FreeGeometry.push_back(std::move(page));
+            }
+        }
+        Submissions.pop_front();
+    }
 }
 
 void CKSdlGpuBackend::Shutdown()
@@ -189,6 +200,8 @@ void CKSdlGpuBackend::Shutdown()
         ticket->Transfer.reset(); ticket->Fence.reset();
     }
     m->Readbacks.clear(); m->Submissions.clear();
+    m->PendingGeometry.clear(); m->FreeGeometry.clear(); m->FreeGeometryBytes = 0;
+    m->BatchVertices.clear(); m->BatchIndices.clear();
     m->Bindings = {};
     m->Samplers.clear();
     m->ClearProgram.reset(); m->VolumeMipProgram.reset();
