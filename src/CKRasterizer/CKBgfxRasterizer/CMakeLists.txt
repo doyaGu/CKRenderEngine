@@ -1,6 +1,7 @@
 # Native device implementation. It consumes generic commands and owns no FFP catalog.
 set(CKBGFX_BACKEND_SOURCES
         CKBgfxBackend.cpp
+        CKBgfxClear.cpp
         CKBgfxCallback.cpp
         CKBgfxConfig.cpp
         CKBgfxDrawMapTrace.cpp

@@ -162,6 +162,13 @@ private:
     CKBOOL IsReady() const { return m_BgfxInitialized && m_Created && IsApiThread() ? TRUE : FALSE; }
     void LatchFatalError(CKERROR Error);
     void ReleaseBgfx();
+    CKERROR PrepareRectClear();
+    void EncodeRectClear(bgfx::ViewId View, const CKBackendPassDesc &Desc);
+    void ReleaseRectClear();
+    bgfx::ProgramHandle m_RectClearProgram = BGFX_INVALID_HANDLE;
+    bgfx::VertexBufferHandle m_RectClearVertices = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle m_RectClearColor = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle m_RectClearDepth = BGFX_INVALID_HANDLE;
     CKRECT WindowPixelRect(const CKRECT &rect) const;
     CKERROR BuildFrameBufferAttachments(const CKBackendRenderTargetDesc *Desc, bgfx::Attachment *Attachments,
                                         CKDWORD Capacity, CKDWORD &AttachmentCount);

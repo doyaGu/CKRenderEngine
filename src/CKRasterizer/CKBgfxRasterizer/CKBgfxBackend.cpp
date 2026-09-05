@@ -938,6 +938,7 @@ void CKBgfxBackend::ReleaseBgfx()
     memset(m_Slots, 0, sizeof(m_Slots));
     m_Resources->DestroyAll();
     m_DefaultTextures.clear();
+    ReleaseRectClear();
     for (auto &ticket : m_Readbacks) {
         if (bgfx::isValid(ticket->Snapshot)) bgfx::destroy(ticket->Snapshot);
         ticket->Snapshot = BGFX_INVALID_HANDLE;
@@ -2683,15 +2684,30 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
         Desc->ClearStencil > 0xff || !(Desc->ClearZ >= 0.0f && Desc->ClearZ <= 1.0f))
         return CKERR_INVALIDPARAMETER;
     bgfx::FrameBufferHandle frameBuffer = BGFX_INVALID_HANDLE;
+    CKDWORD attachmentWidth = m_DrawableWidth;
+    CKDWORD attachmentHeight = m_DrawableHeight;
     if (Desc->RenderTarget != 0) {
         CKBgfxFrameBufferRecord *rec = GetFrameBuffer(Desc->RenderTarget);
         if (!rec)
             return CKERR_INVALIDPARAMETER;
         frameBuffer = rec->Handle;
+        const CKBgfxTextureRecord *color = GetTexture(rec->Desc.ColorTexture);
+        if (!color) return CKERR_INVALIDPARAMETER;
+        attachmentWidth = (std::max)(CKDWORD(1), CKDWORD(color->Width >> rec->Desc.ColorMip));
+        attachmentHeight = (std::max)(CKDWORD(1), CKDWORD(color->Height >> rec->Desc.ColorMip));
     }
 
     if (m_NextView >= m_CapsDesc.MaxRenderViews)
         return CKERR_OUTOFMEMORY;
+    // D3D11's native partial clear uses an internal draw. Keep independent
+    // attachment write masks under our control without patching bgfx.
+    const bool drawClear = m_RendererType == bgfx::RendererType::Direct3D11 && Desc->ClearFlags &&
+        (rect.left != 0 || rect.top != 0 || CKDWORD(rect.right) != attachmentWidth ||
+         CKDWORD(rect.bottom) != attachmentHeight);
+    if (drawClear) {
+        const CKERROR prepared = PrepareRectClear();
+        if (prepared != CK_OK) return prepared;
+    }
     const bgfx::ViewId view = (bgfx::ViewId)m_NextView++;
     const CKDWORD clearFlags = Desc->ClearFlags;
     m_FrameInProgress = TRUE;
@@ -2710,8 +2726,9 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
     const CKDWORD r = (Desc->ClearColor >> 16) & 0xFF;
     const CKDWORD g = (Desc->ClearColor >> 8) & 0xFF;
     const CKDWORD b = (Desc->ClearColor >> 0) & 0xFF;
-    bgfx::setViewClear((bgfx::ViewId)view, bgfxClearFlags, (r << 24) | (g << 16) | (b << 8) | a,
+    bgfx::setViewClear((bgfx::ViewId)view, drawClear ? BGFX_CLEAR_NONE : bgfxClearFlags, (r << 24) | (g << 16) | (b << 8) | a,
                        Desc->ClearZ, (uint8_t)Desc->ClearStencil);
+    if (drawClear) EncodeRectClear(view, *Desc);
     if ((m_DebugFlags & CKRST_DEBUG_DRAWMAP) != 0 && Desc->Name) {
         bgfx::setViewName((bgfx::ViewId)view, Desc->Name);
         CKBgfxCopyDebugText(m_DebugViewName[view], sizeof(m_DebugViewName[view]), (CKSTRING)Desc->Name);
