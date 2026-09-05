@@ -90,6 +90,12 @@ For offline enabled builds, prepopulate CMake's FetchContent cache or provide it
 `FETCHCONTENT_SOURCE_DIR_CKRE_BGFX_CMAKE`, `FETCHCONTENT_SOURCE_DIR_CKRE_BGFX`,
 `FETCHCONTENT_SOURCE_DIR_CKRE_BX` and `FETCHCONTENT_SOURCE_DIR_CKRE_BIMG` overrides.
 
+Shader tool selection distinguishes the build host from the target OS and
+architecture. A cross-compiled shaderc is not assumed executable on the host;
+the host build uses the host executable suffix. macOS universal targets are
+checked for a native host slice; Rosetta or other emulators are not assumed.
+Set `CKRE_SHADERC_EXECUTABLE` to supply a compatible host tool explicitly.
+
 The adapter owns the D3D11 rectangular-clear program and preserves independent
 color/depth/stencil write masks through public bgfx APIs. Full attachment clears
 retain the native fast path. Its offline shader generator takes explicit
@@ -103,6 +109,9 @@ invokes installation. Cleanup removes only known provider binaries inside an
 isolated build prefix, preserves configurations and other plugins, and refuses
 to modify stale binaries in external prefixes. Use a fresh external prefix or
 remove the reported stale plugin. `RasterizerInstallSelection` tests these rules.
+Library naming is shared by cleanup and validation, including MinGW `lib*.dll`,
+ELF `.so` and Mach-O `.dylib` names. Windows prefix comparisons ignore case while
+preserving resolved-path containment checks.
 
 ## Versioning
 
