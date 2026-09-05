@@ -1641,6 +1641,10 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
     case VXEFFECT_TGCUBEMAP_REFLECT:
         generation = CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR;
         transformFlags = CKRST_TTF_COUNT3;
+        // Cube faces are in world space. CKDX8Rasterizer receives inverse
+        // view rotation here, with translation removed for a direction.
+        Vx3DInverseMatrix(texMatrix, dev->GetViewTransformationMatrix());
+        texMatrix[3][0] = texMatrix[3][1] = texMatrix[3][2] = 0.0f;
         break;
     case VXEFFECT_TGCUBEMAP_NORMALS:
         generation = CKRST_TEXGEN_CAMERASPACENORMAL;
@@ -1678,7 +1682,7 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
     }
 
     CKRasterizerContext *rst = dev->m_RasterizerContext;
-    if (texGen == VXEFFECT_TGREFLECT || texGen == VXEFFECT_TGCHROME) {
+    if (texGen == VXEFFECT_TGREFLECT || texGen == VXEFFECT_TGCHROME || texGen == VXEFFECT_TGCUBEMAP_REFLECT) {
         rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), texMatrix);
     }
     if (texGen == VXEFFECT_TGTRANSFORM && refEntity) {

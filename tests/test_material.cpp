@@ -10,6 +10,7 @@
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKMaterial.h"
+#include "RCKMesh.h"
 #include "RCKTexture.h"
 #include "CKTranslatedRasterizerInternal.h"
 #include "FFPRecordingHarness.h"
@@ -92,7 +93,7 @@ VX_EFFECTCALLBACK_RETVAL TextureMatrixEffectCallback(CKRenderContext *context,
                                                      void *) {
     RCKRenderContext *renderContext = static_cast<RCKRenderContext *>(context);
     VxMatrix matrix;
-    matrix.Identity();
+    matrix.SetIdentity();
     matrix[3][0] = 3.25f;
     renderContext->SetTextureMatrix(matrix, stage);
     renderContext->m_RasterizerContext->SetTextureStageState(
@@ -204,6 +205,48 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
     CKDWORD bound = 0xFFFFFFFFu;
     TestCheck(world.renderContext->m_RasterizerContext->GetTexture(1, &bound) && bound == 0,
               "failed secondary texture upload must not leave the stage bound");
+}
+
+void MeshAdditionalPassPreservesMonoPassChannels() {
+    MaterialTestWorld world;
+    RCKMaterial base(world.context, "Base"), lightmap(world.context, "Lightmap"), glow(world.context, "Glow");
+    RCKTexture baseTexture(world.context, "BaseTexture"), lightmapTexture(world.context, "LightmapTexture"), glowTexture(world.context, "GlowTexture");
+    RCKMaterial *materials[] = {&base, &lightmap, &glow};
+    RCKTexture *textures[] = {&baseTexture, &lightmapTexture, &glowTexture};
+    for (int i = 0; i < 3; ++i) {
+        TestCheck(textures[i]->Create(2, 2, 32, 0), "channel texture creation failed");
+        FillTextureSlot(*textures[i], 0, 0xFF808080u);
+        materials[i]->SetTexture(0, textures[i]);
+    }
+    RCKMesh mesh(world.context, "MixedChannels");
+    TestCheck(mesh.SetVertexCount(3) && mesh.SetFaceCount(1), "mesh creation failed");
+    VxVector positions[] = {VxVector(-0.5f, -0.5f, 0.5f), VxVector(0.5f, -0.5f, 0.5f), VxVector(0.0f, 0.5f, 0.5f)};
+    VxVector normal(0, 0, -1);
+    for (int i = 0; i < 3; ++i) {
+        mesh.SetVertexPosition(i, &positions[i]);
+        mesh.SetVertexNormal(i, &normal);
+    }
+    mesh.SetFaceVertexIndex(0, 0, 1, 2);
+    mesh.SetFaceMaterial(0, &base);
+    const int modulate = mesh.AddChannel(&lightmap, TRUE);
+    const int additive = mesh.AddChannel(&glow, TRUE);
+    mesh.SetChannelSourceBlend(modulate, VXBLEND_ZERO);
+    mesh.SetChannelDestBlend(modulate, VXBLEND_SRCCOLOR);
+    mesh.SetChannelSourceBlend(additive, VXBLEND_ONE);
+    mesh.SetChannelDestBlend(additive, VXBLEND_ONE);
+    mesh.SetFlags(mesh.GetFlags() | VXMESH_RENDERCHANNELS);
+    TestCheck(world.translated.Context->BeginScene(), "BeginScene failed");
+    TestCheck(mesh.DefaultRender(world.renderContext, nullptr), "mesh draw failed");
+    TestCheck(world.rasterizer->Log.DrawCount == 2, "base and additive must each draw");
+    int lightmapDraws = 0;
+    for (const auto &binding : world.rasterizer->Log.TextureBindings)
+        if (binding.Stage == 1 && binding.Texture)
+            ++lightmapDraws;
+    TestCheck(lightmapDraws == 2, "DX8 keeps the mono-pass lightmap active during the additional channel draw");
+    CKDWORD texture = 0xFFFFFFFFu;
+    world.translated.Context->GetTexture(1, &texture);
+    TestCheck(texture == 0, "mesh completion must retire its additional stages");
+    world.translated.Context->EndScene();
 }
 
 void AdditionalTexturesSaveWithoutEffect() {
@@ -382,6 +425,28 @@ void CubeTexGenPreservesThreeCoordinates() {
               "planar TexGen remains two-dimensional");
 }
 
+void CubeReflectionRemovesCameraRotation() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "CubeReflection");
+    VxMatrix view;
+    view.SetIdentity();
+    view[1][1] = 0.8f; view[1][2] = -0.6f;
+    view[2][1] = 0.6f; view[2][2] = 0.8f;
+    view[3][0] = -100.0f; view[3][2] = 10.0f;
+    world.renderContext->SetViewTransformationMatrix(view);
+    TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGCUBEMAP_REFLECT, nullptr, 0) != 0,
+              "cube reflection setup succeeds");
+    VxMatrix texture;
+    TestCheck(world.renderContext->m_RasterizerContext->GetTransformMatrix(VXMATRIX_TEXTURE0, texture),
+              "cube reflection installs a texture matrix");
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col)
+            TestCheck(fabsf(texture[row][col] - view[col][row]) < 0.00001f,
+                      "cube reflection removes the camera rotation as on CKDX8Rasterizer");
+    TestCheck(texture[3][0] == 0 && texture[3][1] == 0 && texture[3][2] == 0,
+              "reflection directions must not include camera translation");
+}
+
 void ZWriteChangesInvalidateTransparencyClassification() {
     CKContext context(nullptr, 0, 0);
     RCKMaterial material(&context, "ZWriteTransparency");
@@ -404,6 +469,7 @@ int main() {
     TestCheck(CKStartUp() == CK_OK, "CKStartUp failed");
     CKCLASSREGISTERCID(RCKMaterial, CKCID_BEOBJECT);
     CKCLASSREGISTERCID(RCKTexture, CKCID_BEOBJECT);
+    CKCLASSREGISTERCID(RCKMesh, CKCID_BEOBJECT);
     CKCLASSREGISTERCID(RCKRenderContext, CKCID_OBJECT);
     CKBuildClassHierarchyTable();
 
@@ -416,6 +482,7 @@ int main() {
               &SetAsCurrentPropagatesTextureUploadFailure);
     tests.Run("Channel texture binding preserves texture flags",
               &ChannelTextureBindingPreservesTextureFlags);
+    tests.Run("Mesh additional pass preserves mono-pass channels", &MeshAdditionalPassPreservesMonoPassChannels);
     tests.Run("Multi-texture effect propagates secondary upload failure",
               &MultiTextureEffectPropagatesSecondaryUploadFailure);
     tests.Run("Additional textures save without effect",
@@ -432,6 +499,7 @@ int main() {
               &CustomEffectTextureMatrixSurvivesMaterialSetup);
     tests.Run("Cubemap TexGen preserves three coordinates",
               &CubeTexGenPreservesThreeCoordinates);
+    tests.Run("Cube reflection removes camera rotation", &CubeReflectionRemovesCameraRotation);
     tests.Run("ZWrite changes invalidate transparency classification",
               &ZWriteChangesInvalidateTransparencyClassification);
 

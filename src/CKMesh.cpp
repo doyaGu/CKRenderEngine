@@ -4809,6 +4809,11 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         CKBOOL useLighting = (m_Flags & VXMESH_PRELITMODE) == 0 && (channelFlags & VXCHANNEL_NOTLIT) == 0;
 
         mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
+        // DX8 keeps the mesh's mono-pass stages active for additional channel
+        // draws. SetAsCurrent resets the material stages, so restore the mesh
+        // bindings explicitly. The channel draw still supplies only UV set 0;
+        // missing sets use the rasterizer's normal zero-coordinate default.
+        BindMonoPassTextureChannels(dev);
         dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
 
         // Handle unlit channel - clear color pointers
