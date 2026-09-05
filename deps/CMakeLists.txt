@@ -1,5 +1,10 @@
 # RenderEngine third-party dependencies
 
+if (NOT CKRE_BUILD_BGFX_RASTERIZER AND NOT CKRE_GENERATE_SHADERS)
+    message(STATUS "[CKRenderEngine] bgfx dependency disabled")
+    return()
+endif ()
+
 # bgfx is the default rasterizer backend. Build target-architecture bgfx tools
 # only when CK2_3D can run them on this host. Cross builds use CKREHostShaderc.
 set(BGFX_BUILD_TOOLS ${CKRE_BUILD_TARGET_SHADERC} CACHE BOOL "" FORCE)

@@ -70,6 +70,7 @@ public:
 
     // Conventions the backends of this driver report (nominal: nothing is
     // rendered). Tests set them before creating a backend.
+    CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     CKBOOL OriginBottomLeft;
     CKBOOL HomogeneousDepth;

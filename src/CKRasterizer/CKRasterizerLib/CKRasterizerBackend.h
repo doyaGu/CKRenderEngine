@@ -54,13 +54,15 @@ struct CKBackendCaps {
     CKDWORD MaxTextureBindings;    // sampler slots a draw may use (>= CKFF_SAMPLER_SLOT_COUNT + 1 for the present sampler)
     CKDWORD MaxPasses;             // passes per frame (bgfx: views)
     CKDWORD MaxMSAASamples;        // 0 / 1 = no multisampled targets
+    CK_SHADER_FORMAT ShaderFormat; // exact payload accepted by CreateShader
     CK_SHADER_PROFILE ShaderProfile;
     CKBOOL OriginBottomLeft;       // framebuffer writes start at the bottom row (OpenGL)
     CKBOOL HomogeneousDepth;       // clip z in [-1, 1] (OpenGL) instead of [0, 1]
 
     CKBackendCaps()
         : Features(0), MaxTextureSize(0), MaxTextureBindings(0), MaxPasses(0), MaxMSAASamples(0),
-          ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN), OriginBottomLeft(FALSE), HomogeneousDepth(FALSE) {}
+          ShaderFormat(CKRST_SHADER_FORMAT_UNKNOWN), ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN),
+          OriginBottomLeft(FALSE), HomogeneousDepth(FALSE) {}
 };
 
 struct CKBackendStats {

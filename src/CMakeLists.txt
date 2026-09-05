@@ -145,11 +145,15 @@ if (CKRE_ENABLE_RENDER_STATS)
     list(APPEND CKRE_SOURCES CKRenderPerfStats.cpp)
 endif ()
 
-# Add the bgfx rasterizer plugin targets when requested.
+# Add the translation core and the requested concrete backend targets.
 if (CKRE_BUILD_BGFX_RASTERIZER AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
     add_subdirectory(CKRasterizer)
 elseif (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC)
     add_subdirectory(CKRasterizer/CKRasterizerLib)
+endif ()
+
+if (CKRE_BUILD_SDL_GPU_SUPPORT AND (CKRE_BUILD_SHARED OR CKRE_BUILD_STATIC))
+    add_subdirectory(CKRasterizer/CKSdlGpuRasterizer)
 endif ()
 
 # Function to configure common target settings
@@ -206,6 +210,7 @@ set(CKRE_TARGETS)
 
 if (CKRE_BUILD_SHARED)
     add_library(CK2_3D SHARED ${CKRE_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS} ${CKRE_CONFIG_FILES})
+    target_compile_definitions(CK2_3D PRIVATE CKRE_DYNAMIC_RENDER_ENGINE=1)
     ckre_configure_target(CK2_3D)
 
     # Shared library specific settings
@@ -231,7 +236,13 @@ if (CKRE_BUILD_STATIC)
     list(FILTER CKRE_STATIC_SOURCES EXCLUDE REGEX "\\.rc$")
 
     add_library(CK2_3DStatic STATIC ${CKRE_STATIC_SOURCES} ${CKRE_PUBLIC_HEADERS} ${CKRE_PRIVATE_HEADERS})
+    target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_RENDER_ENGINE=1)
     ckre_configure_target(CK2_3DStatic)
+
+    if (TARGET CKBgfxRasterizerStatic)
+        target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_BGFX_RASTERIZER=1)
+        target_link_libraries(CK2_3DStatic PRIVATE $<BUILD_INTERFACE:CKBgfxRasterizerStatic>)
+    endif ()
 
     # Static library specific settings
     set_target_properties(CK2_3DStatic PROPERTIES

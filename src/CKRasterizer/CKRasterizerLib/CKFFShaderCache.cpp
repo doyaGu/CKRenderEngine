@@ -57,6 +57,7 @@ struct CKFFShaderBlob {
 };
 
 struct CKFFShaderBlobSet {
+    CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     const char *Name;
     CKFFShaderBlob VS[CKFF_PROGRAM_VARIANT_COUNT]; // indexed by CKFFProgramVariant
@@ -64,19 +65,19 @@ struct CKFFShaderBlobSet {
 };
 
 #define CKFF_BLOB(name) {name, sizeof(name)}
-#define CKFF_BLOB_SET(profile, backend) \
-    {profile, #backend, \
+#define CKFF_BLOB_SET(format, profile, backend) \
+    {format, profile, #backend, \
      {CKFF_BLOB(s_##backend##_vs_ff_3d), CKFF_BLOB(s_##backend##_vs_ff_3d_clip), \
       CKFF_BLOB(s_##backend##_vs_ff_positiont), CKFF_BLOB(s_##backend##_vs_ff_positiont_clip)}, \
      CKFF_BLOB(s_##backend##_fs_ff_stage)}
 
 static const CKFFShaderBlobSet g_ShaderBlobSets[] = {
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_DX11, dx11),
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_DX12, dx12),
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_SPIRV, spirv),
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_GLSL, glsl),
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_ESSL, essl),
-    CKFF_BLOB_SET(CKRST_SHADER_PROFILE_MSL, metal),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11, dx11),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX12, dx12),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_SPIRV, spirv),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_GLSL, glsl),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_ESSL, essl),
+    CKFF_BLOB_SET(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_MSL, metal),
 };
 
 #undef CKFF_BLOB_SET
@@ -86,12 +87,14 @@ static const char *const g_ProgramVariantNames[CKFF_PROGRAM_VARIANT_COUNT] = {
     "3d", "3d_clip", "positiont", "positiont_clip"
 };
 
-static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_PROFILE profile)
+static const CKFFShaderBlobSet *FindShaderBlobSet(CK_SHADER_FORMAT format,
+                                                   CK_SHADER_PROFILE profile)
 {
-    if (profile == CKRST_SHADER_PROFILE_UNKNOWN)
+    if (format == CKRST_SHADER_FORMAT_UNKNOWN ||
+        profile == CKRST_SHADER_PROFILE_UNKNOWN)
         return nullptr;
     for (const CKFFShaderBlobSet &set : g_ShaderBlobSets) {
-        if (set.Profile == profile)
+        if (set.Format == format && set.Profile == profile)
             return &set;
     }
     return nullptr;
@@ -143,16 +146,20 @@ bool CKFFShaderCache::ResolveShaderTarget() {
 
     const CKBackendCaps &caps = m_Backend->GetCaps();
     m_Target = CKRasterizerTargetDesc();
+    m_Target.ShaderFormat = caps.ShaderFormat;
     m_Target.ShaderProfile = caps.ShaderProfile;
     m_Target.HomogeneousDepth = caps.HomogeneousDepth;
     m_Target.OriginBottomLeft = caps.OriginBottomLeft;
-    if (m_Target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN) {
-        CK_LOG_FMT("ShaderCache", "backend reports no shader profile");
+    if (m_Target.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN ||
+        m_Target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN) {
+        CK_LOG_FMT("ShaderCache", "backend reports no shader target");
         return false;
     }
-    const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.ShaderProfile);
+    const CKFFShaderBlobSet *set = FindShaderBlobSet(m_Target.ShaderFormat,
+                                                      m_Target.ShaderProfile);
     if (!set) {
-        CK_LOG_FMT("ShaderCache", "No FFP shader set for profile=0x%08X",
+        CK_LOG_FMT("ShaderCache", "No FFP shader set for format=0x%08X profile=0x%08X",
+                   m_Target.ShaderFormat,
                    m_Target.ShaderProfile);
         return false;
     }
@@ -218,7 +225,7 @@ CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
     if (!m_PixelShader) {
         CKShaderDesc fsDesc = {};
         fsDesc.Stage = CKRST_SHADER_PIXEL;
-        fsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+        fsDesc.Format = m_Target.ShaderFormat;
         fsDesc.Profile = m_Target.ShaderProfile;
         fsDesc.Code = set->FS.Data;
         fsDesc.CodeSize = set->FS.Size;
@@ -233,7 +240,7 @@ CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
     if (!m_VertexShaders[variant]) {
         CKShaderDesc vsDesc = {};
         vsDesc.Stage = CKRST_SHADER_VERTEX;
-        vsDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+        vsDesc.Format = m_Target.ShaderFormat;
         vsDesc.Profile = m_Target.ShaderProfile;
         vsDesc.Code = vs.Data;
         vsDesc.CodeSize = vs.Size;

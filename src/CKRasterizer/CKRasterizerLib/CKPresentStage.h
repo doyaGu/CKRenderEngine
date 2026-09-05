@@ -90,7 +90,8 @@ private:
     CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target for readbacks
     CKDWORD m_ReadbackWidth;
     CKDWORD m_ReadbackHeight;
-    CKDWORD m_VertexShaderProfile;
+    CK_SHADER_FORMAT m_ShaderFormat;
+    CK_SHADER_PROFILE m_ShaderProfile;
 };
 
 #endif // CKPRESENTSTAGE_H

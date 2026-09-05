@@ -47,7 +47,7 @@
 #include "RCKSpriteText.h"
 #include "CKRenderFrameCostStats.h"
 
-#ifdef CK_LIB
+#if defined(CKRE_STATIC_RENDER_ENGINE)
 #define CKGetPluginInfo CKGet_CK2_3D_PluginInfo
 #endif
 
@@ -128,19 +128,41 @@ void RegisterRasterizer(const char *dll) {
     g_RasterizersInfo.PushBack(info);
 }
 
+static void RegisterStaticRasterizer(CKRST_GETINFO getInfoFunc, const char *name) {
+    if (!getInfoFunc || !name)
+        return;
+
+    CKRasterizerInfo info;
+    getInfoFunc(&info);
+    if (info.InterfaceRevision != CKRST_INTERFACE_REVISION ||
+        !info.StartFct || !info.CloseFct) {
+        return;
+    }
+
+    info.DllInstance = nullptr;
+    info.DllName = name;
+    g_RasterizersInfo.PushBack(info);
+}
+
+static void RegisterNullRasterizer() {
+    CKRasterizerInfo info;
+    info.StartFct = CKTranslatedNullRasterizerStart;
+    info.CloseFct = CKTranslatedNullRasterizerClose;
+    info.DllInstance = nullptr;
+    info.DllName = "";
+    info.Desc = "NULL Rasterizer";
+    info.InterfaceRevision = CKRST_INTERFACE_REVISION;
+    g_RasterizersInfo.PushBack(info);
+}
+
 void EnumerateRasterizers() {
     if (!g_EnumerationDone) {
-#ifdef CK_LIB
+#if defined(CKRE_STATIC_BGFX_RASTERIZER)
         extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
-        CKRasterizerInfo info;
-        CKBgfxRasterizerGetInfo(&info);
-        if (info.InterfaceRevision == CKRST_INTERFACE_REVISION &&
-            info.StartFct && info.CloseFct) {
-            info.DllInstance = nullptr;
-            info.DllName = "CKBgfxRasterizer";
-            g_RasterizersInfo.PushBack(info);
-        }
-#else
+        RegisterStaticRasterizer(CKBgfxRasterizerGetInfo, "CKBgfxRasterizer");
+#endif
+
+#if defined(CKRE_DYNAMIC_RENDER_ENGINE)
         XString moduleName = CKRenderEngineModulePath();
         CKPathSplitter ps(moduleName.CStr());
 
@@ -154,18 +176,10 @@ void EnumerateRasterizers() {
             RegisterRasterizer(file);
             file = parser.GetNextFile();
         }
-
-        if (g_RasterizersInfo.Size() == 0) {
-            CKRasterizerInfo info;
-            info.StartFct = CKTranslatedNullRasterizerStart;
-            info.CloseFct = CKTranslatedNullRasterizerClose;
-            info.DllInstance = nullptr;
-            info.DllName = "";
-            info.Desc = "NULL Rasterizer";
-            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
-            g_RasterizersInfo.PushBack(info);
-        }
 #endif
+
+        if (g_RasterizersInfo.Size() == 0)
+            RegisterNullRasterizer();
 
         g_EnumerationDone = TRUE;
     }
@@ -258,7 +272,7 @@ void ReleaseRasterizers() {
     }
 }
 
-#if !defined(CK_LIB) && defined(_WIN32)
+#if defined(CKRE_DYNAMIC_RENDER_ENGINE) && defined(_WIN32)
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     switch (fdwReason) {
@@ -275,4 +289,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
     return TRUE;
 }
 
-#endif // !CK_LIB && _WIN32
+#endif // CKRE_DYNAMIC_RENDER_ENGINE && _WIN32

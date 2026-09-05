@@ -756,6 +756,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     }
     const bgfx::Caps *caps = bgfx::getCaps();
     m_Caps = CKBackendCaps();
+    m_Caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
     m_Caps.ShaderProfile = CKBgfxShaderProfile(actualRenderer);
     m_Caps.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
     m_Caps.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
@@ -1585,7 +1586,7 @@ CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
                    Desc ? Desc->CodeSize : 0u);
         return CKERR_INVALIDPARAMETER;
     }
-    if (Desc->Format != CKRST_SHADER_FORMAT_NATIVE ||
+    if (Desc->Format != CKRST_SHADER_FORMAT_BGFX ||
         Desc->Profile != m_Caps.ShaderProfile) {
         CKBgfxLogf("CreateShader",
                    "shader target mismatch shader=%u stage=%u descFormat=0x%08X descProfile=%s(0x%08X) targetFormat=0x%08X targetProfile=%s(0x%08X)",
@@ -1594,7 +1595,7 @@ CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
                    Desc->Format,
                    CKBgfxShaderProfileName(Desc->Profile),
                    Desc->Profile,
-                    CKRST_SHADER_FORMAT_NATIVE,
+                    CKRST_SHADER_FORMAT_BGFX,
                     CKBgfxShaderProfileName(m_Caps.ShaderProfile),
                     m_Caps.ShaderProfile);
         return CKERR_INVALIDPARAMETER;

@@ -9,7 +9,8 @@
 // ===========================================================================
 
 CKNullBackendDriver::CKNullBackendDriver()
-    : Profile(CKRST_SHADER_PROFILE_DX11), OriginBottomLeft(FALSE), HomogeneousDepth(FALSE)
+    : Format(CKRST_SHADER_FORMAT_BGFX), Profile(CKRST_SHADER_PROFILE_DX11),
+      OriginBottomLeft(FALSE), HomogeneousDepth(FALSE)
 {
     m_Desc = "NULL Rasterizer";
     m_Hardware = FALSE;
@@ -188,6 +189,7 @@ CKERROR CKNullBackend::Init(const CKBackendInitDesc *Desc)
     m_Caps.MaxTextureBindings = CKRST_BACKEND_SLOT_COUNT;
     m_Caps.MaxPasses = CKRST_MAX_PASSES;
     m_Caps.MaxMSAASamples = 16;
+    m_Caps.ShaderFormat = m_Driver ? m_Driver->Format : CKRST_SHADER_FORMAT_BGFX;
     m_Caps.ShaderProfile = m_Driver ? m_Driver->Profile : CKRST_SHADER_PROFILE_DX11;
     m_Caps.OriginBottomLeft = m_Driver ? m_Driver->OriginBottomLeft : FALSE;
     m_Caps.HomogeneousDepth = m_Driver ? m_Driver->HomogeneousDepth : FALSE;

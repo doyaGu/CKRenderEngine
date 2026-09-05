@@ -17,13 +17,15 @@
 struct CKRasterizerTargetDesc {
     CKDWORD Size;
     CKDWORD Version;
+    CK_SHADER_FORMAT ShaderFormat;
     CK_SHADER_PROFILE ShaderProfile;
     CKBOOL HomogeneousDepth;
     CKBOOL OriginBottomLeft;
 
     CKRasterizerTargetDesc()
         : Size(sizeof(CKRasterizerTargetDesc)),
-          Version(1),
+          Version(2),
+          ShaderFormat(CKRST_SHADER_FORMAT_UNKNOWN),
           ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN),
           HomogeneousDepth(FALSE),
           OriginBottomLeft(FALSE) {}
@@ -90,12 +92,23 @@ struct CKReadbackDesc {
 
 struct CKShaderDesc {
     CK_SHADER_STAGE Stage;
-    // Opaque precompiled shader blob for the selected rasterizer backend.
-    // Backend-specific payload selection happens above the rasterizer layer.
+    // The payload format is explicit: a shader profile alone does not say
+    // whether Code is a bgfx container or a raw SDL_gpu-compatible binary.
     CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     const CKBYTE *Code;
     CKDWORD CodeSize;
+    const char *EntryPoint;
+    CKDWORD SamplerCount;
+    CKDWORD StorageTextureCount;
+    CKDWORD StorageBufferCount;
+    CKDWORD UniformBufferCount;
+
+    CKShaderDesc()
+        : Stage(CKRST_SHADER_VERTEX), Format(CKRST_SHADER_FORMAT_UNKNOWN),
+          Profile(CKRST_SHADER_PROFILE_UNKNOWN), Code(NULL), CodeSize(0),
+          EntryPoint("main"), SamplerCount(0), StorageTextureCount(0),
+          StorageBufferCount(0), UniformBufferCount(0) {}
 };
 
 // ===========================================================================

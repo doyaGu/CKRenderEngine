@@ -43,6 +43,18 @@ void NullRasterizerSupportsHeadlessFFP()
               "Idle headless backends must be independently destroyable");
 }
 
+void MissingShaderPayloadFamilyFailsInitialization()
+{
+    FFPRecordingDriver driver(CKRST_SHADER_PROFILE_SPIRV, 0,
+                              CKRST_SHADER_FORMAT_SPIRV);
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(!ffp.Init(context.StartedBackend()),
+              "FFP must not pass bgfx containers to a raw SPIR-V backend");
+    TestCheck(context.CreatedShaderCount == 0,
+              "missing payload family fails before backend shader creation");
+}
+
 CKDWORD FloatStageState(float value) {
     union {
         float F;
@@ -3070,6 +3082,8 @@ int main() {
     TestFramework tests;
     tests.Run("Null rasterizer supports headless FFP",
               &NullRasterizerSupportsHeadlessFFP);
+    tests.Run("Missing shader payload family fails initialization",
+              &MissingShaderPayloadFamilyFailsInitialization);
     tests.Run("DrawVertexBuffer approximates stencil write masks",
               &DrawVertexBufferApproximatesStencilWriteMasks);
     tests.Run("DrawVertexBuffer submits representable stencil masks",

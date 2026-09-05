@@ -109,8 +109,11 @@ class FFPRecordingBackend;
 // framebuffer conventions the backends report.
 class FFPRecordingDriver : public CKNullBackendDriver {
 public:
-    explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11, CKDWORD flags = 0)
+    explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
+                                CKDWORD flags = 0,
+                                CK_SHADER_FORMAT format = CKRST_SHADER_FORMAT_BGFX)
     {
+        Format = format;
         Profile = profile;
         HomogeneousDepth = (flags & CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE) ? TRUE : FALSE;
         OriginBottomLeft = (flags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) ? TRUE : FALSE;

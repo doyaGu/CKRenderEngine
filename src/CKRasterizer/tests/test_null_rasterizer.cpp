@@ -86,6 +86,7 @@ int main()
         (caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) == 0 ||
         caps.MaxPasses != CKRST_MAX_PASSES ||
         caps.MaxTextureBindings != CKRST_BACKEND_SLOT_COUNT ||
+        caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
         caps.ShaderProfile != CKRST_SHADER_PROFILE_DX11 ||
         caps.OriginBottomLeft || caps.HomogeneousDepth)
         return Fail("caps");

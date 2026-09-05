@@ -56,7 +56,7 @@ CKDWORD MakeProgram(CKRasterizerBackend *b)
 {
     static const CKBYTE blob[4] = {1, 2, 3, 4};
     CKShaderDesc shader;
-    shader.Format = CKRST_SHADER_FORMAT_NATIVE;
+    shader.Format = b->GetCaps().ShaderFormat;
     shader.Profile = b->GetCaps().ShaderProfile;
     shader.Code = blob;
     shader.CodeSize = sizeof(blob);
@@ -73,10 +73,29 @@ void TestCapsAndTables()
 {
     Fixture f;
     const CKBackendCaps &caps = f.Backend->GetCaps();
+    TestCheck(caps.ShaderFormat == CKRST_SHADER_FORMAT_BGFX, "caps carry the shader payload format");
     TestCheck(caps.ShaderProfile == CKRST_SHADER_PROFILE_DX11, "caps carry the shader profile");
     TestCheck(caps.MaxTextureSize > 0, "caps carry the texture size limit");
     TestCheck((caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) != 0, "caps carry the device features");
     TestCheck(f.Backend->GetDeviceStatus() == CK_OK && f.Backend->IsIdle(), "idle after Init");
+
+    CKRasterizerTargetDesc targetDefaults;
+    TestCheck(targetDefaults.Size == sizeof(CKRasterizerTargetDesc) &&
+                  targetDefaults.Version == 2 &&
+                  targetDefaults.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN &&
+                  targetDefaults.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN,
+              "shader target descriptor version covers format and profile");
+
+    CKShaderDesc shaderDefaults;
+    TestCheck(shaderDefaults.Format == CKRST_SHADER_FORMAT_UNKNOWN &&
+                  shaderDefaults.Profile == CKRST_SHADER_PROFILE_UNKNOWN &&
+                  shaderDefaults.EntryPoint && strcmp(shaderDefaults.EntryPoint, "main") == 0,
+              "shader descriptor defaults are explicit");
+    TestCheck(shaderDefaults.SamplerCount == 0 &&
+                  shaderDefaults.StorageTextureCount == 0 &&
+                  shaderDefaults.StorageBufferCount == 0 &&
+                  shaderDefaults.UniformBufferCount == 0,
+              "shader resource layout defaults to empty");
 
     // The constant block table is the shader ABI.
     TestCheck(strcmp(CKBackendConstantBlockInfo(CKRST_BLOCK_MATRICES).Name, "u_ffMatrices") == 0 &&

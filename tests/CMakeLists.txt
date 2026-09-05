@@ -208,6 +208,12 @@ ckre_add_test(render_settings_tests
     test_render_settings.cpp
 )
 
+if (TARGET CKBgfxRasterizerStatic)
+    ckre_add_test(static_rasterizer_registration_tests
+        test_static_rasterizer_registration.cpp
+    )
+endif ()
+
 if (CKRE_ENABLE_FRAME_COST_STATS)
     ckre_add_test(render_frame_cost_stats_tests
         test_render_frame_cost_stats.cpp

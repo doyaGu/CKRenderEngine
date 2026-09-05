@@ -19,6 +19,7 @@
 namespace {
 
 struct CKPresentShaderBlobSet {
+    CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     const unsigned char *VS;
     unsigned int VSSize;
@@ -27,24 +28,25 @@ struct CKPresentShaderBlobSet {
 };
 
 const CKPresentShaderBlobSet g_PresentShaderBlobSets[] = {
-    {CKRST_SHADER_PROFILE_DX11, s_dx11_vs_postprocess, sizeof(s_dx11_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11, s_dx11_vs_postprocess, sizeof(s_dx11_vs_postprocess),
      s_dx11_fs_postprocess, sizeof(s_dx11_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_DX12, s_dx12_vs_postprocess, sizeof(s_dx12_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX12, s_dx12_vs_postprocess, sizeof(s_dx12_vs_postprocess),
      s_dx12_fs_postprocess, sizeof(s_dx12_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_SPIRV, s_spirv_vs_postprocess, sizeof(s_spirv_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_SPIRV, s_spirv_vs_postprocess, sizeof(s_spirv_vs_postprocess),
      s_spirv_fs_postprocess, sizeof(s_spirv_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_GLSL, s_glsl_vs_postprocess, sizeof(s_glsl_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_GLSL, s_glsl_vs_postprocess, sizeof(s_glsl_vs_postprocess),
      s_glsl_fs_postprocess, sizeof(s_glsl_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_ESSL, s_essl_vs_postprocess, sizeof(s_essl_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_ESSL, s_essl_vs_postprocess, sizeof(s_essl_vs_postprocess),
      s_essl_fs_postprocess, sizeof(s_essl_fs_postprocess)},
-    {CKRST_SHADER_PROFILE_MSL, s_metal_vs_postprocess, sizeof(s_metal_vs_postprocess),
+    {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_MSL, s_metal_vs_postprocess, sizeof(s_metal_vs_postprocess),
      s_metal_fs_postprocess, sizeof(s_metal_fs_postprocess)},
 };
 
-const CKPresentShaderBlobSet *FindPresentShaderBlobSet(CK_SHADER_PROFILE profile)
+const CKPresentShaderBlobSet *FindPresentShaderBlobSet(CK_SHADER_FORMAT format,
+                                                       CK_SHADER_PROFILE profile)
 {
     for (const CKPresentShaderBlobSet &set : g_PresentShaderBlobSets) {
-        if (set.Profile == profile)
+        if (set.Format == format && set.Profile == profile)
             return &set;
     }
     return nullptr;
@@ -88,7 +90,8 @@ float CKPresentStage::ClampSharpness(float sharpness)
 
 CKPresentStage::CKPresentStage()
     : m_Backend(nullptr), m_ReadbackTexture(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
-      m_VertexShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
+      m_ShaderFormat(CKRST_SHADER_FORMAT_UNKNOWN),
+      m_ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
 CKPresentStage::~CKPresentStage()
 {
@@ -239,9 +242,11 @@ CKBOOL CKPresentStage::EnsureResources()
     if (!m_Backend)
         return FALSE;
     const CKBackendCaps &caps = m_Backend->GetCaps();
-    if (caps.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
+    if (caps.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN ||
+        caps.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
         return FALSE;
-    if (m_VertexShaderProfile == caps.ShaderProfile &&
+    if (m_ShaderFormat == caps.ShaderFormat &&
+        m_ShaderProfile == caps.ShaderProfile &&
         m_Backend->IsObjectAlive(m_ResourceIds.Program, CKRST_OBJ_PROGRAM) &&
         m_Backend->IsObjectAlive(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER) &&
         m_Backend->IsObjectAlive(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER) &&
@@ -250,12 +255,13 @@ CKBOOL CKPresentStage::EnsureResources()
 
     DestroyResources();
 
-    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(caps.ShaderProfile);
+    const CKPresentShaderBlobSet *blobs = FindPresentShaderBlobSet(caps.ShaderFormat,
+                                                                   caps.ShaderProfile);
     if (!blobs)
         return FALSE;
 
     CKShaderDesc shaderDesc;
-    shaderDesc.Format = CKRST_SHADER_FORMAT_NATIVE;
+    shaderDesc.Format = caps.ShaderFormat;
     shaderDesc.Profile = caps.ShaderProfile;
 
     shaderDesc.Stage = CKRST_SHADER_VERTEX;
@@ -303,7 +309,8 @@ CKBOOL CKPresentStage::EnsureResources()
         return FALSE;
     }
 
-    m_VertexShaderProfile = caps.ShaderProfile;
+    m_ShaderFormat = caps.ShaderFormat;
+    m_ShaderProfile = caps.ShaderProfile;
     return TRUE;
 }
 
@@ -320,7 +327,8 @@ void CKPresentStage::DestroyResources()
             m_Backend->DestroyObject(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT);
     }
     m_ResourceIds = CKPresentResources();
-    m_VertexShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
+    m_ShaderFormat = CKRST_SHADER_FORMAT_UNKNOWN;
+    m_ShaderProfile = CKRST_SHADER_PROFILE_UNKNOWN;
 }
 
 CKERROR CKPresentStage::SubmitResolve(CKBOOL fxaa, float sharpness)
