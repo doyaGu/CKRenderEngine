@@ -96,12 +96,13 @@ retain the native fast path. Its offline shader generator takes explicit
 `--shaderc` and `--bgfx-source` paths; runtime does not invoke a compiler.
 Scene capture uses stb headers independently of bgfx/bimg.
 
-In Ballanced, rerun `stage` after changing providers. It removes disabled provider
-binaries left by a previous configuration inside the build tree, while preserving
-configuration files and other plugins. External install directories are not
-cleaned automatically; use a fresh prefix or remove the reported stale plugin.
-`StageLayout` rejects disabled provider binaries, including those left after a
-switch to static registration. The macOS stage already replaces its full snapshot.
+RenderEngine's standard `Runtime` installation owns configuration files, disabled
+provider cleanup and runtime layout verification. This also applies to standalone
+component installs and `cmake --install --prefix`. Ballanced's `stage` simply
+invokes installation. Cleanup removes only known provider binaries inside an
+isolated build prefix, preserves configurations and other plugins, and refuses
+to modify stale binaries in external prefixes. Use a fresh external prefix or
+remove the reported stale plugin. `RasterizerInstallSelection` tests these rules.
 
 ## Versioning
 
