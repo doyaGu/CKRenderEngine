@@ -5,6 +5,11 @@
 #include <string.h>
 #include <time.h>
 #include <vector>
+#include <algorithm>
+#include <fstream>
+#include <iomanip>
+#include <locale>
+#include <numeric>
 
 #include <SDL3/SDL.h>
 #ifdef _WIN32
@@ -13,6 +18,11 @@
 
 #include "CKAll.h"
 #include "CKPluginManager.h"
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+// The public v3 contract is shared by the saved baseline and current engine.
+// Original Virtools SDK rasterizers have another vtable and are not queried.
+#include "../../include/CKRasterizer.h"
+#endif
 
 namespace {
 
@@ -97,10 +107,16 @@ void CaptureApp::Fail(const std::string &message)
 bool CaptureApp::Boot(const CaptureOptions &options)
 {
     m_Options = options;
+    m_Cancelled = false;
     if (!InitWindow(options))
         return false;
+    const bool profile = !options.ProfileJson.empty();
+    if (profile) m_ProfileTickMilliseconds = 1000.0 / double(SDL_GetPerformanceFrequency());
+    const Uint64 start = profile ? SDL_GetPerformanceCounter() : 0;
     if (!InitEngine(options))
         return false;
+    if (profile)
+        m_ProfileEngineInitMilliseconds = double(SDL_GetPerformanceCounter() - start) * m_ProfileTickMilliseconds;
     return true;
 }
 
@@ -121,6 +137,10 @@ bool CaptureApp::InitWindow(const CaptureOptions &options)
         return false;
     }
     SDL_SetWindowPosition(m_Window, 32, 32);
+    if (!options.HiddenWindow) {
+        SDL_ShowWindow(m_Window);
+        SDL_RaiseWindow(m_Window);
+    }
     m_WindowHandle = m_Window;
 
     if (options.NativeWindowHandle) {
@@ -218,6 +238,16 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     }
     m_Context->SetVirtoolsVersion(CK_VIRTOOLS_DEV, 0x2000043);
     m_Context->SetInterfaceMode(FALSE, LogRedirect, NULL);
+    if (!options.ProfileJson.empty()) {
+        // Render flags are resolved through CKTimeManager, whose default is
+        // synchronized. Use the existing public control in profiling only.
+        auto *time = m_Context->GetTimeManager();
+        if (!time) {
+            Fail("profiling needs CKTimeManager to disable frame synchronization");
+            return false;
+        }
+        time->ChangeLimitOptions(CK_FRAMERATE_FREE);
+    }
 
     m_RenderManager = m_Context->GetRenderManager();
     if (!m_RenderManager) {
@@ -229,13 +259,28 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
         Fail("render manager reports no drivers");
         return false;
     }
-    if (options.Driver < 0 || options.Driver >= m_DriverCount) {
+    int selectedDriver = options.Driver;
+    if (!options.Rasterizer.empty()) {
+        selectedDriver = -1;
+        const char *wanted = options.Rasterizer == "sdlgpu" ? "SDL_gpu Driver" :
+            (options.Rasterizer == "bgfx" ? "bgfx Driver" : "NULL Rasterizer");
+        for (int i = 0; i < m_DriverCount; ++i) {
+            VxDriverDesc *candidate = m_RenderManager->GetRenderDriverDescription(i);
+            if (candidate && EqualsNoCase(candidate->DriverName, wanted)) { selectedDriver = i; break; }
+        }
+        if (selectedDriver < 0) {
+            Fail("requested rasterizer is unavailable: " + options.Rasterizer);
+            return false;
+        }
+    }
+    m_Options.Driver = selectedDriver;
+    if (selectedDriver < 0 || selectedDriver >= m_DriverCount) {
         char buf[96];
-        snprintf(buf, sizeof(buf), "driver %d out of range (0..%d)", options.Driver, m_DriverCount - 1);
+        snprintf(buf, sizeof(buf), "driver %d out of range (0..%d)", selectedDriver, m_DriverCount - 1);
         Fail(buf);
         return false;
     }
-    VxDriverDesc *desc = m_RenderManager->GetRenderDriverDescription(options.Driver);
+    VxDriverDesc *desc = m_RenderManager->GetRenderDriverDescription(selectedDriver);
     if (desc) {
         m_DriverName = desc->DriverName;
         if (options.Verbose) {
@@ -248,7 +293,10 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     }
 
     CKRECT rect = {0, 0, options.Width, options.Height};
-    m_RenderContext = m_RenderManager->CreateRenderContext(m_WindowHandle, options.Driver, &rect, FALSE, 32, -1, -1, 0);
+    const Uint64 contextStart = options.ProfileJson.empty() ? 0 : SDL_GetPerformanceCounter();
+    m_RenderContext = m_RenderManager->CreateRenderContext(m_WindowHandle, selectedDriver, &rect, FALSE, 32, -1, -1, 0);
+    if (!options.ProfileJson.empty())
+        m_ProfileContextCreateMilliseconds = double(SDL_GetPerformanceCounter() - contextStart) * m_ProfileTickMilliseconds;
     if (!m_RenderContext) {
         Fail("CreateRenderContext failed");
         return false;
@@ -269,7 +317,7 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     level->AddRenderContext(m_RenderContext, TRUE);
     if (options.Verbose)
         printf("render context %dx%d on driver %d (%s)\n", m_RenderContext->GetWidth(),
-               m_RenderContext->GetHeight(), options.Driver, m_DriverName.c_str());
+               m_RenderContext->GetHeight(), selectedDriver, m_DriverName.c_str());
     return true;
 }
 
@@ -349,6 +397,7 @@ bool CaptureApp::WriteCapsJson(const std::string &path)
 
 bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
 {
+    SDL_SetWindowTitle(m_Window, (std::string("ckre_scene_capture - ") + scene.Name + " - " + m_DriverName).c_str());
     if (!m_RenderContext) {
         Fail("CaptureScene before Boot");
         return false;
@@ -361,36 +410,206 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
     sc.FrameCount = m_Options.Frames;
     sc.Verbose = m_Options.Verbose;
 
+    const bool profile = !m_Options.ProfileJson.empty();
+    const Uint64 buildStart = profile ? SDL_GetPerformanceCounter() : 0;
     if (!scene.Build(sc)) {
         Fail(std::string("scene '") + scene.Name + "' failed to build");
         return false;
     }
     if (sc.MainCamera)
         m_RenderContext->AttachViewpointToCamera(sc.MainCamera);
+    if (profile)
+        m_ProfileSceneBuildMilliseconds = double(SDL_GetPerformanceCounter() - buildStart) * m_ProfileTickMilliseconds;
 
     int frames = m_Options.Frames < 1 ? 1 : m_Options.Frames;
     if (frames < scene.MinFrames)
         frames = scene.MinFrames; // e.g. dump_copy pastes the previous frame's dump
     sc.FrameCount = frames;
+    if (profile) {
+        if (m_Options.ProfileWarmup < 0 || m_Options.ProfileWarmup >= frames) {
+            Fail("--profile-warmup must leave at least one measured frame");
+            return false;
+        }
+        m_ProfileFrames.clear();
+        m_ProfileFrames.reserve(size_t(frames));
+        if (m_Options.ProfileInteractiveStart && !WaitForProfileStart(scene)) return false;
+    }
     for (int i = 0; i < frames; ++i) {
         sc.FrameIndex = i;
         SDL_PumpEvents();
         if (scene.PreFrame)
             scene.PreFrame(sc);
+        if (!sc.Error.empty()) {
+            Fail(sc.Error);
+            return false;
+        }
         CK_RENDER_FLAGS flags = CK_RENDER_DEFAULTSETTINGS;
         if (i == frames - 1 && !m_Options.PresentLastFrame)
             flags = (CK_RENDER_FLAGS)(flags & ~CK_RENDER_DOBACKTOFRONT);
+        const Uint64 renderStart = profile ? SDL_GetPerformanceCounter() : 0;
         const CKERROR err = m_RenderContext->Render(flags);
+        const Uint64 renderEnd = profile ? SDL_GetPerformanceCounter() : 0;
         if (err != CK_OK) {
             char buf[64];
             snprintf(buf, sizeof(buf), "Render failed on frame %d (%d)", i, (int)err);
             Fail(buf);
             return false;
         }
+        if (profile) {
+            ProfileFrame sample;
+            sample.RenderMilliseconds = double(renderEnd - renderStart) * m_ProfileTickMilliseconds;
+            sample.Width = m_RenderContext->GetWidth(); sample.Height = m_RenderContext->GetHeight();
+            sample.WindowFocused = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+            if (auto *rasterizer = m_RenderContext->GetRasterizerContext()) {
+                if (const auto *stats = rasterizer->GetStats()) {
+                    sample.HasRasterizerStats = true;
+                    sample.DrawCalls = stats->DrawCalls; sample.Primitives = stats->Primitives;
+                    sample.Passes = stats->Passes; sample.Clears = stats->Clears;
+                    sample.TextureUploads = stats->TextureUploads; sample.BufferUploads = stats->BufferUploads;
+                }
+            }
+#endif
+            m_ProfileFrames.push_back(sample);
+        }
         if (scene.PostFrame)
             scene.PostFrame(sc);
+        if (!sc.Error.empty()) {
+            Fail(sc.Error);
+            return false;
+        }
     }
-    return CaptureBackBuffer(out);
+    if (!CaptureBackBuffer(out))
+        return false;
+    if (scene.ValidateImage && !scene.ValidateImage(sc, out)) {
+        Fail(sc.Error.empty() ? std::string(scene.Name) + ": image validation failed" : sc.Error);
+        return false;
+    }
+    if (profile && !WriteProfileJson(scene)) return false;
+    return true;
+}
+
+bool CaptureApp::WaitForProfileStart(const SceneDef &scene)
+{
+    printf("[%s] profile ready: window=%u render=%dx%d; press Enter to start, Escape to cancel\n",
+           scene.Name, SDL_GetWindowID(m_Window), m_RenderContext->GetWidth(), m_RenderContext->GetHeight());
+    fflush(stdout);
+    for (;;) {
+        SDL_Event event;
+        if (!SDL_WaitEventTimeout(&event, 100)) continue;
+        const bool key = event.type == SDL_EVENT_KEY_DOWN && event.key.windowID == SDL_GetWindowID(m_Window);
+        if (event.type == SDL_EVENT_QUIT ||
+            (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(m_Window)) ||
+            (key && event.key.key == SDLK_ESCAPE)) {
+            m_Cancelled = true;
+            printf("[%s] profile cancelled before measurement\n", scene.Name);
+            fflush(stdout);
+            return false;
+        }
+        if (key && !event.key.repeat && (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) &&
+            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) return true;
+    }
+}
+
+bool CaptureApp::WriteProfileJson(const SceneDef &scene)
+{
+    const size_t warmup = size_t(m_Options.ProfileWarmup);
+    if (m_ProfileFrames.size() <= warmup) {
+        Fail("no measured frames for " + m_Options.ProfileJson);
+        return false;
+    }
+    std::vector<double> sorted;
+    sorted.reserve(m_ProfileFrames.size() - warmup);
+    bool hasStats = true;
+    bool measuredFramesFocused = true;
+    uint64_t draws = 0, primitives = 0, passes = 0, clears = 0, textures = 0, buffers = 0;
+    for (size_t i = warmup; i < m_ProfileFrames.size(); ++i) {
+        const auto &sample = m_ProfileFrames[i];
+        sorted.push_back(sample.RenderMilliseconds);
+        hasStats = hasStats && sample.HasRasterizerStats;
+        measuredFramesFocused = measuredFramesFocused && sample.WindowFocused;
+        draws += sample.DrawCalls; primitives += sample.Primitives; passes += sample.Passes;
+        clears += sample.Clears; textures += sample.TextureUploads; buffers += sample.BufferUploads;
+    }
+    std::sort(sorted.begin(), sorted.end());
+    const double mean = std::accumulate(sorted.begin(), sorted.end(), 0.0) / double(sorted.size());
+    const size_t middle = sorted.size() / 2;
+    const double median = sorted.size() % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) * 0.5;
+    const double p95 = sorted[(95 * sorted.size() + 99) / 100 - 1];
+    int drawableWidth = 0, drawableHeight = 0;
+    SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight);
+    const auto windowFlags = SDL_GetWindowFlags(m_Window);
+    const VxDriverDesc *driver = m_RenderManager->GetRenderDriverDescription(m_Options.Driver);
+    std::ofstream report(m_Options.ProfileJson, std::ios::binary | std::ios::trunc);
+    report.imbue(std::locale::classic());
+    report << std::fixed << std::setprecision(6);
+    auto quote = [&](const char *text) { report << '"' << JsonEscape(text) << '"'; };
+    report << "{\n  \"schemaVersion\": 1,\n  \"scene\": "; quote(scene.Name);
+    report << ",\n  \"renderEngineDll\": "; quote(m_RenderEngineDll.c_str());
+    report << ",\n  \"driverIndex\": " << m_Options.Driver << ",\n  \"driverName\": ";
+    quote(driver ? driver->DriverName : m_DriverName.c_str());
+    report << ",\n  \"driverDescription\": "; quote(driver ? driver->DriverDesc : "");
+    report << ",\n  \"rasterizerSelection\": "; quote(m_Options.Rasterizer.c_str());
+    report << ",\n  \"settingsIni\": "; quote(m_Options.SettingsIni.c_str());
+    report << ",\n  \"processId\": ";
+#ifdef _WIN32
+    report << GetCurrentProcessId();
+#else
+    report << "null";
+#endif
+    report << ",\n  \"windowId\": " << SDL_GetWindowID(m_Window)
+           << ",\n  \"windowVisibleAtReport\": " << ((windowFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) ? "false" : "true")
+           << ",\n  \"windowFocusedAtReport\": " << ((windowFlags & SDL_WINDOW_INPUT_FOCUS) ? "true" : "false")
+           << ",\n  \"interactiveStart\": " << (m_Options.ProfileInteractiveStart ? "true" : "false")
+           << ",\n  \"allMeasuredFramesFocused\": " << (measuredFramesFocused ? "true" : "false")
+           << ",\n  \"requestedWidth\": " << m_Options.Width << ",\n  \"requestedHeight\": " << m_Options.Height
+           << ",\n  \"drawableWidth\": " << drawableWidth << ",\n  \"drawableHeight\": " << drawableHeight
+           << ",\n  \"renderWidth\": " << m_ProfileFrames.back().Width
+           << ",\n  \"renderHeight\": " << m_ProfileFrames.back().Height
+           << ",\n  \"requestedFrames\": " << m_Options.Frames
+           << ",\n  \"totalFrames\": " << m_ProfileFrames.size()
+           << ",\n  \"warmupFrames\": " << warmup << ",\n  \"measuredFrames\": " << sorted.size()
+           << ",\n  \"waitVBlankRequested\": false"
+           << ",\n  \"frameRateMode\": \"CK_FRAMERATE_FREE (profile mode only)\""
+           << ",\n  \"frameRateLimitOptions\": " << m_Context->GetTimeManager()->GetLimitOptions()
+           << ",\n  \"presentEveryFrame\": " << (m_Options.PresentLastFrame ? "true" : "false")
+           << ",\n  \"timingScope\": \"CKRenderContext::Render wall time, including presentation and any GPU backpressure; excludes scene PreFrame/PostFrame hooks, stats queries, readback, image validation and report writing\""
+           << ",\n  \"coldStartMilliseconds\": {\"engineInit\": " << m_ProfileEngineInitMilliseconds
+           << ", \"contextCreate\": " << m_ProfileContextCreateMilliseconds
+           << ", \"sceneBuild\": " << m_ProfileSceneBuildMilliseconds
+           << ", \"firstRender\": " << m_ProfileFrames.front().RenderMilliseconds << "}"
+           << ",\n  \"coldStartNote\": \"contextCreate is part of engineInit; shader and pipeline creation can occur in contextCreate or firstRender and cannot be isolated through the shared public ABI\""
+           << ",\n  \"renderMilliseconds\": {\"mean\": " << mean << ", \"median\": " << median
+           << ", \"p95\": " << p95 << ", \"min\": " << sorted.front() << ", \"max\": " << sorted.back() << "}"
+           << ",\n  \"p95Method\": \"nearest rank over measured frames\""
+           << ",\n  \"measuredRasterizerTotals\": ";
+    if (hasStats)
+        report << "{\"drawCalls\": " << draws << ", \"primitives\": " << primitives << ", \"passes\": " << passes
+               << ", \"clears\": " << clears << ", \"textureUploads\": " << textures << ", \"bufferUploads\": " << buffers << "}";
+    else report << "null";
+    report << ",\n  \"frames\": [\n";
+    for (size_t i = 0; i < m_ProfileFrames.size(); ++i) {
+        const auto &sample = m_ProfileFrames[i];
+        report << "    {\"index\": " << i << ", \"warmup\": " << (i < warmup ? "true" : "false")
+               << ", \"renderMilliseconds\": " << sample.RenderMilliseconds
+               << ", \"windowFocused\": " << (sample.WindowFocused ? "true" : "false")
+               << ", \"width\": " << sample.Width << ", \"height\": " << sample.Height << ", \"rasterizerStats\": ";
+        if (sample.HasRasterizerStats)
+            report << "{\"drawCalls\": " << sample.DrawCalls << ", \"primitives\": " << sample.Primitives
+                   << ", \"passes\": " << sample.Passes << ", \"clears\": " << sample.Clears
+                   << ", \"textureUploads\": " << sample.TextureUploads << ", \"bufferUploads\": " << sample.BufferUploads << "}";
+        else report << "null";
+        report << '}' << (i + 1 == m_ProfileFrames.size() ? "\n" : ",\n");
+    }
+    report << "  ]\n}\n";
+    report.close();
+    if (!report) {
+        Fail("cannot write " + m_Options.ProfileJson);
+        return false;
+    }
+    printf("[%s] profile %zu frames after %zu warmup: mean %.3f ms, median %.3f ms, p95 %.3f ms -> %s\n",
+           scene.Name, sorted.size(), warmup, mean, median, p95, m_Options.ProfileJson.c_str());
+    return true;
 }
 
 bool CaptureApp::CaptureBackBuffer(RgbaImage &out)
@@ -420,6 +639,18 @@ bool CaptureApp::CaptureBackBuffer(RgbaImage &out)
     if (m_Options.Verbose)
         printf("captured %dx%d, %d bpp, %d bytes\n", desc.Width, desc.Height, desc.BitsPerPixel, written);
     return true;
+}
+
+void CaptureApp::HoldVisibleFrame()
+{
+    if (m_Options.HiddenWindow || m_Options.HoldMilliseconds <= 0) return;
+    const Uint64 deadline = SDL_GetTicks() + m_Options.HoldMilliseconds;
+    while (SDL_GetTicks() < deadline) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+            if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) return;
+        SDL_Delay(16);
+    }
 }
 
 void CaptureApp::Shutdown()

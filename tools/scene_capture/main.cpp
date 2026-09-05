@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <filesystem>
 #include <system_error>
@@ -34,6 +35,7 @@ enum ExitCode {
     EXIT_SCENE = 3,
     EXIT_CAPTURE = 4,
     EXIT_COMPARE = 5,
+    EXIT_CANCELLED = 130,
 };
 
 struct Args {
@@ -50,6 +52,8 @@ struct Args {
     std::vector<std::string> Skip; // scenes excluded from --scene all
     bool Single = false;      // internal: run the scene in this process
     bool Help = false;
+    bool DriverSpecified = false;
+    bool ProfileWarmupSpecified = false;
     std::vector<std::string> Raw; // original argv for child processes
 };
 
@@ -58,11 +62,19 @@ void PrintUsage()
     printf("usage: ckre_scene_capture --render-engine-dir DIR [options]\n"
            "  --render-engine-dir DIR   directory holding CK2_3D.dll and its rasterizer DLLs\n"
            "  --driver N                render driver index (default 0)\n"
+           "  --rasterizer NAME         stable provider: sdlgpu, bgfx or null; excludes --driver\n"
+           "  --hold-ms N               keep the presented frame visible for desktop inspection\n"
            "  --scene NAME|all          scene to render (default all; see --list-scenes)\n"
            "  --frames K                frames rendered before the capture (default 1)\n"
            "  --size WxH                render size (default 640x480)\n"
            "  --out DIR                 output directory for <scene>.png (default .)\n"
            "  --caps-json FILE          write the driver's Vx3DCapsDesc / Vx2DCapsDesc as JSON\n"
+           "  --profile-json FILE       record render CPU wall time and public rasterizer counters\n"
+           "                            requests CK_FRAMERATE_FREE to disable vblank synchronization\n"
+           "                            with --scene all, writes FILE-stem.<scene>.FILE-extension\n"
+           "  --profile-warmup N        omit N initial frames from profile statistics (default 1)\n"
+           "  --profile-interactive-start  wait for Enter in the foreground window before profiling\n"
+           "                            Escape or window close cancels the run (exit 130)\n"
            "  --native-window-handle    hand the Win32 HWND to the engine (original Virtools DLLs)\n"
            "  --hidden                  create a hidden window\n"
            "  --no-present-last         do not present the last frame before reading it back\n"
@@ -93,7 +105,18 @@ bool ParseArgs(int argc, char **argv, Args &args)
         };
         std::string v;
         if (a == "--render-engine-dir") { if (!value(args.Capture.RenderEngineDir)) return false; }
-        else if (a == "--driver") { if (!value(v)) return false; args.Capture.Driver = atoi(v.c_str()); }
+        else if (a == "--driver") { if (!value(v)) return false; args.Capture.Driver = atoi(v.c_str()); args.DriverSpecified = true; }
+        else if (a == "--rasterizer") {
+            if (!value(args.Capture.Rasterizer)) return false;
+            if (args.Capture.Rasterizer != "sdlgpu" && args.Capture.Rasterizer != "bgfx" && args.Capture.Rasterizer != "null") return false;
+        }
+        else if (a == "--hold-ms") {
+            if (!value(v)) return false;
+            char *end = NULL;
+            const long duration = strtol(v.c_str(), &end, 10);
+            if (v.empty() || *end || duration < 0 || duration > 600000) return false;
+            args.Capture.HoldMilliseconds = (int)duration;
+        }
         else if (a == "--scene") { if (!value(args.Scene)) return false; }
         else if (a == "--frames") { if (!value(v)) return false; args.Capture.Frames = atoi(v.c_str()); }
         else if (a == "--size") {
@@ -106,6 +129,22 @@ bool ParseArgs(int argc, char **argv, Args &args)
         }
         else if (a == "--out") { if (!value(args.OutDir)) return false; }
         else if (a == "--caps-json") { if (!value(args.CapsJson)) return false; }
+        else if (a == "--profile-json") {
+            if (!value(args.Capture.ProfileJson) || args.Capture.ProfileJson.empty()) return false;
+        }
+        else if (a == "--profile-warmup") {
+            if (!value(v)) return false;
+            char *end = NULL;
+            errno = 0;
+            const long count = strtol(v.c_str(), &end, 10);
+            if (v.empty() || *end || errno == ERANGE || count < 0 || count >= 1000000) {
+                fprintf(stderr, "--profile-warmup must be an integer from 0 to 999999\n");
+                return false;
+            }
+            args.Capture.ProfileWarmup = (int)count;
+            args.ProfileWarmupSpecified = true;
+        }
+        else if (a == "--profile-interactive-start") args.Capture.ProfileInteractiveStart = true;
         else if (a == "--native-window-handle") args.Capture.NativeWindowHandle = true;
         else if (a == "--hidden") args.Capture.HiddenWindow = true;
         else if (a == "--no-present-last") args.Capture.PresentLastFrame = false;
@@ -131,6 +170,32 @@ bool ParseArgs(int argc, char **argv, Args &args)
         else if (a == "--help" || a == "-h") args.Help = true;
         else {
             fprintf(stderr, "unknown option %s\n", a.c_str());
+            return false;
+        }
+    }
+    if (args.DriverSpecified && !args.Capture.Rasterizer.empty()) {
+        fprintf(stderr, "--driver and --rasterizer are mutually exclusive\n");
+        return false;
+    }
+    if (args.Capture.HoldMilliseconds && (args.Capture.HiddenWindow || !args.Capture.PresentLastFrame)) {
+        fprintf(stderr, "--hold-ms requires a visible, presented window\n");
+        return false;
+    }
+    if (args.ProfileWarmupSpecified && args.Capture.ProfileJson.empty()) {
+        fprintf(stderr, "--profile-warmup requires --profile-json\n");
+        return false;
+    }
+    if (args.Capture.ProfileInteractiveStart && args.Capture.ProfileJson.empty()) {
+        fprintf(stderr, "--profile-interactive-start requires --profile-json\n");
+        return false;
+    }
+    if (!args.Capture.ProfileJson.empty()) {
+        if (args.Capture.HiddenWindow || !args.Capture.PresentLastFrame) {
+            fprintf(stderr, "--profile-json requires a visible window presented on every frame\n");
+            return false;
+        }
+        if (args.Capture.Frames <= args.Capture.ProfileWarmup || args.Capture.Frames > 1000000) {
+            fprintf(stderr, "--profile-json requires --frames greater than --profile-warmup, up to 1000000 frames\n");
             return false;
         }
     }
@@ -174,8 +239,10 @@ int RunSingle(const Args &args, const SceneDef &scene)
         return EXIT_BOOT;
     printf("[%s] engine=%s driver=%s\n", scene.Name, app.RenderEngineDll().c_str(), app.DriverName().c_str());
     RgbaImage image;
-    if (!app.CaptureScene(scene, image))
+    if (!app.CaptureScene(scene, image)) {
+        if (app.Cancelled()) return EXIT_CANCELLED;
         return app.Error().find("failed to build") != std::string::npos ? EXIT_SCENE : EXIT_CAPTURE;
+    }
     std::string error;
     const std::string outPath = JoinPath(args.OutDir, std::string(scene.Name) + ".png");
     if (!WritePng(outPath, image, error)) {
@@ -183,6 +250,8 @@ int RunSingle(const Args &args, const SceneDef &scene)
         return EXIT_CAPTURE;
     }
     printf("[%s] wrote %s (%dx%d)\n", scene.Name, outPath.c_str(), image.Width, image.Height);
+    fflush(stdout);
+    app.HoldVisibleFrame();
     app.Shutdown();
     return EXIT_OK;
 }
@@ -207,7 +276,7 @@ int RunChild(const Args &args, const SceneDef &scene, const std::string &setting
     // which the parent handles.
     for (size_t i = 1; i < args.Raw.size(); ++i) {
         const std::string &a = args.Raw[i];
-        if (a == "--scene" || a == "--caps-json" || a == "--compare" || a == "--mask-dir" ||
+        if (a == "--scene" || a == "--caps-json" || a == "--profile-json" || a == "--compare" || a == "--mask-dir" ||
             a == "--threshold" || a == "--min-pass" || a == "--settings-ini") {
             ++i;
             continue;
@@ -219,6 +288,15 @@ int RunChild(const Args &args, const SceneDef &scene, const std::string &setting
     argsOut.push_back("--single");
     argsOut.push_back("--scene");
     argsOut.push_back(scene.Name);
+    if (!args.Capture.ProfileJson.empty()) {
+        std::filesystem::path profile = args.Capture.ProfileJson;
+        if (args.Scene == "all") {
+            const std::string extension = profile.has_extension() ? profile.extension().string() : ".json";
+            profile = profile.parent_path() / (profile.stem().string() + "." + scene.Name + extension);
+        }
+        argsOut.push_back("--profile-json");
+        argsOut.push_back(profile.string());
+    }
     if (!settingsIni.empty()) {
         argsOut.push_back("--settings-ini");
         argsOut.push_back(settingsIni);
@@ -237,7 +315,7 @@ int RunChild(const Args &args, const SceneDef &scene, const std::string &setting
     if (!SDL_WaitProcess(process, true, &exitCode))
         exitCode = EXIT_CAPTURE;
     SDL_DestroyProcess(process);
-    if (exitCode != EXIT_OK)
+    if (exitCode != EXIT_OK && exitCode != EXIT_CANCELLED)
         fprintf(stderr, "[%s] child exited with code %d\n", scene.Name, exitCode);
     return exitCode;
 }
@@ -333,6 +411,17 @@ int main(int argc, char **argv)
         std::error_code ec;
         std::filesystem::create_directories(args.OutDir, ec);
     }
+    if (!args.Capture.ProfileJson.empty()) {
+        const auto directory = std::filesystem::path(args.Capture.ProfileJson).parent_path();
+        if (!directory.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(directory, ec);
+            if (ec) {
+                fprintf(stderr, "cannot create profile directory %s: %s\n", directory.string().c_str(), ec.message().c_str());
+                return EXIT_CAPTURE;
+            }
+        }
+    }
 
     std::vector<const SceneDef *> scenes;
     if (args.Scene == "all") {
@@ -389,6 +478,10 @@ int main(int argc, char **argv)
             }
         }
         results[i] = RunChild(args, scene, settingsIni);
+        if (results[i] == EXIT_CANCELLED) {
+            SDL_Quit();
+            return EXIT_CANCELLED;
+        }
         if (results[i] > worst)
             worst = results[i];
     }
