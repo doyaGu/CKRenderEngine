@@ -814,12 +814,6 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
     double rcAspect = static_cast<double>(right) / static_cast<double>(bottom);
     double camAspect = static_cast<double>(width) / static_cast<double>(height);
 
-    // Rendering into a texture fills the texture: the original engine does not
-    // letterbox a render target to the camera ratio (oracle scenes rtt_2d /
-    // rtt_cube show the full texture), so the ratio only applies to the window.
-    if (rc->m_TargetTexture)
-        Flags = (CK_RENDER_FLAGS)(Flags & ~CK_RENDER_USECAMERARATIO);
-
     if ((Flags & CK_RENDER_USECAMERARATIO) != 0) {
         if (rcAspect >= camAspect) {
             viewHeight = bottom;
@@ -889,4 +883,3 @@ void CKRenderedScene::ForceCameraSettingsUpdate() {
     // Update viewport size
     UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
 }
-

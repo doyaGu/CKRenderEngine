@@ -6,9 +6,13 @@
 #include "CKDependencies.h"
 #include "CKGlobals.h"
 #include "CKStateChunk.h"
+#include "CKRenderedScene.h"
+#include "RCKCamera.h"
+#include "RCK2dEntity.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKTexture.h"
+#include "RCKSprite.h"
 #include "CKTranslatedRasterizerInternal.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
@@ -357,6 +361,32 @@ void CopyPreservesUserMipmapsAndInvalidatesDestinationVideoMemory() {
     TestCheck(dest.ToRestore(), "copied texture should be marked for restore");
 }
 
+void RenderTargetPreservesCameraAspectRatio() {
+    TextureTestWorld world;
+    RCKTexture target(world.context, "CameraRatioTarget");
+    RCKCamera camera(world.context, "CameraRatio");
+    camera.SetAspectRatio(4, 3);
+    TestCheck(target.Create(256, 256, 32, 0), "camera-ratio target creation");
+    target.SetDesiredVideoFormat(_32_ARGB8888);
+    world.renderContext->AttachViewpointToCamera(reinterpret_cast<CKCamera *>(&camera));
+    TestCheck(world.renderContext->SetRenderTarget(&target, 0), "camera-ratio target binding");
+    world.renderContext->m_RenderedScene->UpdateViewportSize(TRUE, CK_RENDER_USECAMERARATIO);
+    VxRect view;
+    world.renderContext->GetViewRect(view);
+    // Original CKDX8Rasterizer capture: 4:3 camera on a 256-square target.
+    TestCheck(view.left == 0.0f && view.top == 32.0f &&
+                  view.right == 256.0f && view.bottom == 224.0f,
+              "render targets must preserve the requested camera ratio like the original engine");
+    TestCheck(world.renderContext->Clear(CK_RENDER_CLEARBACK, 0) == CK_OK,
+              "engine clear with a letterboxed target");
+    const FFPPassClearRecord &clear = world.rasterizer->PassClears.back();
+    TestCheck(clear.Rect.left == 0 && clear.Rect.top == 0 &&
+                  clear.Rect.right == 256 && clear.Rect.bottom == 256,
+              "engine Clear must clear the full target, independently of the camera viewport");
+    TestCheck(world.renderContext->SetRenderTarget(NULL, 0), "camera-ratio target release");
+    world.renderContext->DetachViewpointFromCamera();
+}
+
 void EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat() {
     TextureTestWorld world;
     RCKTexture texture(world.context, "RenderTarget");
@@ -379,6 +409,47 @@ void EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat() {
               "render target creation should not upload system-memory pixels");
 }
 
+void WindowResizeCommitsOnlyAfterBackendSuccess() {
+    TextureTestWorld world;
+    RCKRenderContext *rc = world.renderContext;
+    TestCheck(rc->Resize(5, 6, 640, 480, 0) == CK_OK, "initial engine resize");
+    const CKRECT previous = rc->m_Settings.m_Rect;
+    const CKViewportData previousViewport = rc->m_ViewportData;
+    rc->m_ProjectionUpdated = TRUE;
+    world.rasterizer->FailResize = TRUE;
+    TestCheck(rc->Resize(10, 20, 1920, 1080, 0) == CKERR_INVALIDOPERATION, "report backend resize failure");
+    TestCheck(memcmp(&previous, &rc->m_Settings.m_Rect, sizeof(previous)) == 0 &&
+              memcmp(&previousViewport, &rc->m_ViewportData, sizeof(previousViewport)) == 0 &&
+              rc->m_ProjectionUpdated, "failed resize preserves settings, viewport and projection validity");
+    world.rasterizer->FailResize = FALSE;
+    TestCheck(rc->Resize(0, 0, 1920, 1080, VX_RESIZE_NOMOVE) == CK_OK, "Player NOMOVE resize succeeds");
+    TestCheck(rc->GetWidth() == 1920 && rc->GetHeight() == 1080 &&
+              rc->m_Settings.m_Rect.left == 5 && rc->m_Settings.m_Rect.top == 6,
+              "Player resize preserves origin and updates dimensions");
+    TestCheck(rc->m_ViewportData.ViewWidth == 1920 && rc->m_ViewportData.ViewHeight == 1080 &&
+              !rc->m_ProjectionUpdated, "successful resize updates viewport and invalidates projection");
+    TestCheck(rc->Resize(20, 30, -1, -1, VX_RESIZE_NOSIZE) == CK_OK, "move ignores size arguments");
+    TestCheck(rc->GetWidth() == 1920 && rc->GetHeight() == 1080 &&
+              rc->m_Settings.m_Rect.left == 20 && rc->m_Settings.m_Rect.top == 30,
+              "moving preserves the window extent");
+}
+
+void SpriteUsesOraclePointSampling() {
+    TextureTestWorld world;
+    RCKSprite sprite(world.context, "PointSampledSprite");
+    TestCheck(sprite.Create(16, 16, 32, 0), "create sprite pixels");
+    sprite.SetDesiredVideoFormat(_32_ARGB8888);
+    world.renderContext->SetFullViewport(&world.renderContext->m_ViewportData, 64, 64);
+    TestCheck(world.translated.Context->BeginScene(), "begin sprite scene");
+    TestCheck(sprite.Draw(world.renderContext) == CK_OK, "draw sprite");
+    TestCheck(world.rasterizer->Log.DrawCount == 1, "sprite reaches the backend");
+    TestCheck(!world.rasterizer->Log.TextureBindings.empty(), "sprite binds its texture");
+    const CKSamplerDesc &sampler = world.rasterizer->Log.LastTextureSampler;
+    TestCheck(sampler.MinFilter == CKRST_FILTER_NEAREST && sampler.MagFilter == CKRST_FILTER_NEAREST,
+              "sprite uses the point min/mag filters recorded on CKDX8Rasterizer");
+    TestCheck(world.translated.Context->EndScene(), "end sprite scene");
+}
+
 } // namespace
 
 int main() {
@@ -386,6 +457,10 @@ int main() {
     TestCheck(CKStartUp() == CK_OK, "CKStartUp failed");
     CKCLASSREGISTERCID(RCKTexture, CKCID_BEOBJECT);
     CKCLASSREGISTERCID(RCKRenderContext, CKCID_OBJECT);
+    CKCLASSREGISTERCID(RCK3dEntity, CKCID_RENDEROBJECT);
+    CKCLASSREGISTERCID(RCK2dEntity, CKCID_RENDEROBJECT);
+    CKCLASSREGISTERCID(RCKCamera, CKCID_3DENTITY);
+    CKCLASSREGISTERCID(RCKSprite, CKCID_2DENTITY);
     CKBuildClassHierarchyTable();
 
     TestFramework tests;
@@ -417,6 +492,10 @@ int main() {
               &CopyPreservesUserMipmapsAndInvalidatesDestinationVideoMemory);
     tests.Run("EnsureRenderTarget preserves mip request and uses desired format",
               &EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat);
+    tests.Run("RenderTarget preserves camera aspect ratio",
+              &RenderTargetPreservesCameraAspectRatio);
+    tests.Run("Sprite uses oracle point sampling", &SpriteUsesOraclePointSampling);
+    tests.Run("Window resize commits only after backend success", &WindowResizeCommitsOnlyAfterBackendSuccess);
 
     const int exitCode = tests.ExitCode();
     TestCheck(CKShutdown() == CK_OK, "CKShutdown failed");

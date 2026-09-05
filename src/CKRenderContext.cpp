@@ -581,7 +581,12 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     // rasterizer clears at the call position (spec 4.3).
     if (frameLog)
         CK_LOG("Clear", "rasterizer Clear");
-    if (!m_RasterizerContext->Clear(clearFlags, clearColor, 1.0f, Stencil, 0, nullptr))
+    // The engine's Clear covers the complete target even when the camera
+    // viewport is smaller (verified against the original CKDX8Rasterizer).
+    // Express that rectangle explicitly: the rasterizer's zero-rectangle
+    // form retains its separate viewport-clear contract.
+    CKRECT targetRect = {0, 0, GetWidth(), GetHeight()};
+    if (!m_RasterizerContext->Clear(clearFlags, clearColor, 1.0f, Stencil, 1, &targetRect))
         return CKERR_INVALIDOPERATION;
 
     if (frameLog)
@@ -1178,6 +1183,8 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     // IDA: 0x1006cb04
     if (m_DeviceDestroying)
         return CKERR_INVALIDRENDERCONTEXT;
+    if (Flags & ~(VX_RESIZE_NOMOVE | VX_RESIZE_NOSIZE))
+        return CKERR_INVALIDPARAMETER;
 
     // If no rasterizer context, try to create one
     if (!m_RasterizerContext) {
@@ -1199,29 +1206,34 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     if (m_Fullscreen)
         return CKERR_ALREADYFULLSCREEN;
 
-    // Update position if not VX_RESIZE_NOMOVE
+    // Resolve an implicit client size before touching the current settings.
+    if ((Flags & VX_RESIZE_NOSIZE) == 0) {
+        if (!SizeX || !SizeY) {
+            CKRECT clientRect;
+            if (!VxGetClientRect(m_WinHandle, &clientRect))
+                return CKERR_INVALIDPARAMETER;
+            SizeX = clientRect.right;
+            SizeY = clientRect.bottom;
+        }
+    }
+
+    // A rejected resize must leave the viewport and projection consistent
+    // with the existing native targets (for example during a window change).
+    if (!m_RasterizerContext->Resize(PosX, PosY, SizeX, SizeY, Flags))
+        return CKERR_INVALIDOPERATION;
     if ((Flags & VX_RESIZE_NOMOVE) == 0) {
         m_Settings.m_Rect.left = PosX;
         m_Settings.m_Rect.top = PosY;
     }
-
-    // Update size if not VX_RESIZE_NOSIZE
-    if ((Flags & VX_RESIZE_NOSIZE) == 0) {
-        if (!SizeX || !SizeY) {
-            CKRECT clientRect;
-            VxGetClientRect(m_WinHandle, &clientRect);
-            SizeX = clientRect.right;
-            SizeY = clientRect.bottom;
-        }
+    if ((Flags & VX_RESIZE_NOSIZE) == 0 &&
+        (SizeX != m_Settings.m_Rect.right || SizeY != m_Settings.m_Rect.bottom)) {
         m_Settings.m_Rect.right = SizeX;
         m_Settings.m_Rect.bottom = SizeY;
         SetFullViewport(&m_ViewportData, SizeX, SizeY);
         m_ProjectionUpdated = FALSE;
+        m_RenderedScene->UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
     }
-
-    const CKBOOL resized = m_RasterizerContext->Resize(PosX, PosY, SizeX, SizeY, Flags);
-    m_RenderedScene->UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
-    return resized ? CK_OK : CKERR_INVALIDOPERATION;
+    return CK_OK;
 }
 
 void RCKRenderContext::SetViewRect(VxRect &rect) {

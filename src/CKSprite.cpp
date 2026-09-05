@@ -318,8 +318,9 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     // Bind sprite texture
     rctx->DisableTextureStagesFrom(0);
     rstCtx->SetTexture(m_ObjectIndex, 0);
-    rstCtx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
-    rstCtx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    // The DX8 sprite path selects point filtering for bitmap pixels and text.
+    rstCtx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    rstCtx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
     rstCtx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
 
     // Build quad vertices
@@ -350,27 +351,28 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     texCoordPtr[6] = *(CKDWORD *) &u0;
     texCoordPtr[7] = *(CKDWORD *) &v1;
 
-    // Vertex positions (screen-space quad)
-    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
-    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+    // Bitmap pixels land on legacy integer pixel centres: inset the quad
+    // origin by half a pixel so its first sample is the first texel centre.
+    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f) - 0.5f;
+    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f) - 0.5f;
     positionPtr[2] = 0.0f;
     positionPtr[3] = 1.0f;
     positionPtr = (float *) ((char *) positionPtr + posStride);
 
-    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
-    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f);
+    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f) - 0.5f;
+    positionPtr[1] = (float)(int)(m_VtxPos.top + 0.5f) - 0.5f;
     positionPtr[2] = 0.0f;
     positionPtr[3] = 1.0f;
     positionPtr = (float *) ((char *) positionPtr + posStride);
 
-    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f);
-    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+    positionPtr[0] = (float)(int)(m_VtxPos.right + 0.5f) - 0.5f;
+    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f) - 0.5f;
     positionPtr[2] = 0.0f;
     positionPtr[3] = 1.0f;
     positionPtr = (float *) ((char *) positionPtr + posStride);
 
-    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f);
-    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f);
+    positionPtr[0] = (float)(int)(m_VtxPos.left + 0.5f) - 0.5f;
+    positionPtr[1] = (float)(int)(m_VtxPos.bottom + 0.5f) - 0.5f;
     positionPtr[2] = 0.0f;
     positionPtr[3] = 1.0f;
 
