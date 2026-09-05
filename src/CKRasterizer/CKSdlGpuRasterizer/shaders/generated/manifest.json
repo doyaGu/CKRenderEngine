@@ -1,0 +1,226 @@
+{
+  "abi_version": 5,
+  "interface_hash": 1640296617,
+  "shaders": [
+    {
+      "name": "vs_ff_3d",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "cd48ac1c04990e10f0f80944645f4aa77c6af40901d066f2165f25178d63ad67",
+      "sha256": "1fee0c9cbbffaa730757c75e97ecd956e9c9de1382a531305f413448c73e0851"
+    },
+    {
+      "name": "vs_ff_3d",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "cd48ac1c04990e10f0f80944645f4aa77c6af40901d066f2165f25178d63ad67",
+      "sha256": "412fbcd78d4aae233df022421cd177f72faca603b1319ed5354718394db9bd3e"
+    },
+    {
+      "name": "vs_ff_3d_clip",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "aed621f563179ae045a1af9bc21850cbb90e63a21afc54fbb649ab31d26d7289",
+      "sha256": "60f55b61344299ab88dac9e080222164c70603c6fbd69974b1a9a604fba4a7a1"
+    },
+    {
+      "name": "vs_ff_3d_clip",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "aed621f563179ae045a1af9bc21850cbb90e63a21afc54fbb649ab31d26d7289",
+      "sha256": "ac23f9a01ff681eb573e61f98a0bcc04a2a6dd6c15274d9948c48b0a9d37b42e"
+    },
+    {
+      "name": "vs_ff_positiont",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "35e6083749e2ada4b074add14d779688d9cac842ae8d6bce4d162b1d01beb9d7",
+      "sha256": "fb11493f79446e078388072377e0a95b18291a2c2e5ac8e50531f7517a48f042"
+    },
+    {
+      "name": "vs_ff_positiont",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "35e6083749e2ada4b074add14d779688d9cac842ae8d6bce4d162b1d01beb9d7",
+      "sha256": "15a2075051ff07fdec2537add95063e6fd02584330f5a15f44a029e5b635bba8"
+    },
+    {
+      "name": "vs_ff_positiont_clip",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "ef38af9b957f7c99a28e3e111b320ab41259f5f28adfde030dcdc6ad97304147",
+      "sha256": "0537ba555a621ad3a905928756b2804743dd5a6332d9f52f1fdd064c5a079476"
+    },
+    {
+      "name": "vs_ff_positiont_clip",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "ef38af9b957f7c99a28e3e111b320ab41259f5f28adfde030dcdc6ad97304147",
+      "sha256": "3fabe176058484289d2a427fe5b7d832c6db9e8477fe412adbde22bafa3528a7"
+    },
+    {
+      "name": "fs_ff_stage",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 16,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "1a8c769e2be98b85e8eb8e04cce6dd7d42e9b566f6d530fff5e8e1f91d971d26",
+      "sha256": "458ce37663c48fd40b2293e7a945d4c0acbc3ac0db50d814b33a41ce510bd44e"
+    },
+    {
+      "name": "fs_ff_stage",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 16,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "1a8c769e2be98b85e8eb8e04cce6dd7d42e9b566f6d530fff5e8e1f91d971d26",
+      "sha256": "4dec65969def833dee7dd064ee7f57bd3153dfed6112b729e177ba61ec110aef"
+    },
+    {
+      "name": "vs_postprocess",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 0,
+      "reflected": true,
+      "uniform_bytes": 0,
+      "source_sha256": "edfb7558ed7961913db748c489d7327047a2e2797c714583e6aa2dc55c077cb3",
+      "sha256": "0e96a4406c328c325159947178c15de07960c0431d50ab17c880d99f0944d4ab"
+    },
+    {
+      "name": "vs_postprocess",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 0,
+      "reflected": true,
+      "uniform_bytes": 0,
+      "source_sha256": "edfb7558ed7961913db748c489d7327047a2e2797c714583e6aa2dc55c077cb3",
+      "sha256": "b1c8f3edb28e128a4388264771a2ba765e6b89ae445b370c6bd1a482405d809e"
+    },
+    {
+      "name": "fs_postprocess",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 1,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "7d4ba8de5dd89e1800fca44e1ead7811d7035a41dcde4d2ceb39c721697f961e",
+      "sha256": "bc7ea1ac46654bb72fcd4dae6b0ab1c39cb7f629cec39101f33e9a676df5a894"
+    },
+    {
+      "name": "fs_postprocess",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 1,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 3744,
+      "source_sha256": "7d4ba8de5dd89e1800fca44e1ead7811d7035a41dcde4d2ceb39c721697f961e",
+      "sha256": "e3ff0bb60a948acc51996fa3bf2b8b6636d9fb009ceef0af08ab1de78dd2b69e"
+    },
+    {
+      "name": "vs_clear",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 16,
+      "source_sha256": "482c955304a730c8efd2cbf984cde6b6afa5a3c3807c3d3863bae68a143385cf",
+      "sha256": "19e2febeb2386b3387b461385d269a59cfb99c7730b6efbe234d86eab0c7286f"
+    },
+    {
+      "name": "vs_clear",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 16,
+      "source_sha256": "482c955304a730c8efd2cbf984cde6b6afa5a3c3807c3d3863bae68a143385cf",
+      "sha256": "202d1e7b756abb45709f11912dc816a7aeeaafa5680b4a660e1809654f82c868"
+    },
+    {
+      "name": "fs_clear",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 16,
+      "source_sha256": "12f0a66081bf28c93fc53e60a88d9be79457bd5a2c4846cda3d3d3b638d2abb4",
+      "sha256": "1f90e1e602ebd0f3a05f700df00a590d9d99a5f22f2edcefbd30952a323a2a75"
+    },
+    {
+      "name": "fs_clear",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 0,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 16,
+      "source_sha256": "12f0a66081bf28c93fc53e60a88d9be79457bd5a2c4846cda3d3d3b638d2abb4",
+      "sha256": "58125c8febf71f6e6037620561a9b23543e84e007e9c77eee8d8a0850710a388"
+    },
+    {
+      "name": "fs_volume_mip",
+      "format": "dxil",
+      "entry": "main",
+      "samplers": 1,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 32,
+      "source_sha256": "cb0ae267f08dc3a3998da5f0a3b94a5426bce582564b01b8b94cd280b203484e",
+      "sha256": "183e02e631f66efc4071dc5067fcd4234292c525e1490e9ed65d7d83d4b09947"
+    },
+    {
+      "name": "fs_volume_mip",
+      "format": "spirv",
+      "entry": "main",
+      "samplers": 1,
+      "uniform_buffers": 1,
+      "reflected": true,
+      "uniform_bytes": 32,
+      "source_sha256": "cb0ae267f08dc3a3998da5f0a3b94a5426bce582564b01b8b94cd280b203484e",
+      "sha256": "5b197e99816428b7b319ae09ad253a04ce5c3013d1ea4e6ced78f8556be52e07"
+    }
+  ]
+}
