@@ -9,6 +9,7 @@
 #include "VxMath.h"
 #include "CKTypes.h"
 #include "CKRasterizerEnums.h"
+#include "CKRasterizerResourceTypes.h"
 
 class CKRasterizerDriver;
 class CKRasterizerContext;
@@ -20,19 +21,6 @@ class CKRasterizer;
 
 typedef CKRasterizer *(*CKRST_STARTFUNCTION)(WIN_HANDLE);
 typedef void (*CKRST_CLOSEFUNCTION)(CKRasterizer *);
-
-// ===========================================================================
-// Texture descriptor (spec 4.5)
-// ===========================================================================
-
-struct CKTextureDesc {
-    CKDWORD Flags;         // CKRST_TEXTUREFLAGS
-    VxImageDescEx Format;  // Width, Height, pixel format of level 0
-    CKDWORD MipMapCount;   // 0 / 1 = none, N = engine-provided levels, CKRST_MIPMAP_GENERATE
-    CKDWORD Depth;         // Volume depth (1 for 2D and cube)
-
-    CKTextureDesc() : Flags(0), MipMapCount(0), Depth(1) {}
-};
 
 // ===========================================================================
 // Vertex buffer descriptor (spec 4.5)
