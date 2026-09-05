@@ -52,10 +52,13 @@ CKBOOL CKSdlGpuBackend::AllocTransientVertices(CKDWORD count, CKDWORD handle, CK
     if (!m->Ready() || !out || !count || !m->NextTransientToken) return FALSE;
     auto layout = m->Layouts.Get(handle);
     if (!layout || uint64_t(count) * layout->Stride > 64u * 1024u * 1024u) return FALSE;
-    if (m->TransientVertices.empty()) m->TransientVertexInfo.clear();
-    m->TransientVertices.emplace_back(size_t(count) * layout->Stride);
+    const size_t index = m->TransientVertexInfo.size();
+    if (index == m->TransientVertices.size()) m->TransientVertices.emplace_back();
+    auto &storage = m->TransientVertices[index];
+    storage.resize(size_t(count) * layout->Stride);
+    std::fill(storage.begin(), storage.end(), CKBYTE(0));
     m->TransientVertexInfo.push_back({m->NextTransientToken++, handle, layout->Stride});
-    out->Data = m->TransientVertices.back().data(); out->Count = count; out->Stride = layout->Stride;
+    out->Data = storage.data(); out->Count = count; out->Stride = layout->Stride;
     out->Layout = handle; out->Token = m->TransientVertexInfo.back().Token;
     return TRUE;
 }
@@ -64,10 +67,13 @@ CKBOOL CKSdlGpuBackend::AllocTransientIndices(CKDWORD count, CKBOOL index32, CKB
 {
     if (out) *out = CKBackendTransientIndices();
     if (!m->Ready() || !out || !count || !m->NextTransientToken || count > 16u * 1024u * 1024u) return FALSE;
-    if (m->TransientIndices.empty()) m->TransientIndexInfo.clear();
-    m->TransientIndices.emplace_back(size_t(count) * (index32 ? 4 : 2));
+    const size_t index = m->TransientIndexInfo.size();
+    if (index == m->TransientIndices.size()) m->TransientIndices.emplace_back();
+    auto &storage = m->TransientIndices[index];
+    storage.resize(size_t(count) * (index32 ? 4 : 2));
+    std::fill(storage.begin(), storage.end(), CKBYTE(0));
     m->TransientIndexInfo.push_back({m->NextTransientToken++, index32 ? TRUE : FALSE});
-    out->Data = m->TransientIndices.back().data(); out->Count = count;
+    out->Data = storage.data(); out->Count = count;
     out->Index32 = m->TransientIndexInfo.back().Index32; out->Token = m->TransientIndexInfo.back().Token;
     return TRUE;
 }
@@ -85,28 +91,28 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     if (!draw.Program || (desc->Stream1Layout && !draw.Layout1)) return CKERR_INVALIDPARAMETER;
     const bool procedural = draw.Program->Interface.VertexInputs.empty();
     if (procedural ? (desc->IndexCount || desc->StartVertex) : !draw.Layout) return CKERR_INVALIDPARAMETER;
+    struct Bytes { const CKBYTE *Data = nullptr; size_t Size = 0; } vertices, vertices1, indices;
     auto geometry = [&](const std::shared_ptr<CKSdlGpuLayout> &layout, const std::shared_ptr<CKSdlGpuBuffer> &buffer,
                        CKDWORD layoutHandle, const CKBackendTransientVertices *transient, unsigned start, unsigned count,
-                       std::vector<CKBYTE> &vertices) {
+                       Bytes &snapshot) {
         if (buffer) return uint64_t(start + uint64_t(count)) * layout->Stride <= buffer->Shadow.size();
         if (!transient || !transient->Token) return false;
         const auto allocation = std::lower_bound(m->TransientVertexInfo.begin(), m->TransientVertexInfo.end(),
             transient->Token, [](const CKSdlGpuTransientVertexInfo &info, CKDWORD token) { return info.Token < token; });
         if (allocation == m->TransientVertexInfo.end() || allocation->Token != transient->Token) return false;
         const size_t index = size_t(allocation - m->TransientVertexInfo.begin());
-        if (index >= m->TransientVertices.size()) return false; // Submit invalidates the frame's storage.
+        if (index >= m->TransientVertices.size()) return false;
         const auto &storage = m->TransientVertices[index];
         if (allocation->Layout != layoutHandle || transient->Layout != allocation->Layout ||
             transient->Stride != allocation->Stride || transient->Stride != layout->Stride ||
             transient->Data != storage.data() || uint64_t(transient->Count) * transient->Stride != storage.size() ||
             start > transient->Count || count > transient->Count - start) return false;
-        const auto *bytes = storage.data();
-        vertices.assign(bytes + size_t(start) * layout->Stride, bytes + size_t(start + count) * layout->Stride);
+        snapshot = {storage.data() + size_t(start) * layout->Stride, size_t(count) * layout->Stride};
         return true;
     };
-    if (!procedural && !geometry(draw.Layout, draw.VB, desc->Layout, desc->TransientVertices, desc->StartVertex, desc->VertexCount, draw.Vertices)) return CKERR_INVALIDPARAMETER;
+    if (!procedural && !geometry(draw.Layout, draw.VB, desc->Layout, desc->TransientVertices, desc->StartVertex, desc->VertexCount, vertices)) return CKERR_INVALIDPARAMETER;
     if (!procedural && draw.Layout1 && !geometry(draw.Layout1, draw.VB1, desc->Stream1Layout, desc->Stream1Transient, desc->Stream1StartVertex,
-                                  desc->VertexCount, draw.Vertices1)) return CKERR_INVALIDPARAMETER;
+                                  desc->VertexCount, vertices1)) return CKERR_INVALIDPARAMETER;
     if (desc->IndexCount) {
         const CKBYTE *bytes = nullptr;
         unsigned available = 0;
@@ -133,7 +139,7 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
             std::memcpy(&index, bytes + size_t(desc->StartIndex + i) * size, size);
             if (index >= desc->VertexCount) return CKERR_INVALIDPARAMETER;
         }
-        if (!draw.IB) draw.Indices.assign(bytes + size_t(desc->StartIndex) * size, bytes + size_t(desc->StartIndex + desc->IndexCount) * size);
+        if (!draw.IB) indices = {bytes + size_t(desc->StartIndex) * size, size_t(desc->IndexCount) * size};
     }
     draw.Desc.TransientVertices = nullptr; draw.Desc.Stream1Transient = nullptr; draw.Desc.TransientIndices = nullptr;
     auto &uniforms = draw.Program->UniformLayout;
@@ -171,6 +177,24 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
         std::memcpy(uniforms.Data.data() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
         std::memcpy(uniforms.Data.data() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
     }
+    // Snapshot directly into the batch only after validating the entire draw.
+    // Offsets survive arena growth; caller-owned transient data may change as
+    // soon as Draw returns. Check aligned sizes before narrowing to GPU offsets.
+    auto endOffset = [](uint64_t offset, size_t size) {
+        return size ? ((offset + 3) & ~uint64_t(3)) + size : offset;
+    };
+    if (endOffset(endOffset(m->BatchVertices.size(), vertices.Size), vertices1.Size) > UINT32_MAX ||
+        endOffset(m->BatchIndices.size(), indices.Size) > UINT32_MAX ||
+        uint64_t(m->UniformArena.size()) + uniforms.Data.size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
+    auto append = [](std::vector<CKBYTE> &dst, const Bytes &src, unsigned &offset) {
+        if (!src.Size) return;
+        dst.resize((dst.size() + 3) & ~size_t(3));
+        offset = unsigned(dst.size());
+        dst.insert(dst.end(), src.Data, src.Data + src.Size);
+    };
+    append(m->BatchVertices, vertices, draw.VertexOffset);
+    append(m->BatchVertices, vertices1, draw.VertexOffset1);
+    append(m->BatchIndices, indices, draw.IndexOffset);
     draw.UniformOffset = unsigned(m->UniformArena.size());
     m->UniformArena.insert(m->UniformArena.end(), uniforms.Data.begin(), uniforms.Data.end());
     m->DrawApproximations = 0;
@@ -185,7 +209,10 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     if (Draws.empty() && (!PassOpen || !Pass.ClearFlags)) return CK_OK;
     if (!EnsureCommands()) return Error;
     if (!Target) {
-        if (!presentWindow) { Draws.clear(); UniformArena.clear(); Pass.ClearFlags = 0; return CK_OK; }
+        if (!presentWindow) {
+            Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            return CK_OK;
+        }
         if (!Swapchain) {
             const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
             if (!SDL_WaitAndAcquireGPUSwapchainTexture(Commands, Window, &Swapchain, &SwapWidth, &SwapHeight))
@@ -195,22 +222,13 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
                         SDL_GetWindowID(Window), SwapWidth, SwapHeight, Width, Height);
         }
         // A minimized window has no swapchain image. Resource work still submits.
-        if (!Swapchain) { Draws.clear(); UniformArena.clear(); Pass.ClearFlags = 0; return CK_OK; }
+        if (!Swapchain) {
+            Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            return CK_OK;
+        }
     }
-    auto &vertexData = BatchVertices;
-    auto &indexData = BatchIndices;
-    vertexData.clear(); indexData.clear();
-    auto append = [](std::vector<CKBYTE> &dst, const std::vector<CKBYTE> &src, unsigned &offset) {
-        dst.resize((dst.size() + 3) & ~size_t(3));
-        offset = unsigned(dst.size()); dst.insert(dst.end(), src.begin(), src.end());
-    };
-    for (auto &draw : Draws) {
-        if (!draw.Vertices.empty()) append(vertexData, draw.Vertices, draw.VertexOffset);
-        if (!draw.Vertices1.empty()) append(vertexData, draw.Vertices1, draw.VertexOffset1);
-        if (!draw.Indices.empty()) append(indexData, draw.Indices, draw.IndexOffset);
-    }
-    auto batchVB = UploadGeometry(vertexData, SDL_GPU_BUFFERUSAGE_VERTEX);
-    auto batchIB = UploadGeometry(indexData, SDL_GPU_BUFFERUSAGE_INDEX);
+    auto batchVB = UploadGeometry(BatchVertices, SDL_GPU_BUFFERUSAGE_VERTEX);
+    auto batchIB = UploadGeometry(BatchIndices, SDL_GPU_BUFFERUSAGE_INDEX);
     if (Error != CK_OK) return Error;
     const unsigned width = Target ? std::max(1u, Target->Color->Info.width >> Target->Desc.ColorMip) : SwapWidth;
     const unsigned height = Target ? std::max(1u, Target->Color->Info.height >> Target->Desc.ColorMip) : SwapHeight;
@@ -323,7 +341,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             if (error != CK_OK) return error;
         }
     }
-    Pass.ClearFlags = 0; Draws.clear(); UniformArena.clear();
+    Pass.ClearFlags = 0; Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear();
     return CK_OK;
 }
 
@@ -420,7 +438,19 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
         m->PendingGeometry.clear();
     }
     m->PassOpen = false; m->Target.reset(); m->Pass = CKBackendPassDesc();
-    m->TransientVertices.clear(); m->TransientIndices.clear();
+    m->TransientVertexInfo.clear(); m->TransientIndexInfo.clear();
+    // Keep common CPU allocations warm, with a shared 16 MiB retention budget.
+    // GPU uploads already own their snapshots; trimming cannot affect a fence.
+    uint64_t retained = 0;
+    auto trim = [&retained](std::vector<std::vector<CKBYTE>> &allocations) {
+        size_t keep = 0;
+        while (keep < allocations.size() && retained + allocations[keep].capacity() <= 16u * 1024u * 1024u) {
+            retained += allocations[keep].capacity();
+            ++keep;
+        }
+        allocations.resize(keep);
+    };
+    trim(m->TransientVertices); trim(m->TransientIndices);
     m->FrameStats.Frames = ++m->Submission;
     m->Stats = m->FrameStats; m->FrameStats = CKBackendStats();
     if (number) *number = m->Submission;

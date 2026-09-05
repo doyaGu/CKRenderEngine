@@ -210,6 +210,52 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
                            "fence-retired transient batch")) return false;
     std::puts("SDL_gpu transient reuse: 36 ordered batches across 12 submissions passed");
 
+    // A draw snapshots both streams and indices immediately, even when the
+    // caller changes the same allocation again before any native pass starts.
+    CKTextureDesc sampleDesc = image;
+    sampleDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    sampleDesc.Format.Width = 2; sampleDesc.Format.Height = 1; sampleDesc.Format.BytesPerLine = 8;
+    CKDWORD colors[] = {0xffff0000, 0xff00ff00};
+    VxImageDescEx samples = sampleDesc.Format; samples.Image = reinterpret_cast<CKBYTE *>(colors);
+    if (backend.CreateTexture(&sampleDesc, &samples, &texture) != CK_OK) return false;
+    backend.BindTexture(CKFF_SLOT_PRESENT, texture, &sampler);
+    for (unsigned mutation = 0; mutation < 3; ++mutation) {
+        CKBackendTransientVertices snapshotVertices, snapshotUv;
+        CKBackendTransientIndices snapshotIndex;
+        if (!allocate(snapshotVertices, snapshotUv, snapshotIndex)) return false;
+        float redUv[] = {0.25f, 0.5f, 0.25f, 0.5f, 0.25f, 0.5f};
+        std::memcpy(snapshotUv.Data, redUv, sizeof(redUv));
+        CKBackendDraw snapshotDraw = draw;
+        snapshotDraw.TransientVertices = &snapshotVertices;
+        snapshotDraw.Stream1Transient = &snapshotUv;
+        snapshotDraw.TransientIndices = &snapshotIndex;
+        pass.ClearColor = 0xff0000ff; pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
+        state.ScissorEnabled = TRUE; state.Scissor = {0, 0, 2, 4};
+        backend.SetPipelineState(&state);
+        if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&snapshotDraw) != CK_OK) return false;
+        if (mutation == 0) {
+            auto *positions = static_cast<float *>(snapshotVertices.Data);
+            for (unsigned vertex = 0; vertex < 3; ++vertex) positions[vertex * 3] += 10;
+        } else if (mutation == 1) {
+            auto *uvs = static_cast<float *>(snapshotUv.Data);
+            for (unsigned vertex = 0; vertex < 3; ++vertex) uvs[vertex * 2] = 0.75f;
+        } else std::memset(snapshotIndex.Data, 0, sizeof(indices)); // degenerate triangle
+        state.Scissor = {2, 0, 4, 4}; backend.SetPipelineState(&state);
+        if (backend.Draw(&snapshotDraw) != CK_OK) return false;
+        std::memcpy(snapshotVertices.Data, positions, sizeof(positions));
+        std::memcpy(snapshotUv.Data, redUv, sizeof(redUv));
+        std::memcpy(snapshotIndex.Data, indices, sizeof(indices));
+        if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
+            backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+        for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x)
+            pixels[y * 4 + x] = x < 2 ? colors[0] : mutation == 1 ? colors[1] : pass.ClearColor;
+        if (!CheckReadback(backend, ticket, pixels, 0, "transient draw-time snapshot")) return false;
+    }
+    backend.BindTexture(CKFF_SLOT_PRESENT, 0, &sampler);
+    backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
+    state.ScissorEnabled = FALSE; backend.SetPipelineState(&state);
+    std::puts("SDL_gpu transient snapshots: position, UV and index mutations between deferred draws passed");
+
     pass.ClearFlags = 0;
     if (backend.BeginPass(&pass) != CK_OK || !rejected(draw, "previous frame before reallocation")) return false;
     CKBackendTransientVertices currentVertices, currentUv;

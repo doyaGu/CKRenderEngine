@@ -213,6 +213,7 @@ void CKSdlGpuBackend::Shutdown()
     SDL_DestroyGPUDevice(m->Device);
     m->WindowClaimed = false; m->Device = nullptr; m->Window = nullptr; m->Swapchain = nullptr; m->PassOpen = false;
     m->TransientVertices.clear(); m->TransientIndices.clear();
+    m->TransientVertexInfo.clear(); m->TransientIndexInfo.clear();
 }
 
 CKERROR CKSdlGpuBackend::Resize(int x, int y, int width, int height)

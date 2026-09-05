@@ -53,8 +53,12 @@ batch retains its pair through submission; only a completed submission fence
 returns it to the free pool. Pending batches never share upload storage, even
 within one submission. Selection uses buffer usage and smallest sufficient
 capacity. The idle pool retains at most 16 MiB of combined GPU/transfer storage.
-CPU batch assembly vectors retain capacity separately. Partial persistent
-resource updates keep their existing preservation path.
+Draw validates transient allocations and snapshots their requested ranges
+directly into CPU batch arenas. Packets store offsets, so arena growth and
+later caller writes cannot change earlier draws. CPU allocation storage is
+reused by ordinal after Submit, with a separate 16 MiB retention budget;
+submission invalidates all allocation tokens even if their addresses recur.
+Partial persistent resource updates keep their existing preservation path.
 
 Readback tickets own transfer storage until their submission fence completes,
 including after cancellation. Resource destruction is deferred by SDL until

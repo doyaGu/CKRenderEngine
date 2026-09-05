@@ -115,7 +115,6 @@ struct CKSdlGpuDraw {
     std::array<std::shared_ptr<CKSdlGpuTexture>, 32> Textures;
     std::array<std::shared_ptr<SDL_GPUSampler>, 32> Samplers;
     unsigned UniformOffset = 0;
-    std::vector<CKBYTE> Vertices, Vertices1, Indices;
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
     std::string Marker;
@@ -171,6 +170,8 @@ struct CKSdlGpuDevice {
     CKBackendConstantValues Constants;
     std::vector<CKBYTE> UniformArena;
     std::string Marker;
+    // Info arrays describe this submission's live allocations; storage is reused
+    // by allocation ordinal only after Submit invalidates every token.
     std::vector<std::vector<CKBYTE>> TransientVertices, TransientIndices;
     CKDWORD NextTransientToken = 1; // never reset or reused across submissions/device reinitialization
     std::vector<CKSdlGpuTransientVertexInfo> TransientVertexInfo;
