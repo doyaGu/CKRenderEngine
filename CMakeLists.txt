@@ -284,6 +284,7 @@ if (CKRE_BUILD_TESTS)
     enable_testing()
 endif ()
 add_subdirectory(src)
+include(CKRERuntime)
 
 # =============================================================================
 # Tools (before tests: scene_capture_golden refers to the tool target)
