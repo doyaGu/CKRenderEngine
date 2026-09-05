@@ -4,16 +4,18 @@ CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `C
 
 ## Architecture
 
-The render engine is layered around one contract and one thin backend interface:
+The responsibilities follow `CK_3D → CKRasterizer → CKRasterizerBackend → Graphics API`:
 
-- **Engine** (`src/`, `include/RCK*.h`) — scene graph, render objects, materials, textures, sprites. It drives the rasterizer through the D3D7-shaped `CKRasterizer` v3 contract in `include/CKRasterizer.h` (render states, texture stage states, transforms, lights, materials, `DrawPrimitive*`, vertex/index buffer locks, `Clear` / `BeginScene` / `EndScene` / `BackToFront`, render-target textures, readbacks).
-- **Translation core** (`src/CKRasterizer/CKRasterizerLib/`, static library linked into `CK2_3D` and every rasterizer plugin) — `CKTranslatedRasterizer` / `CKTranslatedDriver` / `CKTranslatedContext` implement the contract: a verbatim state mirror, the fixed-function pipeline (`CKFixedFunctionPipeline`, `CKFF*`: one uber shader family plus per-draw specialization data), the virtual backbuffer and present stage (render scale, MSAA, FXAA, sharpening, readbacks), transient geometry and vertex layouts. Draws reach the GPU through the ~30-method `CKRasterizerBackend` interface (`CKRasterizerBackend.h`).
-- **Backends** — `CKBgfxRasterizer` (`src/CKRasterizer/CKBgfxRasterizer/`, `CKBgfxBackend` on bgfx: Direct3D 11/12, Vulkan, OpenGL/ES, Metal) and the built-in NULL backend (`CKNullBackend`, the fallback when no plugin loads and the base of the test harness).
-- **Reference and tests** — `tests/reference/` holds the capability baseline and the reference frames captured from the original Virtools rasterizer; `tools/scene_capture/` renders procedural scenes through any rasterizer and compares them (`ckre_scene_capture --compare`). Unit and contract tests live in `tests/` and `src/CKRasterizer/tests/`; the GPU pixel gate `rasterizer3_pixel_tests` runs when `CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1` (`CKBGFX_RENDERER_BACKEND` selects d3d11 / d3d12 / vulkan / opengl / opengles / metal).
+- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer v3 calls and loads providers through the registration entry points.
+- **CKRasterizerLib** implements fixed-function state, shader variants, geometry preparation and frame composition: render scale, MSAA, postprocessing, overlays and logical readbacks.
+- **CKRasterizerBackend** defines modern graphics resources, explicit programs, constant blocks, resolved pipeline state, ordered commands and completion. It is an internal contract independent of FFP and plugin loading.
+- **Native backends** implement that contract: `CKSdlGpuBackend` for SDL GPU, optional `CKBgfxBackend` for bgfx, and `CKNullBackend` for fallback and deterministic tests. The dynamic/static rasterizer plugins compose a native backend with the translation core and their own shader artifact catalog.
 
-The design is documented in the Ballanced superproject: `docs/spec/2026-09-01-render-engine-redesign-v3.md` (specification) and `docs/superpowers/plans/2026-09-02-render-engine-v3-implementation-plan.md` (phased implementation record).
+See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for ownership, dependency boundaries and performance constraints. Public rasterizer v3 and shader descriptor v2 compatibility remain intact.
 
-Runtime configuration: `src/CK2_3D.ini` (engine and translation core, installed next to `CK2_3D`) and `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini` (bgfx backend selection, shader cache, logging).
+The default provider is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects providers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
+
+Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance. See [optional bgfx acceptance](tests/reference/BGFX_OPTIONAL_ACCEPTANCE.md) for the latest upstream dependency validation and explicit skipped-test accounting.
 
 ## Support scope
 
@@ -93,6 +95,13 @@ color/depth/stencil write masks through public bgfx APIs. Full attachment clears
 retain the native fast path. Its offline shader generator takes explicit
 `--shaderc` and `--bgfx-source` paths; runtime does not invoke a compiler.
 Scene capture uses stb headers independently of bgfx/bimg.
+
+In Ballanced, rerun `stage` after changing providers. It removes disabled provider
+binaries left by a previous configuration inside the build tree, while preserving
+configuration files and other plugins. External install directories are not
+cleaned automatically; use a fresh prefix or remove the reported stale plugin.
+`StageLayout` rejects disabled provider binaries, including those left after a
+switch to static registration. The macOS stage already replaces its full snapshot.
 
 ## Versioning
 
