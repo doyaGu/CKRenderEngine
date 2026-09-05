@@ -48,6 +48,14 @@ mips. Mip generation snapshots the previous level into a separate sampled
 volume and renders each output slice into a 2D target. All copies and draws
 remain in the ordered GPU command stream; no CPU readback or idle wait is used.
 
+Transient geometry reuses capacity-bucketed GPU/transfer buffer pairs. Each
+batch retains its pair through submission; only a completed submission fence
+returns it to the free pool. Pending batches never share upload storage, even
+within one submission. Selection uses buffer usage and smallest sufficient
+capacity. The idle pool retains at most 16 MiB of combined GPU/transfer storage.
+CPU batch assembly vectors retain capacity separately. Partial persistent
+resource updates keep their existing preservation path.
+
 Readback tickets own transfer storage until their submission fence completes,
 including after cancellation. Resource destruction is deferred by SDL until
 queued GPU references complete. Normal frames bound the number of in-flight

@@ -9,6 +9,8 @@ bgfx and NULL implementations. Current ownership and dependency rules are in
 These records describe specific tested revisions and binaries, not cumulative
 test totals. A later build does not inherit earlier GPU passes.
 
+- [SDL GPU performance](SDL_GPU_PERFORMANCE.md): fence-retired transient buffer
+  reuse, measured gains and current regression evidence.
 - [Optional upstream bgfx](BGFX_OPTIONAL_ACCEPTANCE.md): current dependency,
   staging and unmodified-upstream validation.
 - [Rasterizer layer refactor](RASTERIZER_LAYER_ACCEPTANCE.md): boundary and
