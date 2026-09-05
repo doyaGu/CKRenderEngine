@@ -1,5 +1,10 @@
 include_guard(GLOBAL)
 
+# Cover native and MinGW naming when reusing a staging directory across toolchains.
+function(ckre_runtime_library_names OUT_VAR NAME)
+    set(${OUT_VAR} "${NAME}.dll;lib${NAME}.dll;${NAME}.so;lib${NAME}.so;${NAME}.dylib;lib${NAME}.dylib" PARENT_SCOPE)
+endfunction()
+
 # Keep script-mode defaults aligned with configure without changing the caller's
 # cache. Enabled targets participate in both dynamic and static compositions;
 # disabled binaries also include enabled providers when using static registration.

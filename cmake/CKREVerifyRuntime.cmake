@@ -7,8 +7,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/CKRERasterizers.cmake")
 ckre_get_rasterizers(_enabled _disabled "${CKRE_STATIC_RUNTIME}")
 foreach (_name IN LISTS _disabled)
     foreach (_directory IN ITEMS Bin RenderEngines)
-        foreach (_filename IN ITEMS "${_name}.dll" "${_name}.so" "lib${_name}.so"
-                "${_name}.dylib" "lib${_name}.dylib")
+        ckre_runtime_library_names(_filenames "${_name}")
+        foreach (_filename IN LISTS _filenames)
             if (EXISTS "${STAGE_ROOT}/${_directory}/${_filename}" OR
                     IS_SYMLINK "${STAGE_ROOT}/${_directory}/${_filename}")
                 message(FATAL_ERROR "[CKRenderEngine] Disabled runtime file: ${_directory}/${_filename}")

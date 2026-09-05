@@ -39,8 +39,8 @@ if (CKRE_INSTALL)
     set(_ckre_forbidden_files "")
     foreach (_name IN LISTS _ckre_disabled)
         foreach (_directory IN ITEMS Bin RenderEngines)
-            foreach (_filename IN ITEMS "${_name}.dll" "${_name}.so" "lib${_name}.so"
-                    "${_name}.dylib" "lib${_name}.dylib")
+            ckre_runtime_library_names(_filenames "${_name}")
+            foreach (_filename IN LISTS _filenames)
                 list(APPEND _ckre_forbidden_files "${_directory}/${_filename}")
             endforeach ()
         endforeach ()
@@ -67,6 +67,8 @@ if (CKRE_INSTALL)
 endif ()
 
 if (BUILD_TESTING)
+    add_test(NAME ShaderToolPlatformSelection
+            COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_LIST_DIR}/CKRETestShaderToolPlatform.cmake")
     add_test(NAME RasterizerInstallSelection
             COMMAND "${CMAKE_COMMAND}" "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-selection-test"
             -P "${CMAKE_CURRENT_LIST_DIR}/CKRETestRasterizerInstall.cmake")
