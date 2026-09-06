@@ -81,6 +81,90 @@ void FillTextureSlot(RCKTexture &texture, int slot, CKDWORD seed) {
     texture.ReleaseSurfacePtr(slot);
 }
 
+void CheckResetTextureStage(CKRasterizerContext &context, int stage) {
+    CKDWORD value = ~0u;
+    TestCheck(context.GetTexture(stage, &value) && value == 0,
+              "unused material stage must have no texture");
+    for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state) {
+        const CKDWORD expected = state == CKRST_TSS_TEXCOORDINDEX ? CKDWORD(stage) : 0;
+        TestCheck(context.GetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), &value) &&
+                      value == expected,
+                  "unused material stage must expose the complete not-set state");
+    }
+    VxMatrix matrix, identity;
+    identity.SetIdentity();
+    TestCheck(context.GetTransformMatrix(VXMATRIX_TYPE(VXMATRIX_TEXTURE0 + stage), matrix) &&
+                  memcmp(&matrix, &identity, sizeof(matrix)) == 0,
+              "unused material stage must restore the identity texture transform");
+}
+
+void MaterialBindingClearsTailAndPreservesLowerStages() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "StageResetMaterial");
+    RCKTexture texture(world.context, "StageResetTexture");
+    TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
+    FillTextureSlot(texture, 0, 0xFF112233u);
+    CKRasterizerContext &context = *world.translated.Context;
+    for (int current : {0, 2}) {
+        CKDWORD previousTextures[CKRST_MAX_TEXTURE_STAGES] = {};
+        CKDWORD previousStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE] = {};
+        VxMatrix previousMatrices[CKRST_MAX_TEXTURE_STAGES];
+        for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, stage), "seed stage texture");
+            // Valid state IDs retain arbitrary values at the public v3 boundary.
+            for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+                context.SetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), 0x1000u + state);
+            previousMatrices[stage].SetIdentity();
+            previousMatrices[stage][3][0] = float(stage + 1);
+            context.SetTransformMatrix(VXMATRIX_TYPE(VXMATRIX_TEXTURE0 + stage), previousMatrices[stage]);
+            context.GetTexture(stage, &previousTextures[stage]);
+            for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+                context.GetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), &previousStates[stage][state]);
+        }
+        material.SetTexture(current, &texture);
+        TestCheck(material.SetAsCurrent(world.renderContext, TRUE, current), "apply material to selected stage");
+        for (int stage = 0; stage < current; ++stage) {
+            CKDWORD value = 0;
+            TestCheck(context.GetTexture(stage, &value) && value == previousTextures[stage],
+                      "material on a later stage must preserve earlier texture bindings");
+            for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+                TestCheck(context.GetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), &value) &&
+                              value == previousStates[stage][state],
+                          "material on a later stage must preserve earlier stage states");
+            VxMatrix matrix;
+            context.GetTransformMatrix(VXMATRIX_TYPE(VXMATRIX_TEXTURE0 + stage), matrix);
+            TestCheck(memcmp(&matrix, &previousMatrices[stage], sizeof(matrix)) == 0,
+                      "material on a later stage must preserve earlier texture matrices");
+        }
+        for (int stage = current + 1; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+            CheckResetTextureStage(context, stage);
+        CKDWORD bound = 0;
+        TestCheck(context.GetTexture(current, &bound) && bound == previousTextures[current],
+                  "material must bind its own texture after resetting the chain");
+    }
+}
+
+VX_EFFECTCALLBACK_RETVAL OwnedTextureStagesCallback(CKRenderContext *context, CKMaterial *, int, void *) {
+    context->SetTextureStageState(CKRST_TSS_CONSTANT, 0xFFAABBCCu, 7);
+    return VXEFFECTRETVAL_SKIPALLTEX;
+}
+
+void MaterialPreservesCallbackOwnedTextureStages() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "CallbackTexturesMaterial");
+    VxEffectDescription effect;
+    effect.Summary = "OwnedTextureStages";
+    effect.SetCallback = &OwnedTextureStagesCallback;
+    material.SetEffect(VX_EFFECT(world.renderManager->AddEffect(effect)));
+    world.translated.Context->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF112233u);
+    TestCheck(material.SetAsCurrent(world.renderContext, TRUE, 0), "apply callback-owned material");
+    CKDWORD value = 0;
+    TestCheck(world.translated.Context->GetTextureStageState(0, CKRST_TSS_BORDERCOLOR, &value) && value == 0xFF112233u,
+              "SKIPALLTEX must preserve the current texture stage");
+    TestCheck(world.translated.Context->GetTextureStageState(7, CKRST_TSS_CONSTANT, &value) && value == 0xFFAABBCCu,
+              "SKIPALLTEX must preserve later stages written by the effect callback");
+}
+
 VX_EFFECTCALLBACK_RETVAL CustomEffectCallback(CKRenderContext *, CKMaterial *, int, void *argument) {
     int *calls = static_cast<int *>(argument);
     if (calls)
@@ -148,6 +232,7 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
     FillTextureSlot(texture, 0, 0xFF112233u);
     material.SetTexture(0, &texture);
+    world.translated.Context->SetTextureStageState(7, CKRST_TSS_CONSTANT, 0xFFABCDEFu);
     world.rasterizer->FailUpdateTexture = TRUE;
 
     TestCheck(!material.SetAsCurrent(world.renderContext, TRUE, 0),
@@ -155,6 +240,7 @@ void SetAsCurrentPropagatesTextureUploadFailure() {
     CKDWORD bound = 0xFFFFFFFFu;
     TestCheck(world.renderContext->m_RasterizerContext->GetTexture(0, &bound) && bound == 0,
               "failed material texture upload must not leave a texture bound");
+    CheckResetTextureStage(*world.translated.Context, 7);
 }
 
 void ChannelTextureBindingPreservesTextureFlags() {
@@ -478,6 +564,10 @@ int main() {
               &DepthWritingAlphaTestCutoutsAreNotAlphaTransparent);
     tests.Run("Texture slot bounds are checked",
               &TextureSlotBoundsAreChecked);
+    tests.Run("Material binding clears tail and preserves lower stages",
+              &MaterialBindingClearsTailAndPreservesLowerStages);
+    tests.Run("Material preserves callback-owned texture stages",
+              &MaterialPreservesCallbackOwnedTextureStages);
     tests.Run("SetAsCurrent propagates texture upload failure",
               &SetAsCurrentPropagatesTextureUploadFailure);
     tests.Run("Channel texture binding preserves texture flags",

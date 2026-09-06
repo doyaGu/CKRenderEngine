@@ -1519,7 +1519,10 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
                                  CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU));
         rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        dev->DisableTextureStagesFrom(TextureStage + 1);
+        // Stage 0 already reset the entire chain before binding its texture.
+        // Binding/filter setup above touches only the current stage.
+        if (TextureStage != 0)
+            dev->DisableTextureStagesFrom(TextureStage + 1);
     }
 
     if (skipTextureMatrix) {
