@@ -11,6 +11,8 @@ test totals. A later build does not inherit earlier GPU passes.
 
 - [SDL GPU performance](SDL_GPU_PERFORMANCE.md): GPU/CPU transient buffer reuse,
   index validation, corrected capture methodology and current regression evidence.
+- [Redesign baseline](SDL_GPU_REDESIGN_BASELINE.md): separate foreground FPS,
+  FFP/native timeline decomposition, wait evidence and capture limitations.
 - [Optional upstream bgfx](BGFX_OPTIONAL_ACCEPTANCE.md): current dependency,
   staging and unmodified-upstream validation.
 - [Rasterizer layer refactor](RASTERIZER_LAYER_ACCEPTANCE.md): boundary and
