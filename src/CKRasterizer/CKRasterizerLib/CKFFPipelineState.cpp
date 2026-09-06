@@ -206,7 +206,10 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
 
     const uint64_t stateBit = 1ull << (CKDWORD)type;
     if (m_State.StageStates[stage][(int)type] == value &&
-        (m_State.StageStateSetMasks[stage] & stateBit) != 0)
+        (m_State.StageStateSetMasks[stage] & stateBit) != 0 &&
+        type != CKRST_TSS_STAGEBLEND &&
+        (type != CKRST_TSS_TEXTUREMAPBLEND ||
+         (m_State.StageStateSetMasks[stage] & TextureCombineStateMask()) == 0))
         return;
 
     m_State.StageStates[stage][(int)type] = value;

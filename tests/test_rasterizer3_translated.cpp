@@ -162,6 +162,37 @@ void TestStateRoundTrip()
               "state unchanged after rejected calls");
 }
 
+void TestRepeatedCompoundTextureStates()
+{
+    Fixture f;
+    CKDWORD value = 0;
+    f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSWRAP);
+    f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_ADDRESSU, &value) &&
+                  value == VXTEXTURE_ADDRESSCLAMP &&
+                  f.FFP->GetTextureStageState(0, CKRST_TSS_ADDRESSU) == value,
+              "repeated ADDRESS must replace independently changed axes");
+
+    f.Context->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+    f.Context->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD);
+    f.Context->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == 0 &&
+                  f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == 0 &&
+                  !f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
+              "repeated TEXTUREMAPBLEND must clear newer explicit combine state in both stores");
+
+    const CKDWORD stageBlend = (VXBLEND_DESTCOLOR << 4) | VXBLEND_ZERO;
+    f.Context->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, stageBlend);
+    f.Context->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_ADD);
+    f.Context->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, stageBlend);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) &&
+                  value == CKRST_TOP_MODULATE &&
+                  f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == value &&
+                  f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
+              "repeated STAGEBLEND must reapply its derived combine state in both stores");
+}
+
 void TestMatricesLightsClipPlanes()
 {
     Fixture f;
@@ -538,6 +569,7 @@ int main()
     framework.Run("lifecycle", TestLifecycle);
     framework.Run("defaults reach the pipeline", TestDefaultsReachThePipeline);
     framework.Run("state round trip", TestStateRoundTrip);
+    framework.Run("repeated compound texture states", TestRepeatedCompoundTextureStates);
     framework.Run("matrices, lights, clip planes", TestMatricesLightsClipPlanes);
     framework.Run("textures", TestTextures);
     framework.Run("buffers", TestBuffers);
