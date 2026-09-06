@@ -166,6 +166,22 @@ void TestRepeatedCompoundTextureStates()
 {
     Fixture f;
     CKDWORD value = 0;
+    for (int reset = 0; reset < 2; ++reset) {
+        f.Context->InitDefaultRenderStatesValue();
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            f.Context->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+            TestCheck(f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == CKRST_TOP_MODULATE &&
+                          f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
+                      "writing the mirror default must reach FFP after every reset");
+            f.Context->SetTextureStageState(0, CKRST_TSS_ARG1, 0);
+            TestCheck(!f.FFP->IsTextureStageStateSet(0, CKRST_TSS_ARG1),
+                      "repeated zero combine arguments must remain implicit");
+            f.Context->SetTextureStageState(0, CKRST_TSS_MINFILTER, 0);
+            TestCheck(f.FFP->GetTextureStageState(0, CKRST_TSS_MINFILTER) == 0 &&
+                          f.FFP->IsTextureStageStateSet(0, CKRST_TSS_MINFILTER),
+                      "repeated zero sampler values must remain explicit");
+        }
+    }
     f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
     f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSWRAP);
     f.Context->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);

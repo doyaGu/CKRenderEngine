@@ -318,6 +318,9 @@ private:
     // Verbatim state mirror (spec 4.10)
     CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
     CKDWORD m_StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
+    // Defaults in the public mirror can differ from the FFP defaults until
+    // explicitly applied. Only synchronized entries can skip repeated writes.
+    uint64_t m_AppliedStageStates[CKRST_MAX_TEXTURE_STAGES]{};
     CKDWORD m_Textures[CKRST_MAX_TEXTURE_STAGES];
     VxMatrix m_Matrices[CKRST_MATRIX_SLOT_COUNT];
     CKLightData m_Lights[CKRST_MAX_LIGHTS];

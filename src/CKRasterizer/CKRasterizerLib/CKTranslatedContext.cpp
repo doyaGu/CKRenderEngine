@@ -387,7 +387,14 @@ CKBOOL CKTranslatedContext::SetTextureStageState(int Stage, CKRST_TEXTURESTAGEST
         Diag(CKRST_DIAG_INVALID_STAGE_STATE);
         return FALSE;
     }
+    const uint64_t stateBit = 1ull << (CKDWORD)Tss;
+    if (m_StageStates[Stage][(CKDWORD)Tss] == Value &&
+        (m_AppliedStageStates[Stage] & stateBit) != 0 &&
+        Tss != CKRST_TSS_ADDRESS && Tss != CKRST_TSS_STAGEBLEND &&
+        Tss != CKRST_TSS_TEXTUREMAPBLEND)
+        return TRUE;
     m_StageStates[Stage][(CKDWORD)Tss] = Value;
+    m_AppliedStageStates[Stage] |= stateBit;
     switch ((CKDWORD)Tss) {
     case CKRST_TSS_ADDRESS:
         m_StageStates[Stage][CKRST_TSS_ADDRESSU] = Value;
@@ -610,6 +617,7 @@ CKBOOL CKTranslatedContext::GetUserClipPlane(CKDWORD Index, VxPlane &Plane)
 
 void CKTranslatedContext::ResetStateMirror()
 {
+    memset(m_AppliedStageStates, 0, sizeof(m_AppliedStageStates));
     // Contract-visible defaults (spec 4.6). Create() only resets the mirror:
     // the fixed-function pipeline keeps its own richer defaults (they are the
     // ones the engine renders with), and the engine sets everything it
