@@ -122,6 +122,7 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     auto &uniforms = draw.Program->UniformLayout;
     static const CKBackendConstants emptyConstants;
     uniforms.Update(desc->Constants ? *desc->Constants : emptyConstants);
+    CKSdlGpuBindingBatch::Inputs bindingInputs;
     for (unsigned slot = 0; slot < draw.Program->Interface.Samplers.size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
         static const CKBackendTextureBinding emptyBinding;
@@ -134,17 +135,18 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
         if (decl.MetadataBufferSlot == ~0u && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
-        draw.Textures[slot] = binding.Texture ? m->Textures.Get(binding.Texture) : draw.Program->DefaultTextures[slot];
-        if (!draw.Textures[slot] || draw.Textures[slot]->Depth ||
-            draw.Textures[slot]->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
-            (m->Target && draw.Textures[slot] == m->Target->Color)) {
+        const auto &texture = binding.Texture ? m->Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
+        if (!texture || texture->Depth ||
+            texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
+            (m->Target && texture == m->Target->Color)) {
             fprintf(stderr, "SDL_gpu draw rejected: sampler=%u texture=0x%x feedback=%d marker=%s\n",
-                    slot, binding.Texture, m->Target && draw.Textures[slot] == m->Target->Color, draw.Marker.c_str());
+                    slot, binding.Texture, m->Target && texture == m->Target->Color, draw.Marker.c_str());
             return CKERR_INVALIDPARAMETER;
         }
         if (!cached.NativeSampler) cached.NativeSampler = m->Sampler(binding.Sampler);
         if (!cached.NativeSampler) return m->Error;
-        draw.Samplers[slot] = cached.NativeSampler;
+        bindingInputs.Textures[slot] = &texture;
+        bindingInputs.Samplers[slot] = &cached.NativeSampler;
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
         if (metadata == ~0u) continue;
         float rgba[4];
@@ -169,7 +171,7 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     };
     if (endOffset(endOffset(m->BatchVertices.size(), vertices.Size), vertices1.Size) > UINT32_MAX ||
         endOffset(m->BatchIndices.size(), indices.Size) > UINT32_MAX ||
-        uint64_t(m->UniformArena.size()) + uniforms.Data.size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
+        uint64_t(m->Uniforms.Data.size()) + uniforms.Data.size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
     auto append = [](std::vector<CKBYTE> &dst, const Bytes &src, unsigned &offset) {
         if (!src.Size) return;
         dst.resize((dst.size() + 3) & ~size_t(3));
@@ -179,8 +181,8 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     append(m->BatchVertices, vertices, draw.VertexOffset);
     append(m->BatchVertices, vertices1, draw.VertexOffset1);
     append(m->BatchIndices, indices, draw.IndexOffset);
-    draw.UniformOffset = unsigned(m->UniformArena.size());
-    m->UniformArena.insert(m->UniformArena.end(), uniforms.Data.begin(), uniforms.Data.end());
+    m->Uniforms.Snapshot(uniforms, draw.Program->UniformCursor, draw.UniformOffsets);
+    draw.Bindings = m->Bindings.Intern(*draw.Program, bindingInputs);
     m->DrawApproximations = 0;
     m->Draws.push_back(std::move(draw));
     ++m->FrameStats.Draws;
@@ -195,7 +197,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     if (!EnsureCommands()) return Error;
     if (!Target) {
         if (!presentWindow) {
-            Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
             return CK_OK;
         }
         if (!Swapchain) {
@@ -209,14 +211,15 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         }
         // A minimized window has no swapchain image. Resource work still submits.
         if (!Swapchain) {
-            Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
             return CK_OK;
         }
     }
     CKRE_PROFILE_VALUE("CKRE.Batch.Draws", Draws.size());
     CKRE_PROFILE_VALUE("CKRE.Batch.VertexBytes", BatchVertices.size());
     CKRE_PROFILE_VALUE("CKRE.Batch.IndexBytes", BatchIndices.size());
-    CKRE_PROFILE_VALUE("CKRE.Batch.UniformSnapshotBytes", UniformArena.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.UniformSnapshotBytes", Uniforms.Data.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.BindingGroups", Bindings.Size());
     auto batchVB = UploadGeometry(BatchVertices, SDL_GPU_BUFFERUSAGE_VERTEX);
     auto batchIB = UploadGeometry(BatchIndices, SDL_GPU_BUFFERUSAGE_INDEX);
     if (Error != CK_OK) return Error;
@@ -269,6 +272,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     if (!fullRect && Pass.ClearFlags && ClearRect(pass, Pass, colorFormat, depthFormat, samples) != CK_OK) {
         SDL_EndGPURenderPass(pass); return Error;
     }
+    Bindings.MarkReferenced();
     for (auto &draw : Draws) {
         auto pipeline = Pipeline(draw, colorFormat, depthFormat, samples);
         if (!pipeline) { SDL_EndGPURenderPass(pass); return Error; }
@@ -295,19 +299,15 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             SDL_GPUBufferBinding defaults = {draw.Program->DefaultVertices.get(), 0};
             SDL_BindGPUVertexBuffers(pass, draw.Layout1 ? 2 : 1, &defaults, 1);
         }
-        SDL_GPUTextureSamplerBinding vertexBindings[16] = {}, fragmentBindings[16] = {};
-        for (unsigned slot = 0; slot < draw.Program->Interface.Samplers.size(); ++slot) {
-            const auto &decl = draw.Program->Interface.Samplers[slot];
-            auto *bindings = decl.Stage == CKRST_SHADER_VERTEX ? vertexBindings : fragmentBindings;
-            bindings[decl.NativeSlot] = {draw.Textures[slot]->Image.get(), draw.Samplers[slot].get()};
-            draw.Textures[slot]->Referenced = true;
-        }
+        const auto &bindings = Bindings[draw.Bindings];
         if (draw.Program->Vertex->Desc.SamplerCount)
-            SDL_BindGPUVertexSamplers(pass, 0, vertexBindings, draw.Program->Vertex->Desc.SamplerCount);
+            SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex.data(), draw.Program->Vertex->Desc.SamplerCount);
         if (draw.Program->Fragment->Desc.SamplerCount)
-            SDL_BindGPUFragmentSamplers(pass, 0, fragmentBindings, draw.Program->Fragment->Desc.SamplerCount);
-        for (const auto &buffer : draw.Program->UniformLayout.Buffers) {
-            const void *data = UniformArena.data() + draw.UniformOffset + buffer.Offset;
+            SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment.data(), draw.Program->Fragment->Desc.SamplerCount);
+        for (size_t i = 0; i < draw.Program->UniformLayout.Buffers.size(); ++i) {
+            const auto &buffer = draw.Program->UniformLayout.Buffers[i];
+            const unsigned offset = draw.UniformOffsets[i];
+            const void *data = Uniforms.Data.data() + offset;
             if (buffer.Stage == CKRST_SHADER_VERTEX) SDL_PushGPUVertexUniformData(Commands, buffer.Slot, data, buffer.Size);
             else SDL_PushGPUFragmentUniformData(Commands, buffer.Slot, data, buffer.Size);
         }
@@ -331,7 +331,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             if (error != CK_OK) return error;
         }
     }
-    Pass.ClearFlags = 0; Draws.clear(); UniformArena.clear(); BatchVertices.clear(); BatchIndices.clear();
+    Pass.ClearFlags = 0; Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear();
     return CK_OK;
 }
 

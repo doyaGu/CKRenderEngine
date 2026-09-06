@@ -4,6 +4,7 @@
 #include "CKSdlGpuBackend.h"
 #include "CKSdlGpuNativeShaders.h"
 #include "CKBackendProgramLayout.h"
+#include "CKSdlGpuUniformBatch.h"
 #include <SDL3/SDL.h>
 #ifdef min
 #undef min
@@ -35,11 +36,15 @@ public:
         Slots.push_back({std::move(value), 1});
         return 0x10000u | CKDWORD(Slots.size());
     }
-    std::shared_ptr<T> Get(CKDWORD handle) const {
+    // Borrow only until the next mutation of this table. Queued work must own
+    // a copy (through Get or a batch resource group) before returning to callers.
+    const std::shared_ptr<T> &Borrow(CKDWORD handle) const {
+        static const std::shared_ptr<T> empty;
         const unsigned index = (handle & 65535u) - 1;
-        if (index >= Slots.size() || Slots[index].Generation != (handle >> 16)) return {};
+        if (index >= Slots.size() || Slots[index].Generation != (handle >> 16)) return empty;
         return Slots[index].Value;
     }
+    std::shared_ptr<T> Get(CKDWORD handle) const { return Borrow(handle); }
     bool Remove(CKDWORD handle) {
         if (!Get(handle)) return false;
         auto &slot = Slots[(handle & 65535u) - 1];
@@ -86,6 +91,7 @@ struct CKSdlGpuProgram {
     std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;
     CKBackendProgramDesc Interface;
     CKBackendProgramLayout UniformLayout;
+    CKSdlGpuUniformCursor UniformCursor;
     CKDWORD Identity = 0;
     std::array<int, CKRST_ATTRIB_COUNT> AttributeLocations;
     std::shared_ptr<SDL_GPUBuffer> DefaultVertices;
@@ -105,15 +111,72 @@ struct CKSdlGpuBinding {
         CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, 0, CKRST_COMPARE_NONE};
     std::shared_ptr<SDL_GPUSampler> NativeSampler;
 };
+
+// Resources and native binding arrays are retained once per distinct binding
+// group, not once per draw. The fixed bucket table avoids allocation per lookup.
+// Groups expire at every render/copy boundary, before image versions can change.
+class CKSdlGpuBindingBatch {
+public:
+    struct Inputs {
+        std::array<const std::shared_ptr<CKSdlGpuTexture> *, 32> Textures;
+        std::array<const std::shared_ptr<SDL_GPUSampler> *, 32> Samplers;
+    };
+    struct Group {
+        CKDWORD Program = 0;
+        int Next = -1;
+        std::array<std::shared_ptr<CKSdlGpuTexture>, 32> Textures;
+        std::array<std::shared_ptr<SDL_GPUSampler>, 32> Samplers;
+        std::array<SDL_GPUTextureSamplerBinding, 16> Vertex = {}, Fragment = {};
+    };
+    CKSdlGpuBindingBatch() { Buckets.fill(-1); }
+    unsigned Intern(const CKSdlGpuProgram &program, const Inputs &inputs) {
+        const size_t count = program.Interface.Samplers.size();
+        size_t hash = program.Identity;
+        for (size_t i = 0; i < count; ++i) {
+            hash = (hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(inputs.Textures[i]->get()) >> 4);
+            hash = (hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(inputs.Samplers[i]->get()) >> 4);
+        }
+        const size_t bucket = hash % Buckets.size();
+        for (int index = Buckets[bucket]; index >= 0; index = Groups[index].Next) {
+            const auto &group = Groups[index];
+            if (group.Program != program.Identity) continue;
+            size_t i = 0;
+            while (i < count && group.Textures[i] == *inputs.Textures[i] &&
+                   group.Samplers[i] == *inputs.Samplers[i]) ++i;
+            if (i == count) return unsigned(index);
+        }
+        const unsigned index = unsigned(Groups.size());
+        Groups.emplace_back();
+        auto &group = Groups.back();
+        group.Program = program.Identity; group.Next = Buckets[bucket]; Buckets[bucket] = int(index);
+        for (size_t i = 0; i < count; ++i) {
+            const auto &decl = program.Interface.Samplers[i];
+            group.Textures[i] = *inputs.Textures[i]; group.Samplers[i] = *inputs.Samplers[i];
+            auto &bindings = decl.Stage == CKRST_SHADER_VERTEX ? group.Vertex : group.Fragment;
+            bindings[decl.NativeSlot] = {group.Textures[i]->Image.get(), group.Samplers[i].get()};
+        }
+        return index;
+    }
+    const Group &operator[](unsigned index) const { return Groups[index]; }
+    size_t Size() const { return Groups.size(); }
+    void MarkReferenced() {
+        for (auto &group : Groups)
+            for (auto &texture : group.Textures) if (texture) texture->Referenced = true;
+    }
+    void Clear() { Groups.clear(); Buckets.fill(-1); }
+private:
+    std::array<int, 512> Buckets;
+    std::vector<Group> Groups;
+};
+
 struct CKSdlGpuDraw {
     CKBackendDraw Desc;
     CKBackendPipelineState State;
     std::shared_ptr<CKSdlGpuProgram> Program;
     std::shared_ptr<CKSdlGpuLayout> Layout, Layout1;
     std::shared_ptr<CKSdlGpuBuffer> VB, VB1, IB;
-    std::array<std::shared_ptr<CKSdlGpuTexture>, 32> Textures;
-    std::array<std::shared_ptr<SDL_GPUSampler>, 32> Samplers;
-    unsigned UniformOffset = 0;
+    unsigned Bindings = 0;
+    std::array<unsigned, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> UniformOffsets = {};
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
     std::string Marker;
@@ -165,7 +228,8 @@ struct CKSdlGpuDevice {
     std::shared_ptr<CKSdlGpuTarget> Target;
     std::vector<CKSdlGpuDraw> Draws;
     std::array<CKSdlGpuBinding, CKBACKEND_MAX_TEXTURE_SLOTS> SamplerBindings;
-    std::vector<CKBYTE> UniformArena;
+    CKSdlGpuUniformBatch Uniforms;
+    CKSdlGpuBindingBatch Bindings;
     // Info arrays describe this submission's live allocations; storage is reused
     // by allocation ordinal only after Submit invalidates every token.
     std::vector<std::vector<CKBYTE>> TransientVertices, TransientIndices;

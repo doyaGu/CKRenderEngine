@@ -8,6 +8,78 @@ int main()
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
     {
+        CKBackendProgramLayout layout;
+        layout.Buffers = {{CKRST_SHADER_VERTEX, 0, 0, 16}, {CKRST_SHADER_PIXEL, 0, 16, 32},
+                          {CKRST_SHADER_VERTEX, 1, 16, 32}};
+        layout.Data.resize(48, 1);
+        CKSdlGpuUniformBatch batch;
+        CKSdlGpuUniformCursor cursor, otherProgram;
+        std::array<unsigned, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> first = {}, second = {}, third = {}, other = {};
+        batch.Snapshot(layout, cursor, first);
+        check(batch.Data.size() == 48 && first[1] == first[2], "shared stage data is snapshotted once");
+        for (unsigned i = 0; i < 256; ++i) batch.Snapshot(layout, cursor, second);
+        check(batch.Data.size() == 48 && first == second, "256 unchanged draws reuse immutable buffer versions");
+        layout.Data[0] = 2;
+        batch.Snapshot(layout, cursor, second);
+        check(batch.Data.size() == 64 && second[0] != first[0] && second[1] == first[1] &&
+              batch.Data[first[0]] == 1 && batch.Data[second[0]] == 2,
+              "object change leaves the shared fragment data and earlier draw intact");
+        // Metadata is written directly by the backend, independently of the
+        // producer's revision. It must participate in snapshot identity.
+        layout.Data[40] = 3;
+        batch.Snapshot(layout, cursor, third);
+        check(batch.Data.size() == 96 && third[0] == second[0] && third[1] != second[1] &&
+              batch.Data[second[1] + 24] == 1 && batch.Data[third[1] + 24] == 3,
+              "sampler metadata changes cannot overwrite or reuse old draw bytes");
+        batch.Clear();
+        layout.Data.assign(48, 4);
+        batch.Snapshot(layout, cursor, first);
+        check(batch.Data.size() == 48 && first[0] == 0 && batch.Data[0] == 4,
+              "a new batch never follows a previous batch's offsets");
+    }
+    {
+        CKSdlGpuProgram program;
+        program.Identity = 0x10001;
+        CKBackendSamplerBinding declaration;
+        declaration.Stage = CKRST_SHADER_PIXEL; declaration.NativeSlot = 7;
+        program.Interface.Samplers.push_back(declaration);
+        CKSdlGpuTable<CKSdlGpuTexture> textures;
+        auto texture = std::make_shared<CKSdlGpuTexture>();
+        auto handle = textures.Add(texture);
+        // Aliased inert tokens exercise ownership without constructing a GPU.
+        auto token = std::make_shared<int>(1);
+        std::shared_ptr<SDL_GPUSampler> sampler(token, reinterpret_cast<SDL_GPUSampler *>(token.get()));
+        CKSdlGpuBindingBatch batch;
+        CKSdlGpuBindingBatch::Inputs inputs;
+        inputs.Textures[0] = &textures.Borrow(handle); inputs.Samplers[0] = &sampler;
+        const unsigned original = batch.Intern(program, inputs);
+        const long owners = texture.use_count();
+        for (unsigned i = 0; i < 256; ++i)
+            check(batch.Intern(program, inputs) == original, "repeated draw finds its binding group");
+        check(batch.Size() == 1 && texture.use_count() == owners,
+              "resource retention follows unique binding groups, not draws");
+        check(batch[original].Fragment[7].sampler == sampler.get(), "logical declaration maps to the native slot");
+        batch.MarkReferenced();
+        check(texture->Referenced, "encoded binding groups mark sampled textures for version preservation");
+        textures.Remove(handle);
+        auto replacementTexture = std::make_shared<CKSdlGpuTexture>();
+        auto replacementHandle = textures.Add(replacementTexture);
+        inputs.Textures[0] = &textures.Borrow(replacementHandle);
+        const unsigned replacement = batch.Intern(program, inputs);
+        check(replacement != original && batch[original].Textures[0] == texture &&
+              batch[replacement].Textures[0] == replacementTexture, "deleted texture and reused handle keep separate group lifetimes");
+        inputs.Textures[0] = &texture;
+        check(batch.Intern(program, inputs) == original, "nonconsecutive draws reuse an earlier group");
+        auto secondToken = std::make_shared<int>(2);
+        std::shared_ptr<SDL_GPUSampler> secondSampler(secondToken, reinterpret_cast<SDL_GPUSampler *>(secondToken.get()));
+        inputs.Samplers[0] = &secondSampler;
+        check(batch.Intern(program, inputs) != original, "sampler state distinguishes binding groups");
+        program.Identity = 0x20001;
+        check(batch.Intern(program, inputs) == 3, "program generation distinguishes native slot layouts");
+        batch.Clear();
+        check(batch.Size() == 0 && texture.use_count() == 1, "batch completion releases resource ownership");
+    }
+    {
         unsigned char blocks[32] = {};
         VxImageDescEx image;
         std::vector<unsigned char> pixels;

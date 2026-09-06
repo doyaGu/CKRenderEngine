@@ -91,12 +91,28 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (submit(&draw) != CK_OK) return false;
     CKReadbackDesc read; CKBackendReadbackTicket ticket;
     if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK) return false;
+    // Repeated bindings/constants, A-B-A values and automatic batch splitting
+    // must all preserve the draw at which each slice was selected.
+    CKBackendReadbackTicket repeated;
+    if (backend.BeginPass(&pass) != CK_OK) return false;
+    float sliceParams[8] = {4, 4, 2, 0, 4, 4, 2, 0};
+    for (unsigned x = 0; x < 4; ++x) {
+        state.Scissor = {int(x), 0, int(x + 1), 4};
+        sliceParams[7] = float(x % 2);
+        if (constants.Set(29, sliceParams, sizeof(sliceParams)) != CK_OK) return false;
+        for (unsigned i = 0; i < 128; ++i) if (submit(&draw) != CK_OK) return false;
+    }
+    if (backend.ReadTexture(output, 0, &read, &repeated) != CK_OK) return false;
     backend.DestroyObject(program, CKRST_OBJ_PROGRAM); backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
     backend.DestroyObject(target, CKRST_OBJ_FRAMEBUFFER); backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
     if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
     for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x)
         pixels[y * 4 + x] = x < 2 ? 0xffff0000 : 0xff800080;
     if (!CheckReadback(backend, ticket, pixels, 1, "generic program ordered update")) return false;
+    for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x)
+        pixels[y * 4 + x] = x % 2 ? 0xffff0000 : 0xff0000ff;
+    if (!CheckReadback(backend, repeated, pixels, 0, "immutable uniform versions across 512 draws")) return false;
+    std::puts("SDL_gpu batch reuse: 512 ordered draws, repeated and changed constants, automatic pass continuation passed");
     std::puts("SDL_gpu generic program: procedural input, logical sampler 7, byte slots 28/29, ordered slice update and retained resources passed");
 
     // Use the existing textured shader to exercise real two-stream/indexed

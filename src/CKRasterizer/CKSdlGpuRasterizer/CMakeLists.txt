@@ -11,7 +11,8 @@ set(CKSDL_GPU_BACKEND_SOURCES
         CKSdlGpuNativeShaders.cpp
 )
 add_library(CKSdlGpuBackend STATIC ${CKSDL_GPU_BACKEND_SOURCES}
-        CKSdlGpuBackend.h CKSdlGpuInternal.h CKSdlGpuNativeShaders.h CKSdlGpuTextureData.h)
+        CKSdlGpuBackend.h CKSdlGpuInternal.h CKSdlGpuNativeShaders.h CKSdlGpuTextureData.h
+        CKSdlGpuUniformBatch.h)
 target_compile_features(CKSdlGpuBackend PRIVATE cxx_std_20)
 target_include_directories(CKSdlGpuBackend PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_link_libraries(CKSdlGpuBackend PUBLIC CKRasterizerBackend SDL3::SDL3)

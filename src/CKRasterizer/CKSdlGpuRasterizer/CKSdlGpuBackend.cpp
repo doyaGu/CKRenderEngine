@@ -47,7 +47,7 @@ CKERROR CKSdlGpuBackend::Init(const CKBackendInitDesc *desc)
     // Retain resource-table generations across shutdown, but start the new
     // device with fresh bindings, constants and submission/presentation state.
     m->SamplerBindings = {};
-    m->UniformArena.clear();
+    m->Uniforms.Clear(); m->Bindings.Clear();
     m->Caps = CKBackendCaps();
     m->Pass = CKBackendPassDesc();
     m->Stats = {}; m->FrameStats = {};
@@ -185,6 +185,7 @@ void CKSdlGpuBackend::Shutdown()
 {
     if (!m->Device) return;
     m->Draws.clear();
+    m->Bindings.Clear();
     if (m->Commands) {
         // SDL forbids cancelling after swapchain acquisition.
         if (m->Swapchain) SDL_SubmitGPUCommandBuffer(m->Commands);
@@ -203,7 +204,7 @@ void CKSdlGpuBackend::Shutdown()
     m->Samplers.clear();
     m->ClearProgram.reset(); m->VolumeMipProgram.reset();
     m->DefaultVertexBuffers.clear(); m->DefaultTextures.clear();
-    m->UniformArena.clear();
+    m->Uniforms.Clear();
     m->Target.reset(); m->Targets.Clear(); m->Programs.Clear(); m->ShaderObjects.Clear();
     m->VertexBuffers.Clear(); m->IndexBuffers.Clear(); m->Layouts.Clear(); m->Textures.Clear();
     if (m->WindowClaimed) SDL_ReleaseWindowFromGPUDevice(m->Device, m->Window);
