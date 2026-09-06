@@ -56,6 +56,8 @@ void CKFFShaderCache::Shutdown() {
     memset(m_Programs, 0, sizeof(m_Programs));
     memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
     m_PixelShader = 0;
+    for (auto &entry : m_Specializations)
+        entry.Valid = false;
     m_SamplerLayout = CKFFProgramSamplerLayout();
     m_Backend = nullptr;
     m_Shaders = CKBackendShaderSet();
@@ -141,5 +143,11 @@ CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     const CKFFProgramVariant variant = ProgramVariantForKey(key);
     if (m_Programs[variant] == 0)
         m_Programs[variant] = CreateProgramVariant(variant);
-    return CKFFProgramBinding(m_Programs[variant], CKFFBuildSpecializationInfo(key.FS));
+    SpecializationEntry &entry = m_Specializations[variant];
+    if (!entry.Valid || !(entry.Key == key.FS)) {
+        entry.Value = CKFFBuildSpecializationInfo(key.FS);
+        entry.Key = key.FS;
+        entry.Valid = true;
+    }
+    return CKFFProgramBinding(m_Programs[variant], entry.Value);
 }

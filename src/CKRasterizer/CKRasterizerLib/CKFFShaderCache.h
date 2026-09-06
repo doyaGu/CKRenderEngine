@@ -102,6 +102,16 @@ private:
     CKDWORD m_PixelShader;
     CKFFProgramSamplerLayout m_SamplerLayout;
 
+    // Repeated materials change matrices much more often than fragment state.
+    // Keep one value per vertex variant; storage is bounded and draws retain
+    // their own specialization copy when a later material replaces this entry.
+    struct SpecializationEntry {
+        bool Valid = false;
+        CKFFShaderKeyFS Key;
+        CKFFSpecializationInfo Value;
+    };
+    SpecializationEntry m_Specializations[CKFF_PROGRAM_VARIANT_COUNT];
+
     bool ResolveShaderTarget();
     void BuildSamplerLayout();
     CKDWORD CreateProgramVariant(CKFFProgramVariant variant);

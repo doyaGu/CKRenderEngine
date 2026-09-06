@@ -103,6 +103,27 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
     TestCheck(backend.CreatedProgramCount == 1 && backend.CreatedShaderCount == 2,
               "cached draws do not rebuild programs or resource declarations");
 
+    const CKFFProgramBinding original = cache.GetProgram(key);
+    for (int change = 0; change < 32; ++change) {
+        key.FS.AlphaTestEnable = (change & 1) != 0;
+        key.FS.AlphaFunc = (change & 7) + 1;
+        key.FS.LastActiveTextureStage = (change & 7) + 1;
+        auto &stage = key.FS.Stages[change & 7];
+        stage.ColorOp = (change & 1) ? CKRST_TOP_ADD : CKRST_TOP_MODULATE;
+        stage.ColorArg1 = CKRST_TA_TEXTURE | ((change & 2) ? CKRST_TA_COMPLEMENT : 0);
+        stage.MirrorOnceMask = change & 7;
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            const CKFFProgramBinding binding = cache.GetProgram(key);
+            TestCheck(binding.Program == first &&
+                          binding.Specialization == CKFFBuildSpecializationInfo(key.FS),
+                      "repeated and changed materials must carry their own current specialization");
+        }
+    }
+    TestCheck(original.Specialization == CKFFBuildSpecializationInfo(CKFFShaderKeyFS()),
+              "later materials must not mutate an earlier draw binding");
+    TestCheck(backend.CreatedProgramCount == 1,
+              "fragment state changes must retain the fixed native program family");
+
     const float params[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     const CKERROR pushed = CKFFPushConstants(&backend, CKRST_BLOCK_VIEWPORT, params, 1);
     const auto &bytes = backend.GetConstants(CKRST_BLOCK_VIEWPORT);
