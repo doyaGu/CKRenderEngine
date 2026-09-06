@@ -6,7 +6,7 @@ CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `C
 
 The responsibilities follow `CK_3D → CKRasterizer → CKRasterizerBackend → Graphics API`:
 
-- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer revision 4 calls and loads providers through the registration entry points.
+- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer revision 5 calls and loads providers through the registration entry points.
 - **CKRasterizerLib** implements fixed-function state, shader variants, geometry preparation and frame composition: render scale, MSAA, postprocessing, overlays and logical readbacks.
 - **CKRasterizerBackend** defines modern graphics resources, explicit programs, constant blocks, resolved pipeline state, ordered commands and completion. It is an internal contract independent of FFP and plugin loading.
 - **Native backends** implement that contract: `CKSdlGpuBackend` for SDL GPU, optional `CKBgfxBackend` for bgfx, and `CKNullBackend` for fallback and deterministic tests. The dynamic/static rasterizer plugins compose a native backend with the translation core and their own shader artifact catalog.
