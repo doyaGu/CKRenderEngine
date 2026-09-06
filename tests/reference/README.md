@@ -13,6 +13,8 @@ test totals. A later build does not inherit earlier GPU passes.
   index validation, corrected capture methodology and current regression evidence.
 - [Redesign baseline](SDL_GPU_REDESIGN_BASELINE.md): separate foreground FPS,
   FFP/native timeline decomposition, wait evidence and capture limitations.
+- [Redesign progress](SDL_GPU_REDESIGN_PROGRESS.md): implemented slices,
+  revision changes, foreground regressions and stage performance checks.
 - [Optional upstream bgfx](BGFX_OPTIONAL_ACCEPTANCE.md): current dependency,
   staging and unmodified-upstream validation.
 - [Rasterizer layer refactor](RASTERIZER_LAYER_ACCEPTANCE.md): boundary and
