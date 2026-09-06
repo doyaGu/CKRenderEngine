@@ -31,6 +31,20 @@ int main()
         check(batch.Data.size() == 96 && third[0] == second[0] && third[1] != second[1] &&
               batch.Data[second[1] + 24] == 1 && batch.Data[third[1] + 24] == 3,
               "sampler metadata changes cannot overwrite or reuse old draw bytes");
+        CKSdlGpuUniformBindings bindings;
+        check(bindings.NeedsPush(layout.Buffers[0], first[0], batch.Data) &&
+              !bindings.NeedsPush(layout.Buffers[0], first[0], batch.Data) &&
+              bindings.NeedsPush(layout.Buffers[0], second[0], batch.Data),
+              "native push follows byte changes within the pass");
+        batch.Snapshot(layout, otherProgram, other);
+        check(!bindings.NeedsPush(layout.Buffers[0], other[0], batch.Data),
+              "equal bytes at another arena offset do not require a second push");
+        check(bindings.NeedsPush(layout.Buffers[1], third[1], batch.Data) &&
+              bindings.NeedsPush(layout.Buffers[2], third[2], batch.Data),
+              "shared bytes still bind independently to both shader stages");
+        bindings.Invalidate();
+        check(bindings.NeedsPush(layout.Buffers[0], other[0], batch.Data),
+              "pipeline or pass invalidation requires a fresh push");
         batch.Clear();
         layout.Data.assign(48, 4);
         batch.Snapshot(layout, cursor, first);

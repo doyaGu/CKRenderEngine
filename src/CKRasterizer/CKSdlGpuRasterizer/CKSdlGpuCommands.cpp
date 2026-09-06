@@ -272,12 +272,20 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     if (!fullRect && Pass.ClearFlags && ClearRect(pass, Pass, colorFormat, depthFormat, samples) != CK_OK) {
         SDL_EndGPURenderPass(pass); return Error;
     }
+    SDL_GPUGraphicsPipeline *boundPipeline = nullptr;
+    unsigned boundBindings = ~0u;
+    CKSdlGpuUniformBindings boundUniforms;
     Bindings.MarkReferenced();
     for (auto &draw : Draws) {
         auto pipeline = Pipeline(draw, colorFormat, depthFormat, samples);
         if (!pipeline) { SDL_EndGPURenderPass(pass); return Error; }
-        SDL_BindGPUGraphicsPipeline(pass, pipeline.get());
-        SDL_SetGPUViewport(pass, &viewport);
+        if (boundPipeline != pipeline.get()) {
+            SDL_BindGPUGraphicsPipeline(pass, pipeline.get());
+            boundPipeline = pipeline.get();
+            boundBindings = ~0u;
+            boundUniforms.Invalidate();
+            CKRE_PROFILE_VALUE("CKRE.Batch.PipelineBinds", 1);
+        }
         SDL_Rect scissor = passRect;
         if (draw.State.ScissorEnabled) {
             scissor.x = std::max(passRect.x, draw.State.Scissor.left);
@@ -299,17 +307,23 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             SDL_GPUBufferBinding defaults = {draw.Program->DefaultVertices.get(), 0};
             SDL_BindGPUVertexBuffers(pass, draw.Layout1 ? 2 : 1, &defaults, 1);
         }
-        const auto &bindings = Bindings[draw.Bindings];
-        if (draw.Program->Vertex->Desc.SamplerCount)
-            SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex.data(), draw.Program->Vertex->Desc.SamplerCount);
-        if (draw.Program->Fragment->Desc.SamplerCount)
-            SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment.data(), draw.Program->Fragment->Desc.SamplerCount);
+        if (boundBindings != draw.Bindings) {
+            const auto &bindings = Bindings[draw.Bindings];
+            if (draw.Program->Vertex->Desc.SamplerCount)
+                SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex.data(), draw.Program->Vertex->Desc.SamplerCount);
+            if (draw.Program->Fragment->Desc.SamplerCount)
+                SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment.data(), draw.Program->Fragment->Desc.SamplerCount);
+            boundBindings = draw.Bindings;
+        }
         for (size_t i = 0; i < draw.Program->UniformLayout.Buffers.size(); ++i) {
             const auto &buffer = draw.Program->UniformLayout.Buffers[i];
             const unsigned offset = draw.UniformOffsets[i];
+            if (!boundUniforms.NeedsPush(buffer, offset, Uniforms.Data)) continue;
             const void *data = Uniforms.Data.data() + offset;
             if (buffer.Stage == CKRST_SHADER_VERTEX) SDL_PushGPUVertexUniformData(Commands, buffer.Slot, data, buffer.Size);
             else SDL_PushGPUFragmentUniformData(Commands, buffer.Slot, data, buffer.Size);
+            CKRE_PROFILE_VALUE("CKRE.Batch.UniformPushBytes", buffer.Size);
+            CKRE_PROFILE_VALUE("CKRE.Batch.UniformPushes", 1);
         }
         if (!draw.Marker.empty()) SDL_InsertGPUDebugLabel(Commands, draw.Marker.c_str());
         if (draw.Desc.IndexCount) {

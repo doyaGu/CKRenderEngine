@@ -47,4 +47,23 @@ private:
     uint64_t Serial = 1;
 };
 
+// Native bindings belong to one render pass. Pipeline changes invalidate this
+// view, while repeated draws with the same pipeline can reuse pushed bytes.
+class CKSdlGpuUniformBindings {
+public:
+    bool NeedsPush(const CKBackendProgramLayout::Buffer &buffer, unsigned offset,
+                   const std::vector<CKBYTE> &data) {
+        auto &bound = Buffers[buffer.Stage == CKRST_SHADER_VERTEX ? 0 : 1][buffer.Slot];
+        if (bound.Size == buffer.Size &&
+            (bound.Offset == offset || std::memcmp(data.data() + bound.Offset,
+                                                   data.data() + offset, buffer.Size) == 0)) return false;
+        bound = {offset, buffer.Size};
+        return true;
+    }
+    void Invalidate() { Buffers = {}; }
+private:
+    struct Binding { unsigned Offset = 0, Size = 0; };
+    std::array<std::array<Binding, CKBACKEND_MAX_UNIFORM_BUFFERS>, 2> Buffers = {};
+};
+
 #endif
