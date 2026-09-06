@@ -91,6 +91,8 @@ private:
                           CKBOOL linear, CKBOOL fxaa, float sharpness);
 
     CKRasterizerBackend *m_Backend;
+    CKBackendConstants m_Constants;
+    CKBackendTextureBindings m_Bindings;
     CKBackendShaderSet m_Shaders;
     CKPresentResources m_ResourceIds;
     CKPresentTarget m_Scene;

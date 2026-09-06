@@ -125,8 +125,9 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
               "fragment state changes must retain the fixed native program family");
 
     const float params[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-    const CKERROR pushed = CKFFPushConstants(&backend, CKRST_BLOCK_VIEWPORT, params, 1);
-    const auto &bytes = backend.GetConstants(CKRST_BLOCK_VIEWPORT);
+    CKBackendConstants constants;
+    const CKERROR pushed = CKFFSetConstants(&constants, CKRST_BLOCK_VIEWPORT, params, 1);
+    const auto &bytes = constants[CKRST_BLOCK_VIEWPORT].Bytes;
     TestCheck(pushed == CK_OK && bytes.size() == sizeof(params) &&
                   memcmp(bytes.data(), params, sizeof(params)) == 0,
               "FFP converts one vec4 into sixteen backend bytes");
@@ -553,7 +554,7 @@ void DrawVertexBufferStopsBeforeSubmitAfterBindingFailure() {
     ffp.Shutdown();
 }
 
-void DrawVertexBufferStopsUniformUploadsAfterFailure() {
+void DrawVertexBufferRejectsConstantPacketFailure() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -567,8 +568,8 @@ void DrawVertexBufferStopsUniformUploadsAfterFailure() {
 
     TestCheck(!drawn,
               "A backend uniform failure must fail the originating FFP draw");
-    TestCheck(context.Log.UniformSetCount == 1,
-              "Uniform upload must stop at the first backend failure");
+    TestCheck(context.Log.UniformSetCount == 0,
+              "A rejected constant packet is not partially consumed");
     TestCheck(context.Log.StateSetCount == 0 && context.Log.DrawCount == 0,
               "A uniform failure must stop before state binding and submit");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_BACKEND_ERROR,
@@ -3201,8 +3202,8 @@ int main() {
               &DrawVertexBufferPropagatesBackendFailure);
     tests.Run("DrawVertexBuffer stops before submit after binding failure",
               &DrawVertexBufferStopsBeforeSubmitAfterBindingFailure);
-    tests.Run("DrawVertexBuffer stops uniform uploads after failure",
-              &DrawVertexBufferStopsUniformUploadsAfterFailure);
+    tests.Run("DrawVertexBuffer rejects constant packet failure",
+              &DrawVertexBufferRejectsConstantPacketFailure);
     tests.Run("Affine texture coordinates are ignored with diagnostic",
               &AffineTextureCoordinatesAreIgnoredWithDiagnostic);
     tests.Run("Inactive unsupported state does not reject draw",

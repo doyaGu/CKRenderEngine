@@ -219,7 +219,7 @@ void TestFrame()
     state.Scissor.right = 20;
     state.Scissor.bottom = 20;
     state.PointSize = 3.0f;
-    b->SetPipelineState(&state);
+    draw.Pipeline = state;
     CKTextureDesc tex;
     VxPixelFormat2ImageDesc(_32_ARGB8888, tex.Format);
     tex.Format.Width = 4;
@@ -232,10 +232,14 @@ void TestFrame()
     CKSamplerDesc sampler;
     memset(&sampler, 0, sizeof(sampler));
     sampler.MinFilter = CKRST_FILTER_LINEAR;
-    b->BindTexture(2, texture, &sampler);
+    CKBackendTextureBindings bindings;
+    bindings[2].Texture = texture; bindings[2].Sampler = sampler;
+    draw.Textures = &bindings;
+    CKBackendConstants constants;
+    draw.Constants = &constants;
     float block[8] = {0};
-    TestCheck(b->PushConstants(27, block, sizeof(block)) == CK_OK, "push arbitrary logical byte slot");
-    b->SetMarker("first");
+    TestCheck(constants.Set(27, block, sizeof(block)) == CK_OK, "push arbitrary logical byte slot");
+    draw.Marker = "first";
     TestCheck(b->Draw(&draw) == CK_OK, "Draw");
     TestCheck(f.Backend->Log.Draws.size() == 1 && f.Backend->Log.Draws[0].Program == program &&
                   f.Backend->Log.Draws[0].Marker == "first",
@@ -251,18 +255,19 @@ void TestFrame()
     const CKDWORD dataUniform = f.Backend->GetBlockUniformForTests(27);
     TestCheck(f.Backend->Log.FloatUniforms.count(dataUniform) == 1 &&
                   f.Backend->Log.FloatUniforms[dataUniform].size() == 8,
-              "PushConstants carries bytes through the declared logical slot");
+              "The draw packet carries bytes through the declared logical slot");
 
-    // Pass 2 follows pass 1 (passes are sequential); the state stays sticky.
+    // Pass 2 follows pass 1 (passes are sequential); the caller explicitly reuses the packet.
     pass.ClearFlags = 0;
     pass.Name = "overlay";
     TestCheck(b->BeginPass(&pass) == CK_OK, "second BeginPass");
-    b->BindTexture(2, 0, NULL);
+    bindings[2] = CKBackendTextureBinding();
+    draw.Marker = nullptr;
     TestCheck(b->Draw(&draw) == CK_OK, "second Draw");
     TestCheck(f.Backend->Log.Draws.size() == 2 && f.Backend->Log.Draws[1].Pass > f.Backend->Log.Draws[0].Pass,
               "the second draw lands on a later pass");
     TestCheck(f.Backend->Log.TextureBindCount == 1, "an unbound slot is not set again");
-    TestCheck(f.Backend->Log.LastState.Lo == state.State.Lo, "the pipeline state is sticky across passes");
+    TestCheck(f.Backend->Log.LastState.Lo == state.State.Lo, "the packet carries pipeline state across passes");
 
     // Blit inside the pass; layers are cube faces / slices and are range-checked.
     CKTextureDesc dstDesc = tex;

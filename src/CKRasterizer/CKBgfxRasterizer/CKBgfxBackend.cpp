@@ -545,7 +545,6 @@ CKBgfxBackend::CKBgfxBackend()
       m_TransientVBCount(0), m_TransientIBCount(0)
 {
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
-    memset(m_Slots, 0, sizeof(m_Slots));
     memset(m_DebugVertexBindings, 0, sizeof(m_DebugVertexBindings));
     memset(m_DebugTextureBindings, 0, sizeof(m_DebugTextureBindings));
     m_LastMarker[0] = '\0';
@@ -935,7 +934,6 @@ void CKBgfxBackend::ReleaseBgfx()
     if (!m_BgfxInitialized)
         return;
     for (auto &constants : m_ConstantData) constants.clear();
-    memset(m_Slots, 0, sizeof(m_Slots));
     m_Resources->DestroyAll();
     m_DefaultTextures.clear();
     ReleaseRectClear();
@@ -2756,65 +2754,6 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
     return CK_OK;
 }
 
-void CKBgfxBackend::SetPipelineState(const CKBackendPipelineState *State)
-{
-    if (State)
-        m_State = *State;
-}
-
-void CKBgfxBackend::BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler)
-{
-    if (Slot >= CKBACKEND_MAX_TEXTURE_SLOTS)
-        return;
-    SlotBinding &slot = m_Slots[Slot];
-    slot.Texture = Texture;
-    slot.HasSampler = Sampler != NULL;
-    if (Sampler)
-        slot.Sampler = *Sampler;
-}
-
-CKERROR CKBgfxBackend::PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize)
-{
-    if (Slot >= CKBACKEND_MAX_CONSTANT_SLOTS || !Data || ByteSize == 0 ||
-        ByteSize > CKBACKEND_MAX_UNIFORM_BYTES)
-        return CKERR_INVALIDPARAMETER;
-    if (!IsReady())
-        return CKERR_INVALIDOPERATION;
-    static int s_uniformLogCount = 0;
-    if (m_DebugLogUniforms && s_uniformLogCount < 256) {
-        CKBgfxLogf("PushConstants", "slot=%u bytes=%u", Slot, ByteSize);
-        ++s_uniformLogCount;
-    }
-    auto &constants = m_ConstantData[Slot];
-    if (constants.size() < ByteSize) constants.resize(ByteSize);
-    memcpy(constants.data(), Data, ByteSize);
-    return CK_OK;
-}
-
-void CKBgfxBackend::SetMarker(const char *Name)
-{
-    if (!IsReady())
-        return;
-    if (!Name) {
-        m_LastMarker[0] = '\0';
-        return;
-    }
-    if (m_DrawMapMarkerCaptureActive) {
-        if (m_LastMarker[0] != '\0') {
-            m_DebugMarkerOverwriteCount.fetch_add(1, std::memory_order_relaxed);
-            if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_MARKERS))
-                CKBgfxLogf("MarkerOverwrite",
-                           "frame=%u old=\"%s\" new=\"%s\"",
-                           m_DebugFrameId, m_LastMarker, Name);
-        }
-        strncpy(m_LastMarker, Name, sizeof(m_LastMarker) - 1);
-        m_LastMarker[sizeof(m_LastMarker) - 1] = '\0';
-    }
-    bgfx::setMarker(Name);
-    if (CKBgfxDrawMapChannelEnabled(m_DrawMapFlags, CKRST_DEBUG_DRAWMAP_MARKERS))
-        CKBgfxLogf("Marker", "%s", Name);
-}
-
 CKBOOL CKBgfxBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
 {
     if (!Out || Count == 0 || !m_BgfxInitialized || !m_Created)
@@ -2901,35 +2840,35 @@ static void ApplyStencil(CKDrawState state, CKDWORD ref, CKDWORD readMask, CKDWO
     bgfx::setStencil(fstencil, bstencil);
 }
 
-CKERROR CKBgfxBackend::ApplyPipelineState()
+CKERROR CKBgfxBackend::ApplyPipelineState(const CKBackendPipelineState &state)
 {
     uint64_t bgfxState = 0;
-    const CKERROR stateError = CKBgfxTryState(m_State.State, bgfxState);
+    const CKERROR stateError = CKBgfxTryState(state.State, bgfxState);
     if (stateError != CK_OK)
         return stateError;
-    if (!(m_State.PointSize >= 0.0f && m_State.PointSize <= 15.0f))
+    if (!(state.PointSize >= 0.0f && state.PointSize <= 15.0f))
         return CKERR_INVALIDPARAMETER;
-    const CKDWORD stencilRef = m_State.StencilRef & 0xFF;
-    const CKDWORD stencilReadMask = m_State.StencilReadMask & 0xFF;
-    const CKDWORD stencilWriteMask = m_State.StencilWriteMask & 0xFF;
+    const CKDWORD stencilRef = state.StencilRef & 0xFF;
+    const CKDWORD stencilReadMask = state.StencilReadMask & 0xFF;
+    const CKDWORD stencilWriteMask = state.StencilWriteMask & 0xFF;
     // bgfx has no stencil write mask (appendix C): the pipeline approximates
     // partial masks before the draw reaches the backend.
-    if ((m_State.State.Mid & CKRST_STENCIL_ENABLE) && stencilWriteMask != 0x00 && stencilWriteMask != 0xFF)
+    if ((state.State.Mid & CKRST_STENCIL_ENABLE) && stencilWriteMask != 0x00 && stencilWriteMask != 0xFF)
         return CKERR_NOTIMPLEMENTED;
-    m_PointSize = (CKDWORD)(m_State.PointSize + 0.5f);
-    m_CachedDrawState = m_State.State;
+    m_PointSize = (CKDWORD)(state.PointSize + 0.5f);
+    m_CachedDrawState = state.State;
     m_CachedBgfxState = bgfxState;
     uint64_t finalState = bgfxState;
     if (m_PointSize > 0)
         finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
     bgfx::setState(finalState);
-    ApplyStencil(m_State.State, stencilRef, stencilReadMask, stencilWriteMask);
+    ApplyStencil(state.State, stencilRef, stencilReadMask, stencilWriteMask);
 
-    if (m_State.ScissorEnabled) {
-        if (m_State.Scissor.left < 0 || m_State.Scissor.top < 0 ||
-            m_State.Scissor.right < m_State.Scissor.left || m_State.Scissor.bottom < m_State.Scissor.top)
+    if (state.ScissorEnabled) {
+        if (state.Scissor.left < 0 || state.Scissor.top < 0 ||
+            state.Scissor.right < state.Scissor.left || state.Scissor.bottom < state.Scissor.top)
             return CKERR_INVALIDPARAMETER;
-        const CKRECT rect = m_LogicalPass.RenderTarget ? m_State.Scissor : WindowPixelRect(m_State.Scissor);
+        const CKRECT rect = m_LogicalPass.RenderTarget ? state.Scissor : WindowPixelRect(state.Scissor);
         if (rect.left < 0 || rect.top < 0 ||
             rect.right < rect.left || rect.bottom < rect.top ||
             rect.left > 0xffff || rect.top > 0xffff ||
@@ -3187,7 +3126,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
         return DrawFailed(CKERR_INVALIDPARAMETER, "Draw.program");
     }
 
-    CKERROR err = ApplyPipelineState();
+    CKERROR err = ApplyPipelineState(Draw->Pipeline);
     if (err != CK_OK)
         return DrawFailed(err, "Draw.state");
     if (rec->Interface.VertexInputs.empty()) {
@@ -3201,19 +3140,35 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
         return DrawFailed(err, "Draw.geometry");
 
     for (const auto &sampler : rec->Samplers) {
-        const SlotBinding &binding = m_Slots[sampler.Desc.Slot];
+        const CKBackendTextureBinding binding = Draw->Textures ? (*Draw->Textures)[sampler.Desc.Slot] : CKBackendTextureBinding();
         err = BindTextureSlot(sampler.Desc, sampler.Handle, *sampler.DefaultTexture,
-            binding.Texture, binding.HasSampler ? &binding.Sampler : NULL);
+            binding.Texture, &binding.Sampler);
         if (err != CK_OK)
             return DrawFailed(err, "Draw.texture");
     }
 
     // Program creation compiles names, counts and slot mappings. Keep the
     // per-draw path allocation-free while restoring bgfx encoder state.
-    for (const auto &uniform : rec->Uniforms)
-        bgfx::setUniform(uniform.Handle, m_ConstantData[uniform.Slot].data(), (uint16_t)uniform.Count);
+    for (const auto &uniform : rec->Uniforms) {
+        const auto *source = Draw->Constants ? &(*Draw->Constants)[uniform.Slot].Bytes : nullptr;
+        auto &scratch = m_ConstantData[uniform.Slot]; // declaration-sized, allocated at program creation
+        const void *bytes = source && source->size() >= scratch.size() ? source->data() : nullptr;
+        if (!bytes) {
+            std::fill(scratch.begin(), scratch.end(), CKBYTE(0));
+            if (source && !source->empty()) std::memcpy(scratch.data(), source->data(), source->size());
+            bytes = scratch.data();
+        }
+        bgfx::setUniform(uniform.Handle, bytes, (uint16_t)uniform.Count);
+    }
+    if (Draw->Marker) {
+        bgfx::setMarker(Draw->Marker);
+        if (m_DrawMapMarkerCaptureActive) {
+            strncpy(m_LastMarker, Draw->Marker, sizeof(m_LastMarker) - 1);
+            m_LastMarker[sizeof(m_LastMarker) - 1] = '\0';
+        }
+    } else m_LastMarker[0] = '\0';
     if (m_DrawMapSubmitActive)
-        TraceSubmit(Draw->Program, rec->Handle, Draw->SortKey);
+        TraceSubmit(Draw->Program, rec->Handle, Draw->SortKey, Draw->Pipeline);
     RecordViewColorWrite(m_CurrentView, TRUE);
     bgfx::submit(m_CurrentView, rec->Handle, Draw->SortKey, BGFX_DISCARD_ALL);
     if (m_DrawMapMarkerCaptureActive)
@@ -3436,7 +3391,7 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
 }
 
 
-void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth)
+void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth, const CKBackendPipelineState &state)
 {
     if (!m_DrawMapSubmitActive)
         return;
@@ -3448,7 +3403,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
     CKDWORD sourceIndex = CKDRAW_SOURCE_NONE;
     CKBgfxProgramRecord *programRecord = GetProgram(Program);
     CKDWORD stateHash = CKBgfxHashDrawState(m_CachedDrawState);
-    CKDWORD stencilHash = CKBgfxHashStencil(m_State.StencilRef, m_State.StencilReadMask, m_State.StencilWriteMask);
+    CKDWORD stencilHash = CKBgfxHashStencil(state.StencilRef, state.StencilReadMask, state.StencilWriteMask);
     CKDWORD programHash = CKBgfxHashProgram(programRecord);
     uint64_t finalState = m_CachedBgfxState;
     char texFields[CKBACKEND_MAX_TEXTURE_SLOTS * 64];
@@ -3533,9 +3488,9 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
         stateTrace.BgfxStateLo = (CKDWORD)(finalState & 0xffffffffu);
         stateTrace.BgfxStateHi = (CKDWORD)(finalState >> 32);
         stateTrace.StencilHash = stencilHash;
-        stateTrace.StencilRef = m_State.StencilRef;
-        stateTrace.StencilReadMask = m_State.StencilReadMask;
-        stateTrace.StencilWriteMask = m_State.StencilWriteMask;
+        stateTrace.StencilRef = state.StencilRef;
+        stateTrace.StencilReadMask = state.StencilReadMask;
+        stateTrace.StencilWriteMask = state.StencilWriteMask;
         stateTrace.PointSize = m_PointSize;
         CKBgfxDrawMapTraceState(&stateTrace);
     }

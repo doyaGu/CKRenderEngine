@@ -334,21 +334,19 @@ CKERROR CKPresentStage::SubmitTexture(CKDWORD texture, CKDWORD width, CKDWORD he
         .Depth(FALSE, FALSE, VXCMP_ALWAYS)
         .Cull(VXCULL_NONE)
         .Build();
-    m_Backend->SetPipelineState(&state);
-    m_Backend->BindTexture(CKFF_SLOT_PRESENT, texture, &sampler);
-    const CKERROR pushed = CKFFPushConstants(m_Backend, CKRST_BLOCK_PRESENT_PARAMS, params, 1);
-    if (pushed != CK_OK) {
-        m_Backend->BindTexture(CKFF_SLOT_PRESENT, 0, NULL);
-        return pushed;
-    }
+    m_Bindings[CKFF_SLOT_PRESENT].Texture = texture;
+    m_Bindings[CKFF_SLOT_PRESENT].Sampler = sampler;
+    const CKERROR prepared = CKFFSetConstants(&m_Constants, CKRST_BLOCK_PRESENT_PARAMS, params, 1);
+    if (prepared != CK_OK) return prepared;
 
     CKBackendDraw draw;
+    draw.Pipeline = state;
+    draw.Textures = &m_Bindings;
+    draw.Constants = &m_Constants;
     draw.Program = m_ResourceIds.Program;
     draw.Layout = m_ResourceIds.VertexLayout;
     draw.TransientVertices = &tvb;
     draw.VertexCount = 3;
     const CKERROR drawn = m_Backend->Draw(&draw);
-    // The present sampler is only used by these fullscreen draws.
-    m_Backend->BindTexture(CKFF_SLOT_PRESENT, 0, NULL);
     return drawn;
 }

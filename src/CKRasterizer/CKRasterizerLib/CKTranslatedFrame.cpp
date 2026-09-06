@@ -467,10 +467,10 @@ CKBOOL CKTranslatedContext::DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices,
         return FALSE;
     const CKBOOL marker = m_Marker.Length() > 0;
     if (marker)
-        m_Backend->SetMarker(m_Marker.Str());
+        m_FFP.SetDrawMarker(m_Marker.Str());
     const CKBOOL drawn = m_FFP.DrawPrimitive(Type, Indices, elementCount, Data);
     if (marker) {
-        m_Backend->SetMarker(NULL);
+        m_FFP.SetDrawMarker(NULL);
         m_Marker = "";
     }
     if (!drawn) {
@@ -490,12 +490,12 @@ CKBOOL CKTranslatedContext::SubmitVertexBuffer(VXPRIMITIVETYPE Type, const Resou
         return FALSE;
     const CKBOOL marker = m_Marker.Length() > 0;
     if (marker)
-        m_Backend->SetMarker(m_Marker.Str());
+        m_FFP.SetDrawMarker(m_Marker.Str());
     const CKBOOL drawn = m_FFP.DrawVertexBuffer(Type, VB.Handle, IBHandle, BaseVertex, VertexCount, StartIndex,
                                                 IndexCount, VB.VertexBuffer.m_VertexFormat, VB.FormatFlags,
                                                 VB.DeviceLayout);
     if (marker) {
-        m_Backend->SetMarker(NULL);
+        m_FFP.SetDrawMarker(NULL);
         m_Marker = "";
     }
     if (!drawn) {

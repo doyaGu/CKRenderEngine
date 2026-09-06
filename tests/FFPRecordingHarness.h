@@ -372,32 +372,6 @@ public:
         ++Log.PassCount;
         return CK_OK;
     }
-    CKERROR PushConstants(CKDWORD block, const void *data, CKDWORD byteSize) override {
-        if (!data || byteSize == 0)
-            return CKERR_INVALIDPARAMETER;
-        ++Log.UniformSetCount;
-        if (Log.UniformError != CK_OK) {
-            ++Log.DiscardCount;
-            return Log.UniformError;
-        }
-        const CKERROR result = CKNullBackend::PushConstants(block, data, byteSize);
-        if (result != CK_OK) {
-            ++Log.DiscardCount;
-            return result;
-        }
-        const CKDWORD uniform = GetBlockUniformForTests(block);
-        const CKFFConstantBlockDesc &info = CKFFConstantBlockInfo(static_cast<CKFFConstantBlock>(block));
-        if (info.Mat4)
-            ++Log.MatrixUniformSetCount;
-        const float *values = static_cast<const float *>(data);
-        Log.FloatUniforms[uniform].assign(values, values + byteSize / sizeof(float));
-        Log.UniformCounts[uniform] = info.Mat4 ? byteSize / 64u : byteSize / 16u;
-        return CK_OK;
-    }
-    void SetMarker(const char *name) override {
-        CKNullBackend::SetMarker(name);
-        Log.LastMarker = name ? name : "";
-    }
     CKBOOL AllocTransientVertices(CKDWORD count, CKDWORD layout, CKBackendTransientVertices *out) override {
         if (count > TransientVertexCapacity)
             return FALSE;
@@ -463,7 +437,27 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
         ++Log.DiscardCount;
         return Log.StateError;
     }
-    const CKBackendPipelineState &state = GetPipelineState();
+    if (Log.UniformError != CK_OK && draw->Constants) {
+        ++Log.DiscardCount;
+        return Log.UniformError;
+    }
+    if (draw->Constants) {
+        for (CKDWORD block = 0; block < CKBACKEND_MAX_CONSTANT_SLOTS; ++block) {
+            const auto &bytes = (*draw->Constants)[block].Bytes;
+            if (bytes.empty()) continue;
+            ++Log.UniformSetCount;
+            const CKDWORD uniform = GetBlockUniformForTests(block);
+            const CKFFConstantBlockDesc info = block < CKRST_BLOCK_COUNT
+                ? CKFFConstantBlockInfo(static_cast<CKFFConstantBlock>(block)) : CKFFConstantBlockDesc{"", FALSE, 1};
+            if (info.Mat4) ++Log.MatrixUniformSetCount;
+            auto &values = Log.FloatUniforms[uniform];
+            values.resize(bytes.size() / sizeof(float));
+            memcpy(values.data(), bytes.data(), bytes.size());
+            Log.UniformCounts[uniform] = CKDWORD(info.Mat4 ? bytes.size() / 64u : bytes.size() / 16u);
+        }
+    }
+    Log.LastMarker = draw->Marker ? draw->Marker : "";
+    const CKBackendPipelineState &state = draw->Pipeline;
     Log.LastState = state.State;
     ++Log.StateSetCount;
     Log.LastStencilRef = state.StencilRef & 0xFF;
@@ -478,14 +472,14 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
     Log.LastPointSize = state.PointSize;
     ++Log.PointSizeSetCount;
     for (CKDWORD slot = 0; slot < CKFF_SLOT_COUNT; ++slot) {
-        const CKDWORD texture = GetBoundTexture(slot);
+        const CKDWORD texture = draw->Textures ? (*draw->Textures)[slot].Texture : 0;
         if (!texture)
             continue;
         FFPTextureBinding binding;
         binding.Stage = slot;
         binding.Uniform = GetSamplerUniformForTests(slot);
         binding.Texture = texture;
-        binding.Sampler = m_Samplers[slot];
+        binding.Sampler = (*draw->Textures)[slot].Sampler;
         Log.TextureBindings.push_back(binding);
         Log.LastTextureStage = slot;
         Log.LastTextureUniform = binding.Uniform;

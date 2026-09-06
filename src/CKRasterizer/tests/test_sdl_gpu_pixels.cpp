@@ -64,23 +64,31 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
     if (backend.BeginPass(&pass) != CK_OK) return false;
     CKBackendPipelineState state;
+    CKBackendTextureBindings bindings;
+    CKBackendConstants constants;
+    auto submit = [&](const CKBackendDraw *source) {
+        CKBackendDraw packet = *source;
+        packet.Pipeline = state;
+        packet.Textures = &bindings;
+        packet.Constants = &constants;
+        return backend.Draw(&packet);
+    };
     state.State = CKDrawStateBuilder().Depth(FALSE, FALSE, VXCMP_ALWAYS).Cull(VXCULL_NONE).
         NoBlend().Topology(VX_TRIANGLELIST).Build();
     state.ScissorEnabled = TRUE; state.Scissor = {0, 0, 2, 4};
-    backend.SetPipelineState(&state);
     CKSamplerDesc sampler = {CKRST_FILTER_NEAREST, CKRST_FILTER_NEAREST, CKRST_FILTER_NONE,
         CKRST_ADDRESS_CLAMP, CKRST_ADDRESS_CLAMP, CKRST_ADDRESS_CLAMP, 0, CKRST_COMPARE_NONE};
-    backend.BindTexture(7, texture, &sampler);
+    bindings[7].Texture = texture; bindings[7].Sampler = sampler;
     const float position[4] = {}, volume[8] = {4, 4, 2, 0, 4, 4, 1, 0};
-    if (backend.PushConstants(28, position, sizeof(position)) != CK_OK ||
-        backend.PushConstants(29, volume, sizeof(volume)) != CK_OK ||
-        backend.PushConstants(29, volume, 16) != CK_OK) return false; // preserve the trailing vector
+    if (constants.Set(28, position, sizeof(position)) != CK_OK ||
+        constants.Set(29, volume, sizeof(volume)) != CK_OK ||
+        constants.Set(29, volume, 16) != CK_OK) return false; // preserve the trailing vector
     CKBackendDraw draw; draw.Program = program; draw.VertexCount = 3; // no vertex buffer/layout
-    if (backend.Draw(&draw) != CK_OK) return false;
+    if (submit(&draw) != CK_OK) return false;
     std::fill(pixels.begin(), pixels.end(), 0xff0000ff);
     if (backend.UpdateTexture(texture, 0, 0, nullptr, &upload) != CK_OK) return false;
-    state.Scissor = {2, 0, 4, 4}; backend.SetPipelineState(&state);
-    if (backend.Draw(&draw) != CK_OK) return false;
+    state.Scissor = {2, 0, 4, 4};
+    if (submit(&draw) != CK_OK) return false;
     CKReadbackDesc read; CKBackendReadbackTicket ticket;
     if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK) return false;
     backend.DestroyObject(program, CKRST_OBJ_PROGRAM); backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
@@ -112,10 +120,10 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (backend.CreateRenderTarget(&attachment, &target) != CK_OK) return false;
     pass.RenderTarget = target;
     if (backend.BeginPass(&pass) != CK_OK) return false;
-    state.ScissorEnabled = FALSE; backend.SetPipelineState(&state);
-    backend.BindTexture(CKFF_SLOT_PRESENT, 0, &sampler);
+    state.ScissorEnabled = FALSE;
+    bindings[CKFF_SLOT_PRESENT] = CKBackendTextureBinding();
     const float present[4] = {0.25f, 0.25f, 0, 0};
-    if (CKFFPushConstants(&backend, CKRST_BLOCK_PRESENT_PARAMS, present, 1) != CK_OK) return false;
+    if (CKFFSetConstants(&constants, CKRST_BLOCK_PRESENT_PARAMS, present, 1) != CK_OK) return false;
     const float positions[9] = {-1, -1, 0, 3, -1, 0, -1, 3, 0};
     const float texcoords[6] = {0, 1, 2, 1, 0, -1};
     const CKWORD indices[3] = {0, 1, 2};
@@ -137,9 +145,9 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     draw = CKBackendDraw(); draw.Program = program; draw.Layout = positionLayout;
     draw.Stream1Layout = texcoordLayout; draw.VertexCount = draw.IndexCount = 3;
     draw.TransientVertices = &vertices; draw.Stream1Transient = &uv; draw.TransientIndices = &index;
-    if (backend.Draw(&draw) != CK_OK) return false;
+    if (submit(&draw) != CK_OK) return false;
     auto rejected = [&](const CKBackendDraw &candidate, const char *name) {
-        if (backend.Draw(&candidate) == CKERR_INVALIDPARAMETER) return true;
+        if (submit(&candidate) == CKERR_INVALIDPARAMETER) return true;
         std::fprintf(stderr, "SDL_gpu accepted invalid transient descriptor: %s\n", name);
         return false;
     };
@@ -199,7 +207,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
             pass.ClearColor = 0xff223344;
             GeometryCapture capture;
             capture.Color = visible ? 0xffffffff : pass.ClearColor;
-            if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&pooledDraw) != CK_OK ||
+            if (backend.BeginPass(&pass) != CK_OK || submit(&pooledDraw) != CK_OK ||
                 backend.ReadTexture(output, 0, &read, &capture.Ticket) != CK_OK) return false;
             geometryCaptures.push_back(std::move(capture));
         }
@@ -218,7 +226,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     CKDWORD colors[] = {0xffff0000, 0xff00ff00};
     VxImageDescEx samples = sampleDesc.Format; samples.Image = reinterpret_cast<CKBYTE *>(colors);
     if (backend.CreateTexture(&sampleDesc, &samples, &texture) != CK_OK) return false;
-    backend.BindTexture(CKFF_SLOT_PRESENT, texture, &sampler);
+    bindings[CKFF_SLOT_PRESENT].Texture = texture; bindings[CKFF_SLOT_PRESENT].Sampler = sampler;
     for (unsigned mutation = 0; mutation < 3; ++mutation) {
         CKBackendTransientVertices snapshotVertices, snapshotUv;
         CKBackendTransientIndices snapshotIndex;
@@ -231,8 +239,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         snapshotDraw.TransientIndices = &snapshotIndex;
         pass.ClearColor = 0xff0000ff; pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
         state.ScissorEnabled = TRUE; state.Scissor = {0, 0, 2, 4};
-        backend.SetPipelineState(&state);
-        if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&snapshotDraw) != CK_OK) return false;
+            if (backend.BeginPass(&pass) != CK_OK || submit(&snapshotDraw) != CK_OK) return false;
         if (mutation == 0) {
             auto *positions = static_cast<float *>(snapshotVertices.Data);
             for (unsigned vertex = 0; vertex < 3; ++vertex) positions[vertex * 3] += 10;
@@ -240,8 +247,8 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
             auto *uvs = static_cast<float *>(snapshotUv.Data);
             for (unsigned vertex = 0; vertex < 3; ++vertex) uvs[vertex * 2] = 0.75f;
         } else std::memset(snapshotIndex.Data, 0, sizeof(indices)); // degenerate triangle
-        state.Scissor = {2, 0, 4, 4}; backend.SetPipelineState(&state);
-        if (backend.Draw(&snapshotDraw) != CK_OK) return false;
+        state.Scissor = {2, 0, 4, 4};
+        if (submit(&snapshotDraw) != CK_OK) return false;
         std::memcpy(snapshotVertices.Data, positions, sizeof(positions));
         std::memcpy(snapshotUv.Data, redUv, sizeof(redUv));
         std::memcpy(snapshotIndex.Data, indices, sizeof(indices));
@@ -251,9 +258,9 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
             pixels[y * 4 + x] = x < 2 ? colors[0] : mutation == 1 ? colors[1] : pass.ClearColor;
         if (!CheckReadback(backend, ticket, pixels, 0, "transient draw-time snapshot")) return false;
     }
-    backend.BindTexture(CKFF_SLOT_PRESENT, 0, &sampler);
+    bindings[CKFF_SLOT_PRESENT] = CKBackendTextureBinding();
     backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
-    state.ScissorEnabled = FALSE; backend.SetPipelineState(&state);
+    state.ScissorEnabled = FALSE;
     std::puts("SDL_gpu transient snapshots: position, UV and index mutations between deferred draws passed");
 
     // Both index widths validate only the requested subrange, including its
@@ -279,7 +286,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         boundsDraw.TransientVertices = &boundsVertices; boundsDraw.Stream1Transient = &boundsUv;
         boundsDraw.TransientIndices = persistent ? nullptr : &boundsIndex;
         boundsDraw.IndexBuffer = indexBuffer; boundsDraw.StartIndex = 1;
-        if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&boundsDraw) != CK_OK) return false;
+        if (backend.BeginPass(&pass) != CK_OK || submit(&boundsDraw) != CK_OK) return false;
         for (CKDWORD invalid : {CKDWORD(3), CKDWORD(wide ? 0x10000 : 0xffff)}) {
             writeIndex(3, invalid);
             if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
@@ -289,7 +296,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         writeIndex(3, 2);
         if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
             indexSize, static_cast<CKBYTE *>(boundsIndex.Data) + 3 * indexSize) != CK_OK) return false;
-        if (backend.Draw(&boundsDraw) != CK_OK || backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
+        if (submit(&boundsDraw) != CK_OK || backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
             backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK ||
             !CheckReadback(backend, ticket, std::vector<CKDWORD>(16, 0xffffffff), 0, "validated index subrange")) return false;
         if (indexBuffer) backend.DestroyObject(indexBuffer, CKRST_OBJ_INDEXBUFFER);
@@ -312,7 +319,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (!rejected(badDraw, "old stream 1 token with reused current storage")) return false;
     badIndex = currentIndex; badIndex.Token = index.Token;
     badDraw = draw; badDraw.TransientIndices = &badIndex;
-    if (!rejected(badDraw, "old index token with reused current storage") || backend.Draw(&draw) != CK_OK) return false;
+    if (!rejected(badDraw, "old index token with reused current storage") || submit(&draw) != CK_OK) return false;
     backend.DestroyObject(program, CKRST_OBJ_PROGRAM); backend.DestroyObject(target, CKRST_OBJ_FRAMEBUFFER);
     backend.DestroyObject(output, CKRST_OBJ_TEXTURE); backend.DestroyObject(positionLayout, CKRST_OBJ_VERTEXLAYOUT);
     backend.DestroyObject(texcoordLayout, CKRST_OBJ_VERTEXLAYOUT); backend.DestroyObject(otherLayout, CKRST_OBJ_VERTEXLAYOUT);
@@ -612,7 +619,6 @@ static int Run(SDL_Window *window)
     texture.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
     CKDWORD previous = 0, replacement = 0;
     if (backend.CreateTexture(&texture, nullptr, &previous) != CK_OK) return 13;
-    backend.BindTexture(0, previous, nullptr);
     if (backend.Submit({CKRST_BACKEND_SYNC_IMMEDIATE, FALSE}, nullptr) != CK_OK) return 14;
     backend.Shutdown();
     init.Fullscreen = FALSE;

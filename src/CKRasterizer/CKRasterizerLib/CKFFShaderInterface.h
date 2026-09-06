@@ -42,10 +42,10 @@ const char *CKFFSamplerSlotName(CKDWORD slot);
 CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
                                               CK_SHADER_FORMAT format, CKBOOL present = FALSE);
 
-inline CKERROR CKFFPushConstants(CKRasterizerBackend *backend, CKFFConstantBlock block,
+inline CKERROR CKFFSetConstants(CKBackendConstants *constants, CKFFConstantBlock block,
                                 const void *data, CKDWORD vec4Count)
 {
-    return backend->PushConstants(static_cast<CKDWORD>(block), data, vec4Count * 16u);
+    return constants->Set(static_cast<CKDWORD>(block), data, vec4Count * 16u);
 }
 
 #endif

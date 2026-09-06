@@ -101,7 +101,6 @@ struct CKSdlGpuTarget {
     std::shared_ptr<SDL_GPUTexture> VolumeSlice;
 };
 struct CKSdlGpuBinding {
-    CKDWORD Texture = 0;
     CKSamplerDesc Sampler = {CKRST_FILTER_LINEAR, CKRST_FILTER_LINEAR, CKRST_FILTER_NONE,
         CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, 0, CKRST_COMPARE_NONE};
     std::shared_ptr<SDL_GPUSampler> NativeSampler;
@@ -165,11 +164,8 @@ struct CKSdlGpuDevice {
     CKBackendPassDesc Pass;
     std::shared_ptr<CKSdlGpuTarget> Target;
     std::vector<CKSdlGpuDraw> Draws;
-    CKBackendPipelineState State;
-    std::array<CKSdlGpuBinding, CKBACKEND_MAX_TEXTURE_SLOTS> Bindings;
-    CKBackendConstantValues Constants;
+    std::array<CKSdlGpuBinding, CKBACKEND_MAX_TEXTURE_SLOTS> SamplerBindings;
     std::vector<CKBYTE> UniformArena;
-    std::string Marker;
     // Info arrays describe this submission's live allocations; storage is reused
     // by allocation ordinal only after Submit invalidates every token.
     std::vector<std::vector<CKBYTE>> TransientVertices, TransientIndices;

@@ -88,19 +88,20 @@ static int TestGenericBackend()
     if (backend.Init(&init) != CK_OK)
         return Fail("backend construction needs no rasterizer driver");
 
+    CKBackendConstants constants;
     const CKBYTE complete[] = {1, 2, 3, 4, 5, 6, 7, 8};
     const CKBYTE prefix[] = {9, 10, 11};
-    if (backend.PushConstants(31, complete, sizeof(complete)) != CK_OK ||
-        backend.PushConstants(31, prefix, sizeof(prefix)) != CK_OK)
+    if (constants.Set(31, complete, sizeof(complete)) != CK_OK ||
+        constants.Set(31, prefix, sizeof(prefix)) != CK_OK)
         return Fail("arbitrary byte prefixes are accepted");
-    const auto &bytes = backend.GetConstants(31);
+    const auto &bytes = constants[31].Bytes;
     if (bytes.size() != sizeof(complete) || memcmp(bytes.data(), prefix, sizeof(prefix)) != 0 ||
         memcmp(bytes.data() + sizeof(prefix), complete + sizeof(prefix), sizeof(complete) - sizeof(prefix)) != 0)
         return Fail("constant prefix update preserves the remaining bytes");
-    if (backend.PushConstants(CKBACKEND_MAX_CONSTANT_SLOTS, complete, sizeof(complete)) != CKERR_INVALIDPARAMETER ||
-        backend.PushConstants(0, complete, CKBACKEND_MAX_UNIFORM_BYTES + 1) != CKERR_INVALIDPARAMETER ||
-        backend.PushConstants(0, NULL, 1) != CKERR_INVALIDPARAMETER ||
-        backend.PushConstants(0, complete, 0) != CKERR_INVALIDPARAMETER)
+    if (constants.Set(CKBACKEND_MAX_CONSTANT_SLOTS, complete, sizeof(complete)) != CKERR_INVALIDPARAMETER ||
+        constants.Set(0, complete, CKBACKEND_MAX_UNIFORM_BYTES + 1) != CKERR_INVALIDPARAMETER ||
+        constants.Set(0, NULL, 1) != CKERR_INVALIDPARAMETER ||
+        constants.Set(0, complete, 0) != CKERR_INVALIDPARAMETER)
         return Fail("constant byte input bounds");
 
     static const CKBYTE token[] = {'t', 'e', 's', 't'};
@@ -152,6 +153,7 @@ static int TestGenericBackend()
     pass.Rect.right = pass.Rect.bottom = 16;
     CKBackendDraw draw;
     draw.Program = program;
+    draw.Constants = &constants;
     draw.VertexCount = 3;
     if (backend.BeginPass(&pass) != CK_OK || backend.Draw(&draw) != CK_OK)
         return Fail("a procedural program draws without vertex streams");

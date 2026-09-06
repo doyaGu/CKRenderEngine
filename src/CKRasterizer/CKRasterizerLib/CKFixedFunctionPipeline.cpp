@@ -72,7 +72,6 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend, const CKBackend
     }
     m_State.DrawState.Reset();
     m_VertexLayoutCache.Init(backend);
-    m_TextureBinder.ResetProgramBindings();
     m_TransientGeometry.Init(backend, &m_VertexLayoutCache);
     m_FrameNumber = 0;
     m_State.MarkViewProjectionDirty();
@@ -86,7 +85,6 @@ CKERROR CKFixedFunctionPipeline::Shutdown() {
         return status;
     m_TransientGeometry.Shutdown();
     m_VertexLayoutCache.Shutdown();
-    m_TextureBinder.ResetProgramBindings();
     m_ShaderCache.Shutdown();
     m_Backend = nullptr;
     return CK_OK;
@@ -912,7 +910,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     // its pending state).
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
-        if (!m_UniformEmitter.UploadUniforms(m_Backend, programContext, textures->ActiveStageCount))
+        if (!m_UniformEmitter.UploadUniforms(&m_Constants, programContext, textures->ActiveStageCount))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     }
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
@@ -943,13 +941,11 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
         ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_State.DrawState))
         : 1.0f;
-    {
-        CKFF_SCOPE_TIME(m_Probes, PipelineStateUs);
-        m_Backend->SetPipelineState(&pipeline);
-    }
-
     // Geometry.
     CKBackendDraw draw;
+    draw.Pipeline = pipeline;
+    draw.Constants = &m_Constants;
+    draw.Marker = m_DrawMarker;
     draw.Program = programContext->Program;
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
@@ -978,7 +974,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     // Textures.
     {
         CKFF_SCOPE_TIME(m_Probes, TextureUs);
-        BindTextures(programContext->Program, textures);
+        draw.Textures = &m_TextureBinder.BuildDrawBindings(textures);
     }
 
     draw.SortKey = CKFFEncodeDepthKey(ComputeDepthKey());
@@ -1111,9 +1107,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     return SubmitPrepared(submission);
 }
 
-void CKFixedFunctionPipeline::BindTextures(CKDWORD program, const CKFFTextureBindingSet *bindingSet) {
-    m_TextureBinder.Bind(m_Backend, program, bindingSet);
-}
+
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
     CKFF_PROBE(m_Probes, LogAndReset(m_State.DrawState));

@@ -22,6 +22,7 @@
 #include <memory>
 #include <vector>
 #include "CKBackendProgram.h"
+#include "CKBackendDrawData.h"
 #include "CKRasterizerBackendTypes.h"   // CKSamplerDesc, CKVertexLayoutDesc, CKShaderDesc, CKReadbackDesc
 
 // Backend-only object types (the contract defines TEXTURE / VERTEXBUFFER /
@@ -202,7 +203,14 @@ struct CKBackendTransientIndices {
 // One draw. Geometry comes either from buffers (handles) or from transient
 // allocations of this frame (pointers); indices are optional. Each of the two
 // vertex streams has its own layout, source and starting vertex.
+// Complete draw packet: no pipeline, binding, constant or marker state is
+// inherited from a previous call. Null data pointers select empty/zero data.
+// All borrowed data is consumed/snapshotted before Draw returns.
 struct CKBackendDraw {
+    CKBackendPipelineState Pipeline;
+    const CKBackendTextureBindings *Textures = nullptr;
+    const CKBackendConstants *Constants = nullptr;
+    const char *Marker = nullptr;
     CKDWORD Program;
     CKDWORD Layout;                            // vertex layout of stream 0
     CKDWORD VertexBuffer;                      // 0 when TransientVertices is used
@@ -296,16 +304,6 @@ public:
     // target; a backend may split it into native passes around transfers.
     // A Blit does not require or change the logical drawing target.
     virtual CKERROR BeginPass(const CKBackendPassDesc *Desc) = 0;
-    virtual void SetPipelineState(const CKBackendPipelineState *State) = 0;   // sticky until changed
-    // Texture bindings are sticky until changed; Texture 0 clears the slot
-    // (backends whose shaders need every sampler assigned, like GLSL, get the
-    // explicit zero binding once per program from the pipeline).
-    virtual void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) = 0;
-    // Updates the prefix of a logical byte-data slot for subsequent draws.
-    // Its tail is preserved; slots start zeroed. Program declarations map slots
-    // to native resources. Data is copied before this call returns.
-    virtual CKERROR PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize) = 0;
-    virtual void SetMarker(const char *Name) = 0;          // consumed by the next Draw (drawmap)
     virtual CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) = 0;
     virtual CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) = 0;
     virtual CKERROR Draw(const CKBackendDraw *Draw) = 0;

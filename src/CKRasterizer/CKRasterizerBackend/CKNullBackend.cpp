@@ -395,42 +395,6 @@ CKERROR CKNullBackend::BeginPass(const CKBackendPassDesc *Desc)
     return CK_OK;
 }
 
-void CKNullBackend::SetPipelineState(const CKBackendPipelineState *State)
-{
-    if (State)
-        m_State = *State;
-}
-
-void CKNullBackend::BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler)
-{
-    if (Slot >= CKBACKEND_MAX_TEXTURE_SLOTS)
-        return;
-    m_Textures[Slot] = Texture;
-    if (Sampler)
-        m_Samplers[Slot] = *Sampler;
-    else
-        memset(&m_Samplers[Slot], 0, sizeof(m_Samplers[Slot]));
-}
-
-CKERROR CKNullBackend::PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize)
-{
-    if (Slot >= CKBACKEND_MAX_CONSTANT_SLOTS || !Data || ByteSize == 0 ||
-        ByteSize > CKBACKEND_MAX_UNIFORM_BYTES)
-        return CKERR_INVALIDPARAMETER;
-    if (!m_Initialized)
-        return CKERR_INVALIDOPERATION;
-    auto &constants = m_Constants[Slot];
-    if (constants.size() < ByteSize)
-        constants.resize(ByteSize);
-    memcpy(constants.data(), Data, ByteSize);
-    return CK_OK;
-}
-
-void CKNullBackend::SetMarker(const char *Name)
-{
-    m_Marker = Name ? Name : "";
-}
-
 CKBOOL CKNullBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
 {
     if (!Out || Count == 0 || !m_Initialized)
@@ -481,6 +445,17 @@ CKERROR CKNullBackend::Draw(const CKBackendDraw *Draw)
     if (Draw->TransientIndices &&
         (Draw->TransientIndices->Token == 0 || Draw->TransientIndices->Token > m_TransientIndices.size()))
         return CKERR_INVALIDPARAMETER;
+    m_State = Draw->Pipeline;
+    m_Marker = Draw->Marker ? Draw->Marker : "";
+    for (CKDWORD slot = 0; slot < CKBACKEND_MAX_TEXTURE_SLOTS; ++slot) {
+        const CKBackendTextureBinding binding = Draw->Textures ? (*Draw->Textures)[slot] : CKBackendTextureBinding();
+        m_Textures[slot] = binding.Texture;
+        m_Samplers[slot] = binding.Sampler;
+    }
+    for (CKDWORD slot = 0; slot < CKBACKEND_MAX_CONSTANT_SLOTS; ++slot) {
+        if (Draw->Constants) m_Constants[slot] = (*Draw->Constants)[slot].Bytes;
+        else m_Constants[slot].clear();
+    }
     CKNullDraw record;
     record.Pass = GetCurrentPass();
     record.Program = Draw->Program;

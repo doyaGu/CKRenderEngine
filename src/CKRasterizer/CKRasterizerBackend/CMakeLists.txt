@@ -5,6 +5,7 @@ add_library(CKRasterizerBackend STATIC
         CKRasterizerBackendEnums.h
         CKRasterizerBackendTypes.h
         CKRasterizerValidation.h
+        CKBackendDrawData.h
         CKBackendProgram.h
         CKBackendProgram.cpp
         CKBackendProgramLayout.h

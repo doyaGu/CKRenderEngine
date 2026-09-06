@@ -114,10 +114,6 @@ public:
 
     // --- Frame
     CKERROR BeginPass(const CKBackendPassDesc *Desc) override;
-    void SetPipelineState(const CKBackendPipelineState *State) override;
-    void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) override;
-    CKERROR PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize) override;
-    void SetMarker(const char *Name) override;
     CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) override;
     CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) override;
     CKERROR Draw(const CKBackendDraw *Draw) override;
@@ -146,11 +142,6 @@ public:
 private:
     friend struct CKBgfxBackendTestAccess;
 
-    struct SlotBinding {
-        CKDWORD Texture;
-        CKSamplerDesc Sampler;
-        CKBOOL HasSampler;
-    };
 
     static const int MAX_TRANSIENT_VB = 256;
     static const int MAX_TRANSIENT_IB = 256;
@@ -183,13 +174,13 @@ private:
 
     // Draw submission
     CKERROR DrawFailed(CKERROR Error, const char *Operation);
-    CKERROR ApplyPipelineState();
+    CKERROR ApplyPipelineState(const CKBackendPipelineState &state);
     CKERROR BindGeometry(const CKBackendDraw *Draw);
     std::shared_ptr<bgfx::TextureHandle> GetDefaultTexture(const CKBackendSamplerBinding &Binding);
     CKERROR BindTextureSlot(const CKBackendSamplerBinding &Binding, bgfx::UniformHandle Uniform,
                             bgfx::TextureHandle DefaultTexture, CKDWORD Texture, const CKSamplerDesc *Sampler);
     void ResetDebugBindings();
-    void TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth);
+    void TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth, const CKBackendPipelineState &state);
 
     // Debug / diagnostics
     void ConfigureDebug();
@@ -254,8 +245,6 @@ private:
     CKBOOL m_ViewClearRecorded[CKRST_MAX_PASSES];
 
     // Draw state
-    CKBackendPipelineState m_State;
-    SlotBinding m_Slots[CKBACKEND_MAX_TEXTURE_SLOTS];
     CKDrawState m_CachedDrawState;
     uint64_t m_CachedBgfxState;
     CKDWORD m_PointSize;

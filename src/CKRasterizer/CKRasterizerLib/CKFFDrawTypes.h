@@ -7,11 +7,11 @@
 #include "CKRasterizerBackendTypes.h"
 
 class CKDrawStateCache;
-class CKRasterizerBackend;
+class CKBackendConstants;
 struct CKFFStateStore;
 
 struct CKFFUniformSink {
-    CKRasterizerBackend *Backend;
+    CKBackendConstants *Constants;
     CKBOOL EmitStatic;
     CKBOOL EmitObject;
     CKBOOL Failed;

@@ -631,10 +631,6 @@ CKERROR CKSdlGpuBackend::CreateProgram(const CKBackendProgramDesc *desc, CKDWORD
 
     // Reserve the declared constant capacity during program creation. Later
     // draws reuse these slots and the compiled packing layout without allocation.
-    for (const auto &uniform : desc->Uniforms) {
-        auto &bytes = m->Constants[uniform.Slot].Bytes;
-        if (bytes.size() < uniform.Size()) bytes.resize(uniform.Size());
-    }
     *out = m->Programs.Add(program);
     program->Identity = *out;
     return *out ? CK_OK : CKERR_OUTOFMEMORY;

@@ -29,8 +29,8 @@ struct CKFFPipelineTestAccess;
 
 // Reasons a draw returns FALSE. Every fixed-function state the backend cannot
 // express is approximated instead (see RecordDrawApproximation); only invalid
-// input / state values and backend failures (BACKEND_ERROR: a PushConstants /
-// Draw call the backend refused) still reject.
+// input / state values and backend failures (BACKEND_ERROR: a draw packet
+// the backend refused) still reject.
 enum CKFFDrawRejectReason {
     CKFF_DRAW_REJECT_NONE = 0,
     CKFF_DRAW_REJECT_INVALID_INPUT,
@@ -118,6 +118,7 @@ public:
     CKBOOL IsMultisampledTarget() const { return m_State.DrawState.GetMultisampledTarget(); }
     void SetUserClipPlane(int index, const VxPlane &plane);
     const VxPlane &GetUserClipPlane(int index) const { return m_State.UserClipPlanes[index]; }
+    void SetDrawMarker(const char *marker) { m_DrawMarker = marker; }
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
     CKBOOL SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
@@ -196,6 +197,8 @@ private:
     CKDWORD m_FrameNumber;
     CKFFDebugState m_DebugState;
     CKFFStateStore m_State;
+    CKBackendConstants m_Constants;
+    const char *m_DrawMarker = nullptr;
 
     CKFFDrawProbes m_Probes;
     CKFFTextureBinder m_TextureBinder;
@@ -231,7 +234,6 @@ private:
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
     CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
     CKBOOL SubmitPrepared(const CKFFDrawSubmission &submission);
-    void BindTextures(CKDWORD program, const CKFFTextureBindingSet *bindingSet);
     void LogAndResetFrameStats();
 
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,

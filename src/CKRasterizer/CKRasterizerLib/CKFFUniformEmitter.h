@@ -15,20 +15,19 @@ public:
                        CKFFShaderCache &shaderCache,
                        CKFFDrawProbes &probes);
 
-    // Pushes every constant block of the draw; FALSE when the backend refused
-    // an upload (the draw is then rejected).
-    CKBOOL UploadUniforms(CKRasterizerBackend *backend,
+    // Prepares producer-owned blocks for this draw, retaining unchanged revisions.
+    CKBOOL UploadUniforms(CKBackendConstants *constants,
                           const CKFFProgramContext *programContext,
                           CKDWORD activeTextureCount);
 
 private:
-    CKBOOL UploadObjectUniforms(CKRasterizerBackend *backend,
+    CKBOOL UploadObjectUniforms(CKBackendConstants *constants,
                                 const CKFFProgramContext *programContext,
                                 CKDWORD activeTextureCount);
-    CKBOOL UploadStaticUniforms(CKRasterizerBackend *backend,
+    CKBOOL UploadStaticUniforms(CKBackendConstants *constants,
                                 const CKFFProgramContext *programContext,
                                 CKDWORD activeTextureCount);
-    CKBOOL UploadUniform(CKRasterizerBackend *backend, CKFFConstantBlock block, const void *data,
+    CKBOOL UploadUniform(CKBackendConstants *constants, CKFFConstantBlock block, const void *data,
                          CKDWORD vec4Count);
     CKBOOL Emit(CKFFUniformSink *sink, CKFFConstantBlock block, const void *data,
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);

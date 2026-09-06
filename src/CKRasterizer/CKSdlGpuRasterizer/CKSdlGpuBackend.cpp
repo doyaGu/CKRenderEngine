@@ -46,13 +46,10 @@ CKERROR CKSdlGpuBackend::Init(const CKBackendInitDesc *desc)
     m->Error = CK_OK;
     // Retain resource-table generations across shutdown, but start the new
     // device with fresh bindings, constants and submission/presentation state.
-    m->Bindings = {};
-    m->Constants = {};
+    m->SamplerBindings = {};
     m->UniformArena.clear();
     m->Caps = CKBackendCaps();
-    m->State = CKBackendPipelineState();
     m->Pass = CKBackendPassDesc();
-    m->Marker.clear();
     m->Stats = {}; m->FrameStats = {};
     m->Submission = 0; m->DrawApproximations = 0;
     m->SwapWidth = m->SwapHeight = 0;
@@ -202,11 +199,11 @@ void CKSdlGpuBackend::Shutdown()
     m->Readbacks.clear(); m->Submissions.clear();
     m->PendingGeometry.clear(); m->FreeGeometry.clear(); m->FreeGeometryBytes = 0;
     m->BatchVertices.clear(); m->BatchIndices.clear();
-    m->Bindings = {};
+    m->SamplerBindings = {};
     m->Samplers.clear();
     m->ClearProgram.reset(); m->VolumeMipProgram.reset();
     m->DefaultVertexBuffers.clear(); m->DefaultTextures.clear();
-    m->Constants = {}; m->UniformArena.clear();
+    m->UniformArena.clear();
     m->Target.reset(); m->Targets.Clear(); m->Programs.Clear(); m->ShaderObjects.Clear();
     m->VertexBuffers.Clear(); m->IndexBuffers.Clear(); m->Layouts.Clear(); m->Textures.Clear();
     if (m->WindowClaimed) SDL_ReleaseWindowFromGPUDevice(m->Device, m->Window);

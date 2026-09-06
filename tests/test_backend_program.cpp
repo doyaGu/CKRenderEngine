@@ -447,39 +447,60 @@ void TestSharedSnapshotPacking()
                   layout.BufferOffset(CKRST_SHADER_VERTEX, 1) == 64,
               "stage bindings reference the shared snapshot's physical offset");
 
-    CKBackendConstantValues values;
-    values[31].Bytes.resize(32);
-    values[4].Bytes.resize(16);
-    for (CKDWORD i = 0; i < 32; ++i)
-        values[31].Bytes[i] = static_cast<CKBYTE>(i + 1);
-    for (CKDWORD i = 0; i < 16; ++i)
-        values[4].Bytes[i] = static_cast<CKBYTE>(0x80 + i);
-    values[31].Revision = 1;
-    values[4].Revision = 5;
+    CKBackendConstants values;
+    CKBYTE primary[32], independentBytes[16];
+    for (CKDWORD i = 0; i < 32; ++i) primary[i] = static_cast<CKBYTE>(i + 1);
+    for (CKDWORD i = 0; i < 16; ++i) independentBytes[i] = static_cast<CKBYTE>(0x80 + i);
+    TestCheck(values.Set(31, primary, sizeof(primary)) == CK_OK &&
+                  values.Set(4, independentBytes, sizeof(independentBytes)) == CK_OK, "prepare logical data");
     layout.Update(values);
-    TestCheck(memcmp(layout.Data.data(), values[31].Bytes.data(), 32) == 0 &&
-                  memcmp(layout.Data.data() + 64, values[4].Bytes.data(), 16) == 0,
+    TestCheck(memcmp(layout.Data.data(), primary, 32) == 0 &&
+                  memcmp(layout.Data.data() + 64, independentBytes, 16) == 0,
               "logical slots populate only their declared ranges");
     for (CKDWORD i = 32; i < 64; ++i)
         TestCheck(layout.Data[i] == 0, "uniform packing leaves metadata bytes untouched");
 
     const auto previous = layout.Data;
-    values[31].Bytes[0] = 0xee;
+    const uint64_t revision = values[31].Revision;
+    values.Set(31, primary, sizeof(primary));
+    TestCheck(values[31].Revision == revision, "equal bytes preserve the revision");
     layout.Update(values);
-    TestCheck(layout.Data == previous, "unchanged slot revisions avoid copying data again");
-    ++values[31].Revision;
+    TestCheck(layout.Data == previous, "unchanged values preserve the complete snapshot");
+    primary[0] = 0xee;
+    values.Set(31, primary, sizeof(primary));
+    TestCheck(values[31].Revision != revision, "changed bytes advance the revision");
     layout.Update(values);
     TestCheck(layout.Data[0] == 0xee &&
                   memcmp(layout.Data.data() + 1, previous.data() + 1, previous.size() - 1) == 0,
-              "an updated revision refreshes the changed slot without changing other ranges");
+              "changed data refreshes only its declared slot");
 
     const auto fullSnapshot = layout.Data;
-    values[31].Bytes = {0x51, 0x52, 0x53};
-    ++values[31].Revision;
+    const CKBYTE prefix[] = {0x51, 0x52, 0x53};
+    values.Set(31, prefix, sizeof(prefix));
     layout.Update(values);
-    TestCheck(memcmp(layout.Data.data(), values[31].Bytes.data(), 3) == 0 &&
+    TestCheck(memcmp(layout.Data.data(), prefix, sizeof(prefix)) == 0 &&
                   memcmp(layout.Data.data() + 3, fullSnapshot.data() + 3, fullSnapshot.size() - 3) == 0,
-              "a shorter byte prefix preserves the existing uniform tail and other buffers");
+              "prefix mutation preserves its producer's tail and other buffers");
+
+    CKBackendConstants other;
+    const CKBYTE first = 0x91;
+    other.Set(31, &first, 1); // revision 1, as the original producer initially had
+    layout.Update(other);
+    TestCheck(layout.Data[0] == first, "switching producers selects the new source");
+    for (CKDWORD i = 1; i < 32; ++i)
+        TestCheck(layout.Data[i] == 0, "another producer never inherits a previous uniform tail");
+    for (CKDWORD i = 64; i < 80; ++i)
+        TestCheck(layout.Data[i] == 0, "omitted slots select zero data");
+    CKBackendConstants sameRevision;
+    const CKBYTE second = 0x71;
+    sameRevision.Set(31, &second, 1);
+    layout.Update(sameRevision);
+    TestCheck(layout.Data[0] == second && other[31].Revision == sameRevision[31].Revision,
+              "equal revisions from distinct producers cannot alias");
+    layout.Update(values);
+    TestCheck(memcmp(layout.Data.data(), prefix, sizeof(prefix)) == 0 &&
+                  memcmp(layout.Data.data() + 3, fullSnapshot.data() + 3, fullSnapshot.size() - 3) == 0,
+              "switching back restores the original producer's complete values");
 }
 
 } // namespace

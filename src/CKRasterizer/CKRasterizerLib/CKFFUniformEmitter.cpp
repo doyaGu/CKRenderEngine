@@ -56,14 +56,14 @@ static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
 }
 
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
-                                CKRasterizerBackend *backend,
+                                CKBackendConstants *constants,
                                 CKBOOL emitStatic,
                                 CKBOOL emitObject)
 {
     if (!sink)
         return;
     memset(sink, 0, sizeof(CKFFUniformSink));
-    sink->Backend = backend;
+    sink->Constants = constants;
     sink->EmitStatic = emitStatic;
     sink->EmitObject = emitObject;
 }
@@ -112,7 +112,7 @@ CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKFFConstantBlock block,
         return TRUE;
     if (!objectUniform && !sink->EmitStatic)
         return TRUE;
-    if (sink->Backend && !UploadUniform(sink->Backend, block, data, vec4Count)) {
+    if (sink->Constants && !UploadUniform(sink->Constants, block, data, vec4Count)) {
         sink->Failed = TRUE;
         return FALSE;
     }
@@ -327,47 +327,47 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     EmitClipPlaneUniforms(&context);
 }
 
-CKBOOL CKFFUniformEmitter::UploadUniforms(CKRasterizerBackend *backend,
+CKBOOL CKFFUniformEmitter::UploadUniforms(CKBackendConstants *constants,
                                           const CKFFProgramContext *programContext,
                                           CKDWORD activeTextureCount)
 {
-    if (!backend || !programContext)
+    if (!constants || !programContext)
         return FALSE;
-    if (!UploadObjectUniforms(backend, programContext, activeTextureCount))
+    if (!UploadObjectUniforms(constants, programContext, activeTextureCount))
         return FALSE;
-    return UploadStaticUniforms(backend, programContext, activeTextureCount);
+    return UploadStaticUniforms(constants, programContext, activeTextureCount);
 }
 
-CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKRasterizerBackend *backend,
+CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKBackendConstants *constants,
                                                 const CKFFProgramContext *programContext,
                                                 CKDWORD activeTextureCount)
 {
-    if (!backend || !programContext)
+    if (!constants || !programContext)
         return FALSE;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, backend, FALSE, TRUE);
+    CKFFInitUniformSink(&sink, constants, FALSE, TRUE);
     EmitPayloads(&sink, programContext, activeTextureCount);
     return sink.Failed ? FALSE : TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKRasterizerBackend *backend,
+CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKBackendConstants *constants,
                                                 const CKFFProgramContext *programContext,
                                                 CKDWORD activeTextureCount)
 {
-    if (!backend || !programContext)
+    if (!constants || !programContext)
         return FALSE;
     CKFFUniformSink sink;
-    CKFFInitUniformSink(&sink, backend, TRUE, FALSE);
+    CKFFInitUniformSink(&sink, constants, TRUE, FALSE);
     EmitPayloads(&sink, programContext, activeTextureCount);
     return sink.Failed ? FALSE : TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadUniform(CKRasterizerBackend *backend, CKFFConstantBlock block,
+CKBOOL CKFFUniformEmitter::UploadUniform(CKBackendConstants *constants, CKFFConstantBlock block,
                                          const void *data, CKDWORD vec4Count)
 {
-    if (!backend)
+    if (!constants)
         return FALSE;
-    if (CKFFPushConstants(backend, block, data, vec4Count) != CK_OK)
+    if (CKFFSetConstants(constants, block, data, vec4Count) != CK_OK)
         return FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_Probes.OnUniform(block, vec4Count);

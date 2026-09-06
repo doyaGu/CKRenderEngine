@@ -90,10 +90,6 @@ public:
 
     // --- Frame
     CKERROR BeginPass(const CKBackendPassDesc *Desc) override;
-    void SetPipelineState(const CKBackendPipelineState *State) override;
-    void BindTexture(CKDWORD Slot, CKDWORD Texture, const CKSamplerDesc *Sampler) override;
-    CKERROR PushConstants(CKDWORD Slot, const void *Data, CKDWORD ByteSize) override;
-    void SetMarker(const char *Name) override;
     CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) override;
     CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) override;
     CKERROR Draw(const CKBackendDraw *Draw) override;

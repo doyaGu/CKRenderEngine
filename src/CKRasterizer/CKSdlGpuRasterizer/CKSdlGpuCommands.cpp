@@ -15,38 +15,6 @@ CKERROR CKSdlGpuBackend::BeginPass(const CKBackendPassDesc *desc)
     return CK_OK;
 }
 
-void CKSdlGpuBackend::SetPipelineState(const CKBackendPipelineState *state) { if (state) m->State = *state; }
-void CKSdlGpuBackend::BindTexture(CKDWORD slot, CKDWORD texture, const CKSamplerDesc *sampler)
-{
-    if (slot >= m->Bindings.size()) return;
-    auto &binding = m->Bindings[slot];
-    binding.Texture = texture;
-    if (sampler) {
-        const auto &old = binding.Sampler;
-        if (old.MinFilter != sampler->MinFilter || old.MagFilter != sampler->MagFilter ||
-            old.MipFilter != sampler->MipFilter || old.AddressU != sampler->AddressU ||
-            old.AddressV != sampler->AddressV || old.AddressW != sampler->AddressW ||
-            old.BorderColor != sampler->BorderColor || old.CompareFunc != sampler->CompareFunc) {
-            binding.Sampler = *sampler;
-            binding.NativeSampler.reset();
-        }
-    }
-    if (m->Ready() && !binding.NativeSampler) binding.NativeSampler = m->Sampler(binding.Sampler);
-}
-void CKSdlGpuBackend::SetMarker(const char *name) { m->Marker = name ? name : ""; }
-
-CKERROR CKSdlGpuBackend::PushConstants(CKDWORD slot, const void *data, CKDWORD byteSize)
-{
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
-    if (slot >= m->Constants.size() || !data || !byteSize || byteSize > CKBACKEND_MAX_UNIFORM_BYTES)
-        return CKERR_INVALIDPARAMETER;
-    auto &value = m->Constants[slot];
-    if (value.Bytes.size() < byteSize) value.Bytes.resize(byteSize);
-    std::memcpy(value.Bytes.data(), data, byteSize);
-    ++value.Revision;
-    return CK_OK;
-}
-
 CKBOOL CKSdlGpuBackend::AllocTransientVertices(CKDWORD count, CKDWORD handle, CKBackendTransientVertices *out)
 {
     if (out) *out = CKBackendTransientVertices();
@@ -85,7 +53,8 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     if (!m->Ready() || !m->PassOpen) return CKERR_INVALIDOPERATION;
     if (!desc || !desc->VertexCount) return CKERR_INVALIDPARAMETER;
     CKSdlGpuDraw draw;
-    draw.Desc = *desc; draw.State = m->State; draw.Marker = std::move(m->Marker);
+    draw.Desc = *desc; draw.State = desc->Pipeline; draw.Marker = desc->Marker ? desc->Marker : "";
+    draw.Desc.Textures = nullptr; draw.Desc.Constants = nullptr; draw.Desc.Marker = nullptr;
     draw.Program = m->Programs.Get(desc->Program); draw.Layout = m->Layouts.Get(desc->Layout);
     draw.Layout1 = m->Layouts.Get(desc->Stream1Layout);
     draw.VB = m->VertexBuffers.Get(desc->VertexBuffer); draw.VB1 = m->VertexBuffers.Get(desc->Stream1VertexBuffer);
@@ -151,10 +120,17 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     }
     draw.Desc.TransientVertices = nullptr; draw.Desc.Stream1Transient = nullptr; draw.Desc.TransientIndices = nullptr;
     auto &uniforms = draw.Program->UniformLayout;
-    uniforms.Update(m->Constants);
+    static const CKBackendConstants emptyConstants;
+    uniforms.Update(desc->Constants ? *desc->Constants : emptyConstants);
     for (unsigned slot = 0; slot < draw.Program->Interface.Samplers.size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
-        auto &binding = m->Bindings[decl.Slot];
+        static const CKBackendTextureBinding emptyBinding;
+        const auto &binding = desc->Textures ? (*desc->Textures)[decl.Slot] : emptyBinding;
+        auto &cached = m->SamplerBindings[decl.Slot];
+        if (std::memcmp(&cached.Sampler, &binding.Sampler, sizeof(binding.Sampler)) != 0) {
+            cached.Sampler = binding.Sampler;
+            cached.NativeSampler.reset();
+        }
         if (decl.MetadataBufferSlot == ~0u && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
@@ -166,9 +142,9 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
                     slot, binding.Texture, m->Target && draw.Textures[slot] == m->Target->Color, draw.Marker.c_str());
             return CKERR_INVALIDPARAMETER;
         }
-        if (!binding.NativeSampler) binding.NativeSampler = m->Sampler(binding.Sampler);
-        if (!binding.NativeSampler) return m->Error;
-        draw.Samplers[slot] = binding.NativeSampler;
+        if (!cached.NativeSampler) cached.NativeSampler = m->Sampler(binding.Sampler);
+        if (!cached.NativeSampler) return m->Error;
+        draw.Samplers[slot] = cached.NativeSampler;
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
         if (metadata == ~0u) continue;
         float rgba[4];

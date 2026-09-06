@@ -95,72 +95,29 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
                                m_State.TextureHandles, m_State.TextureFlags, samplers);
 }
 
-void CKFFTextureBinder::ResetProgramBindings()
+const CKBackendTextureBindings &CKFFTextureBinder::BuildDrawBindings(const CKFFTextureBindingSet *set)
 {
-    m_InitializedPrograms.Clear();
-    m_BoundSlotMask = 0;
-}
-
-CKBOOL CKFFTextureBinder::InitializeProgramSamplers(
-    CKRasterizerBackend *backend, CKDWORD program)
-{
-    if (!backend || program == 0 ||
-        !m_ShaderCache.RequiresExplicitSamplerInitialization())
-        return FALSE;
-
-    CKBOOL initialized = FALSE;
-    if (m_InitializedPrograms.LookUp(program, initialized))
-        return FALSE;
-
-    const CKFFProgramSamplerLayout &layout = m_ShaderCache.GetSamplerLayout();
-
-    // GLSL rejects draws when active sampler types retain the shared default unit.
-    for (CKDWORD i = 0; i < layout.BindingCount; ++i) {
-        backend->BindTexture(layout.Bindings[i].Stage, 0, NULL);
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        m_Probes.OnTextureBind();
-#endif
-    }
-    m_InitializedPrograms.Insert(program, TRUE);
-    return TRUE;
-}
-
-void CKFFTextureBinder::Bind(CKRasterizerBackend *backend, CKDWORD program,
-                             const CKFFTextureBindingSet *set)
-{
-    if (!backend || !set)
-        return;
-
-    InitializeProgramSamplers(backend, program);
-
-    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
-    for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i)
-        desiredTextures[i] = set->Bindings[i].Texture;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-    m_Probes.OnTextureSet(set->ActiveTextureCount, desiredTextures);
-#endif
-
     CKDWORD boundMask = 0;
+    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
     for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i) {
-        const CKFFTextureBinding &binding = set->Bindings[i];
-        if (binding.Texture == 0)
-            continue;
-        CKSamplerDesc sampler = binding.Sampler;
-        backend->BindTexture(binding.Stage, binding.Texture, &sampler);
-        boundMask |= 1u << binding.Stage;
-#if CKRE_ENABLE_FFP_DIAGNOSTICS
-        m_Probes.OnTextureBind();
-#endif
+        const auto &source = set->Bindings[i];
+        desiredTextures[i] = source.Texture;
+        if (!source.Texture) continue;
+        m_Bindings[source.Stage].Texture = source.Texture;
+        m_Bindings[source.Stage].Sampler = source.Sampler;
+        boundMask |= 1u << source.Stage;
+        CKFF_PROBE(m_Probes, OnTextureBind());
     }
-    // Slots the previous draw used and this one does not.
+    CKFF_PROBE(m_Probes, OnTextureSet(set->ActiveTextureCount, desiredTextures));
     CKDWORD stale = m_BoundSlotMask & ~boundMask;
-    for (CKDWORD slot = 0; stale != 0 && slot < CKFF_SAMPLER_SLOT_COUNT; ++slot) {
+    for (CKDWORD slot = 0; stale; ++slot) {
         if (stale & (1u << slot)) {
-            backend->BindTexture(slot, 0, NULL);
+            m_Bindings[slot] = CKBackendTextureBinding();
             stale &= ~(1u << slot);
         }
     }
     m_BoundSlotMask = boundMask;
+    return m_Bindings;
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const

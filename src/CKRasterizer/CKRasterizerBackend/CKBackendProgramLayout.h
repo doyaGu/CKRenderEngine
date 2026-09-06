@@ -1,13 +1,7 @@
 #ifndef CKBACKENDPROGRAMLAYOUT_H
 #define CKBACKENDPROGRAMLAYOUT_H
 
-#include "CKBackendProgram.h"
-
-struct CKBackendConstantValue {
-    std::vector<CKBYTE> Bytes;
-    uint64_t Revision = 0;
-};
-using CKBackendConstantValues = std::array<CKBackendConstantValue, CKBACKEND_MAX_CONSTANT_SLOTS>;
+#include "CKBackendDrawData.h"
 
 // Compiled once when a native program is created. Packing reuses storage and
 // copies only slots changed since that program's previous draw. The caller
@@ -19,11 +13,12 @@ public:
         CKDWORD Slot, Offset, Size;
     };
     void Init(const CKBackendProgramDesc &desc);
-    void Update(const CKBackendConstantValues &values);
+    void Update(const CKBackendConstants &values);
     CKDWORD BufferOffset(CK_SHADER_STAGE stage, CKDWORD slot) const;
     std::vector<Buffer> Buffers;
     std::vector<CKBYTE> Data;
 private:
+    uint64_t SourceIdentity = 0;
     struct Copy {
         CKDWORD Slot, Offset, Size;
         uint64_t Revision = ~uint64_t(0);
