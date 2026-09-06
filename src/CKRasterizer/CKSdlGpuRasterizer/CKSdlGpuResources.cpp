@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "CKSdlGpuInternal.h"
 #include "CKSdlGpuTextureData.h"
 
@@ -35,6 +36,7 @@ unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip)
 std::shared_ptr<SDL_GPUBuffer> CKSdlGpuDevice::UploadGeometry(
     const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage)
 {
+    CKRE_PROFILE_SCOPE("CKRE.SDL.UploadGeometry");
     if (data.empty()) return {};
     if (data.size() > std::numeric_limits<unsigned>::max()) {
         SDL_SetError("Transient geometry exceeds the native buffer size limit");

@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "RCKRenderContext.h"
 
 #if defined(_WIN32)
@@ -596,6 +597,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
+    CKRE_PROFILE_SCOPE("CKRE.CK3D.DrawScene");
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
     const bool frameLog = FrameLogEnabled();
@@ -631,6 +633,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
 }
 
 CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
+    CKRE_PROFILE_SCOPE("CKRE.CK3D.Present");
     // IDA: 0x1006abdd
     if (m_DeviceDestroying)
         return CK_OK;
@@ -699,6 +702,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 }
 
 CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
+    CKRE_PROFILE_SCOPE("CKRE.CK3D.Render");
     // IDA: 0x1006948e
     VxTimeProfiler profiler;
 
@@ -1296,6 +1300,7 @@ void RCKRenderContext::ResetTextureStage(int Stage) {
 }
 
 void RCKRenderContext::DisableTextureStagesFrom(int FirstStage) {
+    CKRE_PROFILE_SCOPE("CKRE.CK3D.ResetStages");
     if (FirstStage < 0)
         FirstStage = 0;
     for (int stage = FirstStage; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)

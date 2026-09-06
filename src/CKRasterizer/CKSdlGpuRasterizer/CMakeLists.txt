@@ -15,6 +15,7 @@ add_library(CKSdlGpuBackend STATIC ${CKSDL_GPU_BACKEND_SOURCES}
 target_compile_features(CKSdlGpuBackend PRIVATE cxx_std_20)
 target_include_directories(CKSdlGpuBackend PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_link_libraries(CKSdlGpuBackend PUBLIC CKRasterizerBackend SDL3::SDL3)
+target_link_libraries(CKSdlGpuBackend PRIVATE CKRenderProfiling)
 set_target_properties(CKSdlGpuBackend PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" FOLDER "Rasterizer/Backend"
         POSITION_INDEPENDENT_CODE ON)

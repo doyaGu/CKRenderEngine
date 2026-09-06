@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "CKSdlGpuInternal.h"
 
 CKERROR CKSdlGpuBackend::BeginPass(const CKBackendPassDesc *desc)
@@ -80,6 +81,7 @@ CKBOOL CKSdlGpuBackend::AllocTransientIndices(CKDWORD count, CKBOOL index32, CKB
 
 CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
 {
+    CKRE_PROFILE_SCOPE("CKRE.SDL.RecordDraw");
     if (!m->Ready() || !m->PassOpen) return CKERR_INVALIDOPERATION;
     if (!desc || !desc->VertexCount) return CKERR_INVALIDPARAMETER;
     CKSdlGpuDraw draw;
@@ -212,6 +214,7 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
 
 CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
 {
+    CKRE_PROFILE_SCOPE("CKRE.SDL.Encode");
     if (Draws.empty() && (!PassOpen || !Pass.ClearFlags)) return CK_OK;
     if (!EnsureCommands()) return Error;
     if (!Target) {
@@ -221,6 +224,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         }
         if (!Swapchain) {
             const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
+            CKRE_PROFILE_SCOPE("CKRE.SDL.Acquire");
             if (!SDL_WaitAndAcquireGPUSwapchainTexture(Commands, Window, &Swapchain, &SwapWidth, &SwapHeight))
                 return Fail("WaitAndAcquireGPUSwapchainTexture");
             if (Swapchain && (SwapWidth != previousWidth || SwapHeight != previousHeight))
@@ -233,6 +237,10 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             return CK_OK;
         }
     }
+    CKRE_PROFILE_VALUE("CKRE.Batch.Draws", Draws.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.VertexBytes", BatchVertices.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.IndexBytes", BatchIndices.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.UniformSnapshotBytes", UniformArena.size());
     auto batchVB = UploadGeometry(BatchVertices, SDL_GPU_BUFFERUSAGE_VERTEX);
     auto batchIB = UploadGeometry(BatchIndices, SDL_GPU_BUFFERUSAGE_INDEX);
     if (Error != CK_OK) return Error;
@@ -423,6 +431,7 @@ CKERROR CKSdlGpuBackend::ReadTexture(CKDWORD handle, CKDWORD mip, CKReadbackDesc
 
 CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number)
 {
+    CKRE_PROFILE_SCOPE("CKRE.SDL.Submit");
     if (!m->Ready()) return CKERR_INVALIDOPERATION;
     if (desc.Sync != CKRST_BACKEND_SYNC_UNCHANGED) {
         const auto mode = desc.Sync == CKRST_BACKEND_SYNC_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
@@ -436,7 +445,8 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
     const CKERROR error = m->Flush(desc.PresentWindow != FALSE);
     if (error != CK_OK) return error;
     if (m->Commands) {
-        auto fence = CKSdlGpuOwn(m->Device, SDL_SubmitGPUCommandBufferAndAcquireFence(m->Commands), SDL_ReleaseGPUFence);
+        auto fence = CKRE_PROFILE_CALL("CKRE.SDL.NativeSubmit",
+            CKSdlGpuOwn(m->Device, SDL_SubmitGPUCommandBufferAndAcquireFence(m->Commands), SDL_ReleaseGPUFence));
         m->Commands = nullptr; m->Swapchain = nullptr;
         if (!fence) return m->Fail("SubmitGPUCommandBufferAndAcquireFence");
         for (auto &ticket : m->Readbacks) if (!ticket->Fence) ticket->Fence = fence;
@@ -461,7 +471,9 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
     m->Stats = m->FrameStats; m->FrameStats = CKBackendStats();
     if (number) *number = m->Submission;
     m->Collect();
+    CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", m->Submissions.size());
     if (m->Submissions.size() > 3) {
+        CKRE_PROFILE_SCOPE("CKRE.SDL.WaitInflight");
         SDL_GPUFence *oldest = m->Submissions.front().Fence.get();
         if (!SDL_WaitForGPUFences(m->Device, true, &oldest, 1)) return m->Fail("WaitForGPUFences.inflight");
         m->Collect();

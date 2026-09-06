@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKRasterizerBackend.h"
 #include "CKFFUniformState.h"
@@ -620,6 +621,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
     const CKBYTE *texcoordComponentCounts,
     CKBOOL pointSprite)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.PrepareProgram");
     if (!preparation)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
 
@@ -680,6 +682,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
     VxDrawPrimitiveData *data)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.DrawPrimitive");
     BeginDrawDiagnostics();
     if (!m_Backend || !data || data->VertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -846,6 +849,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.DrawVertexBuffer");
     BeginDrawDiagnostics();
     if (!m_Backend || !vb || vertexCount == 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -898,6 +902,7 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
 
 CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submission)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.SubmitPrepared");
     const CKFFProgramContext *programContext = submission.ProgramContext;
     const CKFFTextureBindingSet *textures = submission.Textures;
     if (!m_Backend || !programContext || !textures || !programContext->Program)
@@ -1010,6 +1015,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
     CKDWORD formatFlags,
     CKDWORD vertexLayout)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.SubmitVertexBuffer");
     if (!m_Backend || !vb)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     CKFF_PROBE(m_Probes, OnHardwareDraw());

@@ -77,6 +77,8 @@ if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     add_test(NAME SceneCaptureImageIO COMMAND scene_capture_image_tests)
 endif()
 if (Python3_Interpreter_FOUND)
+    add_test(NAME RasterizerTraceAccounting
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rasterizer_trace.py)
     add_test(NAME RasterizerLayerBoundaries
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_rasterizer_boundaries.py
                 --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -268,3 +270,11 @@ endif ()
 ckre_add_test(render_transient_geometry_tests
     test_transient_geometry.cpp
 )
+
+add_executable(test_render_profile_disabled test_render_profile_disabled.cpp)
+target_include_directories(test_render_profile_disabled PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRenderSupport)
+target_compile_definitions(test_render_profile_disabled PRIVATE CKRE_ENABLE_PROFILING=0)
+set_target_properties(test_render_profile_disabled PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
+add_test(NAME RenderProfileDisabled COMMAND $<TARGET_FILE:test_render_profile_disabled>)

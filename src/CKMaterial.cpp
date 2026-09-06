@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 /**
  * @file CKMaterial.cpp
  * @brief Implementation of RCKMaterial class for the CKRenderEngine.
@@ -1415,6 +1416,7 @@ VXSHADE_MODE RCKMaterial::GetShadeMode() {
  * @return TRUE if material was successfully set
  */
 CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int TextureStage) {
+    CKRE_PROFILE_SCOPE("CKRE.CK3D.Material");
     CK_FRAME_COST_ADD_MATERIAL_SET(FALSE, FALSE, FALSE);
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);

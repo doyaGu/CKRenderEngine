@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "CKTransientGeometry.h"
 #include "CKRasterizer.h"
 #include "CKVertexLayoutCache.h"
@@ -691,6 +692,7 @@ void CKTransientGeometry::InterleaveVertices(
     CKDWORD formatFlags, VxDrawPrimitiveData *data,
     const CKBYTE *texcoordComponentCounts)
 {
+    CKRE_PROFILE_SCOPE("CKRE.FFP.Interleave");
     for (CKDWORD i = 0; i < vertexCount; i++) {
         InterleaveVertex(dst, stride, i, i, formatFlags, data, nullptr, nullptr, texcoordComponentCounts);
     }
