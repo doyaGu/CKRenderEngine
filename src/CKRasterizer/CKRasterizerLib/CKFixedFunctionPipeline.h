@@ -64,6 +64,8 @@ public:
     CKDWORD GetColorWriteMask() const;
     void SetColorWriteMask(CKDWORD mask);
     void ResetTextureStage(int stage);
+    // Semantic material reset, directly mutating the FFP state once per range.
+    void ResetTextureStages(int firstStage, int stageCount);
     void DisableTextureStagesFrom(int firstStage);
     void SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const;
     void RestoreTextureStage(int stage, const CKFFTextureStageSnapshot &snapshot);
@@ -72,6 +74,7 @@ public:
     // is derived from TEXTUREMAPBLEND / the bound texture at draw time.
     void ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type);
     CKDWORD GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
+    CKDWORD QueryTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const;
     // TRUE when the state was set explicitly since the last stage reset.
     CKBOOL IsTextureStageStateSet(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
         if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || (int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES)
@@ -79,6 +82,7 @@ public:
         return (m_State.StageStateSetMasks[stage] & (1ull << (CKDWORD)type)) != 0 ? TRUE : FALSE;
     }
     void SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix);
+    CKBOOL GetTransform(VXMATRIX_TYPE type, VxMatrix &matrix) const;
     void ResetMaterial();
     void SetMaterial(const CKMaterialData *mat);
     void SetLight(int index, const CKLightData *light);

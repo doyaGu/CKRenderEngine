@@ -1,7 +1,6 @@
 // Translation core (CKTranslatedRasterizer / Driver / Context) on top of the
-// recording backend from FFPRecordingHarness.h: verbatim state mirror
-// forwarded to the fixed-function pipeline, resources with Lock/Unlock
-// shadows, one backend pass per pass, targets and shutdown.
+// recording backend from FFPRecordingHarness.h: state/query semantics,
+// resource Lock/Unlock shadows, ordered passes, targets and shutdown.
 
 #include <stdio.h>
 #include <string.h>
@@ -172,7 +171,7 @@ void TestRepeatedCompoundTextureStates()
             f.Context->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
             TestCheck(f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == CKRST_TOP_MODULATE &&
                           f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
-                      "writing the mirror default must reach FFP after every reset");
+                      "writing the initial query default must reach FFP after every reset");
             f.Context->SetTextureStageState(0, CKRST_TSS_ARG1, 0);
             TestCheck(!f.FFP->IsTextureStageStateSet(0, CKRST_TSS_ARG1),
                       "repeated zero combine arguments must remain implicit");
@@ -196,7 +195,7 @@ void TestRepeatedCompoundTextureStates()
     TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == 0 &&
                   f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == 0 &&
                   !f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
-              "repeated TEXTUREMAPBLEND must clear newer explicit combine state in both stores");
+              "repeated TEXTUREMAPBLEND must clear newer explicit combine state for queries and rendering");
 
     const CKDWORD stageBlend = (VXBLEND_DESTCOLOR << 4) | VXBLEND_ZERO;
     f.Context->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, stageBlend);
@@ -206,7 +205,81 @@ void TestRepeatedCompoundTextureStates()
                   value == CKRST_TOP_MODULATE &&
                   f.FFP->GetTextureStageState(0, CKRST_TSS_OP) == value &&
                   f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
-              "repeated STAGEBLEND must reapply its derived combine state in both stores");
+              "repeated STAGEBLEND must reapply its derived combine state for queries and rendering");
+}
+
+void TestSemanticTextureStageReset()
+{
+    Fixture f;
+    const CKDWORD texture = MakeTexture(f, 2, 0);
+    CKFFTextureStageSnapshot initial[CKRST_MAX_TEXTURE_STAGES];
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+        f.Context->SetTexture(texture, stage);
+        for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+            f.Context->SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)state, 0x1000u + state);
+        VxMatrix matrix;
+        matrix.SetIdentity();
+        matrix[3][0] = float(stage + 1);
+        f.Context->SetTransformMatrix(VXMATRIX_TEXTURE(stage), matrix);
+        f.FFP->SaveTextureStage(stage, initial[stage]);
+    }
+    for (int first : {0, 2, 7, 8}) {
+        for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+            f.FFP->RestoreTextureStage(stage, initial[stage]);
+        TestCheck(f.Context->ResetTextureStages(first, CKRST_MAX_TEXTURE_STAGES - first), "valid range reset");
+        CKFFTextureStageSnapshot actual[CKRST_MAX_TEXTURE_STAGES];
+        for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            f.FFP->SaveTextureStage(stage, actual[stage]);
+            f.FFP->RestoreTextureStage(stage, initial[stage]);
+        }
+        // Behavioral reference for the old CK_3D operation. Production must
+        // never expand the range into this sequence of virtual calls.
+        for (int stage = first; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            f.Context->SetTexture(0, stage);
+            for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+                f.Context->SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)state,
+                                               state == CKRST_TSS_TEXCOORDINDEX ? stage : 0);
+            VxMatrix matrix;
+            matrix.SetIdentity();
+            f.Context->SetTransformMatrix(VXMATRIX_TEXTURE(stage), matrix);
+        }
+        for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            CKFFTextureStageSnapshot expected;
+            f.FFP->SaveTextureStage(stage, expected);
+            TestCheck(actual[stage].Texture == expected.Texture && actual[stage].TextureFlags == expected.TextureFlags &&
+                          actual[stage].StateSetMask == expected.StateSetMask &&
+                          actual[stage].StateQueryMask == expected.StateQueryMask &&
+                          memcmp(actual[stage].States, expected.States, sizeof(expected.States)) == 0 &&
+                          memcmp(&actual[stage].TextureMatrix, &expected.TextureMatrix, sizeof(VxMatrix)) == 0,
+                      "range reset preserves lower stages and matches complete reset semantics");
+        }
+    }
+    f.Context->SetTextureStageState(7, CKRST_TSS_CONSTANT, 0xFFAABBCCu);
+    TestCheck(!f.Context->ResetTextureStages(-1, 1) && !f.Context->ResetTextureStages(7, 2) &&
+                  !f.Context->ResetTextureStages(0, -1) && !f.Context->ResetTextureStages(1, 0x7FFFFFFF),
+              "invalid ranges fail before any mutation, including overflowing lengths");
+    CKDWORD value = 0;
+    TestCheck(f.Context->GetTextureStageState(7, CKRST_TSS_CONSTANT, &value) && value == 0xFFAABBCCu,
+              "invalid reset preserves state");
+}
+
+void TestTextureStageQueriesFollowSavedState()
+{
+    Fixture f;
+    CKDWORD value = 0;
+    CKFFTextureStageSnapshot initial, cleared;
+    f.FFP->SaveTextureStage(0, initial);
+    f.Context->SetTextureStageState(0, CKRST_TSS_OP, 0);
+    f.FFP->SaveTextureStage(0, cleared);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == 0,
+              "a cleared unresolved value overrides the initial query default");
+    f.FFP->RestoreTextureStage(0, initial);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == CKRST_TOP_MODULATE,
+              "save/restore includes query presence without a second value store");
+    f.FFP->RestoreTextureStage(0, cleared);
+    TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == 0 &&
+                  !f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),
+              "restore preserves explicit/unset distinction and public query together");
 }
 
 void TestMatricesLightsClipPlanes()
@@ -586,6 +659,8 @@ int main()
     framework.Run("defaults reach the pipeline", TestDefaultsReachThePipeline);
     framework.Run("state round trip", TestStateRoundTrip);
     framework.Run("repeated compound texture states", TestRepeatedCompoundTextureStates);
+    framework.Run("semantic texture stage reset", TestSemanticTextureStageReset);
+    framework.Run("texture stage query snapshots", TestTextureStageQueriesFollowSavedState);
     framework.Run("matrices, lights, clip planes", TestMatricesLightsClipPlanes);
     framework.Run("textures", TestTextures);
     framework.Run("buffers", TestBuffers);

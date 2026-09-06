@@ -6,12 +6,12 @@ CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `C
 
 The responsibilities follow `CK_3D → CKRasterizer → CKRasterizerBackend → Graphics API`:
 
-- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer v3 calls and loads providers through the registration entry points.
+- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer revision 4 calls and loads providers through the registration entry points.
 - **CKRasterizerLib** implements fixed-function state, shader variants, geometry preparation and frame composition: render scale, MSAA, postprocessing, overlays and logical readbacks.
 - **CKRasterizerBackend** defines modern graphics resources, explicit programs, constant blocks, resolved pipeline state, ordered commands and completion. It is an internal contract independent of FFP and plugin loading.
 - **Native backends** implement that contract: `CKSdlGpuBackend` for SDL GPU, optional `CKBgfxBackend` for bgfx, and `CKNullBackend` for fallback and deterministic tests. The dynamic/static rasterizer plugins compose a native backend with the translation core and their own shader artifact catalog.
 
-See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for the current implementation's ownership and dependency boundaries. The [redesign plan](src/CKRasterizer/REDESIGN.md) specifies bulk FFP state, explicit draws, bounded resource ownership and performance validation. It permits replacing rasterizer v3 and shader descriptor v2 with a full migration; it has not been implemented yet.
+See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for the current implementation's ownership and dependency boundaries. The [redesign plan](src/CKRasterizer/REDESIGN.md) specifies bulk FFP state, explicit draws, bounded resource ownership and performance validation. It permits replacing rasterizer v3 and shader descriptor v2 with a full migration; migration has started with semantic stage reset and one FFP-owned texture-stage state; the remaining stages are still pending.
 
 The default provider is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects providers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
 

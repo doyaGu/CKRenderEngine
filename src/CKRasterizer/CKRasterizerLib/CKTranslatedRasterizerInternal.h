@@ -1,12 +1,12 @@
 #ifndef CKTRANSLATEDRASTERIZERINTERNAL_H
 #define CKTRANSLATEDRASTERIZERINTERNAL_H
 
-// Translation core of the CKRasterizer v3 contract (spec section 5).
+// Fixed-function implementation of the public CKRasterizer contract.
 //
 // A CKTranslatedRasterizer composes a plugin's device factory and shader
-// catalog and exposes them to the engine as the D3D7-shaped v3 contract. Every
-// fixed-function state call is mirrored verbatim (so Get* returns exactly
-// what was set) and forwarded to the fixed-function pipeline; draws go
+// catalog and exposes them through the fixed-function contract. Texture-stage
+// values, bindings and transforms live in the FFP state; remaining mirrors are
+// being migrated according to REDESIGN.md. Draws go
 // through CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
 // flow selects logical targets; the backend owns native pass boundaries.
 
@@ -136,6 +136,7 @@ public:
     CKBOOL GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value) override;
     CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) override;
     CKBOOL GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value) override;
+    CKBOOL ResetTextureStages(int FirstStage, int StageCount) override;
     CKBOOL SetTexture(CKDWORD Texture, int Stage) override;
     CKBOOL GetTexture(int Stage, CKDWORD *Texture) override;
     CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) override;
@@ -187,7 +188,7 @@ public:
     // --- Internal access ---
     CKRasterizerBackend *GetBackend() const { return m_Backend; }
 
-    // --- Test access (the translated tests read the pipeline and the mirror) ---
+    // --- Test access ---
     CKFixedFunctionPipeline *GetFFPipelineForTests() { return &m_FFP; }
     CKDWORD GetTargetForTests() const { return m_Target; }
     CKBOOL IsInSceneForTests() const { return m_Frame.IsSceneActive(); }
@@ -317,12 +318,6 @@ private:
 
     // Verbatim state mirror (spec 4.10)
     CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
-    CKDWORD m_StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
-    // Defaults in the public mirror can differ from the FFP defaults until
-    // explicitly applied. Only synchronized entries can skip repeated writes.
-    uint64_t m_AppliedStageStates[CKRST_MAX_TEXTURE_STAGES]{};
-    CKDWORD m_Textures[CKRST_MAX_TEXTURE_STAGES];
-    VxMatrix m_Matrices[CKRST_MATRIX_SLOT_COUNT];
     CKLightData m_Lights[CKRST_MAX_LIGHTS];
     CKBOOL m_LightEnabled[CKRST_MAX_LIGHTS];
     CKMaterialData m_Material;

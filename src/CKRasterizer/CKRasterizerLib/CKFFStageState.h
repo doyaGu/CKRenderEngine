@@ -24,6 +24,7 @@ struct CKFFTextureStageSnapshot {
     CKDWORD TextureFlags;
     CKDWORD States[CKFF_MAX_TEXTURE_STAGE_STATES];
     uint64_t StateSetMask;
+    uint64_t StateQueryMask;
     VxMatrix TextureMatrix;
 };
 

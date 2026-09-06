@@ -1289,22 +1289,15 @@ CKBOOL RCKRenderContext::SetTexture(CKTexture *tex, CKBOOL Clamped, int Stage) {
 void RCKRenderContext::ResetTextureStage(int Stage) {
     if (!m_RasterizerContext || Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
         return;
-    m_RasterizerContext->SetTexture(0, Stage);
-    for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
-        m_RasterizerContext->SetTextureStageState(Stage, (CKRST_TEXTURESTAGESTATETYPE)tss,
-                                                  tss == (CKDWORD)CKRST_TSS_TEXCOORDINDEX ? (CKDWORD)Stage : 0);
-    }
-    VxMatrix identity;
-    Vx3DMatrixIdentity(identity);
-    m_RasterizerContext->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + Stage), identity);
+    m_RasterizerContext->ResetTextureStages(Stage, 1);
 }
 
 void RCKRenderContext::DisableTextureStagesFrom(int FirstStage) {
     CKRE_PROFILE_SCOPE("CKRE.CK3D.ResetStages");
     if (FirstStage < 0)
         FirstStage = 0;
-    for (int stage = FirstStage; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
-        ResetTextureStage(stage);
+    if (m_RasterizerContext && FirstStage < CKRST_MAX_TEXTURE_STAGES)
+        m_RasterizerContext->ResetTextureStages(FirstStage, CKRST_MAX_TEXTURE_STAGES - FirstStage);
 }
 
 // ---------------------------------------------------------------------------

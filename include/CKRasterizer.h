@@ -1,8 +1,8 @@
 #ifndef CKRASTERIZER_H
 #define CKRASTERIZER_H
 
-// CKRasterizer v3 contract (spec: docs/spec/2026-09-01-render-engine-
-// redesign-v3.md, section 4). The engine talks to a rasterizer plugin
+// CKRasterizer revision 4. Migration design: src/CKRasterizer/REDESIGN.md.
+// The engine talks to a rasterizer plugin
 // exclusively through the three classes declared here. Everything that is
 // not a fixed-function state, a draw, a resource handle or a target / readback
 // operation is an implementation detail of the plugin.
@@ -158,6 +158,11 @@ public:
     // STAGEBLEND stores the derived combine states.
     virtual CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) = 0;
     virtual CKBOOL GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value) = 0;
+    // Clear a contiguous range immediately: no bound texture, identity texture
+    // matrix, zero stage states except TEXCOORDINDEX = stage. Combine states
+    // become unset. Stages outside the range are unchanged. Invalid ranges
+    // fail atomically; [MAX_TEXTURE_STAGES, 0] is a valid empty range.
+    virtual CKBOOL ResetTextureStages(int FirstStage, int StageCount) = 0;
     virtual CKBOOL SetTexture(CKDWORD Texture, int Stage) = 0;
     virtual CKBOOL GetTexture(int Stage, CKDWORD *Texture) = 0;
     virtual CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) = 0;

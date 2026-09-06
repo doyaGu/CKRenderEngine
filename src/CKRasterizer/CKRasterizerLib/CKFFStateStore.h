@@ -29,6 +29,10 @@ struct CKFFStateStore {
     CKDWORD TextureFlags[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     uint64_t StageStateSetMasks[CKFF_MAX_TEXTURE_STAGES];
+    // Query defaults differ from unresolved FFP values before the first write.
+    // A bit selects the single stored value, including an explicitly cleared
+    // zero. This is independent of the combine-expression explicit mask.
+    uint64_t StageStateQueryMasks[CKFF_MAX_TEXTURE_STAGES];
     CKBYTE TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
     float Viewport[4];               // POSITIONT screen -> viewport-relative clip mapping
