@@ -1,15 +1,7 @@
 #include "CKFixedFunctionPipeline.h"
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
-    : m_Pipeline(&pipeline),
-      m_ColorWriteMask(pipeline.GetColorWriteMask()),
-      m_World(pipeline.GetWorldMatrix()),
-      m_View(pipeline.GetViewMatrix()),
-      m_Projection(pipeline.GetProjectionMatrix()) {
-    for (int i = 0; i < CKFF_RS_COUNT; ++i)
-        m_RenderStates[i] = pipeline.GetRenderState((VXRENDERSTATETYPE)i);
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        pipeline.SaveTextureStage(stage, m_TextureStages[stage]);
+    : m_Pipeline(&pipeline), m_Snapshot(pipeline.m_State) {
 }
 
 CKFFStateGuard::~CKFFStateGuard() {
@@ -19,14 +11,8 @@ CKFFStateGuard::~CKFFStateGuard() {
 void CKFFStateGuard::Restore() {
     if (!m_Pipeline)
         return;
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        m_Pipeline->RestoreTextureStage(stage, m_TextureStages[stage]);
-    m_Pipeline->SetTransform(VXMATRIX_WORLD, m_World);
-    m_Pipeline->SetTransform(VXMATRIX_VIEW, m_View);
-    m_Pipeline->SetTransform(VXMATRIX_PROJECTION, m_Projection);
-    m_Pipeline->SetColorWriteMask(m_ColorWriteMask);
-    for (int i = 0; i < CKFF_RS_COUNT; ++i)
-        m_Pipeline->SetRenderState((VXRENDERSTATETYPE)i, m_RenderStates[i]);
+    m_Pipeline->m_State = m_Snapshot;
+    m_Pipeline->OnFixedFunctionStateChanged(CKFixedFunctionPipeline::CKFF_CHANGE_PROGRAM | CKFixedFunctionPipeline::CKFF_CHANGE_STATIC_UNIFORM);
     m_Pipeline = nullptr;
 }
 

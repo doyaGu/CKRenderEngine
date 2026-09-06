@@ -144,6 +144,7 @@ public:
     CKBOOL SetLight(CKDWORD Index, const CKLightData *Data) override;
     CKBOOL EnableLight(CKDWORD Index, CKBOOL Enable) override;
     CKBOOL SetMaterial(const CKMaterialData *Data) override;
+    CKBOOL ApplyMaterial(const CKMaterialRenderState &State) override;
     CKBOOL SetViewport(const CKViewportData *Data) override;
     CKBOOL SetUserClipPlane(CKDWORD Index, const VxPlane &Plane) override;
     CKBOOL GetUserClipPlane(CKDWORD Index, VxPlane &Plane) override;
@@ -195,10 +196,10 @@ public:
     CKBOOL IsOverlayPhaseForTests() const { return m_Frame.IsOverlayActive(); }
     CKDWORD GetPassCountForTests() const { return m_FramePasses; }
     int GetLiveResourceCountForTests(CKDWORD TypeMask) const;
-    const CKLightData &GetLightForTests(CKDWORD Index) const { return m_Lights[Index]; }
-    CKBOOL IsLightEnabledForTests(CKDWORD Index) const { return m_LightEnabled[Index]; }
-    const CKMaterialData &GetMaterialForTests() const { return m_Material; }
-    const CKViewportData &GetViewportForTests() const { return m_Viewport; }
+    const CKLightData &GetLightForTests(CKDWORD Index) const { return m_FFP.GetLight((int)Index); }
+    CKBOOL IsLightEnabledForTests(CKDWORD Index) const { return m_FFP.IsLightEnabled((int)Index); }
+    const CKMaterialData &GetMaterialForTests() const { return m_FFP.GetMaterial(); }
+    const CKViewportData &GetViewportForTests() const { return m_FFP.GetViewport(); }
     const CKRasterizerOptions &GetOptionsForTests() const { return m_Options; }
     CKBOOL GetVertexBufferDescForTests(CKDWORD VB, CKVertexBufferDesc *Desc) const;
 
@@ -279,7 +280,6 @@ private:
     CKBOOL PresentInternalTarget();
     void FinishFrame();
     void ApplyOptions();
-    void ResetStateMirror();
     void ReleaseFrameScratch();
     void ReleaseTarget();
     void UpdateAlphaTestPrecision();
@@ -317,12 +317,6 @@ private:
     CKRasterizerOptions m_Options;
 
     // Verbatim state mirror (spec 4.10)
-    CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
-    CKLightData m_Lights[CKRST_MAX_LIGHTS];
-    CKBOOL m_LightEnabled[CKRST_MAX_LIGHTS];
-    CKMaterialData m_Material;
-    CKViewportData m_Viewport;
-    VxPlane m_ClipPlanes[CKRST_MAX_USER_CLIP_PLANES];
 
     // Frame
     CKBOOL m_Created;

@@ -108,6 +108,17 @@ struct CKMaterialData {
     float SpecularPower;
 };
 
+// Base material operation. Texture residency/callbacks and alpha-test ownership
+// remain with CK_3D; disabled blending preserves the existing blend factors.
+struct CKMaterialRenderState {
+    CKMaterialData Material;
+    CKDWORD CullMode, FillMode, ShadeMode;
+    CKBOOL AlphaBlend;
+    CKDWORD SourceBlend, DestBlend;
+    CKBOOL ZWrite;
+    CKDWORD ZFunc;
+};
+
 struct CKLightData {
     VXLIGHT_TYPE Type;
     VxColor Diffuse;

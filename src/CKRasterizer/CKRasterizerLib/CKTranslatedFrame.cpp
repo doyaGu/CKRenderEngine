@@ -269,10 +269,11 @@ CKBOOL CKTranslatedContext::Clear(CKDWORD Flags, CKDWORD Color, float Z, CKDWORD
     // (window) pixels and get scaled to the pass target.
     const CKRECT target = LogicalTargetRect();
     CKRECT viewportRect;
-    viewportRect.left = (int)m_Viewport.ViewX;
-    viewportRect.top = (int)m_Viewport.ViewY;
-    viewportRect.right = (int)(m_Viewport.ViewX + m_Viewport.ViewWidth);
-    viewportRect.bottom = (int)(m_Viewport.ViewY + m_Viewport.ViewHeight);
+    const CKViewportData &viewport = m_FFP.GetViewport();
+    viewportRect.left = (int)viewport.ViewX;
+    viewportRect.top = (int)viewport.ViewY;
+    viewportRect.right = (int)(viewport.ViewX + viewport.ViewWidth);
+    viewportRect.bottom = (int)(viewport.ViewY + viewport.ViewHeight);
     const int count = RectCount > 0 ? RectCount : 1;
     const CKDWORD frameBuffer = CurrentPassFrameBuffer();
     CKBOOL cleared = FALSE;
@@ -703,7 +704,6 @@ int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE 
 
     const CKBOOL drawn = m_FFP.DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, &dp);
     guard.Restore();
-    m_FFP.SetViewport(m_Viewport);
     if (!drawn) {
         Diag(DrawRejectDiagnostic());
         return 0;

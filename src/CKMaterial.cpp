@@ -1465,37 +1465,17 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
             dev->ResetTextureStage(TextureStage);
     }
 
-    // Material constants are part of the fixed-function current state even
-    // when lighting is disabled; texture ops and unlit draws can still read
-    // DIFFUSE/CURRENT from the material if no vertex color stream is present.
-    rst->SetMaterial(&m_MaterialData);
-
-    // --- Cull mode ---
-    if (IsTwoSided()) {
-        rst->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-    } else {
-        rst->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
-    }
-
-    // --- Fill mode ---
-    rst->SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode);
-
-    // --- Shade mode ---
-    rst->SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode);
-
-    // --- Alpha blending ---
-    if (AlphaBlendEnabled()) {
-        rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
-        rst->SetRenderState(VXRENDERSTATE_SRCBLEND, (CKDWORD)m_SourceBlend);
-        rst->SetRenderState(VXRENDERSTATE_DESTBLEND, (CKDWORD)m_DestBlend);
-    } else {
-        rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    }
-
-    // --- Depth ---
-    rst->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
-    rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled() ? TRUE : FALSE);
-    rst->SetRenderState(VXRENDERSTATE_ZFUNC, (CKDWORD)GetZFunc());
+    CKMaterialRenderState materialState;
+    materialState.Material = m_MaterialData;
+    materialState.CullMode = IsTwoSided() ? VXCULL_NONE : VXCULL_CCW;
+    materialState.FillMode = m_FillMode;
+    materialState.ShadeMode = m_ShadeMode;
+    materialState.AlphaBlend = AlphaBlendEnabled();
+    materialState.SourceBlend = m_SourceBlend;
+    materialState.DestBlend = m_DestBlend;
+    materialState.ZWrite = ZWriteEnabled();
+    materialState.ZFunc = GetZFunc();
+    rst->ApplyMaterial(materialState);
 
     // --- Texture ---
     CKBOOL textureOwnsAlphaTest = FALSE;

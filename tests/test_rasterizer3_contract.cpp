@@ -192,7 +192,7 @@ void TestLifecycle()
     TestCheck(caps.MaxTextureStages >= 1 && caps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES, "caps stages");
     TestCheck(caps.MaxLights == CKRST_MAX_LIGHTS && caps.MaxUserClipPlanes == CKRST_MAX_USER_CLIP_PLANES, "fixed caps");
     TestCheck(!f.Context->GetCaps(NULL), "GetCaps(NULL) must fail");
-    TestCheck(CKRST_INTERFACE_REVISION == 0x00040000u, "semantic stage reset revision value");
+    TestCheck(CKRST_INTERFACE_REVISION == 0x00050000u, "bulk material revision value");
 
     // A second context on the same driver is allowed for the recording backend.
     CKRasterizerContext *second = f.Driver->CreateContext();

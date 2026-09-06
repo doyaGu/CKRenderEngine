@@ -22,9 +22,9 @@
 // Contract revision (spec 4.1)
 // ===========================================================================
 
-// Revision 4 adds semantic stage-range reset. Rebuild every rasterizer plugin;
+// Revision 5 adds the bulk material operation. Rebuild every rasterizer plugin;
 // there is no v3 adapter or fallback to repeated state setters.
-#define CKRST_INTERFACE_REVISION 0x00040000u
+#define CKRST_INTERFACE_REVISION 0x00050000u
 
 // ===========================================================================
 // Limits

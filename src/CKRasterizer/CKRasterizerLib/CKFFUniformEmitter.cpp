@@ -308,7 +308,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     int packed = 0;
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
     if (context.LightingEnabled) {
-        packed = CKFFPackViewLights(m_State.Lights, m_State.LightEnabled, m_State.ActiveLightCount,
+        packed = CKFFPackViewLights(m_State.LightConstants, m_State.LightEnabled, m_State.ActiveLightCount,
                                     CKFFShaderKeyLightingEnabled(context.ShaderKey.VS),
                                     m_State.View, viewLights);
 

@@ -1,7 +1,7 @@
 #ifndef CKRASTERIZER_H
 #define CKRASTERIZER_H
 
-// CKRasterizer revision 4. Migration design: src/CKRasterizer/REDESIGN.md.
+// CKRasterizer revision 5. Migration design: src/CKRasterizer/REDESIGN.md.
 // The engine talks to a rasterizer plugin
 // exclusively through the three classes declared here. Everything that is
 // not a fixed-function state, a draw, a resource handle or a target / readback
@@ -170,6 +170,7 @@ public:
     virtual CKBOOL SetLight(CKDWORD Index, const CKLightData *Data) = 0;
     virtual CKBOOL EnableLight(CKDWORD Index, CKBOOL Enable) = 0;
     virtual CKBOOL SetMaterial(const CKMaterialData *Data) = 0;
+    virtual CKBOOL ApplyMaterial(const CKMaterialRenderState &State) = 0;
     virtual CKBOOL SetViewport(const CKViewportData *Data) = 0;
     virtual CKBOOL SetUserClipPlane(CKDWORD Index, const VxPlane &Plane) = 0;
     virtual CKBOOL GetUserClipPlane(CKDWORD Index, VxPlane &Plane) = 0;

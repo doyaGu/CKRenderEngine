@@ -17,6 +17,7 @@ CKBOOL CKFFStateStore::EnsureViewProjection()
 
 void CKFFStateStore::Reset()
 {
+    DrawState.Reset();
     ActiveLightCount = 0;
     AlphaTestPrecision = 0;
     Vx3DMatrixIdentity(World);
@@ -34,17 +35,20 @@ void CKFFStateStore::Reset()
     VertexBlendPaletteOverflow = FALSE;
     RenderTargetActive = FALSE;
 
-    memset(&Material, 0, sizeof(Material));
-    Material.Diffuse[0] = 1.0f;
-    Material.Diffuse[1] = 1.0f;
-    Material.Diffuse[2] = 1.0f;
-    Material.Diffuse[3] = 1.0f;
-    Material.Ambient[0] = 1.0f;
-    Material.Ambient[1] = 1.0f;
-    Material.Ambient[2] = 1.0f;
-    Material.Ambient[3] = 1.0f;
+    memset(&MaterialConstants, 0, sizeof(MaterialConstants));
+    Material = CKMaterialData();
+    Material.Diffuse = Material.Ambient = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+    MaterialConstants.Diffuse[0] = 1.0f;
+    MaterialConstants.Diffuse[1] = 1.0f;
+    MaterialConstants.Diffuse[2] = 1.0f;
+    MaterialConstants.Diffuse[3] = 1.0f;
+    MaterialConstants.Ambient[0] = 1.0f;
+    MaterialConstants.Ambient[1] = 1.0f;
+    MaterialConstants.Ambient[2] = 1.0f;
+    MaterialConstants.Ambient[3] = 1.0f;
 
     memset(Lights, 0, sizeof(Lights));
+    memset(LightConstants, 0, sizeof(LightConstants));
     memset(LightEnabled, 0, sizeof(LightEnabled));
     memset(TextureHandles, 0, sizeof(TextureHandles));
     memset(TextureFlags, 0, sizeof(TextureFlags));

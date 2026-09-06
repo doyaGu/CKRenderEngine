@@ -1,4 +1,4 @@
-// CKTranslatedContext: lifecycle, fixed-function state mirror, resources,
+// CKTranslatedContext: lifecycle, fixed-function state access, resources,
 // render targets, readback and statistics. The frame flow and the draws live
 // in CKTranslatedFrame.cpp.
 
@@ -80,12 +80,6 @@ CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterize
       m_FrameTextureUploads(0), m_FrameBufferUploads(0), m_LayoutMismatchLogged(FALSE)
 {
     m_Driver = Driver;
-    memset(m_RenderStates, 0, sizeof(m_RenderStates));
-    memset(m_Lights, 0, sizeof(m_Lights));
-    memset(m_LightEnabled, 0, sizeof(m_LightEnabled));
-    memset(&m_Material, 0, sizeof(m_Material));
-    for (int i = 0; i < CKRST_MAX_USER_CLIP_PLANES; ++i)
-        m_ClipPlanes[i] = VxPlane();
     memset(&m_Stats, 0, sizeof(m_Stats));
 }
 
@@ -148,15 +142,14 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_FrameNumber = 0;
     m_Frame.Reset();
 
-    ResetStateMirror();
-
-    m_Viewport.ViewX = 0;
-    m_Viewport.ViewY = 0;
-    m_Viewport.ViewWidth = m_Width;
-    m_Viewport.ViewHeight = m_Height;
-    m_Viewport.ViewZMin = 0.0f;
-    m_Viewport.ViewZMax = 1.0f;
-    m_FFP.SetViewport(m_Viewport);
+    CKViewportData viewport;
+    viewport.ViewX = 0;
+    viewport.ViewY = 0;
+    viewport.ViewWidth = m_Width;
+    viewport.ViewHeight = m_Height;
+    viewport.ViewZMin = 0.0f;
+    viewport.ViewZMax = 1.0f;
+    m_FFP.SetViewport(viewport);
     UpdateTargetExtents();
 
     VxMatrix identity;
@@ -212,11 +205,12 @@ CKBOOL CKTranslatedContext::Resize(int PosX, int PosY, int Width, int Height, CK
     m_Frame.TargetDecided = FALSE;
     // The viewport follows the window like on creation; the engine sets its
     // own viewport again after a resize anyway.
-    m_Viewport.ViewX = 0;
-    m_Viewport.ViewY = 0;
-    m_Viewport.ViewWidth = m_Width;
-    m_Viewport.ViewHeight = m_Height;
-    m_FFP.SetViewport(m_Viewport);
+    CKViewportData viewport = m_FFP.GetViewport();
+    viewport.ViewX = 0;
+    viewport.ViewY = 0;
+    viewport.ViewWidth = m_Width;
+    viewport.ViewHeight = m_Height;
+    m_FFP.SetViewport(viewport);
     UpdateTargetExtents();
     return TRUE;
 }
@@ -353,11 +347,7 @@ CKBOOL CKTranslatedContext::SetRenderState(VXRENDERSTATETYPE State, CKDWORD Valu
         Diag(CKRST_DIAG_INVALID_RENDER_STATE);
         return FALSE;
     }
-    m_RenderStates[(CKDWORD)State] = Value;
-    if ((CKDWORD)State == (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
-        m_FFP.SetColorWriteMask(Value & CKRST_COLORWRITE_ALL);
-    else
-        m_FFP.SetRenderState(State, Value);
+    m_FFP.SetRenderState(State, Value);
     return TRUE;
 }
 
@@ -369,7 +359,7 @@ CKBOOL CKTranslatedContext::GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Val
         Diag(CKRST_DIAG_INVALID_RENDER_STATE);
         return FALSE;
     }
-    *Value = m_RenderStates[(CKDWORD)State];
+    *Value = m_FFP.QueryRenderState(State);
     return TRUE;
 }
 
@@ -506,7 +496,6 @@ CKBOOL CKTranslatedContext::SetLight(CKDWORD Index, const CKLightData *Data)
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    m_Lights[Index] = *Data;
     m_FFP.SetLight((int)Index, Data);
     return TRUE;
 }
@@ -517,22 +506,22 @@ CKBOOL CKTranslatedContext::EnableLight(CKDWORD Index, CKBOOL Enable)
         Diag(CKRST_DIAG_INVALID_LIGHT_INDEX);
         return FALSE;
     }
-    m_LightEnabled[Index] = Enable ? TRUE : FALSE;
     m_FFP.EnableLight((int)Index, Enable);
+    return TRUE;
+}
+
+CKBOOL CKTranslatedContext::ApplyMaterial(const CKMaterialRenderState &State)
+{
+    m_FFP.ApplyMaterial(State);
     return TRUE;
 }
 
 CKBOOL CKTranslatedContext::SetMaterial(const CKMaterialData *Data)
 {
     if (!Data) {
-        // No material: white diffuse / ambient, everything else zero.
-        memset(&m_Material, 0, sizeof(m_Material));
-        m_Material.Diffuse = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
-        m_Material.Ambient = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
         m_FFP.ResetMaterial();
         return TRUE;
     }
-    m_Material = *Data;
     m_FFP.SetMaterial(Data);
     return TRUE;
 }
@@ -543,8 +532,7 @@ CKBOOL CKTranslatedContext::SetViewport(const CKViewportData *Data)
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    m_Viewport = *Data;
-    m_FFP.SetViewport(m_Viewport);
+    m_FFP.SetViewport(*Data);
     return TRUE;
 }
 
@@ -554,7 +542,6 @@ CKBOOL CKTranslatedContext::SetUserClipPlane(CKDWORD Index, const VxPlane &Plane
         Diag(CKRST_DIAG_INVALID_CLIP_PLANE_INDEX);
         return FALSE;
     }
-    m_ClipPlanes[Index] = Plane;
     m_FFP.SetUserClipPlane((int)Index, Plane);
     return TRUE;
 }
@@ -565,41 +552,13 @@ CKBOOL CKTranslatedContext::GetUserClipPlane(CKDWORD Index, VxPlane &Plane)
         Diag(CKRST_DIAG_INVALID_CLIP_PLANE_INDEX);
         return FALSE;
     }
-    Plane = m_ClipPlanes[Index];
+    Plane = m_FFP.GetUserClipPlane((int)Index);
     return TRUE;
-}
-
-void CKTranslatedContext::ResetStateMirror()
-{
-    // Contract-visible defaults (spec 4.6). Create() only resets the mirror:
-    // the fixed-function pipeline keeps its own richer defaults (they are the
-    // ones the engine renders with), and the engine sets everything it
-    // depends on every frame anyway.
-    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
-        m_RenderStates[state] = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
 }
 
 void CKTranslatedContext::InitDefaultRenderStatesValue()
 {
-    ResetStateMirror();
-    // Render states with a non-zero v1 default reach the pipeline; the ones
-    // the v1 table leaves at 0 keep the pipeline's own draw-valid defaults.
-    for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state) {
-        const CKDWORD value = m_RenderStates[state];
-        if (value == 0 && state != (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
-            continue;
-        if (state == (CKDWORD)VXRENDERSTATE_COLORWRITEENABLE)
-            m_FFP.SetColorWriteMask(value & CKRST_COLORWRITE_ALL);
-        else
-            m_FFP.SetRenderState((VXRENDERSTATETYPE)state, value);
-    }
-    // Texture stages go back to the pipeline's own stage defaults. Pushing the
-    // D3D8 defaults one state at a time would mark states such as COLORARG0 or
-    // STAGEBLEND as explicitly set and make the pipeline reject draws.
-    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
-        m_FFP.ResetTextureStage(stage);
-        m_FFP.SetTexture(stage, 0, 0);
-    }
+    m_FFP.InitDefaultStates();
 }
 
 // ===========================================================================

@@ -47,6 +47,7 @@ const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason);
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code);
 
 class CKFixedFunctionPipeline {
+    friend class CKFFStateGuard;
 public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
@@ -60,6 +61,8 @@ public:
     // === State tracking ===
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
+    CKDWORD QueryRenderState(VXRENDERSTATETYPE state) const { return m_State.DrawState.QueryRenderState(state); }
+    void InitDefaultStates();
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
     CKDWORD GetColorWriteMask() const;
     void SetColorWriteMask(CKDWORD mask);
@@ -84,13 +87,18 @@ public:
     void SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix);
     CKBOOL GetTransform(VXMATRIX_TYPE type, VxMatrix &matrix) const;
     void ResetMaterial();
+    void ApplyMaterial(const CKMaterialRenderState &state);
     void SetMaterial(const CKMaterialData *mat);
+    const CKMaterialData &GetMaterial() const { return m_State.Material; }
+    const CKLightData &GetLight(int index) const { return m_State.Lights[index]; }
+    CKBOOL IsLightEnabled(int index) const { return m_State.LightEnabled[index]; }
     void SetLight(int index, const CKLightData *light);
     void EnableLight(int index, CKBOOL enable);
     void SetTexture(int stage, CKDWORD textureHandle);
     void SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags);
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
+    const CKViewportData &GetViewport() const { return m_State.ViewportData; }
     // Extents of the current target (spec 4.4): the logical size the engine's
     // viewport and PositionT coordinates refer to (window pixels or texture
     // size) and the physical size of the texture actually rendered into
@@ -106,9 +114,10 @@ public:
     CKBOOL RenderTargetOriginFlip() const;
     void UpdateViewportMapping();
     // The frame renders into a multisampled scene target (spec 4.4).
-    void SetMultisampledTarget(CKBOOL multisampled) { m_DrawStateCache.SetMultisampledTarget(multisampled); }
-    CKBOOL IsMultisampledTarget() const { return m_DrawStateCache.GetMultisampledTarget(); }
+    void SetMultisampledTarget(CKBOOL multisampled) { m_State.DrawState.SetMultisampledTarget(multisampled); }
+    CKBOOL IsMultisampledTarget() const { return m_State.DrawState.GetMultisampledTarget(); }
     void SetUserClipPlane(int index, const VxPlane &plane);
+    const VxPlane &GetUserClipPlane(int index) const { return m_State.UserClipPlanes[index]; }
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
     CKBOOL SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
@@ -182,7 +191,6 @@ private:
     CKRasterizerBackend *m_Backend;
     // Subsystems
     CKFFShaderCache m_ShaderCache;
-    CKDrawStateCache m_DrawStateCache;
     CKVertexLayoutCache m_VertexLayoutCache;
     CKTransientGeometry m_TransientGeometry;
     CKDWORD m_FrameNumber;
@@ -257,12 +265,7 @@ public:
 
 private:
     CKFixedFunctionPipeline *m_Pipeline;
-    CKDWORD m_RenderStates[CKFF_RS_COUNT];
-    CKDWORD m_ColorWriteMask;
-    VxMatrix m_World;
-    VxMatrix m_View;
-    VxMatrix m_Projection;
-    CKFFTextureStageSnapshot m_TextureStages[CKFF_MAX_TEXTURE_STAGES];
+    CKFFStateStore m_Snapshot;
 };
 
 class CKFFRenderStateGuard {

@@ -1,4 +1,5 @@
 #include "CKDrawStateCache.h"
+#include "CKRasterizer.h"
 #include <string.h>
 
 static CKDWORD FloatState(float value) {
@@ -36,7 +37,7 @@ static void FixupBlendPair(CKDWORD &src, CKDWORD &dst) {
 }
 
 CKDrawStateCache::CKDrawStateCache()
-    : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST), m_ColorWriteMask(CKRST_STATE_WRITE_RGBA),
+    : m_DirtyMask(0xFFFFFFFF), m_LastTopology(VX_TRIANGLELIST),
       m_BuildCacheHits(0), m_BuildRebuilds(0) {
     m_WindingFlip = FALSE;
     m_MultisampledTarget = FALSE;
@@ -92,7 +93,8 @@ void CKDrawStateCache::SetDefaults() {
     m_States[VXRENDERSTATE_STENCILREF] = 0;
     m_States[VXRENDERSTATE_STENCILMASK] = 0xFF;
     m_States[VXRENDERSTATE_STENCILWRITEMASK] = 0xFF;
-    m_ColorWriteMask = CKRST_STATE_WRITE_RGBA;
+    m_States[VXRENDERSTATE_COLORWRITEENABLE] = CKRST_STATE_WRITE_RGBA;
+    ResetQueryDefaults();
     m_DirtyMask = 0xFFFFFFFF;
 }
 
@@ -125,12 +127,16 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
     if ((CKDWORD)state >= CKFF_RS_COUNT)
         return;
 
+    m_QueryMasks[(CKDWORD)state / 64] |= 1ull << ((CKDWORD)state % 64);
     if (m_States[state] == value)
         return;
 
     m_States[state] = value;
 
     switch (state) {
+    case VXRENDERSTATE_COLORWRITEENABLE:
+        m_DirtyMask |= CKFF_DIRTY_COLORMASK;
+        break;
     case VXRENDERSTATE_ALPHABLENDENABLE:
     case VXRENDERSTATE_SRCBLEND:
     case VXRENDERSTATE_DESTBLEND:
@@ -169,6 +175,17 @@ CKDWORD CKDrawStateCache::GetRenderState(VXRENDERSTATETYPE state) const {
     return m_States[state];
 }
 
+void CKDrawStateCache::ResetQueryDefaults() {
+    memset(m_QueryMasks, 0, sizeof(m_QueryMasks));
+}
+
+CKDWORD CKDrawStateCache::QueryRenderState(VXRENDERSTATETYPE state) const {
+    if ((CKDWORD)state >= CKFF_RS_COUNT)
+        return 0;
+    return (m_QueryMasks[(CKDWORD)state / 64] & (1ull << ((CKDWORD)state % 64))) != 0
+        ? m_States[state] : CKRSTDefaultRenderStateValue(state);
+}
+
 void CKDrawStateCache::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
     CKDWORD mask = 0;
     if (r) mask |= CKRST_STATE_WRITE_R;
@@ -179,14 +196,11 @@ void CKDrawStateCache::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a)
 }
 
 void CKDrawStateCache::SetColorWriteMask(CKDWORD mask) {
-    if (m_ColorWriteMask == mask)
-        return;
-    m_ColorWriteMask = mask;
-    m_DirtyMask |= CKFF_DIRTY_COLORMASK;
+    SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, mask);
 }
 
 CKDWORD CKDrawStateCache::GetColorWriteMask() const {
-    return m_ColorWriteMask;
+    return m_States[VXRENDERSTATE_COLORWRITEENABLE] & CKRST_STATE_WRITE_RGBA;
 }
 
 CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
@@ -198,7 +212,7 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
 
     m_LastTopology = topology;
 
-    uint32_t lo = m_ColorWriteMask;
+    uint32_t lo = GetColorWriteMask();
     uint32_t mid = 0;
     uint32_t hi = 0;
 

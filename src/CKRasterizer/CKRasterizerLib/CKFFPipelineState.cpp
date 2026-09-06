@@ -95,9 +95,10 @@ void CKFixedFunctionPipeline::ResetTexcoordComponentCounts() {
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
-    if (m_DrawStateCache.GetRenderState(state) == value)
+    const CKDWORD previous = m_State.DrawState.GetRenderState(state);
+    m_State.DrawState.SetRenderState(state, value);
+    if (previous == value)
         return;
-    m_DrawStateCache.SetRenderState(state, value);
 
     CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM;
     if (CKFFRenderStateAffectsProgram(state))
@@ -106,19 +107,30 @@ void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD va
 }
 
 CKDWORD CKFixedFunctionPipeline::GetRenderState(VXRENDERSTATETYPE state) const {
-    return m_DrawStateCache.GetRenderState(state);
+    return m_State.DrawState.GetRenderState(state);
+}
+
+void CKFixedFunctionPipeline::InitDefaultStates() {
+    m_State.DrawState.ResetQueryDefaults();
+    for (CKDWORD state = 0; state < VXRENDERSTATE_MAXSTATE; ++state) {
+        const CKDWORD value = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
+        if (value || state == VXRENDERSTATE_COLORWRITEENABLE)
+            SetRenderState((VXRENDERSTATETYPE)state, value);
+    }
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        ResetTextureStage(stage);
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
-    m_DrawStateCache.SetColorWriteMask(r, g, b, a);
+    m_State.DrawState.SetColorWriteMask(r, g, b, a);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetColorWriteMask() const {
-    return m_DrawStateCache.GetColorWriteMask();
+    return m_State.DrawState.GetColorWriteMask();
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKDWORD mask) {
-    m_DrawStateCache.SetColorWriteMask(mask);
+    m_State.DrawState.SetColorWriteMask(mask);
 }
 
 static uint64_t TextureCombineStateMask() {
@@ -332,7 +344,7 @@ void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
     if (m_State.RenderTargetActive == active)
         return;
     m_State.RenderTargetActive = active;
-    m_DrawStateCache.SetWindingFlip(RenderTargetOriginFlip());
+    m_State.DrawState.SetWindingFlip(RenderTargetOriginFlip());
     UpdateViewportMapping();
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
@@ -475,45 +487,68 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
     }
 }
 
+void CKFixedFunctionPipeline::ApplyMaterial(const CKMaterialRenderState &state) {
+    SetMaterial(&state.Material);
+    SetRenderState(VXRENDERSTATE_CULLMODE, state.CullMode);
+    SetRenderState(VXRENDERSTATE_FILLMODE, state.FillMode);
+    SetRenderState(VXRENDERSTATE_SHADEMODE, state.ShadeMode);
+    SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, state.AlphaBlend ? TRUE : FALSE);
+    if (state.AlphaBlend) {
+        SetRenderState(VXRENDERSTATE_SRCBLEND, state.SourceBlend);
+        SetRenderState(VXRENDERSTATE_DESTBLEND, state.DestBlend);
+    }
+    SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+    SetRenderState(VXRENDERSTATE_ZWRITEENABLE, state.ZWrite ? TRUE : FALSE);
+    SetRenderState(VXRENDERSTATE_ZFUNC, state.ZFunc);
+}
+
 void CKFixedFunctionPipeline::ResetMaterial() {
-    memset(&m_State.Material, 0, sizeof(m_State.Material));
-    m_State.Material.Diffuse[0] = 1.0f;
-    m_State.Material.Diffuse[1] = 1.0f;
-    m_State.Material.Diffuse[2] = 1.0f;
-    m_State.Material.Diffuse[3] = 1.0f;
-    m_State.Material.Ambient[0] = 1.0f;
-    m_State.Material.Ambient[1] = 1.0f;
-    m_State.Material.Ambient[2] = 1.0f;
-    m_State.Material.Ambient[3] = 1.0f;
+    m_State.Material = CKMaterialData();
+    m_State.Material.Diffuse = m_State.Material.Ambient = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+    memset(&m_State.MaterialConstants, 0, sizeof(m_State.MaterialConstants));
+    m_State.MaterialConstants.Diffuse[0] = 1.0f;
+    m_State.MaterialConstants.Diffuse[1] = 1.0f;
+    m_State.MaterialConstants.Diffuse[2] = 1.0f;
+    m_State.MaterialConstants.Diffuse[3] = 1.0f;
+    m_State.MaterialConstants.Ambient[0] = 1.0f;
+    m_State.MaterialConstants.Ambient[1] = 1.0f;
+    m_State.MaterialConstants.Ambient[2] = 1.0f;
+    m_State.MaterialConstants.Ambient[3] = 1.0f;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
     if (!mat) return;
-    m_State.Material.Diffuse[0] = mat->Diffuse.r;
-    m_State.Material.Diffuse[1] = mat->Diffuse.g;
-    m_State.Material.Diffuse[2] = mat->Diffuse.b;
-    m_State.Material.Diffuse[3] = mat->Diffuse.a;
-    m_State.Material.Ambient[0] = mat->Ambient.r;
-    m_State.Material.Ambient[1] = mat->Ambient.g;
-    m_State.Material.Ambient[2] = mat->Ambient.b;
-    m_State.Material.Ambient[3] = mat->Ambient.a;
-    m_State.Material.Specular[0] = mat->Specular.r;
-    m_State.Material.Specular[1] = mat->Specular.g;
-    m_State.Material.Specular[2] = mat->Specular.b;
-    m_State.Material.Specular[3] = mat->Specular.a;
-    m_State.Material.Emissive[0] = mat->Emissive.r;
-    m_State.Material.Emissive[1] = mat->Emissive.g;
-    m_State.Material.Emissive[2] = mat->Emissive.b;
-    m_State.Material.Emissive[3] = mat->Emissive.a;
-    m_State.Material.Power = mat->SpecularPower;
+    if (memcmp(&m_State.Material, mat, sizeof(*mat)) == 0)
+        return;
+    m_State.Material = *mat;
+    m_State.MaterialConstants.Diffuse[0] = mat->Diffuse.r;
+    m_State.MaterialConstants.Diffuse[1] = mat->Diffuse.g;
+    m_State.MaterialConstants.Diffuse[2] = mat->Diffuse.b;
+    m_State.MaterialConstants.Diffuse[3] = mat->Diffuse.a;
+    m_State.MaterialConstants.Ambient[0] = mat->Ambient.r;
+    m_State.MaterialConstants.Ambient[1] = mat->Ambient.g;
+    m_State.MaterialConstants.Ambient[2] = mat->Ambient.b;
+    m_State.MaterialConstants.Ambient[3] = mat->Ambient.a;
+    m_State.MaterialConstants.Specular[0] = mat->Specular.r;
+    m_State.MaterialConstants.Specular[1] = mat->Specular.g;
+    m_State.MaterialConstants.Specular[2] = mat->Specular.b;
+    m_State.MaterialConstants.Specular[3] = mat->Specular.a;
+    m_State.MaterialConstants.Emissive[0] = mat->Emissive.r;
+    m_State.MaterialConstants.Emissive[1] = mat->Emissive.g;
+    m_State.MaterialConstants.Emissive[2] = mat->Emissive.b;
+    m_State.MaterialConstants.Emissive[3] = mat->Emissive.a;
+    m_State.MaterialConstants.Power = mat->SpecularPower;
     OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
     if (index < 0 || index >= CKFF_MAX_LIGHTS || !light) return;
+    if (memcmp(&m_State.Lights[index], light, sizeof(*light)) == 0)
+        return;
+    m_State.Lights[index] = *light;
 
-    CKFFLightData &dst = m_State.Lights[index];
+    CKFFLightData &dst = m_State.LightConstants[index];
 
     // Store in world space; will be transformed to view space at upload time
     dst.Position[0] = light->Position.x;
@@ -556,6 +591,7 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
 
 void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
     if (index < 0 || index >= CKFF_MAX_LIGHTS) return;
+    enable = enable ? TRUE : FALSE;
     if (m_State.LightEnabled[index] == enable)
         return;
     m_State.LightEnabled[index] = enable;

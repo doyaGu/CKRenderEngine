@@ -20,6 +20,8 @@ public:
 
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
+    CKDWORD QueryRenderState(VXRENDERSTATETYPE state) const;
+    void ResetQueryDefaults();
 
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
     void SetColorWriteMask(CKDWORD mask);
@@ -45,10 +47,10 @@ public:
 
 private:
     CKDWORD m_States[CKFF_RS_COUNT];
+    uint64_t m_QueryMasks[(CKFF_RS_COUNT + 63) / 64]{};
     CKDWORD m_DirtyMask;
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;
-    CKDWORD m_ColorWriteMask;
     CKBOOL m_WindingFlip;
     CKBOOL m_MultisampledTarget;
     CKDWORD m_BuildCacheHits;

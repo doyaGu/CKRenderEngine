@@ -282,6 +282,33 @@ void TestTextureStageQueriesFollowSavedState()
               "restore preserves explicit/unset distinction and public query together");
 }
 
+void TestAuthoritativeStateSnapshot()
+{
+    Fixture f;
+    CKDWORD initial = 0, value = 0;
+    f.Context->GetRenderState(VXRENDERSTATE_LIGHTING, &initial);
+    const CKDWORD effective = f.FFP->GetRenderState(VXRENDERSTATE_LIGHTING);
+    const CKViewportData viewport = f.FFP->GetViewport();
+    CKFFStateGuard guard(*f.FFP);
+    f.Context->SetRenderState(VXRENDERSTATE_LIGHTING, effective);
+    f.Context->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0xFFFF0001u);
+    CKViewportData temporary; temporary.ViewWidth = 3; temporary.ViewHeight = 5;
+    f.Context->SetViewport(&temporary);
+    CKMaterialData material = {}; material.SpecularPower = 19.0f;
+    f.Context->SetMaterial(&material);
+    guard.Restore();
+    f.Context->GetRenderState(VXRENDERSTATE_LIGHTING, &value);
+    TestCheck(value == initial && f.FFP->GetRenderState(VXRENDERSTATE_LIGHTING) == effective,
+              "internal drawing restores query presence and effective defaults together");
+    TestCheck(f.Context->GetViewportForTests().ViewWidth == viewport.ViewWidth &&
+                  f.Context->GetMaterialForTests().SpecularPower == 0.0f,
+              "viewport and material queries share the restored FFP state");
+    f.Context->SetRenderState(VXRENDERSTATE_COLORWRITEENABLE, 0xFFFF0001u);
+    f.Context->GetRenderState(VXRENDERSTATE_COLORWRITEENABLE, &value);
+    TestCheck(value == 0xFFFF0001u && f.FFP->GetColorWriteMask() == CKRST_COLORWRITE_RED,
+              "raw color write state is queryable while native state uses channel bits");
+}
+
 void TestMatricesLightsClipPlanes()
 {
     Fixture f;
@@ -661,6 +688,7 @@ int main()
     framework.Run("repeated compound texture states", TestRepeatedCompoundTextureStates);
     framework.Run("semantic texture stage reset", TestSemanticTextureStageReset);
     framework.Run("texture stage query snapshots", TestTextureStageQueriesFollowSavedState);
+    framework.Run("authoritative state snapshot", TestAuthoritativeStateSnapshot);
     framework.Run("matrices, lights, clip planes", TestMatricesLightsClipPlanes);
     framework.Run("textures", TestTextures);
     framework.Run("buffers", TestBuffers);

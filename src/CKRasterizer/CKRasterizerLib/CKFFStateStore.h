@@ -6,8 +6,10 @@
 #include "CKRasterizerTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
+#include "CKDrawStateCache.h"
 
 struct CKFFStateStore {
+    CKDrawStateCache DrawState;
     VxMatrix World;
     VxMatrix View;
     VxMatrix Projection;
@@ -20,8 +22,11 @@ struct CKFFStateStore {
     // D3D layout (spec 5.9, RTT origin) and sampling needs no flip.
     CKBOOL RenderTargetActive;
 
-    CKFFMaterialData Material;
-    CKFFLightData Lights[CKFF_MAX_LIGHTS];
+    CKMaterialData Material;
+    CKLightData Lights[CKFF_MAX_LIGHTS];
+    // Derived shader data, rebuilt only when the corresponding source changes.
+    CKFFMaterialData MaterialConstants;
+    CKFFLightData LightConstants[CKFF_MAX_LIGHTS];
     CKBOOL LightEnabled[CKFF_MAX_LIGHTS];
     int ActiveLightCount;
 

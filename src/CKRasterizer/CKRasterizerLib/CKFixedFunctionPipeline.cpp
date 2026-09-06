@@ -17,7 +17,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     : m_Backend(nullptr),
       m_FrameNumber(0),
       m_TextureBinder(m_State, m_ShaderCache, m_Probes),
-      m_UniformEmitter(m_State, m_DrawStateCache, m_ShaderCache, m_Probes),
+      m_UniformEmitter(m_State, m_State.DrawState, m_ShaderCache, m_Probes),
       m_VertexBufferProgramCacheValid(FALSE),
       m_VertexBufferProgramCacheDPFlags(0),
       m_VertexBufferProgramCacheFormatFlags(0),
@@ -70,7 +70,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend, const CKBackend
         Shutdown();
         return false;
     }
-    m_DrawStateCache.Reset();
+    m_State.DrawState.Reset();
     m_VertexLayoutCache.Init(backend);
     m_TextureBinder.ResetProgramBindings();
     m_TransientGeometry.Init(backend, &m_VertexLayoutCache);
@@ -296,7 +296,7 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
                                                     CKDWORD *effectiveWriteMask) const
 {
     const CKDWORD writeMask =
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
     *forceKeepOps = FALSE;
     if (m_Backend && (m_Backend->GetCaps().Features & CKRST_DEVCAPS_STENCIL_WRITE_MASK)) {
         *effectiveWriteMask = writeMask;
@@ -304,12 +304,12 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
     }
     // The backend only knows "write nothing" or "write every bit".
     *effectiveWriteMask = writeMask == 0x00u ? 0x00u : 0xffu;
-    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILENABLE))
+    if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILENABLE))
         return FALSE;
     const CKBOOL stencilWrites =
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILFAIL) != VXSTENCILOP_KEEP ||
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILZFAIL) != VXSTENCILOP_KEEP ||
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILPASS) != VXSTENCILOP_KEEP;
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILFAIL) != VXSTENCILOP_KEEP ||
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILZFAIL) != VXSTENCILOP_KEEP ||
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILPASS) != VXSTENCILOP_KEEP;
     if (!stencilWrites || writeMask == 0xffu)
         return FALSE;
     if (writeMask == 0x00u)
@@ -346,26 +346,26 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
-    if (!CKFFValidDrawStateValues(m_DrawStateCache) ||
-        (m_DrawStateCache.GetColorWriteMask() & ~CKRST_STATE_WRITE_RGBA) != 0) {
+    if (!CKFFValidDrawStateValues(m_State.DrawState) ||
+        (m_State.DrawState.GetColorWriteMask() & ~CKRST_STATE_WRITE_RGBA) != 0) {
         return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
     }
 
     // Render states the backends cannot express are ignored or approximated
     // (spec appendix C) and reported once per draw.
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_DITHERENABLE))
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
         RecordDrawApproximation(CKRST_DIAG_APPROX_ZBIAS);
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
         RecordDrawApproximation(CKRST_DIAG_IGNORE_LINEPATTERN);
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
-    if (!m_DrawStateCache.GetRenderState(VXRENDERSTATE_CLIPPING))
+    if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING);
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT)
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT)
         RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
 
     CKBOOL forceKeepStencilOps = FALSE;
@@ -374,8 +374,8 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         RecordDrawApproximation(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK);
 
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
         formatFlags);
     if (!vertexBlend.Supported) {
         switch (vertexBlend.UnsupportedReason) {
@@ -401,7 +401,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
     if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
     const CKBOOL perspectiveTexture =
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0;
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0;
     CKDWORD previousColorOp = 0;
     CKDWORD previousAlphaOp = 0;
     for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
@@ -527,8 +527,8 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     CKDWORD formatFlags)
 {
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
         formatFlags);
     if (!vertexBlend.Supported || !vertexBlend.Indexed ||
         vertexBlend.Mode != CKFF_VERTEX_BLEND_NORMAL) {
@@ -628,7 +628,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
     {
         CKFF_SCOPE_TIME(m_Probes, StateUs);
         CKFFStateResolver::BuildPreparedState(
-            m_State, m_DrawStateCache, &preparation->PreparedState,
+            m_State, m_State.DrawState, &preparation->PreparedState,
             dpFlags, activeTextureCount, formatFlags,
             texcoordComponentCounts, pointSprite);
     }
@@ -691,7 +691,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     const CKDWORD formatFlags =
         CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(data);
     const CKBOOL pointSprites = type == VX_POINTLIST &&
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
     const int debugDrawSerial = debugLogging ? m_DebugState.NextDrawSerial() : -1;
@@ -722,7 +722,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     CKDWORD wrapModes[CKFF_MAX_TEXTURE_STAGES];
     CKBOOL wrapsTexcoords = FALSE;
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        wrapModes[stage] = m_DrawStateCache.GetRenderState(
+        wrapModes[stage] = m_State.DrawState.GetRenderState(
             (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage));
         const void *texcoord = stage == 0
             ? data->TexCoordPtr
@@ -732,13 +732,13 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
             wrapsTexcoords = TRUE;
     }
     CKFFPointSpriteParams pointParams;
-    pointParams.Size = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE, 1.0f);
-    pointParams.MinSize = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
-    pointParams.MaxSize = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
-    pointParams.ScaleEnable = m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE);
-    pointParams.ScaleA = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_A, 1.0f);
-    pointParams.ScaleB = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_B, 0.0f);
-    pointParams.ScaleC = CKFFReadFloatRenderState(m_DrawStateCache, VXRENDERSTATE_POINTSCALE_C, 0.0f);
+    pointParams.Size = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSIZE, 1.0f);
+    pointParams.MinSize = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSIZE_MIN, 1.0f);
+    pointParams.MaxSize = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSIZE_MAX, 64.0f);
+    pointParams.ScaleEnable = m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE);
+    pointParams.ScaleA = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSCALE_A, 1.0f);
+    pointParams.ScaleB = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSCALE_B, 0.0f);
+    pointParams.ScaleC = CKFFReadFloatRenderState(m_State.DrawState, VXRENDERSTATE_POINTSCALE_C, 0.0f);
     pointParams.World = m_State.World;
     pointParams.View = m_State.View;
     pointParams.Projection = m_State.Projection;
@@ -783,7 +783,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
         debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
         debugInfo.ActiveLightCount = m_State.ActiveLightCount;
         debugInfo.StateDesc = &preparedState.StateDesc;
-        debugInfo.DrawState = &m_DrawStateCache;
+        debugInfo.DrawState = &m_State.DrawState;
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
         debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
             m_State.StageStates[0],
@@ -857,14 +857,14 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(formatFlags, activeTextureCount))
         return FALSE;
-    if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
-        m_DrawStateCache.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
+    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
         // Indices inside a backend buffer cannot be validated; the shader clamps
         // them to the palette (spec appendix C).
         RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
     }
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if ((m_DrawStateCache.GetRenderState(
+        if ((m_State.DrawState.GetRenderState(
                  (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0) {
             // Texture wrap only applies to CPU-interleaved primitives.
             RecordDrawApproximation(CKRST_DIAG_IGNORE_WRAP);
@@ -874,9 +874,9 @@ CKBOOL CKFixedFunctionPipeline::DrawVertexBuffer(
     if (type == VX_POINTLIST) {
         // Device-buffer points render as plain points of the clamped constant
         // size; sprites, scaling and per-vertex sizes are not applied.
-        const float pointSize = CKFFResolveConstantPointSize(m_DrawStateCache);
-        if (m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
-            m_DrawStateCache.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
+        const float pointSize = CKFFResolveConstantPointSize(m_State.DrawState);
+        if (m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
             (dpFlags & CKRST_DP_PSIZE) != 0 ||
             CKFFClampVertexBufferPointSize(pointSize) != pointSize) {
             RecordDrawApproximation(CKRST_DIAG_APPROX_POINT_SIZE);
@@ -921,13 +921,13 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     CKBackendPipelineState pipeline;
     {
         CKFF_SCOPE_TIME(m_Probes, DrawStateBuildUs);
-        pipeline.State = m_DrawStateCache.BuildDrawState(submission.DrawStateType);
+        pipeline.State = m_State.DrawState.BuildDrawState(submission.DrawStateType);
     }
     CKFF_PROBE(m_Probes, OnDrawState(pipeline.State));
     // Stencil reference and masks are DWORD render states of which the 8-bit
     // stencil buffer uses the low byte (D3D7 semantics).
-    pipeline.StencilRef = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILREF) & 0xffu;
-    pipeline.StencilReadMask = m_DrawStateCache.GetRenderState(VXRENDERSTATE_STENCILMASK) & 0xffu;
+    pipeline.StencilRef = m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILREF) & 0xffu;
+    pipeline.StencilReadMask = m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILMASK) & 0xffu;
     CKBOOL forceKeepStencilOps = FALSE;
     CKDWORD stencilWriteMask = 0xffu;
     ResolveStencilWrite(&forceKeepStencilOps, &stencilWriteMask);
@@ -941,7 +941,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     pipeline.ScissorEnabled = m_State.ScissorEnabled;
     pipeline.Scissor = m_State.Scissor;
     pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
-        ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_DrawStateCache))
+        ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_State.DrawState))
         : 1.0f;
     {
         CKFF_SCOPE_TIME(m_Probes, PipelineStateUs);
@@ -1068,7 +1068,7 @@ CKBOOL CKFixedFunctionPipeline::SubmitVertexBufferImmediate(
         debugInfo.ActiveTextureCount = (int)preparedState.ActiveTextureCount;
         debugInfo.ActiveLightCount = m_State.ActiveLightCount;
         debugInfo.StateDesc = &preparedState.StateDesc;
-        debugInfo.DrawState = &m_DrawStateCache;
+        debugInfo.DrawState = &m_State.DrawState;
         debugInfo.Stage0.ColorOp = preparedState.StateDesc.FS.GetStageColorOp(0);
         debugInfo.Stage0.ColorArg1 = CKFFResolveStageColorArg1(
             m_State.StageStates[0],
@@ -1116,7 +1116,7 @@ void CKFixedFunctionPipeline::BindTextures(CKDWORD program, const CKFFTextureBin
 }
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
-    CKFF_PROBE(m_Probes, LogAndReset(m_DrawStateCache));
+    CKFF_PROBE(m_Probes, LogAndReset(m_State.DrawState));
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
@@ -1124,5 +1124,5 @@ CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
-    return CKFFComputeDepthKey(m_State, m_DrawStateCache);
+    return CKFFComputeDepthKey(m_State, m_State.DrawState);
 }

@@ -213,11 +213,11 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
         return 0;
     const CKFFShaderKey &shaderKey = context->ShaderKey;
     memset(drawParams, 0, sizeof(float) * CKFF_DRAW_PARAM_VEC4_COUNT * 4);
-    memcpy(drawParams[0], state.Material.Diffuse, sizeof(drawParams[0]));
-    memcpy(drawParams[1], state.Material.Ambient, sizeof(drawParams[1]));
-    memcpy(drawParams[2], state.Material.Specular, sizeof(drawParams[2]));
-    memcpy(drawParams[3], state.Material.Emissive, sizeof(drawParams[3]));
-    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.Material.Power;
+    memcpy(drawParams[0], state.MaterialConstants.Diffuse, sizeof(drawParams[0]));
+    memcpy(drawParams[1], state.MaterialConstants.Ambient, sizeof(drawParams[1]));
+    memcpy(drawParams[2], state.MaterialConstants.Specular, sizeof(drawParams[2]));
+    memcpy(drawParams[3], state.MaterialConstants.Emissive, sizeof(drawParams[3]));
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.MaterialConstants.Power;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][1] =
         (float)drawState.GetRenderState(VXRENDERSTATE_ZBIAS) * CKFF_ZBIAS_DEPTH_UNIT;
     float materialSource[4];
