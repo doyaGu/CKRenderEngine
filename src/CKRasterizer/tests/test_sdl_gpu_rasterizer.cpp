@@ -1,12 +1,53 @@
 #include "CKSdlGpuInternal.h"
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuTextureData.h"
+#include "CKFFShaderInterface.h"
 #include <cstdio>
 
 int main()
 {
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
+    {
+        const auto program = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_DXIL);
+        CKBackendProgramLayout layout;
+        layout.Init(program);
+        CKBackendConstants constants;
+        layout.Update(constants);
+        CKSdlGpuUniformBatch batch;
+        CKSdlGpuUniformCursor cursor;
+        CKSdlGpuUniformBindings native;
+        std::array<unsigned, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> first = {}, moved = {}, fragment = {};
+        batch.Snapshot(layout, cursor, first);
+        check(batch.Data.size() == 4304 && native.NeedsPush(layout.Buffers[0], first[0], batch.Data) &&
+              native.NeedsPush(layout.Buffers[1], first[1], batch.Data), "first FFP draw binds both compact stage buffers");
+        float matrix[16] = {}; matrix[12] = 2.0f;
+        constants.Set(CKRST_BLOCK_MATRICES, matrix, sizeof(matrix));
+        layout.Update(constants);
+        batch.Snapshot(layout, cursor, moved);
+        check(moved[0] != first[0] && moved[1] == first[1] && batch.Data.size() == 4304 + 2880 &&
+              native.NeedsPush(layout.Buffers[0], moved[0], batch.Data) &&
+              !native.NeedsPush(layout.Buffers[1], moved[1], batch.Data),
+              "matrix-only changes snapshot/push 2880 vertex bytes and zero fragment bytes");
+        const float bump[4] = {0.5f, 1, 0, 0};
+        constants.Set(CKRST_BLOCK_BUMP_ENV, bump, sizeof(bump));
+        layout.Update(constants);
+        batch.Snapshot(layout, cursor, fragment);
+        check(fragment[0] == moved[0] && fragment[1] != moved[1] &&
+              !native.NeedsPush(layout.Buffers[0], fragment[0], batch.Data) &&
+              native.NeedsPush(layout.Buffers[1], fragment[1], batch.Data),
+              "fragment-only changes preserve the vertex buffer version and binding");
+        auto shared = std::find_if(program.Uniforms.begin(), program.Uniforms.end(), [](const auto &uniform) {
+            return uniform.Slot == CKRST_BLOCK_DRAW_PARAMS && uniform.Stage == CKRST_SHADER_PIXEL;
+        });
+        const float factor[4] = {0.1f, 0.2f, 0.3f, 1};
+        constants.Set(CKRST_BLOCK_DRAW_PARAMS, factor, sizeof(factor));
+        layout.Update(constants);
+        check(shared != program.Uniforms.end() &&
+              std::memcmp(layout.Data.data() + layout.BufferOffset(CKRST_SHADER_PIXEL, 0) + shared->Offset,
+                          factor, sizeof(factor)) == 0,
+              "logical data used by both stages is copied into each stage's declared range");
+    }
     {
         CKBackendProgramLayout layout;
         layout.Buffers = {{CKRST_SHADER_VERTEX, 0, 0, 16}, {CKRST_SHADER_PIXEL, 0, 16, 32},
@@ -149,6 +190,9 @@ int main()
         auto mismatched = set;
         mismatched.InterfaceHash ^= 1;
         check(!mismatched.Matches(payload, profile), "ABI mismatch excludes family");
+        mismatched = set;
+        mismatched.InterfaceHash = CKFF_SHADER_INTERFACE_HASH;
+        check(!mismatched.Matches(payload, profile), "old shared native layout hash is rejected");
         check(set.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount == 16, "FFP logical slots retained");
         check(set.Shaders[CKRST_SHADER_PRESENT_FRAGMENT].SamplerCount == 1, "presentation uses native slot zero");
         CKShaderDesc vertex, fragment;

@@ -29,7 +29,7 @@ struct CKBackendShaderSet {
 
     bool Matches(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile) const {
         if (format == CKRST_SHADER_FORMAT_UNKNOWN || profile == CKRST_SHADER_PROFILE_UNKNOWN ||
-            ABIVersion != CKFF_SHADER_ABI_VERSION || InterfaceHash != CKFF_SHADER_INTERFACE_HASH)
+            ABIVersion != CKFF_SHADER_ABI_VERSION || InterfaceHash != CKFFShaderInterfaceHash(format))
             return false;
         for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i) {
             const CKShaderDesc &shader = Shaders[i];

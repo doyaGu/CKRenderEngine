@@ -55,7 +55,7 @@ VARYINGS = ["v_color0", "v_color1", "v_flatColor0", "v_flatColor1"] + [
 
 def source_body(path: Path) -> str:
     result = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith("$") or re.match(r"^uniform\s", line):
             continue
         include = re.fullmatch(r'#include "([^"]+)"', line)
@@ -67,16 +67,32 @@ def source_body(path: Path) -> str:
     return "\n".join(result).replace("void main()", "void ckffEvaluate()")
 
 
-def uniform_declaration(vertex: bool) -> str:
-    result = [f"cbuffer CKUniforms : register(b0, space{1 if vertex else 3}) {{"]
-    row = 0
-    for kind, name, count in BLOCKS:
-        array = f"[{count}]" if count != 1 else ""
-        result.append(f"    {kind} {name}{array} : packoffset(c{row});")
-        row += count * (4 if kind == "float4x4" else 1)
-    result += [f"    float4 ck_borderColor[16] : packoffset(c{row});",
-               f"    float4 ck_samplerInfo[16] : packoffset(c{row + 16});", "};"]
-    return "\n".join(result)
+def native_layout_schema():
+    enum = (SHARED.parent / "CKFFShaderInterface.h").read_text(encoding="utf-8").split("enum CKFFConstantBlock {")[1].split("};")[0]
+    names = re.findall(r"CKRST_BLOCK_(\w+)", enum)
+    assert names.pop() == "COUNT" and len(names) == len(BLOCKS)
+    blocks = dict(zip(names, BLOCKS))
+    groups = {name: [] for name in ("VERTEX", "FRAGMENT", "PRESENT")}
+    metadata_groups = set()
+    canonical = ""
+    for line in (SHARED.parent / "CKFFNativeLayout.def").read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("//"):
+            continue
+        match = re.fullmatch(r"CKFF_NATIVE_(BLOCK|METADATA)\((\w+), (\w+)\)", line)
+        assert match, f"Invalid native layout row: {line}"
+        kind, group, value = match.groups()
+        assert group in groups
+        canonical += f"{kind.lower()}:{group}:{value};"
+        if kind == "BLOCK":
+            assert group not in metadata_groups, "Metadata must follow a stage's logical blocks"
+            assert blocks[value] not in groups[group], "Duplicate native block"
+            groups[group].append(blocks[value])
+        else:
+            count = int(value)
+            assert group not in metadata_groups and 0 < count <= 16
+            metadata_groups.add(group)
+            groups[group] += [("float4", "ck_borderColor", count), ("float4", "ck_samplerInfo", count)]
+    return groups, canonical
 
 
 def uniform_layout(source: str):
@@ -84,30 +100,44 @@ def uniform_layout(source: str):
         return "CKNativeClear", [("float4", "ckClear", 1)], 16
     if source == "fs_volume_mip":
         return "CKNativeVolume", [("float4", "ckVolumeParams", 2)], 32
-    return "CKUniforms", BLOCKS + [("float4", "ck_borderColor", 16), ("float4", "ck_samplerInfo", 16)], 3744
+    if source == "vs_postprocess":
+        return "CKPresent", [], 0
+    group = "PRESENT" if source == "fs_postprocess" else "VERTEX" if source.startswith("vs_") else "FRAGMENT"
+    members = native_layout_schema()[0][group]
+    size = sum(count * (64 if kind == "float4x4" else 16) for kind, _, count in members)
+    return {"VERTEX": "CKVertex", "FRAGMENT": "CKFragment", "PRESENT": "CKPresent"}[group], members, size
 
 
-def private_uniform_declaration(source: str) -> str:
-    name, blocks, _ = uniform_layout(source)
-    result = [f"cbuffer {name} : register(b0, space{1 if source.startswith('vs_') else 3}) {{"]
+def shader_resources(source: str):
+    vertex = source.startswith("vs_")
+    samplers = 0 if vertex or source == "fs_clear" else (1 if source in ("fs_postprocess", "fs_volume_mip") else 16)
+    return int(uniform_layout(source)[2] != 0), samplers
+
+
+def uniform_declaration(source: str) -> str:
+    name, blocks, size = uniform_layout(source)
+    if not size:
+        return ""
+    vertex = source.startswith("vs_")
+    result = [f"cbuffer {name} : register(b0, space{1 if vertex else 3}) {{"]
     row = 0
     for kind, member, count in blocks:
-        array = f"[{count}]" if count != 1 else ""
+        array = f"[{count}]" if count != 1 or member in ("ck_borderColor", "ck_samplerInfo") else ""
         result.append(f"    {kind} {member}{array} : packoffset(c{row});")
-        row += count
+        row += count * (4 if kind == "float4x4" else 1)
     return "\n".join(result + ["};"])
 
 
 def make_source(source: str, clipping: bool) -> str:
     vertex = source.startswith("vs_")
     if source == "fs_volume_mip":
-        return "\n".join([private_uniform_declaration(source), HERE.joinpath("volume_mip.hlsl").read_text()])
+        return "\n".join([uniform_declaration(source), HERE.joinpath("volume_mip.hlsl").read_text(encoding="utf-8")])
     if source.endswith("_clear"):
         body = ("float4 main(uint vertex : SV_VertexID) : SV_Position { "
                 "float2 p = vertex == 0 ? float2(-1,-1) : (vertex == 1 ? float2(3,-1) : float2(-1,3)); "
                 "return float4(p, ckClear.x, 1); }" if vertex else
                 "float4 main() : SV_Target0 { return ckClear; }")
-        return private_uniform_declaration(source) + "\n" + body
+        return uniform_declaration(source) + "\n" + body
     present = source.endswith("postprocess")
     varying = ["v_texcoord0"] if present else VARYINGS
     declarations = ["struct CKVaryings {", "    float4 position : SV_Position;"]
@@ -137,9 +167,9 @@ def make_source(source: str, clipping: bool) -> str:
         entry += [f"    {name} = input.{name};" for name in varying]
         entry += ["    ckffEvaluate();", "    return gl_FragColor;", "}"]
     return "\n".join([f"#define CKFF_VS_CLIP_DISTANCE {int(clipping)}",
-                       HERE.joinpath("native_compat.hlsli").read_text(),
-                       uniform_declaration(vertex),
-                       "" if vertex else HERE.joinpath("native_sampling.hlsli").read_text(), *declarations,
+                       HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8"),
+                       uniform_declaration(source),
+                       "" if vertex else HERE.joinpath("native_sampling.hlsli").read_text(encoding="utf-8"), *declarations,
                        source_body(SHARED / f"{source}.sc"), *entry])
 
 
@@ -166,7 +196,7 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms):
             assert member["name"] == name and member["offset"] == offset
             assert member["type"] == ("mat4" if kind == "float4x4" else "vec4")
             assert member.get("array", [1]) == [count]
-            if count > 1: assert member["array_stride"] == (64 if kind == "float4x4" else 16)
+            if count > 1 or name in ("ck_borderColor", "ck_samplerInfo"): assert member["array_stride"] == (64 if kind == "float4x4" else 16)
             # DXC transposes the SPIR-V matrix type; RowMajor here stores the
             # same bytes as HLSL column_major, with corresponding operations.
             if kind == "float4x4": assert member["matrix_stride"] == 16 and member["row_major"]
@@ -174,7 +204,12 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms):
     assert all(t["set"] == 2 for t in textures)
     assert sorted(t["binding"] for t in textures) == list(range(samplers))
     if source == "fs_volume_mip":
-        assert textures[0]["type"] == "sampler3D"
+        dimensions = ["sampler3D"]
+    elif source == "fs_postprocess":
+        dimensions = ["sampler2D"]
+    else:
+        dimensions = ["sampler2D"] * 8 + ["samplerCube"] * 4 + ["sampler3D"] * 4 if samplers else []
+    assert [t["type"] for t in sorted(textures, key=lambda t: t["binding"])] == dimensions
 
 
 def validate_dxil(assembly, source, vertex, samplers, uniforms):
@@ -190,7 +225,7 @@ def validate_dxil(assembly, source, vertex, samplers, uniforms):
         assert all(int(r[3]) == space and r[4] == "1" for r in selected)
     if uniforms:
         for kind, name, count, offset in expected_members(source):
-            array = rf"\[{count}\]" if count > 1 else ""
+            array = rf"\[{count}\]" if count > 1 or name in ("ck_borderColor", "ck_samplerInfo") else ""
             major = "column_major " if kind == "float4x4" else ""
             assert re.search(rf"{major}{kind} {name}{array};\s*; Offset:\s*{offset}\b", assembly)
         buffer_name, _, buffer_size = uniform_layout(source)
@@ -198,18 +233,23 @@ def validate_dxil(assembly, source, vertex, samplers, uniforms):
 
 
 def verify_artifacts(directory, abi, abi_hash):
-    manifest = json.loads((directory / "manifest.json").read_text())
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert (manifest["abi_version"], manifest["interface_hash"]) == (abi, abi_hash), "Shader ABI is stale"
+    expected_abi = (f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
+                    f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
+    assert (directory / "abi.h").read_text(encoding="utf-8") == expected_abi, "Compiled shader identity is stale"
     expected = {(name, format_) for name, _, _ in SHADERS for format_ in ("dxil", "spirv")}
     assert {(s["name"], s["format"]) for s in manifest["shaders"]} == expected
     sources = {name: hashlib.sha256(make_source(source, clipping).encode()).hexdigest()
                for name, source, clipping in SHADERS}
     layouts = {name: uniform_layout(source)[2] if source != "vs_postprocess" else 0
                for name, source, _ in SHADERS}
+    source_by_name = {name: source for name, source, _ in SHADERS}
     for shader in manifest["shaders"]:
         name, format_ = shader["name"], shader["format"]
+        assert (shader["uniform_buffers"], shader["samplers"]) == shader_resources(source_by_name[name]), f"{name}: resource count mismatch"
         assert shader["source_sha256"] == sources[name], f"{name}: source changed; regenerate native shaders"
-        header = (directory / f"{format_}_{name}.h").read_text()
+        header = (directory / f"{format_}_{name}.h").read_text(encoding="utf-8")
         payload = bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", header))
         assert hashlib.sha256(payload).hexdigest() == shader["sha256"], f"{name}: native payload hash mismatch"
         assert shader["entry"] == "main" and shader["reflected"]
@@ -225,9 +265,12 @@ def main() -> None:
     parser.add_argument("--dxc", default=shutil.which("dxc"))
     parser.add_argument("--spirv-cross", default=shutil.which("spirv-cross"))
     args = parser.parse_args()
-    abi_text = (SHARED.parent / "CKFFShaderABI.h").read_text()
+    abi_text = (SHARED.parent / "CKFFShaderABI.h").read_text(encoding="utf-8")
     abi = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", abi_text)[1])
     abi_hash = int(re.search(r"CKFF_SHADER_INTERFACE_HASH = (0x[0-9a-fA-F]+)", abi_text)[1], 16)
+    # Hash exactly the ordered schema consumed by C++ in CKFFShaderABI.h.
+    for byte in native_layout_schema()[1].encode("ascii"):
+        abi_hash = ((abi_hash ^ byte) * 16777619) & 0xffffffff
     if args.verify:
         verify_artifacts(args.output_dir, abi, abi_hash)
         return
@@ -239,8 +282,7 @@ def main() -> None:
     manifest = {"abi_version": abi, "interface_hash": abi_hash, "shaders": []}
     for name, source, clipping in SHADERS:
         vertex = source.startswith("vs_")
-        samplers = 0 if vertex or source == "fs_clear" else (1 if source in ("fs_postprocess", "fs_volume_mip") else 16)
-        uniforms = 0 if source == "vs_postprocess" else 1
+        uniforms, samplers = shader_resources(source)
         hlsl = args.work_dir / f"{name}.hlsl"
         hlsl.write_text(make_source(source, clipping))
         for format_ in ("dxil", "spirv"):
@@ -256,7 +298,7 @@ def main() -> None:
                 validate_spirv(reflection, source, vertex, samplers, uniforms)
                 (args.work_dir / f"{format_}_{name}.json").write_text(json.dumps(reflection, indent=2))
             else:
-                validate_dxil(assembly.read_text(), source, vertex, samplers, uniforms)
+                validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
             code = output.read_bytes()
             assert code[:4] == (b"DXBC" if format_ == "dxil" else b"\x03\x02\x23\x07")
             header = args.work_dir / f"{format_}_{name}.h"
@@ -277,16 +319,6 @@ def main() -> None:
     (args.output_dir / "abi.h").write_text(
         f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
         f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
-    offsets = []
-    row = 0
-    for kind, _, count in BLOCKS:
-        offsets.append(row)
-        row += count * (4 if kind == "float4x4" else 1)
-    (args.output_dir / "uniform_layout.h").write_text(
-        "static constexpr unsigned CKSDL_BLOCK_OFFSETS[] = {" + ",".join(map(str, offsets)) + "};\n" +
-        f"static constexpr unsigned CKSDL_BORDER_COLOR_OFFSET = {row};\n" +
-        f"static constexpr unsigned CKSDL_SAMPLER_INFO_OFFSET = {row + 16};\n" +
-        f"static constexpr unsigned CKSDL_UNIFORM_ROWS = {row + 32};\n")
     print("Generated and reflected both complete native shader families.")
 
 

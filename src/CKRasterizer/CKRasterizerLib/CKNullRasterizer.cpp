@@ -176,7 +176,7 @@ CKBOOL CKNullRasterizerShaderSet(const CKBackendCaps &Caps, CKBackendShaderSet &
     if (Caps.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN || Caps.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
         return FALSE;
     Out.ABIVersion = CKFF_SHADER_ABI_VERSION;
-    Out.InterfaceHash = CKFF_SHADER_INTERFACE_HASH;
+    Out.InterfaceHash = CKFFShaderInterfaceHash(Caps.ShaderFormat);
     for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i) {
         CKShaderDesc &shader = Out.Shaders[i];
         shader.Code = token[i];

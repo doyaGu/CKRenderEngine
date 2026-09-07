@@ -48,6 +48,7 @@ set(CKRASTERIZER_LIB_HEADERS
         CKFFDrawProbes.h
         CKFFStageState.h
         CKFFShaderABI.h
+        CKFFNativeLayout.def
         CKFFUniformState.h
         CKFFShaderKey.h
         CKFFSpecializationInfo.h

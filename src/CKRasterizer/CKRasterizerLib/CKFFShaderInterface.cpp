@@ -17,6 +17,24 @@ const CKFFConstantBlockDesc BlockTable[CKRST_BLOCK_COUNT] = {
     {"u_postParams", FALSE, 1},
 };
 
+enum NativeGroup { VERTEX, FRAGMENT, PRESENT };
+struct NativeBlock { NativeGroup Group; CKFFConstantBlock Block; };
+const NativeBlock NativeBlocks[] = {
+#define CKFF_NATIVE_BLOCK(Stage, Block) {Stage, CKRST_BLOCK_##Block},
+#define CKFF_NATIVE_METADATA(Stage, Count)
+#include "CKFFNativeLayout.def"
+#undef CKFF_NATIVE_BLOCK
+#undef CKFF_NATIVE_METADATA
+};
+struct NativeMetadata { NativeGroup Group; CKDWORD Count; };
+const NativeMetadata NativeMetadataCounts[] = {
+#define CKFF_NATIVE_BLOCK(Stage, Block)
+#define CKFF_NATIVE_METADATA(Stage, Count) {Stage, Count},
+#include "CKFFNativeLayout.def"
+#undef CKFF_NATIVE_BLOCK
+#undef CKFF_NATIVE_METADATA
+};
+
 const CKFFConstantBlockDesc InvalidBlock = {NULL, FALSE, 0};
 
 const CK_VERTEX_ATTRIB VertexAttributes[16] = {
@@ -56,26 +74,12 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
     result.UniformBuffers.reserve(packed ? stageCount : 0u);
     result.Uniforms.reserve(present ? 1u : CKRST_BLOCK_COUNT * stageCount);
 
-    CKDWORD constantBytes = 0;
-    for (const auto &block : BlockTable)
-        constantBytes += block.Count * (block.Mat4 ? 64u : 16u);
-    const CKDWORD borderBytes = CKFF_SAMPLER_SLOT_COUNT * 16u;
-    const CKDWORD uniformBytes = constantBytes + borderBytes * 2u;
-
+    CKDWORD metadataOffset = 0, metadataCount = 0;
     for (CKDWORD stageIndex = 0; stageIndex < stageCount; ++stageIndex) {
         const CK_SHADER_STAGE stage = present ? CKRST_SHADER_PIXEL : static_cast<CK_SHADER_STAGE>(stageIndex);
-        if (packed) {
-            CKBackendUniformBufferBinding buffer;
-            buffer.Stage = stage;
-            buffer.Size = uniformBytes;
-            // FFP vertex and fragment shaders consume the same immutable data.
-            // The backend snapshots it once per draw and binds both stages.
-            buffer.SharedData = 0;
-            result.UniformBuffers.push_back(buffer);
-        }
         CKDWORD offset = 0;
-        for (CKDWORD slot = 0; slot < CKRST_BLOCK_COUNT; ++slot) {
-            const CKFFConstantBlockDesc &block = BlockTable[slot];
+        auto addUniform = [&](CKFFConstantBlock slot) {
+            const auto &block = BlockTable[slot];
             CKBackendUniformBinding uniform;
             uniform.Slot = slot;
             uniform.Name = block.Name;
@@ -84,8 +88,26 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
             uniform.Stage = stage;
             uniform.Offset = offset;
             offset += uniform.Size();
-            if (!present || slot == CKRST_BLOCK_PRESENT_PARAMS)
-                result.Uniforms.push_back(uniform);
+            result.Uniforms.push_back(uniform);
+        };
+        if (packed) {
+            const NativeGroup group = present ? PRESENT : stage == CKRST_SHADER_VERTEX ? VERTEX : FRAGMENT;
+            for (const auto &entry : NativeBlocks)
+                if (entry.Group == group) addUniform(entry.Block);
+            for (const auto &entry : NativeMetadataCounts) {
+                if (entry.Group != group) continue;
+                metadataOffset = offset; metadataCount = entry.Count;
+                offset += entry.Count * 32u; // one border color and sampler-state vector per native slot
+            }
+            CKBackendUniformBufferBinding buffer;
+            buffer.Stage = stage; buffer.Size = offset;
+            result.UniformBuffers.push_back(buffer);
+        } else {
+            // Named uniforms retain their logical identity and do not acquire
+            // a synthetic native buffer layout.
+            for (CKDWORD slot = 0; slot < CKRST_BLOCK_COUNT; ++slot)
+                if (!present || slot == CKRST_BLOCK_PRESENT_PARAMS)
+                    addUniform(static_cast<CKFFConstantBlock>(slot));
         }
     }
 
@@ -100,8 +122,8 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
             slot < CKFF_VOLUME_SAMPLER_SLOT_BASE ? CKBACKEND_TEXTURE_CUBE : CKBACKEND_TEXTURE_3D;
         if (packed) {
             sampler.MetadataBufferSlot = 0;
-            sampler.BorderColorOffset = constantBytes + slot * 16u;
-            sampler.SamplerStateOffset = constantBytes + borderBytes + slot * 16u;
+            sampler.BorderColorOffset = metadataOffset + slot * 16u;
+            sampler.SamplerStateOffset = metadataOffset + metadataCount * 16u + slot * 16u;
         }
         result.Samplers.push_back(sampler);
     }

@@ -40,18 +40,18 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
         TestCheck(CKValidateBackendProgram(program, vertex, pixel) == CK_OK,
                   "FFP native declarations satisfy generic backend validation");
         TestCheck(program.UniformBuffers.size() == 2 &&
-                      program.UniformBuffers[0].Size == 3744 && program.UniformBuffers[1].Size == 3744 &&
-                      program.UniformBuffers[0].SharedData == 0 && program.UniformBuffers[1].SharedData == 0,
-                  "both shader stages bind a single shared 3744-byte snapshot");
-        TestCheck(program.Uniforms.size() == CKRST_BLOCK_COUNT * 2 &&
-                      program.Uniforms[CKRST_BLOCK_PRESENT_PARAMS].Offset == 3216 &&
+                      program.UniformBuffers[0].Size == 2880 && program.UniformBuffers[1].Size == 1424 &&
+                      program.UniformBuffers[0].SharedData == ~0u && program.UniformBuffers[1].SharedData == ~0u,
+                  "vertex and fragment stages declare independent compact buffers");
+        TestCheck(program.Uniforms.size() == 13 &&
+                      program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS && program.Uniforms[9].Offset == 0 &&
                       program.Samplers.size() == 16,
-                  "native packing retains the offline shader ABI without recompilation");
+                  "native packing follows the stage layout schema");
         TestCheck(program.Samplers[0].Dimension == CKBACKEND_TEXTURE_2D &&
                       program.Samplers[8].Dimension == CKBACKEND_TEXTURE_CUBE &&
                       program.Samplers[12].Dimension == CKBACKEND_TEXTURE_3D &&
-                      program.Samplers[15].BorderColorOffset == 3232 + 15 * 16 &&
-                      program.Samplers[15].SamplerStateOffset == 3488 + 15 * 16,
+                      program.Samplers[15].BorderColorOffset == 912 + 15 * 16 &&
+                      program.Samplers[15].SamplerStateOffset == 1168 + 15 * 16,
                   "sampler dimensions and border metadata are declared explicitly");
         TestCheck(program.VertexInputs.size() == 16 && program.VertexInputs[6].Integer &&
                       program.VertexInputs[6].DefaultValue[3] == 0 &&
@@ -68,7 +68,9 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
         TestCheck(CKValidateBackendProgram(present, vertex, pixel) == CK_OK &&
                       present.UniformBuffers.size() == 1 &&
                       present.UniformBuffers[0].Stage == CKRST_SHADER_PIXEL &&
-                      present.Uniforms.size() == 1 && present.Uniforms[0].Offset == 3216 &&
+                      present.UniformBuffers[0].Size == 48 &&
+                      present.Uniforms.size() == 1 && present.Uniforms[0].Offset == 0 &&
+                      present.Samplers[0].BorderColorOffset == 16 && present.Samplers[0].SamplerStateOffset == 32 &&
                       present.Samplers[0].Slot == CKFF_SLOT_PRESENT && present.Samplers[0].NativeSlot == 0 &&
                       present.VertexInputs.size() == 2 && present.VertexInputs[1].Location == 8,
                   "presentation declares one native sampler independently of its logical slot");

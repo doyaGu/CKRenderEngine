@@ -12,6 +12,27 @@
 static const CKDWORD CKFF_SHADER_ABI_VERSION = 5u;
 static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;
 
+// Logical/named uniforms keep their existing ABI. Native artifacts additionally
+// identify the ordered stage layout; changing it cannot accept an old payload.
+constexpr CKDWORD CKFFNativeInterfaceHash() {
+    const char *layout =
+#define CKFF_NATIVE_BLOCK(Stage, Block) "block:" #Stage ":" #Block ";"
+#define CKFF_NATIVE_METADATA(Stage, Count) "metadata:" #Stage ":" #Count ";"
+#include "CKFFNativeLayout.def"
+#undef CKFF_NATIVE_BLOCK
+#undef CKFF_NATIVE_METADATA
+    ;
+    CKDWORD hash = CKFF_SHADER_INTERFACE_HASH;
+    while (*layout) hash = (hash ^ static_cast<CKBYTE>(*layout++)) * 16777619u;
+    return hash;
+}
+
+static constexpr CKDWORD CKFF_SHADER_NATIVE_INTERFACE_HASH = CKFFNativeInterfaceHash();
+
+inline CKDWORD CKFFShaderInterfaceHash(CK_SHADER_FORMAT format) {
+    return format == CKRST_SHADER_FORMAT_BGFX ? CKFF_SHADER_INTERFACE_HASH : CKFF_SHADER_NATIVE_INTERFACE_HASH;
+}
+
 // VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
 // depth of the draw towards the viewer by this fraction of the depth range
 // (u_ffDrawParams[CKFF_DRAW_PARAM_MATERIAL_POWER].y, applied in the vertex shaders).
