@@ -77,6 +77,8 @@ if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     add_test(NAME SceneCaptureImageIO COMMAND scene_capture_image_tests)
 endif()
 if (Python3_Interpreter_FOUND)
+    add_test(NAME PresentMonCaptureValidation
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_presentmon_summary.py)
     add_test(NAME RasterizerTraceAccounting
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rasterizer_trace.py)
     add_test(NAME RasterizerLayerBoundaries
