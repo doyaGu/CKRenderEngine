@@ -819,6 +819,61 @@ static void SubmissionCopyPreservesTweenStreams()
               "RenderContext submission copy must retain the simple-data contract");
 }
 
+static void CommonInterleaveMatchesGenericPacking()
+{
+    const float positions[3][4] = {
+        {1.0f, 2.0f, 3.0f, 0.25f},
+        {4.0f, 5.0f, 6.0f, 0.50f},
+        {7.0f, 8.0f, 9.0f, 1.00f}
+    };
+    const float normals[3][4] = {
+        {1.0f, 0.0f, 0.0f, 12.0f},
+        {0.0f, 1.0f, 0.0f, 13.0f},
+        {0.0f, 0.0f, 1.0f, 14.0f}
+    };
+    const float texcoords[3][3] = {
+        {0.1f, 0.2f, 20.0f},
+        {0.3f, 0.4f, 21.0f},
+        {0.5f, 0.6f, 22.0f}
+    };
+    const CKDWORD diffuse[3] = {0xFF102030u, 0x80405060u, 0x20708090u};
+    const CKDWORD specular[3] = {0x00112233u, 0x40445566u, 0x80778899u};
+    const CKDWORD layouts[] = {
+        CKFF_VF_POSITION | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0 | CKFF_VF_COLOR1,
+        CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0 | CKFF_VF_COLOR1,
+        CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0 | CKFF_VF_COLOR1
+    };
+    for (size_t layout = 0; layout < 3; ++layout) {
+        VxDrawPrimitiveData data = {};
+        data.VertexCount = 3;
+        data.Flags = layout == 0 ? CKRST_DP_TRANSFORM :
+            (layout == 1 ? CKRST_DP_TRANSFORM | CKRST_DP_LIGHT |
+                           CKRST_DP_DIFFUSE | CKRST_DP_SPECULAR
+                         : CKRST_DP_DIFFUSE);
+        data.PositionPtr = (void *)positions;
+        data.PositionStride = sizeof(positions[0]);
+        data.NormalPtr = (void *)normals;
+        data.NormalStride = sizeof(normals[0]);
+        data.TexCoordPtr = (void *)texcoords;
+        data.TexCoordStride = sizeof(texcoords[0]);
+        data.ColorPtr = (void *)diffuse;
+        data.ColorStride = sizeof(diffuse[0]);
+        data.SpecularColorPtr = (void *)specular;
+        data.SpecularColorStride = sizeof(specular[0]);
+
+        const CKDWORD stride = CKVertexLayoutCache::ComputeStride(layouts[layout]);
+        std::vector<CKBYTE> fast(stride * data.VertexCount, 0xCD);
+        std::vector<CKBYTE> generic(stride * data.VertexCount, 0xCD);
+        CKTransientGeometry::InterleaveVertices(fast.data(), stride, data.VertexCount,
+                                                layouts[layout], &data);
+        for (int vertex = 0; vertex < data.VertexCount; ++vertex)
+            CKTransientGeometry::InterleaveVertex(generic.data(), stride, (CKDWORD)vertex, (CKDWORD)vertex,
+                                                  layouts[layout], &data);
+        TestCheck(fast == generic,
+                  "common interleave path must match generic canonical packing byte-for-byte");
+    }
+}
+
 int main()
 {
     TestFramework tests;
@@ -852,5 +907,7 @@ int main()
               &UserDrawStructureAllocatesTweenStreams);
     tests.Run("submission copy preserves tween streams",
               &SubmissionCopyPreservesTweenStreams);
+    tests.Run("common interleave matches generic packing",
+              &CommonInterleaveMatchesGenericPacking);
     return tests.ExitCode();
 }

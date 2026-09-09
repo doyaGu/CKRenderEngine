@@ -36,13 +36,13 @@ struct CKPresentResources {
 };
 
 // Presentation stage of the virtual backbuffer (spec 4.4): the scene renders
-// into the *scene target* (window size x RenderScale, MSAA), the resolve
+// into the *scene target* (window size x RenderScale, MSAA), and the resolve
 // draws it (scale, FXAA, sharpen) into the *native target* (window size,
-// single sampled), the overlay draws on the native target and the frame ends
-// with a plain blit of the native target to the swap chain. Readbacks blit the
-// native target into the readback texture. Driven by the translated context's
-// frame flow; it does not open passes, the caller begins the pass each
-// fullscreen draw goes to.
+// single sampled). The translated context may render the scene straight into
+// the native target when that resolve would be an identity operation. The
+// overlay draws on the native target and the frame ends with a plain blit to
+// the swap chain. Readbacks blit the native target into the readback texture.
+// This class does not open passes; the caller begins each fullscreen pass.
 class CKPresentStage {
 public:
     CKPresentStage();

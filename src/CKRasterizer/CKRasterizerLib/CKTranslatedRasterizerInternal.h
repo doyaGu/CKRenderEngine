@@ -33,15 +33,19 @@ enum CKTranslatedFramePhase {
 struct CKTranslatedFrameState {
     CKTranslatedFramePhase Phase;
     CKBOOL PassOpen;
+    CKDWORD PassTarget;
+    CKRECT PassRect;
     CKBOOL InternalTargets;
+    CKBOOL SceneUsesNative;
     CKBOOL Composited;
     CKBOOL TargetDecided;
     CKBOOL Open;
     CKBOOL NativePresented;
 
     CKTranslatedFrameState()
-        : Phase(CKTRANSLATED_FRAME_IDLE), PassOpen(FALSE), InternalTargets(FALSE),
-          Composited(FALSE), TargetDecided(FALSE), Open(FALSE), NativePresented(FALSE) {}
+        : Phase(CKTRANSLATED_FRAME_IDLE), PassOpen(FALSE), PassTarget(0), PassRect{0, 0, 0, 0},
+          InternalTargets(FALSE), SceneUsesNative(FALSE), Composited(FALSE), TargetDecided(FALSE),
+          Open(FALSE), NativePresented(FALSE) {}
 
     CKBOOL IsSceneActive() const { return Phase == CKTRANSLATED_FRAME_SCENE ? TRUE : FALSE; }
     CKBOOL IsOverlayActive() const { return Phase == CKTRANSLATED_FRAME_OVERLAY ? TRUE : FALSE; }
@@ -50,6 +54,9 @@ struct CKTranslatedFrameState {
     {
         Phase = CKTRANSLATED_FRAME_IDLE;
         PassOpen = FALSE;
+        PassTarget = 0;
+        PassRect.left = PassRect.top = PassRect.right = PassRect.bottom = 0;
+        SceneUsesNative = FALSE;
         Composited = FALSE;
         TargetDecided = FALSE;
         Open = FALSE;
@@ -264,6 +271,7 @@ private:
     CKBOOL PrepareFrameTarget();
     CKBOOL OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
                     float Z, CKDWORD Stencil, const char *Name);
+    CKBOOL CanContinuePass(CKDWORD RenderTarget, const CKRECT &Rect) const;
     CKBOOL EnsureDrawPass();
     CKRECT CurrentTargetRect() const;
     CKRECT WindowRect() const;
@@ -277,7 +285,7 @@ private:
     CKDWORD CurrentPassFrameBuffer() const;
     CKRECT CurrentPassRect() const;
     CKBOOL CompositeScene();
-    CKBOOL PresentInternalTarget();
+    CKBOOL PresentInternalTarget(CKBackendPresentSync Sync);
     void FinishFrame();
     void ApplyOptions();
     void ReleaseFrameScratch();

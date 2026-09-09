@@ -1235,6 +1235,8 @@ CKBOOL CKTranslatedContext::ResolveCopySource()
 {
     if (m_Target || !m_Frame.Open || m_Frame.Composited)
         return TRUE;
+    if (m_Frame.SceneUsesNative)
+        return m_Frame.InternalTargets;
     return m_Frame.InternalTargets &&
            OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1, 0, "snapshot-resolve") &&
            m_Present.SubmitResolve(m_Options.FXAA, m_Options.Sharpness) == CK_OK;
@@ -1260,7 +1262,7 @@ CKBOOL CKTranslatedContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Blit, CKD
     const CKDWORD passes = m_FramePasses;
     CKBOOL ok = TRUE;
     if (Present && !m_Target)
-        ok = PresentInternalTarget();
+        ok = PresentInternalTarget(CKRST_BACKEND_SYNC_UNCHANGED);
     if (ok && Blit)
         ok = BlitForReadback();
     CKDWORD frame = 0;

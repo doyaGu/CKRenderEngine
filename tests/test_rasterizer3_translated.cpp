@@ -485,8 +485,8 @@ void TestFrameFlowAndDraws()
     const CKRenderStats *stats = f.Context->GetStats();
     TestCheck(stats->FrameNumber == 1, "frame counter");
     TestCheck(stats->DrawCalls == 4 && stats->Primitives == 2 + 2 + 2 + 1, "draw and primitive counters");
-    TestCheck(stats->Passes == 6 && stats->Clears == 2,
-              "pass and clear counters (clear, scene, stencil clear, scene, resolve, present)");
+    TestCheck(stats->Passes == 4 && stats->Clears == 2,
+              "pass and clear counters (clear/scene, stencil clear, scene, present)");
     TestCheck(f.Context->IsIdle(), "idle after present");
 
     // The next frame starts again at pass 0 and does not leak scratch buffers.
@@ -533,10 +533,10 @@ void TestOverlayPhase()
     const CKDWORD passes = f.Context->GetPassCountForTests();
     const CKDWORD drawsBefore = f.Backend->Log.DrawCount;
     TestCheck(f.Context->BeginOverlayPhase(), "BeginOverlayPhase");
-    TestCheck(f.Context->GetPassCountForTests() == passes + 2, "overlay opens the resolve pass and the overlay pass");
-    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 1, "resolve submitted");
+    TestCheck(f.Context->GetPassCountForTests() == passes, "native-size overlay continues the scene pass");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore, "identity resolve skipped");
     TestCheck(f.Context->BackToFront(FALSE), "present");
-    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 2, "present blit submitted");
+    TestCheck(f.Backend->Log.DrawCount == drawsBefore + 1, "present blit submitted");
 
     CKRasterizerOptions options;
     options.RenderScale = 0.5f;
@@ -545,8 +545,8 @@ void TestOverlayPhase()
     const CKDWORD scaledPasses = f.Context->GetPassCountForTests();
     const CKDWORD draws = f.Backend->Log.DrawCount;
     TestCheck(f.Context->BeginOverlayPhase(), "overlay after a scaled scene");
-    // resolve pass + overlay pass, and the resolve is a backend draw
-    TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 2, "resolve and overlay passes");
+    // The resolve opens the native-target pass and overlay draws continue in it.
+    TestCheck(f.Context->GetPassCountForTests() == scaledPasses + 1, "combined resolve and overlay pass");
     TestCheck(f.Backend->Log.DrawCount == draws + 1, "resolve submitted");
     TestCheck(f.Context->BackToFront(FALSE), "present scaled frame");
 }
@@ -623,6 +623,9 @@ void TestShutdown()
 void TestPresentFailurePropagation()
 {
     Fixture f;
+    CKRasterizerOptions options;
+    options.RenderScale = 0.5f;
+    TestCheck(f.Context->SetOptions(&options), "scaled frame keeps the composite pass");
     TestCheck(f.Context->BeginScene() && f.Context->EndScene(), "frame for composite failure");
     f.Backend->Log.DrawError = CKERR_INVALIDOPERATION;
     f.Backend->Log.DrawErrorAt = f.Backend->Log.DrawCount + 1;

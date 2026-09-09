@@ -200,15 +200,8 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
             return CK_OK;
         }
-        if (!Swapchain) {
-            const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
-            CKRE_PROFILE_SCOPE("CKRE.SDL.Acquire");
-            if (!SDL_WaitAndAcquireGPUSwapchainTexture(Commands, Window, &Swapchain, &SwapWidth, &SwapHeight))
-                return Fail("WaitAndAcquireGPUSwapchainTexture");
-            if (Swapchain && (SwapWidth != previousWidth || SwapHeight != previousHeight))
-                SDL_Log("SDL_gpu swapchain: window=%u drawable=%ux%u logical=%ux%u",
-                        SDL_GetWindowID(Window), SwapWidth, SwapHeight, Width, Height);
-        }
+        const CKERROR acquired = AcquireSwapchain();
+        if (acquired != CK_OK) return acquired;
         // A minimized window has no swapchain image. Resource work still submits.
         if (!Swapchain) {
             Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
@@ -346,6 +339,71 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         }
     }
     Pass.ClearFlags = 0; Draws.clear(); Uniforms.Clear(); Bindings.Clear(); BatchVertices.clear(); BatchIndices.clear();
+    return CK_OK;
+}
+
+CKERROR CKSdlGpuDevice::AcquireSwapchain()
+{
+    if (Swapchain) return CK_OK;
+    const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
+    CKRE_PROFILE_SCOPE("CKRE.SDL.Acquire");
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(Commands, Window, &Swapchain, &SwapWidth, &SwapHeight))
+        return Fail("WaitAndAcquireGPUSwapchainTexture");
+    if (Swapchain && (SwapWidth != previousWidth || SwapHeight != previousHeight))
+        SDL_Log("SDL_gpu swapchain: window=%u drawable=%ux%u logical=%ux%u",
+                SDL_GetWindowID(Window), SwapWidth, SwapHeight, Width, Height);
+    return CK_OK;
+}
+
+CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD height,
+                                        CKBackendPresentSync sync)
+{
+    if (!m->Ready()) return CKERR_INVALIDOPERATION;
+    auto source = m->Textures.Get(handle);
+    if (!source || source->Depth || source->Multisample ||
+        source->Info.type != SDL_GPU_TEXTURETYPE_2D ||
+        !width || !height || width > source->Info.width || height > source->Info.height)
+        return CKERR_INVALIDPARAMETER;
+
+    if (sync != CKRST_BACKEND_SYNC_UNCHANGED && sync != CKRST_BACKEND_SYNC_VSYNC &&
+        sync != CKRST_BACKEND_SYNC_IMMEDIATE)
+        return CKERR_INVALIDPARAMETER;
+
+    // Finish the native-target scene pass, then let SDL encode its dedicated
+    // blit straight to the acquired swapchain image. This keeps the portable
+    // texture backbuffer/readback contract while avoiding another translated
+    // draw packet, geometry upload and backend render-pass setup.
+    CKERROR error = m->Flush();
+    if (error != CK_OK) return error;
+    if (sync != CKRST_BACKEND_SYNC_UNCHANGED) {
+        const auto mode = sync == CKRST_BACKEND_SYNC_VSYNC
+            ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+        if (mode != m->PresentMode) {
+            if (m->Swapchain) return CKERR_INVALIDOPERATION;
+            if (!SDL_SetGPUSwapchainParameters(m->Device, m->Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+                return m->Fail("SetGPUSwapchainParameters");
+            m->PresentMode = mode;
+        }
+    }
+    if (!m->EnsureCommands()) return m->Error;
+    error = m->AcquireSwapchain();
+    if (error != CK_OK) return error;
+
+    ++m->FrameStats.Passes;
+    ++m->FrameStats.Blits;
+    if (m->Swapchain) {
+        SDL_GPUBlitInfo blit = {};
+        blit.source = {source->Image.get(), 0, 0, 0, 0, width, height};
+        blit.destination = {m->Swapchain, 0, 0, 0, 0, m->SwapWidth, m->SwapHeight};
+        blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        blit.flip_mode = SDL_FLIP_NONE;
+        blit.filter = SDL_GPU_FILTER_LINEAR;
+        SDL_BlitGPUTexture(m->Commands, &blit);
+        source->Referenced = true;
+    }
+    m->PassOpen = false;
+    m->Target.reset();
+    m->Pass = CKBackendPassDesc();
     return CK_OK;
 }
 

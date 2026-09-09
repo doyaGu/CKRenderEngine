@@ -35,6 +35,8 @@ public:
     CKERROR Draw(const CKBackendDraw *Draw) override;
     CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                  CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect) override;
+    CKERROR PresentTexture(CKDWORD Texture, CKDWORD Width, CKDWORD Height,
+                           CKBackendPresentSync Sync) override;
     CKERROR Submit(const CKBackendSubmitDesc &Desc, CKDWORD *SubmissionNumber) override;
     CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket) override;
     CKBackendReadbackState PollReadback(const CKBackendReadbackTicket &Ticket, CKBOOL Wait) override;

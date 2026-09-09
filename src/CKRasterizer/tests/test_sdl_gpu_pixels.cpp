@@ -663,7 +663,8 @@ static int Run(SDL_Window *window)
     CKReadbackDesc read;
     if (backend.ReadTexture(present.NativeTarget().ColorTexture, 0, &read, &ticket) != CK_OK) return 5;
     pass.RenderTarget = 0;
-    if (backend.BeginPass(&pass) != CK_OK || present.SubmitBlit() != CK_OK ||
+    if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
+                               CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
         backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 6;
     if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) return 7;
     CKDWORD center = 0;
@@ -675,7 +676,8 @@ static int Run(SDL_Window *window)
     while (SDL_GetTicks() < end) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) return 0;
-        if (backend.BeginPass(&pass) != CK_OK || present.SubmitBlit() != CK_OK ||
+        if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
+                                   CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
             backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 9;
         SDL_Delay(10);
     }

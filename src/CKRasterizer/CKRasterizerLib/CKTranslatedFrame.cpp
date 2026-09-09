@@ -53,8 +53,9 @@ CKRECT CKTranslatedContext::CurrentTargetRect() const
         rect.right = (int)m_TargetWidth;
         rect.bottom = (int)m_TargetHeight;
     } else if (m_Frame.InternalTargets) {
-        rect.right = (int)m_Present.SceneTarget().Width;
-        rect.bottom = (int)m_Present.SceneTarget().Height;
+        const CKPresentTarget &scene = m_Frame.SceneUsesNative ? m_Present.NativeTarget() : m_Present.SceneTarget();
+        rect.right = (int)scene.Width;
+        rect.bottom = (int)scene.Height;
     } else {
         rect.right = (int)m_Width;
         rect.bottom = (int)m_Height;
@@ -110,7 +111,9 @@ CKDWORD CKTranslatedContext::CurrentSceneFrameBuffer() const
 {
     if (m_Target)
         return m_TargetFrameBuffer;
-    return m_Frame.InternalTargets ? m_Present.SceneTarget().FrameBuffer : 0;
+    if (!m_Frame.InternalTargets)
+        return 0;
+    return m_Frame.SceneUsesNative ? m_Present.NativeTarget().FrameBuffer : m_Present.SceneTarget().FrameBuffer;
 }
 
 CKDWORD CKTranslatedContext::OverlayFrameBuffer() const
@@ -133,11 +136,12 @@ CKRECT CKTranslatedContext::CurrentPassRect() const
 
 // Decides once per frame whether the scene renders into the scaled scene
 // framebuffer (RenderScale / FXAA / Sharpness) or straight into the target.
-// Prepares the internal targets once per frame: the scene target (window size
-// x RenderScale, MSAA) receives every pass that does not go to a user target,
-// its resolve lands on the native target and the frame finally blits the
-// native target to the swap chain. Falls back to drawing straight into the
-// swap chain when the backend cannot provide the targets.
+// Prepares the internal targets once per frame. At native size without MSAA or
+// postprocessing, scene and overlay draws share the native target and skip the
+// identity resolve. Other configurations render through the scaled/MSAA scene
+// target before resolving to native size. The final blit remains the only pass
+// that touches the swap chain. Falls back to drawing straight into the swap
+// chain when the backend does not require and cannot provide internal targets.
 CKBOOL CKTranslatedContext::PrepareFrameTarget()
 {
     const bool required = m_Backend->GetCaps().RequiresIntermediateTarget && !m_Target;
@@ -145,28 +149,35 @@ CKBOOL CKTranslatedContext::PrepareFrameTarget()
         return !required || m_Frame.InternalTargets;
     m_Frame.TargetDecided = TRUE;
     m_Frame.InternalTargets = FALSE;
+    m_Frame.SceneUsesNative = FALSE;
     m_Frame.Composited = FALSE;
     const CKBackendCaps &caps = m_Backend->GetCaps();
     if (caps.MaxTextureSize == 0)
         return !required;
     const CKDWORD width = CKPresentStage::ScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD height = CKPresentStage::ScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
-    CKBOOL sceneReady = m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
-    if (!sceneReady && m_Options.MSAASamples > 1) {
+    const CKDWORD nativeWidth = m_Width < caps.MaxTextureSize ? m_Width : caps.MaxTextureSize;
+    const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
+    const bool sceneUsesNative = m_Options.MSAASamples == 0 && !m_Options.FXAA &&
+                                 m_Options.Sharpness == 0.0f &&
+                                 width == nativeWidth && height == nativeHeight;
+    CKBOOL sceneReady = sceneUsesNative ? TRUE : m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
+    if (!sceneUsesNative && !sceneReady && m_Options.MSAASamples > 1) {
         // The backend has no multisampled targets: render single sampled.
         Diag(CKRST_DIAG_APPROX_MSAA);
         sceneReady = m_Present.EnsureSceneTarget(width, height, 0);
     }
-    const CKDWORD nativeWidth = m_Width < caps.MaxTextureSize ? m_Width : caps.MaxTextureSize;
-    const CKDWORD nativeHeight = m_Height < caps.MaxTextureSize ? m_Height : caps.MaxTextureSize;
     const CKDWORD nativeBefore = m_Present.NativeTarget().ColorTexture;
-    if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources())
+    if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources()) {
         m_Frame.InternalTargets = TRUE;
-    else
+        m_Frame.SceneUsesNative = sceneUsesNative ? TRUE : FALSE;
+    } else {
         m_Present.DestroyTargets();
+    }
     if (m_Present.NativeTarget().ColorTexture != nativeBefore)
         m_Frame.NativePresented = FALSE;
-    m_FFP.SetMultisampledTarget(m_Frame.InternalTargets && m_Present.SceneTarget().Samples > 0);
+    m_FFP.SetMultisampledTarget(m_Frame.InternalTargets && !m_Frame.SceneUsesNative &&
+                                m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
     return !required || m_Frame.InternalTargets;
 }
@@ -186,8 +197,18 @@ CKBOOL CKTranslatedContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, C
         return FALSE;
     m_Frame.Open = TRUE;
     m_Frame.PassOpen = TRUE;
+    m_Frame.PassTarget = RenderTarget;
+    m_Frame.PassRect = Rect;
     ++m_FramePasses;
     return TRUE;
+}
+
+CKBOOL CKTranslatedContext::CanContinuePass(CKDWORD RenderTarget, const CKRECT &Rect) const
+{
+    const CKRECT &open = m_Frame.PassRect;
+    return m_Frame.PassOpen && m_Frame.PassTarget == RenderTarget &&
+           open.left == Rect.left && open.top == Rect.top &&
+           open.right == Rect.right && open.bottom == Rect.bottom;
 }
 
 CKBOOL CKTranslatedContext::EnsureDrawPass()
@@ -203,6 +224,10 @@ CKBOOL CKTranslatedContext::CompositeScene()
 {
     if (!m_Frame.InternalTargets || m_Frame.Composited)
         return TRUE;
+    if (m_Frame.SceneUsesNative) {
+        m_Frame.Composited = TRUE;
+        return TRUE;
+    }
     if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "composite"))
         return FALSE;
     if (m_Present.SubmitResolve(m_Options.FXAA, m_Options.Sharpness) != CK_OK)
@@ -211,12 +236,22 @@ CKBOOL CKTranslatedContext::CompositeScene()
     return TRUE;
 }
 
-// Present: native target -> swap chain, the only pass that touches frame
-// buffer 0 in a frame that renders through the internal targets.
-CKBOOL CKTranslatedContext::PresentInternalTarget()
+// Present: native target -> swap chain. A backend may encode this as a direct
+// texture blit; otherwise the portable fullscreen pass is used.
+CKBOOL CKTranslatedContext::PresentInternalTarget(CKBackendPresentSync sync)
 {
     if (!m_Frame.InternalTargets)
         return TRUE;
+    const CKPresentTarget &native = m_Present.NativeTarget();
+    const CKERROR direct = m_Backend->PresentTexture(native.ColorTexture, native.Width, native.Height, sync);
+    if (direct == CK_OK) {
+        m_Frame.Open = TRUE;
+        m_Frame.PassOpen = FALSE;
+        ++m_FramePasses;
+        return TRUE;
+    }
+    if (direct != CKERR_NOTIMPLEMENTED)
+        return FALSE;
     if (!OpenPass(0, WindowRect(), 0, 0, 1.0f, 0, "present"))
         return FALSE;
     return m_Present.SubmitBlit() == CK_OK ? TRUE : FALSE;
@@ -314,7 +349,9 @@ CKBOOL CKTranslatedContext::BeginScene()
     DeliverReadbacks();
     if (!PrepareFrameTarget()) return FALSE;
     m_FFP.BeginDebugFrame();
-    if (!OpenPass(CurrentSceneFrameBuffer(), CurrentTargetRect(), 0, 0, 1.0f, 0, "scene"))
+    const CKDWORD target = CurrentSceneFrameBuffer();
+    const CKRECT rect = CurrentTargetRect();
+    if (!CanContinuePass(target, rect) && !OpenPass(target, rect, 0, 0, 1.0f, 0, "scene"))
         return FALSE;
     m_Frame.Phase = CKTRANSLATED_FRAME_SCENE;
     return TRUE;
@@ -347,7 +384,12 @@ CKBOOL CKTranslatedContext::BeginOverlayPhase()
     if (!PrepareFrameTarget()) return FALSE;
     if (!CompositeScene())
         return FALSE;
-    if (!OpenPass(OverlayFrameBuffer(), WindowRect(), 0, 0, 1.0f, 0, "overlay"))
+    // The default native-size path already has the same attachment and extent
+    // open. Keep recording into it; draw state is carried by each packet, so a
+    // render-pass split would only force another upload/encode batch.
+    const CKDWORD target = OverlayFrameBuffer();
+    const CKRECT rect = WindowRect();
+    if (!CanContinuePass(target, rect) && !OpenPass(target, rect, 0, 0, 1.0f, 0, "overlay"))
         return FALSE;
     m_Frame.Phase = CKTRANSLATED_FRAME_OVERLAY;
     UpdateTargetExtents();
@@ -367,7 +409,7 @@ CKBOOL CKTranslatedContext::BackToFront(CKBOOL VSync)
         if (!m_Target) {
             if (!CompositeScene()) {
                 frameSucceeded = FALSE;
-            } else if (PresentInternalTarget()) {
+            } else if (PresentInternalTarget(VSync ? CKRST_BACKEND_SYNC_VSYNC : CKRST_BACKEND_SYNC_IMMEDIATE)) {
                 m_Frame.NativePresented = m_Frame.InternalTargets;
             } else {
                 frameSucceeded = FALSE;

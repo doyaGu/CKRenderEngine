@@ -309,6 +309,15 @@ public:
     virtual CKERROR Draw(const CKBackendDraw *Draw) = 0;
     virtual CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                          CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect) = 0;
+    // Optional direct presentation path for a complete window-sized texture.
+    // CKERR_NOTIMPLEMENTED asks the translation layer to draw its portable
+    // fullscreen present pass instead. Sync is applied before acquiring the
+    // window image; the caller still submits with the same mode (or UNCHANGED).
+    virtual CKERROR PresentTexture(CKDWORD Texture, CKDWORD Width, CKDWORD Height,
+                                   CKBackendPresentSync Sync) {
+        (void)Texture; (void)Width; (void)Height; (void)Sync;
+        return CKERR_NOTIMPLEMENTED;
+    }
     // Submit recorded work. PresentWindow requests the recorded window image;
     // Sync independently controls presentation timing. The returned serial is
     // for statistics, never a GPU-completion guarantee. An adapter may keep

@@ -258,6 +258,7 @@ struct CKSdlGpuDevice {
     bool Ready() const { return Device && SDL_GetCurrentThreadID() == Thread && Error == CK_OK; }
     CKERROR Fail(const char *operation);
     bool EnsureCommands();
+    CKERROR AcquireSwapchain();
     CKERROR Flush(bool presentWindow = true);
     std::shared_ptr<SDL_GPUBuffer> UploadGeometry(const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage);
     CKERROR UploadBuffer(SDL_GPUBuffer *buffer, const void *data, unsigned size, bool cycle);
