@@ -150,6 +150,25 @@ def check(root):
         for path in sorted(foreign):
             errors.append(f"CMake: {module} compiles source outside its module: {path.relative_to(root)}")
 
+        if module in {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}:
+            shared, static = sorted(targets)
+            shared_cpp = {path for path in sources[shared] if path.suffix.lower() == ".cpp"}
+            static_cpp = {path for path in sources[static] if path.suffix.lower() == ".cpp"}
+            if shared_cpp != static_cpp:
+                errors.append(f"CMake: {module} shared and static targets compile different implementation sources")
+
+    internal_install_targets = {"CKFFPLib", "CKSdlGpuRasterizerStatic", "CKBgfxRasterizerStatic"}
+    runtime_providers = {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
+    for cmake in sorted(rasterizer.rglob("CMakeLists.txt")):
+        for command, values, line in commands(cmake.read_text(encoding="utf-8-sig")):
+            if command != "install" or not values or values[0].upper() != "TARGETS":
+                continue
+            installed = set(values[1:])
+            for target in sorted(installed & internal_install_targets):
+                errors.append(f"{cmake.relative_to(root)}:{line}: installs internal target {target}")
+            if installed & runtime_providers and any(value.upper() == "EXPORT" for value in values):
+                errors.append(f"{cmake.relative_to(root)}:{line}: exports a concrete rasterizer target")
+
     if "CKRasterizerLib" not in edges["CKFFPLib"]:
         errors.append("CMake: CKFFPLib must link CKRasterizerLib")
     for dependency in edges["CKRasterizerLib"]:
