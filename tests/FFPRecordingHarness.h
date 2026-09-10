@@ -6,7 +6,7 @@
 // (passes, draws with their state / textures / constants, presents, resource
 // traffic) and a few failure knobs.
 
-#include "CKNullRasterizer.h"
+#include "CKRecordingProvider.h"
 #include "CKFFShaderInterface.h"
 #include "CKTranslatedRasterizerInternal.h"
 #include "TestTriangleMultiset.h"
@@ -105,7 +105,7 @@ class FFPRecordingBackend;
 
 // Backend driver of the recording backends: the shader profile and the
 // framebuffer conventions the backends report.
-class FFPRecordingDriver : public CKNullBackendDriver {
+class FFPRecordingDriver : public CKRecordingBackendDriver {
 public:
     explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
                                 CKDWORD flags = 0,
@@ -131,7 +131,7 @@ public:
             out = CKBackendShaderSet();
             return FALSE;
         }
-        if (!CKNullRasterizerShaderSet(caps, out))
+        if (!CKRecordingShaderSet(caps, out))
             return FALSE;
         // Deliberately keep this fixture's artifact family independent from
         // its reported device format, so mismatch tests fail before creation.
@@ -147,15 +147,15 @@ public:
     CKBOOL DestroyBackend(CKRasterizerBackend *backend) override;
 
 protected:
-    CKNullBackend *NewBackend() override;
+    CKRecordingBackend *NewBackend() override;
 };
 
-class FFPRecordingBackend : public CKNullBackend {
+class FFPRecordingBackend : public CKRecordingBackend {
 public:
-    explicit FFPRecordingBackend(CKNullBackendDriver *driver)
-        : CKNullBackend(driver ? driver->GetBackendConventions() : CKBackendCaps()), TestProvider(driver) {}
+    explicit FFPRecordingBackend(CKRecordingBackendDriver *driver)
+        : CKRecordingBackend(driver ? driver->GetBackendConventions() : CKBackendCaps()), TestProvider(driver) {}
 
-    CKNullBackendDriver *TestProvider;
+    CKRecordingBackendDriver *TestProvider;
 
     // --- Knobs
     CKBOOL FailCreateProgram = FALSE;
@@ -163,7 +163,7 @@ public:
     CKBOOL RequireIntermediateTarget = FALSE;
     mutable CKBackendCaps ReportedCaps;
     const CKBackendCaps &GetCaps() const override {
-        ReportedCaps = CKNullBackend::GetCaps();
+        ReportedCaps = CKRecordingBackend::GetCaps();
         ReportedCaps.RequiresIntermediateTarget = RequireIntermediateTarget;
         if (RequireIntermediateTarget && !ReportedCaps.MaxTextureSize) ReportedCaps.MaxTextureSize = 4096;
         return ReportedCaps;
@@ -179,7 +179,7 @@ public:
     CKDWORD Height = 64;
 
     CKERROR Resize(int x, int y, int width, int height) override {
-        return FailResize ? CKERR_INVALIDOPERATION : CKNullBackend::Resize(x, y, width, height);
+        return FailResize ? CKERR_INVALIDOPERATION : CKRecordingBackend::Resize(x, y, width, height);
     }
 
     // --- Log
@@ -256,7 +256,7 @@ public:
 
     // --- Recording overrides
     CKERROR GetDeviceStatus() const override {
-        const CKERROR base = CKNullBackend::GetDeviceStatus();
+        const CKERROR base = CKRecordingBackend::GetDeviceStatus();
         return base != CK_OK ? base : DeviceStatus;
     }
     CKERROR CreateTexture(const CKTextureDesc *desc, const VxImageDescEx *data, CKDWORD *out) override {
@@ -267,7 +267,7 @@ public:
             if (out) *out = 0;
             return CKERR_INVALIDPARAMETER;
         }
-        const CKERROR result = CKNullBackend::CreateTexture(desc, data, out);
+        const CKERROR result = CKRecordingBackend::CreateTexture(desc, data, out);
         if (result == CK_OK) {
             LastCreatedTexture = *out;
             LiveHandles.insert(*out);
@@ -287,16 +287,16 @@ public:
             LastTextureUpdateDesc = *desc;
         if (FailUpdateTexture)
             return CKERR_INVALIDPARAMETER;
-        return CKNullBackend::UpdateTexture(texture, mip, face, region, desc);
+        return CKRecordingBackend::UpdateTexture(texture, mip, face, region, desc);
     }
     CKERROR CreateDepthTexture(const CKBackendDepthDesc *desc, CKDWORD *out) override {
-        const CKERROR result = CKNullBackend::CreateDepthTexture(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateDepthTexture(desc, out);
         if (result == CK_OK)
             LiveHandles.insert(*out);
         return result;
     }
     CKERROR CreateRenderTarget(const CKBackendRenderTargetDesc *desc, CKDWORD *out) override {
-        const CKERROR result = CKNullBackend::CreateRenderTarget(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateRenderTarget(desc, out);
         if (result == CK_OK) {
             LiveHandles.insert(*out);
             FrameBufferColorTexture[*out] = desc->ColorTexture;
@@ -304,7 +304,7 @@ public:
         return result;
     }
     CKERROR CreateBuffer(const CKBackendBufferDesc *desc, CKDWORD *out) override {
-        const CKERROR result = CKNullBackend::CreateBuffer(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateBuffer(desc, out);
         if (result == CK_OK)
             LiveHandles.insert(*out);
         return result;
@@ -315,7 +315,7 @@ public:
             for (CKDWORD i = 0; i < desc->ElementCount; ++i)
                 LastVertexLayoutElements.push_back(desc->Elements[i]);
         }
-        const CKERROR result = CKNullBackend::CreateVertexLayout(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateVertexLayout(desc, out);
         if (result == CK_OK)
             LiveHandles.insert(*out);
         return result;
@@ -330,7 +330,7 @@ public:
             LastPixelShaderCode = desc->Code;
             LastPixelShaderCodeSize = desc->CodeSize;
         }
-        const CKERROR result = CKNullBackend::CreateShader(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateShader(desc, out);
         if (result == CK_OK)
             LiveHandles.insert(*out);
         return result;
@@ -340,7 +340,7 @@ public:
             if (out) *out = 0;
             return CKERR_INVALIDPARAMETER;
         }
-        const CKERROR result = CKNullBackend::CreateProgram(desc, out);
+        const CKERROR result = CKRecordingBackend::CreateProgram(desc, out);
         if (result == CK_OK) {
             ++CreatedProgramCount;
             LastProgramInterface = *desc;
@@ -352,13 +352,13 @@ public:
         ++DeletedObjectCount;
         LastDeletedObject = object;
         LastDeletedObjectType = type;
-        const CKERROR result = CKNullBackend::DestroyObject(object, type);
+        const CKERROR result = CKRecordingBackend::DestroyObject(object, type);
         if (result == CK_OK)
             LiveHandles.erase(object);
         return result;
     }
     CKERROR BeginPass(const CKBackendPassDesc *desc) override {
-        const CKERROR result = CKNullBackend::BeginPass(desc);
+        const CKERROR result = CKRecordingBackend::BeginPass(desc);
         if (result != CK_OK)
             return result;
         const CKDWORD pass = GetCurrentPass();
@@ -375,7 +375,7 @@ public:
     CKBOOL AllocTransientVertices(CKDWORD count, CKDWORD layout, CKBackendTransientVertices *out) override {
         if (count > TransientVertexCapacity)
             return FALSE;
-        if (!CKNullBackend::AllocTransientVertices(count, layout, out))
+        if (!CKRecordingBackend::AllocTransientVertices(count, layout, out))
             return FALSE;
         ++TransientVertexAllocations;
         return TRUE;
@@ -383,14 +383,14 @@ public:
     CKBOOL AllocTransientIndices(CKDWORD count, CKBOOL index32, CKBackendTransientIndices *out) override {
         if (count > TransientIndexCapacity)
             return FALSE;
-        if (!CKNullBackend::AllocTransientIndices(count, index32, out))
+        if (!CKRecordingBackend::AllocTransientIndices(count, index32, out))
             return FALSE;
         ++TransientIndexAllocations;
         return TRUE;
     }
     CKERROR Draw(const CKBackendDraw *draw) override;
     CKERROR Submit(const CKBackendSubmitDesc &desc, CKDWORD *frameNumber) override {
-        const CKERROR result = CKNullBackend::Submit(desc, frameNumber);
+        const CKERROR result = CKRecordingBackend::Submit(desc, frameNumber);
         if (result != CK_OK)
             return result;
         ++FrameSerial;
@@ -398,7 +398,7 @@ public:
         return FrameResult;
     }
     CKERROR ReadTexture(CKDWORD texture, CKDWORD mip, CKReadbackDesc *desc, CKBackendReadbackTicket *ticket) override {
-        const CKERROR result = CKNullBackend::ReadTexture(texture, mip, desc, ticket);
+        const CKERROR result = CKRecordingBackend::ReadTexture(texture, mip, desc, ticket);
         if (result == CK_OK && ticket)
             ++ReadTextureCount;
         return result;
@@ -406,7 +406,7 @@ public:
 
 };
 
-inline CKNullBackend *FFPRecordingDriver::NewBackend()
+inline CKRecordingBackend *FFPRecordingDriver::NewBackend()
 {
     return new FFPRecordingBackend(this);
 }
@@ -414,11 +414,11 @@ inline CKNullBackend *FFPRecordingDriver::NewBackend()
 inline CKBOOL FFPRecordingDriver::DestroyBackend(CKRasterizerBackend *backend)
 {
     if (!ForceDestroyBusy)
-        return CKNullBackendDriver::DestroyBackend(backend);
+        return CKRecordingBackendDriver::DestroyBackend(backend);
     FFPRecordingBackend *recording = static_cast<FFPRecordingBackend *>(backend);
     const CKBOOL wasForcedBusy = recording->ForceNotIdle;
     recording->ForceNotIdle = FALSE;
-    const CKBOOL result = CKNullBackendDriver::DestroyBackend(backend);
+    const CKBOOL result = CKRecordingBackendDriver::DestroyBackend(backend);
     if (!result)
         recording->ForceNotIdle = wasForcedBusy;
     return result;
@@ -499,7 +499,7 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
     }
 
     const CKDWORD pass = GetCurrentPass();
-    const CKERROR result = CKNullBackend::Draw(draw);
+    const CKERROR result = CKRecordingBackend::Draw(draw);
     if (result != CK_OK) {
         ++Log.DiscardCount;
         return result;
@@ -541,9 +541,9 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
 // Recording backend behind the v3 translation core
 // ===========================================================================
 
-class FFPRecordingLibrary : public CKNullBackendLibrary {
+class FFPRecordingLibrary : public CKRecordingBackendLibrary {
 protected:
-    CKNullBackendDriver *NewDriver() override { return new FFPRecordingDriver(); }
+    CKRecordingBackendDriver *NewDriver() override { return new FFPRecordingDriver(); }
 };
 
 // A started translated rasterizer over the recording backend. Add texture

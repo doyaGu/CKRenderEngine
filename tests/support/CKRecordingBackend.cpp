@@ -1,13 +1,13 @@
-#include "CKNullBackend.h"
+#include "CKRecordingBackend.h"
 
 #include <stdio.h>
 #include <string.h>
 
 // ===========================================================================
-// CKNullBackend
+// CKRecordingBackend
 // ===========================================================================
 
-CKNullBackend::CKNullBackend(const CKBackendCaps &Conventions)
+CKRecordingBackend::CKRecordingBackend(const CKBackendCaps &Conventions)
     : m_Conventions(Conventions), m_Initialized(FALSE), m_ShuttingDown(FALSE), m_DebugFlags(0), m_PosX(0), m_PosY(0),
       m_Width(0), m_Height(0), m_FrameNumber(0), m_NextHandle(1), m_PassOpen(FALSE), m_FrameBlits(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0)
@@ -16,12 +16,12 @@ CKNullBackend::CKNullBackend(const CKBackendCaps &Conventions)
     memset(m_Samplers, 0, sizeof(m_Samplers));
 }
 
-CKNullBackend::~CKNullBackend()
+CKRecordingBackend::~CKRecordingBackend()
 {
     Shutdown();
 }
 
-CKERROR CKNullBackend::Init(const CKBackendInitDesc *Desc)
+CKERROR CKRecordingBackend::Init(const CKBackendInitDesc *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -42,7 +42,7 @@ CKERROR CKNullBackend::Init(const CKBackendInitDesc *Desc)
         }
     }
     if (!targetAllowed) {
-        fprintf(stderr, "CKNullBackend: shader target format=%u profile=%u is absent from InitDesc.ShaderTargets\n",
+        fprintf(stderr, "CKRecordingBackend: shader target format=%u profile=%u is absent from InitDesc.ShaderTargets\n",
                 (unsigned)shaderFormat, (unsigned)shaderProfile);
         return CKERR_NOTIMPLEMENTED;
     }
@@ -73,7 +73,7 @@ CKERROR CKNullBackend::Init(const CKBackendInitDesc *Desc)
     return CK_OK;
 }
 
-void CKNullBackend::Shutdown()
+void CKRecordingBackend::Shutdown()
 {
     for (auto &ticket : m_Readbacks) ticket->Error = CKERR_INVALIDOPERATION;
     m_Readbacks.clear();
@@ -93,7 +93,7 @@ void CKNullBackend::Shutdown()
     memset(m_Samplers, 0, sizeof(m_Samplers));
 }
 
-CKERROR CKNullBackend::Resize(int PosX, int PosY, int Width, int Height)
+CKERROR CKRecordingBackend::Resize(int PosX, int PosY, int Width, int Height)
 {
     if (!m_Initialized || m_PassOpen)
         return CKERR_INVALIDOPERATION;
@@ -106,14 +106,14 @@ CKERROR CKNullBackend::Resize(int PosX, int PosY, int Width, int Height)
     return CK_OK;
 }
 
-CKERROR CKNullBackend::GetDeviceStatus() const
+CKERROR CKRecordingBackend::GetDeviceStatus() const
 {
     if (!m_Initialized)
         return m_ShuttingDown ? CKERR_INVALIDOPERATION : CKERR_INVALIDRENDERCONTEXT;
     return CK_OK;
 }
 
-CKBOOL CKNullBackend::IsIdle() const
+CKBOOL CKRecordingBackend::IsIdle() const
 {
     return !m_PassOpen;
 }
@@ -122,35 +122,35 @@ CKBOOL CKNullBackend::IsIdle() const
 // Objects
 // ---------------------------------------------------------------------------
 
-CKDWORD CKNullBackend::AllocateHandle(const CKNullObject &Object)
+CKDWORD CKRecordingBackend::AllocateHandle(const CKRecordingObject &Object)
 {
     const CKDWORD handle = m_NextHandle++;
     m_Objects[handle] = Object;
     return handle;
 }
 
-CKNullObject *CKNullBackend::FindObject(CKDWORD Handle)
+CKRecordingObject *CKRecordingBackend::FindObject(CKDWORD Handle)
 {
-    std::unordered_map<CKDWORD, CKNullObject>::iterator it = m_Objects.find(Handle);
+    std::unordered_map<CKDWORD, CKRecordingObject>::iterator it = m_Objects.find(Handle);
     return it == m_Objects.end() ? NULL : &it->second;
 }
 
-const CKNullObject *CKNullBackend::FindObject(CKDWORD Handle) const
+const CKRecordingObject *CKRecordingBackend::FindObject(CKDWORD Handle) const
 {
-    std::unordered_map<CKDWORD, CKNullObject>::const_iterator it = m_Objects.find(Handle);
+    std::unordered_map<CKDWORD, CKRecordingObject>::const_iterator it = m_Objects.find(Handle);
     return it == m_Objects.end() ? NULL : &it->second;
 }
 
-int CKNullBackend::GetObjectCount(CKDWORD TypeMask) const
+int CKRecordingBackend::GetObjectCount(CKDWORD TypeMask) const
 {
     int count = 0;
-    for (std::unordered_map<CKDWORD, CKNullObject>::const_iterator it = m_Objects.begin(); it != m_Objects.end(); ++it)
+    for (std::unordered_map<CKDWORD, CKRecordingObject>::const_iterator it = m_Objects.begin(); it != m_Objects.end(); ++it)
         if (it->second.Type & TypeMask)
             ++count;
     return count;
 }
 
-CKERROR CKNullBackend::CreateTexture(const CKTextureDesc *Desc, const VxImageDescEx *Data, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateTexture(const CKTextureDesc *Desc, const VxImageDescEx *Data, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -159,7 +159,7 @@ CKERROR CKNullBackend::CreateTexture(const CKTextureDesc *Desc, const VxImageDes
         return CKERR_INVALIDOPERATION;
     if (!Desc || Desc->Format.Width <= 0 || Desc->Format.Height <= 0 || (Desc->Flags & CKRST_TEXTURE_DEPTHSTENCIL))
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_TEXTURE;
     object.Width = (CKDWORD)Desc->Format.Width;
     object.Height = (CKDWORD)Desc->Format.Height;
@@ -172,7 +172,7 @@ CKERROR CKNullBackend::CreateTexture(const CKTextureDesc *Desc, const VxImageDes
     return CK_OK;
 }
 
-CKERROR CKNullBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face, const CKRECT *Region,
+CKERROR CKRecordingBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face, const CKRECT *Region,
                                      const VxImageDescEx *Data)
 {
     (void)Mip;
@@ -180,14 +180,14 @@ CKERROR CKNullBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face,
     (void)Region;
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    const CKNullObject *object = FindObject(Texture);
+    const CKRecordingObject *object = FindObject(Texture);
     if (!object || object->Type != CKRST_OBJ_TEXTURE || !Data || !Data->Image)
         return CKERR_INVALIDPARAMETER;
     ++m_FrameTextureUploads;
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -196,7 +196,7 @@ CKERROR CKNullBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWOR
         return CKERR_INVALIDOPERATION;
     if (!Desc || Desc->Width == 0 || Desc->Height == 0)
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_TEXTURE;
     object.Width = Desc->Width;
     object.Height = Desc->Height;
@@ -205,7 +205,7 @@ CKERROR CKNullBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWOR
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -214,22 +214,22 @@ CKERROR CKNullBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc,
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    const CKNullObject *color = FindObject(Desc->ColorTexture);
+    const CKRecordingObject *color = FindObject(Desc->ColorTexture);
     if (!color || color->Type != CKRST_OBJ_TEXTURE || (color->Flags & CKRST_TEXTURE_RENDERTARGET) == 0)
         return CKERR_INVALIDPARAMETER;
     if (Desc->DepthTexture) {
-        const CKNullObject *depth = FindObject(Desc->DepthTexture);
+        const CKRecordingObject *depth = FindObject(Desc->DepthTexture);
         if (!depth || depth->Type != CKRST_OBJ_TEXTURE || (depth->Flags & CKRST_TEXTURE_DEPTHSTENCIL) == 0)
             return CKERR_INVALIDPARAMETER;
     }
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_RENDERTARGET;
     object.Target = *Desc;
     *Out = AllocateHandle(object);
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -238,7 +238,7 @@ CKERROR CKNullBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
         return CKERR_INVALIDOPERATION;
     if (!Desc || Desc->Size == 0)
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     if (Desc->Kind == CKRST_BACKEND_BUFFER_VERTEX) {
         if (Desc->Stride == 0 || (Desc->Size % Desc->Stride) != 0)
             return CKERR_INVALIDPARAMETER;
@@ -262,14 +262,14 @@ CKERROR CKNullBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
     return CK_OK;
 }
 
-CKERROR CKNullBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
+CKERROR CKRecordingBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
                                     CKDWORD Size, const void *Data)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
     if (Kind != CKRST_BACKEND_BUFFER_VERTEX && Kind != CKRST_BACKEND_BUFFER_INDEX)
         return CKERR_INVALIDPARAMETER;
-    const CKNullObject *object = FindObject(Buffer);
+    const CKRecordingObject *object = FindObject(Buffer);
     const CKDWORD expectedType = Kind == CKRST_BACKEND_BUFFER_VERTEX
         ? CKRST_OBJ_VERTEXBUFFER : CKRST_OBJ_INDEXBUFFER;
     if (!object || object->Type != expectedType || !Data ||
@@ -279,7 +279,7 @@ CKERROR CKNullBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CK
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -288,14 +288,14 @@ CKERROR CKNullBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWOR
         return CKERR_INVALIDOPERATION;
     if (!Desc || Desc->Stride == 0 || Desc->ElementCount == 0 || !Desc->Elements)
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_VERTEXLAYOUT;
     object.Stride = Desc->Stride;
     *Out = AllocateHandle(object);
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -306,7 +306,7 @@ CKERROR CKNullBackend::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out)
         Desc->Format != m_Caps.ShaderFormat || Desc->Profile != m_Caps.ShaderProfile ||
         (Desc->Stage != CKRST_SHADER_VERTEX && Desc->Stage != CKRST_SHADER_PIXEL))
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_SHADER;
     object.Stage = Desc->Stage;
     object.Shader = *Desc;
@@ -315,7 +315,7 @@ CKERROR CKNullBackend::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out)
     return CK_OK;
 }
 
-CKERROR CKNullBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -324,12 +324,12 @@ CKERROR CKNullBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    const CKNullObject *vs = FindObject(Desc->VertexShader);
-    const CKNullObject *ps = FindObject(Desc->PixelShader);
+    const CKRecordingObject *vs = FindObject(Desc->VertexShader);
+    const CKRecordingObject *ps = FindObject(Desc->PixelShader);
     if (!vs || !ps || vs->Type != CKRST_OBJ_SHADER || ps->Type != CKRST_OBJ_SHADER ||
         CKValidateBackendProgram(*Desc, vs->Shader, ps->Shader) != CK_OK)
         return CKERR_INVALIDPARAMETER;
-    CKNullObject object;
+    CKRecordingObject object;
     object.Type = CKRST_OBJ_PROGRAM;
     object.VertexShader = Desc->VertexShader;
     object.PixelShader = Desc->PixelShader;
@@ -338,24 +338,24 @@ CKERROR CKNullBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *
     return CK_OK;
 }
 
-CKBOOL CKNullBackend::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
+CKBOOL CKRecordingBackend::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
 {
-    const CKNullObject *object = FindObject(Object);
+    const CKRecordingObject *object = FindObject(Object);
     return object && (object->Type & Type) != 0 ? TRUE : FALSE;
 }
 
-CKERROR CKNullBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
+CKERROR CKRecordingBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    std::unordered_map<CKDWORD, CKNullObject>::iterator it = m_Objects.find(Object);
+    std::unordered_map<CKDWORD, CKRecordingObject>::iterator it = m_Objects.find(Object);
     if (it == m_Objects.end() || (it->second.Type & Type) == 0)
         return CKERR_INVALIDPARAMETER;
     m_Objects.erase(it);
     return CK_OK;
 }
 
-void CKNullBackend::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name)
+void CKRecordingBackend::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name)
 {
     (void)Object;
     (void)Type;
@@ -366,7 +366,7 @@ void CKNullBackend::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name
 // Frame
 // ---------------------------------------------------------------------------
 
-CKERROR CKNullBackend::BeginPass(const CKBackendPassDesc *Desc)
+CKERROR CKRecordingBackend::BeginPass(const CKBackendPassDesc *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -376,11 +376,11 @@ CKERROR CKNullBackend::BeginPass(const CKBackendPassDesc *Desc)
         Desc->Rect.top < 0)
         return CKERR_INVALIDPARAMETER;
     if (Desc->RenderTarget != 0) {
-        const CKNullObject *target = FindObject(Desc->RenderTarget);
+        const CKRecordingObject *target = FindObject(Desc->RenderTarget);
         if (!target || target->Type != CKRST_OBJ_RENDERTARGET)
             return CKERR_INVALIDPARAMETER;
     }
-    CKNullPass pass;
+    CKRecordingPass pass;
     pass.RenderTarget = Desc->RenderTarget;
     pass.Rect = Desc->Rect;
     pass.ClearFlags = Desc->ClearFlags;
@@ -395,12 +395,12 @@ CKERROR CKNullBackend::BeginPass(const CKBackendPassDesc *Desc)
     return CK_OK;
 }
 
-CKBOOL CKNullBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
+CKBOOL CKRecordingBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
 {
     if (!Out || Count == 0 || !m_Initialized)
         return FALSE;
     *Out = CKBackendTransientVertices();
-    const CKNullObject *layout = FindObject(Layout);
+    const CKRecordingObject *layout = FindObject(Layout);
     if (!layout || layout->Type != CKRST_OBJ_VERTEXLAYOUT || layout->Stride == 0)
         return FALSE;
     m_TransientVertices.push_back(std::vector<CKBYTE>((size_t)Count * layout->Stride, 0));
@@ -412,7 +412,7 @@ CKBOOL CKNullBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBa
     return TRUE;
 }
 
-CKBOOL CKNullBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out)
+CKBOOL CKRecordingBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out)
 {
     if (!Out || Count == 0 || !m_Initialized)
         return FALSE;
@@ -425,13 +425,13 @@ CKBOOL CKNullBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBac
     return TRUE;
 }
 
-CKERROR CKNullBackend::Draw(const CKBackendDraw *Draw)
+CKERROR CKRecordingBackend::Draw(const CKBackendDraw *Draw)
 {
     if (!Draw || !Draw->Program)
         return CKERR_INVALIDPARAMETER;
     if (!m_Initialized || !m_PassOpen)
         return CKERR_INVALIDOPERATION;
-    const CKNullObject *program = FindObject(Draw->Program);
+    const CKRecordingObject *program = FindObject(Draw->Program);
     if (!program || program->Type != CKRST_OBJ_PROGRAM)
         return CKERR_INVALIDPARAMETER;
     // Buffer handles are not checked: the pipeline tests draw with bare
@@ -456,7 +456,7 @@ CKERROR CKNullBackend::Draw(const CKBackendDraw *Draw)
         if (Draw->Constants) m_Constants[slot] = (*Draw->Constants)[slot].Bytes;
         else m_Constants[slot].clear();
     }
-    CKNullDraw record;
+    CKRecordingDraw record;
     record.Pass = GetCurrentPass();
     record.Program = Draw->Program;
     record.VertexCount = Draw->VertexCount;
@@ -470,7 +470,7 @@ CKERROR CKNullBackend::Draw(const CKBackendDraw *Draw)
     return CK_OK;
 }
 
-CKERROR CKNullBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
+CKERROR CKRecordingBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                             CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect)
 {
     (void)DstMip;
@@ -478,8 +478,8 @@ CKERROR CKNullBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
     (void)SrcRect;
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    const CKNullObject *dst = FindObject(DstTexture);
-    const CKNullObject *src = FindObject(SrcTexture);
+    const CKRecordingObject *dst = FindObject(DstTexture);
+    const CKRecordingObject *src = FindObject(SrcTexture);
     if (!dst || !src || dst->Type != CKRST_OBJ_TEXTURE || src->Type != CKRST_OBJ_TEXTURE)
         return CKERR_INVALIDPARAMETER;
     const CKDWORD dstLayers = (dst->Flags & CKRST_TEXTURE_CUBEMAP) ? 6 : dst->Depth;
@@ -492,7 +492,7 @@ CKERROR CKNullBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer
     return CK_OK;
 }
 
-CKERROR CKNullBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
+CKERROR CKRecordingBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
 {
     const CKBackendPresentSync Mode = Desc.Sync;
     if (FrameNumber)
@@ -525,13 +525,13 @@ CKERROR CKNullBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
 
 // Readbacks deliver a zero-filled ARGB image of the texture size, available
 // after the next Present().
-CKERROR CKNullBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket)
+CKERROR CKRecordingBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
     if (!Readback)
         return CKERR_INVALIDPARAMETER;
-    const CKNullObject *object = FindObject(Texture);
+    const CKRecordingObject *object = FindObject(Texture);
     if (!object || object->Type != CKRST_OBJ_TEXTURE)
         return CKERR_INVALIDPARAMETER;
     if ((object->Flags & CKRST_TEXTURE_READBACK) == 0)
@@ -546,7 +546,7 @@ CKERROR CKNullBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc 
     Readback->RequiredSize = Readback->RowPitch * height;
     if (!Ticket)
         return CK_OK;
-    auto pending = std::make_shared<CKNullBackend::Readback>();
+    auto pending = std::make_shared<CKRecordingBackend::Readback>();
     pending->Data.resize(Readback->RequiredSize, 0);
     pending->AvailableFrame = m_FrameNumber + 1;
     m_Readbacks.push_back(pending);

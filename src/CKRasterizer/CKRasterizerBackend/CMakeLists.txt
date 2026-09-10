@@ -1,5 +1,5 @@
-# Generic resources, program interfaces, command contracts and the NULL device.
-# This target has no fixed-function translation or plugin composition dependency.
+# Generic resources and program interfaces used by translated rasterizers.
+# Test recorders and the direct NULL rasterizer live outside this target.
 add_library(CKRasterizerBackend STATIC
         CKRasterizerBackend.h
         CKRasterizerBackendEnums.h
@@ -10,8 +10,6 @@ add_library(CKRasterizerBackend STATIC
         CKBackendProgram.cpp
         CKBackendProgramLayout.h
         CKBackendProgramLayout.cpp
-        CKNullBackend.h
-        CKNullBackend.cpp
 )
 target_compile_features(CKRasterizerBackend PUBLIC cxx_std_17)
 target_include_directories(CKRasterizerBackend PUBLIC

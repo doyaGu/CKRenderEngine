@@ -27,6 +27,7 @@ function(ckre_configure_test_target TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
         CKRasterizerLib
+        ckre_recording_support
         ${_ckre_test_rasterizer_deps}
         ${_ckre_test_ck2_dep}
         ${_ckre_test_vxmath_dep}
@@ -43,6 +44,22 @@ function(ckre_configure_test_target TARGET_NAME)
     )
     ckre_copy_runtime_dependencies(${TARGET_NAME})
 endfunction()
+
+# The recording backend is test infrastructure, not a production rasterizer.
+# Keeping it in a private test library prevents it from becoming an installed
+# backend or an accidental fallback implementation.
+add_library(ckre_recording_support STATIC
+    support/CKRecordingBackend.cpp
+    support/CKRecordingProvider.cpp
+)
+target_include_directories(ckre_recording_support PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/support
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerBackend
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
+)
+target_link_libraries(ckre_recording_support PUBLIC CKRasterizerLib)
+target_compile_features(ckre_recording_support PRIVATE cxx_std_20)
+set_target_properties(ckre_recording_support PROPERTIES FOLDER "Tests/Support")
 
 function(ckre_add_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
@@ -97,7 +114,7 @@ function(ckre_add_rasterizer3_test TARGET_NAME)
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
     )
-    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
+    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib ckre_recording_support)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
         FOLDER "Tests"
@@ -106,6 +123,16 @@ function(ckre_add_rasterizer3_test TARGET_NAME)
     add_test(NAME ${TARGET_NAME} COMMAND $<TARGET_FILE:${TARGET_NAME}>)
     set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
 endfunction()
+
+add_executable(test_recording_backend test_recording_backend.cpp)
+target_link_libraries(test_recording_backend PRIVATE ckre_recording_support)
+set_target_properties(test_recording_backend PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    FOLDER "Tests"
+)
+ckre_copy_runtime_dependencies(test_recording_backend)
+add_test(NAME RecordingBackendTests COMMAND $<TARGET_FILE:test_recording_backend>)
+set_tests_properties(RecordingBackendTests PROPERTIES TIMEOUT 60)
 
 ckre_add_rasterizer3_test(rasterizer3_contract_tests
     test_rasterizer3_contract.cpp

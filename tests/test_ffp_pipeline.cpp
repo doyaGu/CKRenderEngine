@@ -138,7 +138,7 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
 
 void NullRasterizerSupportsHeadlessFFP()
 {
-    CKNullBackendLibrary library;
+    CKRecordingBackendLibrary library;
     TestCheck(library.Start(NULL) && library.GetDriverCount() == 1,
               "Null backend library must expose its headless driver");
     CKRasterizerBackendDriver *driver = library.GetDriver(0);

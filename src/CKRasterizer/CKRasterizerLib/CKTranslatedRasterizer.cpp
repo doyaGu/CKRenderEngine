@@ -1,6 +1,4 @@
 #include "CKTranslatedRasterizerInternal.h"
-#include "CKNullRasterizer.h"
-#include "CKRasterizerRegistration.h"
 
 #include <new>
 
@@ -155,38 +153,4 @@ CKRasterizer *CKTranslatedRasterizerStart(CKRasterizerBackendLibrary *Library,
 void CKTranslatedRasterizerClose(CKRasterizer *Rasterizer)
 {
     delete Rasterizer;
-}
-
-CKRasterizer *CKTranslatedNullRasterizerStart(WIN_HANDLE AppWnd)
-{
-    CKNullBackendLibrary *library = new (std::nothrow) CKNullBackendLibrary();
-    if (!library)
-        return NULL;
-    if (!library->Start(AppWnd)) {
-        delete library;
-        return NULL;
-    }
-    return CKTranslatedRasterizerStart(library, NULL);
-}
-
-void CKTranslatedNullRasterizerClose(CKRasterizer *Rasterizer)
-{
-    CKTranslatedRasterizerClose(Rasterizer);
-}
-
-void CKTranslatedNullRasterizerGetInfo(CKRasterizerInfo *Info)
-{
-    if (!Info)
-        return;
-    Info->DllName = "CK2_3D";
-    Info->Desc = "NULL Rasterizer (translation core)";
-    Info->DllInstance = NULL;
-    Info->StartFct = CKTranslatedNullRasterizerStart;
-    Info->CloseFct = CKTranslatedNullRasterizerClose;
-    Info->InterfaceRevision = CKRST_INTERFACE_REVISION;
-}
-
-void CKNullRasterizerGetInfo(CKRasterizerInfo *Info)
-{
-    CKTranslatedNullRasterizerGetInfo(Info);
 }

@@ -3,7 +3,7 @@
 // description (baseline caps, display modes), the frame protocol and the
 // handle table.
 
-#include "CKNullRasterizer.h"
+#include "CKRecordingProvider.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +11,7 @@
 
 static int Fail(const char *what)
 {
-    fprintf(stderr, "test_null_rasterizer: %s\n", what);
+    fprintf(stderr, "test_recording_backend: %s\n", what);
     return EXIT_FAILURE;
 }
 
@@ -41,7 +41,7 @@ static int TestBackendShaderTargets()
         CKBackendCaps conventions;
         conventions.ShaderFormat = selected.Format;
         conventions.ShaderProfile = selected.Profile;
-        CKNullBackend backend(conventions);
+        CKRecordingBackend backend(conventions);
         CKBackendInitDesc init;
         init.Width = init.Height = 16;
         if (backend.Init(&init) != CK_OK || backend.GetCaps().ShaderFormat != selected.Format ||
@@ -82,7 +82,7 @@ static int TestBackendShaderTargets()
 
 static int TestGenericBackend()
 {
-    CKNullBackend backend;
+    CKRecordingBackend backend;
     CKBackendInitDesc init;
     init.Width = init.Height = 16;
     if (backend.Init(&init) != CK_OK)
@@ -136,10 +136,10 @@ static int TestGenericBackend()
     CKDWORD rejected = 123;
     programDesc.Samplers[0].NativeSlot = 1;
     if (backend.CreateProgram(&programDesc, &rejected) != CKERR_INVALIDPARAMETER || rejected != 0)
-        return Fail("NULL backend validates program resource declarations");
+        return Fail("recording backend validates program resource declarations");
     programDesc.Uniforms.clear();
     programDesc.Samplers.clear();
-    const CKNullObject *record = static_cast<const CKNullBackend &>(backend).FindObject(program);
+    const CKRecordingObject *record = static_cast<const CKRecordingBackend &>(backend).FindObject(program);
     if (!record || record->Program.Uniforms.size() != 1 || record->Program.Samplers.size() != 1 ||
         record->Program.Uniforms[0].Name != "u_customData" || record->Program.Samplers[0].NativeSlot != 0)
         return Fail("program keeps an owned resource declaration");
@@ -165,7 +165,7 @@ static int TestGenericBackend()
 
 static int TestConfiguredProvider()
 {
-    CKNullBackendDriver driver;
+    CKRecordingBackendDriver driver;
     driver.Format = CKRST_SHADER_FORMAT_SPIRV;
     driver.Profile = CKRST_SHADER_PROFILE_SPIRV;
     driver.OriginBottomLeft = TRUE;
@@ -200,7 +200,7 @@ int main()
     if (TestBackendShaderTargets() != EXIT_SUCCESS || TestGenericBackend() != EXIT_SUCCESS ||
         TestConfiguredProvider() != EXIT_SUCCESS)
         return EXIT_FAILURE;
-    CKNullBackendLibrary library;
+    CKRecordingBackendLibrary library;
     if (library.GetDriverCount() != 0 || !library.Start(NULL))
         return Fail("library start");
     if (library.GetDriverCount() != 1 || !library.Start(NULL) || library.GetDriverCount() != 1)

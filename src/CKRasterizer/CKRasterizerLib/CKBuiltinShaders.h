@@ -43,8 +43,4 @@ struct CKBackendShaderSet {
     }
 };
 
-// The NULL rasterizer supplies its own descriptors for deterministic tests.
-CKBOOL CKNullRasterizerShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out);
-void CKNullRasterizerShaderTargets(std::vector<CKBackendShaderTarget> &out);
-
 #endif

@@ -1,21 +1,20 @@
-#ifndef CKNULLBACKEND_H
-#define CKNULLBACKEND_H
+#ifndef CKRECORDINGBACKEND_H
+#define CKRECORDINGBACKEND_H
 
-// NULL backend: a generic resource and command recorder that draws nothing.
-// The NULL rasterizer composes it with the fallback driver and shader catalog;
-// tests can also construct it without a plugin or a fixed-function pipeline.
+// Test-only resource and command recorder. It draws nothing and lets FFP tests
+// inspect emitted resources, passes, bindings, constants, and draw commands.
 //
 // Objects are handle-table entries (never reused), constant blocks keep the
 // last pushed bytes, passes and draws of the current frame are recorded until
 // Submit(), and readbacks deliver a zero image. Shader blobs are nominal;
-// program interfaces obey the same contract as native backends.
+// program interfaces follow the same validation rules as native backends.
 
 #include "CKRasterizerBackend.h"
 
 #include <unordered_map>
 #include <vector>
 
-struct CKNullObject {
+struct CKRecordingObject {
     CKDWORD Type;                  // CKRST_OBJ_*
     CKDWORD Width, Height, Depth;  // textures
     CKDWORD Flags;                 // textures: CKRST_TEXTURE_*
@@ -28,12 +27,12 @@ struct CKNullObject {
     CKBackendProgramDesc Program;
     CKBackendRenderTargetDesc Target;
 
-    CKNullObject()
+    CKRecordingObject()
         : Type(0), Width(0), Height(0), Depth(1), Flags(0), Format(UNKNOWN_PF), Size(0), Stride(0), Layout(0),
           Index32(FALSE), Stage(CKRST_SHADER_VERTEX), VertexShader(0), PixelShader(0) {}
 };
 
-struct CKNullPass {
+struct CKRecordingPass {
     CKDWORD RenderTarget;
     CKRECT Rect;
     CKDWORD ClearFlags;
@@ -43,7 +42,7 @@ struct CKNullPass {
     XString Name;
 };
 
-struct CKNullDraw {
+struct CKRecordingDraw {
     CKDWORD Pass;                  // index into the frame's passes
     CKDWORD Program;
     CKDWORD VertexCount;
@@ -55,13 +54,13 @@ struct CKNullDraw {
 };
 
 // ===========================================================================
-// CKNullBackend
+// CKRecordingBackend
 // ===========================================================================
 
-class CKNullBackend : public CKRasterizerBackend {
+class CKRecordingBackend : public CKRasterizerBackend {
 public:
-    explicit CKNullBackend(const CKBackendCaps &Conventions = CKBackendCaps());
-    ~CKNullBackend() override;
+    explicit CKRecordingBackend(const CKBackendCaps &Conventions = CKBackendCaps());
+    ~CKRecordingBackend() override;
 
     // --- Device
     CKERROR Init(const CKBackendInitDesc *Desc) override;
@@ -104,8 +103,8 @@ public:
     const CKBackendStats &GetStats() const override { return m_Stats; }
 
     // --- Records (this frame; cleared by Present)
-    const std::vector<CKNullPass> &GetPasses() const { return m_Passes; }
-    const std::vector<CKNullDraw> &GetDraws() const { return m_Draws; }
+    const std::vector<CKRecordingPass> &GetPasses() const { return m_Passes; }
+    const std::vector<CKRecordingDraw> &GetDraws() const { return m_Draws; }
     CKDWORD GetCurrentPass() const { return m_Passes.empty() ? 0 : (CKDWORD)m_Passes.size() - 1; }
     CKBOOL IsPassOpen() const { return m_PassOpen; }
     CKDWORD GetFrameNumber() const { return m_FrameNumber; }
@@ -115,15 +114,15 @@ public:
         static const std::vector<CKBYTE> empty;
         return Slot < CKBACKEND_MAX_CONSTANT_SLOTS ? m_Constants[Slot] : empty;
     }
-    const CKNullObject *FindObject(CKDWORD Handle) const;
+    const CKRecordingObject *FindObject(CKDWORD Handle) const;
     int GetObjectCount(CKDWORD TypeMask) const;
     // Pseudo uniform handles the tests key their expectations on.
     CKDWORD GetBlockUniformForTests(CKDWORD Slot) const { return Slot < CKBACKEND_MAX_CONSTANT_SLOTS ? 1 + Slot : 0; }
     CKDWORD GetSamplerUniformForTests(CKDWORD Slot) const { return Slot < CKBACKEND_MAX_TEXTURE_SLOTS ? 100 + Slot : 0; }
 
 protected:
-    CKDWORD AllocateHandle(const CKNullObject &Object);
-    CKNullObject *FindObject(CKDWORD Handle);
+    CKDWORD AllocateHandle(const CKRecordingObject &Object);
+    CKRecordingObject *FindObject(CKDWORD Handle);
 
     CKBackendCaps m_Conventions;
     struct Readback : CKBackendReadback { CKDWORD AvailableFrame = 0; };
@@ -137,12 +136,12 @@ protected:
     CKDWORD m_Width, m_Height;
     CKDWORD m_FrameNumber;
     CKDWORD m_NextHandle;
-    std::unordered_map<CKDWORD, CKNullObject> m_Objects;
+    std::unordered_map<CKDWORD, CKRecordingObject> m_Objects;
 
     // Frame
     CKBOOL m_PassOpen;
-    std::vector<CKNullPass> m_Passes;
-    std::vector<CKNullDraw> m_Draws;
+    std::vector<CKRecordingPass> m_Passes;
+    std::vector<CKRecordingDraw> m_Draws;
     CKDWORD m_FrameBlits, m_FrameTextureUploads, m_FrameBufferUploads;
     CKBackendPipelineState m_State;
     CKDWORD m_Textures[CKBACKEND_MAX_TEXTURE_SLOTS];
@@ -153,4 +152,4 @@ protected:
     std::vector<std::vector<CKBYTE> > m_TransientIndices;
 };
 
-#endif // CKNULLBACKEND_H
+#endif // CKRECORDINGBACKEND_H

@@ -1,16 +1,17 @@
-// CKRasterizer v3 contract conformance tests (spec 7.2).
+// CKRasterizer v3 interface conformance tests (spec 7.2).
 //
 // The translation core (CKTranslatedRasterizer / Driver / Context in
 // CKRasterizerLib) is driven exclusively through the public contract in
 // include/CKRasterizer.h. The backend below it is the recording backend of
 // FFPRecordingHarness.h: its log is what the tests inspect (draw order, pass
 // splitting, clear rectangles, targets, presents, readbacks). The built-in
-// NULL backend is checked separately for the capability baseline.
+// direct NULL implementation is checked separately for the capability baseline.
 
 #include <stdio.h>
 #include <string.h>
 
 #include "CKTranslatedRasterizerInternal.h"
+#include "CKNullRasterizer.h"
 #include "CKRasterizerCapsBaseline.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
@@ -236,7 +237,7 @@ void TestResizeFlags()
 void TestNullBackendDriverCaps()
 {
     CKRasterizerInfo info;
-    CKTranslatedNullRasterizerGetInfo(&info);
+    CKNullRasterizerGetInfo(&info);
     TestCheck(info.InterfaceRevision == CKRST_INTERFACE_REVISION, "interface revision");
     TestCheck(info.StartFct != NULL && info.CloseFct != NULL, "entry points");
 
