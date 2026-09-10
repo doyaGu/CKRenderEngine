@@ -365,9 +365,7 @@ CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD h
         !width || !height || width > source->Info.width || height > source->Info.height)
         return CKERR_INVALIDPARAMETER;
 
-    if (sync != CKRST_BACKEND_SYNC_UNCHANGED && sync != CKRST_BACKEND_SYNC_VSYNC &&
-        sync != CKRST_BACKEND_SYNC_IMMEDIATE)
-        return CKERR_INVALIDPARAMETER;
+    if (!CKSdlGpuValidPresentSync(sync)) return CKERR_INVALIDPARAMETER;
 
     // Finish the native-target scene pass, then let SDL encode its dedicated
     // blit straight to the acquired swapchain image. This keeps the portable
@@ -392,13 +390,31 @@ CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD h
     ++m->FrameStats.Passes;
     ++m->FrameStats.Blits;
     if (m->Swapchain) {
-        SDL_GPUBlitInfo blit = {};
-        blit.source = {source->Image.get(), 0, 0, 0, 0, width, height};
-        blit.destination = {m->Swapchain, 0, 0, 0, 0, m->SwapWidth, m->SwapHeight};
-        blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-        blit.flip_mode = SDL_FLIP_NONE;
-        blit.filter = SDL_GPU_FILTER_LINEAR;
-        SDL_BlitGPUTexture(m->Commands, &blit);
+        const SDL_GPUTextureFormat swapchainFormat = SDL_GetGPUSwapchainTextureFormat(m->Device, m->Window);
+        if (m->PresentCopySupported && CKSdlGpuCanCopyPresent(source->Info.format, swapchainFormat,
+                                   width, height, m->SwapWidth, m->SwapHeight)) {
+            if (!m->PresentCopyLogged) {
+                SDL_Log("SDL_gpu present path: exact texture copy format=%u size=%ux%u",
+                        unsigned(swapchainFormat), width, height);
+                m->PresentCopyLogged = true;
+            }
+            auto *copy = SDL_BeginGPUCopyPass(m->Commands);
+            if (!copy) return m->Fail("BeginGPUCopyPass.present");
+            SDL_GPUTextureLocation sourceLocation = {}, destinationLocation = {};
+            sourceLocation.texture = source->Image.get();
+            destinationLocation.texture = m->Swapchain;
+            SDL_CopyGPUTextureToTexture(copy, &sourceLocation, &destinationLocation,
+                                        width, height, 1, false);
+            SDL_EndGPUCopyPass(copy);
+        } else {
+            SDL_GPUBlitInfo blit = {};
+            blit.source = {source->Image.get(), 0, 0, 0, 0, width, height};
+            blit.destination = {m->Swapchain, 0, 0, 0, 0, m->SwapWidth, m->SwapHeight};
+            blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+            blit.flip_mode = SDL_FLIP_NONE;
+            blit.filter = SDL_GPU_FILTER_LINEAR;
+            SDL_BlitGPUTexture(m->Commands, &blit);
+        }
         source->Referenced = true;
     }
     m->PassOpen = false;
@@ -481,6 +497,7 @@ CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number
 {
     CKRE_PROFILE_SCOPE("CKRE.SDL.Submit");
     if (!m->Ready()) return CKERR_INVALIDOPERATION;
+    if (!CKSdlGpuValidPresentSync(desc.Sync)) return CKERR_INVALIDPARAMETER;
     if (desc.Sync != CKRST_BACKEND_SYNC_UNCHANGED) {
         const auto mode = desc.Sync == CKRST_BACKEND_SYNC_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
         if (mode != m->PresentMode) {

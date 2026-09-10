@@ -76,6 +76,12 @@ CKERROR CKSdlGpuBackend::Init(const CKBackendInitDesc *desc)
     const bool debug = SDL_getenv("CKRE_SDL_GPU_DEBUG") && SDL_strcmp(SDL_getenv("CKRE_SDL_GPU_DEBUG"), "0") != 0;
     m->Device = SDL_CreateGPUDevice(allowedFormats, debug, driver);
     if (!m->Device) return m->Fail("CreateGPUDevice");
+    m->PresentCopySupported = CKSdlGpuSupportsSwapchainCopy(SDL_GetGPUDeviceDriver(m->Device));
+    // Keep the SDL default depth explicit. A third queued frame improves peak
+    // throughput on some systems, but increases presentation latency.
+    if (!SDL_SetGPUAllowedFramesInFlight(m->Device, 2)) {
+        m->Fail("SetGPUAllowedFramesInFlight.init"); Shutdown(); return CKERR_INVALIDOPERATION;
+    }
     const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(m->Device) & allowedFormats;
     if (!formats) {
         SDL_SetError("Device and requested native shader targets have no common format");
@@ -210,6 +216,8 @@ void CKSdlGpuBackend::Shutdown()
     if (m->WindowClaimed) SDL_ReleaseWindowFromGPUDevice(m->Device, m->Window);
     SDL_DestroyGPUDevice(m->Device);
     m->WindowClaimed = false; m->Device = nullptr; m->Window = nullptr; m->Swapchain = nullptr; m->PassOpen = false;
+    m->PresentCopySupported = false;
+    m->PresentCopyLogged = false;
     m->TransientVertices.clear(); m->TransientIndices.clear();
     m->TransientVertexInfo.clear(); m->TransientIndexInfo.clear();
 }

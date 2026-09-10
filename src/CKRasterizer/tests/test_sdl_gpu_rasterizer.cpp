@@ -8,6 +8,25 @@ int main()
 {
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
+    check(CKSdlGpuValidPresentSync(CKRST_BACKEND_SYNC_UNCHANGED) &&
+          CKSdlGpuValidPresentSync(CKRST_BACKEND_SYNC_VSYNC) &&
+          CKSdlGpuValidPresentSync(CKRST_BACKEND_SYNC_IMMEDIATE) &&
+          !CKSdlGpuValidPresentSync(static_cast<CKBackendPresentSync>(99)),
+          "only declared presentation synchronization modes are accepted");
+    check(CKSdlGpuCanCopyPresent(SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                                 SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                                 640, 480, 640, 480) &&
+          !CKSdlGpuCanCopyPresent(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+                                  SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                                  640, 480, 640, 480) &&
+          !CKSdlGpuCanCopyPresent(SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                                  SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+                                  640, 480, 1280, 960),
+          "present copy fast path requires identical format and extent");
+    check(CKSdlGpuSupportsSwapchainCopy("direct3d12") &&
+          !CKSdlGpuSupportsSwapchainCopy("vulkan") &&
+          !CKSdlGpuSupportsSwapchainCopy(nullptr),
+          "only the verified D3D12 swapchain path uses transfer copy");
     {
         const auto program = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_DXIL);
         CKBackendProgramLayout layout;

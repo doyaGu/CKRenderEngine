@@ -199,6 +199,28 @@ struct CKSdlGpuReadback : CKBackendReadback {
     std::shared_ptr<SDL_GPUFence> Fence;
 };
 
+constexpr bool CKSdlGpuCanCopyPresent(SDL_GPUTextureFormat sourceFormat,
+                                      SDL_GPUTextureFormat swapchainFormat,
+                                      unsigned width, unsigned height,
+                                      unsigned swapchainWidth, unsigned swapchainHeight)
+{
+    return sourceFormat == swapchainFormat && width == swapchainWidth &&
+           height == swapchainHeight;
+}
+
+inline bool CKSdlGpuSupportsSwapchainCopy(const char *driver)
+{
+    // SDL 3.4.8's Vulkan swapchain acquisition waits at the color-attachment
+    // stage, which does not safely cover a transfer copy to the acquired image.
+    return driver && SDL_strcmp(driver, "direct3d12") == 0;
+}
+
+constexpr bool CKSdlGpuValidPresentSync(CKBackendPresentSync sync)
+{
+    return sync == CKRST_BACKEND_SYNC_UNCHANGED || sync == CKRST_BACKEND_SYNC_VSYNC ||
+           sync == CKRST_BACKEND_SYNC_IMMEDIATE;
+}
+
 struct CKSdlGpuTransientVertexInfo {
     CKDWORD Token = 0, Layout = 0, Stride = 0;
 };
@@ -223,6 +245,8 @@ struct CKSdlGpuDevice {
     SDL_GPUCommandBuffer *Commands = nullptr;
     SDL_GPUTexture *Swapchain = nullptr;
     unsigned SwapWidth = 0, SwapHeight = 0;
+    bool PresentCopySupported = false;
+    bool PresentCopyLogged = false;
     bool PassOpen = false;
     CKBackendPassDesc Pass;
     std::shared_ptr<CKSdlGpuTarget> Target;

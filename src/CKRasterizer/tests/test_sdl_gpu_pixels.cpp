@@ -31,6 +31,144 @@ static bool CheckReadback(CKSdlGpuBackend &backend, const CKBackendReadbackTicke
     return true;
 }
 
+static bool CheckExactCopyMatchesBlit(SDL_Window *window)
+{
+    const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");
+    if (driver && SDL_strcmp(driver, "auto") == 0) driver = nullptr;
+#ifdef _WIN32
+    if (!driver) driver = "direct3d12";
+#endif
+    SDL_GPUDevice *device = SDL_CreateGPUDevice(
+        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, true, driver);
+    if (!device) {
+        std::fprintf(stderr, "copy equivalence device: %s\n", SDL_GetError());
+        return false;
+    }
+
+    bool claimed = false;
+    SDL_GPUTexture *source = nullptr, *copied = nullptr, *blitted = nullptr;
+    SDL_GPUTransferBuffer *upload = nullptr, *copyDownload = nullptr, *blitDownload = nullptr;
+    SDL_GPUCommandBuffer *commands = nullptr;
+    SDL_GPUFence *fence = nullptr;
+    auto cleanup = [&]() {
+        if (commands) SDL_CancelGPUCommandBuffer(commands);
+        if (fence) SDL_ReleaseGPUFence(device, fence);
+        if (upload) SDL_ReleaseGPUTransferBuffer(device, upload);
+        if (copyDownload) SDL_ReleaseGPUTransferBuffer(device, copyDownload);
+        if (blitDownload) SDL_ReleaseGPUTransferBuffer(device, blitDownload);
+        if (source) SDL_ReleaseGPUTexture(device, source);
+        if (copied) SDL_ReleaseGPUTexture(device, copied);
+        if (blitted) SDL_ReleaseGPUTexture(device, blitted);
+        if (claimed) SDL_ReleaseWindowFromGPUDevice(device, window);
+        SDL_DestroyGPUDevice(device);
+    };
+    auto fail = [&](const char *operation) {
+        std::fprintf(stderr, "copy equivalence %s: %s\n", operation, SDL_GetError());
+        cleanup();
+        return false;
+    };
+
+    if (!SDL_ClaimWindowForGPUDevice(device, window)) return fail("claim window");
+    claimed = true;
+    constexpr unsigned width = 17, height = 13, bytes = width * height * 4;
+    SDL_GPUTextureCreateInfo textureInfo = {};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    textureInfo.width = width; textureInfo.height = height;
+    textureInfo.layer_count_or_depth = textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    source = SDL_CreateGPUTexture(device, &textureInfo);
+    copied = SDL_CreateGPUTexture(device, &textureInfo);
+    blitted = SDL_CreateGPUTexture(device, &textureInfo);
+    if (!source || !copied || !blitted) return fail("create texture");
+
+    SDL_GPUTransferBufferCreateInfo transferInfo = {SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes, 0};
+    upload = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+    copyDownload = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+    blitDownload = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+    if (!upload || !copyDownload || !blitDownload) return fail("create transfer buffer");
+
+    std::vector<CKDWORD> expected(width * height);
+    for (unsigned y = 0; y < height; ++y) {
+        for (unsigned x = 0; x < width; ++x) {
+            expected[y * width + x] = ((x * 29 + y * 17) & 255) |
+                (((x * 11 + y * 37) & 255) << 8) |
+                (((x * 43 + y * 7) & 255) << 16) |
+                (((x * 3 + y * 19) & 255) << 24);
+        }
+    }
+    void *mapped = SDL_MapGPUTransferBuffer(device, upload, false);
+    if (!mapped) return fail("map upload");
+    std::memcpy(mapped, expected.data(), bytes);
+    SDL_UnmapGPUTransferBuffer(device, upload);
+
+    commands = SDL_AcquireGPUCommandBuffer(device);
+    if (!commands) return fail("acquire commands");
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(commands);
+    if (!copy) return fail("begin upload");
+    SDL_GPUTextureTransferInfo uploadLocation = {upload, 0, 0, 0};
+    SDL_GPUTextureRegion sourceRegion = {};
+    sourceRegion.texture = source; sourceRegion.w = width; sourceRegion.h = height; sourceRegion.d = 1;
+    SDL_UploadToGPUTexture(copy, &uploadLocation, &sourceRegion, false);
+    SDL_EndGPUCopyPass(copy);
+
+    copy = SDL_BeginGPUCopyPass(commands);
+    if (!copy) return fail("begin exact copy");
+    SDL_GPUTextureLocation sourceLocation = {}, destinationLocation = {};
+    sourceLocation.texture = source; destinationLocation.texture = copied;
+    SDL_CopyGPUTextureToTexture(copy, &sourceLocation, &destinationLocation, width, height, 1, false);
+    SDL_EndGPUCopyPass(copy);
+
+    SDL_GPUBlitInfo blit = {};
+    blit.source = {source, 0, 0, 0, 0, width, height};
+    blit.destination = {blitted, 0, 0, 0, 0, width, height};
+    blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    blit.flip_mode = SDL_FLIP_NONE;
+    blit.filter = SDL_GPU_FILTER_LINEAR;
+    SDL_BlitGPUTexture(commands, &blit);
+
+    copy = SDL_BeginGPUCopyPass(commands);
+    if (!copy) return fail("begin download");
+    SDL_GPUTextureRegion copiedRegion = sourceRegion, blittedRegion = sourceRegion;
+    copiedRegion.texture = copied; blittedRegion.texture = blitted;
+    SDL_GPUTextureTransferInfo copyDestination = {copyDownload, 0, 0, 0};
+    SDL_GPUTextureTransferInfo blitDestination = {blitDownload, 0, 0, 0};
+    SDL_DownloadFromGPUTexture(copy, &copiedRegion, &copyDestination);
+    SDL_DownloadFromGPUTexture(copy, &blittedRegion, &blitDestination);
+    SDL_EndGPUCopyPass(copy);
+
+    fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+    commands = nullptr;
+    if (!fence || !SDL_WaitForGPUFences(device, true, &fence, 1)) return fail("submit/wait");
+    const void *copyBytes = SDL_MapGPUTransferBuffer(device, copyDownload, false);
+    const void *blitBytes = SDL_MapGPUTransferBuffer(device, blitDownload, false);
+    if (!copyBytes || !blitBytes) {
+        if (copyBytes) SDL_UnmapGPUTransferBuffer(device, copyDownload);
+        if (blitBytes) SDL_UnmapGPUTransferBuffer(device, blitDownload);
+        return fail("map download");
+    }
+    const bool exact = std::memcmp(copyBytes, expected.data(), bytes) == 0 &&
+                       std::memcmp(blitBytes, expected.data(), bytes) == 0 &&
+                       std::memcmp(copyBytes, blitBytes, bytes) == 0;
+    if (!exact) {
+        const auto *copyPixels = static_cast<const CKDWORD *>(copyBytes);
+        const auto *blitPixels = static_cast<const CKDWORD *>(blitBytes);
+        for (unsigned i = 0; i < width * height; ++i) {
+            if (copyPixels[i] == expected[i] && blitPixels[i] == expected[i] && copyPixels[i] == blitPixels[i]) continue;
+            std::fprintf(stderr, "copy equivalence pixel %u: copy=%08x blit=%08x expected=%08x\n",
+                         i, unsigned(copyPixels[i]), unsigned(blitPixels[i]), unsigned(expected[i]));
+            break;
+        }
+    }
+    SDL_UnmapGPUTransferBuffer(device, copyDownload);
+    SDL_UnmapGPUTransferBuffer(device, blitDownload);
+    cleanup();
+    if (exact) std::puts("SDL_gpu exact copy and 1:1 linear blit are byte-identical for every test pixel");
+    return exact;
+}
+
 static bool CheckGenericProgram(CKSdlGpuBackend &backend)
 {
     CKShaderDesc vertex, fragment;
@@ -617,6 +755,7 @@ static bool CheckGpuWrittenMips(CKSdlGpuBackend &backend)
 
 static int Run(SDL_Window *window)
 {
+    if (!CheckExactCopyMatchesBlit(window)) return 26;
     CKSdlGpuBackend backend;
     CKBackendInitDesc init;
     init.Window = window; init.Width = 640; init.Height = 480;
@@ -624,6 +763,8 @@ static int Run(SDL_Window *window)
     const SDL_WindowFlags ownerFlags = SDL_GetWindowFlags(window);
     init.Fullscreen = TRUE;
     if (backend.Init(&init) != CK_OK) return 1;
+    if (backend.Submit({static_cast<CKBackendPresentSync>(99), FALSE}, nullptr) != CKERR_INVALIDPARAMETER ||
+        backend.GetDeviceStatus() != CK_OK) return 25;
     SDL_SyncWindow(window);
     if ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != (ownerFlags & SDL_WINDOW_FULLSCREEN)) {
         std::fprintf(stderr, "backend changed the owner's fullscreen state\n");
@@ -670,6 +811,13 @@ static int Run(SDL_Window *window)
     CKDWORD center = 0;
     std::memcpy(&center, ticket->Data.data() + 240 * read.RowPitch + 320 * 4, 4);
     if (center != 0xff20b060) { std::fprintf(stderr, "resolve pixel: %08x expected ff20b060\n", unsigned(center)); return 8; }
+    // Exercise the production present-mode transition in both directions.
+    if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
+                               CKRST_BACKEND_SYNC_IMMEDIATE) != CK_OK ||
+        backend.Submit({CKRST_BACKEND_SYNC_IMMEDIATE, TRUE}, nullptr) != CK_OK ||
+        backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
+                               CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
+        backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 24;
     std::printf("SDL_gpu native resolve, presentation and fence readback passed; window=%u size=640x480\n", SDL_GetWindowID(window));
     std::fflush(stdout);
     const Uint64 end = SDL_GetTicks() + (SDL_getenv("CKRE_GPU_TEST_HOLD") ? 120000 : 1500);
@@ -694,6 +842,7 @@ int main(int argc, char **argv)
     SDL_Window *window = SDL_CreateWindow("SDL_gpu rasterizer pixel tests", 640, 480, SDL_WINDOW_RESIZABLE);
     if (!window) { SDL_Quit(); return 11; }
     SDL_ShowWindow(window); SDL_RaiseWindow(window);
+    SDL_SyncWindow(window);
     if (SDL_getenv("CKRE_GPU_TEST_INTERACTIVE_START")) {
         SDL_SetWindowTitle(window, "SDL_gpu native tests - press Enter to start");
         const Uint64 deadline = SDL_GetTicks() + 120000;
@@ -710,6 +859,13 @@ int main(int argc, char **argv)
         if (!start) { SDL_DestroyWindow(window); SDL_Quit(); return 18; }
         SDL_SetWindowTitle(window, "SDL_gpu rasterizer pixel tests");
     }
+    const SDL_WindowFlags visibleFlags = SDL_GetWindowFlags(window);
+    if (!(visibleFlags & SDL_WINDOW_INPUT_FOCUS) || (visibleFlags & SDL_WINDOW_HIDDEN)) {
+        std::fprintf(stderr, "visible GPU acceptance requires a shown foreground window (flags=0x%llx)\n",
+                     static_cast<unsigned long long>(visibleFlags));
+        SDL_DestroyWindow(window); SDL_Quit(); return 27;
+    }
+    std::puts("SDL_gpu visible acceptance window is shown and has input focus");
     const int result = Run(window);
     SDL_DestroyWindow(window); SDL_Quit();
     return result;
