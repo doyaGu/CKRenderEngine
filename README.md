@@ -11,11 +11,11 @@ The responsibilities follow `CK_3D → CKRasterizer → CKRasterizerBackend → 
 - **CKRasterizerBackend** defines modern graphics resources, explicit programs, constant blocks, resolved pipeline state, ordered commands and completion. It is an internal contract independent of FFP and plugin loading.
 - **Native backends** implement that contract: `CKSdlGpuBackend` for SDL GPU, optional `CKBgfxBackend` for bgfx, and `CKNullBackend` for fallback and deterministic tests. The dynamic/static rasterizer plugins compose a native backend with the translation core and their own shader artifact catalog.
 
-See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for the current implementation's ownership and dependency boundaries. The [redesign plan](src/CKRasterizer/REDESIGN.md) specifies bulk FFP state, explicit draws, bounded resource ownership and performance validation. It permits replacing rasterizer v3 and shader descriptor v2 with a full migration; migration has started with semantic stage reset and one FFP-owned texture-stage state; the remaining stages are still pending.
+See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for the current implementation's ownership and dependency boundaries.
 
 The default provider is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects providers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
 
-Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance. See [optional bgfx acceptance](tests/reference/BGFX_OPTIONAL_ACCEPTANCE.md) for the latest upstream dependency validation and explicit skipped-test accounting.
+Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance.
 
 ## Support scope
 

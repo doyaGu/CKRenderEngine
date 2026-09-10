@@ -6,8 +6,7 @@
 // The v3 contract is D3D7 shaped: the engine sets fixed-function state
 // (render states, texture stage states, transforms, lights, material,
 // viewport, clip planes) and issues draws; all translation to a modern GPU
-// API happens below this boundary (spec: docs/spec/2026-09-01-render-engine-
-// redesign-v3.md, section 4).
+// API happens below this boundary.
 //
 // The backend interface of the translation core
 // (src/CKRasterizer/CKRasterizerBackend/CKRasterizerBackend.h) includes this header for the

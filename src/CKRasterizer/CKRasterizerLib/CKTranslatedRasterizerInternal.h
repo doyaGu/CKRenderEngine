@@ -5,9 +5,8 @@
 //
 // A CKTranslatedRasterizer composes a plugin's device factory and shader
 // catalog and exposes them through the fixed-function contract. Texture-stage
-// values, bindings and transforms live in the FFP state; remaining mirrors are
-// being migrated according to REDESIGN.md. Draws go
-// through CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
+// values, bindings and transforms live in the FFP state. Draws go through
+// CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
 // flow selects logical targets; the backend owns native pass boundaries.
 
 #include "CKTranslatedRasterizer.h"

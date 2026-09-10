@@ -1,7 +1,7 @@
 {
-  "source": "CKDX8Rasterizer.dll (Ballance retail, RenderEngines/CK2_3D.dll 2002-10-30) | NVIDIA GeForce RTX 4090 (T&L DX8) | Windows 11 x64, 32-bit process | captured 2026-09-02 by ckre_scene_capture --caps-json",
+  "source": "Original CKDX8Rasterizer capability baseline",
   "notes": [
-    "Bit fields (RasterCaps, TextureCaps, ...) are the contract baseline (spec 4.9.2). Drivers may only lower numeric fields.",
+    "Bit fields (RasterCaps, TextureCaps, ...) define the compatibility baseline. Drivers may only lower numeric fields.",
     "RenderBpps / ZBufferBpps / StencilBpps / MaxVideoMemory / AvailableVideoMemory were reported as 0 by the original driver.",
     "The original driver reported an empty TextureFormats list through VxDriverDesc; the format list is not part of the baseline."
   ],
