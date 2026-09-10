@@ -2,29 +2,31 @@
 find_package(SDL3 3.4 CONFIG REQUIRED)
 
 set(CKSDL_GPU_RASTERIZER_SOURCES
-    CKSdlGpuBackend.cpp
-    CKSdlGpuCommands.cpp
-    CKSdlGpuMipmaps.cpp
-    CKSdlGpuNativeShaders.cpp
-    CKSdlGpuPipeline.cpp
-    CKSdlGpuRasterizer.cpp
-    CKSdlGpuResources.cpp
-    CKSdlGpuShaders.cpp
-    CKSdlGpuTextureData.cpp
+    Backend/CKSdlGpuBackend.cpp
+    Backend/CKSdlGpuCommands.cpp
+    Backend/CKSdlGpuMipmaps.cpp
+    Backend/CKSdlGpuNativeShaders.cpp
+    Backend/CKSdlGpuPipeline.cpp
+    Backend/CKSdlGpuResources.cpp
+    Backend/CKSdlGpuTextureData.cpp
+    Provider/CKSdlGpuRasterizer.cpp
+    Provider/CKSdlGpuShaders.cpp
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
-    CKSdlGpuBackend.h
-    CKSdlGpuInternal.h
-    CKSdlGpuNativeShaders.h
-    CKSdlGpuShaders.h
-    CKSdlGpuTextureData.h
-    CKSdlGpuUniformBatch.h
+    Backend/CKSdlGpuBackend.h
+    Backend/CKSdlGpuInternal.h
+    Backend/CKSdlGpuNativeShaders.h
+    Backend/CKSdlGpuTextureData.h
+    Backend/CKSdlGpuUniformBatch.h
+    Provider/CKSdlGpuShaders.h
 )
 
 function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
         ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
     )
     target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib SDL3::SDL3)
@@ -72,6 +74,8 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
         add_executable(${_test} ../tests/${_test}.cpp)
         target_include_directories(${_test} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/Backend
+            ${CMAKE_CURRENT_SOURCE_DIR}/Provider
             ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
         )
         target_link_libraries(${_test} PRIVATE CKFFPLib SDL3::SDL3)
