@@ -641,8 +641,10 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
 
 void TweeningInputsAndShaderAreWired() {
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
-    const std::string layout = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/CKVertexLayoutCache.cpp");
-    const std::string transient = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/CKTransientGeometry.cpp");
+    const std::string layout = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/FixedFunction/CKVertexLayoutCache.cpp");
+    const std::string transient = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/FixedFunction/CKTransientGeometry.cpp");
     const std::string vertexBuffer = ReadTextFile("Source/RenderEngine/src/CKVertexBuffer.cpp");
 
     TestCheck(!vs3d.empty() && !layout.empty() && !transient.empty() &&
@@ -1101,7 +1103,7 @@ void TextureBindingMaskIgnoresInactiveStages() {
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void BgfxTransientAllocationsPreflightAvailability() {
     const std::string contents = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CKBgfxBackend.cpp");
+        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/Backend/CKBgfxBackend.cpp");
     TestCheck(!contents.empty(),
               "bgfx rasterizer context source must be readable");
 

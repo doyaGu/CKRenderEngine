@@ -75,7 +75,7 @@ function(ckre_add_benchmark TARGET_NAME)
     ckre_configure_test_target(${TARGET_NAME})
 endfunction()
 
-# The generic program contract can be built and tested without the FFP library.
+# The provider-neutral program interface can be tested without a GPU device.
 add_executable(test_backend_program test_backend_program.cpp)
 target_link_libraries(test_backend_program PRIVATE CKFFPLib)
 set_target_properties(test_backend_program PROPERTIES
@@ -105,7 +105,7 @@ if (Python3_Interpreter_FOUND)
 endif ()
 
 # Tests of the CKRasterizer v3 interface: the translation core (CKFFPLib)
-# driven through the public contract only, over the recording device of
+# driven through the public interface only, over the recording device of
 # FFPRecordingHarness.h. They do not link the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
