@@ -13,6 +13,16 @@ if (NOT CKRE_BUILD_SHARED)
     set(CKRE_STATIC_RUNTIME TRUE)
 endif ()
 
+ckre_get_rasterizers(_ckre_unused _ckre_disabled_runtime_providers
+        "${CKRE_STATIC_RUNTIME}")
+set_property(GLOBAL PROPERTY CKRE_DISABLED_RUNTIME_OUTPUTS
+        "${_ckre_disabled_runtime_providers}")
+set(_ckre_runtime_configs CK2_3D.ini)
+if (CKRE_BUILD_BGFX_RASTERIZER)
+    list(APPEND _ckre_runtime_configs CKBgfxRasterizer.ini)
+endif ()
+set_property(GLOBAL PROPERTY CKRE_RUNTIME_CONFIGS "${_ckre_runtime_configs}")
+
 if (CKRE_INSTALL)
     set(_ckre_required_files "")
     if (CKRE_BUILD_SHARED)
@@ -33,32 +43,6 @@ if (CKRE_INSTALL)
     if (CKRE_BUILD_BGFX_RASTERIZER)
         list(APPEND _ckre_required_files "${_ckre_config_directory}/CKBgfxRasterizer.ini")
     endif ()
-    # A data-only contract also lets archive checkers validate the component
-    # without knowing any provider names or executing installed scripts.
-    ckre_get_rasterizers(_ckre_enabled _ckre_disabled "${CKRE_STATIC_RUNTIME}")
-    set(_ckre_forbidden_files "")
-    foreach (_name IN LISTS _ckre_disabled)
-        foreach (_directory IN ITEMS Bin RenderEngines)
-            ckre_runtime_library_names(_filenames "${_name}")
-            foreach (_filename IN LISTS _filenames)
-                list(APPEND _ckre_forbidden_files "${_directory}/${_filename}")
-            endforeach ()
-        endforeach ()
-    endforeach ()
-    set(_ckre_required_json "")
-    set(_ckre_forbidden_json "")
-    if (_ckre_required_files)
-        string(REPLACE ";" "\",\n    \"" _ckre_required_json "${_ckre_required_files}")
-        set(_ckre_required_json "\"${_ckre_required_json}\"")
-    endif ()
-    if (_ckre_forbidden_files)
-        string(REPLACE ";" "\",\n    \"" _ckre_forbidden_json "${_ckre_forbidden_files}")
-        set(_ckre_forbidden_json "\"${_ckre_forbidden_json}\"")
-    endif ()
-    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/runtime-$<CONFIG>/RenderEngine.json"
-        CONTENT "{\n  \"required\": [${_ckre_required_json}],\n  \"forbidden\": [${_ckre_forbidden_json}]\n}\n")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/runtime-$<CONFIG>/RenderEngine.json"
-            DESTINATION Bin/RuntimeManifests COMPONENT Runtime)
     configure_file("${CMAKE_CURRENT_LIST_DIR}/CKREInstallRuntime.cmake.in"
             "${CMAKE_CURRENT_BINARY_DIR}/CKREInstallRuntime.cmake.in" @ONLY)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CKREInstallRuntime-$<CONFIG>.cmake"

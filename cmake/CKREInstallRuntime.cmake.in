@@ -4,5 +4,19 @@ set(CKRE_BUILD_BGFX_RASTERIZER "@CKRE_BUILD_BGFX_RASTERIZER@")
 set(CKRE_BUILD_SDL_GPU_RASTERIZER "@CKRE_BUILD_SDL_GPU_RASTERIZER@")
 set(CKRE_STATIC_RUNTIME "@CKRE_STATIC_RUNTIME@")
 set(CKRE_REQUIRED_RUNTIME_FILES "@_ckre_required_files@")
+
+# Remove the data contract installed by older builds. Runtime validation now
+# executes directly during component installation and leaves no metadata in
+# the staged product.
+set(_ckre_legacy_manifest_directory "${STAGE_ROOT}/Bin/RuntimeManifests")
+file(REMOVE "${_ckre_legacy_manifest_directory}/RenderEngine.json")
+if (IS_DIRECTORY "${_ckre_legacy_manifest_directory}")
+    file(GLOB _ckre_legacy_manifest_entries
+            LIST_DIRECTORIES TRUE "${_ckre_legacy_manifest_directory}/*")
+    if (NOT _ckre_legacy_manifest_entries)
+        file(REMOVE_RECURSE "${_ckre_legacy_manifest_directory}")
+    endif ()
+endif ()
+
 include("@CMAKE_CURRENT_LIST_DIR@/CKREPruneRasterizers.cmake")
 include("@CMAKE_CURRENT_LIST_DIR@/CKREVerifyRuntime.cmake")
