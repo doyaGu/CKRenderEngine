@@ -229,14 +229,15 @@ ckre_add_test(ffp_contract_exhaustive_tests
     test_ffp_contract_exhaustive.cpp
 )
 
-# Real-backend pixel gate: the fixed-function semantics driven through the v3
-# contract on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
+# Real-backend pixel gate: fixed-function semantics driven through the public
+# rasterizer interface on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
 if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_add_rasterizer3_test(rasterizer3_pixel_tests
         test_rasterizer3_pixels.cpp
     )
     target_include_directories(rasterizer3_pixel_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Backend
     )
     target_link_libraries(rasterizer3_pixel_tests PRIVATE
         CKBgfxRasterizerStatic
