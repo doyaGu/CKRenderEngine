@@ -72,7 +72,7 @@ support; it never invokes a shader compiler. Windows defaults to D3D12;
 `CKRE_SDL_GPU_DRIVER=vulkan` explicitly selects Vulkan. SDL-only builds do not
 build or stage bgfx shader containers.
 
-Run the native and public-contract tests on the interactive desktop with
+Run the native and public-interface tests on the interactive desktop with
 `--visible`, `CKRE_GPU_TEST_INTERACTIVE_START=1`, and `CKRE_GPU_TEST_HOLD=1`.
 Bring the test window to the foreground and press Enter, inspect and record
 the final window, then close it normally. Run GPU tests serially. A skipped
