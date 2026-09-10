@@ -16,7 +16,7 @@ import shutil
 import subprocess
 
 HERE = Path(__file__).resolve().parent
-SHARED = HERE.parent.parent / "CKRasterizerLib" / "shaders"
+SHARED = HERE.parent.parent / "CKFFPLib" / "shaders"
 SHADERS = [
     ("vs_ff_3d", "vs_ff_3d", False),
     ("vs_ff_3d_clip", "vs_ff_3d", True),

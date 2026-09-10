@@ -3,6 +3,7 @@ function(ckre_configure_test_target TARGET_NAME)
         ${CKRE_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
@@ -27,6 +28,7 @@ function(ckre_configure_test_target TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
         CKRasterizerLib
+        CKFFPLib
         ckre_recording_support
         ${_ckre_test_rasterizer_deps}
         ${_ckre_test_ck2_dep}
@@ -54,10 +56,10 @@ add_library(ckre_recording_support STATIC
 )
 target_include_directories(ckre_recording_support PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/support
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerBackend
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
 )
-target_link_libraries(ckre_recording_support PUBLIC CKRasterizerLib)
+target_link_libraries(ckre_recording_support PUBLIC CKFFPLib)
 target_compile_features(ckre_recording_support PRIVATE cxx_std_20)
 set_target_properties(ckre_recording_support PROPERTIES FOLDER "Tests/Support")
 
@@ -75,7 +77,7 @@ endfunction()
 
 # The generic program contract can be built and tested without the FFP library.
 add_executable(test_backend_program test_backend_program.cpp)
-target_link_libraries(test_backend_program PRIVATE CKRasterizerBackend)
+target_link_libraries(test_backend_program PRIVATE CKFFPLib)
 set_target_properties(test_backend_program PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
 ckre_copy_runtime_dependencies(test_backend_program)
@@ -102,7 +104,7 @@ if (Python3_Interpreter_FOUND)
     set_tests_properties(RasterizerLayerBoundaries PROPERTIES TIMEOUT 60)
 endif ()
 
-# Tests of the CKRasterizer v3 contract: the translation core (CKRasterizerLib)
+# Tests of the CKRasterizer v3 interface: the translation core (CKFFPLib)
 # driven through the public contract only, over the recording device of
 # FFPRecordingHarness.h. They do not link the engine.
 function(ckre_add_rasterizer3_test TARGET_NAME)
@@ -110,11 +112,12 @@ function(ckre_add_rasterizer3_test TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
     )
-    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib ckre_recording_support)
+    target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib ckre_recording_support)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
         FOLDER "Tests"
@@ -300,7 +303,7 @@ ckre_add_test(render_transient_geometry_tests
 
 add_executable(test_render_profile_disabled test_render_profile_disabled.cpp)
 target_include_directories(test_render_profile_disabled PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRenderSupport)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 target_compile_definitions(test_render_profile_disabled PRIVATE CKRE_ENABLE_PROFILING=0)
 set_target_properties(test_render_profile_disabled PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")

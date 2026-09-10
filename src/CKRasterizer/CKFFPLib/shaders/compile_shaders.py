@@ -46,7 +46,7 @@ BACKENDS = [
 ]
 
 ABI_HEADER = "CKFFShaderABI.generated.h"
-SPEC_LAYOUT_DEF = "CKFFSpecLayout.def"      # in the parent (CKRasterizerLib) directory
+SPEC_LAYOUT_DEF = "CKFFSpecLayout.def"      # in the parent CKFFPLib directory
 SPEC_LAYOUT_SHADER = "ff_spec_layout.sh"    # generated next to the shader sources
 
 
@@ -68,7 +68,7 @@ def find_shaderc(explicit: str | None) -> Path:
         candidates.append(Path(path_shaderc))
 
     script_dir = Path(__file__).resolve().parent
-    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKRasterizerLib/shaders
+    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKFFPLib/shaders
     workspace_root = renderengine_root.parent.parent
     for build_root in (workspace_root / "build", workspace_root / "out"):
         if build_root.exists():

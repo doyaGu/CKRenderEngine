@@ -1,4 +1,4 @@
-# Dependency direction: plugin composition -> FFP -> generic backend -> API.
+# Dependency direction: concrete rasterizers -> CKFFPLib -> CKRasterizerLib.
 set(_ckre_rasterizer_ck2_dep CK2)
 if (CKRE_BUILD_STATIC AND TARGET CK2Static)
     set(_ckre_rasterizer_ck2_dep CK2Static)
@@ -8,9 +8,8 @@ if (CKRE_BUILD_STATIC AND TARGET VxMathStatic)
     set(_ckre_rasterizer_vxmath_dep VxMathStatic)
 endif ()
 
-add_subdirectory(CKRenderSupport)
-add_subdirectory(CKRasterizerBackend)
 add_subdirectory(CKRasterizerLib)
+add_subdirectory(CKFFPLib)
 include(CKRERasterizers)
 ckre_get_rasterizers(_ckre_enabled_rasterizers _ckre_disabled_rasterizers FALSE)
 foreach (_ckre_rasterizer IN LISTS _ckre_enabled_rasterizers)
