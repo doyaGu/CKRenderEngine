@@ -1,19 +1,14 @@
 # SDL_gpu rasterizer
 
-`CKSdlGpuRasterizer` and `CKSdlGpuRasterizerStatic` implement the public
-rasterizer v3 interface through `CKTranslatedRasterizer`. The translation core
-owns fixed-function state, geometry preparation, shader selection, scene targets
-and overlay ordering.
-This backend owns SDL resources, native pipelines, command encoding, fences
-and presentation. Descriptor v2 and public resource slots are unchanged.
+`CKSdlGpuRasterizer` and `CKSdlGpuRasterizerStatic` are the complete SDL_gpu
+rasterizer targets. They contain the provider, SDL resources, native pipelines,
+command encoding, fences, presentation, and the native shader catalog. Both
+use `CKFFPLib` for fixed-function state translation, geometry preparation, and
+scene composition; there is no separately packaged SDL backend target.
 
-The `CKSdlGpuBackend` target is independent of `CKRasterizerLib`. The dynamic
-and static rasterizer targets compose that device implementation with FFP
-translation and its native artifact catalog. The provider advertises complete
-format/profile targets before device creation, then supplies the matching
-catalog after initialization. `GetShaderSet` belongs to that provider; the
-native backend consumes explicit shader and program descriptors. See the
-[rasterizer architecture](../ARCHITECTURE.md) for these boundaries.
+The provider advertises complete format/profile targets before device creation,
+then supplies the matching catalog after initialization. Its native device
+consumes explicit shader and program descriptors from the compatibility layer.
 
 The Player owns its `SDL_Window` and controls fullscreen and window events.
 The backend claims that window on the main thread and releases it during
