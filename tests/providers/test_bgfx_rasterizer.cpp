@@ -566,12 +566,12 @@ static void TestBgfxRasterizerLifecycle()
 }
 
 // ============================================================================
-// DrawMap trace contract helpers
+// DrawMap trace binding-order helpers
 // ============================================================================
 
-static void TestDrawMapTraceContractHelpers()
+static void TestDrawMapTraceBindingOrder()
 {
-    TEST_SECTION("DrawMap Trace Contract Helpers");
+    TEST_SECTION("DrawMap Trace Binding Order");
 
     TEST_ASSERT(CKBGFX_DRAWMAP_SCHEMA == 2,
                 "DrawMap submit schema stays at version 2");
@@ -595,7 +595,7 @@ static void TestDrawMapTraceContractHelpers()
                                                   0x1234) == TRUE,
                 "texture binding formatter succeeds");
     TEST_ASSERT(strcmp(buffer, " tex3=77:8:21:0x00001234") == 0,
-                "texture binding formatter keeps contract order");
+                "texture binding formatter keeps draw-packet order");
 
     offset = 0;
     buffer[0] = '\0';
@@ -604,7 +604,7 @@ static void TestDrawMapTraceContractHelpers()
                                                  3) == TRUE,
                 "vertex binding formatter succeeds");
     TEST_ASSERT(strcmp(buffer, " vb1=5:2:12:9:3") == 0,
-                "vertex binding formatter keeps contract order");
+                "vertex binding formatter keeps draw-packet order");
 }
 
 static void TestPersistentCacheCallback()
@@ -633,12 +633,12 @@ static void TestPersistentCacheCallback()
 }
 
 // ============================================================================
-// Debug overlay view map contract
+// Debug overlay view allocation
 // ============================================================================
 
-static void TestDebugOverlayViewMapContract()
+static void TestDebugOverlayViewAllocation()
 {
-    TEST_SECTION("Debug Overlay View Map Contract");
+    TEST_SECTION("Debug Overlay View Allocation");
 
     const char *line0 = CKBgfxDebugViewLine0();
     const char *line1 = CKBgfxDebugViewLine1();
@@ -870,9 +870,9 @@ int main()
     TestSamplerFilterAndAddressConventions();
     TestOpenGLAutoMipPolicy();
     TestBgfxRasterizerLifecycle();
-    TestDrawMapTraceContractHelpers();
+    TestDrawMapTraceBindingOrder();
     TestPersistentCacheCallback();
-    TestDebugOverlayViewMapContract();
+    TestDebugOverlayViewAllocation();
     TestExactPixelFormatMapping();
     TestGenerationCheckedResourceTable();
 

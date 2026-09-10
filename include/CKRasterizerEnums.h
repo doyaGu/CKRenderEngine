@@ -1,16 +1,16 @@
 #ifndef CKRASTERIZERENUMS_H
 #define CKRASTERIZERENUMS_H
 
-// CKRasterizer v3 contract: enumerations and constants.
+// CKRasterizer v3 interface: enumerations and constants.
 //
-// The v3 contract is D3D7 shaped: the engine sets fixed-function state
+// The v3 interface is D3D7 shaped: the engine sets fixed-function state
 // (render states, texture stage states, transforms, lights, material,
 // viewport, clip planes) and issues draws; all translation to a modern GPU
-// API happens below this boundary.
+// API happens inside the rasterizer implementation.
 //
 // The backend interface of the translation core
-// (src/CKRasterizer/CKRasterizerBackend/CKRasterizerBackend.h) includes this header for the
-// enumerations both layers share.
+// (src/CKRasterizer/CKFFPLib/Backend/CKRasterizerBackend.h) includes this
+// header for the enumerations shared by both interfaces.
 
 #include <stdint.h>
 
@@ -18,7 +18,7 @@
 #include "CKTypes.h"  // CKDWORD
 
 // ===========================================================================
-// Contract revision (spec 4.1)
+// Interface revision (spec 4.1)
 // ===========================================================================
 
 // Revision 5 adds the bulk material operation. Rebuild every rasterizer plugin;
@@ -38,7 +38,7 @@
 // ===========================================================================
 // Object kinds (spec 4.5)
 // ===========================================================================
-// Only three kinds of handles cross the contract. Framebuffers, depth
+// Only three kinds of handles cross the public interface. Framebuffers, depth
 // buffers, shaders, programs, uniforms, vertex layouts and samplers are
 // rasterizer-internal objects.
 

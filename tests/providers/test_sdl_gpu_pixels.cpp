@@ -1,3 +1,4 @@
+// Pixel coverage for the complete SDL_gpu rasterizer.
 #include "CKSdlGpuBackend.h"
 #include "CKSdlGpuNativeShaders.h"
 #include "CKSdlGpuShaders.h"

@@ -1,3 +1,4 @@
+// Device and command coverage for the complete SDL_gpu rasterizer.
 #include "CKSdlGpuInternal.h"
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuTextureData.h"

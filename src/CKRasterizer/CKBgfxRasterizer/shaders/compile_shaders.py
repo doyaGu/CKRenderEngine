@@ -68,7 +68,7 @@ def find_shaderc(explicit: str | None) -> Path:
         candidates.append(Path(path_shaderc))
 
     script_dir = Path(__file__).resolve().parent
-    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKFFPLib/shaders
+    renderengine_root = script_dir.parents[3]  # .../src/CKRasterizer/CKBgfxRasterizer/shaders
     workspace_root = renderengine_root.parent.parent
     for build_root in (workspace_root / "build", workspace_root / "out"):
         if build_root.exists():
@@ -320,9 +320,10 @@ def main() -> int:
                         action="append", help="Backend to compile. May be repeated.")
     args = parser.parse_args()
 
-    script_dir = Path(__file__).resolve().parent
-    generated_dir = script_dir.parent.parent / "CKBgfxRasterizer" / "shaders" / "generated"
-    spec_layout = write_spec_layout_shader(script_dir)
+    provider_shader_dir = Path(__file__).resolve().parent
+    source_dir = provider_shader_dir.parents[1] / "CKFFPLib" / "shaders"
+    generated_dir = provider_shader_dir / "generated"
+    spec_layout = write_spec_layout_shader(source_dir)
     print(f"Wrote {spec_layout.name} from {SPEC_LAYOUT_DEF}")
     if args.command == "gen-spec-layout":
         return 0
@@ -339,7 +340,7 @@ def main() -> int:
             for shader in SHADERS:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
-                run_shaderc(shaderc, script_dir, shader, backend, bin_path, args.bgfx_source)
+                run_shaderc(shaderc, source_dir, shader, backend, bin_path, args.bgfx_source)
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
                 write_header(header, var_name, bin_path.read_bytes())

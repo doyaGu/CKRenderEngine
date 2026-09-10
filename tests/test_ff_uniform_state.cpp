@@ -182,9 +182,9 @@ void StageParamsPackThroughABIIndices() {
               "Inactive stages must pack neither transform flags nor a texture");
 }
 
-void ShaderSourcesDeclarePortableFlatAndClipSpaceContracts() {
+void ShaderSourcesDeclarePortableFlatAndClipSpaceConventions() {
     const std::string varying = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/varying.def.sc");
-    const std::string compiler = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/compile_shaders.py");
+    const std::string compiler = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
     const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_positiont.sc");
 
@@ -370,7 +370,7 @@ void SpecUniformCarriesLanesAsExactIntegers() {
 void SpecLayoutShaderHeaderMatchesTheDef() {
     const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/ff_spec_layout.sh");
     const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_common.sc");
-    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/compile_shaders.py");
+    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
     TestCheck(!generated.empty() && !common.empty() && !script.empty(),
               "Generated spec layout header, fragment common shader and codegen script must be readable");
 
@@ -830,8 +830,8 @@ void FragmentShaderDeclaresTheFixedSamplerLayout() {
 
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void ShaderCodegenCompilesOneProgramFamily() {
-    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/compile_shaders.py");
-    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/CMakeLists.txt");
+    const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
+    const std::string cmake = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/CMakeLists.txt");
     const std::string abi = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/generated/CKFFShaderABI.generated.h");
     TestCheck(!script.empty() && !cmake.empty() && !abi.empty(),
               "Shader codegen script, CMake list and generated ABI stamp must be readable");
@@ -866,16 +866,16 @@ void ShaderCodegenCompilesOneProgramFamily() {
     TestCheck(script.find(scriptVersion) != std::string::npos && script.find(scriptHash) != std::string::npos,
               "Shader codegen ABI stamp constants must match CKFFShaderABI.h");
 
-    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/ff_fog_common.sc") != std::string::npos &&
-                  cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/shaders/fs_ff_common.sc") != std::string::npos,
+    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_fog_common.sc") != std::string::npos &&
+                  cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_common.sc") != std::string::npos,
               "Shader generation dependencies must include the shared shader includes");
     TestCheck(cmake.find(".json") == std::string::npos &&
                   cmake.find("CKFFSpecializedModuleTable") == std::string::npos &&
                   cmake.find("CKFFSamplerLayout.h") == std::string::npos,
-              "Translation core build must not reference variant manifests or the module table");
-    TestCheck(cmake.find("DEPENDS ${CKRE_SHADERC_DEPENDS} ${CKRE_SHADER_SOURCES}") != std::string::npos &&
-                  cmake.find("SOURCES ${CKRE_SHADER_SOURCES}") != std::string::npos,
-              "Shader generation must depend on CKRE_SHADER_SOURCES");
+              "bgfx rasterizer build must not reference variant manifests or the module table");
+    TestCheck(cmake.find("DEPENDS ${CKRE_SHADERC_DEPENDS} ${_ckbgfx_shader_sources}") != std::string::npos &&
+                  cmake.find("SOURCES ${_ckbgfx_shader_sources}") != std::string::npos,
+              "bgfx shader generation must depend on every provider and FFP source");
 }
 
 #endif
@@ -1158,8 +1158,8 @@ int main() {
               &TextureArgModifierRepackRoundTripsBothModifierBits);
     tests.Run("Shader ABI constants match shader uniform declarations",
               &ShaderABIConstantsMatchShaderUniformDeclarations);
-    tests.Run("Shader sources declare portable flat and clip-space contracts",
-              &ShaderSourcesDeclarePortableFlatAndClipSpaceContracts);
+    tests.Run("Shader sources declare portable flat and clip-space conventions",
+              &ShaderSourcesDeclarePortableFlatAndClipSpaceConventions);
     tests.Run("Stage params pack through ABI indices",
               &StageParamsPackThroughABIIndices);
     tests.Run("MIRRORONCE address modes pack into stage params",

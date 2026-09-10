@@ -1,7 +1,7 @@
 #ifndef CKRASTERIZERTYPES_H
 #define CKRASTERIZERTYPES_H
 
-// CKRasterizer v3 contract: descriptor and data structures.
+// CKRasterizer v3 interface: descriptor and data structures.
 
 #include <stdint.h>
 

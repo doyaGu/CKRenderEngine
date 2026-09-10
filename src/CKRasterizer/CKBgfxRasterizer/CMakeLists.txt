@@ -20,6 +20,45 @@ set(CKBGFX_RASTERIZER_HEADERS
 )
 set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 
+# The provider owns compilation of its shader containers. The fixed-function
+# source calculations remain canonical input owned by CKFFPLib.
+find_package(Python3 COMPONENTS Interpreter)
+set(_ckbgfx_shader_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/varying.def.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_ff_3d.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_ff_positiont.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_stage.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_postprocess.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_postprocess.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_fog_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_spec_layout.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction/CKFFSpecLayout.def
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+)
+if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)
+    set(_ckbgfx_shader_stamp "${CMAKE_CURRENT_BINARY_DIR}/CKBgfxShaderArtifacts.stamp")
+    add_custom_command(OUTPUT "${_ckbgfx_shader_stamp}"
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
+            --shaderc "${CKRE_SHADERC_COMMAND}"
+            --bgfx-source "${BGFX_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_ckbgfx_shader_stamp}"
+        DEPENDS ${CKRE_SHADERC_DEPENDS} ${_ckbgfx_shader_sources}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders
+        COMMENT "Generating bgfx fixed-function shader containers"
+        VERBATIM
+    )
+    add_custom_target(CKBgfxShaderArtifacts
+        DEPENDS "${_ckbgfx_shader_stamp}"
+        SOURCES ${_ckbgfx_shader_sources}
+    )
+elseif (CKRE_GENERATE_SHADERS)
+    message(WARNING "CKBgfxShaderArtifacts target disabled: Python3 or bgfx shaderc target not available")
+else ()
+    message(STATUS "CKBgfxShaderArtifacts target disabled: using checked-in generated shader headers")
+endif ()
+
 if (APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     foreach (_target bx bimg bgfx)
         if (TARGET ${_target})
@@ -49,8 +88,8 @@ function(ckre_configure_bgfx_rasterizer TARGET_NAME)
     if (CMAKE_DL_LIBS)
         target_link_libraries(${TARGET_NAME} PRIVATE ${CMAKE_DL_LIBS})
     endif ()
-    if (TARGET CK2_3D_shaders)
-        add_dependencies(${TARGET_NAME} CK2_3D_shaders)
+    if (TARGET CKBgfxShaderArtifacts)
+        add_dependencies(${TARGET_NAME} CKBgfxShaderArtifacts)
     endif ()
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
@@ -111,7 +150,8 @@ if (CKRE_BUILD_STATIC)
 endif ()
 
 if (CKRE_BUILD_TESTS AND BUILD_TESTING)
-    add_executable(test_bgfx_rasterizer ../tests/test_bgfx_rasterizer.cpp)
+    add_executable(test_bgfx_rasterizer
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/providers/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend

@@ -1,17 +1,34 @@
 # CKRenderEngine
 
-CKRenderEngine implements the Virtools rendering layer used by Ballanced: the `CK2_3D` engine module, a translation core that turns the engine's Direct3D 7 style calls into GPU work, the default `CKSdlGpuRasterizer` plugin, and the optional `CKBgfxRasterizer` plugin.
+CKRenderEngine implements the Virtools rendering layer used by Ballanced: the
+`CK2_3D` engine module, the public rasterizer library, a fixed-function
+compatibility layer, the default `CKSdlGpuRasterizer`, and the optional
+`CKBgfxRasterizer`.
 
 ## Architecture
 
-The responsibilities follow `CK_3D → CKRasterizer → CKRasterizerBackend → Graphics API`:
+The implementation has four rasterizer modules with one dependency direction:
 
-- **CK_3D** owns the public engine API, scene objects and traversal. It issues public rasterizer revision 5 calls and loads providers through the registration entry points.
-- **CKRasterizerLib** implements fixed-function state, shader variants, geometry preparation and frame composition: render scale, MSAA, postprocessing, overlays and logical readbacks.
-- **CKRasterizerBackend** defines modern graphics resources, explicit programs, constant blocks, resolved pipeline state, ordered commands and completion. It is an internal contract independent of FFP and plugin loading.
-- **Native backends** implement that contract: `CKSdlGpuBackend` for SDL GPU, optional `CKBgfxBackend` for bgfx, and `CKNullBackend` for fallback and deterministic tests. The dynamic/static rasterizer plugins compose a native backend with the translation core and their own shader artifact catalog.
+```text
+CKSdlGpuRasterizer ─┐
+                    ├─> CKFFPLib ─> CKRasterizerLib ─> CK2 / VxMath
+CKBgfxRasterizer ───┘
 
-See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for the current implementation's ownership and dependency boundaries.
+CKNullRasterizer is implemented directly inside CKRasterizerLib.
+```
+
+- **CKRasterizerLib** owns the public `CKRasterizer` interface, common
+  configuration and diagnostics, capability baselines, registration support,
+  and the direct NULL implementation.
+- **CKFFPLib** translates legacy fixed-function state into provider-neutral
+  resources, pipelines, draw packets, ordered commands, submission and
+  readback through `CKRasterizerBackend`.
+- **CKSdlGpuRasterizer** and **CKBgfxRasterizer** each own a complete concrete
+  rasterizer: plugin entry points, device implementation, presentation, shader
+  containers and provider-specific build tools.
+
+See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for source ownership,
+rendering semantics and the enforced dependency direction.
 
 The default provider is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects providers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
 

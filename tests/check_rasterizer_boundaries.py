@@ -25,7 +25,15 @@ FORBIDDEN_TARGETS = {
     "CKSdlGpuBackend",
     "CKBgfxBackend",
 }
-FORBIDDEN_DIRECTORIES = {"CKRenderSupport", "CKRasterizerBackend"}
+FORBIDDEN_DIRECTORIES = {"CKRenderSupport", "CKRasterizerBackend", "tests"}
+PROVIDER_BUILD_TOKENS = {
+    "BGFX_DIR",
+    "CKBgfxShaderArtifacts",
+    "CKRE_SHADERC_COMMAND",
+    "CKRE_SHADERC_DEPENDS",
+    "CKSdlGpuShaderArtifacts",
+    "compile_shaders.py",
+}
 
 
 def commands(text):
@@ -126,7 +134,12 @@ def check(root):
         errors.append(f"CMake declares obsolete rasterizer target {target}")
     for directory in sorted(FORBIDDEN_DIRECTORIES):
         if (rasterizer / directory).exists():
-            errors.append(f"obsolete rasterizer directory remains: src/CKRasterizer/{directory}")
+            errors.append(f"non-module directory remains under src/CKRasterizer: {directory}")
+
+    ffp_cmake = (module_roots["CKFFPLib"] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+    for token in sorted(PROVIDER_BUILD_TOKENS):
+        if token in ffp_cmake:
+            errors.append(f"CMake: CKFFPLib references provider build input {token}")
 
     for module, targets in MODULE_TARGETS.items():
         for target in targets:
