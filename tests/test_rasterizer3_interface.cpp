@@ -59,7 +59,7 @@ VxMatrix Matrix(CKRasterizerContext *ctx, VXMATRIX_TYPE type)
 
 // --- Backend log ------------------------------------------------------------
 
-// Draws are the recording backend's draws (one per contract draw; the
+// Draws are the recording backend's draws (one per public draw call; the
 // postprocess composite would be one too, but the default options never
 // composite).
 int CountDraws(const Fixture &f)
@@ -982,7 +982,7 @@ void TestApproximationsKeepDrawing()
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
     }
 
-    // The public contract does not impose a backend-specific palette limit.
+    // The public interface does not impose a backend-specific palette limit.
     {
         Fixture f;
         CKRasterizerContext *ctx = f.Context;

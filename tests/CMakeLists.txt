@@ -137,8 +137,8 @@ ckre_copy_runtime_dependencies(test_recording_backend)
 add_test(NAME RecordingBackendTests COMMAND $<TARGET_FILE:test_recording_backend>)
 set_tests_properties(RecordingBackendTests PROPERTIES TIMEOUT 60)
 
-ckre_add_rasterizer3_test(rasterizer3_contract_tests
-    test_rasterizer3_contract.cpp
+ckre_add_rasterizer3_test(rasterizer3_interface_tests
+    test_rasterizer3_interface.cpp
 )
 
 # Translation core internals (state forwarding into the fixed-function
@@ -225,8 +225,8 @@ if (TARGET CKBgfxRasterizerStatic)
     target_compile_definitions(ff_uniform_state_tests PRIVATE CKRE_TEST_BGFX_ARTIFACTS=1)
 endif ()
 
-ckre_add_test(ffp_contract_exhaustive_tests
-    test_ffp_contract_exhaustive.cpp
+ckre_add_test(ffp_state_matrix_tests
+    test_ffp_state_matrix.cpp
 )
 
 # Real-backend pixel gate: fixed-function semantics driven through the public
