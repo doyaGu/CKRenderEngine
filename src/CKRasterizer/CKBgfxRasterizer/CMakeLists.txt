@@ -1,22 +1,22 @@
 set(CKBGFX_RASTERIZER_SOURCES
-    CKBgfxBackend.cpp
-    CKBgfxBackendDriver.cpp
-    CKBgfxCallback.cpp
-    CKBgfxClear.cpp
-    CKBgfxConfig.cpp
-    CKBgfxDrawMapTrace.cpp
-    CKBgfxInternal.cpp
-    CKBgfxRasterizer.cpp
-    CKBgfxShaders.cpp
+    Backend/CKBgfxBackend.cpp
+    Backend/CKBgfxCallback.cpp
+    Backend/CKBgfxClear.cpp
+    Backend/CKBgfxConfig.cpp
+    Backend/CKBgfxDrawMapTrace.cpp
+    Backend/CKBgfxInternal.cpp
+    Provider/CKBgfxBackendDriver.cpp
+    Provider/CKBgfxRasterizer.cpp
+    Provider/CKBgfxShaders.cpp
 )
 set(CKBGFX_RASTERIZER_HEADERS
-    CKBgfxBackend.h
-    CKBgfxBorderPalette.h
-    CKBgfxConfig.h
-    CKBgfxDrawMapTrace.h
-    CKBgfxInternal.h
-    CKBgfxRasterizer.h
-    CKBgfxResources.h
+    Backend/CKBgfxBackend.h
+    Backend/CKBgfxBorderPalette.h
+    Backend/CKBgfxConfig.h
+    Backend/CKBgfxDrawMapTrace.h
+    Backend/CKBgfxInternal.h
+    Backend/CKBgfxResources.h
+    Provider/CKBgfxRasterizer.h
 )
 set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 
@@ -35,6 +35,8 @@ function(ckre_configure_bgfx_rasterizer TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
         ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
@@ -112,6 +114,8 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_executable(test_bgfx_rasterizer ../tests/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
         ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
     )
     target_link_libraries(test_bgfx_rasterizer PRIVATE CKFFPLib bgfx bimg bx SDL3::SDL3)
