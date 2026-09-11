@@ -155,7 +155,8 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
             Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
         }
     }
-    Vx3DMultiplyMatrix4(viewProj, m_State.Projection, m_State.View);
+    m_State.EnsureViewProjection();
+    viewProj = m_State.ViewProjection();
     {
         // D3D8 samples at integer pixel centers. Match the half-pixel shift
         // already applied to POSITIONT vertices, then map the viewport into
