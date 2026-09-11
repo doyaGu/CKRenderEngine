@@ -1,5 +1,5 @@
-#ifndef CKRECORDINGPROVIDER_H
-#define CKRECORDINGPROVIDER_H
+#ifndef CKRECORDINGRASTERIZER_H
+#define CKRECORDINGRASTERIZER_H
 
 #include "CKRecordingBackend.h"
 #include "CKBuiltinShaders.h"

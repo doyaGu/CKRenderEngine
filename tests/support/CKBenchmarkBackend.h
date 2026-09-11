@@ -1,7 +1,7 @@
 #ifndef CKRE_CK_BENCHMARK_BACKEND_H
 #define CKRE_CK_BENCHMARK_BACKEND_H
 
-#include "CKRecordingProvider.h"
+#include "CKRecordingRasterizer.h"
 
 #include <array>
 #include <cstddef>

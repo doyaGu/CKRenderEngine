@@ -1,4 +1,4 @@
-#include "CKRecordingProvider.h"
+#include "CKRecordingRasterizer.h"
 
 #include "CKFFRasterizerContext.h"
 #include "CKRasterizerCapsBaseline.h"

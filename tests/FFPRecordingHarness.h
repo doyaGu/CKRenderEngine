@@ -6,7 +6,7 @@
 // (passes, draws with their state / textures / constants, presents, resource
 // traffic) and a few failure knobs.
 
-#include "CKRecordingProvider.h"
+#include "CKRecordingRasterizer.h"
 #include "CKFFShaderInterface.h"
 #include "CKFFRasterizerContextInternal.h"
 #include "TestTriangleMultiset.h"

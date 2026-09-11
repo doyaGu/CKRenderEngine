@@ -3,7 +3,7 @@
 // description (baseline caps, display modes), the frame protocol and the
 // handle table.
 
-#include "CKRecordingProvider.h"
+#include "CKRecordingRasterizer.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -53,7 +53,7 @@ endfunction()
 # backend or an accidental fallback implementation.
 add_library(ckre_recording_support STATIC
     support/CKRecordingBackend.cpp
-    support/CKRecordingProvider.cpp
+    support/CKRecordingRasterizer.cpp
 )
 target_include_directories(ckre_recording_support PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/support

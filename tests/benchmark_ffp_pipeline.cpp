@@ -4,7 +4,7 @@
 #include "CKFFStateResolver.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
-#include "CKRecordingProvider.h"
+#include "CKRecordingRasterizer.h"
 #include "CKFFRasterizerContextInternal.h"
 
 #include <algorithm>
