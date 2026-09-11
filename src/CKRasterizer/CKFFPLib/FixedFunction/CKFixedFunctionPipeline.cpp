@@ -19,6 +19,10 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_TextureBinder(m_State, m_ShaderCache, m_Probes),
       m_UniformEmitter(m_State, m_State.DrawState, m_ShaderCache, m_Probes),
       m_StaticUniformRevision(1),
+      m_DrawValidationCacheValid(FALSE),
+      m_DrawValidationCacheFormatFlags(0),
+      m_DrawValidationCacheActiveTextureCount(0),
+      m_DrawValidationCacheApproximationMask(0),
       m_VertexBufferProgramCacheValid(FALSE),
       m_VertexBufferProgramCacheDPFlags(0),
       m_VertexBufferProgramCacheFormatFlags(0),
@@ -66,6 +70,7 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend, const CKBackend
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     m_StaticUniformRevision = 1;
     m_UniformEmitter.ResetCache();
+    m_DrawValidationCacheValid = FALSE;
     if (!backend)
         return false;
     const CKBackendCaps &caps = backend->GetCaps();
@@ -357,6 +362,16 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
+    if (m_DrawValidationCacheValid &&
+        m_DrawValidationCacheFormatFlags == formatFlags &&
+        m_DrawValidationCacheActiveTextureCount == activeTextureCount) {
+        for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i) {
+            if ((m_DrawValidationCacheApproximationMask & (1ull << i)) != 0)
+                RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
+        }
+        return TRUE;
+    }
+
     if (!CKFFValidDrawStateValues(m_State.DrawState) ||
         (m_State.DrawState.GetColorWriteMask() & ~CKRST_STATE_WRITE_RGBA) != 0) {
         return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
@@ -530,6 +545,10 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         previousColorOp = colorOp;
         previousAlphaOp = shaderStage.AlphaOp;
     }
+    m_DrawValidationCacheFormatFlags = formatFlags;
+    m_DrawValidationCacheActiveTextureCount = activeTextureCount;
+    m_DrawValidationCacheApproximationMask = m_LastDrawApproximationMask;
+    m_DrawValidationCacheValid = TRUE;
     return TRUE;
 }
 
@@ -588,6 +607,8 @@ void CKFixedFunctionPipeline::MarkPreparedProgramDirty()
 
 void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 {
+    if (changeMask & CKFF_CHANGE_DRAW_VALIDATION)
+        m_DrawValidationCacheValid = FALSE;
     if (changeMask & CKFF_CHANGE_STATIC_UNIFORM) {
         ++m_StaticUniformRevision;
         if (m_StaticUniformRevision == 0) {

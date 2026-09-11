@@ -2137,6 +2137,70 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
     ffp.Shutdown();
 }
 
+void DrawValidationCacheInvalidatesOnStateChanges() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    const CKBOOL firstDraw = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKBOOL cachedDraw = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(firstDraw && cachedDraw && context.Log.DrawCount == 2,
+              "unchanged valid draw state remains submit-ready");
+
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    const CKBOOL firstApproximation = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const CKBOOL cachedApproximation = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(firstApproximation && cachedApproximation &&
+                  ffp.GetLastDrawApproximationMask() ==
+                      (1ull << CKRST_DIAG_IGNORE_DITHER) &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_DITHER) == 2 &&
+                  context.Log.DrawCount == 4,
+              "cached validation replays per-draw approximation diagnostics");
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, 99);
+    TestCheck(!ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STATE_VALUE &&
+                  context.Log.DrawCount == 4,
+              "render-state changes invalidate cached draw validation");
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ffp.SetTexture(0, 1, CKRST_TEXTURE_VALID);
+    TestCheck(ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  context.Log.DrawCount == 5,
+              "restored draw state can be validated and cached again");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, 99);
+    TestCheck(!ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST,
+                  1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_STATE_VALUE &&
+                  context.Log.DrawCount == 5,
+              "texture-stage changes invalidate cached draw validation");
+
+    ffp.Shutdown();
+}
+
 void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
@@ -3382,6 +3446,8 @@ int main() {
               &IgnoredRenderStatesReportDiagnostics);
     tests.Run("Invalid state values reject before backend encoding",
               &InvalidStateValuesRejectBeforeBackendEncoding);
+    tests.Run("Draw validation cache invalidates on state changes",
+              &DrawValidationCacheInvalidatesOnStateChanges);
     tests.Run("Unsupported texture-stage states approximate with diagnostics",
               &UnsupportedTextureStageStatesApproximateWithDiagnostics);
     tests.Run("Single cube-volume layout uses generic mixed sampler module",

@@ -173,7 +173,8 @@ private:
     enum CKFFStateChange {
         CKFF_CHANGE_OBJECT_UNIFORM = 0x1,
         CKFF_CHANGE_STATIC_UNIFORM = 0x2,
-        CKFF_CHANGE_PROGRAM = 0x4
+        CKFF_CHANGE_PROGRAM = 0x4,
+        CKFF_CHANGE_DRAW_VALIDATION = 0x8
     };
     enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
@@ -206,6 +207,10 @@ private:
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
     uint64_t m_StaticUniformRevision;
+    CKBOOL m_DrawValidationCacheValid;
+    CKDWORD m_DrawValidationCacheFormatFlags;
+    CKDWORD m_DrawValidationCacheActiveTextureCount;
+    uint64_t m_DrawValidationCacheApproximationMask;
     CKBOOL m_VertexBufferProgramCacheValid;
     CKDWORD m_VertexBufferProgramCacheDPFlags;
     CKDWORD m_VertexBufferProgramCacheFormatFlags;

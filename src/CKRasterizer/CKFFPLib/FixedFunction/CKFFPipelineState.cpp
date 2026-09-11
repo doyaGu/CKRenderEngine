@@ -44,6 +44,7 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
 void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                                                CKBOOL ForceAnisotropicFiltering) {
     m_TextureBinder.SetRenderOptions(DisableTextureFiltering, DisableMipmaps, ForceAnisotropicFiltering);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
@@ -60,6 +61,8 @@ CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
 
 CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
     if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT) {
+        if (!m_State.VertexBlendPaletteOverflow)
+            OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION);
         m_State.VertexBlendPaletteOverflow = TRUE;
         return FALSE;
     }
@@ -75,7 +78,8 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
         m_State.VertexBlendMatrixSet[i] = FALSE;
     }
     m_State.VertexBlendPaletteOverflow = FALSE;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD count) {
@@ -100,7 +104,8 @@ void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD va
     if (previous == value)
         return;
 
-    CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM;
+    CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM |
+                         CKFF_CHANGE_DRAW_VALIDATION;
     if (CKFFRenderStateAffectsProgram(state))
         changeMask |= CKFF_CHANGE_PROGRAM;
     OnFixedFunctionStateChanged(changeMask);
@@ -122,7 +127,10 @@ void CKFixedFunctionPipeline::InitDefaultStates() {
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
+    const CKDWORD previous = m_State.DrawState.GetColorWriteMask();
     m_State.DrawState.SetColorWriteMask(r, g, b, a);
+    if (m_State.DrawState.GetColorWriteMask() != previous)
+        OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetColorWriteMask() const {
@@ -130,7 +138,10 @@ CKDWORD CKFixedFunctionPipeline::GetColorWriteMask() const {
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKDWORD mask) {
+    const CKDWORD previous = m_State.DrawState.GetColorWriteMask();
     m_State.DrawState.SetColorWriteMask(mask);
+    if (m_State.DrawState.GetColorWriteMask() != previous)
+        OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 static uint64_t TextureCombineStateMask() {
@@ -178,7 +189,8 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     m_State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
     m_State.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
     Vx3DMatrixIdentity(m_State.TexMatrix[stage]);
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
@@ -208,7 +220,8 @@ void CKFixedFunctionPipeline::ResetTextureStages(int firstStage, int stageCount)
         m_State.StageStateQueryMasks[stage] = queryMask;
         Vx3DMatrixIdentity(m_State.TexMatrix[stage]);
     }
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const {
@@ -240,7 +253,8 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
             : CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)state);
     }
     m_State.TexMatrix[stage] = snapshot.TextureMatrix;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
@@ -315,7 +329,8 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
             m_State.StageStateQueryMasks[stage] |= derivedMask;
         }
     }
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) {
@@ -329,7 +344,8 @@ void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTA
         return;
     m_State.StageStates[stage][(int)type] = 0;
     m_State.StageStateSetMasks[stage] &= ~stateBit;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
@@ -642,11 +658,13 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
     m_State.TextureHandles[stage] = textureHandle;
     m_State.TextureFlags[stage] = normalizedFlags;
     if (oldHasTexture != newHasTexture || oldStaticFlags != newStaticFlags) {
-        OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
+                                    CKFF_CHANGE_DRAW_VALIDATION);
     } else if (oldFlags != normalizedFlags) {
         // Non-program texture flags such as BUMPLUMINANCE are packed into the
         // stage-parameter uniform even when the sampler dimension is unchanged.
-        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM |
+                                    CKFF_CHANGE_DRAW_VALIDATION);
     }
 }
 
