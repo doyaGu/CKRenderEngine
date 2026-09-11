@@ -135,7 +135,7 @@ void TestFixedFunctionShapedProgram()
     }
     p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = 1;
     p.Pixel.SamplerCount = 12;
-    TestCheck(p.Validate() == CK_OK, "shared matrices, stage data and twelve texture bindings fit the generic contract");
+    TestCheck(p.Validate() == CK_OK, "shared matrices, stage data and twelve texture bindings fit the backend limits");
     p.SetTarget(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11);
     p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = p.Pixel.SamplerCount = 0;
     TestCheck(p.Validate() == CK_OK, "the same declarations also describe named-uniform shaders");

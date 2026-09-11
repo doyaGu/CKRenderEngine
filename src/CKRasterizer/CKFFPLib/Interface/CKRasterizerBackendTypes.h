@@ -6,7 +6,7 @@
 #include "XArray.h"
 #include "CKTypes.h"
 #include "CKRasterizerBackendEnums.h"
-// CKTextureDesc is shared with the public v3 contract. Backend geometry uses
+// CKTextureDesc is shared with the public rasterizer interface. Backend geometry uses
 // explicit layouts and byte buffers rather than fixed-function vertex formats.
 #include "CKRasterizerResourceTypes.h"
 

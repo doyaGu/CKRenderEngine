@@ -267,7 +267,7 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
         m_HardwareValid = FALSE;
     }
 
-    // Contract vertex format and canonical layout of the hardware buffer.
+    // Public vertex format and canonical interleaved layout of the hardware buffer.
     const CKDWORD vertexFormat = CKRSTVertexFormatFromDrawData(&m_DpData);
     CKRSTVertexLayout layout;
     const CKDWORD stride = CKRSTGetVertexLayout(vertexFormat, nullptr, &layout);

@@ -30,7 +30,7 @@ inline CKDWORD CKFFUniformDebugSlot(CKFFConstantBlock block)
 struct CKFFDebugConfig {
     int DrawLogLimit;
     int Real3DLogLimit;
-    int Contract3DLogLimit;
+    int Draw3DLogLimit;
     int PositionTLogLimit;
     bool DrawSerialPerFrame;
 
@@ -97,8 +97,8 @@ private:
     void LogMatrixRows(const char *label, const VxMatrix &m) const;
     void LogVertexClipSamples(const VxMatrix &world, const VxMatrix &view,
                               const VxMatrix &proj, const VxDrawPrimitiveData *data) const;
-    void LogPrimitiveIndexContract(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
-                                   const VxDrawPrimitiveData *data) const;
+    void LogPrimitiveIndexRange(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
+                                const VxDrawPrimitiveData *data) const;
     void LogPositionTSamples(const float *viewport, const VxDrawPrimitiveData *data) const;
     const char *PrimitiveName(VXPRIMITIVETYPE type) const;
     const char *VertexBlendName(CKDWORD vertexBlend) const;
@@ -109,7 +109,7 @@ private:
     int m_PositionTDrawLogCount;
     int m_Opaque3DDrawSerial;
     int m_Transparent3DDrawSerial;
-    int m_3DContractLogCount;
+    int m_3DDrawLogCount;
 };
 
 #endif // CKFFDEBUG_H

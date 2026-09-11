@@ -9,7 +9,7 @@
 // resources, resolved pipeline states, commands and synchronization.
 //
 // Handles are opaque non-zero CKDWORDs; 0 is never a valid object. Object
-// types are the CKRST_OBJ_* ids shared with the contract (CKRasterizerEnums.h)
+// types are the CKRST_OBJ_* ids shared with the public rasterizer interface
 // plus the backend-only ones below.
 // ===========================================================================
 
@@ -26,7 +26,7 @@
 #include "CKBuiltinShaders.h"
 #include "CKRasterizerBackendTypes.h"   // CKSamplerDesc, CKVertexLayoutDesc, CKShaderDesc, CKReadbackDesc
 
-// Backend-only object types (the contract defines TEXTURE / VERTEXBUFFER /
+// Backend-only object types (the public rasterizer interface defines TEXTURE / VERTEXBUFFER /
 // INDEXBUFFER).
 #define CKRST_OBJ_RENDERTARGET    CKRST_OBJ_FRAMEBUFFER
 
@@ -98,7 +98,7 @@ struct CKBackendStats {
 // Resources
 // ---------------------------------------------------------------------------
 
-// Textures use the contract's CKTextureDesc (flags: CKRST_TEXTURE_CUBEMAP /
+// Textures use the public rasterizer's CKTextureDesc (flags: CKRST_TEXTURE_CUBEMAP /
 // VOLUMEMAP / RENDERTARGET / MIPMAP..., plus the backend-only
 // CKRST_TEXTURE_MSAA_Xn / READBACK / BLIT_DST from CKRasterizerBackendEnums.h).
 

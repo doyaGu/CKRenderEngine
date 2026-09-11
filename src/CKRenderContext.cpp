@@ -313,7 +313,7 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
     if (frameRateMode & CK_FRAMERATE_SYNC) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
     } else if (frameRateMode & CK_FRAMERATE_LIMIT) {
-        // Frame limiting is a timer contract; keep presentation synchronized.
+        // Timer-based limiting still requests synchronized presentation.
         resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
     } else if (frameRateMode & CK_FRAMERATE_FREE) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved & ~CK_RENDER_WAITVBL);
@@ -330,8 +330,8 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
     return resolved;
 }
 
-static void LogPresentFrameRateContract(const char *stage, CK_RENDER_FLAGS inputFlags, CK_RENDER_FLAGS resolvedFlags,
-                                        CKTimeManager *timeManager) {
+static void LogPresentFrameRateState(const char *stage, CK_RENDER_FLAGS inputFlags, CK_RENDER_FLAGS resolvedFlags,
+                                     CKTimeManager *timeManager) {
     if (!PresentSyncLogEnabled())
         return;
 
@@ -592,7 +592,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     // The engine's Clear covers the complete target even when the camera
     // viewport is smaller (verified against the original CKDX8Rasterizer).
     // Express that rectangle explicitly: the rasterizer's zero-rectangle
-    // form retains its separate viewport-clear contract.
+    // form retains its separate viewport-clear semantics.
     CKRECT targetRect = {0, 0, GetWidth(), GetHeight()};
     if (!m_RasterizerContext->Clear(clearFlags, clearColor, 1.0f, Stencil, 1, &targetRect))
         return CKERR_INVALIDOPERATION;
@@ -688,7 +688,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     // (spec 4.8) so later draws in this Virtools frame can sample the texture.
     const CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
     if (!m_TargetTexture)
-        LogPresentFrameRateContract("BackToFront", inputFlags, renderFlags, timeManager);
+        LogPresentFrameRateState("BackToFront", inputFlags, renderFlags, timeManager);
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
     const CKBOOL presented = m_RasterizerContext->BackToFront(waitVbl);

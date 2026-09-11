@@ -816,7 +816,7 @@ static void SubmissionCopyPreservesTweenStreams()
         destination, (VxDrawPrimitiveData *)&simple);
     TestCheck(destination.PositionPtr == &position &&
                   !destination.TweenPositionPtr && !destination.TweenNormalPtr,
-              "RenderContext submission copy must retain the simple-data contract");
+              "RenderContext submission copy must retain simple-data ownership");
 }
 
 static void CommonInterleaveMatchesGenericPacking()

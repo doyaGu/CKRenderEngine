@@ -553,7 +553,7 @@ CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD h
 
     // Finish the native-target scene pass, then let SDL encode its dedicated
     // blit straight to the acquired swapchain image. This keeps the portable
-    // texture backbuffer/readback contract while avoiding another translated
+    // texture backbuffer/readback semantics while avoiding another translated
     // draw packet, geometry upload and backend render-pass setup.
     CKERROR error = m->Flush();
     if (error != CK_OK) return error;

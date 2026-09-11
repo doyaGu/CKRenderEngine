@@ -20,7 +20,7 @@ set(CKBGFX_RASTERIZER_HEADERS
 )
 set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 
-# The provider owns compilation of its shader containers. The fixed-function
+# The bgfx rasterizer owns compilation of its shader containers. The fixed-function
 # source calculations remain canonical input owned by CKFFPLib.
 find_package(Python3 COMPONENTS Interpreter)
 set(_ckbgfx_shader_sources
@@ -151,7 +151,7 @@ endif ()
 
 if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_executable(test_bgfx_rasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/providers/test_bgfx_rasterizer.cpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/rasterizers/test_bgfx_rasterizer.cpp)
     target_include_directories(test_bgfx_rasterizer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend

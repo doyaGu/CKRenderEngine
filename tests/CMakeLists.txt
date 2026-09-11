@@ -75,7 +75,7 @@ function(ckre_add_benchmark TARGET_NAME)
     ckre_configure_test_target(${TARGET_NAME})
 endfunction()
 
-# The provider-neutral program interface can be tested without a GPU device.
+# The backend-neutral program interface can be tested without a GPU device.
 add_executable(test_backend_program test_backend_program.cpp)
 target_link_libraries(test_backend_program PRIVATE CKFFPLib)
 set_target_properties(test_backend_program PROPERTIES

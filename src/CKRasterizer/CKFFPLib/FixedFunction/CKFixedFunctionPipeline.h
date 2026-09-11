@@ -43,7 +43,7 @@ enum CKFFDrawRejectReason {
 };
 
 const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason);
-// Name of an APPROX_* / IGNORE_* contract diagnostic recorded for a draw.
+// Name of an APPROX_* / IGNORE_* diagnostic recorded for a draw.
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code);
 
 class CKFixedFunctionPipeline {

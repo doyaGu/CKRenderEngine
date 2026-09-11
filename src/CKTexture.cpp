@@ -378,7 +378,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             if (!converted)
                 return FALSE;
         }
-        // Upload the pixels through the contract
+        // Upload the pixels through the public rasterizer interface.
         if (m_MipMaps && m_MipMapLevel) {
             if (!m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, nullptr)) {
                 delete[] converted;
@@ -744,7 +744,7 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev) {
 
     // Readbacks go through the render context (DumpToMemory / RequestReadback
     // read the presented frame or the bound target); they are not a texture
-    // property in the v3 contract.
+    // property in the public v3 texture interface.
     const CKDWORD requiredFlags = CKRST_TEXTURE_RENDERTARGET |
                                   (isCubeTarget ? CKRST_TEXTURE_CUBEMAP : 0);
     if (m_InVideoMemory &&

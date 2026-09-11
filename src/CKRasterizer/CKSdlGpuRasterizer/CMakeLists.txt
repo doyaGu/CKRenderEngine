@@ -72,7 +72,7 @@ endif ()
 if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     foreach (_test test_sdl_gpu_rasterizer test_sdl_gpu_pixels)
         add_executable(${_test}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/providers/${_test}.cpp)
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/rasterizers/${_test}.cpp)
         target_include_directories(${_test} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/Backend

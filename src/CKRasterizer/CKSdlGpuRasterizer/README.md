@@ -1,12 +1,12 @@
 # SDL_gpu rasterizer
 
 `CKSdlGpuRasterizer` and `CKSdlGpuRasterizerStatic` are the complete SDL_gpu
-rasterizer targets. They contain the provider, SDL resources, native pipelines,
+rasterizer targets. They contain the concrete driver, SDL resources, native pipelines,
 command encoding, fences, presentation, and the native shader catalog. Both
 use `CKFFPLib` for fixed-function state translation, geometry preparation, and
 scene composition; there is no separately packaged SDL backend target.
 
-The provider advertises complete format/profile targets before device creation,
+The SDL_gpu rasterizer advertises complete format/profile targets before device creation,
 then supplies the matching catalog after initialization. Its native device
 consumes explicit shader and program descriptors from the compatibility layer.
 

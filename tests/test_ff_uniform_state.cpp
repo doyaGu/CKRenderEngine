@@ -875,7 +875,7 @@ void ShaderCodegenCompilesOneProgramFamily() {
               "bgfx rasterizer build must not reference variant manifests or the module table");
     TestCheck(cmake.find("DEPENDS ${CKRE_SHADERC_DEPENDS} ${_ckbgfx_shader_sources}") != std::string::npos &&
                   cmake.find("SOURCES ${_ckbgfx_shader_sources}") != std::string::npos,
-              "bgfx shader generation must depend on every provider and FFP source");
+              "bgfx shader generation must depend on every rasterizer and FFP source");
 }
 
 #endif
@@ -1107,13 +1107,13 @@ void BgfxTransientAllocationsPreflightAvailability() {
     TestCheck(!contents.empty(),
               "bgfx rasterizer context source must be readable");
 
-    struct Contract {
+    struct AllocationSequence {
         const char *Function;
         const char *Avail;
         const char *Alloc;
         const char *Miss;
     };
-    const Contract contracts[] = {
+    const AllocationSequence sequences[] = {
         {
             "CKBOOL CKBgfxBackend::AllocTransientVertices",
             "bgfx::getAvailTransientVertexBuffer",
@@ -1128,16 +1128,16 @@ void BgfxTransientAllocationsPreflightAvailability() {
         },
     };
 
-    for (size_t i = 0; i < sizeof(contracts) / sizeof(contracts[0]); ++i) {
-        const std::string::size_type functionStart = contents.find(contracts[i].Function);
+    for (size_t i = 0; i < sizeof(sequences) / sizeof(sequences[0]); ++i) {
+        const std::string::size_type functionStart = contents.find(sequences[i].Function);
         TestCheck(functionStart != std::string::npos,
                   "transient allocation function must exist");
         if (functionStart == std::string::npos)
             continue;
 
-        const std::string::size_type availPos = contents.find(contracts[i].Avail, functionStart);
-        const std::string::size_type allocPos = contents.find(contracts[i].Alloc, functionStart);
-        const std::string::size_type missPos = contents.find(contracts[i].Miss, functionStart);
+        const std::string::size_type availPos = contents.find(sequences[i].Avail, functionStart);
+        const std::string::size_type allocPos = contents.find(sequences[i].Alloc, functionStart);
+        const std::string::size_type missPos = contents.find(sequences[i].Miss, functionStart);
 
         TestCheck(availPos != std::string::npos && allocPos != std::string::npos && availPos < allocPos,
                   "transient allocation must query bgfx availability before allocation");

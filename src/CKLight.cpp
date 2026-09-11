@@ -577,7 +577,7 @@ CKERROR RCKLight::Load(CKStateChunk *chunk, CKFile *file) {
 
 /*************************************************
 Summary: Sets up the light in the fixed-function pipeline.
-Purpose: Configures the light at the specified index through the rasterizer contract.
+Purpose: Configures the light at the specified index through the public rasterizer interface.
 Remarks:
 - Checks visibility first
 - For non-directional lights, checks if attenuation sum is sufficient

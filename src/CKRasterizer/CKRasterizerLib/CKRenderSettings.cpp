@@ -366,12 +366,12 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
     const CKRenderSettingsView ffpLog = CKRenderFFPLogSettings();
     config.FFPLog.DrawLimit = ffpLog.GetInt("DrawLimit", 0);
     config.FFPLog.Real3DLimit = ffpLog.GetInt("Real3DLimit", 0);
-    config.FFPLog.Contract3DLimit = ffpLog.GetInt("Contract3DLimit", 0);
+    config.FFPLog.Draw3DLimit = ffpLog.GetInt("Draw3DLimit", 0);
     config.FFPLog.PositionTLimit = ffpLog.GetInt("PositionTLimit", 0);
     config.FFPLog.DrawSerialPerFrame = ffpLog.GetBool("DrawSerialPerFrame", false);
 
     const CKRenderSettingsView meshLog = CKRenderMeshLogSettings();
-    config.MeshLog.ContractLimit = meshLog.GetInt("ContractLimit", 0);
+    config.MeshLog.DrawLimit = meshLog.GetInt("DrawLimit", 0);
     config.MeshLog.HardwareIndexRanges = meshLog.GetBool("HardwareIndexRanges", false);
 
     return config;

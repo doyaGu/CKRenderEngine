@@ -152,22 +152,22 @@ struct CKRenderFFPStatsConfig {
 struct CKRenderFFPLogConfig {
     int DrawLimit;
     int Real3DLimit;
-    int Contract3DLimit;
+    int Draw3DLimit;
     int PositionTLimit;
     bool DrawSerialPerFrame;
 
     bool Any() const {
-        return DrawLimit > 0 || Real3DLimit > 0 || Contract3DLimit > 0 ||
+        return DrawLimit > 0 || Real3DLimit > 0 || Draw3DLimit > 0 ||
                PositionTLimit > 0 || DrawSerialPerFrame;
     }
 };
 
 struct CKRenderMeshLogConfig {
-    int ContractLimit;
+    int DrawLimit;
     bool HardwareIndexRanges;
 
     bool Any() const {
-        return ContractLimit > 0 || HardwareIndexRanges;
+        return DrawLimit > 0 || HardwareIndexRanges;
     }
 };
 

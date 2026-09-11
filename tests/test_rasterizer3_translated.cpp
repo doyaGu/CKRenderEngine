@@ -113,7 +113,7 @@ void TestDefaultsReachThePipeline()
 {
     Fixture f;
     CKDWORD value = 0;
-    // Create() resets only the contract-visible mirror; the explicit call
+    // Create() resets only the public state mirror; the explicit call
     // pushes the v1 defaults into the pipeline.
     TestCheck(f.FFP->GetRenderState(VXRENDERSTATE_CULLMODE) == VXCULL_CCW, "pipeline keeps its own defaults after Create");
     f.Context->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CW);

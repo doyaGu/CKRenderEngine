@@ -163,7 +163,7 @@ public:
 private:
     struct Resource {
         CKDWORD Type;                      // CKRST_OBJ_*
-        CKDWORD Handle;                    // backend handle (== contract handle)
+        CKDWORD Handle;                    // backend handle (same value returned publicly)
         CKTextureDesc Texture;
         CKVertexBufferDesc VertexBuffer;
         CKIndexBufferDesc IndexBuffer;

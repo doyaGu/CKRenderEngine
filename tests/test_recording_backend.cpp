@@ -173,7 +173,7 @@ static int TestConfiguredDriver()
     std::vector<CKBackendShaderTarget> targets;
     driver.GetShaderTargets(targets);
     if (targets.size() != 1 || targets[0].Format != driver.Format || targets[0].Profile != driver.Profile)
-        return Fail("provider targets follow configured shader conventions");
+        return Fail("rasterizer targets follow configured shader conventions");
     CKRasterizerBackend *backend = driver.CreateBackend();
     if (!backend)
         return Fail("configured backend");

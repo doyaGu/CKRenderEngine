@@ -322,10 +322,10 @@ def main() -> int:
                         action="append", help="Backend to compile. May be repeated.")
     args = parser.parse_args()
 
-    provider_shader_dir = Path(__file__).resolve().parent
-    source_dir = provider_shader_dir.parents[1] / "CKFFPLib" / "shaders"
+    rasterizer_shader_dir = Path(__file__).resolve().parent
+    source_dir = rasterizer_shader_dir.parents[1] / "CKFFPLib" / "shaders"
     interface_dir = source_dir.parent / "Interface"
-    generated_dir = provider_shader_dir / "generated"
+    generated_dir = rasterizer_shader_dir / "generated"
     spec_layout = write_spec_layout_shader(source_dir)
     print(f"Wrote {spec_layout.name} from {SPEC_LAYOUT_DEF}")
     if args.command == "gen-spec-layout":

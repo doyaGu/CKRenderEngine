@@ -6,7 +6,7 @@
 #include "VxDefines.h"
 
 // Enumerations of the backend interface (CKRasterizerBackend.h) and the
-// fixed-function translation core. Everything shared with the v3 contract -
+// fixed-function translation core. Everything shared with the public rasterizer interface -
 // object kinds, clear flags, cube faces, texture / buffer / lock flags, debug
 // flags - comes from the public header; this file
 // only adds what the backends need on top of it.
@@ -21,7 +21,7 @@
 
 
 // ===========================================================================
-// Object Kinds (backend-internal objects; the contract kinds are in CKRasterizerEnums.h)
+// Object Kinds (backend-internal objects; public kinds are in CKRasterizerEnums.h)
 // ===========================================================================
 
 #define CKRST_OBJ_SHADER          0x00000010
@@ -146,7 +146,7 @@ typedef enum CK_COMPARE_MODE {
 } CK_COMPARE_MODE;
 
 // ---------------------------------------------------------------------------
-// Backend texture flags (extend the contract's CKRST_TEXTUREFLAGS)
+// Backend texture flags (extend the public CKRST_TEXTUREFLAGS)
 // ---------------------------------------------------------------------------
 
 #define CKRST_TEXTURE_MSAA_X2         0x00800000

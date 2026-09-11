@@ -151,7 +151,7 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
         stateDesc.FS.SetRangeFog(drawState.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE) != 0);
     }
 
-    // Fragment state description mirrors the active fixed-function texture-stage contract.
+    // Fragment state description mirrors the active fixed-function texture-stage state.
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const uint64_t stateSetMask = state.StageStateSetMasks[stage];
         const bool stageActive = (CKDWORD)stage < out->ActiveTextureCount;

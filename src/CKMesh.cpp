@@ -4579,13 +4579,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                         ++CKRenderPerfCurrent().SoftwarePrimitiveEntries;
                         CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
                     );
-                    static int s_meshContractLogCount = 0;
+                    static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.ContractLimit;
+                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
 #else
                     const int meshLogLimit = 0;
 #endif
-                    if (s_meshContractLogCount < meshLogLimit) {
+                    if (s_meshDrawLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
                         VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
@@ -4601,8 +4601,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                             dstBlend = (CKDWORD)mat->GetDestBlend();
                         }
                         CK_LOG_FMT("Mesh",
-                                   "Mesh contract #%d: path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
-                                   s_meshContractLogCount,
+                                   "Mesh draw #%d: path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   s_meshDrawLogCount,
                                    prim->m_Type,
                                    ent && ent->GetName() ? ent->GetName() : "",
                                    GetName() ? GetName() : "",
@@ -4619,7 +4619,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                    world[3][0], world[3][1], world[3][2],
                                    box.Min.x, box.Min.y, box.Min.z,
                                    box.Max.x, box.Max.y, box.Max.z);
-                        ++s_meshContractLogCount;
+                        ++s_meshDrawLogCount;
                     }
                     CKMeshSetDrawAnnotation(dev, (CKSTRING)"SW",
                                     ent, this, mat, groupIndex, p,
@@ -4651,13 +4651,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                     );
                     CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
                     CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
-                    static int s_meshContractLogCount = 0;
+                    static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.ContractLimit;
+                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
 #else
                     const int meshLogLimit = 0;
 #endif
-                    if (s_meshContractLogCount < meshLogLimit) {
+                    if (s_meshDrawLogCount < meshLogLimit) {
                         const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
                         const VxBbox &box = GetLocalBox();
                         VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
@@ -4673,8 +4673,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                             dstBlend = (CKDWORD)mat->GetDestBlend();
                         }
                         CK_LOG_FMT("Mesh",
-                                   "Mesh contract #%d: path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
-                                   s_meshContractLogCount,
+                                   "Mesh draw #%d: path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                   s_meshDrawLogCount,
                                    prim->m_Type,
                                    ent && ent->GetName() ? ent->GetName() : "",
                                    GetName() ? GetName() : "",
@@ -4692,7 +4692,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                    world[3][0], world[3][1], world[3][2],
                                    box.Min.x, box.Min.y, box.Min.z,
                                    box.Max.x, box.Max.y, box.Max.z);
-                        ++s_meshContractLogCount;
+                        ++s_meshDrawLogCount;
                     }
                     const CKDWORD hwBaseVertex = m_VertexBufferWrapAware ? 0 : group->m_BaseVertex;
                     const CKDWORD hwVertexCount = m_VertexBufferWrapAware ? m_VertexBufferVertexCount : group->m_VertexCount;
@@ -5284,7 +5284,7 @@ void RCKMesh::ResetHardwareVertexBufferState() {
     m_VertexBufferVertexCount = 0;
 }
 
-// Creates the contract vertex buffer for `vertexCount` vertices of
+// Creates the interleaved hardware vertex buffer for `vertexCount` vertices of
 // `vertexFormat`. Index buffers are 16-bit and absolute (spec 4.7), so a
 // mesh whose per-group vertex copies exceed 65536 stays on the software path.
 CKBOOL RCKMesh::CreateHardwareVertexBuffer(CKRasterizerContext *rst, CKDWORD vertexFormat,
@@ -5331,7 +5331,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         m_IndexBufferIndexCount = 0;
     }
 
-    // Contract vertex format and the canonical layout Lock memory uses.
+    // Public vertex format and the canonical interleaved layout Lock memory uses.
     const CKDWORD vertexFormat = CKRSTVertexFormatFromDrawData(data);
     CKRSTVertexLayout layout;
     const CKDWORD stride = CKRSTGetVertexLayout(vertexFormat, nullptr, &layout);

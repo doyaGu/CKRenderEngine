@@ -21,7 +21,7 @@
 #endif
 
 // Sampler resource indices are dense within fragment space 2. Their logical
-// roles (2D, cube and volume) are fixed by the shared FFP shader contract.
+// roles (2D, cube and volume) are fixed by the shared FFP shader ABI.
 #define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot

@@ -270,7 +270,7 @@ def main() -> None:
     abi_text = (SHARED.parent / "Interface" / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
     abi = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", abi_text)[1])
     abi_hash = int(re.search(r"CKFF_SHADER_INTERFACE_HASH = (0x[0-9a-fA-F]+)", abi_text)[1], 16)
-    # Hash exactly the ordered schema consumed by the provider-facing identity.
+    # Hash exactly the ordered schema consumed by the rasterizer shader identity.
     for byte in native_layout_schema()[1].encode("ascii"):
         abi_hash = ((abi_hash ^ byte) * 16777619) & 0xffffffff
     if args.verify:

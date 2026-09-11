@@ -1,5 +1,5 @@
 // rasterizer3_pixel_tests: the fixed-function semantics only a real backend
-// can prove, driven exclusively through the CKRasterizer v3 contract on the
+// can prove, driven exclusively through the public CKRasterizer v3 interface on the
 // selected plugin in a visible SDL window. Pixels come back through
 // CopyToMemoryBuffer, so the readback path is part of the gate.
 //
@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Static plugin entry; both executables run the same public contract cases.
+// Static plugin entry; both executables run the same public rasterizer cases.
 #ifdef CKRE_PIXEL_SDL_GPU
 extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
 #else
@@ -213,7 +213,7 @@ void ExpectCenter(const Pixels &pixels, int r, int g, int b, const char *what)
 }
 
 // ---------------------------------------------------------------------------
-// State and frame helpers (contract only)
+// State and frame helpers (public interface only)
 // ---------------------------------------------------------------------------
 
 void ResetStage(CKRasterizerContext *ctx, int stage)
@@ -1211,10 +1211,10 @@ void CheckDriverCaps(const Backend &b)
     TestCheck((caps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_DX8) != 0 &&
                   (caps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_HARDWARETL) != 0,
               "driver caps report the baseline DX8 hardware T&L level");
-    CKRasterizerCapsDesc contractCaps;
-    TestCheck(b.Context->GetCaps(&contractCaps) && contractCaps.MaxTextureStages >= 1 &&
-                  contractCaps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES,
-              "contract caps");
+    CKRasterizerCapsDesc publicCaps;
+    TestCheck(b.Context->GetCaps(&publicCaps) && publicCaps.MaxTextureStages >= 1 &&
+                  publicCaps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES,
+              "public rasterizer caps");
 }
 
 struct ReadbackCapture {
@@ -1663,7 +1663,7 @@ int main(int argc, char **argv)
     }
 
     TestFramework tests;
-    tests.Run("backend renders the fixed-function semantics through the v3 contract",
+    tests.Run("backend renders the fixed-function semantics through the public v3 interface",
               &BackendRendersFixedFunctionSemantics);
     return tests.ExitCode();
 }

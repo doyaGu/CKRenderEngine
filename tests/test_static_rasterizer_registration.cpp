@@ -26,7 +26,7 @@ int main()
     for (int i = 0; i < g_RasterizersInfo.Size(); ++i) {
         const CKRasterizerInfo &info = g_RasterizersInfo[i];
         if (!info.StartFct || !info.CloseFct || info.InterfaceRevision != CKRST_INTERFACE_REVISION)
-            return Fail("registered rasterizer has an invalid contract");
+            return Fail("registered rasterizer does not implement the public interface");
         if (strcmp(info.DllName.CStr(), "CKBgfxRasterizer") == 0) ++bgfx;
         if (strcmp(info.DllName.CStr(), "CKSdlGpuRasterizer") == 0) ++sdl;
         if (strcmp(info.Desc.CStr(), "NULL Rasterizer") == 0) ++null;
