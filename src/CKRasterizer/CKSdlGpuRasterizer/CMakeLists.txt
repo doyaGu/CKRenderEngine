@@ -33,6 +33,7 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         FOLDER "Rasterizer"
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
     )
 endfunction()
 

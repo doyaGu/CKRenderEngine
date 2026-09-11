@@ -198,6 +198,7 @@ function(ckre_configure_target TARGET_NAME)
     set_target_properties(${TARGET_NAME} PROPERTIES
             VERSION ${PROJECT_VERSION}
             SOVERSION ${PROJECT_VERSION_MAJOR}
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
     )
 endfunction()
 

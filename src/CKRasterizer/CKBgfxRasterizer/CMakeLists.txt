@@ -96,6 +96,7 @@ function(ckre_configure_bgfx_rasterizer TARGET_NAME)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         FOLDER "Rasterizer"
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
     )
 endfunction()
 
