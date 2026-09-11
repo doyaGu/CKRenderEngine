@@ -22,12 +22,12 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFixedFunctionPipeline.cpp
     FixedFunction/CKTransientGeometry.cpp
     FixedFunction/CKVertexLayoutCache.cpp
-    Translation/CKBackendDisplayCaps.cpp
-    Translation/CKPresentStage.cpp
-    Translation/CKRasterizerPlugin.cpp
-    Translation/CKTranslatedContext.cpp
-    Translation/CKTranslatedFrame.cpp
-    Translation/CKTranslatedRasterizer.cpp
+    Rasterizer/CKBackendDisplayCaps.cpp
+    Rasterizer/CKPresentStage.cpp
+    Rasterizer/CKRasterizerPlugin.cpp
+    Rasterizer/CKTranslatedContext.cpp
+    Rasterizer/CKTranslatedFrame.cpp
+    Rasterizer/CKTranslatedRasterizer.cpp
 )
 
 set(CKFFP_LIB_HEADERS
@@ -65,8 +65,8 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKFixedFunctionPipeline.h
     FixedFunction/CKTransientGeometry.h
     FixedFunction/CKVertexLayoutCache.h
-    Translation/CKPresentStage.h
-    Translation/CKTranslatedRasterizerInternal.h
+    Rasterizer/CKPresentStage.h
+    Rasterizer/CKTranslatedRasterizerInternal.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
@@ -78,7 +78,7 @@ target_include_directories(CKFFPLib
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
         ${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/Translation
+        ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
 )
 target_link_libraries(CKFFPLib
     PUBLIC CKRasterizerLib

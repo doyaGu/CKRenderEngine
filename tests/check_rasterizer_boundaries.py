@@ -175,7 +175,7 @@ def check(root):
                 continue
             for value in values[1:]:
                 normalized = value.replace('\\', '/')
-                if re.search(r'CKFFPLib/(?:Backend|FixedFunction|Translation)(?:/|$)', normalized):
+                if re.search(r'CKFFPLib/(?:Backend|FixedFunction|Rasterizer)(?:/|$)', normalized):
                     errors.append(
                         f"{provider_cmake_path.relative_to(root)}:{line}: "
                         f"{provider} exposes CKFFPLib implementation include path {value}"

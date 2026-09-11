@@ -78,7 +78,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/Backend
             ${CMAKE_CURRENT_SOURCE_DIR}/Provider
             ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
-            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/Translation
+            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/Rasterizer
         )
         target_link_libraries(${_test} PRIVATE CKFFPLib SDL3::SDL3)
         if (TARGET CKSdlGpuRasterizerStatic)
