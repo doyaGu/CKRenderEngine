@@ -47,7 +47,7 @@ CKERROR CKSdlGpuBackend::Init(const CKBackendInitDesc *desc)
     // Retain resource-table generations across shutdown, but start the new
     // device with fresh bindings, constants and submission/presentation state.
     m->SamplerBindings = {};
-    m->Uniforms.Clear(); m->Bindings.Clear();
+    m->Uniforms.Clear(); m->Bindings.Clear(); m->DrawResources.Clear();
     m->Caps = CKBackendCaps();
     m->Pass = CKBackendPassDesc();
     m->Stats = {}; m->FrameStats = {};
@@ -191,6 +191,7 @@ void CKSdlGpuBackend::Shutdown()
 {
     if (!m->Device) return;
     m->Draws.clear();
+    m->DrawResources.Clear();
     m->Bindings.Clear();
     if (m->Commands) {
         // SDL forbids cancelling after swapchain acquisition.

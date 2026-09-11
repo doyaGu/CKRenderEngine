@@ -130,7 +130,11 @@ int main()
         std::shared_ptr<SDL_GPUSampler> sampler(token, reinterpret_cast<SDL_GPUSampler *>(token.get()));
         CKSdlGpuBindingBatch batch;
         CKSdlGpuBindingBatch::Inputs inputs;
-        inputs.Textures[0] = &textures.Borrow(handle); inputs.Samplers[0] = &sampler;
+        inputs.Hash = program.Identity;
+        inputs.Textures[0] = texture.get(); inputs.Samplers[0] = sampler.get();
+        inputs.TextureOwners[0] = &textures.Borrow(handle); inputs.SamplerOwners[0] = &sampler;
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(texture.get()) >> 4);
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(sampler.get()) >> 4);
         const unsigned original = batch.Intern(program, inputs);
         const long owners = texture.use_count();
         for (unsigned i = 0; i < 256; ++i)
@@ -143,20 +147,71 @@ int main()
         textures.Remove(handle);
         auto replacementTexture = std::make_shared<CKSdlGpuTexture>();
         auto replacementHandle = textures.Add(replacementTexture);
-        inputs.Textures[0] = &textures.Borrow(replacementHandle);
+        inputs.Textures[0] = replacementTexture.get();
+        inputs.TextureOwners[0] = &textures.Borrow(replacementHandle);
+        inputs.Hash = program.Identity;
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(replacementTexture.get()) >> 4);
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(sampler.get()) >> 4);
         const unsigned replacement = batch.Intern(program, inputs);
-        check(replacement != original && batch[original].Textures[0] == texture &&
-              batch[replacement].Textures[0] == replacementTexture, "deleted texture and reused handle keep separate group lifetimes");
-        inputs.Textures[0] = &texture;
+        check(replacement != original && batch[original].Textures[0] == texture.get() &&
+              batch[replacement].Textures[0] == replacementTexture.get(), "deleted texture and reused handle keep separate group lifetimes");
+        inputs.Textures[0] = texture.get(); inputs.TextureOwners[0] = &texture;
+        inputs.Hash = program.Identity;
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(texture.get()) >> 4);
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(sampler.get()) >> 4);
         check(batch.Intern(program, inputs) == original, "nonconsecutive draws reuse an earlier group");
         auto secondToken = std::make_shared<int>(2);
         std::shared_ptr<SDL_GPUSampler> secondSampler(secondToken, reinterpret_cast<SDL_GPUSampler *>(secondToken.get()));
-        inputs.Samplers[0] = &secondSampler;
+        inputs.Samplers[0] = secondSampler.get(); inputs.SamplerOwners[0] = &secondSampler;
+        inputs.Hash = program.Identity;
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(texture.get()) >> 4);
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(secondSampler.get()) >> 4);
         check(batch.Intern(program, inputs) != original, "sampler state distinguishes binding groups");
         program.Identity = 0x20001;
+        inputs.Hash = program.Identity;
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(texture.get()) >> 4);
+        inputs.Hash = (inputs.Hash * 16777619u) ^ (reinterpret_cast<uintptr_t>(secondSampler.get()) >> 4);
         check(batch.Intern(program, inputs) == 3, "program generation distinguishes native slot layouts");
         batch.Clear();
         check(batch.Size() == 0 && texture.use_count() == 1, "batch completion releases resource ownership");
+    }
+    {
+        CKSdlGpuDrawResourceBatch batch;
+        auto program = std::make_shared<CKSdlGpuProgram>();
+        auto layout = std::make_shared<CKSdlGpuLayout>();
+        auto buffer = std::make_shared<CKSdlGpuBuffer>();
+        check(batch.Retain(program) == program.get() && batch.Retain(program) == program.get() &&
+              batch.Retain(layout) == layout.get() && batch.Retain(buffer) == buffer.get() &&
+              program.use_count() == 2 && layout.use_count() == 2 && buffer.use_count() == 2,
+              "draw resources are retained once per distinct batch resource");
+        batch.Clear();
+        check(program.use_count() == 1 && layout.use_count() == 1 && buffer.use_count() == 1,
+              "draw resource ownership ends with the encoded batch");
+    }
+    {
+        CKSdlGpuBuffer buffer;
+        const CKWORD initial[] = {4, 1, 7, 2, 6, 3};
+        buffer.Shadow.assign(reinterpret_cast<const CKBYTE *>(initial),
+                             reinterpret_cast<const CKBYTE *>(initial) + sizeof(initial));
+        unsigned maximum = 0;
+        check(buffer.FindMaxIndex(1, 4, false, maximum) && maximum == 7,
+              "16-bit persistent index ranges find their maximum");
+        const CKWORD replacement = 5;
+        std::memcpy(buffer.Shadow.data() + 2 * sizeof(CKWORD), &replacement, sizeof(replacement));
+        check(buffer.FindMaxIndex(1, 4, false, maximum) && maximum == 7,
+              "persistent index range lookup reuses the validated cache");
+        buffer.InvalidateIndexRanges();
+        check(buffer.FindMaxIndex(1, 4, false, maximum) && maximum == 6,
+              "buffer updates invalidate persistent index range results");
+        const CKDWORD wide[] = {0x10002u, 9u, 0x10001u};
+        buffer.Shadow.assign(reinterpret_cast<const CKBYTE *>(wide),
+                             reinterpret_cast<const CKBYTE *>(wide) + sizeof(wide));
+        buffer.InvalidateIndexRanges();
+        check(buffer.FindMaxIndex(0, 3, true, maximum) && maximum == 0x10002u &&
+              !buffer.FindMaxIndex(3, 1, true, maximum),
+              "32-bit index ranges preserve width and reject out-of-bounds requests");
+        check(buffer.FindMaxIndex(0, 3, false, maximum) && maximum == 9,
+              "persistent index range cache keys include the index element width");
     }
     {
         unsigned char blocks[32] = {};

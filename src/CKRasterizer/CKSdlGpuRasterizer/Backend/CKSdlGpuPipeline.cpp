@@ -36,16 +36,46 @@ static SDL_GPUBlendFactor BlendFactor(unsigned factor, bool alpha)
     }
 }
 
-std::shared_ptr<SDL_GPUGraphicsPipeline> CKSdlGpuDevice::Pipeline(const CKSdlGpuDraw &draw,
+static void AddVertexStream(
+    const CKSdlGpuProgram &program,
+    const CKSdlGpuLayout *layout,
+    unsigned slot,
+    std::array<SDL_GPUVertexAttribute, 16> &locations,
+    std::vector<SDL_GPUVertexBufferDescription> &streams)
+{
+    if (!layout)
+        return;
+    streams.push_back({slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0});
+    for (const CKVertexElementDesc &element : layout->Elements) {
+        const int location = program.AttributeLocations[element.Attrib];
+        if (location < 0)
+            continue;
+        locations[location] = {
+            unsigned(location), slot, CKSdlGpuVertexFormat(element), element.Offset};
+    }
+}
+
+static SDL_GPUStencilOpState StencilState(unsigned function, unsigned fail,
+                                          unsigned depthFail, unsigned pass)
+{
+    SDL_GPUStencilOpState state = {};
+    state.compare_op = SDL_GPUCompareOp(function ? function : VXCMP_ALWAYS);
+    state.fail_op = SDL_GPUStencilOp(fail ? fail : VXSTENCILOP_KEEP);
+    state.depth_fail_op = SDL_GPUStencilOp(depthFail ? depthFail : VXSTENCILOP_KEEP);
+    state.pass_op = SDL_GPUStencilOp(pass ? pass : VXSTENCILOP_KEEP);
+    return state;
+}
+
+SDL_GPUGraphicsPipeline *CKSdlGpuDevice::Pipeline(const CKSdlGpuDraw &draw,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const auto &state = draw.State.State;
-    const std::array<unsigned, 10> key = {draw.Desc.Layout, draw.Desc.Stream1Layout,
+    const std::array<unsigned, 10> key = {draw.LayoutHandle, draw.Layout1Handle,
         unsigned(color), unsigned(depth), unsigned(samples), state.Lo, state.Mid, state.Hi,
         draw.State.StencilReadMask, draw.State.StencilWriteMask};
     auto &pipelines = draw.Program->Pipelines;
     auto found = pipelines.find(key);
-    if (found != pipelines.end()) return found->second;
+    if (found != pipelines.end()) return found->second.get();
     SDL_GPUGraphicsPipelineCreateInfo info = {};
     info.vertex_shader = draw.Program->Vertex->Shader.get();
     info.fragment_shader = draw.Program->Fragment->Shader.get();
@@ -60,16 +90,8 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> CKSdlGpuDevice::Pipeline(const CKSdlGpu
                 input.Integer ? SDL_GPU_VERTEXELEMENTFORMAT_UINT4 : SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
                 input.Location * 16};
         }
-        auto addStream = [&](const std::shared_ptr<CKSdlGpuLayout> &layout, unsigned slot) {
-            if (!layout) return;
-            streams.push_back({slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0});
-            for (const auto &e : layout->Elements) {
-                const int location = draw.Program->AttributeLocations[e.Attrib];
-                if (location < 0) continue;
-                locations[location] = {unsigned(location), slot, CKSdlGpuVertexFormat(e), e.Offset};
-            }
-        };
-        addStream(draw.Layout, 0); addStream(draw.Layout1, 1);
+        AddVertexStream(*draw.Program, draw.Layout, 0, locations, streams);
+        AddVertexStream(*draw.Program, draw.Layout1, 1, locations, streams);
         streams.push_back({defaultSlot, 256, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0});
         attributes.reserve(inputs.size());
         for (const auto &input : inputs) attributes.push_back(locations[input.Location]);
@@ -99,16 +121,8 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> CKSdlGpuDevice::Pipeline(const CKSdlGpu
     ds.compare_op = SDL_GPUCompareOp(std::max(1u, (state.Lo >> 6) & 15));
     ds.enable_stencil_test = depth != SDL_GPU_TEXTUREFORMAT_INVALID && (state.Mid & CKRST_STENCIL_ENABLE) != 0;
     ds.compare_mask = Uint8(draw.State.StencilReadMask); ds.write_mask = Uint8(draw.State.StencilWriteMask);
-    auto stencil = [](unsigned func, unsigned fail, unsigned zfail, unsigned pass) {
-        SDL_GPUStencilOpState s = {};
-        s.compare_op = SDL_GPUCompareOp(func ? func : VXCMP_ALWAYS);
-        s.fail_op = SDL_GPUStencilOp(fail ? fail : VXSTENCILOP_KEEP);
-        s.depth_fail_op = SDL_GPUStencilOp(zfail ? zfail : VXSTENCILOP_KEEP);
-        s.pass_op = SDL_GPUStencilOp(pass ? pass : VXSTENCILOP_KEEP);
-        return s;
-    };
-    ds.front_stencil_state = stencil((state.Mid >> 10) & 15, (state.Mid >> 14) & 15, (state.Mid >> 18) & 15, (state.Mid >> 22) & 15);
-    ds.back_stencil_state = state.Hi & 0xffff ? stencil(state.Hi & 15, (state.Hi >> 4) & 15, (state.Hi >> 8) & 15, (state.Hi >> 12) & 15)
+    ds.front_stencil_state = StencilState((state.Mid >> 10) & 15, (state.Mid >> 14) & 15, (state.Mid >> 18) & 15, (state.Mid >> 22) & 15);
+    ds.back_stencil_state = state.Hi & 0xffff ? StencilState(state.Hi & 15, (state.Hi >> 4) & 15, (state.Hi >> 8) & 15, (state.Hi >> 12) & 15)
                                            : ds.front_stencil_state;
     SDL_GPUColorTargetDescription target = {};
     target.format = color;
@@ -126,9 +140,9 @@ std::shared_ptr<SDL_GPUGraphicsPipeline> CKSdlGpuDevice::Pipeline(const CKSdlGpu
     info.target_info.has_depth_stencil_target = depth != SDL_GPU_TEXTUREFORMAT_INVALID;
     info.target_info.depth_stencil_format = depth;
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
-    if (!pipeline) { Fail("CreateGPUGraphicsPipeline"); return {}; }
+    if (!pipeline) { Fail("CreateGPUGraphicsPipeline"); return nullptr; }
     pipelines.emplace(std::move(key), pipeline);
-    return pipeline;
+    return pipeline.get();
 }
 
 static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
@@ -168,7 +182,7 @@ CKERROR CKSdlGpuDevice::ClearRect(SDL_GPURenderPass *pass, const CKBackendPassDe
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     CKSdlGpuDraw draw;
-    draw.Program = ClearProgram;
+    draw.Program = ClearProgram.get();
     draw.State.State.Lo = desc.ClearFlags & CKRST_CTXCLEAR_COLOR ? CKRST_STATE_WRITE_RGBA : 0;
     draw.State.State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
     draw.State.State.Hi = 0;
@@ -179,7 +193,7 @@ CKERROR CKSdlGpuDevice::ClearRect(SDL_GPURenderPass *pass, const CKBackendPassDe
     const float vertexParams[4] = {desc.ClearZ, 0, 0, 0};
     const float rgba[4] = {float((desc.ClearColor >> 16) & 255) / 255, float((desc.ClearColor >> 8) & 255) / 255,
                           float(desc.ClearColor & 255) / 255, float(desc.ClearColor >> 24) / 255};
-    SDL_BindGPUGraphicsPipeline(pass, pipeline.get());
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
     SDL_SetGPUStencilReference(pass, Uint8(desc.ClearStencil));
     SDL_PushGPUVertexUniformData(Commands, 0, vertexParams, unsigned(sizeof(vertexParams)));
     SDL_PushGPUFragmentUniformData(Commands, 0, rgba, unsigned(sizeof(rgba)));

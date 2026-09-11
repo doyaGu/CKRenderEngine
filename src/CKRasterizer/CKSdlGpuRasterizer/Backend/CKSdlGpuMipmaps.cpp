@@ -19,7 +19,7 @@ CKERROR CKSdlGpuDevice::GenerateVolumeMips(CKSdlGpuTexture &texture)
     if (texture.Info.num_levels <= 1) return CK_OK;
     if (!EnsureCommands()) return Error;
     CKSdlGpuDraw draw;
-    draw.Program = VolumeMipProgram;
+    draw.Program = VolumeMipProgram.get();
     draw.State.State.Lo = CKRST_STATE_WRITE_RGBA;
     draw.State.State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
     draw.State.State.Hi = 0;
@@ -67,7 +67,7 @@ CKERROR CKSdlGpuDevice::GenerateVolumeMips(CKSdlGpuTexture &texture)
             auto *pass = SDL_BeginGPURenderPass(Commands, &target, 1, nullptr);
             if (!pass) return Fail("BeginGPURenderPass.volumeMip");
             params[7] = float(z);
-            SDL_BindGPUGraphicsPipeline(pass, pipeline.get());
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
             SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
             SDL_PushGPUVertexUniformData(Commands, 0, vertexParams, unsigned(sizeof(vertexParams)));
             SDL_PushGPUFragmentUniformData(Commands, 0, params, unsigned(sizeof(params)));

@@ -33,16 +33,62 @@ unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip)
                                                      : texture.Info.layer_count_or_depth;
 }
 
-std::shared_ptr<SDL_GPUBuffer> CKSdlGpuDevice::UploadGeometry(
-    const std::vector<CKBYTE> &data, SDL_GPUBufferUsageFlags usage)
+bool CKSdlGpuBuffer::FindMaxIndex(unsigned start, unsigned count, bool index32, unsigned &maximum)
+{
+    const size_t elementSize = index32 ? sizeof(CKDWORD) : sizeof(CKWORD);
+    if (!count || start > Shadow.size() / elementSize || count > Shadow.size() / elementSize - start)
+        return false;
+    if (++IndexRangeClock == 0) {
+        IndexRangeClock = 1;
+        for (auto &range : IndexRanges) range.LastUse = 0;
+    }
+    for (auto &range : IndexRanges) {
+        if (!range.Valid || range.Start != start || range.Count != count || range.Index32 != index32) continue;
+        range.LastUse = IndexRangeClock;
+        maximum = range.MaxIndex;
+        return true;
+    }
+    unsigned result = 0;
+    const CKBYTE *first = Shadow.data() + size_t(start) * elementSize;
+    if (index32) {
+        for (unsigned i = 0; i < count; ++i) {
+            CKDWORD index;
+            std::memcpy(&index, first + size_t(i) * sizeof(index), sizeof(index));
+            result = std::max(result, unsigned(index));
+        }
+    } else {
+        for (unsigned i = 0; i < count; ++i) {
+            CKWORD index;
+            std::memcpy(&index, first + size_t(i) * sizeof(index), sizeof(index));
+            result = std::max(result, unsigned(index));
+        }
+    }
+    auto oldest = &IndexRanges[0];
+    for (auto &range : IndexRanges) {
+        if (!range.Valid) { oldest = &range; break; }
+        if (range.LastUse < oldest->LastUse) oldest = &range;
+    }
+    *oldest = {start, count, result, IndexRangeClock, index32, true};
+    maximum = result;
+    return true;
+}
+
+CKSdlGpuGeometryUpload CKSdlGpuDevice::UploadGeometry(
+    const std::vector<CKBYTE> &vertices, const std::vector<CKBYTE> &indices)
 {
     CKRE_PROFILE_SCOPE("CKRE.SDL.UploadGeometry");
-    if (data.empty()) return {};
-    if (data.size() > std::numeric_limits<unsigned>::max()) {
+    CKSdlGpuGeometryUpload upload;
+    if (vertices.empty() && indices.empty()) return upload;
+    const uint64_t indexOffset = (uint64_t(vertices.size()) + 3) & ~uint64_t(3);
+    const uint64_t totalSize = indexOffset + indices.size();
+    if (totalSize > std::numeric_limits<unsigned>::max()) {
         SDL_SetError("Transient geometry exceeds the native buffer size limit");
-        Fail("UploadGeometry.size"); return {};
+        Fail("UploadGeometry.size"); return upload;
     }
-    const unsigned size = unsigned(data.size());
+    const unsigned size = unsigned(totalSize);
+    SDL_GPUBufferUsageFlags usage = 0;
+    if (!vertices.empty()) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+    if (!indices.empty()) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
     auto best = FreeGeometry.end();
     for (auto it = FreeGeometry.begin(); it != FreeGeometry.end(); ++it) {
         if ((*it)->Usage == usage && (*it)->Capacity >= size &&
@@ -62,26 +108,31 @@ std::shared_ptr<SDL_GPUBuffer> CKSdlGpuDevice::UploadGeometry(
         page->Usage = usage;
         SDL_GPUBufferCreateInfo bufferInfo = {usage, page->Capacity, 0};
         page->Buffer = CKSdlGpuOwn(Device, SDL_CreateGPUBuffer(Device, &bufferInfo), SDL_ReleaseGPUBuffer);
-        if (!page->Buffer) { Fail("CreateGPUBuffer.batch"); return {}; }
+        if (!page->Buffer) { Fail("CreateGPUBuffer.batch"); return upload; }
         SDL_GPUTransferBufferCreateInfo transferInfo = {SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, page->Capacity, 0};
         page->Transfer = CKSdlGpuOwn(Device, SDL_CreateGPUTransferBuffer(Device, &transferInfo), SDL_ReleaseGPUTransferBuffer);
-        if (!page->Transfer) { Fail("CreateGPUTransferBuffer.batch"); return {}; }
+        if (!page->Transfer) { Fail("CreateGPUTransferBuffer.batch"); return upload; }
     }
     // Pending pages are ineligible for reuse even across multiple Flush calls
     // in the same command buffer. Submit attaches the completion fence.
     PendingGeometry.push_back(page);
     void *mapped = SDL_MapGPUTransferBuffer(Device, page->Transfer.get(), false);
-    if (!mapped) { Fail("MapGPUTransferBuffer.batch"); return {}; }
-    std::memcpy(mapped, data.data(), size);
+    if (!mapped) { Fail("MapGPUTransferBuffer.batch"); return upload; }
+    if (!vertices.empty()) std::memcpy(mapped, vertices.data(), vertices.size());
+    if (indexOffset > vertices.size())
+        std::memset(static_cast<CKBYTE *>(mapped) + vertices.size(), 0, size_t(indexOffset) - vertices.size());
+    if (!indices.empty()) std::memcpy(static_cast<CKBYTE *>(mapped) + indexOffset, indices.data(), indices.size());
     SDL_UnmapGPUTransferBuffer(Device, page->Transfer.get());
     auto *copy = SDL_BeginGPUCopyPass(Commands);
-    if (!copy) { Fail("BeginGPUCopyPass.batch"); return {}; }
+    if (!copy) { Fail("BeginGPUCopyPass.batch"); return upload; }
     SDL_GPUTransferBufferLocation source = {page->Transfer.get(), 0};
     SDL_GPUBufferRegion destination = {page->Buffer.get(), 0, size};
     SDL_UploadToGPUBuffer(copy, &source, &destination, false);
     SDL_EndGPUCopyPass(copy);
     ++FrameStats.BufferUploads;
-    return page->Buffer;
+    upload.Buffer = page->Buffer;
+    upload.IndexOffset = unsigned(indexOffset);
+    return upload;
 }
 
 CKERROR CKSdlGpuDevice::UploadBuffer(SDL_GPUBuffer *buffer, const void *data, unsigned size, bool cycle)
@@ -138,6 +189,7 @@ CKERROR CKSdlGpuBackend::UpdateBuffer(CKBackendBufferKind kind, CKDWORD handle, 
     const CKERROR flush = m->Flush();
     if (flush != CK_OK) return flush;
     std::memcpy(buffer->Shadow.data() + offset, data, size);
+    if (kind == CKRST_BACKEND_BUFFER_INDEX) buffer->InvalidateIndexRanges();
     // Cycling is safe only because this upload defines the entire new version.
     return m->UploadBuffer(buffer->Buffer.get(), buffer->Shadow.data(), unsigned(buffer->Shadow.size()), true);
 }
