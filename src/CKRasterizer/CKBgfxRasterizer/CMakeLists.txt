@@ -24,16 +24,16 @@ set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 # source calculations remain canonical input owned by CKFFPLib.
 find_package(Python3 COMPONENTS Interpreter)
 set(_ckbgfx_shader_sources
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/varying.def.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_ff_3d.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_ff_positiont.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_stage.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/vs_postprocess.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_postprocess.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_common.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_fog_common.sc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_spec_layout.sh
-    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction/CKFFSpecLayout.def
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/varying.def.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/vs_postprocess.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_postprocess.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fog_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_spec_layout.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFSpecLayout.def
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)

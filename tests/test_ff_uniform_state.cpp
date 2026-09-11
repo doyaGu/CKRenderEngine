@@ -134,8 +134,8 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
                   CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME) == 4,
               "Fixed sampler layout must hold 8 + 4 + 4 samplers");
 
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
-    const std::string vs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string vs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
     TestCheck(fs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos &&
                   vs.find("uniform vec4 u_ffDrawParams[20]") != std::string::npos,
               "Shader sources must declare u_ffDrawParams with the ABI count");
@@ -183,10 +183,10 @@ void StageParamsPackThroughABIIndices() {
 }
 
 void ShaderSourcesDeclarePortableFlatAndClipSpaceConventions() {
-    const std::string varying = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/varying.def.sc");
+    const std::string varying = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/varying.def.sc");
     const std::string compiler = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
-    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_positiont.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
 
     TestCheck(varying.find("flat vec4 v_flatColor0") != std::string::npos &&
                   varying.find("flat vec4 v_flatColor1") != std::string::npos,
@@ -293,10 +293,10 @@ void LastActiveTextureStageSpecializationRoundTrips() {
 }
 
 void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
-    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_common.sc");
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
-    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_positiont.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
 
     TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
@@ -316,7 +316,7 @@ void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
 }
 
 void TextureCombinerOpFormulasStayDxvkCompatible() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
 
     TestCheck(!fs.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -368,8 +368,8 @@ void SpecUniformCarriesLanesAsExactIntegers() {
 }
 
 void SpecLayoutShaderHeaderMatchesTheDef() {
-    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/ff_spec_layout.sh");
-    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_common.sc");
+    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_spec_layout.sh");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
     const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
     TestCheck(!generated.empty() && !common.empty() && !script.empty(),
               "Generated spec layout header, fragment common shader and codegen script must be readable");
@@ -458,7 +458,7 @@ void TextureCombinerPreservesTempDestination() {
               "a final TEMP write must leave CURRENT unchanged");
 
     const std::string fs = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
     TestCheck(fs.find("vec4 stageResult = resultArg == 5 ? temp : current") !=
                   std::string::npos &&
                   fs.find("if (op == 1) return dst") != std::string::npos &&
@@ -542,7 +542,7 @@ void AlphaTestPrecisionFollowsRenderTargetAlphaMask() {
 }
 
 void TextureCombinerTempInitializesAlphaToZero() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -553,7 +553,7 @@ void TextureCombinerTempInitializesAlphaToZero() {
 }
 
 void DepthTextureCompareUsesSamplerCompareOrdering() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -640,7 +640,7 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
 }
 
 void TweeningInputsAndShaderAreWired() {
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
     const std::string layout = ReadTextFile(
         "Source/RenderEngine/src/CKRasterizer/CKFFPLib/FixedFunction/CKVertexLayoutCache.cpp");
     const std::string transient = ReadTextFile(
@@ -777,10 +777,10 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
 }
 
 void FragmentShaderDeclaresTheFixedSamplerLayout() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_stage.sc");
-    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/fs_ff_common.sc");
-    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_3d.sc");
-    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/shaders/vs_ff_positiont.sc");
+    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
+    const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
     TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
 
@@ -866,8 +866,8 @@ void ShaderCodegenCompilesOneProgramFamily() {
     TestCheck(script.find(scriptVersion) != std::string::npos && script.find(scriptHash) != std::string::npos,
               "Shader codegen ABI stamp constants must match CKFFShaderABI.h");
 
-    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/ff_fog_common.sc") != std::string::npos &&
-                  cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/shaders/fs_ff_common.sc") != std::string::npos,
+    TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fog_common.sc") != std::string::npos &&
+                  cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_common.sc") != std::string::npos,
               "Shader generation dependencies must include the shared shader includes");
     TestCheck(cmake.find(".json") == std::string::npos &&
                   cmake.find("CKFFSpecializedModuleTable") == std::string::npos &&

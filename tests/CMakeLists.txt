@@ -4,6 +4,7 @@ function(ckre_configure_test_target TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/Context
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE
@@ -113,6 +114,7 @@ function(ckre_add_rasterizer3_test TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/Context
     )
     target_compile_definitions(${TARGET_NAME} PRIVATE

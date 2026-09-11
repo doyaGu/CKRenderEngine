@@ -10,9 +10,9 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFFPipelineGuards.cpp
     FixedFunction/CKFFPipelineState.cpp
     FixedFunction/CKFFShaderCache.cpp
-    FixedFunction/CKFFShaderInterface.cpp
-    FixedFunction/CKFFShaderKey.cpp
-    FixedFunction/CKFFSpecializationInfo.cpp
+    ShaderModel/CKFFShaderInterface.cpp
+    ShaderModel/CKFFShaderKey.cpp
+    ShaderModel/CKFFSpecializationInfo.cpp
     FixedFunction/CKFFStageState.cpp
     FixedFunction/CKFFStateResolver.cpp
     FixedFunction/CKFFStateStore.cpp
@@ -44,13 +44,7 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKFFDebug.h
     FixedFunction/CKFFDrawProbes.h
     FixedFunction/CKFFDrawTypes.h
-    FixedFunction/CKFFShaderABI.h
     FixedFunction/CKFFShaderCache.h
-    FixedFunction/CKFFShaderInterface.h
-    FixedFunction/CKFFShaderKey.h
-    FixedFunction/CKFFSpecializationInfo.h
-    FixedFunction/CKFFSpecLayout.def
-    FixedFunction/CKFFSpecLayout.h
     FixedFunction/CKFFStageState.h
     FixedFunction/CKFFStateDesc.h
     FixedFunction/CKFFStateResolver.h
@@ -61,6 +55,12 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKFixedFunctionPipeline.h
     FixedFunction/CKTransientGeometry.h
     FixedFunction/CKVertexLayoutCache.h
+    ShaderModel/CKFFShaderABI.h
+    ShaderModel/CKFFShaderInterface.h
+    ShaderModel/CKFFShaderKey.h
+    ShaderModel/CKFFSpecializationInfo.h
+    ShaderModel/CKFFSpecLayout.def
+    ShaderModel/CKFFSpecLayout.h
     Context/CKPresentStage.h
     Context/CKFFRasterizerContextInternal.h
 )
@@ -74,6 +74,7 @@ target_include_directories(CKFFPLib
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
         ${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction
+        ${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel
         ${CMAKE_CURRENT_SOURCE_DIR}/Context
 )
 target_link_libraries(CKFFPLib

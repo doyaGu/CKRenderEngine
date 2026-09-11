@@ -40,7 +40,7 @@ BACKENDS = [
 ]
 
 ABI_HEADER = "CKFFShaderABI.generated.h"
-SPEC_LAYOUT_DEF = "CKFFSpecLayout.def"      # in CKFFPLib/FixedFunction
+SPEC_LAYOUT_DEF = "CKFFSpecLayout.def"      # in CKFFPLib/ShaderModel
 SPEC_LAYOUT_SHADER = "ff_spec_layout.sh"    # generated next to the shader sources
 
 
@@ -288,7 +288,7 @@ def spec_layout_shader_lines(layout: SpecLayout) -> list[str]:
 
 
 def write_spec_layout_shader(script_dir: Path) -> Path:
-    layout = load_spec_layout(script_dir.parent / "FixedFunction" / SPEC_LAYOUT_DEF)
+    layout = load_spec_layout(script_dir.parent / SPEC_LAYOUT_DEF)
     path = script_dir / SPEC_LAYOUT_SHADER
     path.write_text("\n".join(spec_layout_shader_lines(layout)), encoding="utf-8", newline="\n")
     return path
@@ -323,8 +323,9 @@ def main() -> int:
     args = parser.parse_args()
 
     rasterizer_shader_dir = Path(__file__).resolve().parent
-    source_dir = rasterizer_shader_dir.parents[1] / "CKFFPLib" / "shaders"
-    interface_dir = source_dir.parent / "Interface"
+    ckff_root = rasterizer_shader_dir.parents[1] / "CKFFPLib"
+    source_dir = ckff_root / "ShaderModel" / "shaders"
+    interface_dir = ckff_root / "Interface"
     generated_dir = rasterizer_shader_dir / "generated"
     spec_layout = write_spec_layout_shader(source_dir)
     print(f"Wrote {spec_layout.name} from {SPEC_LAYOUT_DEF}")

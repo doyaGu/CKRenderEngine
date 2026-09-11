@@ -16,7 +16,8 @@ import shutil
 import subprocess
 
 HERE = Path(__file__).resolve().parent
-SHARED = HERE.parent.parent / "CKFFPLib" / "shaders"
+CKFF_ROOT = HERE.parent.parent / "CKFFPLib"
+SHARED = CKFF_ROOT / "ShaderModel" / "shaders"
 SHADERS = [
     ("vs_ff_3d", "vs_ff_3d", False),
     ("vs_ff_3d_clip", "vs_ff_3d", True),
@@ -68,9 +69,9 @@ def source_body(path: Path) -> str:
 
 
 def native_layout_schema():
-    fixed_function = SHARED.parent / "FixedFunction"
-    interface = SHARED.parent / "Interface"
-    enum = (fixed_function / "CKFFShaderInterface.h").read_text(encoding="utf-8").split("enum CKFFConstantBlock {")[1].split("};")[0]
+    shader_model = CKFF_ROOT / "ShaderModel"
+    interface = CKFF_ROOT / "Interface"
+    enum = (shader_model / "CKFFShaderInterface.h").read_text(encoding="utf-8").split("enum CKFFConstantBlock {")[1].split("};")[0]
     names = re.findall(r"CKRST_BLOCK_(\w+)", enum)
     assert names.pop() == "COUNT" and len(names) == len(BLOCKS)
     blocks = dict(zip(names, BLOCKS))
@@ -267,7 +268,7 @@ def main() -> None:
     parser.add_argument("--dxc", default=shutil.which("dxc"))
     parser.add_argument("--spirv-cross", default=shutil.which("spirv-cross"))
     args = parser.parse_args()
-    abi_text = (SHARED.parent / "Interface" / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
+    abi_text = (CKFF_ROOT / "Interface" / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
     abi = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", abi_text)[1])
     abi_hash = int(re.search(r"CKFF_SHADER_INTERFACE_HASH = (0x[0-9a-fA-F]+)", abi_text)[1], 16)
     # Hash exactly the ordered schema consumed by the rasterizer shader identity.
