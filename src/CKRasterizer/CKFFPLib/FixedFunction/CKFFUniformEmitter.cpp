@@ -95,8 +95,22 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
     : m_State(state),
       m_DrawState(drawState),
       m_ShaderCache(shaderCache),
-      m_Probes(probes)
+      m_Probes(probes),
+      m_StaticUniformCacheValid(FALSE),
+      m_LastStaticConstantsIdentity(0),
+      m_LastStaticUniformRevision(0),
+      m_LastStaticActiveTextureCount(0)
 {
+}
+
+void CKFFUniformEmitter::ResetCache()
+{
+    m_StaticUniformCacheValid = FALSE;
+    m_LastStaticConstantsIdentity = 0;
+    m_LastStaticUniformRevision = 0;
+    m_LastStaticActiveTextureCount = 0;
+    m_LastStaticShaderKey = CKFFShaderKey();
+    m_LastStaticSpecialization = CKFFSpecializationInfo();
 }
 
 CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKFFConstantBlock block,
@@ -329,13 +343,30 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 
 CKBOOL CKFFUniformEmitter::UploadUniforms(CKBackendConstants *constants,
                                           const CKFFProgramContext *programContext,
-                                          CKDWORD activeTextureCount)
+                                          CKDWORD activeTextureCount,
+                                          uint64_t staticUniformRevision)
 {
     if (!constants || !programContext)
         return FALSE;
     if (!UploadObjectUniforms(constants, programContext, activeTextureCount))
         return FALSE;
-    return UploadStaticUniforms(constants, programContext, activeTextureCount);
+    if (m_StaticUniformCacheValid &&
+        m_LastStaticConstantsIdentity == constants->Identity() &&
+        m_LastStaticUniformRevision == staticUniformRevision &&
+        m_LastStaticActiveTextureCount == activeTextureCount &&
+        m_LastStaticShaderKey == programContext->ShaderKey &&
+        m_LastStaticSpecialization == programContext->Specialization) {
+        return TRUE;
+    }
+    if (!UploadStaticUniforms(constants, programContext, activeTextureCount))
+        return FALSE;
+    m_StaticUniformCacheValid = TRUE;
+    m_LastStaticConstantsIdentity = constants->Identity();
+    m_LastStaticUniformRevision = staticUniformRevision;
+    m_LastStaticActiveTextureCount = activeTextureCount;
+    m_LastStaticShaderKey = programContext->ShaderKey;
+    m_LastStaticSpecialization = programContext->Specialization;
+    return TRUE;
 }
 
 CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKBackendConstants *constants,

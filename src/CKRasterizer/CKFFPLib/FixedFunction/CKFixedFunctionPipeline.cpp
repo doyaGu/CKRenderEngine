@@ -18,10 +18,16 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_FrameNumber(0),
       m_TextureBinder(m_State, m_ShaderCache, m_Probes),
       m_UniformEmitter(m_State, m_State.DrawState, m_ShaderCache, m_Probes),
+      m_StaticUniformRevision(1),
       m_VertexBufferProgramCacheValid(FALSE),
       m_VertexBufferProgramCacheDPFlags(0),
       m_VertexBufferProgramCacheFormatFlags(0),
       m_VertexBufferProgramCacheActiveTextureCount(0),
+      m_SoftwareProgramCacheValid(FALSE),
+      m_SoftwareProgramCacheDPFlags(0),
+      m_SoftwareProgramCacheFormatFlags(0),
+      m_SoftwareProgramCacheActiveTextureCount(0),
+      m_SoftwareProgramCachePointSprite(FALSE),
       m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_LastDrawApproximationMask(0),
       m_FrameDrawRejected(FALSE) {
@@ -38,6 +44,11 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     CKFFInitPreparedState(&m_VertexBufferProgramCache.PreparedState);
     CKFFInitProgramContext(&m_VertexBufferProgramCache.ProgramContext,
                            CKFFShaderKey(), CKFFProgramBinding());
+    memset(m_SoftwareProgramCacheTexcoordComponentCounts, 0,
+           sizeof(m_SoftwareProgramCacheTexcoordComponentCounts));
+    CKFFInitPreparedState(&m_SoftwareProgramCache.PreparedState);
+    CKFFInitProgramContext(&m_SoftwareProgramCache.ProgramContext,
+                           CKFFShaderKey(), CKFFProgramBinding());
 }
 
 CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
@@ -53,6 +64,8 @@ bool CKFixedFunctionPipeline::Init(CKRasterizerBackend *backend, const CKBackend
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
     m_FrameDrawRejected = FALSE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
+    m_StaticUniformRevision = 1;
+    m_UniformEmitter.ResetCache();
     if (!backend)
         return false;
     const CKBackendCaps &caps = backend->GetCaps();
@@ -570,10 +583,18 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
 void CKFixedFunctionPipeline::MarkPreparedProgramDirty()
 {
     m_VertexBufferProgramCacheValid = FALSE;
+    m_SoftwareProgramCacheValid = FALSE;
 }
 
 void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 {
+    if (changeMask & CKFF_CHANGE_STATIC_UNIFORM) {
+        ++m_StaticUniformRevision;
+        if (m_StaticUniformRevision == 0) {
+            m_StaticUniformRevision = 1;
+            m_UniformEmitter.ResetCache();
+        }
+    }
     if (changeMask & CKFF_CHANGE_PROGRAM)
         MarkPreparedProgramDirty();
 }
@@ -676,6 +697,46 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
     return status;
 }
 
+CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
+    CKFFProgramPreparation *preparation,
+    CKDWORD dpFlags,
+    CKDWORD activeTextureCount,
+    CKDWORD formatFlags,
+    const CKBYTE *texcoordComponentCounts,
+    CKBOOL pointSprite)
+{
+    if (!preparation || !texcoordComponentCounts)
+        return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
+
+    if (m_SoftwareProgramCacheValid &&
+        m_SoftwareProgramCacheDPFlags == dpFlags &&
+        m_SoftwareProgramCacheFormatFlags == formatFlags &&
+        m_SoftwareProgramCacheActiveTextureCount == activeTextureCount &&
+        m_SoftwareProgramCachePointSprite == pointSprite &&
+        memcmp(m_SoftwareProgramCacheTexcoordComponentCounts,
+               texcoordComponentCounts,
+               sizeof(m_SoftwareProgramCacheTexcoordComponentCounts)) == 0) {
+        *preparation = m_SoftwareProgramCache;
+        return CKFF_PROGRAM_PREPARE_OK;
+    }
+
+    const CKFFProgramPrepareStatus status = PrepareProgram(
+        preparation, dpFlags, activeTextureCount, formatFlags,
+        texcoordComponentCounts, pointSprite);
+    if (status == CKFF_PROGRAM_PREPARE_OK) {
+        m_SoftwareProgramCacheDPFlags = dpFlags;
+        m_SoftwareProgramCacheFormatFlags = formatFlags;
+        m_SoftwareProgramCacheActiveTextureCount = activeTextureCount;
+        m_SoftwareProgramCachePointSprite = pointSprite;
+        memcpy(m_SoftwareProgramCacheTexcoordComponentCounts,
+               texcoordComponentCounts,
+               sizeof(m_SoftwareProgramCacheTexcoordComponentCounts));
+        m_SoftwareProgramCache = *preparation;
+        m_SoftwareProgramCacheValid = TRUE;
+    }
+    return status;
+}
+
 CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
     VxDrawPrimitiveData *data)
@@ -745,7 +806,7 @@ CKBOOL CKFixedFunctionPipeline::DrawPrimitive(
     pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     CKFFProgramPreparation programPreparation;
-    const CKFFProgramPrepareStatus prepareStatus = PrepareProgram(
+    const CKFFProgramPrepareStatus prepareStatus = PrepareSoftwareProgram(
         &programPreparation, data->Flags, activeTextureCount, formatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
     if (prepareStatus != CKFF_PROGRAM_PREPARE_OK) {
@@ -910,7 +971,9 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
     // its pending state).
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
-        if (!m_UniformEmitter.UploadUniforms(&m_Constants, programContext, textures->ActiveStageCount))
+        if (!m_UniformEmitter.UploadUniforms(
+                &m_Constants, programContext, textures->ActiveStageCount,
+                m_StaticUniformRevision))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     }
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));

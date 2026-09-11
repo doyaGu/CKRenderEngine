@@ -65,7 +65,7 @@ CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatr
     }
     m_State.VertexBlendMatrices[index] = matrix;
     m_State.VertexBlendMatrixSet[index] = TRUE;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM);
     return TRUE;
 }
 
@@ -75,7 +75,7 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
         m_State.VertexBlendMatrixSet[i] = FALSE;
     }
     m_State.VertexBlendPaletteOverflow = FALSE;
-    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD count) {
@@ -368,7 +368,7 @@ void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
     m_State.RenderTargetActive = active;
     m_State.DrawState.SetWindingFlip(RenderTargetOriginFlip());
     UpdateViewportMapping();
-    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 CKBOOL CKFixedFunctionPipeline::RenderTargetOriginFlip() const {
@@ -390,7 +390,7 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
     m_State.Viewport[3] = 1.0f + (2.0f * y / h);
     m_State.ViewportData = viewport;
     UpdateViewportMapping();
-    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetTargetExtents(CKDWORD logicalWidth, CKDWORD logicalHeight,
@@ -403,7 +403,7 @@ void CKFixedFunctionPipeline::SetTargetExtents(CKDWORD logicalWidth, CKDWORD log
     m_State.TargetPhysicalWidth = physicalWidth;
     m_State.TargetPhysicalHeight = physicalHeight;
     UpdateViewportMapping();
-    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 CKBOOL CKFixedFunctionPipeline::GetViewportScissor(CKRECT *rect) const {
@@ -485,17 +485,17 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
     switch (type) {
     case VXMATRIX_WORLD:
         m_State.World = matrix;
-        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM);
         break;
     case VXMATRIX_VIEW:
         m_State.View = matrix;
         m_State.MarkViewProjectionDirty();
-        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM | CKFF_CHANGE_STATIC_UNIFORM);
         break;
     case VXMATRIX_PROJECTION:
         m_State.Projection = matrix;
         m_State.MarkViewProjectionDirty();
-        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_OBJECT_UNIFORM);
         break;
     default:
         if (type >= VXMATRIX_TEXTURE0 && type <= VXMATRIX_TEXTURE7) {
@@ -636,12 +636,17 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
         return;
     const CKBOOL oldHasTexture = m_State.TextureHandles[stage] != 0 ? TRUE : FALSE;
     const CKBOOL newHasTexture = textureHandle != 0 ? TRUE : FALSE;
+    const CKDWORD oldFlags = m_State.TextureFlags[stage];
     const CKDWORD oldStaticFlags = CKFFStaticTextureFlags(m_State.TextureFlags[stage]);
     const CKDWORD newStaticFlags = CKFFStaticTextureFlags(normalizedFlags);
     m_State.TextureHandles[stage] = textureHandle;
     m_State.TextureFlags[stage] = normalizedFlags;
     if (oldHasTexture != newHasTexture || oldStaticFlags != newStaticFlags) {
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    } else if (oldFlags != normalizedFlags) {
+        // Non-program texture flags such as BUMPLUMINANCE are packed into the
+        // stage-parameter uniform even when the sampler dimension is unchanged.
+        OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
     }
 }
 

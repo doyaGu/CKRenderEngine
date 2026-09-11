@@ -17,9 +17,15 @@
 #include <vector>
 
 struct CKFFPipelineTestAccess {
-    static CKDWORD CachedProgramCount(const CKFixedFunctionPipeline &pipeline)
+    static size_t CachedProgramCount(const CKFixedFunctionPipeline &pipeline)
     {
         return pipeline.m_ShaderCache.CachedProgramCount();
+    }
+
+    static uint64_t ConstantRevision(const CKFixedFunctionPipeline &pipeline,
+                                     CKDWORD block)
+    {
+        return pipeline.m_Constants[block].Revision;
     }
 };
 

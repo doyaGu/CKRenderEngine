@@ -8,7 +8,10 @@
 #include "CKRasterizerBackendEnums.h"
 #include "CKRasterizerBackendTypes.h"
 
+#include <stdint.h>
+
 class CKRasterizerBackend;
+struct CKFFShaderCacheTestAccess;
 
 // The fixed-function program family (spec 5.3): every draw runs the single
 // fragment uber shader with one of four vertex shaders selected by the
@@ -94,6 +97,8 @@ public:
     size_t CachedProgramCount() const;
 
 private:
+    friend struct CKFFShaderCacheTestAccess;
+
     CKRasterizerBackend *m_Backend;
     CKRasterizerTargetDesc m_Target;
     CKBackendShaderSet m_Shaders;
@@ -103,14 +108,20 @@ private:
     CKFFProgramSamplerLayout m_SamplerLayout;
 
     // Repeated materials change matrices much more often than fragment state.
-    // Keep one value per vertex variant; storage is bounded and draws retain
-    // their own specialization copy when a later material replaces this entry.
+    // Retain a bounded working set per vertex variant; draws keep their own
+    // specialization copy when an older entry is evicted.
+    static constexpr CKDWORD SPECIALIZATION_CACHE_CAPACITY = 16;
     struct SpecializationEntry {
-        bool Valid = false;
         CKFFShaderKeyFS Key;
         CKFFSpecializationInfo Value;
+        uint64_t LastUse = 0;
     };
-    SpecializationEntry m_Specializations[CKFF_PROGRAM_VARIANT_COUNT];
+    struct SpecializationCache {
+        SpecializationEntry Entries[SPECIALIZATION_CACHE_CAPACITY];
+        CKDWORD Count = 0;
+        uint64_t Clock = 0;
+    };
+    SpecializationCache m_Specializations[CKFF_PROGRAM_VARIANT_COUNT];
 
     bool ResolveShaderTarget();
     void BuildSamplerLayout();

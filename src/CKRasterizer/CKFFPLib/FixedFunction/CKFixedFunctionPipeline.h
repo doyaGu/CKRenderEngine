@@ -170,9 +170,11 @@ public:
 private:
     friend struct CKFFPipelineTestAccess;
 
-    // Static uniforms are uploaded with every draw, so only program-affecting
-    // changes have to invalidate anything.
-    enum CKFFStateChange { CKFF_CHANGE_STATIC_UNIFORM = 0x1, CKFF_CHANGE_PROGRAM = 0x2 };
+    enum CKFFStateChange {
+        CKFF_CHANGE_OBJECT_UNIFORM = 0x1,
+        CKFF_CHANGE_STATIC_UNIFORM = 0x2,
+        CKFF_CHANGE_PROGRAM = 0x4
+    };
     enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
 
     struct CKFFDrawSubmission {
@@ -203,11 +205,19 @@ private:
     CKFFDrawProbes m_Probes;
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
+    uint64_t m_StaticUniformRevision;
     CKBOOL m_VertexBufferProgramCacheValid;
     CKDWORD m_VertexBufferProgramCacheDPFlags;
     CKDWORD m_VertexBufferProgramCacheFormatFlags;
     CKDWORD m_VertexBufferProgramCacheActiveTextureCount;
     CKFFProgramPreparation m_VertexBufferProgramCache;
+    CKBOOL m_SoftwareProgramCacheValid;
+    CKDWORD m_SoftwareProgramCacheDPFlags;
+    CKDWORD m_SoftwareProgramCacheFormatFlags;
+    CKDWORD m_SoftwareProgramCacheActiveTextureCount;
+    CKBOOL m_SoftwareProgramCachePointSprite;
+    CKBYTE m_SoftwareProgramCacheTexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
+    CKFFProgramPreparation m_SoftwareProgramCache;
     CKFFDrawRejectReason m_LastDrawRejectReason;
     CKBOOL m_FrameDrawRejected;
     CKDWORD m_DrawRejectCounts[CKFF_DRAW_REJECT_COUNT];
@@ -226,6 +236,12 @@ private:
     CKFFProgramPrepareStatus PrepareVertexBufferProgram(CKFFProgramPreparation *preparation,
                                                         CKDWORD dpFlags,
                                                         CKDWORD formatFlags);
+    CKFFProgramPrepareStatus PrepareSoftwareProgram(CKFFProgramPreparation *preparation,
+                                                    CKDWORD dpFlags,
+                                                    CKDWORD activeTextureCount,
+                                                    CKDWORD formatFlags,
+                                                    const CKBYTE *texcoordComponentCounts,
+                                                    CKBOOL pointSprite);
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags);

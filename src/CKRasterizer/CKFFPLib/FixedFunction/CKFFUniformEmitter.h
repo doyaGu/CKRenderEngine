@@ -7,6 +7,7 @@
 
 class CKDrawStateCache;
 class CKRasterizerBackend;
+struct CKFFUniformEmitterTestAccess;
 
 class CKFFUniformEmitter {
 public:
@@ -18,9 +19,13 @@ public:
     // Prepares producer-owned blocks for this draw, retaining unchanged revisions.
     CKBOOL UploadUniforms(CKBackendConstants *constants,
                           const CKFFProgramContext *programContext,
-                          CKDWORD activeTextureCount);
+                          CKDWORD activeTextureCount,
+                          uint64_t staticUniformRevision);
+    void ResetCache();
 
 private:
+    friend struct CKFFUniformEmitterTestAccess;
+
     CKBOOL UploadObjectUniforms(CKBackendConstants *constants,
                                 const CKFFProgramContext *programContext,
                                 CKDWORD activeTextureCount);
@@ -44,6 +49,12 @@ private:
     const CKDrawStateCache &m_DrawState;
     CKFFShaderCache &m_ShaderCache;
     CKFFDrawProbes &m_Probes;
+    CKBOOL m_StaticUniformCacheValid;
+    uint64_t m_LastStaticConstantsIdentity;
+    uint64_t m_LastStaticUniformRevision;
+    CKDWORD m_LastStaticActiveTextureCount;
+    CKFFShaderKey m_LastStaticShaderKey;
+    CKFFSpecializationInfo m_LastStaticSpecialization;
 };
 
 #endif // CKFFUNIFORMEMITTER_H

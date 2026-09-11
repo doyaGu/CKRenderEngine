@@ -56,8 +56,8 @@ void CKFFShaderCache::Shutdown() {
     memset(m_Programs, 0, sizeof(m_Programs));
     memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
     m_PixelShader = 0;
-    for (auto &entry : m_Specializations)
-        entry.Valid = false;
+    for (auto &cache : m_Specializations)
+        cache = SpecializationCache();
     m_SamplerLayout = CKFFProgramSamplerLayout();
     m_Backend = nullptr;
     m_Shaders = CKBackendShaderSet();
@@ -143,11 +143,40 @@ CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     const CKFFProgramVariant variant = ProgramVariantForKey(key);
     if (m_Programs[variant] == 0)
         m_Programs[variant] = CreateProgramVariant(variant);
-    SpecializationEntry &entry = m_Specializations[variant];
-    if (!entry.Valid || !(entry.Key == key.FS)) {
-        entry.Value = CKFFBuildSpecializationInfo(key.FS);
-        entry.Key = key.FS;
-        entry.Valid = true;
+
+    SpecializationCache &cache = m_Specializations[variant];
+    ++cache.Clock;
+    if (cache.Clock == 0) {
+        // Preserve cache correctness after counter wrap. Exact recency at this
+        // unreachable scale is immaterial, but zero remains reserved for an
+        // entry that has never been used.
+        cache.Clock = 1;
+        for (CKDWORD i = 0; i < cache.Count; ++i)
+            cache.Entries[i].LastUse = 1;
     }
+
+    for (CKDWORD i = 0; i < cache.Count; ++i) {
+        SpecializationEntry &entry = cache.Entries[i];
+        if (entry.Key == key.FS) {
+            entry.LastUse = cache.Clock;
+            return CKFFProgramBinding(m_Programs[variant], entry.Value);
+        }
+    }
+
+    CKDWORD entryIndex = cache.Count;
+    if (cache.Count < SPECIALIZATION_CACHE_CAPACITY) {
+        ++cache.Count;
+    } else {
+        entryIndex = 0;
+        for (CKDWORD i = 1; i < cache.Count; ++i) {
+            if (cache.Entries[i].LastUse < cache.Entries[entryIndex].LastUse)
+                entryIndex = i;
+        }
+    }
+
+    SpecializationEntry &entry = cache.Entries[entryIndex];
+    entry.Value = CKFFBuildSpecializationInfo(key.FS);
+    entry.Key = key.FS;
+    entry.LastUse = cache.Clock;
     return CKFFProgramBinding(m_Programs[variant], entry.Value);
 }

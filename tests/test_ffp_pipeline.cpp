@@ -8,6 +8,32 @@
 #include <math.h>
 #include <string.h>
 
+struct CKFFShaderCacheTestAccess {
+    static size_t CachedSpecializationCount(
+        const CKFFShaderCache &cache, CKFFProgramVariant variant)
+    {
+        return cache.m_Specializations[variant].Count;
+    }
+
+    static size_t SpecializationCapacity()
+    {
+        return CKFFShaderCache::SPECIALIZATION_CACHE_CAPACITY;
+    }
+
+    static bool ContainsSpecialization(
+        const CKFFShaderCache &cache, CKFFProgramVariant variant,
+        const CKFFShaderKeyFS &key)
+    {
+        const CKFFShaderCache::SpecializationCache &specializations =
+            cache.m_Specializations[variant];
+        for (CKDWORD i = 0; i < specializations.Count; ++i) {
+            if (specializations.Entries[i].Key == key)
+                return true;
+        }
+        return false;
+    }
+};
+
 namespace {
 
 void FixedFunctionProgramDeclaresItsShaderInterface()
@@ -133,6 +159,73 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
     TestCheck(pushed == CK_OK && bytes.size() == sizeof(params) &&
                   memcmp(bytes.data(), params, sizeof(params)) == 0,
               "FFP converts one vec4 into sixteen backend bytes");
+    cache.Shutdown();
+}
+
+void ShaderCacheRetainsAlternatingSpecializations()
+{
+    FFPRecordingDriver driver;
+    FFPRecordingBackend backend(&driver);
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(backend.StartedBackend(), backend.ShaderSet()),
+              "shader cache accepts the benchmark catalog");
+
+    CKFFShaderKey keys[8];
+    for (CKDWORD i = 0; i < 8; ++i) {
+        keys[i].FS.AlphaTestEnable = true;
+        keys[i].FS.AlphaFunc = i + 1;
+        const CKFFProgramBinding binding = cache.GetProgram(keys[i]);
+        TestCheck(binding.Program != 0 &&
+                      binding.Specialization ==
+                          CKFFBuildSpecializationInfo(keys[i].FS),
+                  "each alternating fragment state must resolve correctly");
+    }
+
+    TestCheck(CKFFShaderCacheTestAccess::CachedSpecializationCount(
+                  cache, CKFF_PROGRAM_3D) == 8,
+              "one vertex variant must retain the eight-material working set");
+    for (const CKFFShaderKey &key : keys) {
+        const CKFFProgramBinding binding = cache.GetProgram(key);
+        TestCheck(binding.Specialization ==
+                      CKFFBuildSpecializationInfo(key.FS),
+                  "retained specialization values must survive alternation");
+    }
+    cache.Shutdown();
+}
+
+void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
+{
+    FFPRecordingDriver driver;
+    FFPRecordingBackend backend(&driver);
+    CKFFShaderCache cache;
+    TestCheck(cache.Init(backend.StartedBackend(), backend.ShaderSet()),
+              "shader cache accepts the benchmark catalog");
+
+    const size_t capacity = CKFFShaderCacheTestAccess::SpecializationCapacity();
+    std::vector<CKFFShaderKey> keys(capacity + 1);
+    for (size_t i = 0; i <= capacity; ++i) {
+        keys[i].FS.AlphaTestEnable = true;
+        keys[i].FS.AlphaFunc = static_cast<CKDWORD>((i % 8) + 1);
+        keys[i].FS.LastActiveTextureStage = static_cast<CKDWORD>(i / 8);
+    }
+    for (size_t i = 0; i < capacity; ++i)
+        cache.GetProgram(keys[i]);
+
+    cache.GetProgram(keys[0]);
+    cache.GetProgram(keys[capacity]);
+
+    TestCheck(CKFFShaderCacheTestAccess::CachedSpecializationCount(
+                  cache, CKFF_PROGRAM_3D) == capacity,
+              "specialization cache must remain bounded");
+    TestCheck(CKFFShaderCacheTestAccess::ContainsSpecialization(
+                  cache, CKFF_PROGRAM_3D, keys[0].FS),
+              "recently used specialization must survive eviction");
+    TestCheck(!CKFFShaderCacheTestAccess::ContainsSpecialization(
+                  cache, CKFF_PROGRAM_3D, keys[1].FS),
+              "least recently used specialization must be evicted");
+    TestCheck(CKFFShaderCacheTestAccess::ContainsSpecialization(
+                  cache, CKFF_PROGRAM_3D, keys[capacity].FS),
+              "new specialization must enter the bounded cache");
     cache.Shutdown();
 }
 
@@ -2043,6 +2136,94 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
     ffp.Shutdown();
 }
 
+void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()),
+              "prepared-cache pipeline initialization");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "initial prepared-cache draw");
+
+    const uint64_t firstMatrices = CKFFPipelineTestAccess::ConstantRevision(
+        ffp, CKRST_BLOCK_MATRICES);
+    const uint64_t firstStageParams = CKFFPipelineTestAccess::ConstantRevision(
+        ffp, CKRST_BLOCK_STAGE_PARAMS);
+    const uint64_t firstDrawParams = CKFFPipelineTestAccess::ConstantRevision(
+        ffp, CKRST_BLOCK_DRAW_PARAMS);
+
+    VxMatrix world;
+    Vx3DMatrixIdentity(world);
+    world[3][0] = 4.0f;
+    ffp.SetTransform(VXMATRIX_WORLD, world);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "world-only prepared-cache draw");
+    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
+                  ffp, CKRST_BLOCK_MATRICES) > firstMatrices &&
+                  CKFFPipelineTestAccess::ConstantRevision(
+                      ffp, CKRST_BLOCK_STAGE_PARAMS) == firstStageParams &&
+                  CKFFPipelineTestAccess::ConstantRevision(
+                      ffp, CKRST_BLOCK_DRAW_PARAMS) == firstDrawParams,
+              "world-only changes update object matrices without rewriting static blocks");
+
+    CKMaterialData material = {};
+    material.Diffuse = VxColor(0.25f, 0.5f, 0.75f, 1.0f);
+    ffp.SetMaterial(&material);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "material prepared-cache draw");
+    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
+                  ffp, CKRST_BLOCK_DRAW_PARAMS) > firstDrawParams,
+              "material changes invalidate the static draw-parameter block");
+
+    const uint64_t stageBeforeFlags = CKFFPipelineTestAccess::ConstantRevision(
+        ffp, CKRST_BLOCK_STAGE_PARAMS);
+    ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPLUMINANCE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "texture-flag prepared-cache draw");
+    const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const std::vector<float> &stageParams = context.Log.FloatUniforms[stageUniform];
+    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
+                  ffp, CKRST_BLOCK_STAGE_PARAMS) > stageBeforeFlags &&
+                  stageParams.size() >= 4 &&
+                  (((CKDWORD)stageParams[1]) & CKFF_TTF_BUMP_UNORM) != 0,
+              "non-program texture flags invalidate and repack stage parameters");
+
+    VxVector positions[3] = {
+        VxVector(-1.0f, -1.0f, 0.0f),
+        VxVector(1.0f, -1.0f, 0.0f),
+        VxVector(0.0f, 1.0f, 0.0f)
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    ffp.SetTexture(0, 0);
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
+              "initial software prepared-cache draw");
+    TestCheck(CurrentDrawSpecialization(ffp, context).Get(
+                  CKFF_SPEC_ALPHA_TEST_ENABLED) == 0,
+              "initial software specialization has alpha testing disabled");
+    ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
+              "mutated software prepared-cache draw");
+    TestCheck(CurrentDrawSpecialization(ffp, context).Get(
+                  CKFF_SPEC_ALPHA_TEST_ENABLED) == 1,
+              "program-affecting state invalidates the software prepared cache");
+
+    ffp.Shutdown();
+}
+
 void ProgramFamilyHasFourVertexVariants() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
@@ -3184,6 +3365,10 @@ int main() {
     tests.Run("FFP declares generic program resources", &FixedFunctionProgramDeclaresItsShaderInterface);
     tests.Run("Shader catalog and program metadata stay outside cached draws",
               &ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss);
+    tests.Run("Shader cache retains alternating specializations",
+              &ShaderCacheRetainsAlternatingSpecializations);
+    tests.Run("Shader cache evicts least recently used specialization",
+              &ShaderCacheEvictsLeastRecentlyUsedSpecialization);
     tests.Run("Null rasterizer supports headless FFP",
               &NullRasterizerSupportsHeadlessFFP);
     tests.Run("Missing shader payload family fails initialization",
@@ -3290,6 +3475,8 @@ int main() {
               &PremodulateImplicitTextureDependencyBindsNextStage);
     tests.Run("Program family is shared across state bindings",
               &ProgramFamilyIsSharedAcrossStateBindings);
+    tests.Run("Prepared caches invalidate every uniform and program dependency",
+              &PreparedCachesInvalidateEveryUniformAndProgramDependency);
     tests.Run("Program family has four vertex variants",
               &ProgramFamilyHasFourVertexVariants);
     tests.Run("Legacy STAGEBLEND zero terminates stale multitexture state",
