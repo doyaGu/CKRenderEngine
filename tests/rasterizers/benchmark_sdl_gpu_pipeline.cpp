@@ -2,6 +2,8 @@
 #include "CKSdlGpuInternal.h"
 #include "CKSdlGpuShaders.h"
 #include "CKPresentStage.h"
+#include "CKTransientGeometry.h"
+#include "CKVertexLayoutCache.h"
 #include "FFPBenchmarkWorkload.h"
 
 #include <SDL3/SDL.h>
@@ -78,7 +80,9 @@ const char *const kStageNames[StageCount] = {
 enum class CaseKind {
     PresentOnly,
     Transient44,
-    TransientMaterial8
+    TransientMaterial8,
+    VertexBufferSteady,
+    VertexBufferMaterial8
 };
 
 struct Options {
@@ -254,7 +258,9 @@ bool ParseOptions(int argc, char **argv, Options &options, std::string &error)
     }
     if ((options.CaseName != "all" && options.CaseName != "present_only" &&
          options.CaseName != "transient_44" &&
-         options.CaseName != "transient_material8_44") ||
+         options.CaseName != "transient_material8_44" &&
+         options.CaseName != "vb_steady_44" &&
+         options.CaseName != "vb_material8_44") ||
         (options.Format != "text" && options.Format != "json") ||
         options.Samples < 3 || options.Samples > 101 ||
         options.SampleMilliseconds < 1.0 ||
@@ -292,7 +298,7 @@ void PrintHelp()
 {
     std::cout
         << "Usage: sdl_gpu_pipeline_benchmark --visible [options]\n"
-        << "  --case <all|present_only|transient_44|transient_material8_44>\n"
+        << "  --case <all|present_only|transient_44|transient_material8_44|vb_steady_44|vb_material8_44>\n"
         << "  --samples <n>       sample count (default 11)\n"
         << "  --sample-ms <ms>    minimum production time per sample (default 250)\n"
         << "  --warmup-ms <ms>    warmup per case (default 500)\n"
@@ -343,6 +349,10 @@ public:
             return false;
         }
         m_Workload.ConfigureCore(m_Pipeline, m_Textures);
+        if (!CreateVertexBuffers()) {
+            error = "benchmark vertex/index buffer creation failed";
+            return false;
+        }
 
         // Establish IMMEDIATE before any swapchain image is acquired. This
         // mode transition and shader/pipeline creation are outside timing.
@@ -356,12 +366,13 @@ public:
         return true;
     }
 
-    bool ValidateRenderedOutput(uint64_t &checksum, std::string &error)
+    bool ValidateRenderedOutput(CaseKind kind, uint64_t &checksum,
+                                std::string &error)
     {
         std::vector<CKBYTE> first;
         std::vector<CKBYTE> second;
-        if (!CaptureRenderedFrame(first, error) ||
-            !CaptureRenderedFrame(second, error))
+        if (!CaptureRenderedFrame(kind, first, error) ||
+            !CaptureRenderedFrame(kind, second, error))
             return false;
         if (first != second) {
             error = "two deterministic GPU readbacks differ";
@@ -396,8 +407,7 @@ public:
             if (kind == CaseKind::PresentOnly)
                 ok = RunPresentOnlyFrame(sample, error);
             else
-                ok = RunTransientFrame(
-                    sample, kind == CaseKind::TransientMaterial8, error);
+                ok = RunDrawFrame(sample, kind, error);
             if (!ok)
                 return false;
             if ((frame & 255u) == 255u && !PumpEvents(error))
@@ -441,6 +451,42 @@ private:
         return true;
     }
 
+    bool CreateVertexBuffers()
+    {
+        m_FormatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+            CKFFBenchmark::VertexFormat, true, true);
+        m_VertexLayout = m_Pipeline.ResolveVertexLayout(m_FormatFlags);
+        if (!m_FormatFlags || !m_VertexLayout)
+            return false;
+
+        std::array<CKBYTE, CKFFBenchmark::VerticesPerDraw *
+                           CKFFBenchmark::PackedVertexStride> vertices{};
+        VxDrawPrimitiveData data = m_Workload.PrimitiveData(false);
+        CKBYTE texcoordCounts[CKRST_MAX_STAGES]{};
+        texcoordCounts[0] = 2;
+        CKTransientGeometry::InterleaveVertices(
+            vertices.data(), CKFFBenchmark::PackedVertexStride,
+            CKFFBenchmark::VerticesPerDraw, m_FormatFlags, &data,
+            texcoordCounts);
+
+        CKBackendBufferDesc vertexDesc;
+        vertexDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+        vertexDesc.Size = static_cast<CKDWORD>(vertices.size());
+        vertexDesc.Stride = CKFFBenchmark::PackedVertexStride;
+        vertexDesc.Layout = m_VertexLayout;
+        vertexDesc.InitialData = vertices.data();
+        if (m_Backend.CreateBuffer(&vertexDesc, &m_VertexBuffer) != CK_OK)
+            return false;
+
+        CKBackendBufferDesc indexDesc;
+        indexDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+        indexDesc.Size = static_cast<CKDWORD>(
+            m_Workload.Indices.size() * sizeof(CKWORD));
+        indexDesc.Index32 = FALSE;
+        indexDesc.InitialData = m_Workload.Indices.data();
+        return m_Backend.CreateBuffer(&indexDesc, &m_IndexBuffer) == CK_OK;
+    }
+
     bool BeginBenchmarkPass()
     {
         CKBackendPassDesc pass;
@@ -452,11 +498,27 @@ private:
         return m_Backend.BeginPass(&pass) == CK_OK;
     }
 
-    bool CaptureRenderedFrame(std::vector<CKBYTE> &output,
+    bool RecordDraws(CaseKind kind)
+    {
+        if (kind == CaseKind::VertexBufferSteady ||
+            kind == CaseKind::VertexBufferMaterial8) {
+            return m_Workload.RunCoreVertexBufferFrame(
+                m_Pipeline, m_Textures, m_VertexBuffer, m_IndexBuffer,
+                m_VertexLayout, m_FormatFlags,
+                kind == CaseKind::VertexBufferMaterial8);
+        }
+        if (kind == CaseKind::TransientMaterial8) {
+            return m_Workload.RunCoreTransientMaterialFrame(
+                m_Pipeline, false, m_Textures);
+        }
+        return m_Workload.RunCoreTransientFrame(m_Pipeline, false);
+    }
+
+    bool CaptureRenderedFrame(CaseKind kind, std::vector<CKBYTE> &output,
                               std::string &error)
     {
         if (!BeginBenchmarkPass() ||
-            !m_Workload.RunCoreTransientFrame(m_Pipeline, false) ||
+            !RecordDraws(kind) ||
             CKSdlGpuBenchmarkAccess::Flush(m_Backend) != CK_OK) {
             error = "validation draw or encode failed";
             return false;
@@ -516,8 +578,7 @@ private:
         return true;
     }
 
-    bool RunTransientFrame(Sample &sample, bool cycleMaterials,
-                           std::string &error)
+    bool RunDrawFrame(Sample &sample, CaseKind kind, std::string &error)
     {
         const uint64_t start = Counter();
         if (!BeginBenchmarkPass()) {
@@ -526,11 +587,7 @@ private:
         }
         const uint64_t afterBegin = Counter();
         m_Pipeline.SetFrameNumber(m_LastSubmission + 1);
-        const bool recorded = cycleMaterials
-            ? m_Workload.RunCoreTransientMaterialFrame(
-                  m_Pipeline, false, m_Textures)
-            : m_Workload.RunCoreTransientFrame(m_Pipeline, false);
-        if (!recorded) {
+        if (!RecordDraws(kind)) {
             error = "44-draw recording failed";
             return false;
         }
@@ -618,13 +675,18 @@ private:
     {
         if (!m_Ready && m_Backend.GetDeviceStatus() != CK_OK)
             return;
-        m_Pipeline.Shutdown();
         m_Present.Shutdown();
         for (CKDWORD texture : m_Textures) {
             if (texture)
                 m_Backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
         }
+        if (m_VertexBuffer)
+            m_Backend.DestroyObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
+        if (m_IndexBuffer)
+            m_Backend.DestroyObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+        m_VertexBuffer = m_IndexBuffer = 0;
         m_Textures = {};
+        m_Pipeline.Shutdown();
         m_Backend.Shutdown();
         m_Ready = false;
     }
@@ -636,6 +698,10 @@ private:
     CKBackendShaderSet m_Shaders;
     CKFFBenchmark::Workload m_Workload;
     std::array<CKDWORD, 4> m_Textures{};
+    CKDWORD m_FormatFlags = 0;
+    CKDWORD m_VertexLayout = 0;
+    CKDWORD m_VertexBuffer = 0;
+    CKDWORD m_IndexBuffer = 0;
     CKDWORD m_LastSubmission = 0;
     bool m_Ready = false;
 };
@@ -657,7 +723,7 @@ bool MeasureCase(SDL_Window *window, CaseKind kind, const Options &options,
 
     uint64_t pixelChecksum = 0;
     if (kind != CaseKind::PresentOnly &&
-        !fixture.ValidateRenderedOutput(pixelChecksum, error))
+        !fixture.ValidateRenderedOutput(kind, pixelChecksum, error))
         return false;
 
     const double frequency = CounterFrequency();
@@ -728,8 +794,12 @@ bool MeasureCase(SDL_Window *window, CaseKind kind, const Options &options,
         result.Name = "present_only";
     else if (kind == CaseKind::Transient44)
         result.Name = "transient_44";
-    else
+    else if (kind == CaseKind::TransientMaterial8)
         result.Name = "transient_material8_44";
+    else if (kind == CaseKind::VertexBufferSteady)
+        result.Name = "vb_steady_44";
+    else
+        result.Name = "vb_material8_44";
     result.FramesPerSample = framesPerSample;
     result.PixelChecksum = pixelChecksum;
     for (size_t stage = 0; stage < StageCount; ++stage) {
@@ -897,6 +967,28 @@ int main(int argc, char **argv)
         if (!MeasureCase(window, CaseKind::TransientMaterial8,
                          options, result, error)) {
             std::fprintf(stderr, "transient_material8_44: %s\n", error.c_str());
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 4;
+        }
+        results.push_back(result);
+    }
+    if (options.CaseName == "all" || options.CaseName == "vb_steady_44") {
+        CaseResult result;
+        if (!MeasureCase(window, CaseKind::VertexBufferSteady,
+                         options, result, error)) {
+            std::fprintf(stderr, "vb_steady_44: %s\n", error.c_str());
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 4;
+        }
+        results.push_back(result);
+    }
+    if (options.CaseName == "all" || options.CaseName == "vb_material8_44") {
+        CaseResult result;
+        if (!MeasureCase(window, CaseKind::VertexBufferMaterial8,
+                         options, result, error)) {
+            std::fprintf(stderr, "vb_material8_44: %s\n", error.c_str());
             SDL_DestroyWindow(window);
             SDL_Quit();
             return 4;
