@@ -170,6 +170,9 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     m_State.TextureHandles[stage] = 0;
     m_State.TextureFlags[stage] = 0;
     memset(m_State.StageStates[stage], 0, sizeof(m_State.StageStates[stage]));
+    for (CKDWORD state = CKRST_TSS_OP; state < CKFF_MAX_TEXTURE_STAGE_STATES; ++state)
+        m_State.StageQueryStates[stage][state] = CKRSTDefaultTextureStageStateValue(
+            stage, (CKRST_TEXTURESTAGESTATETYPE)state);
     m_State.StageStateSetMasks[stage] = 0;
     m_State.StageStateQueryMasks[stage] = 0;
     m_State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
@@ -198,7 +201,9 @@ void CKFixedFunctionPipeline::ResetTextureStages(int firstStage, int stageCount)
         m_State.TextureHandles[stage] = 0;
         m_State.TextureFlags[stage] = 0;
         memset(m_State.StageStates[stage], 0, sizeof(m_State.StageStates[stage]));
+        memset(m_State.StageQueryStates[stage], 0, sizeof(m_State.StageQueryStates[stage]));
         m_State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
+        m_State.StageQueryStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
         m_State.StageStateSetMasks[stage] = setMask;
         m_State.StageStateQueryMasks[stage] = queryMask;
         Vx3DMatrixIdentity(m_State.TexMatrix[stage]);
@@ -228,6 +233,12 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
     memcpy(m_State.StageStates[stage], snapshot.States, sizeof(m_State.StageStates[stage]));
     m_State.StageStateSetMasks[stage] = snapshot.StateSetMask;
     m_State.StageStateQueryMasks[stage] = snapshot.StateQueryMask;
+    for (CKDWORD state = CKRST_TSS_OP; state < CKFF_MAX_TEXTURE_STAGE_STATES; ++state) {
+        const uint64_t stateBit = 1ull << state;
+        m_State.StageQueryStates[stage][state] = (snapshot.StateQueryMask & stateBit) != 0
+            ? snapshot.States[state]
+            : CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)state);
+    }
     m_State.TexMatrix[stage] = snapshot.TextureMatrix;
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
@@ -243,6 +254,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
 
     const uint64_t stateBit = 1ull << (CKDWORD)type;
     m_State.StageStateQueryMasks[stage] |= stateBit;
+    m_State.StageQueryStates[stage][type] = value;
     if (m_State.StageStates[stage][(int)type] == value &&
         (m_State.StageStateSetMasks[stage] & stateBit) != 0 &&
         type != CKRST_TSS_STAGEBLEND && type != CKRST_TSS_ADDRESS &&
@@ -257,6 +269,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         ClearExplicitTextureCombineState(m_State.StageStates[stage],
                                          &m_State.StageStateSetMasks[stage]);
         m_State.StageStateQueryMasks[stage] |= TextureCombineStateMask();
+        ClearExplicitTextureCombineState(m_State.StageQueryStates[stage], nullptr);
     } else if (type == CKRST_TSS_ADDRESS) {
         constexpr uint64_t addressMask = (1ull << CKRST_TSS_ADDRESSU) |
                                          (1ull << CKRST_TSS_ADDRESSV) |
@@ -264,6 +277,9 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         m_State.StageStates[stage][CKRST_TSS_ADDRESSU] = value;
         m_State.StageStates[stage][CKRST_TSS_ADDRESSV] = value;
         m_State.StageStates[stage][CKRST_TSS_ADDRESW] = value;
+        m_State.StageQueryStates[stage][CKRST_TSS_ADDRESSU] = value;
+        m_State.StageQueryStates[stage][CKRST_TSS_ADDRESSV] = value;
+        m_State.StageQueryStates[stage][CKRST_TSS_ADDRESW] = value;
         m_State.StageStateSetMasks[stage] |= addressMask;
         m_State.StageStateQueryMasks[stage] |= addressMask;
     } else if (type == CKRST_TSS_STAGEBLEND) {
@@ -282,6 +298,12 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
             m_State.StageStates[stage][CKRST_TSS_AOP] = alphaOp;
             m_State.StageStates[stage][CKRST_TSS_AARG1] = alphaArg1;
             m_State.StageStates[stage][CKRST_TSS_AARG2] = alphaArg2;
+            m_State.StageQueryStates[stage][CKRST_TSS_OP] = colorOp;
+            m_State.StageQueryStates[stage][CKRST_TSS_ARG1] = colorArg1;
+            m_State.StageQueryStates[stage][CKRST_TSS_ARG2] = colorArg2;
+            m_State.StageQueryStates[stage][CKRST_TSS_AOP] = alphaOp;
+            m_State.StageQueryStates[stage][CKRST_TSS_AARG1] = alphaArg1;
+            m_State.StageQueryStates[stage][CKRST_TSS_AARG2] = alphaArg2;
             constexpr uint64_t derivedMask =
                 (1ull << CKRST_TSS_OP) |
                 (1ull << CKRST_TSS_ARG1) |
@@ -301,6 +323,7 @@ void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTA
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
     const uint64_t stateBit = 1ull << (CKDWORD)type;
     m_State.StageStateQueryMasks[stage] |= stateBit;
+    m_State.StageQueryStates[stage][type] = 0;
     if (m_State.StageStates[stage][(int)type] == 0 &&
         (m_State.StageStateSetMasks[stage] & stateBit) == 0)
         return;
@@ -318,8 +341,7 @@ CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTUREST
 CKDWORD CKFixedFunctionPipeline::QueryTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || !CKRSTIsValidTextureStageStateType(type))
         return 0;
-    return (m_State.StageStateQueryMasks[stage] & (1ull << (CKDWORD)type)) != 0
-        ? m_State.StageStates[stage][type] : CKRSTDefaultTextureStageStateValue(stage, type);
+    return m_State.StageQueryStates[stage][type];
 }
 
 CKBOOL CKFixedFunctionPipeline::GetTransform(VXMATRIX_TYPE type, VxMatrix &matrix) const {

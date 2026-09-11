@@ -275,7 +275,7 @@ void TestTextureStageQueriesFollowSavedState()
               "a cleared unresolved value overrides the initial query default");
     f.FFP->RestoreTextureStage(0, initial);
     TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == CKRST_TOP_MODULATE,
-              "save/restore includes query presence without a second value store");
+              "save/restore preserves initial query defaults");
     f.FFP->RestoreTextureStage(0, cleared);
     TestCheck(f.Context->GetTextureStageState(0, CKRST_TSS_OP, &value) && value == 0 &&
                   !f.FFP->IsTextureStageStateSet(0, CKRST_TSS_OP),

@@ -1,6 +1,6 @@
 #include "CKFFStateStore.h"
 #include "CKFFDrawTypes.h"
-
+#include "CKRasterizer.h"
 #include <string.h>
 
 CKBOOL CKFFStateStore::EnsureViewProjection()
@@ -53,12 +53,16 @@ void CKFFStateStore::Reset()
     memset(TextureHandles, 0, sizeof(TextureHandles));
     memset(TextureFlags, 0, sizeof(TextureFlags));
     memset(StageStates, 0, sizeof(StageStates));
+    memset(StageQueryStates, 0, sizeof(StageQueryStates));
     memset(StageStateSetMasks, 0, sizeof(StageStateSetMasks));
     memset(StageStateQueryMasks, 0, sizeof(StageStateQueryMasks));
     memset(UserClipPlanes, 0, sizeof(UserClipPlanes));
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         StageStates[stage][CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
+        for (CKDWORD state = CKRST_TSS_OP; state < CKFF_MAX_TEXTURE_STAGE_STATES; ++state)
+            StageQueryStates[stage][state] = CKRSTDefaultTextureStageStateValue(
+                stage, (CKRST_TEXTURESTAGESTATETYPE)state);
         TexcoordComponentCounts[stage] = 2;
     }
 

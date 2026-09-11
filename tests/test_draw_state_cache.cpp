@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #include "CKDrawStateCache.h"
+#include "CKRasterizer.h"
 #include "CKRasterizerBackendEnums.h"
 #include "TestTriangleMultiset.h"
 
@@ -154,6 +155,26 @@ void DisabledDepthBufferCannotWriteDepth() {
               "Disabled depth buffering must also clear depth writes");
 }
 
+void PublicQueryValuesTrackDefaultsAndExplicitWrites() {
+    CKDrawStateCache cache;
+    for (CKDWORD state = 0; state < VXRENDERSTATE_MAXSTATE; ++state) {
+        TestCheck(cache.QueryRenderState((VXRENDERSTATETYPE)state) ==
+                      CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state),
+                  "Public render-state queries must begin at the rasterizer defaults");
+    }
+
+    cache.SetRenderState(VXRENDERSTATE_TEXTUREFACTOR, 0x10203040u);
+    cache.SetRenderState(VXRENDERSTATE_STENCILMASK, 0x5Au);
+    TestCheck(cache.QueryRenderState(VXRENDERSTATE_TEXTUREFACTOR) == 0x10203040u &&
+                  cache.QueryRenderState(VXRENDERSTATE_STENCILMASK) == 0x5Au,
+              "Public render-state queries must return explicit writes");
+
+    cache.Reset();
+    TestCheck(cache.QueryRenderState(VXRENDERSTATE_TEXTUREFACTOR) == 0xFF000000u &&
+                  cache.QueryRenderState(VXRENDERSTATE_STENCILMASK) == 0xFFFFFFFFu,
+              "Reset must restore public defaults independently of native draw defaults");
+}
+
 } // namespace
 
 int main() {
@@ -172,5 +193,7 @@ int main() {
               &AntialiasStateMapsToMsaa);
     tests.Run("Disabled depth buffer cannot write depth",
               &DisabledDepthBufferCannotWriteDepth);
+    tests.Run("Public query values track defaults and explicit writes",
+              &PublicQueryValuesTrackDefaultsAndExplicitWrites);
     return tests.ExitCode();
 }

@@ -33,6 +33,7 @@ struct CKFFStateStore {
     CKDWORD TextureHandles[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD TextureFlags[CKFF_MAX_TEXTURE_STAGES];
     CKDWORD StageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
+    CKDWORD StageQueryStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES];
     uint64_t StageStateSetMasks[CKFF_MAX_TEXTURE_STAGES];
     // Query defaults differ from unresolved FFP values before the first write.
     // A bit selects the single stored value, including an explicitly cleared

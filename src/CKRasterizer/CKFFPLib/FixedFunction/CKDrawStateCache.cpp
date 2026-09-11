@@ -127,7 +127,7 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
     if ((CKDWORD)state >= CKFF_RS_COUNT)
         return;
 
-    m_QueryMasks[(CKDWORD)state / 64] |= 1ull << ((CKDWORD)state % 64);
+    m_QueryStates[state] = value;
     if (m_States[state] == value)
         return;
 
@@ -176,14 +176,14 @@ CKDWORD CKDrawStateCache::GetRenderState(VXRENDERSTATETYPE state) const {
 }
 
 void CKDrawStateCache::ResetQueryDefaults() {
-    memset(m_QueryMasks, 0, sizeof(m_QueryMasks));
+    for (CKDWORD state = 0; state < CKFF_RS_COUNT; ++state)
+        m_QueryStates[state] = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
 }
 
 CKDWORD CKDrawStateCache::QueryRenderState(VXRENDERSTATETYPE state) const {
     if ((CKDWORD)state >= CKFF_RS_COUNT)
         return 0;
-    return (m_QueryMasks[(CKDWORD)state / 64] & (1ull << ((CKDWORD)state % 64))) != 0
-        ? m_States[state] : CKRSTDefaultRenderStateValue(state);
+    return m_QueryStates[state];
 }
 
 void CKDrawStateCache::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {

@@ -47,7 +47,7 @@ public:
 
 private:
     CKDWORD m_States[CKFF_RS_COUNT];
-    uint64_t m_QueryMasks[(CKFF_RS_COUNT + 63) / 64]{};
+    CKDWORD m_QueryStates[CKFF_RS_COUNT];
     CKDWORD m_DirtyMask;
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;
