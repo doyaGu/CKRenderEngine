@@ -231,10 +231,11 @@ void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
 
 void NullRasterizerSupportsHeadlessFFP()
 {
-    CKRecordingBackendLibrary library;
-    TestCheck(library.Start(NULL) && library.GetDriverCount() == 1,
-              "Null backend library must expose its headless driver");
-    CKRasterizerBackendDriver *driver = library.GetDriver(0);
+    CKRecordingRasterizer rasterizer;
+    TestCheck(rasterizer.Start(NULL) && rasterizer.GetDriverCount() == 1,
+              "recording rasterizer must expose its headless driver");
+    CKRecordingRasterizerDriver *driver =
+        static_cast<CKRecordingRasterizerDriver *>(rasterizer.GetDriver(0));
     CKRasterizerBackend *first = driver->CreateBackend();
     CKRasterizerBackend *second = driver->CreateBackend();
     TestCheck(first != NULL && second != NULL, "Null driver must create headless backends");

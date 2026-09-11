@@ -111,7 +111,7 @@ class FFPRecordingBackend;
 
 // Backend driver of the recording backends: the shader profile and the
 // framebuffer conventions the backends report.
-class FFPRecordingDriver : public CKRecordingBackendDriver {
+class FFPRecordingDriver : public CKRecordingRasterizerDriver {
 public:
     explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
                                 CKDWORD flags = 0,
@@ -158,10 +158,10 @@ protected:
 
 class FFPRecordingBackend : public CKRecordingBackend {
 public:
-    explicit FFPRecordingBackend(CKRecordingBackendDriver *driver)
-        : CKRecordingBackend(driver ? driver->GetBackendConventions() : CKBackendCaps()), TestProvider(driver) {}
+    explicit FFPRecordingBackend(CKRecordingRasterizerDriver *driver)
+        : CKRecordingBackend(driver ? driver->GetBackendConventions() : CKBackendCaps()), TestDriver(driver) {}
 
-    CKRecordingBackendDriver *TestProvider;
+    CKRecordingRasterizerDriver *TestDriver;
 
     // --- Knobs
     CKBOOL FailCreateProgram = FALSE;
@@ -255,7 +255,7 @@ public:
     CKBackendShaderSet ShaderSet() {
         StartedBackend();
         CKBackendShaderSet shaders;
-        TestCheck(TestProvider && TestProvider->GetShaderSet(GetCaps(), shaders), "recording shader catalog");
+        TestCheck(TestDriver && TestDriver->GetShaderSet(GetCaps(), shaders), "recording shader catalog");
         return shaders;
     }
     CKBOOL IsIdle() const override { return m_Initialized && ForceNotIdle ? FALSE : TRUE; }
@@ -420,11 +420,11 @@ inline CKRecordingBackend *FFPRecordingDriver::NewBackend()
 inline CKBOOL FFPRecordingDriver::DestroyBackend(CKRasterizerBackend *backend)
 {
     if (!ForceDestroyBusy)
-        return CKRecordingBackendDriver::DestroyBackend(backend);
+        return CKRecordingRasterizerDriver::DestroyBackend(backend);
     FFPRecordingBackend *recording = static_cast<FFPRecordingBackend *>(backend);
     const CKBOOL wasForcedBusy = recording->ForceNotIdle;
     recording->ForceNotIdle = FALSE;
-    const CKBOOL result = CKRecordingBackendDriver::DestroyBackend(backend);
+    const CKBOOL result = CKRecordingRasterizerDriver::DestroyBackend(backend);
     if (!result)
         recording->ForceNotIdle = wasForcedBusy;
     return result;
@@ -547,9 +547,9 @@ inline CKERROR FFPRecordingBackend::Draw(const CKBackendDraw *draw)
 // Recording backend behind the v3 translation core
 // ===========================================================================
 
-class FFPRecordingLibrary : public CKRecordingBackendLibrary {
+class FFPRecordingRasterizer : public CKRecordingRasterizer {
 protected:
-    CKRecordingBackendDriver *NewDriver() override { return new FFPRecordingDriver(); }
+    CKRecordingRasterizerDriver *NewDriver() override { return new FFPRecordingDriver(); }
 };
 
 // A started translated rasterizer over the recording backend. Add texture
@@ -557,25 +557,25 @@ protected:
 // syncs them when the context is created.
 struct FFPTranslatedWorld {
     CKRasterizer *Rasterizer;
-    CKTranslatedDriver *Driver;
+    FFPRecordingDriver *Driver;
     CKTranslatedContext *Context;
     FFPRecordingBackend *Backend;
 
     FFPTranslatedWorld() : Rasterizer(NULL), Driver(NULL), Context(NULL), Backend(NULL) {
-        FFPRecordingLibrary *library = new FFPRecordingLibrary();
-        library->Start(NULL);
-        Rasterizer = CKTranslatedRasterizerStart(library, NULL);
+        FFPRecordingRasterizer *rasterizer = new FFPRecordingRasterizer();
+        Rasterizer = rasterizer;
+        Rasterizer->Start(NULL);
         TestCheck(Rasterizer != NULL && Rasterizer->GetDriverCount() == 1, "translated rasterizer over the recording backend");
-        Driver = Rasterizer ? static_cast<CKTranslatedDriver *>(Rasterizer->GetDriver(0)) : NULL;
+        Driver = Rasterizer ? static_cast<FFPRecordingDriver *>(Rasterizer->GetDriver(0)) : NULL;
     }
 
     ~FFPTranslatedWorld() {
         if (Rasterizer)
-            CKTranslatedRasterizerClose(Rasterizer);
+            delete Rasterizer;
     }
 
     FFPRecordingDriver *BackendDriver() const {
-        return Driver ? static_cast<FFPRecordingDriver *>(Driver->GetBackendDriver()) : NULL;
+        return Driver;
     }
 
     CKBOOL CreateContext(int width, int height) {

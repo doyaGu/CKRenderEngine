@@ -26,7 +26,7 @@ FORBIDDEN_TARGETS = {
     "CKBgfxBackend",
 }
 FORBIDDEN_DIRECTORIES = {"CKRenderSupport", "CKRasterizerBackend", "tests"}
-PROVIDER_BUILD_TOKENS = {
+ADAPTER_BUILD_TOKENS = {
     "BGFX_DIR",
     "CKBgfxShaderArtifacts",
     "CKRE_SHADERC_COMMAND",
@@ -151,13 +151,13 @@ def check(root):
             errors.append(f"non-module directory remains under src/CKRasterizer: {directory}")
 
     ffp_cmake = (module_roots["CKFFPLib"] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
-    for token in sorted(PROVIDER_BUILD_TOKENS):
+    for token in sorted(ADAPTER_BUILD_TOKENS):
         if token in ffp_cmake:
-            errors.append(f"CMake: CKFFPLib references provider build input {token}")
+            errors.append(f"CMake: CKFFPLib references Adapter build input {token}")
 
     ffp_public_includes = target_public_include_paths(ffp_cmake, "CKFFPLib")
     if not ffp_public_includes:
-        errors.append("CMake: CKFFPLib has no provider-facing include seam")
+        errors.append("CMake: CKFFPLib has no library Interface include seam")
     for include, line in ffp_public_includes:
         if not re.search(r'/Interface(?:>|$)', include):
             errors.append(
@@ -165,10 +165,10 @@ def check(root):
                 f"CKFFPLib exposes non-interface include path {include}"
             )
 
-    for provider in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
-        provider_cmake_path = module_roots[provider] / "CMakeLists.txt"
-        provider_cmake = provider_cmake_path.read_text(encoding="utf-8-sig")
-        for command, values, line in commands(provider_cmake):
+    for adapter in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
+        adapter_cmake_path = module_roots[adapter] / "CMakeLists.txt"
+        adapter_cmake = adapter_cmake_path.read_text(encoding="utf-8-sig")
+        for command, values, line in commands(adapter_cmake):
             if command != "target_include_directories":
                 continue
             if values and (values[0].startswith("test_") or values[0] == "${_test}"):
@@ -177,8 +177,8 @@ def check(root):
                 normalized = value.replace('\\', '/')
                 if re.search(r'CKFFPLib/(?:Backend|FixedFunction|Rasterizer)(?:/|$)', normalized):
                     errors.append(
-                        f"{provider_cmake_path.relative_to(root)}:{line}: "
-                        f"{provider} exposes CKFFPLib implementation include path {value}"
+                        f"{adapter_cmake_path.relative_to(root)}:{line}: "
+                        f"{adapter} exposes CKFFPLib Implementation include path {value}"
                     )
 
     for module, targets in MODULE_TARGETS.items():
@@ -211,7 +211,7 @@ def check(root):
                 errors.append(f"CMake: {module} shared and static targets compile different implementation sources")
 
     internal_install_targets = {"CKFFPLib", "CKSdlGpuRasterizerStatic", "CKBgfxRasterizerStatic"}
-    runtime_providers = {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
+    runtime_rasterizers = {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
     for cmake in sorted(rasterizer.rglob("CMakeLists.txt")):
         for command, values, line in commands(cmake.read_text(encoding="utf-8-sig")):
             if command != "install" or not values or values[0].upper() != "TARGETS":
@@ -219,7 +219,7 @@ def check(root):
             installed = set(values[1:])
             for target in sorted(installed & internal_install_targets):
                 errors.append(f"{cmake.relative_to(root)}:{line}: installs internal target {target}")
-            if installed & runtime_providers and any(value.upper() == "EXPORT" for value in values):
+            if installed & runtime_rasterizers and any(value.upper() == "EXPORT" for value in values):
                 errors.append(f"{cmake.relative_to(root)}:{line}: exports a concrete rasterizer target")
 
     if "CKRasterizerLib" not in edges["CKFFPLib"]:
@@ -231,11 +231,27 @@ def check(root):
     for dependency in edges["CKFFPLib"]:
         if dependency in {"CKSdlGpuRasterizer", "CKSdlGpuRasterizerStatic",
                           "CKBgfxRasterizer", "CKBgfxRasterizerStatic"}:
-            errors.append(f"CMake: CKFFPLib depends on concrete provider {dependency}")
-    for provider in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
-        cmake_text = (module_roots[provider] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+            errors.append(f"CMake: CKFFPLib depends on concrete rasterizer {dependency}")
+    for adapter in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
+        cmake_text = (module_roots[adapter] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
         if not re.search(r'\btarget_link_libraries\s*\([^)]*\bCKFFPLib\b', cmake_text, re.DOTALL):
-            errors.append(f"CMake: {provider} must link CKFFPLib")
+            errors.append(f"CMake: {adapter} must link CKFFPLib")
+
+    forbidden_ffp_lifecycle = {
+        "CKRasterizerBackendLibrary",
+        "CKRasterizerBackendDriver",
+        "CKTranslatedRasterizerStart",
+        "CKTranslatedRasterizerClose",
+    }
+    for source in module_roots["CKFFPLib"].rglob("*"):
+        if source.suffix.lower() not in {".cpp", ".h"}:
+            continue
+        text = source.read_text(encoding="utf-8-sig", errors="replace")
+        for token in sorted(forbidden_ffp_lifecycle):
+            if token in text:
+                errors.append(
+                    f"{source.relative_to(root)}: CKFFPLib owns rasterizer lifecycle token {token}"
+                )
 
     header_index = defaultdict(list)
     for folder in (public_root, rasterizer):
@@ -268,9 +284,9 @@ def check(root):
                 continue
             imported = module_for(resolved, module_roots, public_root)
             if imported == "CKFFPLib":
-                provider = owner in {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
+                adapter = owner in {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
                 interface_header = resolved.is_relative_to(ffp_interface_root)
-                if provider and not interface_header:
+                if adapter and not interface_header:
                     line = text.count('\n', 0, match.start()) + 1
                     errors.append(
                         f"{source.relative_to(root)}:{line}: {owner} imports private "
@@ -279,7 +295,7 @@ def check(root):
                 if source.is_relative_to(ffp_interface_root) and not interface_header:
                     line = text.count('\n', 0, match.start()) + 1
                     errors.append(
-                        f"{source.relative_to(root)}:{line}: provider-facing Interface imports "
+                        f"{source.relative_to(root)}:{line}: library Interface imports "
                         f"private CKFFPLib header {match.group(1)}"
                     )
             if imported and imported not in allowed_imports[owner]:

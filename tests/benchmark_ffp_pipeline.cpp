@@ -311,15 +311,16 @@ class BenchmarkTranslatedWorld {
 public:
     explicit BenchmarkTranslatedWorld(const CKFFBenchmark::Workload &workload)
     {
-        CKBenchmarkBackendLibrary *library = new CKBenchmarkBackendLibrary();
-        if (!library->Start(nullptr)) {
-            delete library;
+        CKBenchmarkRasterizer *rasterizer = new CKBenchmarkRasterizer();
+        Rasterizer = rasterizer;
+        if (!Rasterizer->Start(nullptr)) {
+            delete Rasterizer;
+            Rasterizer = nullptr;
             return;
         }
-        Rasterizer = CKTranslatedRasterizerStart(library, nullptr);
         if (!Rasterizer || Rasterizer->GetDriverCount() != 1)
             return;
-        Driver = static_cast<CKTranslatedDriver *>(Rasterizer->GetDriver(0));
+        Driver = static_cast<CKBenchmarkRasterizerDriver *>(Rasterizer->GetDriver(0));
         Context = Driver
             ? static_cast<CKTranslatedContext *>(Driver->CreateContext())
             : nullptr;
@@ -335,11 +336,11 @@ public:
     ~BenchmarkTranslatedWorld()
     {
         if (Rasterizer)
-            CKTranslatedRasterizerClose(Rasterizer);
+            delete Rasterizer;
     }
 
     CKRasterizer *Rasterizer = nullptr;
-    CKTranslatedDriver *Driver = nullptr;
+    CKBenchmarkRasterizerDriver *Driver = nullptr;
     CKTranslatedContext *Context = nullptr;
     CKBenchmarkBackend *Backend = nullptr;
     CKFFBenchmark::PublicResources Resources;

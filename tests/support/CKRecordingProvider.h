@@ -2,26 +2,26 @@
 #define CKRECORDINGPROVIDER_H
 
 #include "CKRecordingBackend.h"
-#include "CKRasterizerPlugin.h"
 #include "CKBuiltinShaders.h"
+#include "CKRasterizer.h"
 
-// Test-only provider composition. Display enumeration and nominal shader
-// artifacts make the command recorder usable through the FFP translation.
-void CKRecordingShaderTargets(std::vector<CKBackendShaderTarget> &Out);
-CKBOOL CKRecordingShaderSet(const CKBackendCaps &Caps, CKBackendShaderSet &Out);
+void CKRecordingShaderTargets(std::vector<CKBackendShaderTarget> &out);
+CKBOOL CKRecordingShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out);
 
-class CKRecordingBackendDriver : public CKRasterizerBackendDriver {
+class CKRecordingRasterizerDriver : public CKRasterizerDriver {
 public:
-    CKRecordingBackendDriver();
-    ~CKRecordingBackendDriver() override;
+    explicit CKRecordingRasterizerDriver(CKRasterizer *owner = NULL, CKDWORD index = 0);
+    ~CKRecordingRasterizerDriver() override;
 
-    CKRasterizerBackend *CreateBackend() override;
-    CKBOOL DestroyBackend(CKRasterizerBackend *Backend) override;
-    void GetShaderTargets(std::vector<CKBackendShaderTarget> &Out) const override;
-    CKBOOL GetShaderSet(const CKBackendCaps &Caps, CKBackendShaderSet &Out) const override;
+    CKRasterizerContext *CreateContext() override;
+    CKBOOL DestroyContext(CKRasterizerContext *context) override;
+
+    virtual CKRasterizerBackend *CreateBackend();
+    virtual CKBOOL DestroyBackend(CKRasterizerBackend *backend);
+    virtual void GetShaderTargets(std::vector<CKBackendShaderTarget> &out) const;
+    virtual CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out) const;
     CKBackendCaps GetBackendConventions() const;
 
-    // Tests configure these nominal conventions before creating a backend.
     CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     CKBOOL OriginBottomLeft;
@@ -29,28 +29,22 @@ public:
 
 protected:
     virtual CKRecordingBackend *NewBackend();
+    CKBOOL BuildShaderLibrary(CKFFShaderLibrary &shaders) const;
 
 private:
     XArray<CKRecordingBackend *> m_Backends;
+    XArray<CKRecordingBackend *> m_ContextBackends;
 };
 
-class CKRecordingBackendLibrary : public CKRasterizerBackendLibrary {
+class CKRecordingRasterizer : public CKRasterizer {
 public:
-    CKRecordingBackendLibrary();
-    ~CKRecordingBackendLibrary() override;
+    ~CKRecordingRasterizer() override;
 
-    CKBOOL Start(WIN_HANDLE AppWnd) override;
+    CKBOOL Start(WIN_HANDLE appWindow) override;
     void Close() override;
-    int GetDriverCount() const override { return m_Drivers.Size(); }
-    CKRasterizerBackendDriver *GetDriver(CKDWORD Index) const override;
-    WIN_HANDLE GetMainWindow() const override { return m_MainWindow; }
 
 protected:
-    virtual CKRecordingBackendDriver *NewDriver();
-
-private:
-    WIN_HANDLE m_MainWindow;
-    XArray<CKRecordingBackendDriver *> m_Drivers;
+    virtual CKRecordingRasterizerDriver *NewDriver();
 };
 
 #endif

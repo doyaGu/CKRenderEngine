@@ -1,8 +1,4 @@
-// Plugin entry points: the engine sees the v3 contract, implemented by the
-// translation core over the bgfx backend library.
-
 #include "CKBgfxRasterizer.h"
-#include "CKTranslatedRasterizer.h"
 
 #include <new>
 
@@ -14,27 +10,25 @@
 #define CK_BGFX_RASTERIZER_EXPORT
 #endif
 
-static void CKBgfxLibraryClose(CKRasterizerBackendLibrary *library)
-{
-    delete static_cast<CKBgfxBackendLibrary *>(library);
-}
+namespace {
 
-static CKRasterizer *CKBgfxRasterizerStart(WIN_HANDLE AppWnd)
+CKRasterizer *StartRasterizer(WIN_HANDLE appWindow)
 {
-    auto *library = new (std::nothrow) CKBgfxBackendLibrary();
-    if (!library)
+    CKBgfxRasterizer *rasterizer = new (std::nothrow) CKBgfxRasterizer();
+    if (!rasterizer)
         return NULL;
-    if (!library->Start(AppWnd)) {
-        delete library;
+    if (!rasterizer->Start(appWindow)) {
+        delete rasterizer;
         return NULL;
     }
-    return CKTranslatedRasterizerStart(library, CKBgfxLibraryClose);
+    return rasterizer;
+}
+void CloseRasterizer(CKRasterizer *rasterizer)
+{
+    delete rasterizer;
 }
 
-static void CKBgfxRasterizerClose(CKRasterizer *rst)
-{
-    CKTranslatedRasterizerClose(rst);
-}
+} // namespace
 
 #ifdef CK_LIB
 void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info)
@@ -46,7 +40,7 @@ extern "C" CK_BGFX_RASTERIZER_EXPORT void CKRasterizerGetInfo(CKRasterizerInfo *
         return;
 
     info->Desc = "bgfx Rasterizer";
-    info->StartFct = CKBgfxRasterizerStart;
-    info->CloseFct = CKBgfxRasterizerClose;
+    info->StartFct = StartRasterizer;
+    info->CloseFct = CloseRasterizer;
     info->InterfaceRevision = CKRST_INTERFACE_REVISION;
 }

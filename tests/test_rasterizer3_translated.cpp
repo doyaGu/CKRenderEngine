@@ -14,7 +14,7 @@ namespace {
 struct Fixture {
     // World is declared last so the members above are plain aliases into it.
     CKRasterizer *Rasterizer;
-    CKTranslatedDriver *Driver;
+    FFPRecordingDriver *Driver;
     CKTranslatedContext *Context;
     FFPRecordingBackend *Backend;
     CKFixedFunctionPipeline *FFP;
@@ -98,7 +98,7 @@ void TestLifecycle()
     Fixture f;
     TestCheck(f.Driver->m_Desc == "Recording backend", "driver description synced from the backend driver");
     TestCheck(f.Driver->m_3DCaps.MaxNumberTextureStage == 8, "3D caps synced from the backend driver");
-    TestCheck(f.Driver->GetBackendDriver() != NULL, "backend driver reachable");
+    TestCheck(f.Driver != NULL, "recording driver reachable");
     TestCheck(f.Context->m_Width == 64 && f.Context->m_Height == 64, "context size from the backend");
     TestCheck(f.Context->GetDeviceStatus() == CK_OK, "device status");
     TestCheck(f.Context->IsIdle(), "idle after Create");
@@ -641,25 +641,24 @@ void TestPresentFailurePropagation()
     f.Backend->Log.DrawErrorAt = 0;
 }
 
-void TestRasterizerOwnsShaderSelectionAndCatalogFailure()
+void TestDriverOwnsShaderSelectionAndCatalogFailure()
 {
     FFPTranslatedWorld world;
-    FFPRecordingDriver *provider = world.BackendDriver();
-    provider->FailShaderCatalog = TRUE;
-    TestCheck(!world.CreateContext(64, 64) && world.Context &&
-                  world.Context->GetDeviceStatus() != CK_OK,
-              "missing rasterizer artifacts fail creation and roll the device back");
-    TestCheck(provider->ShaderTargetQueries == 1 && provider->ShaderCatalogQueries == 1,
-              "the rasterizer supplies device targets then resolves a catalog");
+    FFPRecordingDriver *driver = world.BackendDriver();
+    driver->FailShaderCatalog = TRUE;
+    TestCheck(!world.CreateContext(64, 64) && !world.Context,
+              "missing rasterizer artifacts reject context construction");
+    TestCheck(driver->ShaderTargetQueries == 1 && driver->ShaderCatalogQueries == 1,
+              "the driver builds its shader library once for the attempted context");
 
-    provider->FailShaderCatalog = FALSE;
-    TestCheck(world.Context->Create(NULL, 0, 0, 64, 64, 32, FALSE, 60, 24, 8),
-              "the same context can retry after its catalog becomes available");
-    TestCheck(provider->ShaderTargetQueries == 2 && provider->ShaderCatalogQueries == 2,
-              "retry supplies a fresh shader selection exactly once");
+    driver->FailShaderCatalog = FALSE;
+    TestCheck(world.CreateContext(64, 64),
+              "context construction succeeds after artifacts become available");
+    TestCheck(driver->ShaderTargetQueries == 2 && driver->ShaderCatalogQueries == 2,
+              "the successful context receives one immutable shader-library snapshot");
     TestCheck(world.Context->BeginScene() && world.Context->EndScene() && world.Context->BackToFront(FALSE),
               "the retained catalog supports lazy presentation shader creation");
-    TestCheck(provider->ShaderTargetQueries == 2 && provider->ShaderCatalogQueries == 2,
+    TestCheck(driver->ShaderTargetQueries == 2 && driver->ShaderCatalogQueries == 2,
               "frame submission and lazy program creation never rediscover artifacts");
 }
 
@@ -700,7 +699,7 @@ int main()
     framework.Run("overlay phase", TestOverlayPhase);
     framework.Run("RenderScale coordinates", TestRenderScaleCoordinates);
     framework.Run("present failures propagate", TestPresentFailurePropagation);
-    framework.Run("rasterizer owns shader selection and catalog failures", TestRasterizerOwnsShaderSelectionAndCatalogFailure);
+    framework.Run("driver owns shader selection and catalog failures", TestDriverOwnsShaderSelectionAndCatalogFailure);
     framework.Run("failed shutdown preserves context", TestDestroyContextPreservesFailedShutdown);
     framework.Run("shutdown", TestShutdown);
     return framework.ExitCode();

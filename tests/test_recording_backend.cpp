@@ -15,7 +15,7 @@ static int Fail(const char *what)
     return EXIT_FAILURE;
 }
 
-static bool HasDisplayMode(CKRasterizerBackendDriver *driver, int width, int height, int bpp, int refreshRate)
+static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &mode = driver->m_DisplayModes[i];
@@ -163,9 +163,9 @@ static int TestGenericBackend()
     return EXIT_SUCCESS;
 }
 
-static int TestConfiguredProvider()
+static int TestConfiguredDriver()
 {
-    CKRecordingBackendDriver driver;
+    CKRecordingRasterizerDriver driver;
     driver.Format = CKRST_SHADER_FORMAT_SPIRV;
     driver.Profile = CKRST_SHADER_PROFILE_SPIRV;
     driver.OriginBottomLeft = TRUE;
@@ -198,16 +198,17 @@ static int TestConfiguredProvider()
 int main()
 {
     if (TestBackendShaderTargets() != EXIT_SUCCESS || TestGenericBackend() != EXIT_SUCCESS ||
-        TestConfiguredProvider() != EXIT_SUCCESS)
+        TestConfiguredDriver() != EXIT_SUCCESS)
         return EXIT_FAILURE;
-    CKRecordingBackendLibrary library;
-    if (library.GetDriverCount() != 0 || !library.Start(NULL))
-        return Fail("library start");
-    if (library.GetDriverCount() != 1 || !library.Start(NULL) || library.GetDriverCount() != 1)
+    CKRecordingRasterizer rasterizer;
+    if (rasterizer.GetDriverCount() != 0 || !rasterizer.Start(NULL))
+        return Fail("rasterizer start");
+    if (rasterizer.GetDriverCount() != 1 || !rasterizer.Start(NULL) || rasterizer.GetDriverCount() != 1)
         return Fail("one driver, idempotent start");
 
-    CKRasterizerBackendDriver *driver = library.GetDriver(0);
-    if (!driver || driver->m_DriverIndex != 0 || library.GetDriver(1) != NULL)
+    CKRecordingRasterizerDriver *driver =
+        static_cast<CKRecordingRasterizerDriver *>(rasterizer.GetDriver(0));
+    if (!driver || driver->m_DriverIndex != 0 || rasterizer.GetDriver(1) != NULL)
         return Fail("driver lookup");
 
     if (driver->m_Hardware || !driver->m_CapsUpToDate)
@@ -327,8 +328,8 @@ int main()
     if (!driver->DestroyBackend(backend) || driver->DestroyBackend(backend))
         return Fail("DestroyBackend");
 
-    library.Close();
-    if (library.GetDriverCount() != 0)
+    rasterizer.Close();
+    if (rasterizer.GetDriverCount() != 0)
         return Fail("Close");
     return EXIT_SUCCESS;
 }

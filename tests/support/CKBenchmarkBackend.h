@@ -54,14 +54,14 @@ private:
         m_LastConstantRevisions{};
 };
 
-class CKBenchmarkBackendDriver : public CKRecordingBackendDriver {
+class CKBenchmarkRasterizerDriver : public CKRecordingRasterizerDriver {
 protected:
     CKRecordingBackend *NewBackend() override;
 };
 
-class CKBenchmarkBackendLibrary : public CKRecordingBackendLibrary {
+class CKBenchmarkRasterizer : public CKRecordingRasterizer {
 protected:
-    CKRecordingBackendDriver *NewDriver() override;
+    CKRecordingRasterizerDriver *NewDriver() override;
 };
 
 #endif // CKRE_CK_BENCHMARK_BACKEND_H

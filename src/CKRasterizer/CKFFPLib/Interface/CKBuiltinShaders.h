@@ -5,8 +5,10 @@
 #include "CKRasterizerBackendTypes.h"
 #include <vector>
 
-struct CKBackendCaps;
-struct CKBackendShaderTarget;
+struct CKBackendShaderTarget {
+    CK_SHADER_FORMAT Format = CKRST_SHADER_FORMAT_UNKNOWN;
+    CK_SHADER_PROFILE Profile = CKRST_SHADER_PROFILE_UNKNOWN;
+};
 
 // Rasterizer shader roles. Plugins supply immutable artifacts for the device
 // target; the FFP and presentation layers declare their resource interfaces.
@@ -41,6 +43,61 @@ struct CKBackendShaderSet {
         }
         return true;
     }
+};
+
+// Immutable shader data consumed by one fixed-function context. Concrete
+// rasterizers build this value from their checked-in shader artifacts before
+// creating a context; CKFFPLib does not call back into rasterizer lifecycle
+// objects to discover shaders.
+class CKFFShaderLibrary {
+public:
+    CKBOOL Add(const CKBackendShaderSet &shaderSet)
+    {
+        const CKShaderDesc &identity = shaderSet.Shaders[0];
+        if (!shaderSet.Matches(identity.Format, identity.Profile))
+            return FALSE;
+        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+            const CKShaderDesc &existing = m_ShaderSets[i].Shaders[0];
+            if (existing.Format == identity.Format && existing.Profile == identity.Profile) {
+                m_ShaderSets[i] = shaderSet;
+                return TRUE;
+            }
+        }
+        m_ShaderSets.push_back(shaderSet);
+        return TRUE;
+    }
+
+    void Clear() { m_ShaderSets.clear(); }
+    CKBOOL Empty() const { return m_ShaderSets.empty() ? TRUE : FALSE; }
+
+    void GetTargets(std::vector<CKBackendShaderTarget> &targets) const
+    {
+        targets.clear();
+        targets.reserve(m_ShaderSets.size());
+        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+            const CKShaderDesc &identity = m_ShaderSets[i].Shaders[0];
+            CKBackendShaderTarget target;
+            target.Format = identity.Format;
+            target.Profile = identity.Profile;
+            targets.push_back(target);
+        }
+    }
+
+    CKBOOL Find(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile,
+                CKBackendShaderSet &shaderSet) const
+    {
+        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+            if (m_ShaderSets[i].Matches(format, profile)) {
+                shaderSet = m_ShaderSets[i];
+                return TRUE;
+            }
+        }
+        shaderSet = CKBackendShaderSet();
+        return FALSE;
+    }
+
+private:
+    std::vector<CKBackendShaderSet> m_ShaderSets;
 };
 
 #endif

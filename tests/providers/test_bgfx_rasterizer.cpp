@@ -32,7 +32,7 @@ static int g_FailCount = 0;
 
 #define TEST_SECTION(name) printf("\n[%s]\n", name)
 
-static bool HasDisplayMode(CKRasterizerBackendDriver *driver, int width, int height, int bpp, int refreshRate)
+static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
 {
     for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &mode = driver->m_DisplayModes[i];
@@ -47,7 +47,7 @@ static bool HasDisplayMode(CKRasterizerBackendDriver *driver, int width, int hei
     return false;
 }
 
-static bool DisplayModesAreSorted(CKRasterizerBackendDriver *driver)
+static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
 {
     for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {
         const VxDisplayMode &prev = driver->m_DisplayModes[i - 1];
@@ -511,23 +511,24 @@ static void TestOpenGLAutoMipPolicy()
 }
 
 // ============================================================================
-// Backend library start/close lifecycle
+// Rasterizer start/close lifecycle
 // ============================================================================
 
 static void TestBgfxRasterizerLifecycle()
 {
-    TEST_SECTION("CKBgfxBackendLibrary Start/Close Lifecycle");
+    TEST_SECTION("CKBgfxRasterizer Start/Close Lifecycle");
 
-    CKBgfxBackendLibrary library;
-    TEST_ASSERT(library.GetDriverCount() == 0, "new library has no drivers");
-    TEST_ASSERT(library.Start(NULL) == TRUE, "start succeeds without creating a backend");
-    TEST_ASSERT(library.GetDriverCount() == 1, "start creates one bgfx driver");
-    TEST_ASSERT(library.Start(NULL) == TRUE, "repeated start is idempotent");
-    TEST_ASSERT(library.GetDriverCount() == 1, "repeated start does not add another driver");
+    CKBgfxRasterizer rasterizer;
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "new rasterizer has no drivers");
+    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "start succeeds without creating a backend");
+    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "start creates one bgfx driver");
+    TEST_ASSERT(rasterizer.Start(NULL) == TRUE, "repeated start is idempotent");
+    TEST_ASSERT(rasterizer.GetDriverCount() == 1, "repeated start does not add another driver");
 
-    CKRasterizerBackendDriver *driver = library.GetDriver(0);
+    CKBgfxRasterizerDriver *driver =
+        static_cast<CKBgfxRasterizerDriver *>(rasterizer.GetDriver(0));
     TEST_ASSERT(driver != NULL, "driver exists after start");
-    TEST_ASSERT(static_cast<CKBgfxBackendDriver *>(driver)->GetOwner() == &library, "driver owner points to the library");
+    TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to the rasterizer");
     TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
     TEST_ASSERT(driver->m_DisplayModes.Size() > 0,
                 "bgfx driver exposes real modes or a minimal fallback list");
@@ -538,7 +539,7 @@ static void TestBgfxRasterizerLifecycle()
                 "bgfx driver does not fabricate legacy 16-bit display modes");
     TEST_ASSERT(driver->m_CapsUpToDate == FALSE,
                 "bgfx legacy caps remain provisional until a backend initializes bgfx");
-    TEST_ASSERT(library.GetDriver(1) == NULL, "out-of-range driver index yields NULL");
+    TEST_ASSERT(rasterizer.GetDriver(1) == NULL, "out-of-range driver index yields NULL");
 
     std::vector<CKBackendShaderTarget> shaderTargets;
     driver->GetShaderTargets(shaderTargets);
@@ -559,10 +560,10 @@ static void TestBgfxRasterizerLifecycle()
     TEST_ASSERT(!driver->GetShaderSet(foreignTarget, foreignShaders) && !foreignShaders.Shaders[0].Code,
                 "bgfx rasterizer never offers containers as native DXIL artifacts");
 
-    library.Close();
-    TEST_ASSERT(library.GetDriverCount() == 0, "close removes driver");
-    library.Close();
-    TEST_ASSERT(library.GetDriverCount() == 0, "repeated close is safe");
+    rasterizer.Close();
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "close removes driver");
+    rasterizer.Close();
+    TEST_ASSERT(rasterizer.GetDriverCount() == 0, "repeated close is safe");
 }
 
 // ============================================================================

@@ -23,6 +23,7 @@
 #include <vector>
 #include "CKBackendProgram.h"
 #include "CKBackendDrawData.h"
+#include "CKBuiltinShaders.h"
 #include "CKRasterizerBackendTypes.h"   // CKSamplerDesc, CKVertexLayoutDesc, CKShaderDesc, CKReadbackDesc
 
 // Backend-only object types (the contract defines TEXTURE / VERTEXBUFFER /
@@ -32,11 +33,6 @@
 // ---------------------------------------------------------------------------
 // Device
 // ---------------------------------------------------------------------------
-
-struct CKBackendShaderTarget {
-    CK_SHADER_FORMAT Format = CKRST_SHADER_FORMAT_UNKNOWN;
-    CK_SHADER_PROFILE Profile = CKRST_SHADER_PROFILE_UNKNOWN;
-};
 
 struct CKBackendInitDesc {
     WIN_HANDLE Window;
@@ -57,9 +53,9 @@ struct CKBackendInitDesc {
           Fullscreen(FALSE), RefreshRate(0), DebugFlags(0) {}
 };
 
-// What the translation core needs to know about the backend. Format lists and
-// display modes stay on the driver (CKTranslatedDriver reads the backend
-// driver's tables); this is the per-backend, post-Init view.
+// What the fixed-function context needs to know about the backend. Format
+// lists and display modes stay on the concrete rasterizer driver; this is the
+// per-backend, post-Init view.
 struct CKBackendCaps {
     uint64_t Features;             // CKRST_DEVCAPS_* (RENDER_VIEWS / FRAMEBUFFER / TEXTURE_READBACK / BLIT / DEPTH_TEXTURE / TEXTURE_CUBE / ...)
     CKDWORD MaxTextureSize;

@@ -1,55 +1,42 @@
 #ifndef CKBGFXRASTERIZER_H
 #define CKBGFXRASTERIZER_H
 
-#include "CKRasterizerPlugin.h"
 #include "CKBgfxBackend.h"
 
-class CKBgfxBackendDriver;
-class CKBgfxBackendLibrary;
+#include "CKBuiltinShaders.h"
+#include "CKRasterizer.h"
 
-// Immutable FFP artifacts are a rasterizer/plugin facility. The native
-// backend accepts the supplied descriptors without interpreting their role.
+class CKBgfxRasterizerDriver;
+
 CKBOOL CKBgfxRasterizerShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out);
 
-// ===========================================================================
-// CKBgfxBackendLibrary / CKBgfxBackendDriver
-// ===========================================================================
-
-class CKBgfxBackendLibrary : public CKRasterizerBackendLibrary {
+class CKBgfxRasterizer final : public CKRasterizer {
 public:
-    CKBgfxBackendLibrary();
-    ~CKBgfxBackendLibrary() override;
+    ~CKBgfxRasterizer() override;
 
-    CKBOOL Start(WIN_HANDLE AppWnd) override;
+    CKBOOL Start(WIN_HANDLE appWindow) override;
     void Close() override;
-    int GetDriverCount() const override { return m_Drivers.Size(); }
-    CKRasterizerBackendDriver *GetDriver(CKDWORD Index) const override;
-    WIN_HANDLE GetMainWindow() const override { return m_MainWindow; }
-
-private:
-    WIN_HANDLE m_MainWindow;
-    XArray<CKBgfxBackendDriver *> m_Drivers;
 };
 
-// The single bgfx adapter: display modes from SDL, caps from the baseline
-// (spec 4.9.2) lowered to the bgfx limits once a backend is initialised.
-class CKBgfxBackendDriver : public CKRasterizerBackendDriver {
+class CKBgfxRasterizerDriver final : public CKRasterizerDriver {
 public:
-    explicit CKBgfxBackendDriver(CKBgfxBackendLibrary *owner);
-    ~CKBgfxBackendDriver() override;
+    CKBgfxRasterizerDriver(CKBgfxRasterizer *owner, CKDWORD index);
+    ~CKBgfxRasterizerDriver() override;
 
-    CKRasterizerBackend *CreateBackend() override;
-    CKBOOL DestroyBackend(CKRasterizerBackend *Backend) override;
-    void RefreshCaps() override;
-    void GetShaderTargets(std::vector<CKBackendShaderTarget> &out) const override;
-    CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out) const override;
+    CKRasterizerContext *CreateContext() override;
+    CKBOOL DestroyContext(CKRasterizerContext *context) override;
 
-    CKBgfxBackendLibrary *GetOwner() const { return m_Owner; }
+    void GetShaderTargets(std::vector<CKBackendShaderTarget> &targets) const;
+    CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &shaderSet) const;
     int GetBackendCount() const { return m_Backends.Size(); }
 
 private:
-    CKBgfxBackendLibrary *m_Owner;
+    static void OnBackendReady(void *user, CKRasterizerBackend *backend);
+    void BuildShaderLibrary();
+    void RefreshCaps(CKBgfxBackend &backend);
+
+    CKFFShaderLibrary m_Shaders;
     XArray<CKBgfxBackend *> m_Backends;
 };
 
-#endif // CKBGFXRASTERIZER_H
+#endif

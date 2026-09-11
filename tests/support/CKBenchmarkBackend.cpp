@@ -212,12 +212,12 @@ CKERROR CKBenchmarkBackend::Submit(const CKBackendSubmitDesc &desc,
     return CK_OK;
 }
 
-CKRecordingBackend *CKBenchmarkBackendDriver::NewBackend()
+CKRecordingBackend *CKBenchmarkRasterizerDriver::NewBackend()
 {
     return new (std::nothrow) CKBenchmarkBackend(GetBackendConventions());
 }
 
-CKRecordingBackendDriver *CKBenchmarkBackendLibrary::NewDriver()
+CKRecordingRasterizerDriver *CKBenchmarkRasterizer::NewDriver()
 {
-    return new (std::nothrow) CKBenchmarkBackendDriver();
+    return new (std::nothrow) CKBenchmarkRasterizerDriver();
 }

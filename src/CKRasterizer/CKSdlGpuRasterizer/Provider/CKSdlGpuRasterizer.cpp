@@ -1,93 +1,188 @@
 #include "CKSdlGpuBackend.h"
 #include "CKSdlGpuShaders.h"
-#include "CKRasterizerPlugin.h"
-#include "CKTranslatedRasterizer.h"
+
+#include "CKFFRasterizerContext.h"
 #include "CKRasterizerCapsBaseline.h"
-#include <algorithm>
+#include "CKRasterizerDriverCaps.h"
+
+#include <new>
 
 namespace {
-class SdlDriver final : public CKRasterizerBackendDriver {
-    std::vector<CKRasterizerBackend *> Backends;
+
+class SdlDriver final : public CKRasterizerDriver {
 public:
-    SdlDriver() { m_Desc = "SDL_gpu Driver"; InitializeDisplayCaps(); }
-    ~SdlDriver() override { for (auto *backend : Backends) delete backend; }
-    void GetShaderTargets(std::vector<CKBackendShaderTarget> &out) const override {
-        out.clear();
-        const CKBackendShaderTarget targets[] = {
-            {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12},
-            {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV},
+    SdlDriver(CKRasterizer *owner, CKDWORD index)
+    {
+        m_Owner = owner;
+        m_DriverIndex = index;
+        m_Desc = "SDL_gpu Driver";
+        CKRSTInitializeDriverCaps(this);
+        BuildShaderLibrary();
+    }
+
+    ~SdlDriver() override
+    {
+        while (m_Contexts.Size() > 0) {
+            const int index = m_Contexts.Size() - 1;
+            CKRasterizerContext *context = m_Contexts[index];
+            CKSdlGpuBackend *backend = m_Backends[index];
+            context->BeginShutdown();
+            CKFFDeleteRasterizerContext(context);
+            delete backend;
+            m_Contexts.PopBack();
+            m_Backends.PopBack();
+        }
+    }
+
+    CKRasterizerContext *CreateContext() override
+    {
+        if (m_Shaders.Empty())
+            return NULL;
+
+        CKSdlGpuBackend *backend = new (std::nothrow) CKSdlGpuBackend();
+        if (!backend)
+            return NULL;
+
+        CKFFRasterizerContextDesc desc;
+        desc.Driver = this;
+        desc.Backend = backend;
+        desc.Shaders = &m_Shaders;
+        desc.BackendReady = OnBackendReady;
+        desc.BackendReadyUser = this;
+
+        CKRasterizerContext *context = CKFFCreateRasterizerContext(desc);
+        if (!context) {
+            delete backend;
+            return NULL;
+        }
+
+        m_Backends.PushBack(backend);
+        m_Contexts.PushBack(context);
+        return context;
+    }
+
+    CKBOOL DestroyContext(CKRasterizerContext *context) override
+    {
+        if (!context)
+            return FALSE;
+
+        for (int index = 0; index < m_Contexts.Size(); ++index) {
+            if (m_Contexts[index] != context)
+                continue;
+
+            CKSdlGpuBackend *backend = m_Backends[index];
+            if (!context->BeginShutdown() || !backend->IsIdle())
+                return FALSE;
+
+            CKFFDeleteRasterizerContext(context);
+            delete backend;
+            m_Contexts.RemoveAt(index);
+            m_Backends.RemoveAt(index);
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+private:
+    static void OnBackendReady(void *user, CKRasterizerBackend *backend)
+    {
+        SdlDriver *driver = static_cast<SdlDriver *>(user);
+        if (driver && backend)
+            driver->RefreshCaps(*static_cast<CKSdlGpuBackend *>(backend));
+    }
+
+    void BuildShaderLibrary()
+    {
+        const SDL_GPUShaderFormat formats[] = {
+            SDL_GPU_SHADERFORMAT_DXIL,
+            SDL_GPU_SHADERFORMAT_SPIRV,
         };
-        for (const auto &target : targets) {
-            CKBackendCaps caps;
-            caps.ShaderFormat = target.Format;
-            caps.ShaderProfile = target.Profile;
-            CKBackendShaderSet shaders;
-            if (GetShaderSet(caps, shaders))
-                out.push_back(target);
+        for (size_t index = 0; index < sizeof(formats) / sizeof(formats[0]); ++index) {
+            CKBackendShaderSet shaderSet;
+            if (CKSdlGpuShaderSet(formats[index], shaderSet))
+                m_Shaders.Add(shaderSet);
         }
     }
-    CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out) const override {
-        out = CKBackendShaderSet();
-        const SDL_GPUShaderFormat format = caps.ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
-            SDL_GPU_SHADERFORMAT_DXIL : caps.ShaderFormat == CKRST_SHADER_FORMAT_SPIRV ?
-            SDL_GPU_SHADERFORMAT_SPIRV : 0;
-        return format && CKSdlGpuShaderSet(format, out) &&
-            out.Matches(caps.ShaderFormat, caps.ShaderProfile) ? TRUE : FALSE;
-    }
-    CKRasterizerBackend *CreateBackend() override {
-        auto *backend = new CKSdlGpuBackend;
-        Backends.push_back(backend);
-        return backend;
-    }
-    void RefreshCaps() override {
-        for (auto *entry : Backends) {
-            auto *backend = static_cast<CKSdlGpuBackend *>(entry);
-            if (backend->GetDeviceStatus() != CK_OK) continue;
-            const auto &caps = backend->GetCaps();
-            Vx3DCapsDesc limits = {};
-            limits.MaxTextureWidth = limits.MaxTextureHeight = limits.MaxTextureRatio = caps.MaxTextureSize;
-            limits.MaxNumberTextureStage = limits.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
-            CKRSTLowerCapsToLimits(&m_3DCaps, &limits);
-            m_TextureFormats.Clear();
-            for (int value = _32_ARGB8888; value <= _32_X8L8V8U8; ++value) {
-                const auto format = static_cast<VX_PIXELFORMAT>(value);
-                if (!backend->SupportsTexture2D(format)) continue;
-                CKTextureDesc desc;
-                VxPixelFormat2ImageDesc(format, desc.Format);
-                desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
-                if (desc.Format.AlphaMask || format == _DXT1 || format == _DXT3 || format == _DXT5)
-                    desc.Flags |= CKRST_TEXTURE_ALPHA;
-                m_TextureFormats.PushBack(desc);
-            }
-            m_CapsUpToDate = TRUE;
-            break;
+
+    void RefreshCaps(CKSdlGpuBackend &backend)
+    {
+        if (backend.GetDeviceStatus() != CK_OK)
+            return;
+
+        const CKBackendCaps &caps = backend.GetCaps();
+        Vx3DCapsDesc limits = {};
+        limits.MaxTextureWidth = caps.MaxTextureSize;
+        limits.MaxTextureHeight = caps.MaxTextureSize;
+        limits.MaxTextureRatio = caps.MaxTextureSize;
+        limits.MaxNumberTextureStage = CKRST_MAX_TEXTURE_STAGES;
+        limits.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
+        CKRSTLowerCapsToLimits(&m_3DCaps, &limits);
+
+        m_TextureFormats.Clear();
+        for (int value = _32_ARGB8888; value <= _32_X8L8V8U8; ++value) {
+            const VX_PIXELFORMAT format = static_cast<VX_PIXELFORMAT>(value);
+            if (!backend.SupportsTexture2D(format))
+                continue;
+
+            CKTextureDesc desc;
+            VxPixelFormat2ImageDesc(format, desc.Format);
+            desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
+            if (desc.Format.AlphaMask || format == _DXT1 || format == _DXT3 || format == _DXT5)
+                desc.Flags |= CKRST_TEXTURE_ALPHA;
+            m_TextureFormats.PushBack(desc);
         }
+        m_CapsUpToDate = TRUE;
     }
-    CKBOOL DestroyBackend(CKRasterizerBackend *backend) override {
-        const auto found = std::find(Backends.begin(), Backends.end(), backend);
-        if (found == Backends.end() || !backend->IsIdle()) return FALSE;
-        delete backend; Backends.erase(found);
+
+    CKFFShaderLibrary m_Shaders;
+    XArray<CKSdlGpuBackend *> m_Backends;
+};
+
+class SdlRasterizer final : public CKRasterizer {
+public:
+    ~SdlRasterizer() override
+    {
+        Close();
+    }
+
+    CKBOOL Start(WIN_HANDLE window) override
+    {
+        if (m_Drivers.Size() > 0)
+            return TRUE;
+
+        m_MainWindow = window;
+        SdlDriver *driver = new (std::nothrow) SdlDriver(this, 0);
+        if (!driver)
+            return FALSE;
+        m_Drivers.PushBack(driver);
         return TRUE;
     }
+
+    void Close() override
+    {
+        for (int index = 0; index < m_Drivers.Size(); ++index)
+            delete m_Drivers[index];
+        m_Drivers.Clear();
+    }
 };
-class SdlLibrary final : public CKRasterizerBackendLibrary {
-    std::unique_ptr<SdlDriver> Driver;
-    WIN_HANDLE Window = nullptr;
-public:
-    CKBOOL Start(WIN_HANDLE window) override { Window = window; Driver.reset(new SdlDriver); return TRUE; }
-    void Close() override { Driver.reset(); }
-    int GetDriverCount() const override { return Driver ? 1 : 0; }
-    CKRasterizerBackendDriver *GetDriver(CKDWORD index) const override { return index == 0 ? Driver.get() : nullptr; }
-    WIN_HANDLE GetMainWindow() const override { return Window; }
-};
-void CloseLibrary(CKRasterizerBackendLibrary *library) { delete library; }
+
 CKRasterizer *StartRasterizer(WIN_HANDLE window)
 {
-    auto *library = new SdlLibrary;
-    if (!library->Start(window)) { delete library; return nullptr; }
-    return CKTranslatedRasterizerStart(library, CloseLibrary);
+    SdlRasterizer *rasterizer = new (std::nothrow) SdlRasterizer();
+    if (!rasterizer)
+        return NULL;
+    if (!rasterizer->Start(window)) {
+        delete rasterizer;
+        return NULL;
+    }
+    return rasterizer;
 }
+void CloseRasterizer(CKRasterizer *rasterizer)
+{
+    delete rasterizer;
 }
+
+} // namespace
 
 #ifdef CK_LIB
 void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info)
@@ -99,9 +194,11 @@ extern "C" __attribute__((visibility("default"))) void CKRasterizerGetInfo(CKRas
 #endif
 #endif
 {
-    if (!info) return;
+    if (!info)
+        return;
+
     info->Desc = "SDL_gpu Rasterizer";
     info->StartFct = StartRasterizer;
-    info->CloseFct = CKTranslatedRasterizerClose;
+    info->CloseFct = CloseRasterizer;
     info->InterfaceRevision = CKRST_INTERFACE_REVISION;
 }

@@ -7,6 +7,7 @@
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
 #include "CKDebugLogger.h"
+#include <new>
 #include <stdio.h>
 
 #include <string.h>
@@ -71,15 +72,17 @@ struct TextureCopyScratch {
 // Construction / lifecycle
 // ===========================================================================
 
-CKTranslatedContext::CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerBackend *Backend)
-    : m_TranslatedDriver(Driver), m_Backend(Backend), m_Created(FALSE), m_ShuttingDown(FALSE),
+CKTranslatedContext::CKTranslatedContext(const CKFFRasterizerContextDesc &Desc)
+    : m_ShaderLibrary(*Desc.Shaders), m_BackendReady(Desc.BackendReady),
+      m_BackendReadyUser(Desc.BackendReadyUser), m_Backend(Desc.Backend),
+      m_Created(FALSE), m_ShuttingDown(FALSE),
       m_FrameNumber(0), m_LastDeviceFrame(0), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS),
       m_TargetWidth(0), m_TargetHeight(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
       m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0), m_LayoutMismatchLogged(FALSE)
 {
-    m_Driver = Driver;
+    m_Driver = Desc.Driver;
     memset(&m_Stats, 0, sizeof(m_Stats));
 }
 
@@ -95,7 +98,7 @@ CKTranslatedContext::~CKTranslatedContext()
 CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
                                    CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp)
 {
-    if (m_Created || !m_Backend || !m_TranslatedDriver)
+    if (m_Created || !m_Backend || !m_Driver || m_ShaderLibrary.Empty())
         return FALSE;
     CKBackendInitDesc init;
     init.Window = Window;
@@ -109,10 +112,7 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     init.Fullscreen = Fullscreen;
     init.RefreshRate = RefreshRate;
     init.DebugFlags = m_Options.DebugFlags;
-    CKRasterizerBackendDriver *provider = m_TranslatedDriver->GetBackendDriver();
-    if (!provider)
-        return FALSE;
-    provider->GetShaderTargets(init.ShaderTargets);
+    m_ShaderLibrary.GetTargets(init.ShaderTargets);
     if (m_Backend->Init(&init) != CK_OK)
         return FALSE;
 
@@ -128,13 +128,15 @@ CKBOOL CKTranslatedContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Wi
     m_RefreshRate = (CKDWORD)RefreshRate;
 
     CKBackendShaderSet shaders;
-    if (!provider->GetShaderSet(m_Backend->GetCaps(), shaders) || !m_FFP.Init(m_Backend, shaders)) {
+    const CKBackendCaps &backendCaps = m_Backend->GetCaps();
+    if (!m_ShaderLibrary.Find(backendCaps.ShaderFormat, backendCaps.ShaderProfile, shaders) ||
+        !m_FFP.Init(m_Backend, shaders)) {
         m_Backend->Shutdown();
         return FALSE;
     }
     m_Present.Init(m_Backend, shaders);
-    if (m_TranslatedDriver)
-        m_TranslatedDriver->SyncCapsFromBackend();
+    if (m_BackendReady)
+        m_BackendReady(m_BackendReadyUser, m_Backend);
 
     m_Created = TRUE;
     m_ShuttingDown = FALSE;
@@ -1569,4 +1571,16 @@ const CKRenderStats *CKTranslatedContext::GetStats()
     m_Stats.Width = m_Width;
     m_Stats.Height = m_Height;
     return &m_Stats;
+}
+
+CKRasterizerContext *CKFFCreateRasterizerContext(const CKFFRasterizerContextDesc &desc)
+{
+    if (!desc.Driver || !desc.Backend || !desc.Shaders || desc.Shaders->Empty())
+        return NULL;
+    return new (std::nothrow) CKTranslatedContext(desc);
+}
+
+void CKFFDeleteRasterizerContext(CKRasterizerContext *context)
+{
+    delete static_cast<CKTranslatedContext *>(context);
 }

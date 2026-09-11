@@ -20,7 +20,7 @@ namespace {
 
 struct Fixture {
     CKRasterizer *Rasterizer;
-    CKTranslatedDriver *Driver;
+    FFPRecordingDriver *Driver;
     CKTranslatedContext *Context;
     FFPRecordingBackend *Backend;
 

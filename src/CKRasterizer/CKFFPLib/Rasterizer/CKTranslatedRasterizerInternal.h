@@ -1,24 +1,18 @@
 #ifndef CKTRANSLATEDRASTERIZERINTERNAL_H
 #define CKTRANSLATEDRASTERIZERINTERNAL_H
 
-// Fixed-function implementation of the public CKRasterizer contract.
-//
-// A CKTranslatedRasterizer composes a plugin's device factory and shader
-// catalog and exposes them through the fixed-function contract. Texture-stage
+// Reusable fixed-function CKRasterizerContext implementation. Texture-stage
 // values, bindings and transforms live in the FFP state. Draws go through
-// CKFixedFunctionPipeline onto the CKRasterizerBackend; the frame
-// flow selects logical targets; the backend owns native pass boundaries.
+// CKFixedFunctionPipeline onto CKRasterizerBackend; frame flow selects logical
+// targets, and the backend owns native pass boundaries.
 
-#include "CKTranslatedRasterizer.h"
-#include "CKRasterizerPlugin.h"
+#include "CKFFRasterizerContext.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKPresentStage.h"
 
 #include <unordered_map>
 #include <vector>
 
-class CKTranslatedRasterizer;
-class CKTranslatedDriver;
 class CKTranslatedContext;
 
 enum CKTranslatedFramePhase {
@@ -68,55 +62,12 @@ struct CKTranslatedFrameState {
 };
 
 // ===========================================================================
-// CKTranslatedRasterizer
-// ===========================================================================
-
-class CKTranslatedRasterizer : public CKRasterizer {
-public:
-    // Takes ownership of `Library`. `CloseLibrary` (may be NULL) is called
-    // with the library when the rasterizer is destroyed; NULL means `delete`.
-    CKTranslatedRasterizer(CKRasterizerBackendLibrary *Library, CKTranslatedLibraryCloseFunction CloseLibrary);
-    ~CKTranslatedRasterizer() override;
-
-    CKBOOL Start(WIN_HANDLE AppWnd) override;
-    void Close() override;
-
-    CKRasterizerBackendLibrary *GetLibrary() const { return m_Library; }
-
-private:
-    CKRasterizerBackendLibrary *m_Library;
-    CKTranslatedLibraryCloseFunction m_CloseLibrary;
-};
-
-// ===========================================================================
-// CKTranslatedDriver
-// ===========================================================================
-
-class CKTranslatedDriver : public CKRasterizerDriver {
-public:
-    CKTranslatedDriver(CKTranslatedRasterizer *Owner, CKRasterizerBackendDriver *Backend, CKDWORD Index);
-    ~CKTranslatedDriver() override;
-
-    CKRasterizerContext *CreateContext() override;
-    CKBOOL DestroyContext(CKRasterizerContext *Context) override;
-
-    CKRasterizerBackendDriver *GetBackendDriver() const { return m_Backend; }
-    // Copies caps, display modes and texture formats from the backend driver.
-    // Backends refine their caps when a backend is created, so the context
-    // calls this again after Create().
-    void SyncCapsFromBackend();
-
-private:
-    CKRasterizerBackendDriver *m_Backend;
-};
-
-// ===========================================================================
 // CKTranslatedContext
 // ===========================================================================
 
 class CKTranslatedContext : public CKRasterizerContext {
 public:
-    CKTranslatedContext(CKTranslatedDriver *Driver, CKRasterizerBackend *Backend);
+    explicit CKTranslatedContext(const CKFFRasterizerContextDesc &Desc);
     ~CKTranslatedContext() override;
 
     // --- Lifecycle ---
@@ -317,8 +268,10 @@ private:
     CKBOOL CompleteReadback(PendingReadback &Readback, CKBOOL Wait);
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
 
-    CKTranslatedDriver *m_TranslatedDriver;
-    CKRasterizerBackend *m_Backend;    // owned by the backend driver
+    CKFFShaderLibrary m_ShaderLibrary;
+    CKFFBackendReadyFunction m_BackendReady;
+    void *m_BackendReadyUser;
+    CKRasterizerBackend *m_Backend;    // owned by the concrete rasterizer driver
     CKFixedFunctionPipeline m_FFP;
     CKPresentStage m_Present;
     CKRasterizerOptions m_Options;

@@ -1,5 +1,5 @@
-# Fixed-function translation and the provider-neutral modern graphics API
-# compatibility module used by SDL_gpu and bgfx rasterizers.
+# Reusable fixed-function implementation and modern graphics backend Interface
+# used by SDL_gpu and bgfx rasterizers.
 set(CKFFP_LIB_SOURCES
     Backend/CKBackendProgram.cpp
     Backend/CKBackendProgramLayout.cpp
@@ -22,12 +22,9 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFixedFunctionPipeline.cpp
     FixedFunction/CKTransientGeometry.cpp
     FixedFunction/CKVertexLayoutCache.cpp
-    Rasterizer/CKBackendDisplayCaps.cpp
     Rasterizer/CKPresentStage.cpp
-    Rasterizer/CKRasterizerPlugin.cpp
     Rasterizer/CKTranslatedContext.cpp
     Rasterizer/CKTranslatedFrame.cpp
-    Rasterizer/CKTranslatedRasterizer.cpp
 )
 
 set(CKFFP_LIB_HEADERS
@@ -36,13 +33,12 @@ set(CKFFP_LIB_HEADERS
     Interface/CKBackendProgramLayout.h
     Interface/CKBuiltinShaderIdentity.h
     Interface/CKBuiltinShaders.h
+    Interface/CKFFRasterizerContext.h
     Interface/CKFFNativeLayout.def
     Interface/CKRasterizerBackend.h
     Interface/CKRasterizerBackendEnums.h
     Interface/CKRasterizerBackendTypes.h
-    Interface/CKRasterizerPlugin.h
     Interface/CKRasterizerValidation.h
-    Interface/CKTranslatedRasterizer.h
     FixedFunction/CKDrawStateCache.h
     FixedFunction/CKFFConstants.h
     FixedFunction/CKFFDebug.h
@@ -82,7 +78,6 @@ target_include_directories(CKFFPLib
 )
 target_link_libraries(CKFFPLib
     PUBLIC CKRasterizerLib
-    PRIVATE SDL3::SDL3
 )
 set_target_properties(CKFFPLib PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
