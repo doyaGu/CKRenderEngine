@@ -170,6 +170,33 @@ set_target_properties(ffp_pipeline_benchmark PROPERTIES
     FOLDER "Benchmarks"
     INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
 )
+
+# A real SDL_gpu Release-path benchmark. It is intentionally absent from
+# CTest, install and stage: it opens a visible window and writes results only
+# to stdout when invoked explicitly.
+if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
+    add_executable(sdl_gpu_pipeline_benchmark
+        rasterizers/benchmark_sdl_gpu_pipeline.cpp)
+    target_include_directories(sdl_gpu_pipeline_benchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/Context
+    )
+    target_link_libraries(sdl_gpu_pipeline_benchmark PRIVATE
+        CKFFPLib CKSdlGpuRasterizerStatic SDL3::SDL3)
+    target_compile_definitions(sdl_gpu_pipeline_benchmark PRIVATE
+        CKRE_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>)
+    set_target_properties(sdl_gpu_pipeline_benchmark PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        FOLDER "Benchmarks"
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    ckre_copy_runtime_dependencies(sdl_gpu_pipeline_benchmark)
+endif ()
+
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
 # shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
 # environment gates as rasterizer3_pixel_tests. Skips when no golden frames

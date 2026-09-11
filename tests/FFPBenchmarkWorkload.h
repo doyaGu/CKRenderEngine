@@ -205,6 +205,25 @@ public:
     }
 
     template <typename Observer = NoopObserver>
+    bool RunCoreTransientMaterialFrame(CKFixedFunctionPipeline &pipeline,
+                                       bool general,
+                                       const std::array<CKDWORD, 4> &textures,
+                                       Observer observer = Observer()) const
+    {
+        VxDrawPrimitiveData data = PrimitiveData(general);
+        for (CKDWORD draw = 0; draw < DrawsPerFrame; ++draw) {
+            ApplyCoreProfile(pipeline, textures, draw);
+            pipeline.SetTransform(VXMATRIX_WORLD, Worlds[draw]);
+            if (!pipeline.DrawPrimitive(
+                    VX_TRIANGLELIST, const_cast<CKWORD *>(Indices.data()),
+                    static_cast<int>(IndicesPerDraw), &data))
+                return false;
+            observer(draw);
+        }
+        return true;
+    }
+
+    template <typename Observer = NoopObserver>
     bool RunTranslatedVertexBufferFrame(CKRasterizerContext &context,
                                         const PublicResources &resources,
                                         Observer observer = Observer()) const

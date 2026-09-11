@@ -4,6 +4,7 @@
 #include "CKRasterizerBackend.h"
 
 struct CKSdlGpuDevice;
+struct CKSdlGpuBenchmarkAccess;
 
 class CKSdlGpuBackend final : public CKRasterizerBackend {
 public:
@@ -43,6 +44,7 @@ public:
     uint64_t GetDrawApproximationMask() const override;
     const CKBackendStats &GetStats() const override;
 private:
+    friend struct CKSdlGpuBenchmarkAccess;
     std::unique_ptr<CKSdlGpuDevice> m;
 };
 
