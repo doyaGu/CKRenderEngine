@@ -83,6 +83,13 @@ static const CKRECT *VxRectToRegion(const VxRect *rect, CKRECT &region) {
     return &region;
 }
 
+static void Update2dRootRect(CK2dEntity *entity, const VxRect &rect) {
+    VxRect current;
+    entity->GetRect(current);
+    if (current != rect)
+        entity->SetRect(rect);
+}
+
 CK_CLASSID RCKRenderContext::GetClassID() {
     return m_ClassID;
 }
@@ -3189,8 +3196,8 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     const float bottom = (float) m_Settings.m_Rect.bottom;
     VxRect rect(0.0f, 0.0f, right, bottom);
 
-    ((RCK2dEntity *) Get2dRoot(TRUE))->SetRect(rect);
-    ((RCK2dEntity *) Get2dRoot(FALSE))->SetRect(rect);
+    Update2dRootRect(Get2dRoot(TRUE), rect);
+    Update2dRootRect(Get2dRoot(FALSE), rect);
 }
 
 void RCKRenderContext::FlushSprite3DBatchesIfNeeded() {
