@@ -1067,9 +1067,12 @@ CKBOOL CKFixedFunctionPipeline::SubmitPrepared(const CKFFDrawSubmission &submiss
         if (m_Backend->Draw(&draw) != CK_OK)
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
         const uint64_t backendApproximations = m_Backend->GetDrawApproximationMask();
-        for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i)
-            if (backendApproximations & (1ull << i))
-                RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
+        if (backendApproximations != 0) {
+            for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i) {
+                if ((backendApproximations & (1ull << i)) != 0)
+                    RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
+            }
+        }
         if (submission.Source == CKFF_SUBMIT_PRIMITIVE) {
             CK_FRAME_COST_ADD_PRIMITIVE_SUBMIT();
         } else {

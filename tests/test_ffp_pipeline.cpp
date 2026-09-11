@@ -2201,6 +2201,36 @@ void DrawValidationCacheInvalidatesOnStateChanges() {
     ffp.Shutdown();
 }
 
+class ApproximationReportingBackend : public FFPRecordingBackend {
+public:
+    explicit ApproximationReportingBackend(CKRecordingRasterizerDriver *driver)
+        : FFPRecordingBackend(driver) {}
+
+    uint64_t GetDrawApproximationMask() const override {
+        return 1ull << CKRST_DIAG_APPROX_BORDER_COLOR;
+    }
+};
+
+void BackendDrawApproximationMaskIsPreserved() {
+    FFPRecordingDriver driver;
+    ApproximationReportingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    const CKBOOL drawn = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(drawn && context.Log.DrawCount == 1 &&
+                  ffp.GetLastDrawApproximationMask() ==
+                      (1ull << CKRST_DIAG_APPROX_BORDER_COLOR) &&
+                  ffp.GetApproximatedDrawCount(
+                      CKRST_DIAG_APPROX_BORDER_COLOR) == 1,
+              "nonzero backend draw diagnostics survive the zero-mask fast path");
+
+    ffp.Shutdown();
+}
+
 void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
@@ -3448,6 +3478,8 @@ int main() {
               &InvalidStateValuesRejectBeforeBackendEncoding);
     tests.Run("Draw validation cache invalidates on state changes",
               &DrawValidationCacheInvalidatesOnStateChanges);
+    tests.Run("Backend draw approximation mask is preserved",
+              &BackendDrawApproximationMaskIsPreserved);
     tests.Run("Unsupported texture-stage states approximate with diagnostics",
               &UnsupportedTextureStageStatesApproximateWithDiagnostics);
     tests.Run("Single cube-volume layout uses generic mixed sampler module",
