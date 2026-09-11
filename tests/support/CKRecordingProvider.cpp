@@ -187,7 +187,7 @@ CKBOOL CKRecordingShaderSet(const CKBackendCaps &Caps, CKBackendShaderSet &Out)
             ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
         if (Caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX) {
             shader.UniformBufferCount = i == CKRST_SHADER_PRESENT_VERTEX ? 0 : 1;
-            shader.SamplerCount = i == CKRST_SHADER_FF_FRAGMENT ? CKFF_SAMPLER_SLOT_COUNT :
+            shader.SamplerCount = i == CKRST_SHADER_FF_FRAGMENT ? CKFF_SHADER_SAMPLER_SLOT_COUNT :
                 i == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0;
         }
     }

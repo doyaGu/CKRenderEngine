@@ -69,6 +69,7 @@ def source_body(path: Path) -> str:
 
 def native_layout_schema():
     fixed_function = SHARED.parent / "FixedFunction"
+    interface = SHARED.parent / "Interface"
     enum = (fixed_function / "CKFFShaderInterface.h").read_text(encoding="utf-8").split("enum CKFFConstantBlock {")[1].split("};")[0]
     names = re.findall(r"CKRST_BLOCK_(\w+)", enum)
     assert names.pop() == "COUNT" and len(names) == len(BLOCKS)
@@ -76,7 +77,7 @@ def native_layout_schema():
     groups = {name: [] for name in ("VERTEX", "FRAGMENT", "PRESENT")}
     metadata_groups = set()
     canonical = ""
-    for line in (fixed_function / "CKFFNativeLayout.def").read_text(encoding="utf-8").splitlines():
+    for line in (interface / "CKFFNativeLayout.def").read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.lstrip().startswith("//"):
             continue
         match = re.fullmatch(r"CKFF_NATIVE_(BLOCK|METADATA)\((\w+), (\w+)\)", line)
@@ -266,10 +267,10 @@ def main() -> None:
     parser.add_argument("--dxc", default=shutil.which("dxc"))
     parser.add_argument("--spirv-cross", default=shutil.which("spirv-cross"))
     args = parser.parse_args()
-    abi_text = (SHARED.parent / "FixedFunction" / "CKFFShaderABI.h").read_text(encoding="utf-8")
+    abi_text = (SHARED.parent / "Interface" / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
     abi = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", abi_text)[1])
     abi_hash = int(re.search(r"CKFF_SHADER_INTERFACE_HASH = (0x[0-9a-fA-F]+)", abi_text)[1], 16)
-    # Hash exactly the ordered schema consumed by C++ in CKFFShaderABI.h.
+    # Hash exactly the ordered schema consumed by the provider-facing identity.
     for byte in native_layout_schema()[1].encode("ascii"):
         abi_hash = ((abi_hash ^ byte) * 16777619) & 0xffffffff
     if args.verify:

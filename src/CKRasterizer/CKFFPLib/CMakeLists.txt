@@ -1,5 +1,5 @@
 # Fixed-function translation and the provider-neutral modern graphics API
-# compatibility layer used by SDL_gpu and bgfx rasterizers.
+# compatibility module used by SDL_gpu and bgfx rasterizers.
 set(CKFFP_LIB_SOURCES
     Backend/CKBackendProgram.cpp
     Backend/CKBackendProgramLayout.cpp
@@ -31,20 +31,23 @@ set(CKFFP_LIB_SOURCES
 )
 
 set(CKFFP_LIB_HEADERS
-    Backend/CKBackendDrawData.h
-    Backend/CKBackendProgram.h
-    Backend/CKBackendProgramLayout.h
-    Backend/CKRasterizerBackend.h
-    Backend/CKRasterizerBackendEnums.h
-    Backend/CKRasterizerBackendTypes.h
-    Backend/CKRasterizerValidation.h
-    FixedFunction/CKBuiltinShaders.h
+    Interface/CKBackendDrawData.h
+    Interface/CKBackendProgram.h
+    Interface/CKBackendProgramLayout.h
+    Interface/CKBuiltinShaderIdentity.h
+    Interface/CKBuiltinShaders.h
+    Interface/CKFFNativeLayout.def
+    Interface/CKRasterizerBackend.h
+    Interface/CKRasterizerBackendEnums.h
+    Interface/CKRasterizerBackendTypes.h
+    Interface/CKRasterizerPlugin.h
+    Interface/CKRasterizerValidation.h
+    Interface/CKTranslatedRasterizer.h
     FixedFunction/CKDrawStateCache.h
     FixedFunction/CKFFConstants.h
     FixedFunction/CKFFDebug.h
     FixedFunction/CKFFDrawProbes.h
     FixedFunction/CKFFDrawTypes.h
-    FixedFunction/CKFFNativeLayout.def
     FixedFunction/CKFFShaderABI.h
     FixedFunction/CKFFShaderCache.h
     FixedFunction/CKFFShaderInterface.h
@@ -63,19 +66,19 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKTransientGeometry.h
     FixedFunction/CKVertexLayoutCache.h
     Translation/CKPresentStage.h
-    Translation/CKRasterizerPlugin.h
-    Translation/CKTranslatedRasterizer.h
     Translation/CKTranslatedRasterizerInternal.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
 target_compile_features(CKFFPLib PRIVATE cxx_std_20)
 ckre_apply_diagnostic_definitions(CKFFPLib PRIVATE)
-target_include_directories(CKFFPLib PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Backend>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Translation>
+target_include_directories(CKFFPLib
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction
+        ${CMAKE_CURRENT_SOURCE_DIR}/Translation
 )
 target_link_libraries(CKFFPLib
     PUBLIC CKRasterizerLib

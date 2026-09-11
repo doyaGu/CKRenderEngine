@@ -73,6 +73,20 @@ def expand(values, variables):
     return expanded
 
 
+def target_public_include_paths(cmake_text, target):
+    paths = []
+    for command, values, line in commands(cmake_text):
+        if command != "target_include_directories" or not values or values[0] != target:
+            continue
+        visibility = None
+        for value in values[1:]:
+            if value in {"PUBLIC", "PRIVATE", "INTERFACE"}:
+                visibility = value
+            elif visibility in {"PUBLIC", "INTERFACE"}:
+                paths.append((value.replace('\\', '/'), line))
+    return paths
+
+
 def cmake_model(root):
     sources, edges, declarations = defaultdict(set), defaultdict(set), set()
     inherited = {}
@@ -140,6 +154,32 @@ def check(root):
     for token in sorted(PROVIDER_BUILD_TOKENS):
         if token in ffp_cmake:
             errors.append(f"CMake: CKFFPLib references provider build input {token}")
+
+    ffp_public_includes = target_public_include_paths(ffp_cmake, "CKFFPLib")
+    if not ffp_public_includes:
+        errors.append("CMake: CKFFPLib has no provider-facing include seam")
+    for include, line in ffp_public_includes:
+        if not re.search(r'/Interface(?:>|$)', include):
+            errors.append(
+                f"src/CKRasterizer/CKFFPLib/CMakeLists.txt:{line}: "
+                f"CKFFPLib exposes non-interface include path {include}"
+            )
+
+    for provider in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
+        provider_cmake_path = module_roots[provider] / "CMakeLists.txt"
+        provider_cmake = provider_cmake_path.read_text(encoding="utf-8-sig")
+        for command, values, line in commands(provider_cmake):
+            if command != "target_include_directories":
+                continue
+            if values and (values[0].startswith("test_") or values[0] == "${_test}"):
+                continue
+            for value in values[1:]:
+                normalized = value.replace('\\', '/')
+                if re.search(r'CKFFPLib/(?:Backend|FixedFunction|Translation)(?:/|$)', normalized):
+                    errors.append(
+                        f"{provider_cmake_path.relative_to(root)}:{line}: "
+                        f"{provider} exposes CKFFPLib implementation include path {value}"
+                    )
 
     for module, targets in MODULE_TARGETS.items():
         for target in targets:
@@ -218,6 +258,7 @@ def check(root):
     source_files.extend((path.resolve(), "CKRasterizerLib") for path in public_root.glob("CKRasterizer*.h"))
 
     seen = set()
+    ffp_interface_root = module_roots["CKFFPLib"] / "Interface"
     for source, owner in source_files:
         checked_files += 1
         text = source.read_text(encoding="utf-8-sig", errors="replace")
@@ -226,6 +267,21 @@ def check(root):
             if not resolved:
                 continue
             imported = module_for(resolved, module_roots, public_root)
+            if imported == "CKFFPLib":
+                provider = owner in {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
+                interface_header = resolved.is_relative_to(ffp_interface_root)
+                if provider and not interface_header:
+                    line = text.count('\n', 0, match.start()) + 1
+                    errors.append(
+                        f"{source.relative_to(root)}:{line}: {owner} imports private "
+                        f"CKFFPLib header {match.group(1)}"
+                    )
+                if source.is_relative_to(ffp_interface_root) and not interface_header:
+                    line = text.count('\n', 0, match.start()) + 1
+                    errors.append(
+                        f"{source.relative_to(root)}:{line}: provider-facing Interface imports "
+                        f"private CKFFPLib header {match.group(1)}"
+                    )
             if imported and imported not in allowed_imports[owner]:
                 line = text.count('\n', 0, match.start()) + 1
                 key = (source, line, imported)

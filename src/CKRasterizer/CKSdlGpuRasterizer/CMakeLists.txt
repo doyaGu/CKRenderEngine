@@ -27,7 +27,6 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
         ${CMAKE_CURRENT_SOURCE_DIR}/Provider
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
     )
     target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib SDL3::SDL3)
     set_target_properties(${TARGET_NAME} PROPERTIES
@@ -78,7 +77,8 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/Backend
             ${CMAKE_CURRENT_SOURCE_DIR}/Provider
-            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib
+            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
+            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/Translation
         )
         target_link_libraries(${_test} PRIVATE CKFFPLib SDL3::SDL3)
         if (TARGET CKSdlGpuRasterizerStatic)

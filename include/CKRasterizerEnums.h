@@ -9,7 +9,7 @@
 // API happens inside the rasterizer implementation.
 //
 // The backend interface of the translation core
-// (src/CKRasterizer/CKFFPLib/Backend/CKRasterizerBackend.h) includes this
+// (src/CKRasterizer/CKFFPLib/Interface/CKRasterizerBackend.h) includes this
 // header for the enumerations shared by both interfaces.
 
 #include <stdint.h>

@@ -1,6 +1,7 @@
 #ifndef CKFFSHADERABI_H
 #define CKFFSHADERABI_H
 
+#include "CKBuiltinShaderIdentity.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderKey.h"
 #include "CKFFSpecializationInfo.h"
@@ -8,30 +9,6 @@
 // Internal fixed-function shader ABI. These values define the logical C++
 // data consumed by the shared shader calculations. CKFFShaderInterface maps
 // it to named uniforms or native stage buffers for each artifact family.
-
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 5u;
-static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;
-
-// Logical/named uniforms keep their existing ABI. Native artifacts additionally
-// identify the ordered stage layout; changing it cannot accept an old payload.
-constexpr CKDWORD CKFFNativeInterfaceHash() {
-    const char *layout =
-#define CKFF_NATIVE_BLOCK(Stage, Block) "block:" #Stage ":" #Block ";"
-#define CKFF_NATIVE_METADATA(Stage, Count) "metadata:" #Stage ":" #Count ";"
-#include "CKFFNativeLayout.def"
-#undef CKFF_NATIVE_BLOCK
-#undef CKFF_NATIVE_METADATA
-    ;
-    CKDWORD hash = CKFF_SHADER_INTERFACE_HASH;
-    while (*layout) hash = (hash ^ static_cast<CKBYTE>(*layout++)) * 16777619u;
-    return hash;
-}
-
-static constexpr CKDWORD CKFF_SHADER_NATIVE_INTERFACE_HASH = CKFFNativeInterfaceHash();
-
-inline CKDWORD CKFFShaderInterfaceHash(CK_SHADER_FORMAT format) {
-    return format == CKRST_SHADER_FORMAT_BGFX ? CKFF_SHADER_INTERFACE_HASH : CKFF_SHADER_NATIVE_INTERFACE_HASH;
-}
 
 // VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
 // depth of the draw towards the viewer by this fraction of the depth range
@@ -118,6 +95,7 @@ static_assert(CKFF_SPEC_UNIFORM_VEC4_COUNT == 5, "ABI break: specialization vec4
 static_assert(CKFF_MATRIX_VEC4_COUNT == 8, "ABI break: matrix vec4 count changed");
 static_assert(CKFF_CLIP_PLANE_COUNT == 6, "ABI break: clip plane count changed");
 static_assert(CKFF_DRAW_PARAM_INLINE_LIGHT_BASE == 12, "ABI break: inline light base changed");
-static_assert(CKFF_SAMPLER_SLOT_COUNT == 16, "ABI break: fixed sampler layout must stay within 16 slots");
+static_assert(CKFF_SAMPLER_SLOT_COUNT == CKFF_SHADER_SAMPLER_SLOT_COUNT,
+              "ABI break: fixed sampler layout changed");
 
 #endif // CKFFSHADERABI_H

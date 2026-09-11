@@ -188,7 +188,7 @@ static int TestConfiguredProvider()
     CKBackendShaderSet shaders;
     if (!driver.GetShaderSet(backend->GetCaps(), shaders) ||
         !shaders.Matches(CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV) ||
-        shaders.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount != CKFF_SAMPLER_SLOT_COUNT ||
+        shaders.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount != CKFF_SHADER_SAMPLER_SLOT_COUNT ||
         shaders.Shaders[CKRST_SHADER_PRESENT_FRAGMENT].SamplerCount != 1 ||
         shaders.Shaders[CKRST_SHADER_PRESENT_VERTEX].UniformBufferCount != 0)
         return Fail("rasterizer supplies complete native-shaped fake artifacts for the actual device");

@@ -1,8 +1,8 @@
 #ifndef CKBUILTINSHADERS_H
 #define CKBUILTINSHADERS_H
 
+#include "CKBuiltinShaderIdentity.h"
 #include "CKRasterizerBackendTypes.h"
-#include "CKFFShaderABI.h"
 #include <vector>
 
 struct CKBackendCaps;
