@@ -9,8 +9,8 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Backend/CKSdlGpuPipeline.cpp
     Backend/CKSdlGpuResources.cpp
     Backend/CKSdlGpuTextureData.cpp
-    Provider/CKSdlGpuRasterizer.cpp
-    Provider/CKSdlGpuShaders.cpp
+    Rasterizer/CKSdlGpuRasterizer.cpp
+    Rasterizer/CKSdlGpuShaders.cpp
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
     Backend/CKSdlGpuBackend.h
@@ -18,7 +18,7 @@ set(CKSDL_GPU_RASTERIZER_HEADERS
     Backend/CKSdlGpuNativeShaders.h
     Backend/CKSdlGpuTextureData.h
     Backend/CKSdlGpuUniformBatch.h
-    Provider/CKSdlGpuShaders.h
+    Rasterizer/CKSdlGpuShaders.h
 )
 
 function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
@@ -26,7 +26,7 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
-        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
     target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib SDL3::SDL3)
     set_target_properties(${TARGET_NAME} PROPERTIES
@@ -76,7 +76,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
         target_include_directories(${_test} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/Backend
-            ${CMAKE_CURRENT_SOURCE_DIR}/Provider
+            ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
             ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
             ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/Context
         )

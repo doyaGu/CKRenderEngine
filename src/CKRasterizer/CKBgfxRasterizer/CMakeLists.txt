@@ -5,9 +5,9 @@ set(CKBGFX_RASTERIZER_SOURCES
     Backend/CKBgfxConfig.cpp
     Backend/CKBgfxDrawMapTrace.cpp
     Backend/CKBgfxInternal.cpp
-    Provider/CKBgfxBackendDriver.cpp
-    Provider/CKBgfxRasterizer.cpp
-    Provider/CKBgfxShaders.cpp
+    Rasterizer/CKBgfxRasterizerDriver.cpp
+    Rasterizer/CKBgfxRasterizer.cpp
+    Rasterizer/CKBgfxShaders.cpp
 )
 set(CKBGFX_RASTERIZER_HEADERS
     Backend/CKBgfxBackend.h
@@ -16,7 +16,7 @@ set(CKBGFX_RASTERIZER_HEADERS
     Backend/CKBgfxDrawMapTrace.h
     Backend/CKBgfxInternal.h
     Backend/CKBgfxResources.h
-    Provider/CKBgfxRasterizer.h
+    Rasterizer/CKBgfxRasterizer.h
 )
 set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 
@@ -75,7 +75,7 @@ function(ckre_configure_bgfx_rasterizer TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
-        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
         CKFFPLib
@@ -155,7 +155,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     target_include_directories(test_bgfx_rasterizer PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Backend
-        ${CMAKE_CURRENT_SOURCE_DIR}/Provider
+        ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
     target_link_libraries(test_bgfx_rasterizer PRIVATE CKFFPLib bgfx bimg bx SDL3::SDL3)
     if (TARGET CKBgfxRasterizerStatic)
