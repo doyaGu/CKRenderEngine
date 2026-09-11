@@ -1,50 +1,50 @@
 {
-  "abi_version": 5,
-  "interface_hash": 149016001,
+  "abi_version": 6,
+  "interface_hash": 2784058577,
   "shaders": [
     {
       "name": "vs_ff_3d",
       "format": "dxil",
       "entry": "main",
       "samplers": 0,
-      "uniform_buffers": 1,
+      "uniform_buffers": 2,
       "reflected": true,
       "uniform_bytes": 2880,
-      "source_sha256": "edfb3ab88707d8639d6a75813f7592478034915a79ebad23cbca96c6d7d36d94",
-      "sha256": "a48a1747ce0ac3151eb2861593a4e70bdb042c4001e6beac2bb2f05529449aa3"
+      "source_sha256": "d9779253f685422c94c324678c297f1c2940a67e2c17c20296be20ba7192a499",
+      "sha256": "59a5f3f07d37b3bfeb0d6b40e42baaaf18b332f891ec513fdc5f83fcf99fb741"
     },
     {
       "name": "vs_ff_3d",
       "format": "spirv",
       "entry": "main",
       "samplers": 0,
-      "uniform_buffers": 1,
+      "uniform_buffers": 2,
       "reflected": true,
       "uniform_bytes": 2880,
-      "source_sha256": "edfb3ab88707d8639d6a75813f7592478034915a79ebad23cbca96c6d7d36d94",
-      "sha256": "47a5b497f7e3febc491440230d38007df764dc2bb7eee54bfdaa70f21638b6b0"
+      "source_sha256": "d9779253f685422c94c324678c297f1c2940a67e2c17c20296be20ba7192a499",
+      "sha256": "39ed2d05bb9dfc5737054f11a58f04514ca2d5d0b297a31d4d2c9ac1db92622f"
     },
     {
       "name": "vs_ff_3d_clip",
       "format": "dxil",
       "entry": "main",
       "samplers": 0,
-      "uniform_buffers": 1,
+      "uniform_buffers": 2,
       "reflected": true,
       "uniform_bytes": 2880,
-      "source_sha256": "c17bfbc2e3f6ce265d87678f571c629a7e02a57b4eb0d72344426e80b9fe3a6f",
-      "sha256": "2ff0b65c135218fcf86aab045ece44008944a3c2ed4052e6d05006a8eddaca13"
+      "source_sha256": "575f45a17a92321c14269375448f5d161bc11ef2681050ed122a5874a62c744c",
+      "sha256": "15415f9ba9ed2d6b3f651b67b71c2bcd0e06a1d4d2fe040fac909aa4b7882b5c"
     },
     {
       "name": "vs_ff_3d_clip",
       "format": "spirv",
       "entry": "main",
       "samplers": 0,
-      "uniform_buffers": 1,
+      "uniform_buffers": 2,
       "reflected": true,
       "uniform_bytes": 2880,
-      "source_sha256": "c17bfbc2e3f6ce265d87678f571c629a7e02a57b4eb0d72344426e80b9fe3a6f",
-      "sha256": "9fe19b8c8819c623507badeed88076fc6d44f84c1d57626e58506eadc3e27ab6"
+      "source_sha256": "575f45a17a92321c14269375448f5d161bc11ef2681050ed122a5874a62c744c",
+      "sha256": "32b9f5e7d0cde49bfdde6777e91c086b25658351bdfe5e5e693fb14bd23b78db"
     },
     {
       "name": "vs_ff_positiont",
@@ -53,9 +53,9 @@
       "samplers": 0,
       "uniform_buffers": 1,
       "reflected": true,
-      "uniform_bytes": 2880,
-      "source_sha256": "c5497b36bff6f56cd8135e106f0b1505a00657cbb3d6319d2d9a04755588c749",
-      "sha256": "091a01f6e6462ac2468d6827cc5c248753c9622857caf82ec465b5ca3e7ee771"
+      "uniform_bytes": 2368,
+      "source_sha256": "ce29615d8077a42d9e443136bb365a85f9cc47b99a1880a26d00c7fcaf079a80",
+      "sha256": "32ace51b4195b321977ac003b5580615ee423b6f5384472c1844cbe71a36c30f"
     },
     {
       "name": "vs_ff_positiont",
@@ -64,9 +64,9 @@
       "samplers": 0,
       "uniform_buffers": 1,
       "reflected": true,
-      "uniform_bytes": 2880,
-      "source_sha256": "c5497b36bff6f56cd8135e106f0b1505a00657cbb3d6319d2d9a04755588c749",
-      "sha256": "af013d0fcbb7e715cbf05f53d4e1bf881bb5ebb17da524e9ff8143d1ee802892"
+      "uniform_bytes": 2368,
+      "source_sha256": "ce29615d8077a42d9e443136bb365a85f9cc47b99a1880a26d00c7fcaf079a80",
+      "sha256": "64d8b3e7b7cf803e0219aa1f085570ce0c55ea979a0424cfa0b2abe355e7b780"
     },
     {
       "name": "vs_ff_positiont_clip",
@@ -75,9 +75,9 @@
       "samplers": 0,
       "uniform_buffers": 1,
       "reflected": true,
-      "uniform_bytes": 2880,
-      "source_sha256": "1b4c859b1976c070a981d4b07a646001ccea4388959e138339975d76bb2e0753",
-      "sha256": "434da5ec4bb418a918245a8ec93926f84b82e0fe4b9339949e1f48fa7712ffcb"
+      "uniform_bytes": 2368,
+      "source_sha256": "56a95ba94fdf4f7ce44e3cb9a41bfdd5e34184ec6b8247ccca4fcc338fd46565",
+      "sha256": "0aee2e5695dc7229e98f173da30bb05cd06c74f5c8a725e46d81b8adf2beeb7c"
     },
     {
       "name": "vs_ff_positiont_clip",
@@ -86,9 +86,9 @@
       "samplers": 0,
       "uniform_buffers": 1,
       "reflected": true,
-      "uniform_bytes": 2880,
-      "source_sha256": "1b4c859b1976c070a981d4b07a646001ccea4388959e138339975d76bb2e0753",
-      "sha256": "c0254b3103fa84ce1945dc0cb8df80a8be5dca63487291fc0bf52b5897bcfdf2"
+      "uniform_bytes": 2368,
+      "source_sha256": "56a95ba94fdf4f7ce44e3cb9a41bfdd5e34184ec6b8247ccca4fcc338fd46565",
+      "sha256": "3fce6e16f103726bbd99692980e01c9c282c03c1040c3d3a36853161d90810da"
     },
     {
       "name": "fs_ff_stage",

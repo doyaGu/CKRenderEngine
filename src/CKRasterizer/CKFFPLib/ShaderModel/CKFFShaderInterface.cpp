@@ -18,18 +18,26 @@ const CKFFConstantBlockDesc BlockTable[CKRST_BLOCK_COUNT] = {
 };
 
 enum NativeGroup { VERTEX, FRAGMENT, PRESENT };
-struct NativeBlock { NativeGroup Group; CKFFConstantBlock Block; };
+struct NativeBlock {
+    NativeGroup Group;
+    CKDWORD BufferSlot;
+    CKFFConstantBlock Block;
+};
 const NativeBlock NativeBlocks[] = {
-#define CKFF_NATIVE_BLOCK(Stage, Block) {Stage, CKRST_BLOCK_##Block},
-#define CKFF_NATIVE_METADATA(Stage, Count)
+#define CKFF_NATIVE_BLOCK(Stage, Slot, Block) {Stage, Slot, CKRST_BLOCK_##Block},
+#define CKFF_NATIVE_METADATA(Stage, Slot, Count)
 #include "CKFFNativeLayout.def"
 #undef CKFF_NATIVE_BLOCK
 #undef CKFF_NATIVE_METADATA
 };
-struct NativeMetadata { NativeGroup Group; CKDWORD Count; };
+struct NativeMetadata {
+    NativeGroup Group;
+    CKDWORD BufferSlot;
+    CKDWORD Count;
+};
 const NativeMetadata NativeMetadataCounts[] = {
-#define CKFF_NATIVE_BLOCK(Stage, Block)
-#define CKFF_NATIVE_METADATA(Stage, Count) {Stage, Count},
+#define CKFF_NATIVE_BLOCK(Stage, Slot, Block)
+#define CKFF_NATIVE_METADATA(Stage, Slot, Count) {Stage, Slot, Count},
 #include "CKFFNativeLayout.def"
 #undef CKFF_NATIVE_BLOCK
 #undef CKFF_NATIVE_METADATA
@@ -43,6 +51,25 @@ const CK_VERTEX_ATTRIB VertexAttributes[16] = {
     CKRST_ATTRIB_TEXCOORD0, CKRST_ATTRIB_TEXCOORD1, CKRST_ATTRIB_TEXCOORD2, CKRST_ATTRIB_TEXCOORD3,
     CKRST_ATTRIB_TEXCOORD4, CKRST_ATTRIB_TEXCOORD5, CKRST_ATTRIB_TEXCOORD6, CKRST_ATTRIB_TEXCOORD7,
 };
+
+void AppendUniformBinding(CKBackendProgramDesc &program,
+                          CKFFConstantBlock blockSlot,
+                          CK_SHADER_STAGE stage,
+                          CKDWORD bufferSlot,
+                          CKDWORD &bufferSize)
+{
+    const CKFFConstantBlockDesc &block = BlockTable[blockSlot];
+    CKBackendUniformBinding uniform;
+    uniform.Slot = blockSlot;
+    uniform.Name = block.Name;
+    uniform.Type = block.Mat4 ? CKBACKEND_UNIFORM_MAT4 : CKBACKEND_UNIFORM_VEC4;
+    uniform.Count = block.Count;
+    uniform.Stage = stage;
+    uniform.BufferSlot = bufferSlot;
+    uniform.Offset = bufferSize;
+    bufferSize += uniform.Size();
+    program.Uniforms.push_back(uniform);
+}
 
 } // namespace
 
@@ -64,50 +91,69 @@ const char *CKFFSamplerSlotName(CKDWORD slot)
 }
 
 CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
-                                              CK_SHADER_FORMAT format, CKBOOL present)
+                                              CK_SHADER_FORMAT format, CKBOOL present,
+                                              CKBOOL positionT)
 {
     CKBackendProgramDesc result;
     result.VertexShader = vertexShader;
     result.PixelShader = pixelShader;
     const bool packed = format != CKRST_SHADER_FORMAT_BGFX;
     const CKDWORD stageCount = present ? 1u : 2u;
-    result.UniformBuffers.reserve(packed ? stageCount : 0u);
+    result.UniformBuffers.reserve(packed ? stageCount * 2u : 0u);
     result.Uniforms.reserve(present ? 1u : CKRST_BLOCK_COUNT * stageCount);
 
-    CKDWORD metadataOffset = 0, metadataCount = 0;
+    CKDWORD metadataBufferSlot = ~0u;
+    CKDWORD metadataOffset = 0;
+    CKDWORD metadataCount = 0;
     for (CKDWORD stageIndex = 0; stageIndex < stageCount; ++stageIndex) {
         const CK_SHADER_STAGE stage = present ? CKRST_SHADER_PIXEL : static_cast<CK_SHADER_STAGE>(stageIndex);
-        CKDWORD offset = 0;
-        auto addUniform = [&](CKFFConstantBlock slot) {
-            const auto &block = BlockTable[slot];
-            CKBackendUniformBinding uniform;
-            uniform.Slot = slot;
-            uniform.Name = block.Name;
-            uniform.Type = block.Mat4 ? CKBACKEND_UNIFORM_MAT4 : CKBACKEND_UNIFORM_VEC4;
-            uniform.Count = block.Count;
-            uniform.Stage = stage;
-            uniform.Offset = offset;
-            offset += uniform.Size();
-            result.Uniforms.push_back(uniform);
-        };
         if (packed) {
             const NativeGroup group = present ? PRESENT : stage == CKRST_SHADER_VERTEX ? VERTEX : FRAGMENT;
-            for (const auto &entry : NativeBlocks)
-                if (entry.Group == group) addUniform(entry.Block);
-            for (const auto &entry : NativeMetadataCounts) {
-                if (entry.Group != group) continue;
-                metadataOffset = offset; metadataCount = entry.Count;
-                offset += entry.Count * 32u; // one border color and sampler-state vector per native slot
+            CKDWORD bufferSizes[CKBACKEND_MAX_UNIFORM_BUFFERS] = {};
+            for (const NativeBlock &entry : NativeBlocks) {
+                if (entry.Group != group)
+                    continue;
+                if (group == VERTEX && positionT && entry.BufferSlot == 0)
+                    continue;
+                if (entry.BufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS)
+                    return CKBackendProgramDesc();
+                const CKDWORD bufferSlot = group == VERTEX && positionT
+                    ? entry.BufferSlot - 1u : entry.BufferSlot;
+                AppendUniformBinding(result, entry.Block, stage, bufferSlot,
+                                     bufferSizes[bufferSlot]);
             }
-            CKBackendUniformBufferBinding buffer;
-            buffer.Stage = stage; buffer.Size = offset;
-            result.UniformBuffers.push_back(buffer);
+            for (const auto &entry : NativeMetadataCounts) {
+                if (entry.Group != group)
+                    continue;
+                if (entry.BufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS)
+                    return CKBackendProgramDesc();
+                metadataBufferSlot = entry.BufferSlot;
+                metadataOffset = bufferSizes[entry.BufferSlot];
+                metadataCount = entry.Count;
+                // One border color and sampler-state vector per native slot.
+                bufferSizes[entry.BufferSlot] += entry.Count * 32u;
+            }
+            CKDWORD bufferCount = 0;
+            for (CKDWORD slot = 0; slot < CKBACKEND_MAX_UNIFORM_BUFFERS; ++slot) {
+                if (!bufferSizes[slot])
+                    continue;
+                if (slot != bufferCount)
+                    return CKBackendProgramDesc();
+                CKBackendUniformBufferBinding buffer;
+                buffer.Stage = stage;
+                buffer.Slot = slot;
+                buffer.Size = bufferSizes[slot];
+                result.UniformBuffers.push_back(buffer);
+                ++bufferCount;
+            }
         } else {
             // Named uniforms retain their logical identity and do not acquire
             // a synthetic native buffer layout.
+            CKDWORD offset = 0;
             for (CKDWORD slot = 0; slot < CKRST_BLOCK_COUNT; ++slot)
                 if (!present || slot == CKRST_BLOCK_PRESENT_PARAMS)
-                    addUniform(static_cast<CKFFConstantBlock>(slot));
+                    AppendUniformBinding(result, static_cast<CKFFConstantBlock>(slot),
+                                         stage, 0, offset);
         }
     }
 
@@ -121,7 +167,7 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
         sampler.Dimension = present || slot < CKFF_CUBE_SAMPLER_SLOT_BASE ? CKBACKEND_TEXTURE_2D :
             slot < CKFF_VOLUME_SAMPLER_SLOT_BASE ? CKBACKEND_TEXTURE_CUBE : CKBACKEND_TEXTURE_3D;
         if (packed) {
-            sampler.MetadataBufferSlot = 0;
+            sampler.MetadataBufferSlot = metadataBufferSlot;
             sampler.BorderColorOffset = metadataOffset + slot * 16u;
             sampler.SamplerStateOffset = metadataOffset + metadataCount * 16u + slot * 16u;
         }

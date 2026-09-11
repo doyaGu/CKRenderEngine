@@ -48,7 +48,10 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKBackendShaderSet &out)
         shader.Stage = i == CKRST_SHADER_FF_FRAGMENT || i == CKRST_SHADER_PRESENT_FRAGMENT ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
         shader.Format = payload;
         shader.Profile = profile;
-        shader.UniformBufferCount = i == CKRST_SHADER_PRESENT_VERTEX ? 0 : 1;
+        if (i == CKRST_SHADER_FF_3D || i == CKRST_SHADER_FF_3D_CLIP)
+            shader.UniformBufferCount = 2;
+        else
+            shader.UniformBufferCount = i == CKRST_SHADER_PRESENT_VERTEX ? 0 : 1;
         shader.SamplerCount = i == CKRST_SHADER_FF_FRAGMENT ? 16 : (i == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0);
     }
     return out.Matches(payload, profile);

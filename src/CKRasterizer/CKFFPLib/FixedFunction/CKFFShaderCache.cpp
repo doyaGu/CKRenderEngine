@@ -130,8 +130,11 @@ CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
             &m_Shaders.Shaders[variant], &m_VertexShaders[variant]) != CK_OK)
         return 0;
     CKDWORD program = 0;
+    const CKBOOL positionT = variant == CKFF_PROGRAM_POSITIONT ||
+        variant == CKFF_PROGRAM_POSITIONT_CLIP ? TRUE : FALSE;
     const CKBackendProgramDesc desc = CKFFBuildProgramInterface(
-        m_VertexShaders[variant], m_PixelShader, m_Target.ShaderFormat);
+        m_VertexShaders[variant], m_PixelShader, m_Target.ShaderFormat,
+        FALSE, positionT);
     if (m_Backend->CreateProgram(&desc, &program) != CK_OK)
         return 0;
 

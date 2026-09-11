@@ -75,60 +75,76 @@ def native_layout_schema():
     names = re.findall(r"CKRST_BLOCK_(\w+)", enum)
     assert names.pop() == "COUNT" and len(names) == len(BLOCKS)
     blocks = dict(zip(names, BLOCKS))
-    groups = {name: [] for name in ("VERTEX", "FRAGMENT", "PRESENT")}
-    metadata_groups = set()
+    groups = {name: {} for name in ("VERTEX", "FRAGMENT", "PRESENT")}
+    metadata_buffers = set()
     canonical = ""
     for line in (interface / "CKFFNativeLayout.def").read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.lstrip().startswith("//"):
             continue
-        match = re.fullmatch(r"CKFF_NATIVE_(BLOCK|METADATA)\((\w+), (\w+)\)", line)
+        match = re.fullmatch(r"CKFF_NATIVE_(BLOCK|METADATA)\((\w+), (\d+), (\w+)\)", line)
         assert match, f"Invalid native layout row: {line}"
-        kind, group, value = match.groups()
+        kind, group, slot_text, value = match.groups()
         assert group in groups
-        canonical += f"{kind.lower()}:{group}:{value};"
+        slot = int(slot_text)
+        assert 0 <= slot < 4
+        canonical += f"{kind.lower()}:{group}:{slot}:{value};"
+        members = groups[group].setdefault(slot, [])
         if kind == "BLOCK":
-            assert group not in metadata_groups, "Metadata must follow a stage's logical blocks"
-            assert blocks[value] not in groups[group], "Duplicate native block"
-            groups[group].append(blocks[value])
+            assert (group, slot) not in metadata_buffers, "Metadata must follow a buffer's logical blocks"
+            assert not any(blocks[value] in buffer for buffer in groups[group].values()), "Duplicate native block"
+            members.append(blocks[value])
         else:
             count = int(value)
-            assert group not in metadata_groups and 0 < count <= 16
-            metadata_groups.add(group)
-            groups[group] += [("float4", "ck_borderColor", count), ("float4", "ck_samplerInfo", count)]
-    return groups, canonical
+            assert (group, slot) not in metadata_buffers and 0 < count <= 16
+            metadata_buffers.add((group, slot))
+            members += [("float4", "ck_borderColor", count), ("float4", "ck_samplerInfo", count)]
+    ordered = {}
+    for group, buffers in groups.items():
+        slots = sorted(buffers)
+        assert slots == list(range(len(slots))), f"{group} native buffer slots must be contiguous"
+        ordered[group] = [buffers[slot] for slot in slots]
+    return ordered, canonical
 
 
 def uniform_layout(source: str):
     if source.endswith("_clear"):
-        return "CKNativeClear", [("float4", "ckClear", 1)], 16
+        return [("CKNativeClear", [("float4", "ckClear", 1)], 16)]
     if source == "fs_volume_mip":
-        return "CKNativeVolume", [("float4", "ckVolumeParams", 2)], 32
+        return [("CKNativeVolume", [("float4", "ckVolumeParams", 2)], 32)]
     if source == "vs_postprocess":
-        return "CKPresent", [], 0
+        return []
     group = "PRESENT" if source == "fs_postprocess" else "VERTEX" if source.startswith("vs_") else "FRAGMENT"
-    members = native_layout_schema()[0][group]
-    size = sum(count * (64 if kind == "float4x4" else 16) for kind, _, count in members)
-    return {"VERTEX": "CKVertex", "FRAGMENT": "CKFragment", "PRESENT": "CKPresent"}[group], members, size
+    prefix = {"VERTEX": "CKVertex", "FRAGMENT": "CKFragment", "PRESENT": "CKPresent"}[group]
+    buffers = native_layout_schema()[0][group]
+    if source == "vs_ff_positiont":
+        buffers = buffers[1:]
+    result = []
+    for slot, members in enumerate(buffers):
+        size = sum(count * (64 if kind == "float4x4" else 16) for kind, _, count in members)
+        result.append((f"{prefix}{slot}", members, size))
+    if len(result) == 1:
+        result[0] = (prefix, result[0][1], result[0][2])
+    return result
 
 
 def shader_resources(source: str):
     vertex = source.startswith("vs_")
     samplers = 0 if vertex or source == "fs_clear" else (1 if source in ("fs_postprocess", "fs_volume_mip") else 16)
-    return int(uniform_layout(source)[2] != 0), samplers
+    return len(uniform_layout(source)), samplers
 
 
 def uniform_declaration(source: str) -> str:
-    name, blocks, size = uniform_layout(source)
-    if not size:
-        return ""
     vertex = source.startswith("vs_")
-    result = [f"cbuffer {name} : register(b0, space{1 if vertex else 3}) {{"]
-    row = 0
-    for kind, member, count in blocks:
-        array = f"[{count}]" if count != 1 or member in ("ck_borderColor", "ck_samplerInfo") else ""
-        result.append(f"    {kind} {member}{array} : packoffset(c{row});")
-        row += count * (4 if kind == "float4x4" else 1)
-    return "\n".join(result + ["};"])
+    result = []
+    for slot, (name, blocks, _) in enumerate(uniform_layout(source)):
+        result.append(f"cbuffer {name} : register(b{slot}, space{1 if vertex else 3}) {{")
+        row = 0
+        for kind, member, count in blocks:
+            array = f"[{count}]" if count != 1 or member in ("ck_borderColor", "ck_samplerInfo") else ""
+            result.append(f"    {kind} {member}{array} : packoffset(c{row});")
+            row += count * (4 if kind == "float4x4" else 1)
+        result.append("};")
+    return "\n".join(result)
 
 
 def make_source(source: str, clipping: bool) -> str:
@@ -176,11 +192,15 @@ def make_source(source: str, clipping: bool) -> str:
                        source_body(SHARED / f"{source}.sc"), *entry])
 
 
-def expected_members(source):
+def expected_members(blocks):
     row = 0
-    for kind, name, count in uniform_layout(source)[1]:
+    for kind, name, count in blocks:
         yield kind, name, count, row * 16
         row += count * (4 if kind == "float4x4" else 1)
+
+
+def reflection_binding(resource):
+    return resource["binding"]
 
 
 def validate_spirv(reflection, source, vertex, samplers, uniforms):
@@ -188,14 +208,14 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms):
     ubos, textures = reflection.get("ubos", []), reflection.get("textures", [])
     assert len(ubos) == uniforms
     assert not any(reflection.get(kind) for kind in ("ssbos", "images", "separate_images", "separate_samplers"))
-    if ubos:
-        ubo = ubos[0]
-        buffer_name, _, buffer_size = uniform_layout(source)
+    layouts = uniform_layout(source)
+    for slot, (ubo, (buffer_name, blocks, buffer_size)) in enumerate(
+            zip(sorted(ubos, key=reflection_binding), layouts)):
         assert ubo["name"] in (buffer_name, f"type.{buffer_name}")
-        assert (ubo["set"], ubo["binding"], ubo["block_size"]) == (1 if vertex else 3, 0, buffer_size)
+        assert (ubo["set"], ubo["binding"], ubo["block_size"]) == (1 if vertex else 3, slot, buffer_size)
         members = reflection["types"][ubo["type"]]["members"]
-        assert len(members) == len(list(expected_members(source)))
-        for member, (kind, name, count, offset) in zip(members, expected_members(source)):
+        assert len(members) == len(list(expected_members(blocks)))
+        for member, (kind, name, count, offset) in zip(members, expected_members(blocks)):
             assert member["name"] == name and member["offset"] == offset
             assert member["type"] == ("mat4" if kind == "float4x4" else "vec4")
             assert member.get("array", [1]) == [count]
@@ -227,12 +247,12 @@ def validate_dxil(assembly, source, vertex, samplers, uniforms):
         assert sorted(r[2] for r in selected) == sorted(f"{prefix}{i}" for i in range(count))
         assert all(int(r[3]) == space and r[4] == "1" for r in selected)
     if uniforms:
-        for kind, name, count, offset in expected_members(source):
-            array = rf"\[{count}\]" if count > 1 or name in ("ck_borderColor", "ck_samplerInfo") else ""
-            major = "column_major " if kind == "float4x4" else ""
-            assert re.search(rf"{major}{kind} {name}{array};\s*; Offset:\s*{offset}\b", assembly)
-        buffer_name, _, buffer_size = uniform_layout(source)
-        assert re.search(rf"{buffer_name};.*Size:\s*{buffer_size}\b", assembly)
+        for buffer_name, blocks, buffer_size in uniform_layout(source):
+            for kind, name, count, offset in expected_members(blocks):
+                array = rf"\[{count}\]" if count > 1 or name in ("ck_borderColor", "ck_samplerInfo") else ""
+                major = "column_major " if kind == "float4x4" else ""
+                assert re.search(rf"{major}{kind} {name}{array};\s*; Offset:\s*{offset}\b", assembly)
+            assert re.search(rf"{buffer_name};.*Size:\s*{buffer_size}\b", assembly)
 
 
 def verify_artifacts(directory, abi, abi_hash):
@@ -245,7 +265,7 @@ def verify_artifacts(directory, abi, abi_hash):
     assert {(s["name"], s["format"]) for s in manifest["shaders"]} == expected
     sources = {name: hashlib.sha256(make_source(source, clipping).encode()).hexdigest()
                for name, source, clipping in SHADERS}
-    layouts = {name: uniform_layout(source)[2] if source != "vs_postprocess" else 0
+    layouts = {name: sum(buffer[2] for buffer in uniform_layout(source))
                for name, source, _ in SHADERS}
     source_by_name = {name: source for name, source, _ in SHADERS}
     for shader in manifest["shaders"]:
@@ -314,7 +334,7 @@ def main() -> None:
                 f.write("};\n")
             manifest["shaders"].append({"name": name, "format": format_, "entry": "main",
                 "samplers": samplers, "uniform_buffers": uniforms, "reflected": True,
-                "uniform_bytes": uniform_layout(source)[2] if uniforms else 0,
+                "uniform_bytes": sum(buffer[2] for buffer in uniform_layout(source)),
                 "source_sha256": hashlib.sha256(make_source(source, clipping).encode()).hexdigest(), "sha256": hashlib.sha256(code).hexdigest()})
     for destination, source in pending.items():
         shutil.copyfile(source, destination)

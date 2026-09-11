@@ -6,15 +6,15 @@
 
 // Identifies the fixed-function shader data consumed by CKFFPLib. Concrete
 // rasterizer adapters use these values to reject stale generated artifacts.
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 5u;
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 6u;
 static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;
 static const CKDWORD CKFF_SHADER_SAMPLER_SLOT_COUNT = 16u;
 
 constexpr CKDWORD CKFFNativeInterfaceHash()
 {
     const char *layout =
-#define CKFF_NATIVE_BLOCK(Stage, Block) "block:" #Stage ":" #Block ";"
-#define CKFF_NATIVE_METADATA(Stage, Count) "metadata:" #Stage ":" #Count ";"
+#define CKFF_NATIVE_BLOCK(Stage, Slot, Block) "block:" #Stage ":" #Slot ":" #Block ";"
+#define CKFF_NATIVE_METADATA(Stage, Slot, Count) "metadata:" #Stage ":" #Slot ":" #Count ";"
 #include "CKFFNativeLayout.def"
 #undef CKFF_NATIVE_BLOCK
 #undef CKFF_NATIVE_METADATA

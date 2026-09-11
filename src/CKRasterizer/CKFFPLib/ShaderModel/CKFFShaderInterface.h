@@ -40,7 +40,8 @@ const char *CKFFSamplerSlotName(CKDWORD slot);
 // Called only when a cached program is first created. The resulting owned
 // descriptor is compiled by the backend; draw submission does not rebuild it.
 CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
-                                              CK_SHADER_FORMAT format, CKBOOL present = FALSE);
+                                              CK_SHADER_FORMAT format, CKBOOL present = FALSE,
+                                              CKBOOL positionT = FALSE);
 
 inline CKERROR CKFFSetConstants(CKBackendConstants *constants, CKFFConstantBlock block,
                                 const void *data, CKDWORD vec4Count)

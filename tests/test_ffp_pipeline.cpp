@@ -61,16 +61,22 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
         vertex.Profile = pixel.Profile = format == CKRST_SHADER_FORMAT_DXIL ?
             CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
         pixel.Stage = CKRST_SHADER_PIXEL;
-        vertex.UniformBufferCount = pixel.UniformBufferCount = 1;
+        vertex.UniformBufferCount = 2;
+        pixel.UniformBufferCount = 1;
         pixel.SamplerCount = 16;
         TestCheck(CKValidateBackendProgram(program, vertex, pixel) == CK_OK,
                   "FFP native declarations satisfy generic backend validation");
-        TestCheck(program.UniformBuffers.size() == 2 &&
-                      program.UniformBuffers[0].Size == 2880 && program.UniformBuffers[1].Size == 1424 &&
-                      program.UniformBuffers[0].SharedData == ~0u && program.UniformBuffers[1].SharedData == ~0u,
-                  "vertex and fragment stages declare independent compact buffers");
+        TestCheck(program.UniformBuffers.size() == 3 &&
+                      program.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
+                      program.UniformBuffers[0].Slot == 0 && program.UniformBuffers[0].Size == 512 &&
+                      program.UniformBuffers[1].Stage == CKRST_SHADER_VERTEX &&
+                      program.UniformBuffers[1].Slot == 1 && program.UniformBuffers[1].Size == 2368 &&
+                      program.UniformBuffers[2].Stage == CKRST_SHADER_PIXEL &&
+                      program.UniformBuffers[2].Slot == 0 && program.UniformBuffers[2].Size == 1424,
+                  "native 3D declarations isolate per-draw matrices");
         TestCheck(program.Uniforms.size() == 13 &&
-                      program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS && program.Uniforms[9].Offset == 0 &&
+                      program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS &&
+                      program.Uniforms[9].BufferSlot == 0 && program.Uniforms[9].Offset == 0 &&
                       program.Samplers.size() == 16,
                   "native packing follows the stage layout schema");
         TestCheck(program.Samplers[0].Dimension == CKBACKEND_TEXTURE_2D &&
@@ -87,6 +93,16 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       program.VertexInputs[8].DefaultValue[0] == 0 &&
                       program.VertexInputs[8].DefaultValue[3] == 0x3f800000u,
                   "missing FFP vertex streams keep shader-family defaults");
+
+        const CKBackendProgramDesc positionT = CKFFBuildProgramInterface(
+            1, 2, format, FALSE, TRUE);
+        vertex.UniformBufferCount = 1;
+        TestCheck(CKValidateBackendProgram(positionT, vertex, pixel) == CK_OK &&
+                      positionT.UniformBuffers.size() == 2 &&
+                      positionT.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
+                      positionT.UniformBuffers[0].Slot == 0 &&
+                      positionT.UniformBuffers[0].Size == 2368,
+                  "POSITIONT omits the unused matrix buffer and compacts native slots");
 
         const CKBackendProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
         vertex.UniformBufferCount = 0;
