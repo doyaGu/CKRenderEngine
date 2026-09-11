@@ -147,6 +147,26 @@ ckre_add_rasterizer3_test(rasterizer3_translated_tests
     test_rasterizer3_translated.cpp
 )
 
+# Deterministic CKFFPLib workload coverage.  The benchmark target is
+# intentionally not registered with CTest and is never installed or staged.
+ckre_add_rasterizer3_test(ffp_benchmark_workload_tests
+    test_ffp_benchmark_workload.cpp
+)
+
+ckre_add_benchmark(ffp_pipeline_benchmark
+    benchmark_ffp_pipeline.cpp
+    support/CKBenchmarkBackend.cpp
+)
+target_include_directories(ffp_pipeline_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(ffp_pipeline_benchmark PRIVATE
+    CKRE_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>
+)
+set_target_properties(ffp_pipeline_benchmark PROPERTIES
+    FOLDER "Benchmarks"
+    INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+)
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
 # shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
 # environment gates as rasterizer3_pixel_tests. Skips when no golden frames
