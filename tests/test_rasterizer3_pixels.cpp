@@ -11,7 +11,7 @@
 #ifndef CKRE_PIXEL_SDL_GPU
 #include "CKBgfxBackend.h"
 #endif
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "TestTriangleMultiset.h"
 
 #include <SDL3/SDL.h>

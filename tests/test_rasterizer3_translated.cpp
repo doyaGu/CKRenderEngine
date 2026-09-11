@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 

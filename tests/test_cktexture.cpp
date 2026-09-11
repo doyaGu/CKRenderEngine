@@ -13,7 +13,7 @@
 #include "RCKRenderManager.h"
 #include "RCKTexture.h"
 #include "RCKSprite.h"
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 

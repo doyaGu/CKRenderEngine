@@ -12,7 +12,7 @@
 #include "RCKMaterial.h"
 #include "RCKMesh.h"
 #include "RCKTexture.h"
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 

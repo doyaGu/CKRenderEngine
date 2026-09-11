@@ -1,5 +1,5 @@
-#ifndef CKTRANSLATEDRASTERIZERINTERNAL_H
-#define CKTRANSLATEDRASTERIZERINTERNAL_H
+#ifndef CKFFRASTERIZERCONTEXTINTERNAL_H
+#define CKFFRASTERIZERCONTEXTINTERNAL_H
 
 // Reusable fixed-function CKRasterizerContext implementation. Texture-stage
 // values, bindings and transforms live in the FFP state. Draws go through
@@ -315,4 +315,4 @@ private:
     CKBOOL m_LayoutMismatchLogged;
 };
 
-#endif // CKTRANSLATEDRASTERIZERINTERNAL_H
+#endif

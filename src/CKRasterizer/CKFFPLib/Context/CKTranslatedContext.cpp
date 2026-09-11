@@ -2,7 +2,7 @@
 // render targets, readback and statistics. The frame flow and the draws live
 // in CKTranslatedFrame.cpp.
 
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "CKFFUniformState.h"
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"

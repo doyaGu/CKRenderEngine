@@ -1,7 +1,7 @@
 // CKTranslatedContext: frame flow (one backend pass per pass), draws and the
-// backbuffer upload. See CKTranslatedRasterizerInternal.h.
+// backbuffer upload. See CKFFRasterizerContextInternal.h.
 
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "CKDebugLogger.h"
 
 #include <math.h>

@@ -8,7 +8,7 @@
 
 #include "CKRecordingProvider.h"
 #include "CKFFShaderInterface.h"
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "TestTriangleMultiset.h"
 
 #include <string.h>

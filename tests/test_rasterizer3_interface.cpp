@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 #include "CKNullRasterizer.h"
 #include "CKRasterizerCapsBaseline.h"
 #include "FFPRecordingHarness.h"

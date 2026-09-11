@@ -5,7 +5,7 @@
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
 #include "CKRecordingProvider.h"
-#include "CKTranslatedRasterizerInternal.h"
+#include "CKFFRasterizerContextInternal.h"
 
 #include <algorithm>
 #include <array>
