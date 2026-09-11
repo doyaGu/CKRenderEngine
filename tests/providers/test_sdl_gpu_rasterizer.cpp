@@ -81,6 +81,7 @@ int main()
         for (unsigned i = 0; i < 256; ++i) batch.Snapshot(layout, cursor, second);
         check(batch.Data.size() == 48 && first == second, "256 unchanged draws reuse immutable buffer versions");
         layout.Data[0] = 2;
+        check(layout.MarkDataChanged(0, 1), "object data mutation advances its buffer version");
         batch.Snapshot(layout, cursor, second);
         check(batch.Data.size() == 64 && second[0] != first[0] && second[1] == first[1] &&
               batch.Data[first[0]] == 1 && batch.Data[second[0]] == 2,
@@ -88,6 +89,7 @@ int main()
         // Metadata is written directly by the backend, independently of the
         // producer's revision. It must participate in snapshot identity.
         layout.Data[40] = 3;
+        check(layout.MarkDataChanged(40, 1), "sampler metadata mutation advances the shared buffer version");
         batch.Snapshot(layout, cursor, third);
         check(batch.Data.size() == 96 && third[0] == second[0] && third[1] != second[1] &&
               batch.Data[second[1] + 24] == 1 && batch.Data[third[1] + 24] == 3,
@@ -108,6 +110,8 @@ int main()
               "pipeline or pass invalidation requires a fresh push");
         batch.Clear();
         layout.Data.assign(48, 4);
+        check(layout.MarkDataChanged(0, 48) && !layout.MarkDataChanged(47, 2),
+              "uniform data revisions validate the modified byte range");
         batch.Snapshot(layout, cursor, first);
         check(batch.Data.size() == 48 && first[0] == 0 && batch.Data[0] == 4,
               "a new batch never follows a previous batch's offsets");

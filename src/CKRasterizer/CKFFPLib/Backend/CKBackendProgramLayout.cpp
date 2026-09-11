@@ -41,10 +41,16 @@ void CKBackendProgramLayout::Init(const CKBackendProgramDesc &desc)
     }
     for (const auto &uniform : desc.Uniforms) {
         const CKDWORD offset = BufferOffset(uniform.Stage, uniform.BufferSlot) + uniform.Offset;
-        const auto found = std::find_if(Copies.begin(), Copies.end(), [&](const Copy &copy) {
-            return copy.Slot == uniform.Slot && copy.Offset == offset && copy.Size == uniform.Size();
-        });
-        if (found == Copies.end()) Copies.push_back({uniform.Slot, offset, uniform.Size()});
+        bool duplicate = false;
+        for (const Copy &copy : Copies) {
+            if (copy.Slot == uniform.Slot && copy.Offset == offset &&
+                copy.Size == uniform.Size()) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate)
+            Copies.push_back({uniform.Slot, offset, uniform.Size()});
     }
 }
 
@@ -58,8 +64,34 @@ void CKBackendProgramLayout::Update(const CKBackendConstants &values)
         const size_t size = (std::min)(size_t(copy.Size), source.Bytes.size());
         if (size) std::memcpy(Data.data() + copy.Offset, source.Bytes.data(), size);
         if (size < copy.Size) std::memset(Data.data() + copy.Offset + size, 0, copy.Size - size);
+        MarkDataChanged(copy.Offset, copy.Size);
         copy.Revision = source.Revision;
     }
+}
+
+bool CKBackendProgramLayout::MarkDataChanged(CKDWORD offset, CKDWORD size)
+{
+    if (!size) return true;
+    if (offset > Data.size() || size > Data.size() - offset) return false;
+    const uint64_t end = uint64_t(offset) + size;
+    for (size_t i = 0; i < Buffers.size(); ++i) {
+        const auto &buffer = Buffers[i];
+        if (uint64_t(buffer.Offset) >= end ||
+            uint64_t(offset) >= uint64_t(buffer.Offset) + buffer.Size) continue;
+        bool sharedAlreadyAdvanced = false;
+        for (size_t j = 0; j < i; ++j) {
+            if (Buffers[j].Offset == buffer.Offset) {
+                sharedAlreadyAdvanced = true;
+                break;
+            }
+        }
+        if (sharedAlreadyAdvanced) continue;
+        uint64_t revision = buffer.Revision + 1;
+        if (!revision) revision = 1;
+        for (auto &alias : Buffers)
+            if (alias.Offset == buffer.Offset) alias.Revision = revision;
+    }
+    return true;
 }
 
 CKDWORD CKBackendProgramLayout::BufferOffset(CK_SHADER_STAGE stage, CKDWORD slot) const

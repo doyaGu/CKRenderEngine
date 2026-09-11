@@ -446,6 +446,9 @@ void TestSharedSnapshotPacking()
     TestCheck(layout.BufferOffset(CKRST_SHADER_VERTEX, 0) == layout.BufferOffset(CKRST_SHADER_PIXEL, 0) &&
                   layout.BufferOffset(CKRST_SHADER_VERTEX, 1) == 64,
               "stage bindings reference the shared snapshot's physical offset");
+    TestCheck(layout.Buffers[0].Revision == 0 && layout.Buffers[1].Revision == 0 &&
+                  layout.Buffers[2].Revision == 0,
+              "new physical uniform buffers start at revision zero");
 
     CKBackendConstants values;
     CKBYTE primary[32], independentBytes[16];
@@ -457,6 +460,11 @@ void TestSharedSnapshotPacking()
     TestCheck(memcmp(layout.Data.data(), primary, 32) == 0 &&
                   memcmp(layout.Data.data() + 64, independentBytes, 16) == 0,
               "logical slots populate only their declared ranges");
+    const uint64_t sharedRevision = layout.Buffers[0].Revision;
+    const uint64_t independentRevision = layout.Buffers[2].Revision;
+    TestCheck(sharedRevision != 0 && layout.Buffers[1].Revision == sharedRevision &&
+                  independentRevision != 0,
+              "logical writes advance every binding of the affected physical buffer");
     for (CKDWORD i = 32; i < 64; ++i)
         TestCheck(layout.Data[i] == 0, "uniform packing leaves metadata bytes untouched");
 
@@ -465,13 +473,18 @@ void TestSharedSnapshotPacking()
     values.Set(31, primary, sizeof(primary));
     TestCheck(values[31].Revision == revision, "equal bytes preserve the revision");
     layout.Update(values);
-    TestCheck(layout.Data == previous, "unchanged values preserve the complete snapshot");
+    TestCheck(layout.Data == previous && layout.Buffers[0].Revision == sharedRevision &&
+                  layout.Buffers[2].Revision == independentRevision,
+              "unchanged values preserve data and physical buffer revisions");
     primary[0] = 0xee;
     values.Set(31, primary, sizeof(primary));
     TestCheck(values[31].Revision != revision, "changed bytes advance the revision");
     layout.Update(values);
     TestCheck(layout.Data[0] == 0xee &&
-                  memcmp(layout.Data.data() + 1, previous.data() + 1, previous.size() - 1) == 0,
+                  memcmp(layout.Data.data() + 1, previous.data() + 1, previous.size() - 1) == 0 &&
+                  layout.Buffers[0].Revision != sharedRevision &&
+                  layout.Buffers[1].Revision == layout.Buffers[0].Revision &&
+                  layout.Buffers[2].Revision == independentRevision,
               "changed data refreshes only its declared slot");
 
     const auto fullSnapshot = layout.Data;

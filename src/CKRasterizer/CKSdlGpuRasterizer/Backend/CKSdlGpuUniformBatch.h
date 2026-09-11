@@ -6,11 +6,12 @@
 #include <cstring>
 
 // Each program remembers its latest immutable buffer versions in this batch.
-// Byte comparison includes backend-generated sampler metadata. Offsets remain
-// valid when the arena grows; no caller or packing-cache pointer is retained.
+// Offsets remain valid when the arena grows; no caller or packing-cache pointer
+// is retained.
 struct CKSdlGpuUniformCursor {
     uint64_t Batch = 0;
     std::array<unsigned, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> Offsets = {};
+    std::array<uint64_t, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> Revisions = {};
 };
 
 class CKSdlGpuUniformBatch {
@@ -30,7 +31,7 @@ public:
             }
             if (shared) continue;
             const CKBYTE *source = layout.Data.data() + buffer.Offset;
-            if (sameBatch && std::memcmp(Data.data() + cursor.Offsets[i], source, buffer.Size) == 0) {
+            if (sameBatch && cursor.Revisions[i] == buffer.Revision) {
                 offsets[i] = cursor.Offsets[i];
             } else {
                 offsets[i] = unsigned(Data.size());
@@ -39,9 +40,14 @@ public:
         }
         cursor.Batch = Serial;
         cursor.Offsets = offsets;
+        for (size_t i = 0; i < layout.Buffers.size(); ++i)
+            cursor.Revisions[i] = layout.Buffers[i].Revision;
     }
 
-    void Clear() { Data.clear(); ++Serial; }
+    void Clear() {
+        Data.clear();
+        if (!++Serial) Serial = 1;
+    }
 
 private:
     uint64_t Serial = 1;
