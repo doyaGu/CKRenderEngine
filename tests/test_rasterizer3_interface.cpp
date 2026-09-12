@@ -1,11 +1,10 @@
-// CKRasterizer v3 interface conformance tests (spec 7.2).
+// CKRasterizer v3 translated-context conformance tests (spec 7.2).
 //
-// The translation core (CKTranslatedRasterizer / Driver / Context in
-// CKFFPLib) is driven exclusively through the public interface in
-// include/CKRasterizer.h. The backend below it is the recording backend of
-// FFPRecordingHarness.h: its log is what the tests inspect (draw order, pass
-// splitting, clear rectangles, targets, presents, readbacks). The built-in
-// direct NULL implementation is checked separately for the capability baseline.
+// The cases drive the public CKRasterizerContext methods, then use explicit
+// white-box access to inspect translated state and recording-backend output.
+// Draw order, pass splitting, clear rectangles, targets, presents and
+// readbacks remain observable without exposing test access in production APIs.
+// The direct NULL implementation is checked separately.
 
 #include <stdio.h>
 #include <string.h>

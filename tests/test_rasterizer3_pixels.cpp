@@ -1,7 +1,8 @@
-// rasterizer3_pixel_tests: the fixed-function semantics only a real backend
-// can prove, driven exclusively through the public CKRasterizer v3 interface on the
-// selected plugin in a visible SDL window. Pixels come back through
-// CopyToMemoryBuffer, so the readback path is part of the gate.
+// rasterizer3_pixel_tests: fixed-function semantics that only a real backend
+// can prove. Most cases drive the public CKRasterizer v3 interface in a
+// visible SDL window; explicit white-box cases verify backend resource and
+// presentation invariants. Pixels come back through CopyToMemoryBuffer, so
+// the readback path is part of the gate.
 //
 // Gated by CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 (or the older
 // CKRE_RUN_OPENGL_RUNTIME_TESTS=1); the backend comes from
