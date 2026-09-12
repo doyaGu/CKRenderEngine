@@ -16,6 +16,15 @@ static_assert(BGFX_API_VERSION == 153, "Review CKBgfxRasterizer mappings before 
 static VxMutex g_BgfxContextMutex;
 static CKBgfxBackend *g_BgfxActiveContext = NULL;
 
+static int CKBgfxScaleWindowCoordinate(int value, CKDWORD drawable,
+                                       CKDWORD logical, bool upper)
+{
+    const int64_t pixels =
+        (static_cast<int64_t>(value) * drawable + (upper ? logical - 1 : 0)) /
+        logical;
+    return static_cast<int>(XMin(pixels, static_cast<int64_t>(UINT16_MAX) + 1));
+}
+
 static bool CKBgfxClaimActiveContext(CKBgfxBackend *Context)
 {
     VxMutexLock lock(g_BgfxContextMutex);
@@ -589,15 +598,15 @@ CKRECT CKBgfxBackend::WindowPixelRect(const CKRECT &rect) const
 {
     // FFP and readbacks stay in logical pixels. Only window attachments use
     // drawable pixels, including high-DPI windows and scaled client targets.
-    const auto scale = [](int value, CKDWORD drawable, CKDWORD logical, bool upper) {
-        const int64_t pixels = ((int64_t)value * drawable + (upper ? logical - 1 : 0)) / logical;
-        return (int)XMin(pixels, (int64_t)UINT16_MAX + 1);
-    };
     CKRECT pixels;
-    pixels.left = scale(rect.left, m_DrawableWidth, m_Width, false);
-    pixels.top = scale(rect.top, m_DrawableHeight, m_Height, false);
-    pixels.right = scale(rect.right, m_DrawableWidth, m_Width, true);
-    pixels.bottom = scale(rect.bottom, m_DrawableHeight, m_Height, true);
+    pixels.left = CKBgfxScaleWindowCoordinate(
+        rect.left, m_DrawableWidth, m_Width, false);
+    pixels.top = CKBgfxScaleWindowCoordinate(
+        rect.top, m_DrawableHeight, m_Height, false);
+    pixels.right = CKBgfxScaleWindowCoordinate(
+        rect.right, m_DrawableWidth, m_Width, true);
+    pixels.bottom = CKBgfxScaleWindowCoordinate(
+        rect.bottom, m_DrawableHeight, m_Height, true);
     return pixels;
 }
 

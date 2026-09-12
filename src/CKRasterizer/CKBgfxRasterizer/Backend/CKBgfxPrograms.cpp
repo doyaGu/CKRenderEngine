@@ -14,6 +14,17 @@
 #include <string.h>
 #include <functional>
 
+static bool CKBgfxSamplerBindingsEqual(
+    const CKBackendSamplerBinding &left,
+    const CKBackendSamplerBinding &right)
+{
+    return left.Name == right.Name &&
+        left.NativeSlot == right.NativeSlot &&
+        left.Slot == right.Slot &&
+        left.Dimension == right.Dimension &&
+        left.DefaultColor == right.DefaultColor;
+}
+
 CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
                                                CKDWORD *OutShader)
 {
@@ -234,13 +245,11 @@ CKERROR CKBgfxBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *
             binding.NativeSlot >= m_CapsDesc.MaxTextureBindings) return CKERR_INVALIDPARAMETER;
         const auto named = samplers.emplace(binding.Name, &binding);
         const auto unit = textureUnits.emplace(binding.NativeSlot, &binding);
-        auto sameBinding = [&](const CKBackendSamplerBinding &previous) {
-            return previous.Name == binding.Name && previous.NativeSlot == binding.NativeSlot &&
-                previous.Slot == binding.Slot && previous.Dimension == binding.Dimension &&
-                previous.DefaultColor == binding.DefaultColor;
-        };
-        if ((!named.second && !sameBinding(*named.first->second)) ||
-            (!unit.second && !sameBinding(*unit.first->second))) return CKERR_INVALIDPARAMETER;
+        if ((!named.second &&
+             !CKBgfxSamplerBindingsEqual(*named.first->second, binding)) ||
+            (!unit.second &&
+             !CKBgfxSamplerBindingsEqual(*unit.first->second, binding)))
+            return CKERR_INVALIDPARAMETER;
     }
 
     bgfx::ProgramHandle handle = bgfx::createProgram(vs->Handle, ps->Handle, false);

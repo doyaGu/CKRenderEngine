@@ -252,9 +252,8 @@ static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
     return true;
 }
 
-static CKBOOL CKBgfxUpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
-                                           const VxImageDescEx *data,
-    const std::function<CKERROR(CKDWORD, CKDWORD, CKDWORD, const bgfx::Memory *)> &upload)
+CKBOOL CKBgfxBackend::UpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
+                                             const VxImageDescEx *data)
 {
     if (!rec || rec->MipCount <= 1)
         return TRUE;
@@ -281,7 +280,9 @@ static CKBOOL CKBgfxUpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
             ? (CKDWORD)mipDesc.BytesPerLine
             : (CKDWORD)mipW * mipBpp / 8;
         const bgfx::Memory *mipMem = bgfx::copy(mipDesc.Image, mipRowBytes * mipH);
-        if (upload(level, mipW, mipH, mipMem) != CK_OK) {
+        if (UploadTextureOrdered(rec->Handle, rec->Format,
+                                 level, 0, 0, 0, mipW, mipH,
+                                 mipMem) != CK_OK) {
             complete = FALSE;
             break;
         }
@@ -938,10 +939,7 @@ CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         if (fullBase2DUpdate && !cacheValid)
             return CKERR_OUTOFMEMORY;
         if (cacheValid) {
-            if (!CKBgfxUpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc,
-                [&](CKDWORD level, CKDWORD mw, CKDWORD mh, const bgfx::Memory *bytes) {
-                    return UploadTextureOrdered(rec->Handle, rec->Format, level, 0, 0, 0, mw, mh, bytes);
-                })) {
+            if (!UpdateGeneratedMipMaps(rec, &rec->AutoMipBaseDesc)) {
                 if (m_DebugLogTextures)
                     CKBgfxLogf("UpdateTexture",
                                "id=%u failed to generate complete auto-mip chain",

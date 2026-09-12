@@ -21,6 +21,15 @@ static void CKBgfxCopyDebugText(char *Dst, CKDWORD DstSize, CKSTRING Src)
     Dst[DstSize - 1] = '\0';
 }
 
+static void CKBgfxDestroyDefaultTexture(bgfx::TextureHandle *handle)
+{
+    if (!handle)
+        return;
+    if (bgfx::isValid(*handle))
+        bgfx::destroy(*handle);
+    delete handle;
+}
+
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
@@ -352,10 +361,8 @@ std::shared_ptr<bgfx::TextureHandle> CKBgfxBackend::GetDefaultTexture(const CKBa
         else ++it;
     }
     auto texture = std::shared_ptr<bgfx::TextureHandle>(
-        new bgfx::TextureHandle{bgfx::kInvalidHandle}, [](bgfx::TextureHandle *handle) {
-            if (bgfx::isValid(*handle)) bgfx::destroy(*handle);
-            delete handle;
-        });
+        new bgfx::TextureHandle{bgfx::kInvalidHandle},
+        CKBgfxDestroyDefaultTexture);
     const uint32_t pixels[6] = {Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor,
                                Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor};
     const auto *data = bgfx::copy(pixels, Binding.Dimension == CKBACKEND_TEXTURE_CUBE ? sizeof(pixels) : sizeof(pixels[0]));

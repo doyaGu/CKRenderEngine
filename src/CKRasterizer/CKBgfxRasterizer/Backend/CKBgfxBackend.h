@@ -169,6 +169,8 @@ private:
     CKERROR UploadTextureOrdered(bgfx::TextureHandle Texture, bgfx::TextureFormat::Enum Format,
                                  CKDWORD Mip, CKDWORD X, CKDWORD Y, CKDWORD Layer, CKDWORD Width, CKDWORD Height,
                                  const bgfx::Memory *Data, CKBOOL Cube = FALSE, CKBOOL Volume = FALSE);
+    CKBOOL UpdateGeneratedMipMaps(CKBgfxTextureRecord *Texture,
+                                  const VxImageDescEx *BaseLevel);
     CKERROR UpdateVertexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data);
     CKERROR UpdateIndexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data);
 
