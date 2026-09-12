@@ -1,6 +1,6 @@
-// Translation core (CKTranslatedRasterizer / Driver / Context) on top of the
-// recording backend from FFPRecordingHarness.h: state/query semantics,
-// resource Lock/Unlock shadows, ordered passes, targets and shutdown.
+// CKFFPLib translated context on top of the recording backend from
+// FFPRecordingHarness.h: state/query semantics, resource Lock/Unlock shadows,
+// ordered passes, targets and shutdown.
 
 #include <stdio.h>
 #include <string.h>
