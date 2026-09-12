@@ -25,6 +25,10 @@ set(CKFFP_LIB_SOURCES
     Context/CKPresentStage.cpp
     Context/CKTranslatedContext.cpp
     Context/CKTranslatedFrame.cpp
+    Context/CKTranslatedReadback.cpp
+    Context/CKTranslatedResources.cpp
+    Context/CKTranslatedTargets.cpp
+    Context/CKTranslatedTransfer.cpp
 )
 
 set(CKFFP_LIB_HEADERS

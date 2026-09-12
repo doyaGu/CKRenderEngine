@@ -1,19 +1,9 @@
-// CKTranslatedContext: frame flow (one backend pass per pass), draws and the
-// backbuffer upload. See CKFFRasterizerContextInternal.h.
+// CKTranslatedContext frame flow and fixed-function draw submission.
 
 #include "CKFFRasterizerContextInternal.h"
-#include "CKDebugLogger.h"
-
 #include <math.h>
-#include <string.h>
 
 namespace {
-
-CKBOOL SameImageFormat(const VxImageDescEx &a, const VxImageDescEx &b)
-{
-    return a.BitsPerPixel == b.BitsPerPixel && a.RedMask == b.RedMask && a.GreenMask == b.GreenMask &&
-           a.BlueMask == b.BlueMask && a.AlphaMask == b.AlphaMask;
-}
 
 int PrimitiveCount(VXPRIMITIVETYPE Type, int ElementCount)
 {
@@ -27,7 +17,6 @@ int PrimitiveCount(VXPRIMITIVETYPE Type, int ElementCount)
     default:               return 0;
     }
 }
-
 } // namespace
 
 // ===========================================================================
@@ -609,148 +598,4 @@ CKBOOL CKTranslatedContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD VB, 
     // D3D7 semantics: indices address the whole vertex buffer, MinVertexIndex
     // and VertexCount only describe the range they touch.
     return SubmitVertexBuffer(Type, *vb, IB, 0, MinVertexIndex + VertexCount, StartIndex, (CKDWORD)IndexCount);
-}
-
-// ===========================================================================
-// Backbuffer upload
-// ===========================================================================
-
-int CKTranslatedContext::CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, const VxImageDescEx &Image)
-{
-    if (!CheckDeviceForDraw())
-        return 0;
-    if (Buffer != VXBUFFER_BACKBUFFER || !Image.Image || Image.BitsPerPixel <= 0) {
-        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
-        return 0;
-    }
-    if (!PrepareFrameTarget()) return FALSE;
-    const CKRECT target = LogicalTargetRect();
-    CKRECT rect = Rect ? *Rect : target;
-    if (rect.left < 0) rect.left = 0;
-    if (rect.top < 0) rect.top = 0;
-    if (rect.right > target.right) rect.right = target.right;
-    if (rect.bottom > target.bottom) rect.bottom = target.bottom;
-    const int width = rect.right - rect.left;
-    const int height = rect.bottom - rect.top;
-    if (width <= 0 || height <= 0 || Image.Width != width || Image.Height != height) {
-        Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
-        return 0;
-    }
-
-    VxImageDescEx videoFormat;
-    VxPixelFormat2ImageDesc(_32_ARGB8888, videoFormat);
-    videoFormat.Width = width;
-    videoFormat.Height = height;
-    videoFormat.BytesPerLine = width * 4;
-    const int videoImageSize = videoFormat.BytesPerLine * height;
-
-    VxImageDescEx uploadDesc = Image;
-    std::vector<CKBYTE> converted;
-    if (!SameImageFormat(Image, videoFormat)) {
-        converted.resize((size_t)videoImageSize);
-        uploadDesc = videoFormat;
-        uploadDesc.Image = converted.data();
-        VxDoBlit(Image, uploadDesc);
-    } else if (uploadDesc.BytesPerLine <= 0) {
-        uploadDesc.BytesPerLine = width * uploadDesc.BitsPerPixel / 8;
-    }
-
-    CKERROR err = CK_OK;
-    if (m_CopyWidth != (CKDWORD)width || m_CopyHeight != (CKDWORD)height ||
-        !m_Backend->IsObjectAlive(m_CopyTexture, CKRST_OBJ_TEXTURE)) {
-        if (m_CopyTexture != 0) {
-            m_Backend->DestroyObject(m_CopyTexture, CKRST_OBJ_TEXTURE);
-            m_CopyTexture = 0;
-        }
-        CKTextureDesc texDesc;
-        texDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
-        texDesc.Format = videoFormat;
-        texDesc.MipMapCount = 1;
-        err = m_Backend->CreateTexture(&texDesc, &uploadDesc, &m_CopyTexture);
-        if (err == CK_OK) {
-            m_CopyWidth = (CKDWORD)width;
-            m_CopyHeight = (CKDWORD)height;
-        }
-    } else {
-        err = m_Backend->UpdateTexture(m_CopyTexture, 0, 0, NULL, &uploadDesc);
-    }
-    if (err != CK_OK)
-        return 0;
-    ++m_FrameTextureUploads;
-
-    if (!EnsureDrawPass())
-        return 0;
-
-    CKFFStateGuard guard(m_FFP);
-    m_FFP.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
-    m_FFP.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
-    m_FFP.SetColorWriteMask(TRUE, TRUE, TRUE, TRUE);
-    m_FFP.SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_FOGENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
-    m_FFP.SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
-    m_FFP.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
-    m_FFP.DisableTextureStagesFrom(0);
-    m_FFP.SetTexture(0, m_CopyTexture, CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
-    m_FFP.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
-
-    CKViewportData fullViewport;
-    fullViewport.ViewX = 0;
-    fullViewport.ViewY = 0;
-    fullViewport.ViewWidth = (CKDWORD)target.right;
-    fullViewport.ViewHeight = (CKDWORD)target.bottom;
-    fullViewport.ViewZMin = 0.0f;
-    fullViewport.ViewZMax = 1.0f;
-    m_FFP.SetViewport(fullViewport);
-
-    float positions[4][4];
-    CKDWORD colors[4];
-    float uvs[4][2];
-    // POSITIONT follows the legacy integer pixel-center convention. Put quad
-    // edges half a pixel before those centers, so point sampling lands in the
-    // middle of each source texel rather than on unstable texel boundaries.
-    const float x0 = (float)rect.left - 0.5f, y0 = (float)rect.top - 0.5f;
-    const float x1 = (float)rect.right - 0.5f, y1 = (float)rect.bottom - 0.5f;
-    const float coords[8] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
-    const float xs[4] = {x0, x1, x1, x0};
-    const float ys[4] = {y0, y0, y1, y1};
-    for (int i = 0; i < 4; ++i) {
-        positions[i][0] = xs[i];
-        positions[i][1] = ys[i];
-        positions[i][2] = 0.0f;
-        positions[i][3] = 1.0f;
-        colors[i] = 0xFFFFFFFF;
-        uvs[i][0] = coords[i * 2];
-        uvs[i][1] = coords[i * 2 + 1];
-    }
-    VxDrawPrimitiveData dp;
-    memset(&dp, 0, sizeof(dp));
-    dp.VertexCount = 4;
-    dp.Flags = CKRST_DP_CL_VCT;
-    dp.PositionPtr = positions;
-    dp.PositionStride = sizeof(positions[0]);
-    dp.ColorPtr = colors;
-    dp.ColorStride = sizeof(colors[0]);
-    dp.TexCoordPtr = uvs;
-    dp.TexCoordStride = sizeof(uvs[0]);
-
-    const CKBOOL drawn = m_FFP.DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, &dp);
-    guard.Restore();
-    if (!drawn) {
-        Diag(DrawRejectDiagnostic());
-        return 0;
-    }
-    RecordDrawApproximations();
-    CountDraw(VX_TRIANGLEFAN, 4);
-    return videoImageSize;
 }
