@@ -1,10 +1,18 @@
 set(CKBGFX_RASTERIZER_SOURCES
     Backend/CKBgfxBackend.cpp
+    Backend/CKBgfxBuffers.cpp
     Backend/CKBgfxCallback.cpp
     Backend/CKBgfxClear.cpp
+    Backend/CKBgfxCommands.cpp
     Backend/CKBgfxConfig.cpp
+    Backend/CKBgfxDiagnostics.cpp
     Backend/CKBgfxDrawMapTrace.cpp
     Backend/CKBgfxInternal.cpp
+    Backend/CKBgfxPrograms.cpp
+    Backend/CKBgfxReadback.cpp
+    Backend/CKBgfxRenderTargets.cpp
+    Backend/CKBgfxSubmission.cpp
+    Backend/CKBgfxTextures.cpp
     Rasterizer/CKBgfxRasterizerDriver.cpp
     Rasterizer/CKBgfxRasterizer.cpp
     Rasterizer/CKBgfxShaders.cpp

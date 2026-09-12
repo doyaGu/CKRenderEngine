@@ -173,6 +173,74 @@ uint32_t CKBgfxBuildResetFlags(CKBOOL vsync, CKDWORD samples)
     return flags;
 }
 
+bool CKBgfxIsOpenGLRenderer()
+{
+    const bgfx::RendererType::Enum type = bgfx::getRendererType();
+    return type == bgfx::RendererType::OpenGL ||
+           type == bgfx::RendererType::OpenGLES;
+}
+
+CKBOOL CKBgfxDrawMapChannelEnabled(CKDWORD flags, CKDWORD channel)
+{
+    if ((flags & CKRST_DEBUG_DRAWMAP) == 0)
+        return FALSE;
+    return (flags & channel) != 0 ? TRUE : FALSE;
+}
+
+bool CKBgfxIsBumpLuminanceFormat(VX_PIXELFORMAT format)
+{
+    return format == _16_L6V5U5 || format == _32_X8L8V8U8;
+}
+
+bool CKBgfxCanExposeReadback(VX_PIXELFORMAT format,
+                             bgfx::TextureFormat::Enum nativeFormat)
+{
+    return (format == _32_ARGB8888 && nativeFormat == bgfx::TextureFormat::BGRA8) ||
+           (format == _32_ABGR8888 && nativeFormat == bgfx::TextureFormat::RGBA8);
+}
+
+CKDWORD CKBgfxMapFormatCaps(CKDWORD nativeCaps, CKBOOL allowReadback,
+                            CKBOOL allowComparison)
+{
+    CKDWORD result = CKRST_FORMAT_CAPS_NONE;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_2D)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_2D;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_3D)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_3D;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_CUBE)
+        result |= CKRST_FORMAT_CAPS_TEXTURE_CUBE;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER)
+        result |= CKRST_FORMAT_CAPS_FRAMEBUFFER;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_FRAMEBUFFER_MSAA)
+        result |= CKRST_FORMAT_CAPS_FRAMEBUFFER_MSAA;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_IMAGE_READ)
+        result |= CKRST_FORMAT_CAPS_IMAGE_READ;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_IMAGE_WRITE)
+        result |= CKRST_FORMAT_CAPS_IMAGE_WRITE;
+    if (nativeCaps & BGFX_CAPS_FORMAT_TEXTURE_MIP_AUTOGEN)
+        result |= CKRST_FORMAT_CAPS_MIP_AUTOGEN;
+    if (nativeCaps & (BGFX_CAPS_FORMAT_TEXTURE_2D_SRGB |
+                      BGFX_CAPS_FORMAT_TEXTURE_3D_SRGB |
+                      BGFX_CAPS_FORMAT_TEXTURE_CUBE_SRGB))
+        result |= CKRST_FORMAT_CAPS_SRGB;
+    if (allowReadback && (result & CKRST_FORMAT_CAPS_TEXTURE_2D))
+        result |= CKRST_FORMAT_CAPS_READBACK;
+    if (allowComparison && (result & CKRST_FORMAT_CAPS_TEXTURE_2D))
+        result |= CKRST_FORMAT_CAPS_TEXTURE_COMPARE;
+    return result;
+}
+
+uint64_t CKBgfxTextureMSAAFlags(CKDWORD flags)
+{
+    switch (CKRSTTextureMSAASamples(flags)) {
+    case 16: return BGFX_TEXTURE_RT_MSAA_X16;
+    case 8:  return BGFX_TEXTURE_RT_MSAA_X8;
+    case 4:  return BGFX_TEXTURE_RT_MSAA_X4;
+    case 2:  return BGFX_TEXTURE_RT_MSAA_X2;
+    default: return 0;
+    }
+}
+
 static bool CKBgfxFileLogEnabled()
 {
     return CKBgfxLogEnabled("File", false);

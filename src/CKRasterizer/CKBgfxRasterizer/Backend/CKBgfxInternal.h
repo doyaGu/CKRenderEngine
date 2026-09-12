@@ -36,6 +36,14 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);
 bool CKBgfxTryRendererType(const char *Name, bgfx::RendererType::Enum &Renderer);
 bool CKBgfxParseRequestedRenderer(bgfx::RendererType::Enum &Renderer);
 uint32_t CKBgfxBuildResetFlags(CKBOOL VSync, CKDWORD Samples);
+bool CKBgfxIsOpenGLRenderer();
+CKBOOL CKBgfxDrawMapChannelEnabled(CKDWORD Flags, CKDWORD Channel);
+bool CKBgfxIsBumpLuminanceFormat(VX_PIXELFORMAT Format);
+bool CKBgfxCanExposeReadback(VX_PIXELFORMAT Format,
+                             bgfx::TextureFormat::Enum NativeFormat);
+CKDWORD CKBgfxMapFormatCaps(CKDWORD NativeCaps, CKBOOL AllowReadback,
+                            CKBOOL AllowComparison);
+uint64_t CKBgfxTextureMSAAFlags(CKDWORD Flags);
 const char *CKBgfxNativeWindowHandleTypeName(bgfx::NativeWindowHandleType::Enum type);
 const char *CKBgfxDebugViewLine0();
 const char *CKBgfxDebugViewLine1();
