@@ -5,7 +5,8 @@ option(CKRE_ENABLE_PROFILING "Compile external NVTX timeline annotations (not fo
 
 set(CKRASTERIZER_LIB_SOURCES
     CKRasterizerCapsBaseline.cpp
-    CKNullRasterizer.cpp
+    CKNullRasterizerContext.cpp
+    CKNullRasterizerLifecycle.cpp
     CKRasterizerDriverCaps.cpp
     CKRasterizerDrawMarker.cpp
     CKRenderSettings.cpp
@@ -24,6 +25,7 @@ set(CKRASTERIZER_LIB_HEADERS
     CKRasterizerCapsBaseline.h
     CKRasterizerCapsBaseline.generated.h
     CKNullRasterizer.h
+    CKNullRasterizerInternal.h
     CKRasterizerDriverCaps.h
     CKDebugLogger.h
     CKRasterizerDrawMarker.h

@@ -323,7 +323,7 @@ def check(root):
                         f"{source.relative_to(root)}:{line}: {owner} imports {imported} header {match.group(1)}"
                     )
 
-    null_files = list(module_roots["CKRasterizerLib"].glob("CKNullRasterizer.*"))
+    null_files = list(module_roots["CKRasterizerLib"].glob("CKNullRasterizer*"))
     for source in null_files:
         text = source.read_text(encoding="utf-8-sig", errors="replace")
         for match in INCLUDE.finditer(text):
