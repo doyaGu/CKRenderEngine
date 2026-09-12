@@ -859,12 +859,9 @@ void ShaderCodegenCompilesOneProgramFamily() {
     snprintf(hash, sizeof(hash), "g_CKFFGeneratedShaderInterfaceHash = 0x%08xu;", (unsigned)CKFF_SHADER_INTERFACE_HASH);
     TestCheck(abi.find(version) != std::string::npos && abi.find(hash) != std::string::npos,
               "Generated shader ABI stamp must match CKFFShaderABI.h");
-    char scriptVersion[64];
-    snprintf(scriptVersion, sizeof(scriptVersion), "SHADER_ABI_VERSION = %u\n", (unsigned)CKFF_SHADER_ABI_VERSION);
-    char scriptHash[64];
-    snprintf(scriptHash, sizeof(scriptHash), "SHADER_INTERFACE_HASH = 0x%08X\n", (unsigned)CKFF_SHADER_INTERFACE_HASH);
-    TestCheck(script.find(scriptVersion) != std::string::npos && script.find(scriptHash) != std::string::npos,
-              "Shader codegen ABI stamp constants must match CKFFShaderABI.h");
+    TestCheck(script.find("read_shader_identity(interface_dir)") != std::string::npos &&
+                  script.find("write_abi_header(generated_dir, shader_abi_version, shader_interface_hash)") != std::string::npos,
+              "Shader codegen must derive the ABI stamp from the CKFF interface identity");
 
     TestCheck(cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fog_common.sc") != std::string::npos &&
                   cmake.find("${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_common.sc") != std::string::npos,
@@ -1103,7 +1100,7 @@ void TextureBindingMaskIgnoresInactiveStages() {
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void BgfxTransientAllocationsPreflightAvailability() {
     const std::string contents = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/Backend/CKBgfxBackend.cpp");
+        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/Backend/CKBgfxCommands.cpp");
     TestCheck(!contents.empty(),
               "bgfx rasterizer context source must be readable");
 
