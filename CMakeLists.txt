@@ -81,7 +81,7 @@ set(CKRE_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 set(CKRE_VERSION_HEADER "${CKRE_GENERATED_INCLUDE_DIR}/Version.h")
 
 if (NOT TARGET SDL3::SDL3)
-    find_package(SDL3 CONFIG REQUIRED)
+    find_package(SDL3 3.4.8 CONFIG REQUIRED)
 endif ()
 
 function(ckre_copy_runtime_dependencies TARGET_NAME)
