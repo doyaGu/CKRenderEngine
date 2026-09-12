@@ -3,12 +3,9 @@
 #include "CKBgfxBackend.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
 
-#include <SDL3/SDL.h>
+#include <algorithm>
 #include <stdint.h>
-#include <stdarg.h>
 #include <string.h>
 
 static void CKBgfxCopyDebugText(char *Dst, CKDWORD DstSize, CKSTRING Src)

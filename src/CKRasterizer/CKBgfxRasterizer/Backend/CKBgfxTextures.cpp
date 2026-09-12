@@ -1,18 +1,11 @@
 // CKBgfxBackend texture creation, update and resource lifetime.
 
-// CKBgfxBackend resource creation, upload, destruction and readback.
-
 #include "CKBgfxBackend.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
 
-#include <SDL3/SDL.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <string.h>
-#include <functional>
 
 static uint32_t SampleBytesChecksum(const void *data, uint32_t size)
 {

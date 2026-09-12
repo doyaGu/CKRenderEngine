@@ -1,18 +1,10 @@
 // CKBgfxBackend ordered texture readback.
 
-// CKBgfxBackend resource creation, upload, destruction and readback.
-
 #include "CKBgfxBackend.h"
 #include "CKBgfxResources.h"
-#include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
 
-#include <SDL3/SDL.h>
+#include <memory>
 #include <stdint.h>
-#include <stdarg.h>
-#include <string.h>
-#include <functional>
 
 static bool CKBgfxGetReadbackLayout(const CKBgfxTextureRecord *Record,
                                     CKDWORD Width, CKDWORD Height,

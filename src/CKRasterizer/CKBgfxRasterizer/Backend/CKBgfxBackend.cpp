@@ -1,15 +1,11 @@
 #include "CKBgfxBackend.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
 #include "CKRasterizerDrawMarker.h"
 
 #include <SDL3/SDL.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <string.h>
-#include <functional>
 
 static_assert(BGFX_API_VERSION == 153, "Review CKBgfxRasterizer mappings before updating bgfx");
 

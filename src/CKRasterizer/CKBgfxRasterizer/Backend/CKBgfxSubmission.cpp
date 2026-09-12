@@ -1,16 +1,10 @@
 // CKBgfxBackend frame submission and draw-marker diagnostics.
 
 #include "CKBgfxBackend.h"
-#include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
-
-#include <SDL3/SDL.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <string.h>
 #include "CKRasterizerDrawMarker.h"
+
+#include <stdint.h>
 
 CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
 {

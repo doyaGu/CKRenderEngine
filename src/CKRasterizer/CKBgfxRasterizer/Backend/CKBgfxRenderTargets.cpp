@@ -1,18 +1,10 @@
 // CKBgfxBackend render-target and depth-texture creation.
 
-// CKBgfxBackend resource creation, upload, destruction and readback.
-
 #include "CKBgfxBackend.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
-#include "CKBgfxDrawMapTrace.h"
-#include "CKRasterizerValidation.h"
 
-#include <SDL3/SDL.h>
 #include <stdint.h>
-#include <stdarg.h>
-#include <string.h>
-#include <functional>
 
 CKERROR CKBgfxBackend::BuildFrameBufferAttachments(const CKBackendRenderTargetDesc *Desc,
                                                    bgfx::Attachment *Attachments,
