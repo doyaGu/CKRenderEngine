@@ -7,7 +7,7 @@ set(CKRASTERIZER_LIB_SOURCES
     CKRasterizerCapsBaseline.cpp
     CKNullRasterizer.cpp
     CKRasterizerDriverCaps.cpp
-    CKDrawAnnotationParser.cpp
+    CKRasterizerDrawMarker.cpp
     CKRenderSettings.cpp
 )
 if (CKRE_ENABLE_DEBUG_LOGGER)
@@ -26,7 +26,7 @@ set(CKRASTERIZER_LIB_HEADERS
     CKNullRasterizer.h
     CKRasterizerDriverCaps.h
     CKDebugLogger.h
-    CKDrawAnnotation.h
+    CKRasterizerDrawMarker.h
     CKRenderConfig.h
     CKRenderFrameCostStats.h
     CKRenderPerfClock.h

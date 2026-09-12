@@ -1,4 +1,5 @@
-#include "CKDrawAnnotation.h"
+#include "CKRasterizerDrawMarker.h"
+#include "CKRenderDrawAnnotation.h"
 #include "TestTriangleMultiset.h"
 
 #include <cstring>

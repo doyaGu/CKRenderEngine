@@ -4,7 +4,7 @@
 #include "RCKRenderContext.h"
 #include "CKSprite.h"
 #include "CKDebugLogger.h"
-#include "CKDrawAnnotation.h"
+#include "CKRenderDrawAnnotation.h"
 #include "CKRenderFrameCostStats.h"
 
 // External function from CKMeshUtils.cpp

@@ -36,7 +36,7 @@
 #include "RCKTexture.h"
 #include "RCKMaterial.h"
 #include "RCKSprite3D.h"
-#include "CKDrawAnnotation.h"
+#include "CKRenderDrawAnnotation.h"
 
 
 #include <stdio.h>

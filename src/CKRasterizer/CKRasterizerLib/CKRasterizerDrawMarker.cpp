@@ -1,6 +1,64 @@
-#include "CKDrawAnnotation.h"
+#include "CKRasterizerDrawMarker.h"
 
+#include <cstdio>
 #include <cstring>
+
+namespace {
+
+void AppendCharacter(char *destination, CKDWORD destinationSize,
+                     CKDWORD *offset, char value)
+{
+    if (!destination || !offset || destinationSize == 0 ||
+        *offset + 1 >= destinationSize)
+        return;
+    destination[*offset] = value;
+    ++(*offset);
+    destination[*offset] = '\0';
+}
+
+void AppendText(char *destination, CKDWORD destinationSize,
+                CKDWORD *offset, const char *text)
+{
+    if (!destination || !offset || destinationSize == 0 || !text)
+        return;
+    while (*text && *offset + 1 < destinationSize) {
+        AppendCharacter(destination, destinationSize, offset, *text);
+        ++text;
+    }
+}
+
+void AppendSanitizedText(char *destination, CKDWORD destinationSize,
+                         CKDWORD *offset, const char *text)
+{
+    if (!destination || !offset || destinationSize == 0 || !text)
+        return;
+    while (*text && *offset + 1 < destinationSize) {
+        char value = *text;
+        if (value == ' ' || value == '\t' || value == '\r' || value == '\n' ||
+            value == '"' || value == '\'' || value == '=')
+            value = '_';
+        AppendCharacter(destination, destinationSize, offset, value);
+        ++text;
+    }
+}
+
+void AppendObjectReference(char *destination, CKDWORD destinationSize,
+                           CKDWORD *offset, const char *field,
+                           const CKDrawAnnotationObjectRef *reference)
+{
+    if (!reference)
+        return;
+
+    char id[32];
+    AppendText(destination, destinationSize, offset, " ");
+    AppendText(destination, destinationSize, offset, field);
+    AppendText(destination, destinationSize, offset, "=");
+    std::snprintf(id, sizeof(id), "%u:", (unsigned)reference->Id);
+    AppendText(destination, destinationSize, offset, id);
+    AppendSanitizedText(destination, destinationSize, offset, reference->Name);
+}
+
+} // namespace
 
 const char *CKDrawAnnotationGetSourceName(CKDrawAnnotationSource Source)
 {
@@ -34,6 +92,75 @@ CKDrawAnnotationSource CKDrawAnnotationParseSourceName(CKSTRING Source)
     if (CKDrawAnnotationTextEquals(Source, "RawPrimitive"))
         return CKDRAW_SOURCE_RAW_PRIMITIVE;
     return CKDRAW_SOURCE_NONE;
+}
+
+void CKDrawAnnotationInit(CKDrawAnnotation *Annotation,
+                          CKDrawAnnotationSource Source)
+{
+    if (!Annotation)
+        return;
+    std::memset(Annotation, 0, sizeof(CKDrawAnnotation));
+    Annotation->Source = Source;
+    Annotation->GroupIndex = -1;
+    Annotation->PrimitiveIndex = -1;
+}
+
+void CKDrawAnnotationCopyText(char *Dst, CKDWORD DstSize, CKSTRING Src)
+{
+    CKDWORD offset = 0;
+    if (!Dst || DstSize == 0)
+        return;
+    Dst[0] = '\0';
+    AppendSanitizedText(Dst, DstSize, &offset, Src ? Src : (CKSTRING)"");
+}
+
+void CKDrawAnnotationFormatLabel(const CKDrawAnnotation *Annotation,
+                                 char *Label,
+                                 CKDWORD LabelSize)
+{
+    CKDWORD offset = 0;
+    char value[64];
+    if (!Label || LabelSize == 0)
+        return;
+    Label[0] = '\0';
+    if (!Annotation)
+        return;
+
+    AppendText(Label, LabelSize, &offset, "CKDrawV1 source=");
+    AppendText(Label, LabelSize, &offset,
+               CKDrawAnnotationGetSourceName(Annotation->Source));
+    std::snprintf(value, sizeof(value),
+                  " token=%u type=%d indices=%u verts=%u",
+                  (unsigned)Annotation->Token,
+                  (int)Annotation->PrimitiveType,
+                  (unsigned)Annotation->IndexCount,
+                  (unsigned)Annotation->VertexCount);
+    AppendText(Label, LabelSize, &offset, value);
+
+    if (Annotation->Path[0]) {
+        AppendText(Label, LabelSize, &offset, " path=");
+        AppendSanitizedText(Label, LabelSize, &offset, Annotation->Path);
+    }
+
+    AppendObjectReference(Label, LabelSize, &offset, "object",
+                          &Annotation->Object);
+    AppendObjectReference(Label, LabelSize, &offset, "entity",
+                          &Annotation->Entity);
+    AppendObjectReference(Label, LabelSize, &offset, "mesh",
+                          &Annotation->Mesh);
+    AppendObjectReference(Label, LabelSize, &offset, "material",
+                          &Annotation->Material);
+
+    if (Annotation->GroupIndex >= 0) {
+        std::snprintf(value, sizeof(value), " group=%d",
+                      Annotation->GroupIndex);
+        AppendText(Label, LabelSize, &offset, value);
+    }
+    if (Annotation->PrimitiveIndex >= 0) {
+        std::snprintf(value, sizeof(value), " prim=%d",
+                      Annotation->PrimitiveIndex);
+        AppendText(Label, LabelSize, &offset, value);
+    }
 }
 
 static void CKDrawAnnotationParsedInit(CKDrawAnnotationParsed *Parsed)

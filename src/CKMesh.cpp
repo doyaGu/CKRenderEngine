@@ -20,7 +20,7 @@
 #include "CKRenderSettings.h"
 #include "CKRenderPerfStats.h"
 #include "CKRenderFrameCostStats.h"
-#include "CKDrawAnnotation.h"
+#include "CKRenderDrawAnnotation.h"
 #include "MeshStriper.h"
 #include "NvStripifier.h"
 

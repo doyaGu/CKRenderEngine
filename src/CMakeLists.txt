@@ -77,6 +77,7 @@ set(CKRE_PUBLIC_HEADERS
 
 set(CKRE_PRIVATE_HEADERS
         CKException.h
+        CKRenderDrawAnnotation.h
         CKRenderPerfStats.h
 )
 
@@ -90,7 +91,7 @@ set(CKRE_SOURCES
         CKRenderManager.cpp
         CKRenderContext.cpp
         CKCallbacksContainer.cpp
-        CKDrawAnnotation.cpp
+        CKRenderDrawAnnotation.cpp
 
         CKMaterial.cpp
         CKTexture.cpp

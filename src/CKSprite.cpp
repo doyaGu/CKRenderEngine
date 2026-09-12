@@ -10,7 +10,7 @@
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
 #include "CKDebugLogger.h"
-#include "CKDrawAnnotation.h"
+#include "CKRenderDrawAnnotation.h"
 #include "CKRenderFrameCostStats.h"
 
 CK_CLASSID RCKSprite::m_ClassID = CKCID_SPRITE;

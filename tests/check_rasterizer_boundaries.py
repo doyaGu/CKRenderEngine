@@ -253,6 +253,22 @@ def check(root):
                     f"{source.relative_to(root)}: CKFFPLib owns rasterizer lifecycle token {token}"
                 )
 
+    render_draw_annotation_tokens = {
+        "CKDrawAnnotationState",
+        "CKScopedDrawAnnotation",
+        "CKRenderDrawAnnotation.h",
+    }
+    for module, directory in module_roots.items():
+        for source in directory.rglob("*"):
+            if source.suffix.lower() not in {".cpp", ".h"} or "generated" in source.parts:
+                continue
+            text = source.read_text(encoding="utf-8-sig", errors="replace")
+            for token in sorted(render_draw_annotation_tokens):
+                if token in text:
+                    errors.append(
+                        f"{source.relative_to(root)}: {module} owns render-side draw annotation token {token}"
+                    )
+
     header_index = defaultdict(list)
     for folder in (public_root, rasterizer):
         for header in folder.rglob("*.h"):

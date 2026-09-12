@@ -9,7 +9,7 @@
 #include "CKPlace.h"
 #include "CKScene.h"
 #include "CKDependencies.h"
-#include "CKDrawAnnotation.h"
+#include "CKRenderDrawAnnotation.h"
 #include "RCKRenderContext.h"
 #include "RCKRenderManager.h"
 #include "RCKMesh.h"
